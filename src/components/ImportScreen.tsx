@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { ShoppingItem } from '../types';
 
 interface ImportScreenProps {
-  onBulkAdd: (eventName: string, items: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]) => void;
+  onBulkAdd: (eventName: string, items: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string }) => void;
   activeEventName: string | null;
   itemToEdit: ShoppingItem | null;
   onUpdateItem: (item: ShoppingItem) => void;
@@ -132,10 +132,17 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         }
         cells.push(currentCell);
 
+        // ブロックとナンバーが両方入力されている行のみ取り込む
+        const block = cells[2]?.trim() || '';
+        const number = cells[3]?.trim() || '';
+        if (!block || !number) {
+          continue; // スキップ
+        }
+
         cols.circles.push(cells[0] || '');
         cols.eventDates.push(cells[1] || '');
-        cols.blocks.push(cells[2] || '');
-        cols.numbers.push(cells[3] || '');
+        cols.blocks.push(block);
+        cols.numbers.push(number);
         cols.titles.push(cells[4] || '');
         cols.prices.push((cells[5] || '0').replace(/[^0-9]/g, ''));
         cols.remarks.push(cells[7] || '');
@@ -216,14 +223,21 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         }
         cells.push(currentCell);
 
+        // ブロックとナンバーが両方入力されている行のみ取り込む
+        const block = cells[2]?.trim() || '';
+        const number = cells[3]?.trim() || '';
+        if (!block || !number) {
+          continue; // スキップ
+        }
+
         // Assuming columns: サークル名, 参加日, ブロック, ナンバー, タイトル, 頒布価格, (購入状態), 備考
-        cols.circles.push(cells[12] || '');
-        cols.eventDates.push(cells[13] || '');
-        cols.blocks.push(cells[14] || '');
-        cols.numbers.push(cells[15] || '');
-        cols.titles.push(cells[16] || '');
-        cols.prices.push((cells[17] || '0').replace(/[^0-9]/g, ''));
-        cols.remarks.push(cells[22] || '');
+        cols.circles.push(cells[0] || '');
+        cols.eventDates.push(cells[1] || '');
+        cols.blocks.push(block);
+        cols.numbers.push(number);
+        cols.titles.push(cells[4] || '');
+        cols.prices.push((cells[5] || '0').replace(/[^0-9]/g, ''));
+        cols.remarks.push(cells[7] || '');
       }
 
       setCircles(cols.circles.join('\n'));
@@ -312,7 +326,9 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         });
       }
       if (newItems.length > 0) {
-          onBulkAdd(finalEventName, newItems);
+          // メタデータを渡す
+          const metadata = sheetsUrl ? { url: sheetsUrl, sheetName: sheetName } : undefined;
+          onBulkAdd(finalEventName, newItems, metadata);
           setEventName(''); setCircles(''); setEventDates(''); setBlocks(''); setNumbers(''); setTitles(''); setPrices(''); setRemarks('');
           setCsvFile(null);
           setSheetsUrl('');
@@ -342,7 +358,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
 
   const priceOptions = useMemo(() => {
     const options: number[] = [0];
-    for (let i = 100; i <= 15000; i += 100) {
+    for (let i = 100; i <= 10000; i += 100) {
         options.push(i);
     }
     return options;
