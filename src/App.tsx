@@ -554,7 +554,7 @@ const App: React.FC = () => {
     URL.revokeObjectURL(url);
   }, [eventLists]);
 
- // アイテム更新機能
+  // アイテム更新機能
   const handleUpdateEvent = useCallback(async (eventName: string, urlOverride?: { url: string; sheetName: string }) => {
     const metadata = eventMetadata[eventName];
     let url = urlOverride?.url || metadata?.spreadsheetUrl;
@@ -691,8 +691,7 @@ const App: React.FC = () => {
       setPendingUpdateEventName(eventName);
       setShowUrlUpdateDialog(true);
     }
-  }, [eventLists, eventMetadata]);        
-        // タイトルなしで既存アイテムを検索（タイトルが変更された場合）
+  }, [eventLists, eventMetadata]);
         const existingWithoutTitle = currentItemsMapWithoutTitle.get(keyWithoutTitle);
         if (existingWithoutTitle) {
           // タイトルや価格、備考が変わっていれば更新
