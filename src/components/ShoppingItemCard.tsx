@@ -100,7 +100,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
   const priceOptions = useMemo(() => {
     const options = new Set<number>();
-    for (let i = 0; i <= 50; i++) {
+    for (let i = 0; i <= 100; i++) {
         options.add(i * 100);
     }
     options.add(item.price); // Ensure current price is always an option
