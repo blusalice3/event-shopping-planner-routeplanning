@@ -743,7 +743,7 @@ const App: React.FC = () => {
     const [showModeMenu, setShowModeMenu] = useState(false);
     const longPressTimeout = React.useRef<number | null>(null);
 
-    const handlePointerDown = (e: React.PointerEvent) => {
+    const handlePointerDown = () => {
       if (tab !== 'day1' && tab !== 'day2') return;
       if (!activeEventName) return;
       
