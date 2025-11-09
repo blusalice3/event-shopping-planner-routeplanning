@@ -554,7 +554,7 @@ const App: React.FC = () => {
     URL.revokeObjectURL(url);
   }, [eventLists]);
 
-  // アイテム更新機能
+ // アイテム更新機能
   const handleUpdateEvent = useCallback(async (eventName: string, urlOverride?: { url: string; sheetName: string }) => {
     const metadata = eventMetadata[eventName];
     let url = urlOverride?.url || metadata?.spreadsheetUrl;
@@ -627,7 +627,6 @@ const App: React.FC = () => {
       const currentItems = eventLists[eventName] || [];
       
       // タイトル込みのキーでマップを作成（完全一致用）
-      const sheetItemsMapWithTitle = new Map(sheetItems.map(item => [getItemKey(item), item]));
       const currentItemsMapWithTitle = new Map(currentItems.map(item => [getItemKey(item), item]));
       
       // タイトルなしのキーでマップを作成（タイトル変更検出用）
@@ -637,7 +636,6 @@ const App: React.FC = () => {
       const itemsToDelete: ShoppingItem[] = [];
       const itemsToUpdate: ShoppingItem[] = [];
       const itemsToAdd: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[] = [];
-      const processedSheetKeys = new Set<string>();
 
       // 削除対象: スプレッドシートにないアイテム（サークル名・参加日・ブロック・ナンバーで照合）
       currentItems.forEach(item => {
@@ -666,10 +664,34 @@ const App: React.FC = () => {
               remarks: sheetItem.remarks
             });
           }
-          processedSheetKeys.add(keyWithTitle);
           return;
         }
         
+        // タイトルなしで既存アイテムを検索（タイトルが変更された場合）
+        const existingWithoutTitle = currentItemsMapWithoutTitle.get(keyWithoutTitle);
+        if (existingWithoutTitle) {
+          // タイトルや価格、備考が変わっていれば更新
+          itemsToUpdate.push({
+            ...existingWithoutTitle,
+            title: sheetItem.title,
+            price: sheetItem.price,
+            remarks: sheetItem.remarks
+          });
+          return;
+        }
+        
+        // 新規追加
+        itemsToAdd.push(sheetItem);
+      });
+
+      setUpdateData({ itemsToDelete, itemsToUpdate, itemsToAdd });
+      setShowUpdateConfirmation(true);
+    } catch (error) {
+      console.error('Update error:', error);
+      setPendingUpdateEventName(eventName);
+      setShowUrlUpdateDialog(true);
+    }
+  }, [eventLists, eventMetadata]);        
         // タイトルなしで既存アイテムを検索（タイトルが変更された場合）
         const existingWithoutTitle = currentItemsMapWithoutTitle.get(keyWithoutTitle);
         if (existingWithoutTitle) {
