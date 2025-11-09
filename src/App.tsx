@@ -11,7 +11,7 @@ import UpdateConfirmationModal from './components/UpdateConfirmationModal';
 import UrlUpdateDialog from './components/UrlUpdateDialog';
 import SortAscendingIcon from './components/icons/SortAscendingIcon';
 import SortDescendingIcon from './components/icons/SortDescendingIcon';
-import { getItemKey, insertItemSorted } from './utils/itemComparison';
+import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
 
 type ActiveTab = 'eventList' | 'day1' | 'day2' | 'import';
 type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'Purchased';
