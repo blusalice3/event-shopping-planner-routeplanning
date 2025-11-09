@@ -379,9 +379,9 @@ const App: React.FC = () => {
     });
 
     setBlockSortDirection(nextDirection);
-    // ソート状態は変更しない（並び替えなので）
     setSelectedItemIds(new Set());
   };
+
   const handleEditRequest = (item: ShoppingItem) => {
     setItemToEdit(item);
     setActiveTab('import');
@@ -760,7 +760,6 @@ const App: React.FC = () => {
   const day2Items = useMemo(() => items.filter(item => item.eventDate.includes('2日目')), [items]);
 
   const TabButton: React.FC<{tab: ActiveTab, label: string, count?: number, onClick?: () => void}> = ({ tab, label, count, onClick }) => {
-    const [showModeMenu, setShowModeMenu] = useState(false);
     const longPressTimeout = React.useRef<number | null>(null);
 
     const handlePointerDown = () => {
@@ -782,9 +781,7 @@ const App: React.FC = () => {
     };
 
     const handleClick = () => {
-      if (showModeMenu) {
-        setShowModeMenu(false);
-      } else if (onClick) {
+      if (onClick) {
         onClick();
       } else {
         setItemToEdit(null);
@@ -808,49 +805,6 @@ const App: React.FC = () => {
         >
           {label} {typeof count !== 'undefined' && <span className="text-xs bg-slate-200 dark:bg-slate-700 rounded-full px-2 py-0.5 ml-1">{count}</span>}
         </button>
-      </div>
-    );
-  };
-    const handleClick = () => {
-      if (showModeMenu) {
-        setShowModeMenu(false);
-      } else if (onClick) {
-        onClick();
-      } else {
-        setItemToEdit(null);
-        setSelectedItemIds(new Set());
-        setActiveTab(tab);
-      }
-    };
-
-    return (
-      <div className="relative">
-        <button
-          onClick={handleClick}
-          onPointerDown={handlePointerDown}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 whitespace-nowrap ${
-            activeTab === tab
-              ? 'bg-blue-600 text-white'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-          }`}
-        >
-          {label} {typeof count !== 'undefined' && <span className="text-xs bg-slate-200 dark:bg-slate-700 rounded-full px-2 py-0.5 ml-1">{count}</span>}
-        </button>
-        {showModeMenu && activeEventName && (tab === 'day1' || tab === 'day2') && (
-          <div className="absolute top-full left-0 mt-1 z-20 bg-white dark:bg-slate-800 rounded-md shadow-lg border border-slate-200 dark:border-slate-700 py-1">
-            <button
-              onClick={() => {
-                handleToggleMode();
-                setShowModeMenu(false);
-              }}
-              className="block w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 whitespace-nowrap"
-            >
-              {currentMode === 'edit' ? '📋 実行モード' : '✏️ 編集モード'}
-            </button>
-          </div>
-        )}
       </div>
     );
   };
@@ -944,7 +898,7 @@ const App: React.FC = () => {
                       </button>
                     )}
                 </div>
-            )}       
+            )}
         </div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-200 dark:border-slate-700">
              <div className="flex space-x-2 pt-2 pb-2 overflow-x-auto">
