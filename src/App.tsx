@@ -105,16 +105,16 @@ const App: React.FC = () => {
     const newItems: ShoppingItem[] = newItemsData.map(itemData => ({
         id: crypto.randomUUID(),
         ...itemData,
-        purchaseStatus: 'None',
+        purchaseStatus: 'None' as PurchaseStatus,
     }));
 
     const isNewEvent = !eventLists[eventName];
 
     setEventLists(prevLists => {
-        const currentItems = prevLists[eventName] || [];
+        const currentItems: ShoppingItem[] = prevLists[eventName] || [];
         return {
             ...prevLists,
-            [eventName]: [...currentItems, ...newItems]
+            [eventName]: [...currentItems, ...newItems] as ShoppingItem[]
         };
     });
 
@@ -123,7 +123,7 @@ const App: React.FC = () => {
       setEventMetadata(prev => ({
         ...prev,
         [eventName]: {
-          spreadsheetUrl: metadata.url,
+          spreadsheetUrl: metadata.url!,
           spreadsheetSheetName: metadata.sheetName || '',
           lastImportDate: new Date().toISOString()
         }
@@ -134,7 +134,7 @@ const App: React.FC = () => {
     if (isNewEvent) {
       setDayModes(prev => ({
         ...prev,
-        [eventName]: { day1: 'edit', day2: 'edit' }
+        [eventName]: { day1: 'edit' as ViewMode, day2: 'edit' as ViewMode }
       }));
       setExecuteModeItems(prev => ({
         ...prev,
@@ -167,11 +167,10 @@ const App: React.FC = () => {
     }));
   }, [activeEventName]);
 
-  const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColumn: 'execute' | 'candidate') => {
+  const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate') => {
     if (!activeEventName) return;
     setSortState('Manual');
     setBlockSortDirection(null);
-
     const currentDay = activeTab === 'day1' ? 'day1' : 'day2';
     const mode = dayModes[activeEventName]?.[currentDay] || 'edit';
 
@@ -218,7 +217,6 @@ const App: React.FC = () => {
         const hoverIndex = newItems.findIndex(item => item.id === hoverId);
         
         if (dragIndex === -1 || hoverIndex === -1) return prev;
-
         if (selectedItemIds.has(dragId)) {
           const selectedBlock = newItems.filter(item => selectedItemIds.has(item.id));
           const listWithoutSelection = newItems.filter(item => !selectedItemIds.has(item.id));
@@ -292,7 +290,7 @@ const App: React.FC = () => {
     setDayModes(prev => ({
       ...prev,
       [activeEventName]: {
-        ...(prev[activeEventName] || { day1: 'edit', day2: 'edit' }),
+        ...(prev[activeEventName] || { day1: 'edit' as ViewMode, day2: 'edit' as ViewMode }),
         [currentDay]: newMode
       }
     }));
@@ -449,7 +447,6 @@ const App: React.FC = () => {
     if (!activeEventName || selectedItemIds.size === 0) return;
     setSortState('Manual');
     setBlockSortDirection(null);
-
     const currentDay = activeTab === 'day1' ? 'day1' : 'day2';
     const mode = dayModes[activeEventName]?.[currentDay] || 'edit';
 
@@ -466,7 +463,6 @@ const App: React.FC = () => {
           .filter(Boolean);
         
         const otherItems = dayItems.filter(id => !selectedItemIds.has(id));
-
         selectedItems.sort((a, b) => {
           const comparison = a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: 'base' });
           return direction === 'asc' ? comparison : -comparison;
@@ -474,10 +470,8 @@ const App: React.FC = () => {
         
         const firstSelectedIndex = dayItems.findIndex(id => selectedItemIds.has(id));
         if (firstSelectedIndex === -1) return prev;
-
         const newDayItems = [...otherItems];
         newDayItems.splice(firstSelectedIndex, 0, ...selectedItems.map(item => item.id));
-
         return {
           ...prev,
           [activeEventName]: { ...eventItems, [currentDay]: newDayItems }
@@ -491,8 +485,8 @@ const App: React.FC = () => {
         const otherItems = currentItems.filter(item => !selectedItemIds.has(item.id));
 
         selectedItems.sort((a, b) => {
-          const comparison = a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: 'base' });
-          return direction === 'asc' ? comparison : -comparison;
+            const comparison = a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: 'base' });
+            return direction === 'asc' ? comparison : -comparison;
         });
         
         const firstSelectedIndex = currentItems.findIndex(item => selectedItemIds.has(item.id));
@@ -649,7 +643,6 @@ const App: React.FC = () => {
       sheetItems.forEach(sheetItem => {
         const key = getItemKey(sheetItem);
         const existing = currentItemsMap.get(key);
-
         if (existing) {
           if (
             existing.title !== sheetItem.title ||
@@ -670,7 +663,6 @@ const App: React.FC = () => {
 
       setUpdateData({ itemsToDelete, itemsToUpdate, itemsToAdd });
       setShowUpdateConfirmation(true);
-
     } catch (error) {
       console.error('Update error:', error);
       setPendingUpdateEventName(eventName);
@@ -705,7 +697,7 @@ const App: React.FC = () => {
           title: itemData.title,
           price: itemData.price,
           remarks: itemData.remarks,
-          purchaseStatus: 'None'
+          purchaseStatus: 'None' as PurchaseStatus
         };
         newItems = insertItemSorted(newItems, newItem);
       });
