@@ -1,4 +1,5 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
+
+import React, { useState, useMemo, useEffect } from 'react';
 import { ShoppingItem } from '../types';
 
 interface ImportScreenProps {
@@ -9,12 +10,7 @@ interface ImportScreenProps {
   onDoneEditing: () => void;
 }
 
-type ImportMode = 'paste' | 'csv' | 'sheets';
-
 const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName, itemToEdit, onUpdateItem, onDoneEditing }) => {
-  // Import mode selection
-  const [importMode, setImportMode] = useState<ImportMode>('paste');
-  
   // State for bulk add (creating new list)
   const [eventName, setEventName] = useState('');
   const [circles, setCircles] = useState('');
@@ -24,15 +20,6 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
   const [titles, setTitles] = useState('');
   const [prices, setPrices] = useState('');
   const [remarks, setRemarks] = useState('');
-
-  // CSV upload state
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-
-  // Google Sheets state
-  const [sheetsUrl, setSheetsUrl] = useState('');
-  const [sheetName, setSheetName] = useState('');
-  const [isLoadingSheets, setIsLoadingSheets] = useState(false);
 
   // State for single item add/edit
   const [singleCircle, setSingleCircle] = useState('');
@@ -83,180 +70,6 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
     setNumbers(cols.numbers.join('\n'));
     setTitles(cols.titles.join('\n'));
     setPrices(cols.prices.join('\n'));
-  };
-
-  // CSV file handling
-  const handleCsvFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setCsvFile(file);
-      parseCsvFile(file);
-    }
-  };
-
-  const parseCsvFile = (file: File) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      const lines = text.split('\n').filter(line => line.trim() !== '');
-      
-      // Skip header if exists
-      const startIndex = lines[0].includes('サークル') || lines[0].includes('circle') ? 1 : 0;
-      
-      const cols: { [key: string]: string[] } = {
-        circles: [], eventDates: [], blocks: [], numbers: [], titles: [], prices: [], remarks: []
-      };
-
-      for (let i = startIndex; i < lines.length; i++) {
-        const line = lines[i];
-        const cells: string[] = [];
-        let currentCell = '';
-        let insideQuotes = false;
-
-        for (let j = 0; j < line.length; j++) {
-          const char = line[j];
-          
-          if (char === '"') {
-            if (insideQuotes && line[j + 1] === '"') {
-              currentCell += '"';
-              j++;
-            } else {
-              insideQuotes = !insideQuotes;
-            }
-          } else if (char === ',' && !insideQuotes) {
-            cells.push(currentCell);
-            currentCell = '';
-          } else {
-            currentCell += char;
-          }
-        }
-        cells.push(currentCell);
-
-        // ブロックとナンバーが両方入力されている行のみ取り込む
-        const block = cells[2]?.trim() || '';
-        const number = cells[3]?.trim() || '';
-        if (!block || !number) {
-          continue; // スキップ
-        }
-
-        cols.circles.push(cells[0] || '');
-        cols.eventDates.push(cells[1] || '');
-        cols.blocks.push(block);
-        cols.numbers.push(number);
-        cols.titles.push(cells[4] || '');
-        cols.prices.push((cells[5] || '0').replace(/[^0-9]/g, ''));
-        cols.remarks.push(cells[7] || '');
-      }
-
-      setCircles(cols.circles.join('\n'));
-      setEventDates(cols.eventDates.join('\n'));
-      setBlocks(cols.blocks.join('\n'));
-      setNumbers(cols.numbers.join('\n'));
-      setTitles(cols.titles.join('\n'));
-      setPrices(cols.prices.join('\n'));
-      setRemarks(cols.remarks.join('\n'));
-
-      alert(`${cols.circles.length}件のデータを読み込みました。`);
-    };
-
-    reader.readAsText(file, 'UTF-8');
-  };
-
-  // Google Sheets handling
-  const extractSheetId = (url: string): string | null => {
-    const match = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
-    return match ? match[1] : null;
-  };
-
-  const handleLoadFromSheets = async () => {
-    const sheetId = extractSheetId(sheetsUrl);
-    if (!sheetId) {
-      alert('有効なGoogleスプレッドシートのURLを入力してください。\n例: https://docs.google.com/spreadsheets/d/YOUR_SHEET_ID/edit');
-      return;
-    }
-
-    setIsLoadingSheets(true);
-
-    try {
-      // Use Google Sheets public CSV export
-      // This only works if the sheet is publicly readable
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv${sheetName ? `&sheet=${encodeURIComponent(sheetName)}` : ''}`;
-      
-      const response = await fetch(csvUrl);
-      
-      if (!response.ok) {
-        throw new Error('スプレッドシートの読み込みに失敗しました。\n\nスプレッドシートが「リンクを知っている全員が閲覧可」に設定されているか確認してください。');
-      }
-
-      const text = await response.text();
-      const lines = text.split('\n').filter(line => line.trim() !== '');
-      
-      // Skip header row
-      const startIndex = 1;
-      
-      const cols: { [key: string]: string[] } = {
-        circles: [], eventDates: [], blocks: [], numbers: [], titles: [], prices: [], remarks: []
-      };
-
-      for (let i = startIndex; i < lines.length; i++) {
-        const line = lines[i];
-        const cells: string[] = [];
-        let currentCell = '';
-        let insideQuotes = false;
-
-        for (let j = 0; j < line.length; j++) {
-          const char = line[j];
-          
-          if (char === '"') {
-            if (insideQuotes && line[j + 1] === '"') {
-              currentCell += '"';
-              j++;
-            } else {
-              insideQuotes = !insideQuotes;
-            }
-          } else if (char === ',' && !insideQuotes) {
-            cells.push(currentCell);
-            currentCell = '';
-          } else {
-            currentCell += char;
-          }
-        }
-        cells.push(currentCell);
-
-        // ブロックとナンバーが両方入力されている行のみ取り込む
-        const block = cells[2]?.trim() || '';
-        const number = cells[3]?.trim() || '';
-        if (!block || !number) {
-          continue; // スキップ
-        }
-
-        // Assuming columns: サークル名, 参加日, ブロック, ナンバー, タイトル, 頒布価格, (購入状態), 備考
-        cols.circles.push(cells[0] || '');
-        cols.eventDates.push(cells[1] || '');
-        cols.blocks.push(block);
-        cols.numbers.push(number);
-        cols.titles.push(cells[4] || '');
-        cols.prices.push((cells[5] || '0').replace(/[^0-9]/g, ''));
-        cols.remarks.push(cells[7] || '');
-      }
-
-      setCircles(cols.circles.join('\n'));
-      setEventDates(cols.eventDates.join('\n'));
-      setBlocks(cols.blocks.join('\n'));
-      setNumbers(cols.numbers.join('\n'));
-      setTitles(cols.titles.join('\n'));
-      setPrices(cols.prices.join('\n'));
-      setRemarks(cols.remarks.join('\n'));
-
-      alert(`✓ ${cols.circles.length}件のデータを読み込みました。`);
-      setImportMode('paste'); // Switch to paste view to show loaded data
-
-    } catch (error) {
-      console.error('Sheets loading error:', error);
-      alert(error instanceof Error ? error.message : 'スプレッドシートの読み込みに失敗しました。');
-    } finally {
-      setIsLoadingSheets(false);
-    }
   };
   
   const resetSingleForm = () => {
@@ -326,13 +139,8 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         });
       }
       if (newItems.length > 0) {
-          // メタデータを渡す
-          const metadata = sheetsUrl ? { url: sheetsUrl, sheetName: sheetName } : undefined;
-          onBulkAdd(finalEventName, newItems, metadata);
+          onBulkAdd(finalEventName, newItems);
           setEventName(''); setCircles(''); setEventDates(''); setBlocks(''); setNumbers(''); setTitles(''); setPrices(''); setRemarks('');
-          setCsvFile(null);
-          setSheetsUrl('');
-          setSheetName('');
       } else {
           alert('有効なアイテムデータが見つかりませんでした。必須項目が入力されているか確認してください。');
       }
@@ -358,7 +166,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
 
   const priceOptions = useMemo(() => {
     const options: number[] = [0];
-    for (let i = 100; i <= 10000; i += 100) {
+    for (let i = 100; i <= 15000; i += 100) {
         options.push(i);
     }
     return options;
@@ -370,6 +178,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
   
   const handlePriceInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
+      // Allow only numbers
       if (/^\d*$/.test(value)) {
           setSinglePrice(value);
       }
@@ -384,115 +193,9 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
       <h2 className="text-xl sm:text-2xl font-bold mb-2 text-slate-900 dark:text-white text-center">
         {isEditing ? 'アイテムを編集' : isCreatingNew ? '新規リスト作成' : `「${activeEventName}」にアイテムを追加`}
       </h2>
-      
-      {isCreatingNew && !isEditing && (
-        <div className="mb-6">
-          <div className="flex justify-center space-x-2 mb-4">
-            <button
-              onClick={() => setImportMode('paste')}
-              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                importMode === 'paste'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
-              }`}
-            >
-              📋 コピー&ペースト
-            </button>
-            <button
-              onClick={() => setImportMode('csv')}
-              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                importMode === 'csv'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
-              }`}
-            >
-              📄 CSVファイル
-            </button>
-            <button
-              onClick={() => setImportMode('sheets')}
-              className={`px-4 py-2 text-sm font-medium rounded-md transition-colors ${
-                importMode === 'sheets'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'
-              }`}
-            >
-              📊 スプレッドシート
-            </button>
-          </div>
-
-          {importMode === 'csv' && (
-            <div className="mb-6 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-200 dark:border-blue-800">
-              <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
-                他のデバイスで出力したCSVファイルをアップロードしてデータをインポートできます。
-              </p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".csv"
-                onChange={handleCsvFileChange}
-                className="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-md file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 dark:file:bg-blue-900/50 dark:file:text-blue-300"
-              />
-              {csvFile && (
-                <p className="mt-2 text-sm text-green-600 dark:text-green-400">
-                  ✓ {csvFile.name} を読み込みました
-                </p>
-              )}
-            </div>
-          )}
-
-          {importMode === 'sheets' && (
-            <div className="mb-6 p-4 bg-green-50 dark:bg-green-900/20 rounded-md border border-green-200 dark:border-green-800">
-              <p className="text-sm text-slate-700 dark:text-slate-300 mb-3">
-                Googleスプレッドシートから直接データを読み込みます。
-              </p>
-              <div className="space-y-3">
-                <div>
-                  <label className={labelClass}>スプレッドシートURL</label>
-                  <input
-                    type="url"
-                    value={sheetsUrl}
-                    onChange={(e) => setSheetsUrl(e.target.value)}
-                    placeholder="https://docs.google.com/spreadsheets/d/..."
-                    className={formInputClass}
-                  />
-                </div>
-                <div>
-                  <label className={labelClass}>シート名（オプション）</label>
-                  <input
-                    type="text"
-                    value={sheetName}
-                    onChange={(e) => setSheetName(e.target.value)}
-                    placeholder="空欄の場合は最初のシート"
-                    className={formInputClass}
-                  />
-                </div>
-                <button
-                  onClick={handleLoadFromSheets}
-                  disabled={!sheetsUrl || isLoadingSheets}
-                  className="w-full px-4 py-2 text-sm font-semibold rounded-md text-white bg-green-600 hover:bg-green-700 disabled:bg-slate-400 disabled:cursor-not-allowed transition-colors"
-                >
-                  {isLoadingSheets ? '読み込み中...' : '📊 スプレッドシートから読み込む'}
-                </button>
-              </div>
-              <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded border border-yellow-200 dark:border-yellow-800">
-                <p className="text-xs text-slate-600 dark:text-slate-400">
-                  <strong>⚠️ 重要:</strong> スプレッドシートの共有設定を「リンクを知っている全員が閲覧可」にしてください。
-                  <br />
-                  列の順序: サークル名 | 参加日 | ブロック | ナンバー | タイトル | 頒布価格 | (購入状態) | 備考
-                </p>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
       <p className="text-center text-slate-600 dark:text-slate-400 mb-6">
         {isCreatingNew 
-          ? importMode === 'paste' 
-            ? 'スプレッドシートのM列からR列をコピーし、下の「サークル名」の欄に貼り付けてください。データが自動で振り分けられます。'
-            : importMode === 'csv'
-            ? 'CSVファイルを選択すると、自動的にデータが読み込まれます。'
-            : 'スプレッドシートのURLを入力して読み込んでください。'
+          ? 'スプレッドシートのM列からR列をコピーし、下の「サークル名」の欄に貼り付けてください。データが自動で振り分けられます。'
           : isEditing ? 'アイテムの情報を編集してください。' : '追加するアイテムのデータを入力してください。'
         }
       </p>
