@@ -382,6 +382,56 @@ const App: React.FC = () => {
     setSelectedItemIds(new Set());
   };
 
+  const handleBlockSortToggleCandidate = () => {
+    if (!activeEventName) return;
+
+    const nextDirection = blockSortDirection === 'asc' ? 'desc' : 'asc';
+
+    setEventLists(prev => {
+      const allItems = [...(prev[activeEventName] || [])];
+      const currentTabKey = activeTab === 'day1' ? '1日目' : '2日目';
+      const currentDay = activeTab === 'day1' ? 'day1' : 'day2';
+      const executeIds = new Set(executeModeItems[activeEventName]?.[currentDay] || []);
+
+      // 候補リストのアイテムのみを取得
+      const candidateItems = allItems.filter(item => 
+        item.eventDate.includes(currentTabKey) && !executeIds.has(item.id)
+      );
+      
+      if (candidateItems.length === 0) return prev;
+
+      const sortedCandidateItems = [...candidateItems].sort((a, b) => {
+        if (!a.block && !b.block) return 0;
+        if (!a.block) return 1;
+        if (!b.block) return -1;
+        const comparison = a.block.localeCompare(b.block, 'ja', { numeric: true, sensitivity: 'base' });
+        return nextDirection === 'asc' ? comparison : -comparison;
+      });
+
+      // 実行モード列のアイテムはそのまま、候補リストのアイテムのみ並び替え
+      const executeItems = allItems.filter(item => 
+        item.eventDate.includes(currentTabKey) && executeIds.has(item.id)
+      );
+      
+      // 実行モード列と候補リストを結合（実行モード列が先）
+      const newItems = allItems.map(item => {
+        if (!item.eventDate.includes(currentTabKey)) {
+          return item;
+        }
+        if (executeIds.has(item.id)) {
+          return executeItems.shift() || item;
+        } else {
+          return sortedCandidateItems.shift() || item;
+        }
+      });
+
+      return { ...prev, [activeEventName]: newItems };
+    });
+
+    setBlockSortDirection(nextDirection);
+    setSelectedItemIds(new Set());
+  };
+
   const handleEditRequest = (item: ShoppingItem) => {
     setItemToEdit(item);
     setActiveTab('import');
@@ -450,32 +500,82 @@ const App: React.FC = () => {
     const mode = dayModes[activeEventName]?.[currentDay] || 'edit';
 
     if (mode === 'edit') {
-      // 編集モード: 実行列のみソート
-      setExecuteModeItems(prev => {
-        const eventItems = prev[activeEventName] || { day1: [], day2: [] };
-        const dayItems = [...eventItems[currentDay]];
-        
-        const itemsMap = new Map(items.map(item => [item.id, item]));
-        const selectedItems = dayItems
-          .filter(id => selectedItemIds.has(id))
-          .map(id => itemsMap.get(id)!)
-          .filter(Boolean);
-        
-        const otherItems = dayItems.filter(id => !selectedItemIds.has(id));
-        selectedItems.sort((a, b) => {
-          const comparison = a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: 'base' });
-          return direction === 'asc' ? comparison : -comparison;
+      // 編集モード: 選択されたアイテムが実行モード列か候補リストかを判定
+      const executeIds = new Set(executeModeItems[activeEventName]?.[currentDay] || []);
+      const selectedItems = items.filter(item => selectedItemIds.has(item.id));
+      const isInExecuteColumn = selectedItems.some(item => executeIds.has(item.id));
+      const isInCandidateColumn = selectedItems.some(item => !executeIds.has(item.id));
+      
+      if (isInExecuteColumn && !isInCandidateColumn) {
+        // 実行モード列のみ
+        setExecuteModeItems(prev => {
+          const eventItems = prev[activeEventName] || { day1: [], day2: [] };
+          const dayItems = [...eventItems[currentDay]];
+          
+          const itemsMap = new Map(items.map(item => [item.id, item]));
+          const selectedItems = dayItems
+            .filter(id => selectedItemIds.has(id))
+            .map(id => itemsMap.get(id)!)
+            .filter(Boolean);
+          
+          const otherItems = dayItems.filter(id => !selectedItemIds.has(id));
+          selectedItems.sort((a, b) => {
+            const comparison = a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: 'base' });
+            return direction === 'asc' ? comparison : -comparison;
+          });
+          
+          const firstSelectedIndex = dayItems.findIndex(id => selectedItemIds.has(id));
+          if (firstSelectedIndex === -1) return prev;
+          const newDayItems = [...otherItems];
+          newDayItems.splice(firstSelectedIndex, 0, ...selectedItems.map(item => item.id));
+          return {
+            ...prev,
+            [activeEventName]: { ...eventItems, [currentDay]: newDayItems }
+          };
         });
-        
-        const firstSelectedIndex = dayItems.findIndex(id => selectedItemIds.has(id));
-        if (firstSelectedIndex === -1) return prev;
-        const newDayItems = [...otherItems];
-        newDayItems.splice(firstSelectedIndex, 0, ...selectedItems.map(item => item.id));
-        return {
-          ...prev,
-          [activeEventName]: { ...eventItems, [currentDay]: newDayItems }
-        };
-      });
+      } else if (isInCandidateColumn && !isInExecuteColumn) {
+        // 候補リストのみ
+        setEventLists(prev => {
+          const allItems = [...(prev[activeEventName] || [])];
+          const currentTabKey = activeTab === 'day1' ? '1日目' : '2日目';
+          const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentDay] || []);
+          
+          const candidateItems = allItems.filter(item => 
+            item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id)
+          );
+          const selectedCandidateItems = candidateItems.filter(item => selectedItemIds.has(item.id));
+          const otherCandidateItems = candidateItems.filter(item => !selectedItemIds.has(item.id));
+          
+          selectedCandidateItems.sort((a, b) => {
+            const comparison = a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: 'base' });
+            return direction === 'asc' ? comparison : -comparison;
+          });
+          
+          const firstSelectedIndex = candidateItems.findIndex(item => selectedItemIds.has(item.id));
+          if (firstSelectedIndex === -1) return prev;
+          
+          const sortedCandidateItems = [...otherCandidateItems];
+          sortedCandidateItems.splice(firstSelectedIndex, 0, ...selectedCandidateItems);
+          
+          // 実行モード列のアイテムはそのまま、候補リストのみ並び替え
+          const executeItems = allItems.filter(item => 
+            item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
+          );
+          
+          const newItems = allItems.map(item => {
+            if (!item.eventDate.includes(currentTabKey)) {
+              return item;
+            }
+            if (executeIdsSet.has(item.id)) {
+              return executeItems.shift() || item;
+            } else {
+              return sortedCandidateItems.shift() || item;
+            }
+          });
+          
+          return { ...prev, [activeEventName]: newItems };
+        });
+      }
     } else {
       // 実行モード: 通常ソート
       setEventLists(prev => {
@@ -497,7 +597,7 @@ const App: React.FC = () => {
         return { ...prev, [activeEventName]: newItems };
       });
     }
-  }, [activeEventName, selectedItemIds, items, activeTab, dayModes]);
+  }, [activeEventName, selectedItemIds, items, activeTab, dayModes, executeModeItems]);
 
   const handleExportEvent = useCallback((eventName: string) => {
     const itemsToExport = eventLists[eventName];
@@ -625,16 +725,17 @@ const App: React.FC = () => {
 
       const currentItems = eventLists[eventName] || [];
       
-      // タイトル込みのキーでマップを作成（完全一致用）
-      const currentItemsMapWithTitle = new Map(currentItems.map(item => [getItemKey(item), item]));
+      // サークル名・参加日・ブロック・ナンバー・タイトルで照合するキーでマップを作成
+      const currentItemsMapWithAll = new Map(currentItems.map(item => [getItemKey(item), item]));
       
-      // タイトルなしのキーでマップを作成（タイトル変更検出用）
+      // サークル名・参加日・ブロック・ナンバーで照合するキーでマップを作成（タイトル変更検出用）
       const sheetItemsMapWithoutTitle = new Map(sheetItems.map(item => [getItemKeyWithoutTitle(item), item]));
       const currentItemsMapWithoutTitle = new Map(currentItems.map(item => [getItemKeyWithoutTitle(item), item]));
 
       const itemsToDelete: ShoppingItem[] = [];
       const itemsToUpdate: ShoppingItem[] = [];
       const itemsToAdd: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[] = [];
+      const processedSheetKeys = new Set<string>();
 
       // 削除対象: スプレッドシートにないアイテム（サークル名・参加日・ブロック・ナンバーで照合）
       currentItems.forEach(item => {
@@ -646,23 +747,24 @@ const App: React.FC = () => {
 
       // 更新・追加対象の処理
       sheetItems.forEach(sheetItem => {
-        const keyWithTitle = getItemKey(sheetItem);
+        const keyWithAll = getItemKey(sheetItem);
         const keyWithoutTitle = getItemKeyWithoutTitle(sheetItem);
         
-        // 完全一致（タイトル込み）で既存アイテムを検索
-        const existingWithTitle = currentItemsMapWithTitle.get(keyWithTitle);
-        if (existingWithTitle) {
+        // 完全一致（サークル名・参加日・ブロック・ナンバー・タイトル）で既存アイテムを検索
+        const existingWithAll = currentItemsMapWithAll.get(keyWithAll);
+        if (existingWithAll) {
           // 完全一致した場合、価格や備考が変わっていれば更新
           if (
-            existingWithTitle.price !== sheetItem.price ||
-            existingWithTitle.remarks !== sheetItem.remarks
+            existingWithAll.price !== sheetItem.price ||
+            existingWithAll.remarks !== sheetItem.remarks
           ) {
             itemsToUpdate.push({
-              ...existingWithTitle,
+              ...existingWithAll,
               price: sheetItem.price,
               remarks: sheetItem.remarks
             });
           }
+          processedSheetKeys.add(keyWithAll);
           return;
         }
         
@@ -676,10 +778,11 @@ const App: React.FC = () => {
             price: sheetItem.price,
             remarks: sheetItem.remarks
           });
+          processedSheetKeys.add(keyWithoutTitle);
           return;
         }
         
-        // 新規追加
+        // 新規追加（候補リストに追加）
         itemsToAdd.push(sheetItem);
       });
 
@@ -708,7 +811,7 @@ const App: React.FC = () => {
       const updateMap = new Map(itemsToUpdate.map(item => [item.id, item]));
       newItems = newItems.map(item => updateMap.get(item.id) || item);
       
-      // 追加（ソート挿入）
+      // 追加（ソート挿入 - 候補リストに追加）
       itemsToAdd.forEach(itemData => {
         const newItem: ShoppingItem = {
           id: crypto.randomUUID(),
@@ -722,6 +825,7 @@ const App: React.FC = () => {
           purchaseStatus: 'None' as PurchaseStatus
         };
         newItems = insertItemSorted(newItems, newItem);
+        // 候補リストに追加（実行モード列には追加しない）
       });
       
       return { ...prev, [activeEventName]: newItems };
@@ -855,7 +959,7 @@ const App: React.FC = () => {
   const mainContentVisible = activeTab === 'day1' || activeTab === 'day2';
   
   const handleZoomChange = (newZoom: number) => {
-    setZoomLevel(Math.max(50, Math.min(150, newZoom)));
+    setZoomLevel(Math.max(30, Math.min(150, newZoom)));
   };
 
   return (
@@ -874,6 +978,19 @@ const App: React.FC = () => {
                         : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400'
                     }`}
                     title={blockSortDirection === 'desc' ? "ブロック降順 (昇順へ)" : blockSortDirection === 'asc' ? "ブロック昇順 (降順へ)" : "ブロック昇順でソート"}
+                  >
+                    {blockSortDirection === 'desc' ? <SortDescendingIcon className="w-5 h-5" /> : <SortAscendingIcon className="w-5 h-5" />}
+                  </button>
+                )}
+                {activeEventName && mainContentVisible && items.length > 0 && currentMode === 'edit' && (
+                  <button
+                    onClick={handleBlockSortToggleCandidate}
+                    className={`p-2 rounded-md transition-colors duration-200 ${
+                      blockSortDirection
+                        ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
+                        : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400'
+                    }`}
+                    title={blockSortDirection === 'desc' ? "候補リスト ブロック降順 (昇順へ)" : blockSortDirection === 'asc' ? "候補リスト ブロック昇順 (降順へ)" : "候補リスト ブロック昇順でソート"}
                   >
                     {blockSortDirection === 'desc' ? <SortDescendingIcon className="w-5 h-5" /> : <SortAscendingIcon className="w-5 h-5" />}
                   </button>
@@ -967,6 +1084,7 @@ const App: React.FC = () => {
                     selectedItemIds={selectedItemIds}
                     onSelectItem={handleSelectItem}
                     onRemoveFromColumn={handleRemoveFromExecuteColumn}
+                    onMoveToColumn={handleMoveToExecuteColumn}
                     columnType="execute"
                   />
                 </div>
@@ -1046,9 +1164,9 @@ const App: React.FC = () => {
         />
       )}
 
-      {activeEventName && items.length > 0 && mainContentVisible && currentMode === 'execute' && (
+      {activeEventName && items.length > 0 && mainContentVisible && (
         <>
-          <SummaryBar items={visibleItems} />
+          {currentMode === 'execute' && <SummaryBar items={visibleItems} />}
           <ZoomControl zoomLevel={zoomLevel} onZoomChange={handleZoomChange} />
         </>
       )}
