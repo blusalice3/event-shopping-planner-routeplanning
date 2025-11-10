@@ -83,6 +83,13 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         const itemHeight = rect.height / items.length;
         const insertIndex = Math.floor(relativeY / itemHeight);
         setInsertPosition(insertIndex);
+      } else if (columnType === 'execute' && onMoveToColumn) {
+        // 実行モード列内での挿入位置表示
+        const rect = e.currentTarget.getBoundingClientRect();
+        const relativeY = e.clientY - rect.top;
+        const itemHeight = rect.height / items.length;
+        const insertIndex = Math.floor(relativeY / itemHeight);
+        setInsertPosition(insertIndex);
       }
     } else {
       setInsertPosition(null);
