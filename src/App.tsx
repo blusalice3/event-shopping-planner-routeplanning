@@ -861,19 +861,19 @@ const App: React.FC = () => {
         }
         cells.push(currentCell);
 
-        // A列(0), B列(1), C列(2), D列(3)が全て入力されている行のみをインポート
-        const circle = cells[0]?.trim() || ''; // A列 (0-indexed: 0)
-        const eventDate = cells[1]?.trim() || ''; // B列 (0-indexed: 1)
-        const block = cells[2]?.trim() || ''; // C列 (0-indexed: 2)
-        const number = cells[3]?.trim() || ''; // D列 (0-indexed: 3)
+        // M列(12), N列(13), O列(14), P列(15)が全て入力されている行のみをインポート
+        const circle = cells[12]?.trim() || ''; // M列 (0-indexed: 12)
+        const eventDate = cells[13]?.trim() || ''; // N列 (0-indexed: 13)
+        const block = cells[14]?.trim() || ''; // O列 (0-indexed: 14)
+        const number = cells[15]?.trim() || ''; // P列 (0-indexed: 15)
         
         if (!circle || !eventDate || !block || !number) {
           continue;
         }
 
-        const title = cells[4]?.trim() || ''; // E列 (0-indexed: 4)
-        const price = parseInt((cells[5] || '0').replace(/[^0-9]/g, ''), 10) || 0; // F列 (0-indexed: 5)
-        const remarks = cells[7]?.trim() || ''; // H列 (0-indexed: 7)
+        const title = cells[16]?.trim() || ''; // Q列 (0-indexed: 16)
+        const price = parseInt((cells[17] || '0').replace(/[^0-9]/g, ''), 10) || 0; // R列 (0-indexed: 17)
+        const remarks = cells[22]?.trim() || ''; // W列 (0-indexed: 22)
 
         sheetItems.push({
           circle,
