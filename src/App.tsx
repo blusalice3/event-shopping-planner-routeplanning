@@ -972,6 +972,19 @@ const App: React.FC = () => {
     const itemsForTab = activeTab === 'day1' ? day1Items : day2Items;
     return selectedItems.some(item => itemsForTab.includes(item) && !executeIds.has(item.id));
   }, [activeEventName, activeTab, currentMode, selectedItemIds, items, executeModeItems, day1Items, day2Items]);
+
+  // 実行モード列のアイテムが選択されているかチェック
+  const hasExecuteSelection = useMemo(() => {
+    if (!activeEventName || currentMode !== 'edit' || selectedItemIds.size === 0) return false;
+    const currentDay = activeTab === 'day1' ? 'day1' : 'day2';
+    const executeIds = new Set(executeModeItems[activeEventName]?.[currentDay] || []);
+    const selectedItems = items.filter(item => selectedItemIds.has(item.id));
+    const itemsForTab = activeTab === 'day1' ? day1Items : day2Items;
+    return selectedItems.some(item => itemsForTab.includes(item) && executeIds.has(item.id));
+  }, [activeEventName, activeTab, currentMode, selectedItemIds, items, executeModeItems, day1Items, day2Items]);
+
+  // 左右両列のアイテムが同時に選択されている場合は移動ボタンを表示しない
+  const showMoveButtons = (hasCandidateSelection && !hasExecuteSelection) || (hasExecuteSelection && !hasCandidateSelection);
   
   if (!isInitialized) {
     return null;
@@ -1026,12 +1039,20 @@ const App: React.FC = () => {
                           onSort={handleBulkSort}
                           onClear={handleClearSelection}
                       />
-                      {hasCandidateSelection && (
+                      {showMoveButtons && hasCandidateSelection && (
                           <button
                               onClick={() => handleMoveToExecuteColumn(Array.from(selectedItemIds))}
                               className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
                           >
                               選択したアイテムを左列に移動 ({selectedItemIds.size}件)
+                          </button>
+                      )}
+                      {showMoveButtons && hasExecuteSelection && (
+                          <button
+                              onClick={() => handleRemoveFromExecuteColumn(Array.from(selectedItemIds))}
+                              className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
+                          >
+                              選択したアイテムを右列に移動 ({selectedItemIds.size}件)
                           </button>
                       )}
                   </>
@@ -1203,3 +1224,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+
