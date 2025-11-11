@@ -16,6 +16,11 @@ interface ShoppingListProps {
   currentDay?: 'day1' | 'day2';
 }
 
+// Constants for drag-and-drop auto-scrolling
+const SCROLL_SPEED = 20;
+const TOP_SCROLL_TRIGGER_PX = 150;
+const BOTTOM_SCROLL_TRIGGER_PX = 100;
+
 const ShoppingList: React.FC<ShoppingListProps> = ({
   items,
   onUpdateItem,
@@ -73,6 +78,18 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const handleDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // 自動スクロール機能
+    const clientY = e.clientY;
+    const windowHeight = window.innerHeight;
+    
+    if (clientY < TOP_SCROLL_TRIGGER_PX) {
+      // ヘッダーに近づいたら上にスクロール
+      window.scrollBy(0, -SCROLL_SPEED);
+    } else if (clientY > windowHeight - BOTTOM_SCROLL_TRIGGER_PX) {
+      // フッターに近づいたら下にスクロール
+      window.scrollBy(0, SCROLL_SPEED);
+    }
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -124,6 +141,15 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       className="space-y-4 pb-24 relative"
       onDragOver={(e) => {
         e.preventDefault();
+        // コンテナ全体での自動スクロール
+        const clientY = e.clientY;
+        const windowHeight = window.innerHeight;
+        
+        if (clientY < TOP_SCROLL_TRIGGER_PX) {
+          window.scrollBy(0, -SCROLL_SPEED);
+        } else if (clientY > windowHeight - BOTTOM_SCROLL_TRIGGER_PX) {
+          window.scrollBy(0, SCROLL_SPEED);
+        }
       }}
     >
       {items.map((item, index) => (
