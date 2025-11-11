@@ -73,4 +73,3 @@ const EventRenameDialog: React.FC<EventRenameDialogProps> = ({
 
 export default EventRenameDialog;
 
-
