@@ -416,7 +416,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
                     <div className="md:col-span-1"><label htmlFor="prices" className={labelClass}>頒布価格 </label><textarea id="prices" value={prices} onChange={e => setPrices(e.target.value)} className={formTextareaClass} placeholder="1000&#10;500" /></div>
                 </div>
                 <div>
-                    <label htmlFor="remarks" className={labelClass}>備考 (W列)</label>
+                    <label htmlFor="remarks" className={labelClass}>備考 </label>
                     <textarea id="remarks" value={remarks} onChange={e => setRemarks(e.target.value)} className={`${formTextareaClass} h-24`} placeholder="スケブお願い&#10;挨拶に行く" />
                 </div>
             </>
