@@ -13,7 +13,7 @@ interface ShoppingListProps {
   onMoveToColumn?: (itemIds: string[]) => void;
   onRemoveFromColumn?: (itemIds: string[]) => void;
   columnType?: 'execute' | 'candidate';
-  currentDay?: 'day1' | 'day2';
+  currentDay?: string; // 動的な参加日（例: '1日目', '2日目', '3日目'など）
 }
 
 // Constants for drag-and-drop auto-scrolling
