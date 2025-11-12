@@ -322,7 +322,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
       </h2>
       <p className="text-center text-slate-600 dark:text-slate-400 mb-6">
         {isCreatingNew 
-          ? 'スプレッドシートのA列からF列をコピーし、下の「サークル名」の欄に貼り付けてください。データが自動で振り分けられます。'
+          ? 'スプレッドシートのM列からR列とW列をコピーし、下の「サークル名」の欄に貼り付けてください。データが自動で振り分けられます。'
           : isEditing ? 'アイテムの情報を編集してください。' : '追加するアイテムのデータを入力してください。'
         }
       </p>
@@ -388,15 +388,15 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
                 </div>
                 
                 <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-                    <div className="md:col-span-1"><label htmlFor="circles" className={labelClass}>サークル名 (A)</label><textarea id="circles" value={circles} onChange={e => setCircles(e.target.value)} onPaste={handlePaste} className={formTextareaClass} placeholder="サークルA&#10;サークルB" /></div>
-                    <div className="md:col-span-1"><label htmlFor="event-dates" className={labelClass}>参加日 (B)</label><textarea id="event-dates" value={eventDates} onChange={e => setEventDates(e.target.value)} className={formTextareaClass} placeholder="1日目&#10;2日目" /></div>
-                    <div className="md:col-span-1"><label htmlFor="blocks" className={labelClass}>ブロック (C)</label><textarea id="blocks" value={blocks} onChange={e => setBlocks(e.target.value)} className={formTextareaClass} placeholder="東1&#10;西3" /></div>
-                    <div className="md:col-span-1"><label htmlFor="numbers" className={labelClass}>ナンバー (D)</label><textarea id="numbers" value={numbers} onChange={e => setNumbers(e.target.value)} className={formTextareaClass} placeholder="A-01a&#10;C-03a" /></div>
-                    <div className="md:col-span-1"><label htmlFor="titles" className={labelClass}>タイトル (E)</label><textarea id="titles" value={titles} onChange={e => setTitles(e.target.value)} className={formTextareaClass} placeholder="新刊セット&#10;既刊1" /></div>
-                    <div className="md:col-span-1"><label htmlFor="prices" className={labelClass}>頒布価格 (F)</label><textarea id="prices" value={prices} onChange={e => setPrices(e.target.value)} className={formTextareaClass} placeholder="1000&#10;500" /></div>
+                    <div className="md:col-span-1"><label htmlFor="circles" className={labelClass}>サークル名 (M)</label><textarea id="circles" value={circles} onChange={e => setCircles(e.target.value)} onPaste={handlePaste} className={formTextareaClass} placeholder="サークルA&#10;サークルB" /></div>
+                    <div className="md:col-span-1"><label htmlFor="event-dates" className={labelClass}>参加日 (N)</label><textarea id="event-dates" value={eventDates} onChange={e => setEventDates(e.target.value)} className={formTextareaClass} placeholder="1日目&#10;2日目" /></div>
+                    <div className="md:col-span-1"><label htmlFor="blocks" className={labelClass}>ブロック (O)</label><textarea id="blocks" value={blocks} onChange={e => setBlocks(e.target.value)} className={formTextareaClass} placeholder="東1&#10;西3" /></div>
+                    <div className="md:col-span-1"><label htmlFor="numbers" className={labelClass}>ナンバー (P)</label><textarea id="numbers" value={numbers} onChange={e => setNumbers(e.target.value)} className={formTextareaClass} placeholder="A-01a&#10;C-03a" /></div>
+                    <div className="md:col-span-1"><label htmlFor="titles" className={labelClass}>タイトル (Q)</label><textarea id="titles" value={titles} onChange={e => setTitles(e.target.value)} className={formTextareaClass} placeholder="新刊セット&#10;既刊1" /></div>
+                    <div className="md:col-span-1"><label htmlFor="prices" className={labelClass}>頒布価格 (R)</label><textarea id="prices" value={prices} onChange={e => setPrices(e.target.value)} className={formTextareaClass} placeholder="1000&#10;500" /></div>
                 </div>
                 <div>
-                    <label htmlFor="remarks" className={labelClass}>備考 (H列)</label>
+                    <label htmlFor="remarks" className={labelClass}>備考 (W列)</label>
                     <textarea id="remarks" value={remarks} onChange={e => setRemarks(e.target.value)} className={`${formTextareaClass} h-24`} placeholder="スケブお願い&#10;挨拶に行く" />
                 </div>
             </>
