@@ -30,11 +30,9 @@ export interface EventMetadata {
 }
 
 export interface DayModeState {
-  day1: ViewMode;
-  day2: ViewMode;
+  [eventDate: string]: ViewMode;
 }
 
 export interface ExecuteModeItems {
-  day1: string[];
-  day2: string[];
+  [eventDate: string]: string[];
 }
