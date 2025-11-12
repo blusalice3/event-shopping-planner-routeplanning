@@ -7,9 +7,10 @@ interface ImportScreenProps {
   itemToEdit: ShoppingItem | null;
   onUpdateItem: (item: ShoppingItem) => void;
   onDoneEditing: () => void;
+  availableEventDates?: string[]; // 既存イベントの参加日リスト
 }
 
-const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName, itemToEdit, onUpdateItem, onDoneEditing }) => {
+const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName, itemToEdit, onUpdateItem, onDoneEditing, availableEventDates = [] }) => {
   // State for bulk add (creating new list)
   const [eventName, setEventName] = useState('');
   const [circles, setCircles] = useState('');
@@ -429,10 +430,22 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <label htmlFor="singleEventDate" className={labelClass}>参加日</label>
-                        <select id="singleEventDate" value={singleEventDate} onChange={e => setSingleEventDate(e.target.value)} className={formInputClass}>
-                            <option value="1日目">1日目</option>
-                            <option value="2日目">2日目</option>
-                        </select>
+                        {availableEventDates.length > 0 ? (
+                            <select id="singleEventDate" value={singleEventDate} onChange={e => setSingleEventDate(e.target.value)} className={formInputClass}>
+                                {availableEventDates.map(date => (
+                                    <option key={date} value={date}>{date}</option>
+                                ))}
+                            </select>
+                        ) : (
+                            <input 
+                                type="text" 
+                                id="singleEventDate" 
+                                value={singleEventDate} 
+                                onChange={e => setSingleEventDate(e.target.value)} 
+                                className={formInputClass} 
+                                placeholder="1日目" 
+                            />
+                        )}
                     </div>
                     <div><label htmlFor="singleBlock" className={labelClass}>ブロック</label><input type="text" id="singleBlock" value={singleBlock} onChange={e => setSingleBlock(e.target.value)} className={formInputClass} placeholder="東1" /></div>
                     <div>
