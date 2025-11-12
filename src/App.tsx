@@ -44,6 +44,7 @@ const App: React.FC = () => {
   const [itemToDelete, setItemToDelete] = useState<ShoppingItem | null>(null);
   const [zoomLevel, setZoomLevel] = useState(100);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [selectedBlockFilters, setSelectedBlockFilters] = useState<Set<string>>(new Set());
 
   // 更新機能用の状態
   const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
@@ -375,6 +376,7 @@ const App: React.FC = () => {
   const handleSelectEvent = useCallback((eventName: string) => {
     setActiveEventName(eventName);
     setSelectedItemIds(new Set());
+    setSelectedBlockFilters(new Set());
     const eventItems = eventLists[eventName] || [];
     if (eventItems.some(item => item.eventDate.includes('1日目'))){
         setActiveTab('day1');
@@ -623,6 +625,22 @@ const App: React.FC = () => {
         }
         return newSet;
     });
+  }, []);
+
+  const handleToggleBlockFilter = useCallback((block: string) => {
+    setSelectedBlockFilters(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(block)) {
+        newSet.delete(block);
+      } else {
+        newSet.add(block);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const handleClearBlockFilters = useCallback(() => {
+    setSelectedBlockFilters(new Set());
   }, []);
 
   const handleClearSelection = useCallback(() => {
@@ -1053,6 +1071,7 @@ const App: React.FC = () => {
       } else {
         setItemToEdit(null);
         setSelectedItemIds(new Set());
+        setSelectedBlockFilters(new Set());
         setActiveTab(tab);
       }
     };
@@ -1107,13 +1126,38 @@ const App: React.FC = () => {
     return executeIds.map(id => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
   }, [activeEventName, activeTab, executeModeItems, items]);
 
+  // 候補リストから動的にブロック値を取得
+  const availableBlocks = useMemo(() => {
+    if (!activeEventName) return [];
+    const currentDay = activeTab === 'day1' ? 'day1' : 'day2';
+    const executeIds = new Set(executeModeItems[activeEventName]?.[currentDay] || []);
+    const itemsForTab = activeTab === 'day1' ? day1Items : day2Items;
+    const candidateItems = itemsForTab.filter(item => !executeIds.has(item.id));
+    const blocks = new Set(candidateItems.map(item => item.block).filter(Boolean));
+    return Array.from(blocks).sort((a, b) => {
+      const numA = Number(a);
+      const numB = Number(b);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return numA - numB;
+      }
+      return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
+    });
+  }, [activeEventName, activeTab, executeModeItems, day1Items, day2Items]);
+
   const candidateColumnItems = useMemo(() => {
     if (!activeEventName) return [];
     const currentDay = activeTab === 'day1' ? 'day1' : 'day2';
     const executeIds = new Set(executeModeItems[activeEventName]?.[currentDay] || []);
     const itemsForTab = activeTab === 'day1' ? day1Items : day2Items;
-    return itemsForTab.filter(item => !executeIds.has(item.id));
-  }, [activeEventName, activeTab, executeModeItems, day1Items, day2Items]);
+    let filtered = itemsForTab.filter(item => !executeIds.has(item.id));
+    
+    // ブロックフィルタを適用
+    if (selectedBlockFilters.size > 0) {
+      filtered = filtered.filter(item => selectedBlockFilters.has(item.block));
+    }
+    
+    return filtered;
+  }, [activeEventName, activeTab, executeModeItems, day1Items, day2Items, selectedBlockFilters]);
 
   // 候補リストのアイテムが選択されているかチェック
   const hasCandidateSelection = useMemo(() => {
@@ -1221,7 +1265,7 @@ const App: React.FC = () => {
         </div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-200 dark:border-slate-700">
              <div className="flex space-x-2 pt-2 pb-2 overflow-x-auto">
-                <TabButton tab="eventList" label="即売会リスト" onClick={() => { setActiveEventName(null); setItemToEdit(null); setSelectedItemIds(new Set()); setActiveTab('eventList'); }}/>
+                <TabButton tab="eventList" label="即売会リスト" onClick={() => { setActiveEventName(null); setItemToEdit(null); setSelectedItemIds(new Set()); setSelectedBlockFilters(new Set()); setActiveTab('eventList'); }}/>
                 {activeEventName ? (
                     <>
                         <TabButton tab="day1" label="1日目" count={day1Items.length} />
@@ -1297,7 +1341,42 @@ const App: React.FC = () => {
                 <div className="space-y-2">
                   <div className="bg-slate-100 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg p-3">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">候補リスト</h3>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mb-1">アイテムを選択してヘッダーのボタンから移動</p>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">アイテムを選択してヘッダーのボタンから移動</p>
+                    {availableBlocks.length > 0 && (
+                      <div className="mt-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">ブロックでフィルタ:</span>
+                          {selectedBlockFilters.size > 0 && (
+                            <button
+                              onClick={handleClearBlockFilters}
+                              className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline"
+                            >
+                              すべて解除
+                            </button>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {availableBlocks.map(block => (
+                            <button
+                              key={block}
+                              onClick={() => handleToggleBlockFilter(block)}
+                              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                                selectedBlockFilters.has(block)
+                                  ? 'bg-blue-600 text-white dark:bg-blue-500'
+                                  : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
+                              }`}
+                            >
+                              {block}
+                            </button>
+                          ))}
+                        </div>
+                        {selectedBlockFilters.size > 0 && (
+                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
+                            選択中: {selectedBlockFilters.size}件のブロック
+                          </p>
+                        )}
+                      </div>
+                    )}
                   </div>
                   <ShoppingList
                     items={candidateColumnItems}
