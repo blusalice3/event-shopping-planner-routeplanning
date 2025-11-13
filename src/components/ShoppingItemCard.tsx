@@ -156,7 +156,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       {statusBgOverlay && <div className={statusBgOverlay}></div>}
       {remarksWarning && (
         <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-          <span className="text-gray-500 dark:text-gray-400 text-2xl font-bold opacity-30">{remarksWarning}</span>
+          <span className="text-gray-500 dark:text-gray-400 text-4xl font-bold opacity-50">{remarksWarning}</span>
         </div>
       )}
       <div data-drag-handle className="relative p-3 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-2">
