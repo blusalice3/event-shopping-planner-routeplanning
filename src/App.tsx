@@ -63,8 +63,6 @@ const App: React.FC = () => {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [selectedBlockFilters, setSelectedBlockFilters] = useState<Set<string>>(new Set());
   const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
-  const [selectedInsertPosition, setSelectedInsertPosition] = useState<number | null>(null);
-  const [selectedItemsSourceColumn, setSelectedItemsSourceColumn] = useState<'execute' | 'candidate' | null>(null);
 
   // 更新機能用の状態
   const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
@@ -436,85 +434,35 @@ const App: React.FC = () => {
     }
   }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates]);
 
-  const handleMoveToExecuteColumn = useCallback((itemIds: string[], insertIndex?: number) => {
+  const handleMoveToExecuteColumn = useCallback((itemIds: string[]) => {
     if (!activeEventName) return;
     
     const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
     
     setExecuteModeItems(prev => {
       const eventItems = prev[activeEventName] || {};
-      const currentDayItems = [...(eventItems[currentEventDate] || [])];
+      const currentDayItems = new Set(eventItems[currentEventDate] || []);
       
-      // 既存のアイテムを削除
-      const filteredItems = currentDayItems.filter(id => !itemIds.includes(id));
-      
-      // 挿入位置が指定されている場合はその位置に、そうでなければ最後に追加
-      if (insertIndex !== undefined && insertIndex !== null) {
-        filteredItems.splice(insertIndex, 0, ...itemIds);
-      } else {
-        filteredItems.push(...itemIds);
-      }
+      // 追加（重複は無視）
+      itemIds.forEach(id => currentDayItems.add(id));
       
       return {
         ...prev,
         [activeEventName]: {
           ...eventItems,
-          [currentEventDate]: filteredItems
+          [currentEventDate]: Array.from(currentDayItems)
         }
       };
     });
     
     setSelectedItemIds(new Set());
-    setSelectedInsertPosition(null);
-    setSelectedItemsSourceColumn(null);
   }, [activeEventName, activeTab, eventDates]);
 
-  const handleRemoveFromExecuteColumn = useCallback((itemIds: string[], insertIndex?: number) => {
+  const handleRemoveFromExecuteColumn = useCallback((itemIds: string[]) => {
     if (!activeEventName) return;
     
     const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
     
-    // 実行モード列から削除し、候補リストに追加（順序を保持するため、eventListsを更新）
-    setEventLists(prev => {
-      const allItems = [...(prev[activeEventName] || [])];
-      const currentTabKey = currentEventDate;
-      const currentExecuteIds = executeModeItems[activeEventName]?.[currentTabKey] || [];
-      const executeIdsSet = new Set(currentExecuteIds);
-      
-      // 候補リストのアイテムのみを取得（移動するアイテムを除く）
-      const candidateItems = allItems.filter(item => 
-        item.eventDate === currentTabKey && !executeIdsSet.has(item.id) && !itemIds.includes(item.id)
-      );
-      
-      // 挿入位置にアイテムを追加
-      const itemsToAdd = allItems.filter(item => itemIds.includes(item.id));
-      if (insertIndex !== undefined && insertIndex !== null) {
-        candidateItems.splice(insertIndex, 0, ...itemsToAdd);
-      } else {
-        candidateItems.push(...itemsToAdd);
-      }
-      
-      // 実行モード列のアイテム（移動するアイテムを除く）
-      const executeItems = allItems.filter(item => 
-        item.eventDate === currentTabKey && executeIdsSet.has(item.id) && !itemIds.includes(item.id)
-      );
-      
-      // 新しいリストを構築：実行モード列のアイテム + 候補リストのアイテム
-      const newItems = allItems.map(item => {
-        if (item.eventDate !== currentTabKey) {
-          return item;
-        }
-        if (executeIdsSet.has(item.id) && !itemIds.includes(item.id)) {
-          return executeItems.shift() || item;
-        } else {
-          return candidateItems.shift() || item;
-        }
-      });
-      
-      return { ...prev, [activeEventName]: newItems };
-    });
-    
-    // 実行モード列から削除
     setExecuteModeItems(prev => {
       const eventItems = prev[activeEventName] || {};
       const currentDayItems = (eventItems[currentEventDate] || []).filter(id => !itemIds.includes(id));
@@ -529,9 +477,7 @@ const App: React.FC = () => {
     });
     
     setSelectedItemIds(new Set());
-    setSelectedInsertPosition(null);
-    setSelectedItemsSourceColumn(null);
-  }, [activeEventName, activeTab, eventDates, executeModeItems]);
+  }, [activeEventName, activeTab, eventDates]);
 
   const handleToggleMode = useCallback(() => {
     if (!activeEventName) return;
@@ -809,37 +755,12 @@ const App: React.FC = () => {
         const newSet = new Set(prev);
         if (newSet.has(itemId)) {
             newSet.delete(itemId);
-            // 選択が空になったら挿入位置の選択もリセット
-            if (newSet.size === 0) {
-              setSelectedInsertPosition(null);
-              setSelectedItemsSourceColumn(null);
-            }
         } else {
             newSet.add(itemId);
         }
-        
-        // 選択されたアイテムの列を判定
-        if (newSet.size > 0 && activeEventName) {
-          const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
-          const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-          const selectedItems = items.filter(item => newSet.has(item.id));
-          const isInExecuteColumn = selectedItems.some(item => executeIds.has(item.id));
-          const isInCandidateColumn = selectedItems.some(item => !executeIds.has(item.id));
-          
-          if (isInExecuteColumn && !isInCandidateColumn) {
-            setSelectedItemsSourceColumn('execute');
-          } else if (isInCandidateColumn && !isInExecuteColumn) {
-            setSelectedItemsSourceColumn('candidate');
-          } else {
-            setSelectedItemsSourceColumn(null);
-          }
-        } else {
-          setSelectedItemsSourceColumn(null);
-        }
-        
         return newSet;
     });
-  }, [activeEventName, activeTab, eventDates, executeModeItems, items]);
+  }, []);
 
   const handleToggleBlockFilter = useCallback((block: string) => {
     setSelectedBlockFilters(prev => {
@@ -940,27 +861,7 @@ const App: React.FC = () => {
 
   const handleClearSelection = useCallback(() => {
     setSelectedItemIds(new Set());
-    setSelectedInsertPosition(null);
-    setSelectedItemsSourceColumn(null);
   }, []);
-  
-  const handleSelectInsertPosition = useCallback((index: number) => {
-    setSelectedInsertPosition(index);
-  }, []);
-  
-  const handleConfirmMoveWithInsertPosition = useCallback(() => {
-    if (!activeEventName || selectedItemIds.size === 0 || selectedInsertPosition === null || !selectedItemsSourceColumn) return;
-    
-    const itemIds = Array.from(selectedItemIds);
-    
-    if (selectedItemsSourceColumn === 'candidate') {
-      // 候補リストから実行モード列へ移動
-      handleMoveToExecuteColumn(itemIds, selectedInsertPosition);
-    } else {
-      // 実行モード列から候補リストへ移動
-      handleRemoveFromExecuteColumn(itemIds, selectedInsertPosition);
-    }
-  }, [activeEventName, selectedItemIds, selectedInsertPosition, selectedItemsSourceColumn, handleMoveToExecuteColumn, handleRemoveFromExecuteColumn]);
 
   const handleBulkSort = useCallback((direction: BulkSortDirection) => {
     if (!activeEventName || selectedItemIds.size === 0) return;
@@ -1607,36 +1508,20 @@ const App: React.FC = () => {
                           onSort={handleBulkSort}
                           onClear={handleClearSelection}
                       />
-                      {showMoveButtons && hasCandidateSelection && selectedItemsSourceColumn !== 'candidate' && (
+                      {showMoveButtons && hasCandidateSelection && (
                           <button
-                              onClick={() => {
-                                // 挿入位置選択モードを有効化
-                                setSelectedItemsSourceColumn('candidate');
-                                setSelectedInsertPosition(null);
-                              }}
+                              onClick={() => handleMoveToExecuteColumn(Array.from(selectedItemIds))}
                               className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
                           >
-                              選択したアイテムを左列に移動 ({selectedItemIds.size}件) - 挿入位置を選択してください
+                              選択したアイテムを左列に移動 ({selectedItemIds.size}件)
                           </button>
                       )}
-                      {showMoveButtons && hasExecuteSelection && selectedItemsSourceColumn !== 'execute' && (
+                      {showMoveButtons && hasExecuteSelection && (
                           <button
-                              onClick={() => {
-                                // 挿入位置選択モードを有効化
-                                setSelectedItemsSourceColumn('execute');
-                                setSelectedInsertPosition(null);
-                              }}
+                              onClick={() => handleRemoveFromExecuteColumn(Array.from(selectedItemIds))}
                               className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
                           >
-                              選択したアイテムを右列に移動 ({selectedItemIds.size}件) - 挿入位置を選択してください
-                          </button>
-                      )}
-                      {selectedInsertPosition !== null && selectedItemsSourceColumn && (
-                          <button
-                              onClick={handleConfirmMoveWithInsertPosition}
-                              className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors flex-shrink-0"
-                          >
-                              移動を確定 ({selectedItemIds.size}件)
+                              選択したアイテムを右列に移動 ({selectedItemIds.size}件)
                           </button>
                       )}
                   </>
@@ -1732,9 +1617,6 @@ const App: React.FC = () => {
                     onMoveToColumn={handleMoveToExecuteColumn}
                     columnType="execute"
                     currentDay={eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}
-                    selectedInsertPosition={selectedItemsSourceColumn === 'candidate' ? selectedInsertPosition : null}
-                    selectedItemsSourceColumn={selectedItemsSourceColumn}
-                    onSelectInsertPosition={handleSelectInsertPosition}
                   />
                 </div>
                 
@@ -1808,9 +1690,6 @@ const App: React.FC = () => {
                     onRemoveFromColumn={handleRemoveFromExecuteColumn}
                     columnType="candidate"
                     currentDay={eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}
-                    selectedInsertPosition={selectedItemsSourceColumn === 'execute' ? selectedInsertPosition : null}
-                    selectedItemsSourceColumn={selectedItemsSourceColumn}
-                    onSelectInsertPosition={handleSelectInsertPosition}
                   />
                 </div>
               </div>
