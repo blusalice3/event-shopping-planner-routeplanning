@@ -1690,7 +1690,6 @@ const App: React.FC = () => {
                     onRemoveFromColumn={handleRemoveFromExecuteColumn}
                     columnType="candidate"
                     currentDay={eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}
-                    statusButtonType={statusButtonType}
                   />
                 </div>
               </div>
@@ -1705,7 +1704,6 @@ const App: React.FC = () => {
                 onSelectItem={handleSelectItem}
                 columnType="execute"
                 currentDay={eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}
-                statusButtonType={statusButtonType}
               />
             )}
           </div>
