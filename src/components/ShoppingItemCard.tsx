@@ -259,24 +259,20 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           <span className={`font-semibold w-16 text-left ${currentStatus.color}`}>{currentStatus.label}</span>
         </button>
         <div className="flex items-center">
-            {item.price === null ? (
-              <span className="w-28 text-md font-semibold text-red-600 dark:text-red-400 text-right">価格未定</span>
-            ) : (
-              <>
-                <span className="text-slate-500 dark:text-slate-400 mr-1">¥</span>
-                <select
-                  value={item.price === null ? '' : item.price}
-                  onChange={handlePriceChange}
-                  className="w-28 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none"
-                >
-                  {priceOptions.map(p => (
-                    <option key={p === null ? '' : p} value={p === null ? '' : p}>
-                      {p === null ? '価格未定' : p === 0 ? '0' : p.toLocaleString()}
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
+            {item.price !== null && <span className="text-slate-500 dark:text-slate-400 mr-1">¥</span>}
+            <select
+              value={item.price === null ? '' : item.price}
+              onChange={handlePriceChange}
+              className={`w-28 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none ${
+                item.price === null ? 'text-red-600 dark:text-red-400' : ''
+              }`}
+            >
+              {priceOptions.map(p => (
+                <option key={p === null ? '' : p} value={p === null ? '' : p}>
+                  {p === null ? '価格未定' : p === 0 ? '0' : p.toLocaleString()}
+                </option>
+              ))}
+            </select>
           </div>
       </div>
       
