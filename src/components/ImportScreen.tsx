@@ -43,7 +43,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         setSingleBlock(itemToEdit.block);
         setSingleNumber(itemToEdit.number);
         setSingleTitle(itemToEdit.title);
-        setSinglePrice(String(itemToEdit.price));
+        setSinglePrice(itemToEdit.price === null ? '' : String(itemToEdit.price));
         setSingleRemarks(itemToEdit.remarks);
     }
   }, [itemToEdit, isEditing]);
@@ -152,7 +152,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
       let block = cells[2]?.trim() || ''; // C列: ブロック
       let number = cells[3]?.trim() || ''; // D列: ナンバー
       let title = cells[4]?.trim() || ''; // E列: タイトル
-      let priceStr = cells[5]?.trim() || '0'; // F列: 頒布価格
+      let priceStr = cells[5]?.trim() || ''; // F列: 頒布価格
       let remarks = cells[7]?.trim() || ''; // H列: 備考
       let columnType: 'execute' | 'candidate' | null = null; // I列: 列の種類
       let order = 0; // J列: 列内順番
@@ -176,7 +176,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         block = cells[14]?.trim() || ''; // O列
         number = cells[15]?.trim() || ''; // P列
         title = cells[16]?.trim() || ''; // Q列
-        priceStr = cells[17]?.trim() || '0'; // R列
+        priceStr = cells[17]?.trim() || ''; // R列
         remarks = cells[22]?.trim() || ''; // W列
         
         // それでも必須項目が揃わない場合はスキップ
@@ -185,7 +185,8 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         }
       }
       
-      const price = parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0;
+      // 空欄の場合はnull、0と入力されている場合は0を設定
+      const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0);
       
       const item: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
         circle,
@@ -295,7 +296,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
     setSingleBlock('');
     setSingleNumber('');
     setSingleTitle('');
-    setSinglePrice('0');
+    setSinglePrice('');
     setSingleRemarks('');
   };
 
@@ -307,7 +308,9 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
             alert('サークル名かタイトルを入力してください。');
             return;
         }
-        const price = parseInt(String(singlePrice).replace(/[^0-9]/g, ''), 10) || 0;
+        // 空欄の場合はnull、0と入力されている場合は0を設定
+        const priceStr = String(singlePrice).trim();
+        const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0);
         const updatedItem: ShoppingItem = {
             ...itemToEdit,
             circle: singleCircle.trim(),
@@ -351,8 +354,9 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         if (!circle || !eventDate || !block || !number) {
           continue;
         }
-        const priceString = (pricesArr[i] || '0').replace(/[^0-9]/g, '');
-        const price = parseInt(priceString, 10) || 0;
+        // 空欄の場合はnull、0と入力されている場合は0を設定
+        const priceString = pricesArr[i] || '';
+        const price = priceString === '' ? null : (parseInt(priceString.replace(/[^0-9]/g, ''), 10) || 0);
         newItems.push({
           circle, eventDate, block, number, title: titlesArr[i] || '', price: price, remarks: remarksArr[i] || '',
         });
@@ -368,7 +372,9 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
             alert('サークル名かタイトルを入力してください。');
             return;
         }
-        const price = parseInt(String(singlePrice).replace(/[^0-9]/g, ''), 10) || 0;
+        // 空欄の場合はnull、0と入力されている場合は0を設定
+        const priceStr = String(singlePrice).trim();
+        const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0);
         const newItem: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
             circle: singleCircle.trim(),
             eventDate: singleEventDate,
