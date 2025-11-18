@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState, useRef, useEffect } from 'react';
 import { ShoppingItem, PurchaseStatus, PurchaseStatuses } from '../types';
+import { StatusButtonType } from '../App';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 import CheckCircleIcon from './icons/CheckCircleIcon';
 import CircleIcon from './icons/CircleIcon';
@@ -17,6 +18,7 @@ export interface ShoppingItemCardProps {
   isSelected: boolean;
   onSelectItem: (itemId: string) => void;
   blockBackgroundColor?: string;
+  statusButtonType: StatusButtonType;
 }
 
 const statusConfig: Record<PurchaseStatus, { label: string; icon: React.FC<any>; color: string; dim: boolean; bg: string; }> = {
@@ -38,6 +40,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   isSelected,
   onSelectItem,
   blockBackgroundColor,
+  statusButtonType,
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const longPressTimeout = useRef<number | null>(null);
@@ -57,6 +60,117 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     const nextIndex = (currentIndex + 1) % PurchaseStatuses.length;
     const nextStatus = PurchaseStatuses[nextIndex];
     onUpdate({ ...item, purchaseStatus: nextStatus });
+  }, [item, onUpdate]);
+
+  // 十字フリック入力用の状態
+  const [swipeStart, setSwipeStart] = useState<{ x: number; y: number } | null>(null);
+  const swipeThreshold = 50; // フリック判定の閾値（ピクセル）
+
+  const handleSwipeStart = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    setSwipeStart({ x: clientX, y: clientY });
+  }, []);
+
+  const handleSwipeEnd = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    if (!swipeStart) return;
+    
+    const clientX = 'changedTouches' in e ? e.changedTouches[0].clientX : e.clientX;
+    const clientY = 'changedTouches' in e ? e.changedTouches[0].clientY : e.clientY;
+    
+    const deltaX = clientX - swipeStart.x;
+    const deltaY = clientY - swipeStart.y;
+    const absDeltaX = Math.abs(deltaX);
+    const absDeltaY = Math.abs(deltaY);
+    
+    if (absDeltaX < swipeThreshold && absDeltaY < swipeThreshold) {
+      // クリック/タップとして扱う（トグルボタンの動作）
+      if (statusButtonType === 'toggle') {
+        togglePurchaseStatus();
+      }
+      setSwipeStart(null);
+      return;
+    }
+    
+    if (statusButtonType === 'crossSwipe') {
+      // 十字フリック入力式
+      const currentIndex = PurchaseStatuses.indexOf(item.purchaseStatus);
+      let nextStatus: PurchaseStatus;
+      
+      if (absDeltaX > absDeltaY) {
+        // 横方向のフリック
+        if (deltaX > 0) {
+          // 右にスワイプ: 次の状態へ
+          const nextIndex = (currentIndex + 1) % PurchaseStatuses.length;
+          nextStatus = PurchaseStatuses[nextIndex];
+        } else {
+          // 左にスワイプ: 前の状態へ
+          const prevIndex = (currentIndex - 1 + PurchaseStatuses.length) % PurchaseStatuses.length;
+          nextStatus = PurchaseStatuses[prevIndex];
+        }
+      } else {
+        // 縦方向のフリック
+        if (deltaY > 0) {
+          // 下にスワイプ: 2つ先の状態へ
+          const nextIndex = (currentIndex + 2) % PurchaseStatuses.length;
+          nextStatus = PurchaseStatuses[nextIndex];
+        } else {
+          // 上にスワイプ: 2つ前の状態へ
+          const prevIndex = (currentIndex - 2 + PurchaseStatuses.length) % PurchaseStatuses.length;
+          nextStatus = PurchaseStatuses[prevIndex];
+        }
+      }
+      
+      onUpdate({ ...item, purchaseStatus: nextStatus });
+    }
+    
+    setSwipeStart(null);
+  }, [swipeStart, statusButtonType, item, onUpdate, togglePurchaseStatus]);
+
+  // プルダウンフリック入力用の状態
+  const [pullDownStart, setPullDownStart] = useState<number | null>(null);
+  const [showPullDownMenu, setShowPullDownMenu] = useState(false);
+
+  const handlePullDownStart = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    setPullDownStart(clientY);
+  }, []);
+
+  const handlePullDownMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    if (pullDownStart === null || statusButtonType !== 'pullDownSwipe') return;
+    
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    const deltaY = clientY - pullDownStart;
+    
+    if (deltaY > 30) {
+      setShowPullDownMenu(true);
+    }
+  }, [pullDownStart, statusButtonType]);
+
+  const handlePullDownEnd = useCallback((e?: React.TouchEvent | React.MouseEvent) => {
+    if (pullDownStart === null) {
+      // クリック/タップとして扱う（onClickで処理）
+      return;
+    }
+    
+    if (!e) {
+      setPullDownStart(null);
+      return;
+    }
+    
+    const clientY = 'changedTouches' in e ? e.changedTouches[0].clientY : e.clientY;
+    const deltaY = clientY - pullDownStart;
+    
+    if (deltaY > 30) {
+      setShowPullDownMenu(true);
+    }
+    
+    setPullDownStart(null);
+  }, [pullDownStart, showPullDownMenu]);
+
+  const handleSelectStatus = useCallback((status: PurchaseStatus) => {
+    onUpdate({ ...item, purchaseStatus: status });
+    setShowPullDownMenu(false);
   }, [item, onUpdate]);
 
   const handleRemarksChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -94,12 +208,15 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       if (menuVisible && cardRef.current && !cardRef.current.contains(event.target as Node)) {
         setMenuVisible(false);
       }
+      if (showPullDownMenu && cardRef.current && !cardRef.current.contains(event.target as Node)) {
+        setShowPullDownMenu(false);
+      }
     };
     document.addEventListener('mousedown', handleClickOutside);
     return () => {
       document.removeEventListener('mousedown', handleClickOutside);
     };
-  }, [menuVisible]);
+  }, [menuVisible, showPullDownMenu]);
 
 
   const priceOptions = useMemo(() => {
@@ -250,14 +367,79 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       </div>
       
       <div className="relative flex flex-col items-end justify-between space-y-2 p-4 border-l border-slate-200/80 dark:border-slate-700/80 z-10">
-        <button 
-          onClick={togglePurchaseStatus} 
-          className="flex items-center space-x-2 p-2 -m-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
-          aria-label={`Current status: ${currentStatus.label}. Click to change.`}
-        >
-          <IconComponent className={`w-7 h-7 ${currentStatus.color}`} />
-          <span className={`font-semibold w-16 text-left ${currentStatus.color}`}>{currentStatus.label}</span>
-        </button>
+        {statusButtonType === 'toggle' && (
+          <button 
+            onClick={togglePurchaseStatus} 
+            className="flex items-center space-x-2 p-2 -m-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+            aria-label={`Current status: ${currentStatus.label}. Click to change.`}
+          >
+            <IconComponent className={`w-7 h-7 ${currentStatus.color}`} />
+            <span className={`font-semibold w-16 text-left ${currentStatus.color}`}>{currentStatus.label}</span>
+          </button>
+        )}
+        
+        {statusButtonType === 'crossSwipe' && (
+          <div
+            onTouchStart={handleSwipeStart}
+            onTouchEnd={handleSwipeEnd}
+            onMouseDown={handleSwipeStart}
+            onMouseUp={handleSwipeEnd}
+            className="flex items-center space-x-2 p-2 -m-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer select-none"
+            aria-label={`Current status: ${currentStatus.label}. Swipe to change.`}
+          >
+            <IconComponent className={`w-7 h-7 ${currentStatus.color}`} />
+            <span className={`font-semibold w-16 text-left ${currentStatus.color}`}>{currentStatus.label}</span>
+            <div className="text-xs text-slate-400 dark:text-slate-500 ml-2">
+              <div>←→</div>
+              <div>↑↓</div>
+            </div>
+          </div>
+        )}
+        
+        {statusButtonType === 'pullDownSwipe' && (
+          <div className="relative">
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowPullDownMenu(!showPullDownMenu);
+              }}
+              onTouchStart={handlePullDownStart}
+              onTouchMove={handlePullDownMove}
+              onTouchEnd={(e) => handlePullDownEnd(e)}
+              onMouseDown={handlePullDownStart}
+              onMouseMove={handlePullDownMove}
+              onMouseUp={(e) => handlePullDownEnd(e)}
+              className="flex items-center space-x-2 p-2 -m-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer select-none"
+              aria-label={`Current status: ${currentStatus.label}. Pull down to select.`}
+            >
+              <IconComponent className={`w-7 h-7 ${currentStatus.color}`} />
+              <span className={`font-semibold w-16 text-left ${currentStatus.color}`}>{currentStatus.label}</span>
+              <svg className={`w-4 h-4 text-slate-400 dark:text-slate-500 transition-transform ${showPullDownMenu ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+            {showPullDownMenu && (
+              <div className="absolute top-full right-0 mt-2 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-300 dark:border-slate-600 z-20 min-w-[180px]">
+                {PurchaseStatuses.map((status) => {
+                  const statusInfo = statusConfig[status];
+                  const StatusIcon = statusInfo.icon;
+                  return (
+                    <button
+                      key={status}
+                      onClick={() => handleSelectStatus(status)}
+                      className={`w-full flex items-center space-x-2 px-4 py-2 text-left hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors first:rounded-t-lg last:rounded-b-lg ${
+                        item.purchaseStatus === status ? 'bg-blue-50 dark:bg-blue-900/20' : ''
+                      }`}
+                    >
+                      <StatusIcon className={`w-5 h-5 ${statusInfo.color}`} />
+                      <span className={`font-medium ${statusInfo.color}`}>{statusInfo.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
         <div className="flex items-center">
             {item.price !== null && <span className="text-slate-500 dark:text-slate-400 mr-1">¥</span>}
             <select
