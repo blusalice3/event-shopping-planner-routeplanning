@@ -16,7 +16,7 @@ export interface ShoppingItem {
   block: string;
   number: string;
   title: string;
-  price: number;
+  price: number | null;
   purchaseStatus: PurchaseStatus;
   remarks: string;
 }
