@@ -130,10 +130,22 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   // プルダウンフリック入力用の状態
   const [pullDownStart, setPullDownStart] = useState<number | null>(null);
   const [showPullDownMenu, setShowPullDownMenu] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ top: number; right: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   const handlePullDownStart = useCallback((e: React.TouchEvent | React.MouseEvent) => {
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
     setPullDownStart(clientY);
+  }, []);
+
+  const updateMenuPosition = useCallback(() => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      setMenuPosition({
+        top: rect.bottom + window.scrollY + 8,
+        right: window.innerWidth - rect.right + window.scrollX,
+      });
+    }
   }, []);
 
   const handlePullDownMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
@@ -143,9 +155,10 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     const deltaY = clientY - pullDownStart;
     
     if (deltaY > 30) {
+      updateMenuPosition();
       setShowPullDownMenu(true);
     }
-  }, [pullDownStart, statusButtonType]);
+  }, [pullDownStart, statusButtonType, updateMenuPosition]);
 
   const handlePullDownEnd = useCallback((e?: React.TouchEvent | React.MouseEvent) => {
     if (pullDownStart === null) {
@@ -162,16 +175,31 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     const deltaY = clientY - pullDownStart;
     
     if (deltaY > 30) {
+      updateMenuPosition();
       setShowPullDownMenu(true);
     }
     
     setPullDownStart(null);
-  }, [pullDownStart, showPullDownMenu]);
+  }, [pullDownStart, updateMenuPosition]);
 
   const handleSelectStatus = useCallback((status: PurchaseStatus) => {
     onUpdate({ ...item, purchaseStatus: status });
     setShowPullDownMenu(false);
+    setMenuPosition(null);
   }, [item, onUpdate]);
+
+  // スクロール時にメニューの位置を更新
+  useEffect(() => {
+    if (showPullDownMenu) {
+      const handleScroll = () => {
+        updateMenuPosition();
+      };
+      window.addEventListener('scroll', handleScroll, true);
+      return () => {
+        window.removeEventListener('scroll', handleScroll, true);
+      };
+    }
+  }, [showPullDownMenu, updateMenuPosition]);
 
   const handleRemarksChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onUpdate({ ...item, remarks: e.target.value });
@@ -208,8 +236,16 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       if (menuVisible && cardRef.current && !cardRef.current.contains(event.target as Node)) {
         setMenuVisible(false);
       }
-      if (showPullDownMenu && cardRef.current && !cardRef.current.contains(event.target as Node)) {
-        setShowPullDownMenu(false);
+      if (showPullDownMenu) {
+        // プルダウンメニューはfixedポジションなので、ボタンとメニューの両方をチェック
+        const clickedElement = event.target as Node;
+        const isClickOnButton = buttonRef.current && buttonRef.current.contains(clickedElement);
+        const isClickOnMenu = (event.target as HTMLElement).closest('[data-pull-down-menu]');
+        
+        if (!isClickOnButton && !isClickOnMenu) {
+          setShowPullDownMenu(false);
+          setMenuPosition(null);
+        }
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -399,16 +435,28 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         {statusButtonType === 'pullDownSwipe' && (
           <div className="relative">
             <button
+              ref={buttonRef}
               onClick={(e) => {
                 e.stopPropagation();
+                if (buttonRef.current) {
+                  const rect = buttonRef.current.getBoundingClientRect();
+                  setMenuPosition({
+                    top: rect.bottom + window.scrollY + 8,
+                    right: window.innerWidth - rect.right + window.scrollX,
+                  });
+                }
                 setShowPullDownMenu(!showPullDownMenu);
               }}
               onTouchStart={handlePullDownStart}
               onTouchMove={handlePullDownMove}
-              onTouchEnd={(e) => handlePullDownEnd(e)}
+              onTouchEnd={(e) => {
+                handlePullDownEnd(e);
+              }}
               onMouseDown={handlePullDownStart}
               onMouseMove={handlePullDownMove}
-              onMouseUp={(e) => handlePullDownEnd(e)}
+              onMouseUp={(e) => {
+                handlePullDownEnd(e);
+              }}
               className="flex items-center space-x-2 p-2 -m-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors cursor-pointer select-none"
               aria-label={`Current status: ${currentStatus.label}. Pull down to select.`}
             >
@@ -418,8 +466,15 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
               </svg>
             </button>
-            {showPullDownMenu && (
-              <div className="absolute top-full right-0 mt-2 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-300 dark:border-slate-600 z-20 min-w-[180px]">
+            {showPullDownMenu && menuPosition && (
+              <div 
+                data-pull-down-menu
+                className="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-300 dark:border-slate-600 z-50 min-w-[180px]"
+                style={{
+                  top: `${menuPosition.top}px`,
+                  right: `${menuPosition.right}px`,
+                }}
+              >
                 {PurchaseStatuses.map((status) => {
                   const statusInfo = statusConfig[status];
                   const StatusIcon = statusInfo.icon;
