@@ -14,6 +14,9 @@ interface ShoppingListProps {
   onRemoveFromColumn?: (itemIds: string[]) => void;
   columnType?: 'execute' | 'candidate';
   currentDay?: string; // 動的な参加日（例: '1日目', '2日目', '3日目'など）
+  selectedInsertPosition?: number | null;
+  selectedItemsSourceColumn?: 'execute' | 'candidate' | null;
+  onSelectInsertPosition?: (index: number) => void;
 }
 
 // Constants for drag-and-drop auto-scrolling
@@ -131,11 +134,17 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onRemoveFromColumn: _onRemoveFromColumn,
   columnType,
   currentDay: _currentDay,
+  selectedInsertPosition: externalInsertPosition,
+  selectedItemsSourceColumn,
+  onSelectInsertPosition,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragOverItem = useRef<string | null>(null);
   const [insertPosition, setInsertPosition] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  
+  // 外部から挿入位置が指定されている場合はそれを使用（左右列間の移動用）
+  const showInsertPositionIndicators = externalInsertPosition !== undefined && externalInsertPosition !== null && selectedItemsSourceColumn && selectedItemsSourceColumn !== columnType;
 
   // ブロックベースの色情報を計算
   const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
@@ -145,6 +154,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     if (columnType) {
       e.dataTransfer.setData('sourceColumn', columnType);
     }
+    // 移動のみを許可（複製や削除はしない）
+    e.dataTransfer.effectAllowed = 'move';
     const target = e.currentTarget;
     setTimeout(() => {
       if (target) {
@@ -161,6 +172,13 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   const handleDragEnter = (e: React.DragEvent<HTMLDivElement>, item: ShoppingItem, index: number) => {
     e.preventDefault();
+    
+    // 子要素（アイテムカード）へのドラッグを制限
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-item-id]') && target.closest('[data-item-id]') !== e.currentTarget) {
+      return;
+    }
+    
     // 選択されたアイテムの上にはドロップできない
     if (selectedItemIds.has(item.id) && selectedItemIds.has(dragItem.current || '')) {
       dragOverItem.current = null;
@@ -180,6 +198,16 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     e.preventDefault();
     e.stopPropagation();
     
+    // 子要素（アイテムカード）へのドラッグを制限
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-item-id]') && target.closest('[data-item-id]') !== e.currentTarget) {
+      e.dataTransfer.dropEffect = 'none';
+      return;
+    }
+    
+    // 移動のみを許可
+    e.dataTransfer.dropEffect = 'move';
+    
     // 自動スクロール機能
     const clientY = e.clientY;
     const windowHeight = window.innerHeight;
@@ -196,6 +224,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
+    
+    // ブラウザ外からのファイルドロップを制限
+    if (e.dataTransfer.files.length > 0) {
+      setInsertPosition(null);
+      dragItem.current = null;
+      dragOverItem.current = null;
+      return;
+    }
     
     const sourceColumn = e.dataTransfer.getData('sourceColumn') as 'execute' | 'candidate' | undefined;
     
@@ -255,8 +291,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     >
       {items.map((item, index) => (
         <React.Fragment key={item.id}>
-          {/* 挿入位置インジケーター */}
-          {insertPosition === index && (
+          {/* ドラッグ中の挿入位置インジケーター（同列内の移動用） */}
+          {!showInsertPositionIndicators && insertPosition === index && (
             <div className="flex items-center justify-center h-2 my-2 relative z-10">
               <div className="w-full h-0.5 bg-blue-500"></div>
               <div className="absolute left-1/2 -translate-x-1/2 bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-lg font-bold">
@@ -264,9 +300,27 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               </div>
             </div>
           )}
+          {/* 左右列間の移動用の挿入位置インジケーター（全アイテム間に表示） */}
+          {showInsertPositionIndicators && (
+            <div className="flex items-center justify-center h-4 my-2 relative z-10">
+              <div className="flex-1 h-0.5 bg-green-500"></div>
+              <div className="flex items-center gap-2 mx-2">
+                <span className="text-green-600 dark:text-green-400 font-bold text-lg">〈</span>
+                <input
+                  type="checkbox"
+                  checked={externalInsertPosition === index}
+                  onChange={() => onSelectInsertPosition?.(index)}
+                  className="w-5 h-5 rounded text-green-600 focus:ring-green-500"
+                  aria-label={`Insert position ${index}`}
+                />
+                <span className="text-green-600 dark:text-green-400 font-bold text-lg">〉</span>
+              </div>
+              <div className="flex-1 h-0.5 bg-green-500"></div>
+            </div>
+          )}
           <div
             data-item-id={item.id}
-            draggable
+            draggable={!showInsertPositionIndicators}
             onDragStart={(e) => handleDragStart(e, item)}
             onDragEnter={(e) => handleDragEnter(e, item, index)}
             onDragOver={handleDragOver}
@@ -286,8 +340,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               blockBackgroundColor={blockColorMap.get(item.id)}
             />
           </div>
-          {/* 最後のアイテムの後に挿入位置インジケーター */}
-          {insertPosition === items.length && index === items.length - 1 && (
+          {/* 最後のアイテムの後に挿入位置インジケーター（ドラッグ中） */}
+          {!showInsertPositionIndicators && insertPosition === items.length && index === items.length - 1 && (
             <div className="flex items-center justify-center h-2 my-2 relative z-10">
               <div className="w-full h-0.5 bg-blue-500"></div>
               <div className="absolute left-1/2 -translate-x-1/2 bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-lg font-bold">
@@ -295,8 +349,44 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               </div>
             </div>
           )}
+          {/* 最後のアイテムの後に挿入位置インジケーター（左右列間の移動用） */}
+          {showInsertPositionIndicators && index === items.length - 1 && (
+            <div className="flex items-center justify-center h-4 my-2 relative z-10">
+              <div className="flex-1 h-0.5 bg-green-500"></div>
+              <div className="flex items-center gap-2 mx-2">
+                <span className="text-green-600 dark:text-green-400 font-bold text-lg">〈</span>
+                <input
+                  type="checkbox"
+                  checked={externalInsertPosition === items.length}
+                  onChange={() => onSelectInsertPosition?.(items.length)}
+                  className="w-5 h-5 rounded text-green-600 focus:ring-green-500"
+                  aria-label={`Insert position ${items.length}`}
+                />
+                <span className="text-green-600 dark:text-green-400 font-bold text-lg">〉</span>
+              </div>
+              <div className="flex-1 h-0.5 bg-green-500"></div>
+            </div>
+          )}
         </React.Fragment>
       ))}
+      {/* アイテムが0件の場合でも、最初の位置に挿入位置インジケーターを表示 */}
+      {showInsertPositionIndicators && items.length === 0 && (
+        <div className="flex items-center justify-center h-4 my-2 relative z-10">
+          <div className="flex-1 h-0.5 bg-green-500"></div>
+          <div className="flex items-center gap-2 mx-2">
+            <span className="text-green-600 dark:text-green-400 font-bold text-lg">〈</span>
+            <input
+              type="checkbox"
+              checked={externalInsertPosition === 0}
+              onChange={() => onSelectInsertPosition?.(0)}
+              className="w-5 h-5 rounded text-green-600 focus:ring-green-500"
+              aria-label="Insert position 0"
+            />
+            <span className="text-green-600 dark:text-green-400 font-bold text-lg">〉</span>
+          </div>
+          <div className="flex-1 h-0.5 bg-green-500"></div>
+        </div>
+      )}
     </div>
   );
 };
