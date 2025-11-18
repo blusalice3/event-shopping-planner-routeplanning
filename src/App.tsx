@@ -1145,7 +1145,7 @@ const App: React.FC = () => {
         const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0); // R列 (0-indexed: 17)
         const remarks = cells[22]?.trim() || ''; // W列 (0-indexed: 22)
 
-        sheetItems.push({
+        const item: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
           circle,
           eventDate,
           block,
@@ -1153,7 +1153,8 @@ const App: React.FC = () => {
           title,
           price,
           remarks
-        });
+        };
+        sheetItems.push(item);
       }
 
       const currentItems = eventLists[eventName] || [];
