@@ -481,9 +481,6 @@ const App: React.FC = () => {
       const currentExecuteIds = executeModeItems[activeEventName]?.[currentTabKey] || [];
       const executeIdsSet = new Set(currentExecuteIds);
       
-      // 実行モード列から削除後のIDリスト
-      const newExecuteIds = currentExecuteIds.filter(id => !itemIds.includes(id));
-      
       // 候補リストのアイテムのみを取得（移動するアイテムを除く）
       const candidateItems = allItems.filter(item => 
         item.eventDate === currentTabKey && !executeIdsSet.has(item.id) && !itemIds.includes(item.id)
