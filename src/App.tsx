@@ -62,6 +62,7 @@ const App: React.FC = () => {
   const [zoomLevel, setZoomLevel] = useState(100);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [selectedBlockFilters, setSelectedBlockFilters] = useState<Set<string>>(new Set());
+  const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
 
   // 更新機能用の状態
   const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
@@ -276,10 +277,22 @@ const App: React.FC = () => {
 
   const handleUpdateItem = useCallback((updatedItem: ShoppingItem) => {
     if (!activeEventName) return;
-    setEventLists(prev => ({
-      ...prev,
-      [activeEventName]: prev[activeEventName].map(item => (item.id === updatedItem.id ? updatedItem : item))
-    }));
+    
+    setEventLists(prev => {
+      // 購入状態が変更されたかチェック
+      const currentItem = prev[activeEventName]?.find(item => item.id === updatedItem.id);
+      const purchaseStatusChanged = currentItem && currentItem.purchaseStatus !== updatedItem.purchaseStatus;
+      
+      // 購入状態が変更された場合、最近変更されたアイテムとして記録
+      if (purchaseStatusChanged) {
+        setRecentlyChangedItemIds(prevIds => new Set(prevIds).add(updatedItem.id));
+      }
+      
+      return {
+        ...prev,
+        [activeEventName]: prev[activeEventName].map(item => (item.id === updatedItem.id ? updatedItem : item))
+      };
+    });
   }, [activeEventName]);
 
   const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate') => {
@@ -591,6 +604,8 @@ const App: React.FC = () => {
   const handleSortToggle = () => {
     setSelectedItemIds(new Set());
     setBlockSortDirection(null);
+    // フィルタ変更時に最近変更されたアイテムの追跡をリセット
+    setRecentlyChangedItemIds(new Set());
     const currentIndex = sortCycle.indexOf(sortState);
     const nextIndex = (currentIndex + 1) % sortCycle.length;
     setSortState(sortCycle[nextIndex]);
@@ -1357,12 +1372,16 @@ const App: React.FC = () => {
       if (sortState === 'Manual') {
         return executeColumnItems;
       }
-      return executeColumnItems.filter(item => item.purchaseStatus === sortState as Exclude<SortState, 'Manual'>);
+      // フィルタに該当するアイテム、または最近変更されたアイテムを表示
+      const filterStatus = sortState as Exclude<SortState, 'Manual'>;
+      return executeColumnItems.filter(item => 
+        item.purchaseStatus === filterStatus || recentlyChangedItemIds.has(item.id)
+      );
     }
     
     // 編集モード: すべてのアイテムを表示（列分けはコンポーネント側で処理）
     return itemsForTab;
-  }, [activeTab, currentTabItems, sortState, activeEventName, dayModes, executeColumnItems, eventDates]);
+  }, [activeTab, currentTabItems, sortState, activeEventName, dayModes, executeColumnItems, eventDates, recentlyChangedItemIds]);
 
   // 候補リストから動的にブロック値を取得
   const availableBlocks = useMemo(() => {
