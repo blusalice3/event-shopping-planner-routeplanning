@@ -1798,20 +1798,6 @@ const App: React.FC = () => {
               </button>
               <button
                 onClick={() => {
-                  setStatusButtonType('crossSwipe');
-                  setShowStatusButtonTypeDialog(false);
-                }}
-                className={`w-full p-4 rounded-md border-2 transition-colors text-left ${
-                  statusButtonType === 'crossSwipe'
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-slate-300 dark:border-slate-600 hover:border-slate-400 dark:hover:border-slate-500'
-                }`}
-              >
-                <div className="font-semibold text-slate-900 dark:text-white">十字フリック入力式</div>
-                <div className="text-sm text-slate-600 dark:text-slate-400 mt-1">上下左右のフリックで状態を変更</div>
-              </button>
-              <button
-                onClick={() => {
                   setStatusButtonType('pullDownSwipe');
                   setShowStatusButtonTypeDialog(false);
                 }}
