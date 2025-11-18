@@ -18,7 +18,6 @@ type ActiveTab = 'eventList' | 'import' | string; // string部分は動的な参
 type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'Purchased';
 export type BulkSortDirection = 'asc' | 'desc';
 type BlockSortDirection = 'asc' | 'desc';
-export type StatusButtonType = 'toggle' | 'crossSwipe' | 'pullDownSwipe';
 
 // データから参加日を抽出する関数
 const extractEventDates = (items: ShoppingItem[]): string[] => {
@@ -77,8 +76,6 @@ const App: React.FC = () => {
   const [pendingUpdateEventName, setPendingUpdateEventName] = useState<string | null>(null);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [eventToRename, setEventToRename] = useState<string | null>(null);
-  const [statusButtonType, setStatusButtonType] = useState<StatusButtonType>('toggle');
-  const [showStatusButtonTypeDialog, setShowStatusButtonTypeDialog] = useState(false);
 
   useEffect(() => {
     try {
@@ -86,7 +83,6 @@ const App: React.FC = () => {
       const storedMetadata = localStorage.getItem('eventMetadata');
       const storedExecuteItems = localStorage.getItem('executeModeItems');
       const storedDayModes = localStorage.getItem('dayModes');
-      const storedStatusButtonType = localStorage.getItem('statusButtonType');
       
       if (storedLists) {
         setEventLists(JSON.parse(storedLists));
@@ -99,9 +95,6 @@ const App: React.FC = () => {
       }
       if (storedDayModes) {
         setDayModes(JSON.parse(storedDayModes));
-      }
-      if (storedStatusButtonType) {
-        setStatusButtonType(JSON.parse(storedStatusButtonType) as StatusButtonType);
       }
     } catch (error) {
       console.error("Failed to load data from localStorage", error);
@@ -116,12 +109,11 @@ const App: React.FC = () => {
         localStorage.setItem('eventMetadata', JSON.stringify(eventMetadata));
         localStorage.setItem('executeModeItems', JSON.stringify(executeModeItems));
         localStorage.setItem('dayModes', JSON.stringify(dayModes));
-        localStorage.setItem('statusButtonType', JSON.stringify(statusButtonType));
       } catch (error) {
         console.error("Failed to save data to localStorage", error);
       }
     }
-  }, [eventLists, eventMetadata, executeModeItems, dayModes, statusButtonType, isInitialized]);
+  }, [eventLists, eventMetadata, executeModeItems, dayModes, isInitialized]);
 
   const items = useMemo(() => activeEventName ? eventLists[activeEventName] || [] : [], [activeEventName, eventLists]);
   
@@ -1480,18 +1472,6 @@ const App: React.FC = () => {
           <div>
             <div className="flex items-center gap-3">
                 <h1 className="text-2xl font-bold text-slate-900 dark:text-white">即売会 購入巡回表</h1>
-                {activeTab === 'eventList' && (
-                  <button
-                    onClick={() => setShowStatusButtonTypeDialog(true)}
-                    className="p-2 rounded-md transition-colors duration-200 bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400"
-                    title="状態変更ボタンの種類を設定"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    </svg>
-                  </button>
-                )}
                 {activeEventName && mainContentVisible && items.length > 0 && currentMode === 'execute' && (
                   <button
                     onClick={handleBlockSortToggle}
@@ -1637,7 +1617,6 @@ const App: React.FC = () => {
                     onMoveToColumn={handleMoveToExecuteColumn}
                     columnType="execute"
                     currentDay={eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}
-                    statusButtonType={statusButtonType}
                   />
                 </div>
                 
@@ -1775,50 +1754,6 @@ const App: React.FC = () => {
             setEventToRename(null);
           }}
         />
-      )}
-
-      {showStatusButtonTypeDialog && (
-        <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50" onClick={() => setShowStatusButtonTypeDialog(false)}>
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4" onClick={(e) => e.stopPropagation()}>
-            <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">状態変更ボタンの種類を選択</h2>
-            <div className="space-y-3">
-              <button
-                onClick={() => {
-                  setStatusButtonType('toggle');
-                  setShowStatusButtonTypeDialog(false);
-                }}
-                className={`w-full p-4 rounded-md border-2 transition-colors text-left ${
-                  statusButtonType === 'toggle'
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-slate-300 dark:border-slate-600 hover:border-slate-400 dark:hover:border-slate-500'
-                }`}
-              >
-                <div className="font-semibold text-slate-900 dark:text-white">トグルボタン</div>
-                <div className="text-sm text-slate-600 dark:text-slate-400 mt-1">クリックで状態を順番に切り替え</div>
-              </button>
-              <button
-                onClick={() => {
-                  setStatusButtonType('pullDownSwipe');
-                  setShowStatusButtonTypeDialog(false);
-                }}
-                className={`w-full p-4 rounded-md border-2 transition-colors text-left ${
-                  statusButtonType === 'pullDownSwipe'
-                    ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                    : 'border-slate-300 dark:border-slate-600 hover:border-slate-400 dark:hover:border-slate-500'
-                }`}
-              >
-                <div className="font-semibold text-slate-900 dark:text-white">プルダウンフリック入力式</div>
-                <div className="text-sm text-slate-600 dark:text-slate-400 mt-1">下にスワイプして状態を選択</div>
-              </button>
-            </div>
-            <button
-              onClick={() => setShowStatusButtonTypeDialog(false)}
-              className="mt-6 w-full px-4 py-2 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors"
-            >
-              閉じる
-            </button>
-          </div>
-        </div>
       )}
 
       {activeEventName && items.length > 0 && mainContentVisible && (

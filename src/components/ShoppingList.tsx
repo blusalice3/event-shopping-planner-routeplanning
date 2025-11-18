@@ -2,8 +2,6 @@ import React, { useRef, useState, useMemo } from 'react';
 import { ShoppingItem } from '../types';
 import ShoppingItemCard from './ShoppingItemCard';
 
-import { StatusButtonType } from '../App';
-
 interface ShoppingListProps {
   items: ShoppingItem[];
   onUpdateItem: (item: ShoppingItem) => void;
@@ -16,7 +14,6 @@ interface ShoppingListProps {
   onRemoveFromColumn?: (itemIds: string[]) => void;
   columnType?: 'execute' | 'candidate';
   currentDay?: string; // 動的な参加日（例: '1日目', '2日目', '3日目'など）
-  statusButtonType: StatusButtonType;
 }
 
 // Constants for drag-and-drop auto-scrolling
@@ -134,7 +131,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onRemoveFromColumn: _onRemoveFromColumn,
   columnType,
   currentDay: _currentDay,
-  statusButtonType,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragOverItem = useRef<string | null>(null);
@@ -288,7 +284,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               isSelected={selectedItemIds.has(item.id)}
               onSelectItem={onSelectItem}
               blockBackgroundColor={blockColorMap.get(item.id)}
-              statusButtonType={statusButtonType}
             />
           </div>
           {/* 最後のアイテムの後に挿入位置インジケーター */}
