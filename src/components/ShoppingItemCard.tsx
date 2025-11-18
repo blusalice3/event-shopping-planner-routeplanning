@@ -45,14 +45,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
-    if (value === '') {
-      onUpdate({ ...item, price: null });
-    } else {
-      const newPrice = parseInt(value, 10);
-      if (!isNaN(newPrice)) {
-        onUpdate({ ...item, price: newPrice });
-      }
-    }
+    const updatedItem: ShoppingItem = {
+      ...item,
+      price: value === '' ? null : parseInt(value, 10) || 0
+    };
+    onUpdate(updatedItem);
   };
 
   const togglePurchaseStatus = useCallback(() => {
@@ -268,7 +265,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
               <>
                 <span className="text-slate-500 dark:text-slate-400 mr-1">¥</span>
                 <select
-                  value={item.price}
+                  value={item.price === null ? '' : item.price}
                   onChange={handlePriceChange}
                   className="w-28 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none"
                 >
