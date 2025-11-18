@@ -1035,7 +1035,7 @@ const App: React.FC = () => {
           escapeCsvCell(item.block),
           escapeCsvCell(item.number),
           escapeCsvCell(item.title),
-          escapeCsvCell(item.price),
+          escapeCsvCell(item.price === null ? '' : item.price),
           escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
           escapeCsvCell(item.remarks),
           escapeCsvCell('実行列'),
@@ -1052,7 +1052,7 @@ const App: React.FC = () => {
           escapeCsvCell(item.block),
           escapeCsvCell(item.number),
           escapeCsvCell(item.title),
-          escapeCsvCell(item.price),
+          escapeCsvCell(item.price === null ? '' : item.price),
           escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
           escapeCsvCell(item.remarks),
           escapeCsvCell('候補リスト'),
@@ -1140,7 +1140,9 @@ const App: React.FC = () => {
         }
 
         const title = cells[16]?.trim() || ''; // Q列 (0-indexed: 16)
-        const price = parseInt((cells[17] || '0').replace(/[^0-9]/g, ''), 10) || 0; // R列 (0-indexed: 17)
+        // 空欄の場合はnull、0と入力されている場合は0を設定
+        const priceStr = cells[17]?.trim() || '';
+        const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0); // R列 (0-indexed: 17)
         const remarks = cells[22]?.trim() || ''; // W列 (0-indexed: 22)
 
         sheetItems.push({
