@@ -12,8 +12,9 @@ const SummaryBar: React.FC<SummaryBarProps> = ({ items }) => {
     
     const remainingCost = items.reduce((sum, item) => {
       const isPurchasable = item.purchaseStatus === 'None' || item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'Late';
+      if (!isPurchasable) return sum;
       const price = item.price ?? 0; // nullの場合は0として扱う
-      return isPurchasable ? sum + price : sum;
+      return sum + price;
     }, 0);
 
     return { totalItems, purchasedItems, remainingCost };
