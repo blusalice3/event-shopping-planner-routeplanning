@@ -142,8 +142,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     if (buttonRef.current) {
       const rect = buttonRef.current.getBoundingClientRect();
       setMenuPosition({
-        top: rect.bottom + window.scrollY + 8,
-        right: window.innerWidth - rect.right + window.scrollX,
+        top: rect.bottom + 8, // fixedポジションなのでスクロールオフセット不要
+        right: window.innerWidth - rect.right, // fixedポジションなのでスクロールオフセット不要
       });
     }
   }, []);
@@ -187,6 +187,13 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     setShowPullDownMenu(false);
     setMenuPosition(null);
   }, [item, onUpdate]);
+
+  // メニューが閉じられたときに位置をリセット
+  useEffect(() => {
+    if (!showPullDownMenu) {
+      setMenuPosition(null);
+    }
+  }, [showPullDownMenu]);
 
   // スクロール時にメニューの位置を更新
   useEffect(() => {
@@ -441,8 +448,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 if (buttonRef.current) {
                   const rect = buttonRef.current.getBoundingClientRect();
                   setMenuPosition({
-                    top: rect.bottom + window.scrollY + 8,
-                    right: window.innerWidth - rect.right + window.scrollX,
+                    top: rect.bottom + 8, // fixedポジションなのでスクロールオフセット不要
+                    right: window.innerWidth - rect.right, // fixedポジションなのでスクロールオフセット不要
                   });
                 }
                 setShowPullDownMenu(!showPullDownMenu);
