@@ -245,37 +245,82 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   }
 
   return (
-    <div 
-      ref={containerRef}
-      className="space-y-4 pb-24 relative"
-      onDragOver={(e) => {
-        e.preventDefault();
-        // コンテナ全体での自動スクロール
-        const clientY = e.clientY;
-        const windowHeight = window.innerHeight;
-        
-        if (clientY < TOP_SCROLL_TRIGGER_PX) {
-          window.scrollBy(0, -SCROLL_SPEED);
-        } else if (clientY > windowHeight - BOTTOM_SCROLL_TRIGGER_PX) {
-          window.scrollBy(0, SCROLL_SPEED);
-        }
-      }}
-    >
-      {items.map((item, index) => (
-        <React.Fragment key={item.id}>
-          {/* 挿入位置インジケーター */}
-          {insertPosition === index && (
-            <div className="flex items-center justify-center h-2 my-2 relative z-10">
-              <div className="w-full h-0.5 bg-blue-500"></div>
-              <div className="absolute left-1/2 -translate-x-1/2 bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-lg font-bold">
-                +
+    <>
+      <div 
+        ref={containerRef}
+        className="space-y-4 pb-24 relative"
+        onDragOver={(e) => {
+          e.preventDefault();
+          // コンテナ全体での自動スクロール
+          const clientY = e.clientY;
+          const windowHeight = window.innerHeight;
+          
+          if (clientY < TOP_SCROLL_TRIGGER_PX) {
+            window.scrollBy(0, -SCROLL_SPEED);
+          } else if (clientY > windowHeight - BOTTOM_SCROLL_TRIGGER_PX) {
+            window.scrollBy(0, SCROLL_SPEED);
+          }
+        }}
+      >
+        {items.map((item, index) => (
+          <React.Fragment key={item.id}>
+            {/* 挿入位置インジケーター */}
+            {insertPosition === index && (
+              <div className="flex items-center justify-center h-2 my-2 relative z-10">
+                <div className="w-full h-0.5 bg-blue-500"></div>
+                <div className="absolute left-1/2 -translate-x-1/2 bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-lg font-bold">
+                  +
+                </div>
               </div>
+            )}
+            <div
+              data-item-id={item.id}
+              draggable
+              onDragStart={(e) => handleDragStart(e, item)}
+              onDragEnter={(e) => handleDragEnter(e, item, index)}
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+              onDragEnd={handleDragEnd}
+              className="transition-opacity duration-200 relative"
+              data-is-selected={selectedItemIds.has(item.id)}
+            >
+              <ShoppingItemCard
+                item={item}
+                onUpdate={onUpdateItem}
+                isStriped={index % 2 !== 0}
+                onEditRequest={onEditRequest}
+                onDeleteRequest={onDeleteRequest}
+                isSelected={selectedItemIds.has(item.id)}
+                onSelectItem={onSelectItem}
+                blockBackgroundColor={blockColorMap.get(item.id)}
+                onMoveUp={onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined}
+                onMoveDown={onMoveItemDown ? () => onMoveItemDown(item.id, columnType) : undefined}
+                canMoveUp={index > 0}
+                canMoveDown={index < items.length - 1}
+              />
             </div>
-          )}
-          {/* 実行列の場合、アイテムの前（アイテム間の右端）に挿入位置チェックボックスを表示 */}
-          {columnType === 'execute' && onToggleInsertPosition && (
-            <div className="flex items-center justify-end my-1 relative z-10">
-              <label className="flex items-center cursor-pointer bg-white dark:bg-slate-800 rounded-md px-2 py-1 shadow-sm border border-slate-200 dark:border-slate-700">
+            {/* 最後のアイテムの後に挿入位置インジケーター */}
+            {insertPosition === items.length && index === items.length - 1 && (
+              <div className="flex items-center justify-center h-2 my-2 relative z-10">
+                <div className="w-full h-0.5 bg-blue-500"></div>
+                <div className="absolute left-1/2 -translate-x-1/2 bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-lg font-bold">
+                  +
+                </div>
+              </div>
+            )}
+          </React.Fragment>
+        ))}
+      </div>
+      {/* 実行列の場合、列間スペース内に挿入位置チェックボックスを表示 */}
+      {columnType === 'execute' && onToggleInsertPosition && (
+        <div className="absolute right-0 top-0 bottom-0 w-8 flex flex-col items-center justify-start pt-4 pointer-events-none" style={{ transform: 'translateX(100%)' }}>
+          {items.map((item, index) => (
+            <div
+              key={`insert-check-${item.id}`}
+              className="flex items-center justify-center mb-4 pointer-events-auto"
+              style={{ minHeight: '120px' }} // アイテムカードの高さに合わせて調整
+            >
+              <label className="flex items-center cursor-pointer bg-white dark:bg-slate-800 rounded-md px-2 py-1 shadow-sm border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
                 <input
                   type="checkbox"
                   checked={insertPositionChecks.has(index)}
@@ -286,60 +331,23 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 />
               </label>
             </div>
-          )}
-          <div
-            data-item-id={item.id}
-            draggable
-            onDragStart={(e) => handleDragStart(e, item)}
-            onDragEnter={(e) => handleDragEnter(e, item, index)}
-            onDragOver={handleDragOver}
-            onDrop={handleDrop}
-            onDragEnd={handleDragEnd}
-            className="transition-opacity duration-200 relative"
-            data-is-selected={selectedItemIds.has(item.id)}
-          >
-            <ShoppingItemCard
-              item={item}
-              onUpdate={onUpdateItem}
-              isStriped={index % 2 !== 0}
-              onEditRequest={onEditRequest}
-              onDeleteRequest={onDeleteRequest}
-              isSelected={selectedItemIds.has(item.id)}
-              onSelectItem={onSelectItem}
-              blockBackgroundColor={blockColorMap.get(item.id)}
-              onMoveUp={onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined}
-              onMoveDown={onMoveItemDown ? () => onMoveItemDown(item.id, columnType) : undefined}
-              canMoveUp={index > 0}
-              canMoveDown={index < items.length - 1}
-            />
+          ))}
+          {/* 最後のアイテムの後にもチェックボックス */}
+          <div className="flex items-center justify-center mb-4 pointer-events-auto" style={{ minHeight: '120px' }}>
+            <label className="flex items-center cursor-pointer bg-white dark:bg-slate-800 rounded-md px-2 py-1 shadow-sm border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors">
+              <input
+                type="checkbox"
+                checked={insertPositionChecks.has(items.length)}
+                onChange={() => onToggleInsertPosition(items.length)}
+                onClick={(e) => e.stopPropagation()}
+                className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                aria-label={`位置${items.length + 1}に挿入（最下段）`}
+              />
+            </label>
           </div>
-          {/* 最後のアイテムの後に挿入位置インジケーター */}
-          {insertPosition === items.length && index === items.length - 1 && (
-            <div className="flex items-center justify-center h-2 my-2 relative z-10">
-              <div className="w-full h-0.5 bg-blue-500"></div>
-              <div className="absolute left-1/2 -translate-x-1/2 bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-lg font-bold">
-                +
-              </div>
-            </div>
-          )}
-          {/* 実行列の場合、最後のアイテムの後にも挿入位置チェックボックスを表示 */}
-          {columnType === 'execute' && onToggleInsertPosition && index === items.length - 1 && (
-            <div className="flex items-center justify-end my-1 relative z-10">
-              <label className="flex items-center cursor-pointer bg-white dark:bg-slate-800 rounded-md px-2 py-1 shadow-sm border border-slate-200 dark:border-slate-700">
-                <input
-                  type="checkbox"
-                  checked={insertPositionChecks.has(items.length)}
-                  onChange={() => onToggleInsertPosition(items.length)}
-                  onClick={(e) => e.stopPropagation()}
-                  className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
-                  aria-label={`位置${items.length + 1}に挿入（最下段）`}
-                />
-              </label>
-            </div>
-          )}
-        </React.Fragment>
-      ))}
-    </div>
+        </div>
+      )}
+    </>
   );
 };
 
