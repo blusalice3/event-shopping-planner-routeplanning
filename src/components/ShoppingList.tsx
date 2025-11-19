@@ -273,35 +273,35 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               </div>
             </div>
           )}
-          <div className="relative">
-            <div
-              data-item-id={item.id}
-              draggable
-              onDragStart={(e) => handleDragStart(e, item)}
-              onDragEnter={(e) => handleDragEnter(e, item, index)}
-              onDragOver={handleDragOver}
-              onDrop={handleDrop}
-              onDragEnd={handleDragEnd}
-              className="transition-opacity duration-200 relative"
-              data-is-selected={selectedItemIds.has(item.id)}
-            >
-              <ShoppingItemCard
-                item={item}
-                onUpdate={onUpdateItem}
-                isStriped={index % 2 !== 0}
-                onEditRequest={onEditRequest}
-                onDeleteRequest={onDeleteRequest}
-                isSelected={selectedItemIds.has(item.id)}
-                onSelectItem={onSelectItem}
-                blockBackgroundColor={blockColorMap.get(item.id)}
-                onMoveUp={onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined}
-                onMoveDown={onMoveItemDown ? () => onMoveItemDown(item.id, columnType) : undefined}
-                canMoveUp={index > 0}
-                canMoveDown={index < items.length - 1}
-              />
-            </div>
-            {/* 実行列の場合、アイテムカードの後に列間スペース内にチェックボックスを表示 */}
-            {columnType === 'execute' && onToggleInsertPosition && (
+          <div
+            data-item-id={item.id}
+            draggable
+            onDragStart={(e) => handleDragStart(e, item)}
+            onDragEnter={(e) => handleDragEnter(e, item, index)}
+            onDragOver={handleDragOver}
+            onDrop={handleDrop}
+            onDragEnd={handleDragEnd}
+            className="transition-opacity duration-200 relative"
+            data-is-selected={selectedItemIds.has(item.id)}
+          >
+            <ShoppingItemCard
+              item={item}
+              onUpdate={onUpdateItem}
+              isStriped={index % 2 !== 0}
+              onEditRequest={onEditRequest}
+              onDeleteRequest={onDeleteRequest}
+              isSelected={selectedItemIds.has(item.id)}
+              onSelectItem={onSelectItem}
+              blockBackgroundColor={blockColorMap.get(item.id)}
+              onMoveUp={onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined}
+              onMoveDown={onMoveItemDown ? () => onMoveItemDown(item.id, columnType) : undefined}
+              canMoveUp={index > 0}
+              canMoveDown={index < items.length - 1}
+            />
+          </div>
+          {/* 実行列の場合、アイテムカード間の延長線上（列間スペース内）にチェックボックスを表示 */}
+          {columnType === 'execute' && onToggleInsertPosition && (
+            <div className="relative h-4 flex items-center">
               <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" style={{ transform: 'translateX(calc(100% + 1rem)) translateY(-50%)' }}>
                 <label className="flex items-center cursor-pointer bg-white dark:bg-slate-800 rounded-md px-2 py-1 shadow-sm border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors pointer-events-auto">
                   <input
@@ -314,8 +314,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   />
                 </label>
               </div>
-            )}
-          </div>
+            </div>
+          )}
           {/* 最後のアイテムの後に挿入位置インジケーター */}
           {insertPosition === items.length && index === items.length - 1 && (
             <div className="flex items-center justify-center h-2 my-2 relative z-10">
@@ -327,7 +327,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
           )}
           {/* 実行列の場合、最後のアイテムの後にもチェックボックスを表示（アイテム間の延長線上） */}
           {columnType === 'execute' && onToggleInsertPosition && index === items.length - 1 && (
-            <div className="relative" style={{ minHeight: '1rem' }}>
+            <div className="relative h-4 flex items-center">
               <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" style={{ transform: 'translateX(calc(100% + 1rem)) translateY(-50%)' }}>
                 <label className="flex items-center cursor-pointer bg-white dark:bg-slate-800 rounded-md px-2 py-1 shadow-sm border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors pointer-events-auto">
                   <input
