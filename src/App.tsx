@@ -63,7 +63,6 @@ const App: React.FC = () => {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [selectedBlockFilters, setSelectedBlockFilters] = useState<Set<string>>(new Set());
   const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
-  const [insertPositionChecks, setInsertPositionChecks] = useState<Set<number>>(new Set()); // 実行列の挿入位置チェック（インデックス）
 
   // 更新機能用の状態
   const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
@@ -761,44 +760,22 @@ const App: React.FC = () => {
     
     setExecuteModeItems(prev => {
       const eventItems = prev[activeEventName] || {};
-      const currentDayItems = [...(eventItems[currentEventDate] || [])];
+      const currentDayItems = new Set(eventItems[currentEventDate] || []);
       
-      // チェックされた挿入位置がある場合
-      if (insertPositionChecks.size > 0) {
-        // 最初のチェック位置を使用（複数チェック時は最初の位置に挿入）
-        const insertIndex = Math.min(...Array.from(insertPositionChecks) as number[]);
-        
-        // 既存のアイテムから移動対象を除外
-        const itemsWithoutMoved = currentDayItems.filter(id => !itemIds.includes(id));
-        
-        // 指定位置に挿入
-        itemsWithoutMoved.splice(insertIndex, 0, ...itemIds);
-        
-        return {
-          ...prev,
-          [activeEventName]: {
-            ...eventItems,
-            [currentEventDate]: itemsWithoutMoved
-          }
-        };
-      } else {
-        // チェックがない場合は最下段に追加（従来の動作）
-        const currentDayItemsSet = new Set(currentDayItems);
-        itemIds.forEach(id => currentDayItemsSet.add(id));
-        
-        return {
-          ...prev,
-          [activeEventName]: {
-            ...eventItems,
-            [currentEventDate]: Array.from(currentDayItemsSet)
-          }
-        };
-      }
+      // 追加（重複は無視）
+      itemIds.forEach(id => currentDayItems.add(id));
+      
+      return {
+        ...prev,
+        [activeEventName]: {
+          ...eventItems,
+          [currentEventDate]: Array.from(currentDayItems)
+        }
+      };
     });
     
     setSelectedItemIds(new Set());
-    setInsertPositionChecks(new Set()); // チェックをクリア
-  }, [activeEventName, activeTab, eventDates, insertPositionChecks]);
+  }, [activeEventName, activeTab, eventDates]);
 
   const handleRemoveFromExecuteColumn = useCallback((itemIds: string[]) => {
     if (!activeEventName) return;
@@ -1795,9 +1772,7 @@ const App: React.FC = () => {
   }, [activeEventName, activeTab, currentMode, selectedItemIds, items, executeModeItems, currentTabItems, eventDates]);
 
   // 左右両列のアイテムが同時に選択されている場合は移動ボタンを表示しない
-  // また、挿入位置チェックが2個以上ある場合もボタンを表示しない
   const showMoveButtons = (hasCandidateSelection && !hasExecuteSelection) || (hasExecuteSelection && !hasCandidateSelection);
-  const canShowMoveButton = showMoveButtons && insertPositionChecks.size <= 1;
   
   if (!isInitialized) {
     return null;
@@ -1852,7 +1827,7 @@ const App: React.FC = () => {
                           onSort={handleBulkSort}
                           onClear={handleClearSelection}
                       />
-                      {canShowMoveButton && hasCandidateSelection && (
+                      {showMoveButtons && hasCandidateSelection && (
                           <button
                               onClick={() => handleMoveToExecuteColumn(Array.from(selectedItemIds))}
                               className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
@@ -1942,9 +1917,9 @@ const App: React.FC = () => {
               width: `${100 * (100 / zoomLevel)}%`
           }}>
             {currentMode === 'edit' ? (
-              <div className="grid grid-cols-2 gap-8">
+              <div className="grid grid-cols-2 gap-4">
                 {/* 左列: 実行モード表示列 */}
-                <div className="space-y-2 relative">
+                <div className="space-y-2">
                   <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg p-3">
                     <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2">実行モード表示列</h3>
                     <p className="text-xs text-blue-700 dark:text-blue-300 mb-3">右の候補リストからアイテムを選択して移動</p>
@@ -1963,20 +1938,6 @@ const App: React.FC = () => {
                     currentDay={eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}
                     onMoveItemUp={handleMoveItemUp}
                     onMoveItemDown={handleMoveItemDown}
-                    insertPositionChecks={insertPositionChecks}
-                    onToggleInsertPosition={(index) => {
-                      setInsertPositionChecks(prev => {
-                        const newSet = new Set(prev);
-                        if (newSet.has(index)) {
-                          newSet.delete(index);
-                        } else {
-                          // 他のチェックをクリアして1つだけ選択可能にする
-                          newSet.clear();
-                          newSet.add(index);
-                        }
-                        return newSet;
-                      });
-                    }}
                   />
                 </div>
                 
