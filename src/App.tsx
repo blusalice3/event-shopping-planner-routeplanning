@@ -1927,7 +1927,7 @@ const App: React.FC = () => {
                   <ShoppingList
                     items={executeColumnItems}
                     onUpdateItem={handleUpdateItem}
-                    onMoveItem={(dragId, hoverId, targetColumn) => handleMoveItem(dragId, hoverId, targetColumn)}
+                    onMoveItem={(dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate') => handleMoveItem(dragId, hoverId, targetColumn)}
                     onEditRequest={handleEditRequest}
                     onDeleteRequest={handleDeleteRequest}
                     selectedItemIds={selectedItemIds}
@@ -2002,7 +2002,7 @@ const App: React.FC = () => {
                   <ShoppingList
                     items={candidateColumnItems}
                     onUpdateItem={handleUpdateItem}
-                    onMoveItem={(dragId, hoverId, targetColumn) => handleMoveItem(dragId, hoverId, targetColumn)}
+                    onMoveItem={(dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate') => handleMoveItem(dragId, hoverId, targetColumn)}
                     onEditRequest={handleEditRequest}
                     onDeleteRequest={handleDeleteRequest}
                     selectedItemIds={selectedItemIds}
@@ -2020,7 +2020,7 @@ const App: React.FC = () => {
               <ShoppingList
                 items={visibleItems}
                 onUpdateItem={handleUpdateItem}
-                onMoveItem={(dragId, hoverId, targetColumn) => handleMoveItem(dragId, hoverId, targetColumn)}
+                onMoveItem={(dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate') => handleMoveItem(dragId, hoverId, targetColumn)}
                 onEditRequest={handleEditRequest}
                 onDeleteRequest={handleDeleteRequest}
                 selectedItemIds={selectedItemIds}
