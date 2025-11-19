@@ -337,4 +337,3 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 };
 
 export default ShoppingItemCard;
-
