@@ -604,7 +604,7 @@ const App: React.FC = () => {
           // 選択されたアイテムが最後にない場合のみ移動
           if (lastSelectedIndex >= 0 && lastSelectedIndex < dayItems.length - 1) {
             // listWithoutSelectionでの対応する位置を見つける
-            const targetIndexInListWithout = listWithoutSelection.findIndex((id, idx) => {
+            const targetIndexInListWithout = listWithoutSelection.findIndex((id) => {
               const originalIndex = dayItems.findIndex(originalId => originalId === id);
               return originalIndex > lastSelectedIndex;
             });
@@ -659,7 +659,7 @@ const App: React.FC = () => {
           // 選択されたアイテムが最後にない場合のみ移動
           if (lastSelectedIndex >= 0 && lastSelectedIndex < candidateItems.length - 1) {
             // listWithoutSelectionでの対応する位置を見つける
-            const targetIndexInListWithout = listWithoutSelection.findIndex((item, idx) => {
+            const targetIndexInListWithout = listWithoutSelection.findIndex((item) => {
               const originalIndex = candidateItems.findIndex(originalItem => originalItem.id === item.id);
               return originalIndex > lastSelectedIndex;
             });
@@ -734,7 +734,7 @@ const App: React.FC = () => {
           // 選択されたアイテムが最後にない場合のみ移動
           if (lastSelectedIndex >= 0 && lastSelectedIndex < newItems.length - 1) {
             // listWithoutSelectionでの対応する位置を見つける
-            const targetIndexInListWithout = listWithoutSelection.findIndex((item, idx) => {
+            const targetIndexInListWithout = listWithoutSelection.findIndex((item) => {
               const originalIndex = newItems.findIndex(originalItem => originalItem.id === item.id);
               return originalIndex > lastSelectedIndex;
             });
