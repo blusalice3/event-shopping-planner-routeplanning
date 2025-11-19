@@ -5,7 +5,7 @@ import ShoppingItemCard from './ShoppingItemCard';
 interface ShoppingListProps {
   items: ShoppingItem[];
   onUpdateItem: (item: ShoppingItem) => void;
-  onMoveItem: (dragId: string, insertIndex: number, targetColumn?: 'execute' | 'candidate') => void;
+  onMoveItem: (dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate') => void;
   onEditRequest: (item: ShoppingItem) => void;
   onDeleteRequest: (item: ShoppingItem) => void;
   selectedItemIds: Set<string>;
@@ -137,16 +137,15 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onMoveItemDown,
 }) => {
   const dragItem = useRef<string | null>(null);
-  const dragItemIndex = useRef<number | null>(null);
+  const dragOverItem = useRef<string | null>(null);
   const [insertPosition, setInsertPosition] = useState<number | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   // ブロックベースの色情報を計算
   const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
 
-  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, item: ShoppingItem, index: number) => {
+  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, item: ShoppingItem) => {
     dragItem.current = item.id;
-    dragItemIndex.current = index;
     if (columnType) {
       e.dataTransfer.setData('sourceColumn', columnType);
     }
@@ -168,24 +167,16 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     e.preventDefault();
     // 選択されたアイテムの上にはドロップできない
     if (selectedItemIds.has(item.id) && selectedItemIds.has(dragItem.current || '')) {
-      setInsertPosition(null);
+      dragOverItem.current = null;
       return;
     }
+    dragOverItem.current = item.id;
     
     // 挿入位置を計算（アイテムの中央より上か下かで判定）
     const rect = e.currentTarget.getBoundingClientRect();
     const relativeY = e.clientY - rect.top;
     const itemHeight = rect.height || 100; // フォールバック値
     const insertIndex = relativeY < itemHeight / 2 ? index : index + 1;
-    
-    // ドラッグ中のアイテム自体の位置は除外
-    if (dragItemIndex.current !== null) {
-      if (insertIndex === dragItemIndex.current || insertIndex === dragItemIndex.current + 1) {
-        setInsertPosition(null);
-        return;
-      }
-    }
-    
     setInsertPosition(Math.min(insertIndex, items.length));
   };
 
@@ -216,24 +207,18 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     if (sourceColumn !== columnType) {
       setInsertPosition(null);
       dragItem.current = null;
-      dragItemIndex.current = null;
+      dragOverItem.current = null;
       return;
     }
     
-    // insertPositionを使用して正確な位置に挿入
-    if (dragItem.current !== null && insertPosition !== null) {
-      // ドラッグ中のアイテムの元の位置を考慮して挿入位置を調整
-      let adjustedInsertIndex = insertPosition;
-      if (dragItemIndex.current !== null && dragItemIndex.current < insertPosition) {
-        adjustedInsertIndex = insertPosition - 1;
-      }
-      
-      onMoveItem(dragItem.current, adjustedInsertIndex, columnType);
+    // 同じ列内での移動
+    if (dragItem.current !== null && dragOverItem.current !== null && dragItem.current !== dragOverItem.current) {
+      onMoveItem(dragItem.current, dragOverItem.current, columnType);
     }
     
     setInsertPosition(null);
     dragItem.current = null;
-    dragItemIndex.current = null;
+    dragOverItem.current = null;
   };
 
   const handleDragEnd = (e: React.DragEvent<HTMLDivElement>) => {
@@ -242,7 +227,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       el.classList.remove('opacity-40');
     });
     dragItem.current = null;
-    dragItemIndex.current = null;
+    dragOverItem.current = null;
     setInsertPosition(null);
     e.dataTransfer.clearData();
   };
@@ -271,35 +256,27 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
           window.scrollBy(0, SCROLL_SPEED);
         }
       }}
-      onDragLeave={(e) => {
-        // コンテナから完全に離れた場合のみinsertPositionをクリア
-        if (!containerRef.current?.contains(e.relatedTarget as Node)) {
-          setInsertPosition(null);
-        }
-      }}
     >
       {items.map((item, index) => (
         <React.Fragment key={item.id}>
           {/* 挿入位置インジケーター */}
           {insertPosition === index && (
-            <div className="flex items-center justify-center h-2 my-2 relative z-10 animate-pulse">
-              <div className="w-full h-1 bg-blue-500 shadow-lg"></div>
-              <div className="absolute left-1/2 -translate-x-1/2 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold shadow-lg">
-                ↓
+            <div className="flex items-center justify-center h-2 my-2 relative z-10">
+              <div className="w-full h-0.5 bg-blue-500"></div>
+              <div className="absolute left-1/2 -translate-x-1/2 bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-lg font-bold">
+                +
               </div>
             </div>
           )}
           <div
             data-item-id={item.id}
             draggable
-            onDragStart={(e) => handleDragStart(e, item, index)}
+            onDragStart={(e) => handleDragStart(e, item)}
             onDragEnter={(e) => handleDragEnter(e, item, index)}
             onDragOver={handleDragOver}
             onDrop={handleDrop}
             onDragEnd={handleDragEnd}
-            className={`transition-opacity duration-200 relative ${
-              dragItem.current === item.id ? 'opacity-40' : ''
-            }`}
+            className="transition-opacity duration-200 relative"
             data-is-selected={selectedItemIds.has(item.id)}
           >
             <ShoppingItemCard
@@ -319,10 +296,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
           </div>
           {/* 最後のアイテムの後に挿入位置インジケーター */}
           {insertPosition === items.length && index === items.length - 1 && (
-            <div className="flex items-center justify-center h-2 my-2 relative z-10 animate-pulse">
-              <div className="w-full h-1 bg-blue-500 shadow-lg"></div>
-              <div className="absolute left-1/2 -translate-x-1/2 bg-blue-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-sm font-bold shadow-lg">
-                ↓
+            <div className="flex items-center justify-center h-2 my-2 relative z-10">
+              <div className="w-full h-0.5 bg-blue-500"></div>
+              <div className="absolute left-1/2 -translate-x-1/2 bg-blue-500 text-white rounded-full w-8 h-8 flex items-center justify-center text-lg font-bold">
+                +
               </div>
             </div>
           )}
@@ -333,4 +310,3 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 };
 
 export default ShoppingList;
-
