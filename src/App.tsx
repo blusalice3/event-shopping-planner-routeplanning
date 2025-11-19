@@ -455,7 +455,6 @@ const App: React.FC = () => {
         if (selectedItemIds.has(itemId)) {
           const selectedIds = dayItems.filter(id => selectedItemIds.has(id));
           const listWithoutSelection = dayItems.filter(id => !selectedItemIds.has(id));
-          const targetIndex = Math.max(0, currentIndex - 1);
           
           // 選択されたアイテムの最初の位置を基準に移動
           const firstSelectedIndex = dayItems.findIndex(id => selectedItemIds.has(id));
