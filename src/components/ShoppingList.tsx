@@ -16,8 +16,6 @@ interface ShoppingListProps {
   currentDay?: string; // 動的な参加日（例: '1日目', '2日目', '3日目'など）
   onMoveItemUp?: (itemId: string, targetColumn?: 'execute' | 'candidate') => void;
   onMoveItemDown?: (itemId: string, targetColumn?: 'execute' | 'candidate') => void;
-  insertPositionChecks?: Set<number>; // 挿入位置チェック（インデックス）
-  onToggleInsertPosition?: (index: number) => void; // 挿入位置チェックのトグル
 }
 
 // Constants for drag-and-drop auto-scrolling
@@ -137,8 +135,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   currentDay: _currentDay,
   onMoveItemUp,
   onMoveItemDown,
-  insertPositionChecks = new Set(),
-  onToggleInsertPosition,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragOverItem = useRef<string | null>(null);
@@ -245,23 +241,22 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   }
 
   return (
-    <>
-      <div 
-        ref={containerRef}
-        className="space-y-4 pb-24 relative"
-        onDragOver={(e) => {
-          e.preventDefault();
-          // コンテナ全体での自動スクロール
-          const clientY = e.clientY;
-          const windowHeight = window.innerHeight;
-          
-          if (clientY < TOP_SCROLL_TRIGGER_PX) {
-            window.scrollBy(0, -SCROLL_SPEED);
-          } else if (clientY > windowHeight - BOTTOM_SCROLL_TRIGGER_PX) {
-            window.scrollBy(0, SCROLL_SPEED);
-          }
-        }}
-      >
+    <div 
+      ref={containerRef}
+      className="space-y-4 pb-24 relative"
+      onDragOver={(e) => {
+        e.preventDefault();
+        // コンテナ全体での自動スクロール
+        const clientY = e.clientY;
+        const windowHeight = window.innerHeight;
+        
+        if (clientY < TOP_SCROLL_TRIGGER_PX) {
+          window.scrollBy(0, -SCROLL_SPEED);
+        } else if (clientY > windowHeight - BOTTOM_SCROLL_TRIGGER_PX) {
+          window.scrollBy(0, SCROLL_SPEED);
+        }
+      }}
+    >
       {items.map((item, index) => (
         <React.Fragment key={item.id}>
           {/* 挿入位置インジケーター */}
@@ -299,23 +294,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               canMoveDown={index < items.length - 1}
             />
           </div>
-          {/* 実行列の場合、アイテムカード間の延長線上（列間スペース内）にチェックボックスを表示 */}
-          {columnType === 'execute' && onToggleInsertPosition && (
-            <div className="relative h-4 flex items-center">
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" style={{ transform: 'translateX(calc(100% + 1rem)) translateY(-50%)' }}>
-                <label className="flex items-center cursor-pointer bg-white dark:bg-slate-800 rounded-md px-2 py-1 shadow-sm border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors pointer-events-auto">
-                  <input
-                    type="checkbox"
-                    checked={insertPositionChecks.has(index)}
-                    onChange={() => onToggleInsertPosition(index)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
-                    aria-label={`位置${index + 1}に挿入`}
-                  />
-                </label>
-              </div>
-            </div>
-          )}
           {/* 最後のアイテムの後に挿入位置インジケーター */}
           {insertPosition === items.length && index === items.length - 1 && (
             <div className="flex items-center justify-center h-2 my-2 relative z-10">
@@ -325,27 +303,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               </div>
             </div>
           )}
-          {/* 実行列の場合、最後のアイテムの後にもチェックボックスを表示（アイテム間の延長線上） */}
-          {columnType === 'execute' && onToggleInsertPosition && index === items.length - 1 && (
-            <div className="relative h-4 flex items-center">
-              <div className="absolute right-0 top-1/2 -translate-y-1/2 pointer-events-none" style={{ transform: 'translateX(calc(100% + 1rem)) translateY(-50%)' }}>
-                <label className="flex items-center cursor-pointer bg-white dark:bg-slate-800 rounded-md px-2 py-1 shadow-sm border border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700 transition-colors pointer-events-auto">
-                  <input
-                    type="checkbox"
-                    checked={insertPositionChecks.has(items.length)}
-                    onChange={() => onToggleInsertPosition(items.length)}
-                    onClick={(e) => e.stopPropagation()}
-                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
-                    aria-label={`位置${items.length + 1}に挿入（最下段）`}
-                  />
-                </label>
-              </div>
-            </div>
-          )}
         </React.Fragment>
       ))}
-      </div>
-    </>
+    </div>
   );
 };
 
