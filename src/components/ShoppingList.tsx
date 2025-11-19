@@ -272,6 +272,21 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               </div>
             </div>
           )}
+          {/* 実行列の場合、アイテムの前（アイテム間の右端）に挿入位置チェックボックスを表示 */}
+          {columnType === 'execute' && onToggleInsertPosition && (
+            <div className="flex items-center justify-end my-1 relative z-10">
+              <label className="flex items-center cursor-pointer bg-white dark:bg-slate-800 rounded-md px-2 py-1 shadow-sm border border-slate-200 dark:border-slate-700">
+                <input
+                  type="checkbox"
+                  checked={insertPositionChecks.has(index)}
+                  onChange={() => onToggleInsertPosition(index)}
+                  onClick={(e) => e.stopPropagation()}
+                  className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                  aria-label={`位置${index + 1}に挿入`}
+                />
+              </label>
+            </div>
+          )}
           <div
             data-item-id={item.id}
             draggable
@@ -283,37 +298,20 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             className="transition-opacity duration-200 relative"
             data-is-selected={selectedItemIds.has(item.id)}
           >
-            <div className="relative">
-              <ShoppingItemCard
-                item={item}
-                onUpdate={onUpdateItem}
-                isStriped={index % 2 !== 0}
-                onEditRequest={onEditRequest}
-                onDeleteRequest={onDeleteRequest}
-                isSelected={selectedItemIds.has(item.id)}
-                onSelectItem={onSelectItem}
-                blockBackgroundColor={blockColorMap.get(item.id)}
-                onMoveUp={onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined}
-                onMoveDown={onMoveItemDown ? () => onMoveItemDown(item.id, columnType) : undefined}
-                canMoveUp={index > 0}
-                canMoveDown={index < items.length - 1}
-              />
-              {/* 実行列の場合、アイテムの右端に挿入位置チェックボックスを表示 */}
-              {columnType === 'execute' && onToggleInsertPosition && (
-                <div className="absolute right-0 top-1/2 -translate-y-1/2 translate-x-full pr-2 z-20">
-                  <label className="flex items-center cursor-pointer bg-white dark:bg-slate-800 rounded-md px-2 py-1 shadow-sm border border-slate-200 dark:border-slate-700">
-                    <input
-                      type="checkbox"
-                      checked={insertPositionChecks.has(index)}
-                      onChange={() => onToggleInsertPosition(index)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
-                      aria-label={`位置${index + 1}に挿入`}
-                    />
-                  </label>
-                </div>
-              )}
-            </div>
+            <ShoppingItemCard
+              item={item}
+              onUpdate={onUpdateItem}
+              isStriped={index % 2 !== 0}
+              onEditRequest={onEditRequest}
+              onDeleteRequest={onDeleteRequest}
+              isSelected={selectedItemIds.has(item.id)}
+              onSelectItem={onSelectItem}
+              blockBackgroundColor={blockColorMap.get(item.id)}
+              onMoveUp={onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined}
+              onMoveDown={onMoveItemDown ? () => onMoveItemDown(item.id, columnType) : undefined}
+              canMoveUp={index > 0}
+              canMoveDown={index < items.length - 1}
+            />
           </div>
           {/* 最後のアイテムの後に挿入位置インジケーター */}
           {insertPosition === items.length && index === items.length - 1 && (
@@ -326,7 +324,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
           )}
           {/* 実行列の場合、最後のアイテムの後にも挿入位置チェックボックスを表示 */}
           {columnType === 'execute' && onToggleInsertPosition && index === items.length - 1 && (
-            <div className="flex items-center justify-end my-2 relative z-10">
+            <div className="flex items-center justify-end my-1 relative z-10">
               <label className="flex items-center cursor-pointer bg-white dark:bg-slate-800 rounded-md px-2 py-1 shadow-sm border border-slate-200 dark:border-slate-700">
                 <input
                   type="checkbox"
@@ -336,7 +334,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
                   aria-label={`位置${items.length + 1}に挿入（最下段）`}
                 />
-                <span className="ml-2 text-xs text-slate-500 dark:text-slate-400">最下段に挿入</span>
               </label>
             </div>
           )}
