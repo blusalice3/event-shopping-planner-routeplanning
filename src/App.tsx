@@ -592,15 +592,30 @@ const App: React.FC = () => {
           const selectedIds = dayItems.filter(id => selectedItemIds.has(id));
           const listWithoutSelection = dayItems.filter(id => !selectedItemIds.has(id));
           
-          // 選択されたアイテムの最後の位置を基準に移動
-          const lastSelectedIndex = dayItems.findIndex((id, idx) => selectedItemIds.has(id) && idx === dayItems.length - selectedIds.length);
-          if (lastSelectedIndex >= 0 && lastSelectedIndex < listWithoutSelection.length) {
-            const newTargetIndex = lastSelectedIndex + 1;
-            listWithoutSelection.splice(newTargetIndex, 0, ...selectedIds);
-            return {
-              ...prev,
-              [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection }
-            };
+          // 選択されたアイテムの中で最も後ろの位置を見つける
+          let lastSelectedIndex = -1;
+          for (let i = dayItems.length - 1; i >= 0; i--) {
+            if (selectedItemIds.has(dayItems[i])) {
+              lastSelectedIndex = i;
+              break;
+            }
+          }
+          
+          // 選択されたアイテムが最後にない場合のみ移動
+          if (lastSelectedIndex >= 0 && lastSelectedIndex < dayItems.length - 1) {
+            // listWithoutSelectionでの対応する位置を見つける
+            const targetIndexInListWithout = listWithoutSelection.findIndex((id, idx) => {
+              const originalIndex = dayItems.findIndex(originalId => originalId === id);
+              return originalIndex > lastSelectedIndex;
+            });
+            
+            if (targetIndexInListWithout >= 0) {
+              listWithoutSelection.splice(targetIndexInListWithout, 0, ...selectedIds);
+              return {
+                ...prev,
+                [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection }
+              };
+            }
           }
           return prev;
         } else {
@@ -631,29 +646,45 @@ const App: React.FC = () => {
           // 複数選択時
           const selectedBlock = candidateItems.filter(item => selectedItemIds.has(item.id));
           const listWithoutSelection = candidateItems.filter(item => !selectedItemIds.has(item.id));
-          const lastSelectedIndex = candidateItems.findIndex((item, idx) => selectedItemIds.has(item.id) && idx === candidateItems.length - selectedBlock.length);
           
-          if (lastSelectedIndex >= 0 && lastSelectedIndex < listWithoutSelection.length) {
-            const newTargetIndex = lastSelectedIndex + 1;
-            listWithoutSelection.splice(newTargetIndex, 0, ...selectedBlock);
-            
-            // 実行モード列のアイテムはそのまま、候補リストのみ並び替え
-            const executeItems = allItems.filter(item => 
-              item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
-            );
-            
-            const newItems = allItems.map(item => {
-              if (!item.eventDate.includes(currentTabKey)) {
-                return item;
-              }
-              if (executeIdsSet.has(item.id)) {
-                return executeItems.shift() || item;
-              } else {
-                return listWithoutSelection.shift() || item;
-              }
+          // 選択されたアイテムの中で最も後ろの位置を見つける
+          let lastSelectedIndex = -1;
+          for (let i = candidateItems.length - 1; i >= 0; i--) {
+            if (selectedItemIds.has(candidateItems[i].id)) {
+              lastSelectedIndex = i;
+              break;
+            }
+          }
+          
+          // 選択されたアイテムが最後にない場合のみ移動
+          if (lastSelectedIndex >= 0 && lastSelectedIndex < candidateItems.length - 1) {
+            // listWithoutSelectionでの対応する位置を見つける
+            const targetIndexInListWithout = listWithoutSelection.findIndex((item, idx) => {
+              const originalIndex = candidateItems.findIndex(originalItem => originalItem.id === item.id);
+              return originalIndex > lastSelectedIndex;
             });
             
-            return { ...prev, [activeEventName]: newItems };
+            if (targetIndexInListWithout >= 0) {
+              listWithoutSelection.splice(targetIndexInListWithout, 0, ...selectedBlock);
+              
+              // 実行モード列のアイテムはそのまま、候補リストのみ並び替え
+              const executeItems = allItems.filter(item => 
+                item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
+              );
+              
+              const newItems = allItems.map(item => {
+                if (!item.eventDate.includes(currentTabKey)) {
+                  return item;
+                }
+                if (executeIdsSet.has(item.id)) {
+                  return executeItems.shift() || item;
+                } else {
+                  return listWithoutSelection.shift() || item;
+                }
+              });
+              
+              return { ...prev, [activeEventName]: newItems };
+            }
           }
           return prev;
         } else {
@@ -690,12 +721,28 @@ const App: React.FC = () => {
         if (selectedItemIds.has(itemId)) {
           const selectedBlock = newItems.filter(item => selectedItemIds.has(item.id));
           const listWithoutSelection = newItems.filter(item => !selectedItemIds.has(item.id));
-          const lastSelectedIndex = newItems.findIndex((item, idx) => selectedItemIds.has(item.id) && idx === newItems.length - selectedBlock.length);
           
-          if (lastSelectedIndex >= 0 && lastSelectedIndex < listWithoutSelection.length) {
-            const newTargetIndex = lastSelectedIndex + 1;
-            listWithoutSelection.splice(newTargetIndex, 0, ...selectedBlock);
-            return { ...prev, [activeEventName]: listWithoutSelection };
+          // 選択されたアイテムの中で最も後ろの位置を見つける
+          let lastSelectedIndex = -1;
+          for (let i = newItems.length - 1; i >= 0; i--) {
+            if (selectedItemIds.has(newItems[i].id)) {
+              lastSelectedIndex = i;
+              break;
+            }
+          }
+          
+          // 選択されたアイテムが最後にない場合のみ移動
+          if (lastSelectedIndex >= 0 && lastSelectedIndex < newItems.length - 1) {
+            // listWithoutSelectionでの対応する位置を見つける
+            const targetIndexInListWithout = listWithoutSelection.findIndex((item, idx) => {
+              const originalIndex = newItems.findIndex(originalItem => originalItem.id === item.id);
+              return originalIndex > lastSelectedIndex;
+            });
+            
+            if (targetIndexInListWithout >= 0) {
+              listWithoutSelection.splice(targetIndexInListWithout, 0, ...selectedBlock);
+              return { ...prev, [activeEventName]: listWithoutSelection };
+            }
           }
           return prev;
         } else {
