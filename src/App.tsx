@@ -1942,9 +1942,9 @@ const App: React.FC = () => {
               width: `${100 * (100 / zoomLevel)}%`
           }}>
             {currentMode === 'edit' ? (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 gap-8">
                 {/* 左列: 実行モード表示列 */}
-                <div className="space-y-2">
+                <div className="space-y-2 relative">
                   <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg p-3">
                     <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2">実行モード表示列</h3>
                     <p className="text-xs text-blue-700 dark:text-blue-300 mb-3">右の候補リストからアイテムを選択して移動</p>
