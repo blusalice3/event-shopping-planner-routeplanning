@@ -14,6 +14,8 @@ interface ShoppingListProps {
   onRemoveFromColumn?: (itemIds: string[]) => void;
   columnType?: 'execute' | 'candidate';
   currentDay?: string; // 動的な参加日（例: '1日目', '2日目', '3日目'など）
+  onMoveItemUp?: (itemId: string, targetColumn?: 'execute' | 'candidate') => void;
+  onMoveItemDown?: (itemId: string, targetColumn?: 'execute' | 'candidate') => void;
 }
 
 // Constants for drag-and-drop auto-scrolling
@@ -131,6 +133,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onRemoveFromColumn: _onRemoveFromColumn,
   columnType,
   currentDay: _currentDay,
+  onMoveItemUp,
+  onMoveItemDown,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragOverItem = useRef<string | null>(null);
@@ -284,6 +288,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               isSelected={selectedItemIds.has(item.id)}
               onSelectItem={onSelectItem}
               blockBackgroundColor={blockColorMap.get(item.id)}
+              onMoveUp={onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined}
+              onMoveDown={onMoveItemDown ? () => onMoveItemDown(item.id, columnType) : undefined}
+              canMoveUp={index > 0}
+              canMoveDown={index < items.length - 1}
             />
           </div>
           {/* 最後のアイテムの後に挿入位置インジケーター */}
