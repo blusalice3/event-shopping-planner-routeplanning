@@ -39,7 +39,7 @@ const extractEventDates = (items: ShoppingItem[]): string[] => {
 const sortCycle: SortState[] = ['Postpone', 'Late', 'Absent', 'SoldOut', 'Purchased', 'Manual'];
 const sortLabels: Record<SortState, string> = {
     Manual: '巡回順',
-    Postpone: '単品後回し',
+    Postpone: '後回し',
     Late: '遅参',
     Absent: '欠席',
     SoldOut: '売切',
