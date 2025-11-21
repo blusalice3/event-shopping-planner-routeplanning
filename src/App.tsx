@@ -1235,6 +1235,21 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       (executeModeItems[activeEventName]?.[currentEventDate]?.includes(itemId) ? 'execute' : 'candidate') : 
       'execute');
     
+    // 現在の列のアイテムを直接計算
+    let currentItems: ShoppingItem[] = [];
+    if (activeEventName) {
+      if (currentColumnType === 'execute') {
+        const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+        const itemsMap = new Map(items.map(item => [item.id, item]));
+        currentItems = executeIds.map(id => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+      } else {
+        const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+        currentItems = items.filter(item => 
+          item.eventDate === currentEventDate && !executeIds.has(item.id)
+        );
+      }
+    }
+    
     setSelectedItemIds(prev => {
         const newSet = new Set(prev);
         const wasSelected = newSet.has(itemId);
@@ -1258,7 +1273,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             } else {
                 // 起点が設定済みで、同じ列の場合
                 // 起点の直上または直下のアイテムかチェック
-                const currentItems = currentColumnType === 'execute' ? executeColumnItems : candidateColumnItems;
                 const startIndex = currentItems.findIndex(item => item.id === rangeStart.itemId);
                 const currentIndex = currentItems.findIndex(item => item.id === itemId);
                 
@@ -1277,7 +1291,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         
         return newSet;
     });
-  }, [activeTab, activeEventName, executeModeItems, eventDates, rangeStart, rangeEnd, executeColumnItems, candidateColumnItems]);
+  }, [activeTab, activeEventName, executeModeItems, eventDates, rangeStart, rangeEnd, items]);
 
   const handleToggleBlockFilter = useCallback((block: string) => {
     setSelectedBlockFilters(prev => {
@@ -1388,8 +1402,22 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       return;
     }
 
+    if (!activeEventName) return;
+    
     const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
-    const currentItems = columnType === 'execute' ? executeColumnItems : candidateColumnItems;
+    
+    // 現在の列のアイテムを直接計算
+    let currentItems: ShoppingItem[] = [];
+    if (columnType === 'execute') {
+      const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+      const itemsMap = new Map(items.map(item => [item.id, item]));
+      currentItems = executeIds.map(id => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+    } else {
+      const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+      currentItems = items.filter(item => 
+        item.eventDate === currentEventDate && !executeIds.has(item.id)
+      );
+    }
     
     const startIndex = currentItems.findIndex(item => item.id === rangeStart.itemId);
     const endIndex = currentItems.findIndex(item => item.id === rangeEnd.itemId);
@@ -1401,9 +1429,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     const rangeItems = currentItems.slice(minIndex, maxIndex + 1);
     
     // 範囲内のアイテムが全てチェック済みかチェック
-    const allSelected = rangeItems.every(item => selectedItemIds.has(item.id));
-    
     setSelectedItemIds(prev => {
+      const allSelected = rangeItems.every(item => prev.has(item.id));
       const newSet = new Set(prev);
       if (allSelected) {
         // 全てチェック済みの場合はチェックを外す
@@ -1414,7 +1441,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       }
       return newSet;
     });
-  }, [rangeStart, rangeEnd, activeTab, eventDates, executeColumnItems, candidateColumnItems, selectedItemIds]);
+  }, [rangeStart, rangeEnd, activeTab, activeEventName, eventDates, executeModeItems, items]);
 
   const handleBulkSort = useCallback((direction: BulkSortDirection) => {
     if (!activeEventName || selectedItemIds.size === 0) return;
