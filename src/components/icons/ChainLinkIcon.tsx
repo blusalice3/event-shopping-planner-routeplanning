@@ -22,3 +22,4 @@ const ChainLinkIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
 );
 
 export default ChainLinkIcon;
+
