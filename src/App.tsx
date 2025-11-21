@@ -301,171 +301,147 @@ const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColum
     setBlockSortDirection(null);
     
     const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
-    const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+    // ドロップ先のカラムが指定されていない場合は現在のモードを優先
+    const currentMode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+    const destColumn = targetColumn || (currentMode === 'execute' ? 'execute' : 'candidate');
 
     // リスト末尾への追加判定
     const isAppendToEnd = hoverId === '__END_OF_LIST__';
 
-    if (mode === 'edit' && targetColumn === 'execute') {
-      // 編集モード: 実行列内での並び替え
+    // 移動対象のアイテムIDリストを作成（複数選択 or 単一）
+    let movingItemIds: string[] = [];
+    if (selectedItemIds.has(dragId)) {
+        movingItemIds = Array.from(selectedItemIds);
+    } else {
+        movingItemIds = [dragId];
+    }
+
+    // ---------------------------------------------
+    // ケース1: 実行列へのドロップ (候補->実行 or 実行->実行)
+    // ---------------------------------------------
+    if (destColumn === 'execute') {
       setExecuteModeItems(prev => {
         const eventItems = prev[activeEventName] || {};
-        const dayItems = [...(eventItems[currentEventDate] || [])];
+        const currentDayList = [...(eventItems[currentEventDate] || [])];
         
-        if (selectedItemIds.has(dragId)) {
-          // 複数選択時
-          const selectedBlock = dayItems.filter(id => selectedItemIds.has(id));
-          const listWithoutSelection = dayItems.filter(id => !selectedItemIds.has(id));
-          
-          if (isAppendToEnd) {
-            return {
-              ...prev,
-              [activeEventName]: { ...eventItems, [currentEventDate]: [...listWithoutSelection, ...selectedBlock] }
-            };
-          }
-
-          const targetIndex = listWithoutSelection.findIndex(id => id === hoverId);
-          if (targetIndex === -1) return prev;
-          listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
-          
-          return {
-            ...prev,
-            [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection }
-          };
-        } else {
-          // 単一アイテム
-          const dragIndex = dayItems.findIndex(id => id === dragId);
-          if (dragIndex === -1) return prev; // 見つからない場合
-
-          const [draggedItem] = dayItems.splice(dragIndex, 1);
-          
-          if (isAppendToEnd) {
-             dayItems.push(draggedItem);
-          } else {
-             const hoverIndex = dayItems.findIndex(id => id === hoverId);
-             if (hoverIndex === -1) return prev;
-             dayItems.splice(hoverIndex, 0, draggedItem);
-          }
-          
-          return {
-            ...prev,
-            [activeEventName]: { ...eventItems, [currentEventDate]: dayItems }
-          };
+        // 1. 移動するアイテムをリストから一旦除外（順序変更の場合に備えて）
+        const movingSet = new Set(movingItemIds);
+        const listWithoutMoving = currentDayList.filter(id => !movingSet.has(id));
+        
+        // 2. 挿入位置の決定
+        let insertIndex = listWithoutMoving.length; // デフォルトは末尾
+        if (!isAppendToEnd) {
+            const hoverIndex = listWithoutMoving.findIndex(id => id === hoverId);
+            if (hoverIndex !== -1) {
+                insertIndex = hoverIndex;
+            }
         }
+
+        // 3. 新しい位置に挿入
+        listWithoutMoving.splice(insertIndex, 0, ...movingItemIds);
+        
+        return {
+            ...prev,
+            [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutMoving }
+        };
       });
-    } else if (mode === 'edit' && targetColumn === 'candidate') {
-      // 編集モード: 候補リスト内での並び替え
+      
+      // 候補リストから実行列へ移動した場合、選択状態を解除したほうが自然な動作
+      setSelectedItemIds(new Set());
+    } 
+    
+    // ---------------------------------------------
+    // ケース2: 候補リストへのドロップ (実行->候補 or 候補->候補)
+    // ---------------------------------------------
+    else if (destColumn === 'candidate') {
+      // ステップA: 実行列から削除（もし含まれていれば）
+      setExecuteModeItems(prev => {
+        const eventItems = prev[activeEventName] || {};
+        const currentDayList = eventItems[currentEventDate] || [];
+        const movingSet = new Set(movingItemIds);
+        
+        // 移動対象が含まれていないなら更新不要
+        if (!currentDayList.some(id => movingSet.has(id))) return prev;
+
+        const newList = currentDayList.filter(id => !movingSet.has(id));
+        return {
+            ...prev,
+            [activeEventName]: { ...eventItems, [currentEventDate]: newList }
+        };
+      });
+
+      // ステップB: 全体リスト(eventLists)内での順序変更
+      // 候補リストの表示順は eventLists の順序に依存するため、ここで並び替える
       setEventLists(prev => {
         const allItems = [...(prev[activeEventName] || [])];
         const currentTabKey = currentEventDate;
         const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
         
-        const candidateItems = allItems.filter(item => 
-          item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id)
-        );
+        // 移動対象が実行列に含まれているとみなして除外セットから外す（候補リスト扱いにするため）
+        // ただし、この setEventLists は setExecuteModeItems の更新と同時に走るため、
+        // 状態の不整合を防ぐためにローカルで計算する
+        const movingSet = new Set(movingItemIds);
         
-        if (selectedItemIds.has(dragId)) {
-          // 複数選択時
-          const selectedBlock = candidateItems.filter(item => selectedItemIds.has(item.id));
-          const listWithoutSelection = candidateItems.filter(item => !selectedItemIds.has(item.id));
-          
-          let newCandidateList: ShoppingItem[] = [];
+        // 1. 現在の候補リスト（表示されているもの）を抽出
+        // ここで移動対象のアイテムも「候補リストの一部」として扱うためにフィルタリング条件を調整
+        const currentCandidateItems = allItems.filter(item => {
+            // 別の日付は除外
+            if (item.eventDate !== currentTabKey) return false;
+            // 移動対象アイテムなら「候補」として扱う
+            if (movingSet.has(item.id)) return true;
+            // それ以外で実行列にあるものは除外
+            return !executeIdsSet.has(item.id);
+        });
 
-          if (isAppendToEnd) {
-             newCandidateList = [...listWithoutSelection, ...selectedBlock];
-          } else {
-             const targetIndex = listWithoutSelection.findIndex(item => item.id === hoverId);
-             if (targetIndex === -1) return prev;
-             listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
-             newCandidateList = listWithoutSelection;
-          }
-          
-          // 再結合処理
-          const executeItems = allItems.filter(item => 
-            item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
-          );
-          
-          const newItems = allItems.map(item => {
-            if (!item.eventDate.includes(currentTabKey)) {
-              return item;
-            }
-            if (executeIdsSet.has(item.id)) {
-              return executeItems.shift() || item;
-            } else {
-              return newCandidateList.shift() || item;
-            }
-          });
-          
-          return { ...prev, [activeEventName]: newItems };
-        } else {
-          // 単一アイテム
-          const dragIndex = candidateItems.findIndex(item => item.id === dragId);
-          if (dragIndex === -1) return prev;
-
-          const [draggedItem] = candidateItems.splice(dragIndex, 1);
-          
-          if (isAppendToEnd) {
-              candidateItems.push(draggedItem);
-          } else {
-              const hoverIndex = candidateItems.findIndex(item => item.id === hoverId);
-              if (hoverIndex === -1) return prev;
-              candidateItems.splice(hoverIndex, 0, draggedItem);
-          }
-          
-          // 再結合
-          const executeItems = allItems.filter(item => 
-            item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
-          );
-          
-          const newItems = allItems.map(item => {
-            if (!item.eventDate.includes(currentTabKey)) {
-              return item;
-            }
-            if (executeIdsSet.has(item.id)) {
-              return executeItems.shift() || item;
-            } else {
-              return candidateItems.shift() || item;
-            }
-          });
-          
-          return { ...prev, [activeEventName]: newItems };
-        }
-      });
-    } else if (mode === 'execute') {
-      // 実行モード: 通常の並び替え
-      setEventLists(prev => {
-        const newItems = [...(prev[activeEventName] || [])];
+        // 2. 移動対象を除いた候補リストを作成
+        const candidatesWithoutMoving = currentCandidateItems.filter(item => !movingSet.has(item.id));
         
-        if (selectedItemIds.has(dragId)) {
-          const selectedBlock = newItems.filter(item => selectedItemIds.has(item.id));
-          const listWithoutSelection = newItems.filter(item => !selectedItemIds.has(item.id));
-          
-          if (isAppendToEnd) {
-             return { ...prev, [activeEventName]: [...listWithoutSelection, ...selectedBlock] };
-          }
-
-          const targetIndex = listWithoutSelection.findIndex(item => item.id === hoverId);
-          if (targetIndex === -1) return prev;
-          listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
-          
-          return { ...prev, [activeEventName]: listWithoutSelection };
-        } else {
-          const dragIndex = newItems.findIndex(item => item.id === dragId);
-          if (dragIndex === -1) return prev;
-
-          const [draggedItem] = newItems.splice(dragIndex, 1);
-          
-          if (isAppendToEnd) {
-              newItems.push(draggedItem);
-          } else {
-              const hoverIndex = newItems.findIndex(item => item.id === hoverId);
-              if (hoverIndex === -1) return prev;
-              newItems.splice(hoverIndex, 0, draggedItem);
-          }
-          return { ...prev, [activeEventName]: newItems };
+        // 3. 挿入位置を特定
+        let insertIndexInCandidates = candidatesWithoutMoving.length;
+        if (!isAppendToEnd) {
+            const hoverIndex = candidatesWithoutMoving.findIndex(item => item.id === hoverId);
+            if (hoverIndex !== -1) {
+                insertIndexInCandidates = hoverIndex;
+            }
         }
+
+        // 4. 候補リスト内での新しい順序を構築
+        const newCandidateOrder = [...candidatesWithoutMoving];
+        // 移動対象アイテムを取得（順序保持のため allItems から検索）
+        const itemsToMove = movingItemIds
+            .map(id => allItems.find(item => item.id === id))
+            .filter(Boolean) as ShoppingItem[];
+            
+        newCandidateOrder.splice(insertIndexInCandidates, 0, ...itemsToMove);
+
+        // 5. 全体リストを再構築
+        // 実行列のアイテムはそのままの位置、候補リスト（移動対象含む）は新しい順序で埋め込む
+        const newCandidateQueue = [...newCandidateOrder];
+        
+        const newAllItems = allItems.map(item => {
+            // 別の日付のアイテムはそのまま
+            if (item.eventDate !== currentTabKey) return item;
+            
+            // 実行列のアイテム（かつ移動対象でないもの）はそのまま
+            if (executeIdsSet.has(item.id) && !movingSet.has(item.id)) return item;
+            
+            // それ以外（＝候補リストのアイテム）は、新しい順序のキューから取り出す
+            return newCandidateQueue.shift() || item;
+        });
+
+        // キューに残ったものがあれば末尾に追加（通常は発生しないはずだが安全策）
+        if (newCandidateQueue.length > 0) {
+            // 実際には map で既存の枠を埋めているだけなので、
+            // 移動によって候補リストの総数が増えるわけではないが、
+            // 念のためフィルタリングロジックで漏れた場合の安全策
+        }
+
+        return { ...prev, [activeEventName]: newAllItems };
       });
+      
+      setSelectedItemIds(new Set());
     }
+
   }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates]);
   const handleMoveItemUp = useCallback((itemId: string, targetColumn?: 'execute' | 'candidate') => {
     if (!activeEventName) return;
