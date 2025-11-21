@@ -1434,7 +1434,10 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       const newSet = new Set(prev);
       if (allSelected) {
         // 全てチェック済みの場合はチェックを外す
+        // チェック解除時は起点・終点もリセット（画面右上の✖ボタンと同様の動作）
         rangeItems.forEach(item => newSet.delete(item.id));
+        setRangeStart(null);
+        setRangeEnd(null);
       } else {
         // 未チェックのアイテムがある場合は全てチェックを入れる
         rangeItems.forEach(item => newSet.add(item.id));
