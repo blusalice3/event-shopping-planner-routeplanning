@@ -5,7 +5,7 @@ import ShoppingItemCard from './ShoppingItemCard';
 interface ShoppingListProps {
   items: ShoppingItem[];
   onUpdateItem: (item: ShoppingItem) => void;
-  onMoveItem: (dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate') => void;
+  onMoveItem: (dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate', sourceColumn?: 'execute' | 'candidate') => void;
   onEditRequest: (item: ShoppingItem) => void;
   onDeleteRequest: (item: ShoppingItem) => void;
   selectedItemIds: Set<string>;
@@ -23,7 +23,7 @@ const SCROLL_SPEED = 20;
 const TOP_SCROLL_TRIGGER_PX = 150;
 const BOTTOM_SCROLL_TRIGGER_PX = 100;
 
-// 色のパレット定義
+// 色のパレット定義（変更なし）
 const colorPalette: Array<{ light: string; dark: string }> = [
   { light: 'bg-red-50 dark:bg-red-950/30', dark: 'bg-red-100 dark:bg-red-900/40' },
   { light: 'bg-blue-50 dark:bg-blue-950/30', dark: 'bg-blue-100 dark:bg-blue-900/40' },
@@ -57,7 +57,7 @@ const colorPalette: Array<{ light: string; dark: string }> = [
   { light: 'bg-orange-100 dark:bg-orange-900/40', dark: 'bg-orange-200 dark:bg-orange-800/50' },
 ];
 
-// アイテムリストからブロックベースの色情報を計算
+// アイテムリストからブロックベースの色情報を計算（変更なし）
 const calculateBlockColors = (items: ShoppingItem[]): Map<string, string> => {
   const colorMap = new Map<string, string>();
   const uniqueBlocks = new Set<string>();
@@ -99,21 +99,21 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onMoveItemDown,
 }) => {
   const dragItem = useRef<string | null>(null);
+  const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  // ドロップターゲットの状態管理
+  // 改善: ドロップ位置を「どのアイテムの」「上か下か」で厳密に管理
   const [activeDropTarget, setActiveDropTarget] = useState<{ id: string; position: 'top' | 'bottom' } | null>(null);
 
   const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, item: ShoppingItem) => {
     dragItem.current = item.id;
-    // columnType情報をセット（App.tsx側での判定には使わないが、デバッグ等で有用なため残す）
+    dragSourceColumn.current = columnType || null;
     if (columnType) {
       e.dataTransfer.setData('sourceColumn', columnType);
     }
     const target = e.currentTarget;
-    // スタイル適用を遅延させて、ドラッグゴーストには適用しないようにする
     setTimeout(() => {
       if (target) {
         target.classList.add('opacity-40');
@@ -139,16 +139,20 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       window.scrollBy(0, SCROLL_SPEED);
     }
 
-    // 自分自身の上にはガイドを表示しない（ただし選択アイテム群の移動時は例外あり）
-    if (dragItem.current === item.id && selectedItemIds.size === 0) {
-       setActiveDropTarget(null);
-       return;
-    }
+    // 列間移動かどうかを判定
+    const isCrossColumn = dragSourceColumn.current !== null && dragSourceColumn.current !== columnType;
     
-    // 選択済みアイテム同士でのホバーは何もしない
-    if (selectedItemIds.has(item.id) && selectedItemIds.has(dragItem.current || '')) {
-       setActiveDropTarget(null);
-       return;
+    // 列内移動の場合、自分の上にはドロップ表示しない
+    if (!isCrossColumn) {
+      if (dragItem.current === item.id && selectedItemIds.size === 0) {
+        setActiveDropTarget(null);
+        return;
+      }
+      // 選択済みアイテム同士でのホバーは何もしない
+      if (selectedItemIds.has(item.id) && selectedItemIds.has(dragItem.current || '')) {
+        setActiveDropTarget(null);
+        return;
+      }
     }
 
     // カーソル位置で上半分か下半分かを判定
@@ -159,41 +163,84 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     setActiveDropTarget({ id: item.id, position });
   };
 
+  const handleContainerDragOver = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // 空のリストへのドロップを許可（列間移動の場合のみ）
+    if (items.length === 0 && dragItem.current) {
+      // 空のリストへのドロップ位置を示すために、特別なマーカーを設定
+      // 実際のドロップ処理はhandleDropで行う
+    }
+  };
+
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     
-    if (!dragItem.current || !activeDropTarget) {
+    const sourceColumn = e.dataTransfer.getData('sourceColumn') as 'execute' | 'candidate' | undefined;
+    
+    // 列タイプが設定されていない場合は処理しない
+    if (!columnType || !dragItem.current) {
+      cleanUp();
+      return;
+    }
+
+    // 列間移動の場合、sourceColumnとcolumnTypeが異なることを許可
+    // 列内移動の場合、sourceColumnとcolumnTypeが一致する必要がある
+    if (sourceColumn && sourceColumn === columnType) {
+      // 列内移動: activeDropTargetが必要
+      if (!activeDropTarget) {
+        cleanUp();
+        return;
+      }
+    } else if (sourceColumn && sourceColumn !== columnType) {
+      // 列間移動: activeDropTargetがあればそれを使用、なければ末尾に追加
+    } else {
+      // sourceColumnが不明な場合は処理しない
+      cleanUp();
+      return;
+    }
+
+    // 列間移動でactiveDropTargetがない場合（空のリストへのドロップ）
+    if (!activeDropTarget) {
+      if (sourceColumn && sourceColumn !== columnType) {
+        // 空のリストへの列間移動: 末尾に追加
+        onMoveItem(dragItem.current, '__END_OF_LIST__', columnType, sourceColumn);
+        cleanUp();
+        return;
+      }
       cleanUp();
       return;
     }
 
     const { id: targetId, position } = activeDropTarget;
 
-    // 自分自身へのドロップは無視
-    if (dragItem.current === targetId) {
+    // 同じアイテムへのドロップは無視（ただし列間移動の場合は許可）
+    if (dragItem.current === targetId && sourceColumn === columnType) {
         cleanUp();
         return;
     }
 
     if (position === 'top') {
-        // アイテムの上半分にドロップ -> そのアイテムの「前」に挿入
-        onMoveItem(dragItem.current, targetId, columnType);
+        // アイテムの上半分にドロップ -> そのアイテムの「前」に挿入 (targetIdのインデックスに挿入)
+        onMoveItem(dragItem.current, targetId, columnType, sourceColumn);
     } else {
-        // アイテムの下半分にドロップ -> そのアイテムの「後」（＝次のアイテムの前）に挿入
+        // アイテムの下半分にドロップ -> そのアイテムの「後」に挿入
+        // -> 「次のアイテム」の前、と解釈する
         const targetIndex = items.findIndex(i => i.id === targetId);
+        if (targetIndex === -1) {
+            cleanUp();
+            return;
+        }
         
-        // リストの末尾の場合
-        if (targetIndex === -1 || targetIndex === items.length - 1) {
-            onMoveItem(dragItem.current, '__END_OF_LIST__', columnType);
+        if (targetIndex === items.length - 1) {
+            // 最後のアイテムの下 -> 末尾に追加するための特別シグナルを送る
+            onMoveItem(dragItem.current, '__END_OF_LIST__', columnType, sourceColumn);
         } else {
             // 次のアイテムの前に挿入
             const nextItem = items[targetIndex + 1];
-            if (nextItem) {
-                onMoveItem(dragItem.current, nextItem.id, columnType);
-            } else {
-                onMoveItem(dragItem.current, '__END_OF_LIST__', columnType);
-            }
+            onMoveItem(dragItem.current, nextItem.id, columnType, sourceColumn);
         }
     }
     
@@ -203,33 +250,18 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const cleanUp = () => {
     document.querySelectorAll('.opacity-40').forEach(el => el.classList.remove('opacity-40'));
     dragItem.current = null;
+    dragSourceColumn.current = null;
     setActiveDropTarget(null);
   };
 
   if (items.length === 0) {
-    // 空のリストへのドロップ対応（末尾追加として扱う）
-    return (
+      return (
         <div 
-            className="text-center text-slate-500 dark:text-slate-400 py-12 min-h-[200px] border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg relative transition-colors"
-            onDragOver={(e) => {
-                e.preventDefault();
-                e.currentTarget.classList.add('bg-blue-50', 'dark:bg-blue-900/20', 'border-blue-400');
-            }}
-            onDragLeave={(e) => {
-                e.currentTarget.classList.remove('bg-blue-50', 'dark:bg-blue-900/20', 'border-blue-400');
-            }}
-            onDrop={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                e.currentTarget.classList.remove('bg-blue-50', 'dark:bg-blue-900/20', 'border-blue-400');
-                if (dragItem.current) {
-                    onMoveItem(dragItem.current, '__END_OF_LIST__', columnType);
-                }
-                cleanUp();
-            }}
+          className="text-center text-slate-500 dark:text-slate-400 py-12 min-h-[200px] border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg relative"
+          onDragOver={handleContainerDragOver}
+          onDrop={handleDrop}
         >
-          この日のアイテムはありません。<br/>
-          <span className="text-sm opacity-70">アイテムをここにドロップして移動</span>
+          この日のアイテムはありません。
         </div>
       );
   }
@@ -238,7 +270,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     <div 
       ref={containerRef}
       className="space-y-4 pb-24 relative"
-      // Note: onDragLeave removed from container to prevent guide flickering/disappearing during drag
+      // ここでインライン関数を使用しているため、handleDragLeaveの定義は不要
+      onDragLeave={() => setActiveDropTarget(null)} 
     >
       {items.map((item, index) => (
         <div
@@ -252,7 +285,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             className="transition-opacity duration-200 relative"
             data-is-selected={selectedItemIds.has(item.id)}
         >
-            {/* 上ガイドバー */}
+            {/* 改善: 視覚的にわかりやすいガイドバー (上) */}
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'top' && (
                 <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
                     <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
@@ -276,7 +309,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               canMoveDown={index < items.length - 1}
             />
 
-            {/* 下ガイドバー */}
+            {/* 改善: 視覚的にわかりやすいガイドバー (下) */}
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (
                 <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
                     <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
