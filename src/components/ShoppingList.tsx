@@ -1,6 +1,7 @@
 import React, { useRef, useState, useMemo } from 'react';
 import { ShoppingItem } from '../types';
 import ShoppingItemCard from './ShoppingItemCard';
+import ChainLinkIcon from './icons/ChainLinkIcon';
 
 interface ShoppingListProps {
   items: ShoppingItem[];
@@ -9,13 +10,16 @@ interface ShoppingListProps {
   onEditRequest: (item: ShoppingItem) => void;
   onDeleteRequest: (item: ShoppingItem) => void;
   selectedItemIds: Set<string>;
-  onSelectItem: (itemId: string) => void;
+  onSelectItem: (itemId: string, columnType?: 'execute' | 'candidate') => void;
   onMoveToColumn?: (itemIds: string[]) => void;
   onRemoveFromColumn?: (itemIds: string[]) => void;
   columnType?: 'execute' | 'candidate';
   currentDay?: string;
   onMoveItemUp?: (itemId: string, targetColumn?: 'execute' | 'candidate') => void;
   onMoveItemDown?: (itemId: string, targetColumn?: 'execute' | 'candidate') => void;
+  rangeStart?: { itemId: string; columnType: 'execute' | 'candidate' } | null;
+  rangeEnd?: { itemId: string; columnType: 'execute' | 'candidate' } | null;
+  onToggleRangeSelection?: (columnType: 'execute' | 'candidate') => void;
 }
 
 // Constants for drag-and-drop auto-scrolling
@@ -97,6 +101,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   currentDay: _currentDay,
   onMoveItemUp,
   onMoveItemDown,
+  rangeStart,
+  rangeEnd,
+  onToggleRangeSelection,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
@@ -106,6 +113,30 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const [activeDropTarget, setActiveDropTarget] = useState<{ id: string; position: 'top' | 'bottom' } | null>(null);
 
   const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
+
+  // 範囲選択の状態を計算
+  const rangeInfo = useMemo(() => {
+    if (!rangeStart || !rangeEnd || !columnType || rangeStart.columnType !== columnType || rangeEnd.columnType !== columnType) {
+      return null;
+    }
+
+    const startIndex = items.findIndex(item => item.id === rangeStart.itemId);
+    const endIndex = items.findIndex(item => item.id === rangeEnd.itemId);
+
+    if (startIndex === -1 || endIndex === -1) return null;
+
+    const minIndex = Math.min(startIndex, endIndex);
+    const maxIndex = Math.max(startIndex, endIndex);
+    const rangeItems = items.slice(minIndex, maxIndex + 1);
+    const allSelected = rangeItems.every(item => selectedItemIds.has(item.id));
+
+    return {
+      startIndex: minIndex,
+      endIndex: maxIndex,
+      rangeItems,
+      allSelected,
+    };
+  }, [rangeStart, rangeEnd, columnType, items, selectedItemIds]);
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, item: ShoppingItem) => {
     dragItem.current = item.id;
@@ -294,6 +325,23 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 </div>
             )}
 
+            {/* 範囲選択ボタンを表示 */}
+            {rangeInfo && index === rangeInfo.startIndex && onToggleRangeSelection && (
+              <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-14 z-40 flex items-center">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleRangeSelection(columnType!);
+                  }}
+                  className="p-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white shadow-lg transition-colors flex items-center justify-center"
+                  title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
+                  data-no-long-press
+                >
+                  <ChainLinkIcon className="w-5 h-5" />
+                </button>
+              </div>
+            )}
+
             <ShoppingItemCard
               item={item}
               onUpdate={onUpdateItem}
@@ -301,7 +349,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               onEditRequest={onEditRequest}
               onDeleteRequest={onDeleteRequest}
               isSelected={selectedItemIds.has(item.id)}
-              onSelectItem={onSelectItem}
+              onSelectItem={(itemId) => onSelectItem(itemId, columnType)}
               blockBackgroundColor={blockColorMap.get(item.id)}
               onMoveUp={onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined}
               onMoveDown={onMoveItemDown ? () => onMoveItemDown(item.id, columnType) : undefined}
