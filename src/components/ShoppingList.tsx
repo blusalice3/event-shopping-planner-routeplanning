@@ -23,7 +23,7 @@ const SCROLL_SPEED = 20;
 const TOP_SCROLL_TRIGGER_PX = 150;
 const BOTTOM_SCROLL_TRIGGER_PX = 100;
 
-// 色のパレット定義（変更なし）
+// 色のパレット定義
 const colorPalette: Array<{ light: string; dark: string }> = [
   { light: 'bg-red-50 dark:bg-red-950/30', dark: 'bg-red-100 dark:bg-red-900/40' },
   { light: 'bg-blue-50 dark:bg-blue-950/30', dark: 'bg-blue-100 dark:bg-blue-900/40' },
@@ -57,7 +57,7 @@ const colorPalette: Array<{ light: string; dark: string }> = [
   { light: 'bg-orange-100 dark:bg-orange-900/40', dark: 'bg-orange-200 dark:bg-orange-800/50' },
 ];
 
-// アイテムリストからブロックベースの色情報を計算（変更なし）
+// アイテムリストからブロックベースの色情報を計算
 const calculateBlockColors = (items: ShoppingItem[]): Map<string, string> => {
   const colorMap = new Map<string, string>();
   const uniqueBlocks = new Set<string>();
@@ -101,16 +101,19 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const dragItem = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
+  // ドロップターゲットの状態管理
   const [activeDropTarget, setActiveDropTarget] = useState<{ id: string; position: 'top' | 'bottom' } | null>(null);
 
   const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
 
   const handleDragStart = (e: React.DragEvent<HTMLDivElement>, item: ShoppingItem) => {
     dragItem.current = item.id;
+    // columnType情報をセット（App.tsx側での判定には使わないが、デバッグ等で有用なため残す）
     if (columnType) {
       e.dataTransfer.setData('sourceColumn', columnType);
     }
     const target = e.currentTarget;
+    // スタイル適用を遅延させて、ドラッグゴーストには適用しないようにする
     setTimeout(() => {
       if (target) {
         target.classList.add('opacity-40');
@@ -136,13 +139,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       window.scrollBy(0, SCROLL_SPEED);
     }
 
-    // 自分の上にはドロップ表示しない（選択時は例外）
+    // 自分自身の上にはガイドを表示しない（ただし選択アイテム群の移動時は例外あり）
     if (dragItem.current === item.id && selectedItemIds.size === 0) {
        setActiveDropTarget(null);
        return;
     }
     
-    // ★変更点: 列またぎ移動を許可するため、sourceColumnのチェックを削除しました。
     // 選択済みアイテム同士でのホバーは何もしない
     if (selectedItemIds.has(item.id) && selectedItemIds.has(dragItem.current || '')) {
        setActiveDropTarget(null);
@@ -161,7 +163,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     e.preventDefault();
     e.stopPropagation();
     
-    // ★変更点: ソースカラムのチェックを削除し、列間の移動を許可します
     if (!dragItem.current || !activeDropTarget) {
       cleanUp();
       return;
@@ -169,6 +170,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
     const { id: targetId, position } = activeDropTarget;
 
+    // 自分自身へのドロップは無視
     if (dragItem.current === targetId) {
         cleanUp();
         return;
@@ -180,18 +182,18 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     } else {
         // アイテムの下半分にドロップ -> そのアイテムの「後」（＝次のアイテムの前）に挿入
         const targetIndex = items.findIndex(i => i.id === targetId);
-        if (targetIndex === -1) {
-            cleanUp();
-            return;
-        }
         
-        if (targetIndex === items.length - 1) {
-            // 最後のアイテムの下 -> 末尾に追加するための特別シグナル
+        // リストの末尾の場合
+        if (targetIndex === -1 || targetIndex === items.length - 1) {
             onMoveItem(dragItem.current, '__END_OF_LIST__', columnType);
         } else {
             // 次のアイテムの前に挿入
             const nextItem = items[targetIndex + 1];
-            onMoveItem(dragItem.current, nextItem.id, columnType);
+            if (nextItem) {
+                onMoveItem(dragItem.current, nextItem.id, columnType);
+            } else {
+                onMoveItem(dragItem.current, '__END_OF_LIST__', columnType);
+            }
         }
     }
     
@@ -204,8 +206,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     setActiveDropTarget(null);
   };
 
-  // ... (以下、レンダリング部分は変更なし) ...
-  
   if (items.length === 0) {
     // 空のリストへのドロップ対応（末尾追加として扱う）
     return (
@@ -238,10 +238,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     <div 
       ref={containerRef}
       className="space-y-4 pb-24 relative"
-      onDragLeave={() => setActiveDropTarget(null)} 
+      // Note: onDragLeave removed from container to prevent guide flickering/disappearing during drag
     >
       {items.map((item, index) => (
-        // ... (マッピング内部は変更なし) ...
         <div
             key={item.id}
             data-item-id={item.id}
