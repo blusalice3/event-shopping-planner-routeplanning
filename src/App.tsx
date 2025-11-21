@@ -231,16 +231,78 @@ const App: React.FC = () => {
 
     // 初期モードを編集モードに設定
     if (isNewEvent) {
-const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate') => {
+      const newEventDates = extractEventDates(newItems);
+      const initialDayModes: DayModeState = {};
+      const initialExecuteItems: ExecuteModeItems = {};
+      newEventDates.forEach(date => {
+        initialDayModes[date] = 'edit' as ViewMode;
+        if (!metadata?.layoutInfo) {
+          initialExecuteItems[date] = [];
+        }
+      });
+      
+      setDayModes(prev => ({
+        ...prev,
+        [eventName]: initialDayModes
+      }));
+      
+      if (!metadata?.layoutInfo) {
+        setExecuteModeItems(prev => ({
+          ...prev,
+          [eventName]: initialExecuteItems
+        }));
+      }
+    }
+
+    alert(`${newItems.length}件のアイテムが${isNewEvent ? 'リストにインポートされました。' : '追加されました。'}`);
+    
+    if (isNewEvent) {
+        setActiveEventName(eventName);
+    }
+    
+    if (newItems.length > 0) {
+        // 新しいアイテムの参加日を取得
+        const newEventDates = extractEventDates(newItems);
+        if (newEventDates.length > 0) {
+            setActiveTab(newEventDates[0]);
+        } else {
+            // 既存のイベントの場合、最初の参加日を選択
+            const currentEventDates = extractEventDates(eventLists[eventName] || []);
+            if (currentEventDates.length > 0) {
+                setActiveTab(currentEventDates[0]);
+            }
+        }
+    }
+  }, [eventLists]);
+
+  const handleUpdateItem = useCallback((updatedItem: ShoppingItem) => {
+    if (!activeEventName) return;
+    
+    setEventLists(prev => {
+      // 購入状態が変更されたかチェック
+      const currentItem = prev[activeEventName]?.find(item => item.id === updatedItem.id);
+      const purchaseStatusChanged = currentItem && currentItem.purchaseStatus !== updatedItem.purchaseStatus;
+      
+      // 購入状態が変更された場合、最近変更されたアイテムとして記録
+      if (purchaseStatusChanged) {
+        setRecentlyChangedItemIds(prevIds => new Set(prevIds).add(updatedItem.id));
+      }
+      
+      return {
+        ...prev,
+        [activeEventName]: prev[activeEventName].map(item => (item.id === updatedItem.id ? updatedItem : item))
+      };
+    });
+  }, [activeEventName]);
+
+  const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate') => {
     if (!activeEventName) return;
     setSortState('Manual');
     setBlockSortDirection(null);
     
+    // activeTabが参加日（'1日目', '2日目'など）の場合
     const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
     const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
-
-    // リスト末尾への追加判定
-    const isAppendToEnd = hoverId === '__END_OF_LIST__';
 
     if (mode === 'edit' && targetColumn === 'execute') {
       // 編集モード: 実行列内での並び替え
@@ -252,15 +314,8 @@ const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColum
           // 複数選択時
           const selectedBlock = dayItems.filter(id => selectedItemIds.has(id));
           const listWithoutSelection = dayItems.filter(id => !selectedItemIds.has(id));
-          
-          if (isAppendToEnd) {
-            return {
-              ...prev,
-              [activeEventName]: { ...eventItems, [currentEventDate]: [...listWithoutSelection, ...selectedBlock] }
-            };
-          }
-
           const targetIndex = listWithoutSelection.findIndex(id => id === hoverId);
+          
           if (targetIndex === -1) return prev;
           listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
           
@@ -271,138 +326,13 @@ const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColum
         } else {
           // 単一アイテム
           const dragIndex = dayItems.findIndex(id => id === dragId);
-          if (dragIndex === -1) return prev; // 見つからない場合
-
+          const hoverIndex = dayItems.findIndex(id => id === hoverId);
+          
+          if (dragIndex === -1 || hoverIndex === -1) return prev;
+          
           const [draggedItem] = dayItems.splice(dragIndex, 1);
+          dayItems.splice(hoverIndex, 0, draggedItem);
           
-          if (isAppendToEnd) {
-             dayItems.push(draggedItem);
-          } else {
-             const hoverIndex = dayItems.findIndex(id => id === hoverId);
-             if (hoverIndex === -1) return prev;
-             dayItems.splice(hoverIndex, 0, draggedItem);
-          }
-          
-          return {
-            ...prev,
-            [activeEventName]: { ...eventItems, [currentEventDate]: dayItems }
-          };
-        }
-      });
-    } else if (mode === 'edit' && targetColumn === 'candidate') {
-      // 編集モード: 候補リスト内での並び替え
-      setEventLists(prev => {
-        const allItems = [...(prev[activeEventName] || [])];
-        const currentTabKey = currentEventDate;
-        const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-        
-        const candidateItems = allItems.filter(item => 
-          item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id)
-        );
-        
-        if (selectedItemIds.has(dragId)) {
-          // 複数選択時
-          const selectedBlock = candidateItems.filter(item => selectedItemIds.has(item.id));
-          const listWithoutSelection = candidateItems.filter(item => !selectedItemIds.has(item.id));
-          
-          let newCandidateList: ShoppingItem[] = [];
-
-          if (isAppendToEnd) {
-             newCandidateList = [...listWithoutSelection, ...selectedBlock];
-          } else {
-             const targetIndex = listWithoutSelection.findIndex(item => item.id === hoverId);
-             if (targetIndex === -1) return prev;
-             listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
-             newCandidateList = listWithoutSelection;
-          }
-          
-          // 再結合処理
-          const executeItems = allItems.filter(item => 
-            item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
-          );
-          
-          const newItems = allItems.map(item => {
-            if (!item.eventDate.includes(currentTabKey)) {
-              return item;
-            }
-            if (executeIdsSet.has(item.id)) {
-              return executeItems.shift() || item;
-            } else {
-              return newCandidateList.shift() || item;
-            }
-          });
-          
-          return { ...prev, [activeEventName]: newItems };
-        } else {
-          // 単一アイテム
-          const dragIndex = candidateItems.findIndex(item => item.id === dragId);
-          if (dragIndex === -1) return prev;
-
-          const [draggedItem] = candidateItems.splice(dragIndex, 1);
-          
-          if (isAppendToEnd) {
-              candidateItems.push(draggedItem);
-          } else {
-              const hoverIndex = candidateItems.findIndex(item => item.id === hoverId);
-              if (hoverIndex === -1) return prev;
-              candidateItems.splice(hoverIndex, 0, draggedItem);
-          }
-          
-          // 再結合
-          const executeItems = allItems.filter(item => 
-            item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
-          );
-          
-          const newItems = allItems.map(item => {
-            if (!item.eventDate.includes(currentTabKey)) {
-              return item;
-            }
-            if (executeIdsSet.has(item.id)) {
-              return executeItems.shift() || item;
-            } else {
-              return candidateItems.shift() || item;
-            }
-          });
-          
-          return { ...prev, [activeEventName]: newItems };
-        }
-      });
-    } else if (mode === 'execute') {
-      // 実行モード: 通常の並び替え
-      setEventLists(prev => {
-        const newItems = [...(prev[activeEventName] || [])];
-        
-        if (selectedItemIds.has(dragId)) {
-          const selectedBlock = newItems.filter(item => selectedItemIds.has(item.id));
-          const listWithoutSelection = newItems.filter(item => !selectedItemIds.has(item.id));
-          
-          if (isAppendToEnd) {
-             return { ...prev, [activeEventName]: [...listWithoutSelection, ...selectedBlock] };
-          }
-
-          const targetIndex = listWithoutSelection.findIndex(item => item.id === hoverId);
-          if (targetIndex === -1) return prev;
-          listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
-          
-          return { ...prev, [activeEventName]: listWithoutSelection };
-        } else {
-          const dragIndex = newItems.findIndex(item => item.id === dragId);
-          if (dragIndex === -1) return prev;
-
-          const [draggedItem] = newItems.splice(dragIndex, 1);
-          
-          if (isAppendToEnd) {
-              newItems.push(draggedItem);
-          } else {
-              const hoverIndex = newItems.findIndex(item => item.id === hoverId);
-              if (hoverIndex === -1) return prev;
-              newItems.splice(hoverIndex, 0, draggedItem);
-          }
-          return { ...prev, [activeEventName]: newItems };
-        }
-      });
-    }
-  }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates]);          
           return {
             ...prev,
             [activeEventName]: { ...eventItems, [currentEventDate]: dayItems }
@@ -483,7 +413,28 @@ const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColum
       setEventLists(prev => {
         const newItems = [...(prev[activeEventName] || [])];
         const dragIndex = newItems.findIndex(item => item.id === dragId);
-const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute' | 'candidate') => {
+        const hoverIndex = newItems.findIndex(item => item.id === hoverId);
+        
+        if (dragIndex === -1 || hoverIndex === -1) return prev;
+        if (selectedItemIds.has(dragId)) {
+          const selectedBlock = newItems.filter(item => selectedItemIds.has(item.id));
+          const listWithoutSelection = newItems.filter(item => !selectedItemIds.has(item.id));
+          const targetIndex = listWithoutSelection.findIndex(item => item.id === hoverId);
+          
+          if (targetIndex === -1) return prev;
+          listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
+          
+          return { ...prev, [activeEventName]: listWithoutSelection };
+        } else {
+          const [draggedItem] = newItems.splice(dragIndex, 1);
+          newItems.splice(hoverIndex, 0, draggedItem);
+          return { ...prev, [activeEventName]: newItems };
+        }
+      });
+    }
+  }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates]);
+
+  const handleMoveItemUp = useCallback((itemId: string, targetColumn?: 'execute' | 'candidate') => {
     if (!activeEventName) return;
     setSortState('Manual');
     setBlockSortDirection(null);
@@ -498,40 +449,27 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         const dayItems = [...(eventItems[currentEventDate] || [])];
         const currentIndex = dayItems.findIndex(id => id === itemId);
         
-        if (currentIndex < 0 || currentIndex >= dayItems.length - 1) return prev; // 既に末尾または見つからない
+        if (currentIndex <= 0) return prev; // 既に先頭または見つからない
         
         // 複数選択時は選択されたアイテムすべてを移動
         if (selectedItemIds.has(itemId)) {
           const selectedIds = dayItems.filter(id => selectedItemIds.has(id));
           const listWithoutSelection = dayItems.filter(id => !selectedItemIds.has(id));
           
-          // 選択されたアイテムの中で最も後ろの位置を見つける
-          let lastSelectedIndex = -1;
-          dayItems.forEach((id, index) => {
-              if (selectedItemIds.has(id)) lastSelectedIndex = index;
-          });
-          
-          // 選択されたアイテムが最後にない場合のみ移動
-          if (lastSelectedIndex >= 0 && lastSelectedIndex < dayItems.length - 1) {
-            // 飛び越える対象のアイテム（選択範囲の直後のアイテム）
-            const jumpOverItemId = dayItems[lastSelectedIndex + 1];
-            
-            // 非選択リスト内でのそのアイテムの位置
-            const targetIndexInListWithout = listWithoutSelection.findIndex(id => id === jumpOverItemId);
-            
-            if (targetIndexInListWithout !== -1) {
-              // そのアイテムの後ろに挿入
-              listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedIds);
-              return {
-                ...prev,
-                [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection }
-              };
-            }
+          // 選択されたアイテムの最初の位置を基準に移動
+          const firstSelectedIndex = dayItems.findIndex(id => selectedItemIds.has(id));
+          if (firstSelectedIndex > 0) {
+            const newTargetIndex = firstSelectedIndex - 1;
+            listWithoutSelection.splice(newTargetIndex, 0, ...selectedIds);
+            return {
+              ...prev,
+              [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection }
+            };
           }
           return prev;
         } else {
           // 単一アイテム
-          [dayItems[currentIndex], dayItems[currentIndex + 1]] = [dayItems[currentIndex + 1], dayItems[currentIndex]];
+          [dayItems[currentIndex - 1], dayItems[currentIndex]] = [dayItems[currentIndex], dayItems[currentIndex - 1]];
           return {
             ...prev,
             [activeEventName]: { ...eventItems, [currentEventDate]: dayItems }
@@ -551,50 +489,40 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         );
         
         const currentIndex = candidateItems.findIndex(item => item.id === itemId);
-        if (currentIndex < 0 || currentIndex >= candidateItems.length - 1) return prev; // 既に末尾または見つからない
+        if (currentIndex <= 0) return prev; // 既に先頭または見つからない
         
         if (selectedItemIds.has(itemId)) {
           // 複数選択時
           const selectedBlock = candidateItems.filter(item => selectedItemIds.has(item.id));
           const listWithoutSelection = candidateItems.filter(item => !selectedItemIds.has(item.id));
+          const firstSelectedIndex = candidateItems.findIndex(item => selectedItemIds.has(item.id));
           
-          // 選択されたアイテムの中で最も後ろの位置を見つける
-          let lastSelectedIndex = -1;
-          candidateItems.forEach((item, index) => {
-              if (selectedItemIds.has(item.id)) lastSelectedIndex = index;
-          });
-          
-          // 選択されたアイテムが最後にない場合のみ移動
-          if (lastSelectedIndex >= 0 && lastSelectedIndex < candidateItems.length - 1) {
-            const jumpOverItemId = candidateItems[lastSelectedIndex + 1].id;
-            const targetIndexInListWithout = listWithoutSelection.findIndex(item => item.id === jumpOverItemId);
+          if (firstSelectedIndex > 0) {
+            const newTargetIndex = firstSelectedIndex - 1;
+            listWithoutSelection.splice(newTargetIndex, 0, ...selectedBlock);
             
-            if (targetIndexInListWithout !== -1) {
-              listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedBlock);
-              
-              // 実行モード列のアイテムはそのまま、候補リストのみ並び替え
-              const executeItems = allItems.filter(item => 
-                item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
-              );
-              
-              const newItems = allItems.map(item => {
-                if (!item.eventDate.includes(currentTabKey)) {
-                  return item;
-                }
-                if (executeIdsSet.has(item.id)) {
-                  return executeItems.shift() || item;
-                } else {
-                  return listWithoutSelection.shift() || item;
-                }
-              });
-              
-              return { ...prev, [activeEventName]: newItems };
-            }
+            // 実行モード列のアイテムはそのまま、候補リストのみ並び替え
+            const executeItems = allItems.filter(item => 
+              item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
+            );
+            
+            const newItems = allItems.map(item => {
+              if (!item.eventDate.includes(currentTabKey)) {
+                return item;
+              }
+              if (executeIdsSet.has(item.id)) {
+                return executeItems.shift() || item;
+              } else {
+                return listWithoutSelection.shift() || item;
+              }
+            });
+            
+            return { ...prev, [activeEventName]: newItems };
           }
           return prev;
         } else {
           // 単一アイテム
-          [candidateItems[currentIndex], candidateItems[currentIndex + 1]] = [candidateItems[currentIndex + 1], candidateItems[currentIndex]];
+          [candidateItems[currentIndex - 1], candidateItems[currentIndex]] = [candidateItems[currentIndex], candidateItems[currentIndex - 1]];
           
           // 実行モード列のアイテムはそのまま、候補リストのみ並び替え
           const executeItems = allItems.filter(item => 
@@ -621,36 +549,22 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         const newItems = [...(prev[activeEventName] || [])];
         const currentIndex = newItems.findIndex(item => item.id === itemId);
         
-        if (currentIndex < 0 || currentIndex >= newItems.length - 1) return prev; // 既に末尾または見つからない
+        if (currentIndex <= 0) return prev; // 既に先頭または見つからない
         
         if (selectedItemIds.has(itemId)) {
           const selectedBlock = newItems.filter(item => selectedItemIds.has(item.id));
           const listWithoutSelection = newItems.filter(item => !selectedItemIds.has(item.id));
+          const firstSelectedIndex = newItems.findIndex(item => selectedItemIds.has(item.id));
           
-          // 選択されたアイテムの中で最も後ろの位置を見つける
-          let lastSelectedIndex = -1;
-          newItems.forEach((item, index) => {
-             if (selectedItemIds.has(item.id)) lastSelectedIndex = index;
-          });
-          
-          // 選択されたアイテムが最後にない場合のみ移動
-          if (lastSelectedIndex >= 0 && lastSelectedIndex < newItems.length - 1) {
-            const jumpOverItemId = newItems[lastSelectedIndex + 1].id;
-            const targetIndexInListWithout = listWithoutSelection.findIndex(item => item.id === jumpOverItemId);
-            
-            if (targetIndexInListWithout !== -1) {
-              listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedBlock);
-              return { ...prev, [activeEventName]: listWithoutSelection };
-            }
+          if (firstSelectedIndex > 0) {
+            const newTargetIndex = firstSelectedIndex - 1;
+            listWithoutSelection.splice(newTargetIndex, 0, ...selectedBlock);
+            return { ...prev, [activeEventName]: listWithoutSelection };
           }
           return prev;
         } else {
-          [newItems[currentIndex], newItems[currentIndex + 1]] = [newItems[currentIndex + 1], newItems[currentIndex]];
+          [newItems[currentIndex - 1], newItems[currentIndex]] = [newItems[currentIndex], newItems[currentIndex - 1]];
           return { ...prev, [activeEventName]: newItems };
-        }
-      });
-    }
-  }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates]);          return { ...prev, [activeEventName]: newItems };
         }
       });
     }
