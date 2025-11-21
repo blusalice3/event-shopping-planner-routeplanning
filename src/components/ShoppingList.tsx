@@ -129,12 +129,18 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     const maxIndex = Math.max(startIndex, endIndex);
     const rangeItems = items.slice(minIndex, maxIndex + 1);
     const allSelected = rangeItems.every(item => selectedItemIds.has(item.id));
+    // 起点と終点のみチェックされているか（間のアイテムがチェックされていないか）を判定
+    const onlyStartEndSelected = rangeItems.length > 2 && 
+      selectedItemIds.has(rangeItems[0].id) && 
+      selectedItemIds.has(rangeItems[rangeItems.length - 1].id) &&
+      rangeItems.slice(1, -1).every(item => !selectedItemIds.has(item.id));
 
     return {
       startIndex: minIndex,
       endIndex: maxIndex,
       rangeItems,
       allSelected,
+      onlyStartEndSelected,
     };
   }, [rangeStart, rangeEnd, columnType, items, selectedItemIds]);
 
@@ -325,23 +331,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 </div>
             )}
 
-            {/* 範囲選択ボタンを表示 - 起点と終点の間の全てのアイテムに表示 */}
-            {rangeInfo && index >= rangeInfo.startIndex && index <= rangeInfo.endIndex && onToggleRangeSelection && (
-              <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-14 z-40 flex items-center">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleRangeSelection(columnType!);
-                  }}
-                  className="p-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white shadow-lg transition-colors flex items-center justify-center"
-                  title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
-                  data-no-long-press
-                >
-                  <ChainLinkIcon className="w-5 h-5" />
-                </button>
-              </div>
-            )}
-
             <ShoppingItemCard
               item={item}
               onUpdate={onUpdateItem}
@@ -364,6 +353,31 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
                     <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
                 </div>
+            )}
+
+            {/* チェーンをアイテムの右側（左列）または左側（右列）に表示 */}
+            {rangeInfo && index >= rangeInfo.startIndex && index <= rangeInfo.endIndex && onToggleRangeSelection && (
+              <div 
+                className={`absolute top-1/2 -translate-y-1/2 z-40 flex items-center ${
+                  columnType === 'candidate' 
+                    ? 'left-0 -translate-x-12' 
+                    : 'right-0 translate-x-12'
+                }`}
+              >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleRangeSelection(columnType!);
+                  }}
+                  className={`p-1 rounded transition-opacity ${
+                    rangeInfo.onlyStartEndSelected ? 'opacity-50 hover:opacity-100' : 'opacity-100'
+                  }`}
+                  title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
+                  data-no-long-press
+                >
+                  <ChainLinkIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+                </button>
+              </div>
             )}
         </div>
       ))}
