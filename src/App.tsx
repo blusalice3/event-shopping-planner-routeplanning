@@ -308,7 +308,7 @@ const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColum
     // リスト末尾への追加判定
     const isAppendToEnd = hoverId === '__END_OF_LIST__';
 
-    // 移動対象のアイテムIDリストを作成（複数選択 or 単一）
+    // 移動対象のアイテムIDリストを作成
     let movingItemIds: string[] = [];
     if (selectedItemIds.has(dragId)) {
         movingItemIds = Array.from(selectedItemIds);
@@ -316,20 +316,19 @@ const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColum
         movingItemIds = [dragId];
     }
 
-    // ---------------------------------------------
-    // ケース1: 実行列へのドロップ (候補->実行 or 実行->実行)
-    // ---------------------------------------------
+    // --- [ケースA] 実行列へのドロップ ---
     if (destColumn === 'execute') {
       setExecuteModeItems(prev => {
         const eventItems = prev[activeEventName] || {};
         const currentDayList = [...(eventItems[currentEventDate] || [])];
         
-        // 1. 移動するアイテムをリストから一旦除外（順序変更の場合に備えて）
+        // 1. 移動するアイテムを一旦除外 (順序変更の場合や、重複防止のため)
         const movingSet = new Set(movingItemIds);
         const listWithoutMoving = currentDayList.filter(id => !movingSet.has(id));
         
         // 2. 挿入位置の決定
-        let insertIndex = listWithoutMoving.length; // デフォルトは末尾
+        // hoverIdが実行列に存在するか確認。存在しない(候補リストからドラッグしてきたアイテム上にドロップしようとした等)場合は末尾へ
+        let insertIndex = listWithoutMoving.length; 
         if (!isAppendToEnd) {
             const hoverIndex = listWithoutMoving.findIndex(id => id === hoverId);
             if (hoverIndex !== -1) {
@@ -350,11 +349,9 @@ const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColum
       setSelectedItemIds(new Set());
     } 
     
-    // ---------------------------------------------
-    // ケース2: 候補リストへのドロップ (実行->候補 or 候補->候補)
-    // ---------------------------------------------
+    // --- [ケースB] 候補リストへのドロップ ---
     else if (destColumn === 'candidate') {
-      // ステップA: 実行列から削除（もし含まれていれば）
+      // 1. 実行列から削除 (もし含まれていれば)
       setExecuteModeItems(prev => {
         const eventItems = prev[activeEventName] || {};
         const currentDayList = eventItems[currentEventDate] || [];
@@ -370,33 +367,32 @@ const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColum
         };
       });
 
-      // ステップB: 全体リスト(eventLists)内での順序変更
+      // 2. 全体リスト(eventLists)内での順序変更
       // 候補リストの表示順は eventLists の順序に依存するため、ここで並び替える
       setEventLists(prev => {
         const allItems = [...(prev[activeEventName] || [])];
         const currentTabKey = currentEventDate;
         const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-        
-        // 移動対象が実行列に含まれているとみなして除外セットから外す（候補リスト扱いにするため）
-        // ただし、この setEventLists は setExecuteModeItems の更新と同時に走るため、
-        // 状態の不整合を防ぐためにローカルで計算する
         const movingSet = new Set(movingItemIds);
         
-        // 1. 現在の候補リスト（表示されているもの）を抽出
-        // ここで移動対象のアイテムも「候補リストの一部」として扱うためにフィルタリング条件を調整
+        // [重要] ここで計算する際は、移動対象のアイテムは「候補リスト扱い」にする
+        // (executeIdsSetに含まれていても、今回移動するので候補リストにいるものとして扱う)
+        
+        // 現在表示されている候補リスト（移動対象含む）を構築
         const currentCandidateItems = allItems.filter(item => {
-            // 別の日付は除外
             if (item.eventDate !== currentTabKey) return false;
-            // 移動対象アイテムなら「候補」として扱う
+            
+            // 今回移動するアイテムなら、候補リストに含まれるべき
             if (movingSet.has(item.id)) return true;
-            // それ以外で実行列にあるものは除外
+
+            // それ以外で、実行列にあるものは除外
             return !executeIdsSet.has(item.id);
         });
 
-        // 2. 移動対象を除いた候補リストを作成
+        // 移動対象を除いた候補リスト
         const candidatesWithoutMoving = currentCandidateItems.filter(item => !movingSet.has(item.id));
         
-        // 3. 挿入位置を特定
+        // 挿入位置を特定
         let insertIndexInCandidates = candidatesWithoutMoving.length;
         if (!isAppendToEnd) {
             const hoverIndex = candidatesWithoutMoving.findIndex(item => item.id === hoverId);
@@ -405,35 +401,36 @@ const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColum
             }
         }
 
-        // 4. 候補リスト内での新しい順序を構築
+        // 新しい候補リストの順序キューを作成
         const newCandidateOrder = [...candidatesWithoutMoving];
-        // 移動対象アイテムを取得（順序保持のため allItems から検索）
+        // 移動対象アイテムを取得（allItemsから検索して順序を保持）
         const itemsToMove = movingItemIds
             .map(id => allItems.find(item => item.id === id))
-            .filter(Boolean) as ShoppingItem[];
+            .filter((item): item is ShoppingItem => item !== undefined);
             
         newCandidateOrder.splice(insertIndexInCandidates, 0, ...itemsToMove);
-
-        // 5. 全体リストを再構築
-        // 実行列のアイテムはそのままの位置、候補リスト（移動対象含む）は新しい順序で埋め込む
+        
+        // 全体リストを再構築
+        // ルール: 
+        // - 別の日付はそのまま
+        // - 実行列に残るアイテム(移動対象以外)はそのまま
+        // - それ以外の枠(候補リスト枠)に、newCandidateOrderから順番に詰める
+        
         const newCandidateQueue = [...newCandidateOrder];
         
         const newAllItems = allItems.map(item => {
-            // 別の日付のアイテムはそのまま
             if (item.eventDate !== currentTabKey) return item;
             
-            // 実行列のアイテム（かつ移動対象でないもの）はそのまま
+            // 実行列にあり、かつ今回移動するアイテムではない -> そのまま
             if (executeIdsSet.has(item.id) && !movingSet.has(item.id)) return item;
             
-            // それ以外（＝候補リストのアイテム）は、新しい順序のキューから取り出す
+            // それ以外は候補リストの枠なので、新しい順序で埋める
             return newCandidateQueue.shift() || item;
         });
-
-        // キューに残ったものがあれば末尾に追加（通常は発生しないはずだが安全策）
+        
+        // 万が一キューに残っていたら（通常ありえないが）末尾に追加
         if (newCandidateQueue.length > 0) {
-            // 実際には map で既存の枠を埋めているだけなので、
-            // 移動によって候補リストの総数が増えるわけではないが、
-            // 念のためフィルタリングロジックで漏れた場合の安全策
+             newAllItems.push(...newCandidateQueue);
         }
 
         return { ...prev, [activeEventName]: newAllItems };
