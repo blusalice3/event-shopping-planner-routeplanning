@@ -101,7 +101,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const dragItem = useRef<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  // 改善: ドロップ位置を「どのアイテムの」「上か下か」で厳密に管理
   const [activeDropTarget, setActiveDropTarget] = useState<{ id: string; position: 'top' | 'bottom' } | null>(null);
 
   const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
@@ -137,11 +136,13 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       window.scrollBy(0, SCROLL_SPEED);
     }
 
-    // 自分の上にはドロップ表示しない（ただし、別のアイテムからならOK）
+    // 自分の上にはドロップ表示しない（選択時は例外）
     if (dragItem.current === item.id && selectedItemIds.size === 0) {
        setActiveDropTarget(null);
        return;
     }
+    
+    // ★変更点: 列またぎ移動を許可するため、sourceColumnのチェックを削除しました。
     // 選択済みアイテム同士でのホバーは何もしない
     if (selectedItemIds.has(item.id) && selectedItemIds.has(dragItem.current || '')) {
        setActiveDropTarget(null);
@@ -160,8 +161,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     e.preventDefault();
     e.stopPropagation();
     
-    const sourceColumn = e.dataTransfer.getData('sourceColumn') as 'execute' | 'candidate' | undefined;
-    if (sourceColumn !== columnType || !dragItem.current || !activeDropTarget) {
+    // ★変更点: ソースカラムのチェックを削除し、列間の移動を許可します
+    if (!dragItem.current || !activeDropTarget) {
       cleanUp();
       return;
     }
@@ -174,11 +175,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     }
 
     if (position === 'top') {
-        // アイテムの上半分にドロップ -> そのアイテムの「前」に挿入 (targetIdのインデックスに挿入)
+        // アイテムの上半分にドロップ -> そのアイテムの「前」に挿入
         onMoveItem(dragItem.current, targetId, columnType);
     } else {
-        // アイテムの下半分にドロップ -> そのアイテムの「後」に挿入
-        // -> 「次のアイテム」の前、と解釈する
+        // アイテムの下半分にドロップ -> そのアイテムの「後」（＝次のアイテムの前）に挿入
         const targetIndex = items.findIndex(i => i.id === targetId);
         if (targetIndex === -1) {
             cleanUp();
@@ -186,7 +186,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         }
         
         if (targetIndex === items.length - 1) {
-            // 最後のアイテムの下 -> 末尾に追加するための特別シグナルを送る
+            // 最後のアイテムの下 -> 末尾に追加するための特別シグナル
             onMoveItem(dragItem.current, '__END_OF_LIST__', columnType);
         } else {
             // 次のアイテムの前に挿入
@@ -204,10 +204,32 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     setActiveDropTarget(null);
   };
 
+  // ... (以下、レンダリング部分は変更なし) ...
+  
   if (items.length === 0) {
-      return (
-        <div className="text-center text-slate-500 dark:text-slate-400 py-12 min-h-[200px] border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg relative">
-          この日のアイテムはありません。
+    // 空のリストへのドロップ対応（末尾追加として扱う）
+    return (
+        <div 
+            className="text-center text-slate-500 dark:text-slate-400 py-12 min-h-[200px] border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg relative transition-colors"
+            onDragOver={(e) => {
+                e.preventDefault();
+                e.currentTarget.classList.add('bg-blue-50', 'dark:bg-blue-900/20', 'border-blue-400');
+            }}
+            onDragLeave={(e) => {
+                e.currentTarget.classList.remove('bg-blue-50', 'dark:bg-blue-900/20', 'border-blue-400');
+            }}
+            onDrop={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                e.currentTarget.classList.remove('bg-blue-50', 'dark:bg-blue-900/20', 'border-blue-400');
+                if (dragItem.current) {
+                    onMoveItem(dragItem.current, '__END_OF_LIST__', columnType);
+                }
+                cleanUp();
+            }}
+        >
+          この日のアイテムはありません。<br/>
+          <span className="text-sm opacity-70">アイテムをここにドロップして移動</span>
         </div>
       );
   }
@@ -216,10 +238,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     <div 
       ref={containerRef}
       className="space-y-4 pb-24 relative"
-      // ここでインライン関数を使用しているため、handleDragLeaveの定義は不要
       onDragLeave={() => setActiveDropTarget(null)} 
     >
       {items.map((item, index) => (
+        // ... (マッピング内部は変更なし) ...
         <div
             key={item.id}
             data-item-id={item.id}
@@ -231,7 +253,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             className="transition-opacity duration-200 relative"
             data-is-selected={selectedItemIds.has(item.id)}
         >
-            {/* 改善: 視覚的にわかりやすいガイドバー (上) */}
+            {/* 上ガイドバー */}
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'top' && (
                 <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
                     <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
@@ -255,7 +277,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               canMoveDown={index < items.length - 1}
             />
 
-            {/* 改善: 視覚的にわかりやすいガイドバー (下) */}
+            {/* 下ガイドバー */}
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (
                 <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
                     <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
