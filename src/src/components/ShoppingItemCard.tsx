@@ -7,6 +7,8 @@ import XCircleIcon from './icons/XCircleIcon';
 import MinusCircleIcon from './icons/MinusCircleIcon';
 import PauseCircleIcon from './icons/PauseCircleIcon';
 import ClockIcon from './icons/ClockIcon';
+import ChevronUpIcon from './icons/ChevronUpIcon';
+import ChevronDownIcon from './icons/ChevronDownIcon';
 
 export interface ShoppingItemCardProps {
   item: ShoppingItem;
@@ -17,6 +19,10 @@ export interface ShoppingItemCardProps {
   isSelected: boolean;
   onSelectItem: (itemId: string) => void;
   blockBackgroundColor?: string;
+  onMoveUp?: (itemId: string) => void;
+  onMoveDown?: (itemId: string) => void;
+  canMoveUp?: boolean;
+  canMoveDown?: boolean;
 }
 
 const statusConfig: Record<PurchaseStatus, { label: string; icon: React.FC<any>; color: string; dim: boolean; bg: string; }> = {
@@ -38,6 +44,10 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   isSelected,
   onSelectItem,
   blockBackgroundColor,
+  onMoveUp,
+  onMoveDown,
+  canMoveUp = true,
+  canMoveDown = true,
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const longPressTimeout = useRef<number | null>(null);
@@ -207,7 +217,45 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
             aria-label={`Select item ${item.circle} - ${item.title}`}
         />
+        {onMoveUp && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onMoveUp(item.id);
+            }}
+            disabled={!canMoveUp}
+            data-no-long-press
+            className={`p-1 rounded-md transition-colors ${
+              canMoveUp
+                ? 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer'
+                : 'text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50'
+            }`}
+            aria-label="上に移動"
+            title="上に移動"
+          >
+            <ChevronUpIcon className="w-4 h-4" />
+          </button>
+        )}
         <GripVerticalIcon className="w-6 h-6" />
+        {onMoveDown && (
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onMoveDown(item.id);
+            }}
+            disabled={!canMoveDown}
+            data-no-long-press
+            className={`p-1 rounded-md transition-colors ${
+              canMoveDown
+                ? 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer'
+                : 'text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50'
+            }`}
+            aria-label="下に移動"
+            title="下に移動"
+          >
+            <ChevronDownIcon className="w-4 h-4" />
+          </button>
+        )}
       </div>
 
       <div 
