@@ -156,12 +156,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     setActiveDropTarget({ id: item.id, position });
   };
 
-  const handleDragLeave = (e: React.DragEvent<HTMLDivElement>) => {
-     // 親コンテナから出たときのみリセットしたいが、子要素に入ったときも発火するため
-     // ここでは厳密なリセットはせず、DragOverで常に更新する戦略をとる
-     // 完全に外れた場合は、親のonDragLeaveなどで消すか、Drop時に消える
-  };
-
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
@@ -222,7 +216,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     <div 
       ref={containerRef}
       className="space-y-4 pb-24 relative"
-      onDragLeave={() => setActiveDropTarget(null)} // リスト全体から出たら消す
+      // ここでインライン関数を使用しているため、handleDragLeaveの定義は不要
+      onDragLeave={() => setActiveDropTarget(null)} 
     >
       {items.map((item, index) => (
         <div
