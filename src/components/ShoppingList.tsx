@@ -325,8 +325,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 </div>
             )}
 
-            {/* 範囲選択ボタンを表示 */}
-            {rangeInfo && index === rangeInfo.startIndex && onToggleRangeSelection && (
+            {/* 範囲選択ボタンを表示 - 起点と終点の間の全てのアイテムに表示 */}
+            {rangeInfo && index >= rangeInfo.startIndex && index <= rangeInfo.endIndex && onToggleRangeSelection && (
               <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-14 z-40 flex items-center">
                 <button
                   onClick={(e) => {
