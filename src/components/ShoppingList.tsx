@@ -354,7 +354,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 </div>
             )}
 
-            {/* チェーンをアイテムの右側（左列）または左側（右列）に表示 */}
+            {/* チェーンをアイテムの右側（左列: execute）または左側（右列: candidate）に表示 */}
             {rangeInfo && index >= rangeInfo.startIndex && index <= rangeInfo.endIndex && onToggleRangeSelection && (
               <div 
                 className={`absolute top-0 bottom-0 z-40 pointer-events-none ${
@@ -362,9 +362,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     ? 'left-0' 
                     : 'right-0'
                 }`}
-                style={{ width: '24px' }}
+                style={{ width: '32px' }}
               >
-                {/* チェーンの線とリンク */}
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -374,55 +373,91 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     rangeInfo.onlyStartEndSelected ? 'opacity-50 hover:opacity-100' : 'opacity-100'
                   }`}
                   style={{
-                    [columnType === 'candidate' ? 'left' : 'right']: '-28px',
+                    [columnType === 'candidate' ? 'left' : 'right']: '-34px',
                   }}
                   title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
                   data-no-long-press
                 >
                   <svg
-                    width="24"
+                    width="32"
                     height="100%"
-                    viewBox="0 0 24 100"
+                    viewBox="0 0 32 100"
                     preserveAspectRatio="none"
                     fill="none"
                     xmlns="http://www.w3.org/2000/svg"
                     className="w-full h-full"
                   >
-                    {/* 銀色のチェーン */}
                     <defs>
-                      <linearGradient id={`chainGradient-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stopColor="#d0d0d0" stopOpacity="1" />
-                        <stop offset="50%" stopColor="#f0f0f0" stopOpacity="1" />
-                        <stop offset="100%" stopColor="#b0b0b0" stopOpacity="1" />
+                      {/* 金属光沢のあるグラデーション */}
+                      <linearGradient id={`chainMetal-${item.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#e0e0e0" />
+                        <stop offset="50%" stopColor="#ffffff" />
+                        <stop offset="100%" stopColor="#a0a0a0" />
                       </linearGradient>
-                      <linearGradient id={`chainGradientVertical-${item.id}`} x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stopColor="#c0c0c0" stopOpacity="1" />
-                        <stop offset="50%" stopColor="#e8e8e8" stopOpacity="1" />
-                        <stop offset="100%" stopColor="#a0a0a0" stopOpacity="1" />
+                      
+                      <linearGradient id={`chainShadow-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                         <stop offset="0%" stopColor="#888" />
+                         <stop offset="100%" stopColor="#ddd" />
                       </linearGradient>
+
+                      {/* 鎖のパターン（縦方向の繰り返し） */}
+                      <pattern id={`chainPattern-${item.id}`} x="0" y="0" width="16" height="24" patternUnits="userSpaceOnUse">
+                        {/* 縦向きのコマ（メインの輪） */}
+                        <rect 
+                          x="3" y="2" 
+                          width="10" height="14" 
+                          rx="5" 
+                          stroke={`url(#chainMetal-${item.id})`} 
+                          strokeWidth="2.5" 
+                          fill="none"
+                          filter="drop-shadow(0 1px 1px rgb(0 0 0 / 0.3))"
+                        />
+                        {/* 繋ぎのコマ（横向きに見える部分） */}
+                        <rect 
+                          x="5.5" y="14" 
+                          width="5" height="10" 
+                          rx="2" 
+                          fill={`url(#chainShadow-${item.id})`} 
+                          stroke="#666" 
+                          strokeWidth="0.5" 
+                        />
+                      </pattern>
                     </defs>
-                    {/* チェーンの縦線（アイテムの高さに合わせて） */}
-                    <line 
-                      x1="12" 
-                      y1="0" 
-                      x2="12" 
-                      y2="100" 
-                      stroke={`url(#chainGradientVertical-${item.id})`} 
-                      strokeWidth="2" 
-                      strokeLinecap="round"
+
+                    {/* 垂直方向の鎖（パターンで描画） */}
+                    <rect 
+                      x="8" y="0" 
+                      width="16" height="100%" 
+                      fill={`url(#chainPattern-${item.id})`} 
                     />
-                    {/* チェーンのリンク（上） */}
-                    <ellipse cx="12" cy="8" rx="3" ry="2.5" fill={`url(#chainGradient-${item.id})`} stroke="#808080" strokeWidth="0.5" />
-                    {/* チェーンのリンク（中央） */}
-                    <ellipse cx="12" cy="50" rx="3" ry="2.5" fill={`url(#chainGradient-${item.id})`} stroke="#808080" strokeWidth="0.5" />
-                    {/* チェーンのリンク（下） */}
-                    <ellipse cx="12" cy="92" rx="3" ry="2.5" fill={`url(#chainGradient-${item.id})`} stroke="#808080" strokeWidth="0.5" />
+
+                    {/* アイテムカードから伸びるフック（接続部） */}
+                    {/* 右列(candidate)の場合は左側(-34px)に鎖があるので、右から左へフックを描画 */}
+                    {/* 左列(execute)の場合は右側(-34px)に鎖があるので、左から右へフックを描画 */}
+                    <path
+                      d={columnType === 'candidate'
+                        ? "M 32 50 H 16" // カード左端(32)から鎖の中心(16)へ
+                        : "M 0 50 H 16"  // カード右端(0)から鎖の中心(16)へ
+                      }
+                      stroke={`url(#chainMetal-${item.id})`}
+                      strokeWidth="4"
+                      strokeLinecap="round"
+                      fill="none"
+                      filter="drop-shadow(0 1px 1px rgb(0 0 0 / 0.3))"
+                    />
+                    {/* フックの根元（カード側）の装飾 */}
+                    <circle 
+                      cx={columnType === 'candidate' ? 30 : 2} 
+                      cy="50" 
+                      r="3" 
+                      fill="#aaa" 
+                    />
                   </svg>
                 </button>
               </div>
             )}
             
-            {/* アイテム間のチェーン（次のアイテムまで続く） */}
+            {/* アイテム間のチェーン（次のアイテムまで続く隙間埋め用） */}
             {rangeInfo && index >= rangeInfo.startIndex && index < rangeInfo.endIndex && onToggleRangeSelection && (
               <div 
                 className={`absolute bottom-0 z-50 pointer-events-none ${
@@ -431,9 +466,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     : 'right-0'
                 }`}
                 style={{ 
-                  width: '24px',
-                  height: '16px',
-                  [columnType === 'candidate' ? 'left' : 'right']: '-28px',
+                  width: '32px',
+                  height: '16px', // アイテム間のマージン分
+                  [columnType === 'candidate' ? 'left' : 'right']: '-34px',
                 }}
               >
                 <button
@@ -448,27 +483,19 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   data-no-long-press
                 >
                   <svg
-                    width="24"
+                    width="32"
                     height="16"
-                    viewBox="0 0 24 16"
+                    viewBox="0 0 32 16"
+                    preserveAspectRatio="none"
                     fill="none"
                     xmlns="http://www.w3.org/2000/svg"
                     className="w-full h-full"
                   >
-                    {/* 銀色のチェーンリンク */}
-                    <defs>
-                      <linearGradient id={`chainLinkGradient-${item.id}`} x1="0%" y1="0%" x2="0%" y2="100%">
-                        <stop offset="0%" stopColor="#c0c0c0" stopOpacity="1" />
-                        <stop offset="50%" stopColor="#e8e8e8" stopOpacity="1" />
-                        <stop offset="100%" stopColor="#a0a0a0" stopOpacity="1" />
-                      </linearGradient>
-                    </defs>
-                    {/* チェーンのリンク（上） */}
-                    <ellipse cx="12" cy="4" rx="3" ry="2.5" fill={`url(#chainLinkGradient-${item.id})`} stroke="#808080" strokeWidth="0.5" />
-                    {/* チェーンのリンク（下） */}
-                    <ellipse cx="12" cy="12" rx="3" ry="2.5" fill={`url(#chainLinkGradient-${item.id})`} stroke="#808080" strokeWidth="0.5" />
-                    {/* チェーンの連結部分（縦線） */}
-                    <line x1="12" y1="6.5" x2="12" y2="9.5" stroke={`url(#chainLinkGradient-${item.id})`} strokeWidth="2" strokeLinecap="round" />
+                     <rect 
+                      x="8" y="0" 
+                      width="16" height="100%" 
+                      fill={`url(#chainPattern-${item.id})`} // 同じパターンを使用
+                    />
                   </svg>
                 </button>
               </div>
