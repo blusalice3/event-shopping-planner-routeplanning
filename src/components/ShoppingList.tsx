@@ -129,12 +129,18 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     const maxIndex = Math.max(startIndex, endIndex);
     const rangeItems = items.slice(minIndex, maxIndex + 1);
     const allSelected = rangeItems.every(item => selectedItemIds.has(item.id));
+    // 起点と終点のみチェックされているか（間のアイテムがチェックされていないか）を判定
+    const onlyStartEndSelected = rangeItems.length > 2 && 
+      selectedItemIds.has(rangeItems[0].id) && 
+      selectedItemIds.has(rangeItems[rangeItems.length - 1].id) &&
+      rangeItems.slice(1, -1).every(item => !selectedItemIds.has(item.id));
 
     return {
       startIndex: minIndex,
       endIndex: maxIndex,
       rangeItems,
       allSelected,
+      onlyStartEndSelected,
     };
   }, [rangeStart, rangeEnd, columnType, items, selectedItemIds]);
 
@@ -325,23 +331,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 </div>
             )}
 
-            {/* 範囲選択ボタンを表示 - 起点と終点の間の全てのアイテムに表示 */}
-            {rangeInfo && index >= rangeInfo.startIndex && index <= rangeInfo.endIndex && onToggleRangeSelection && (
-              <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-14 z-40 flex items-center">
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleRangeSelection(columnType!);
-                  }}
-                  className="p-2 rounded-md bg-blue-600 hover:bg-blue-700 text-white shadow-lg transition-colors flex items-center justify-center"
-                  title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
-                  data-no-long-press
-                >
-                  <ChainLinkIcon className="w-5 h-5" />
-                </button>
-              </div>
-            )}
-
             <ShoppingItemCard
               item={item}
               onUpdate={onUpdateItem}
@@ -364,6 +353,126 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
                     <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
                 </div>
+            )}
+
+            {/* チェーンをアイテムの右側（左列）または左側（右列）に表示 */}
+            {rangeInfo && index >= rangeInfo.startIndex && index <= rangeInfo.endIndex && onToggleRangeSelection && (
+              <div 
+                className={`absolute top-0 bottom-0 z-40 pointer-events-none ${
+                  columnType === 'candidate' 
+                    ? 'left-0' 
+                    : 'right-0'
+                }`}
+                style={{ width: '24px' }}
+              >
+                {/* チェーンの線とリンク */}
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleRangeSelection(columnType!);
+                  }}
+                  className={`pointer-events-auto absolute w-full h-full transition-opacity ${
+                    rangeInfo.onlyStartEndSelected ? 'opacity-50 hover:opacity-100' : 'opacity-100'
+                  }`}
+                  style={{
+                    [columnType === 'candidate' ? 'left' : 'right']: '-28px',
+                  }}
+                  title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
+                  data-no-long-press
+                >
+                  <svg
+                    width="24"
+                    height="100%"
+                    viewBox="0 0 24 100"
+                    preserveAspectRatio="none"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-full h-full"
+                  >
+                    {/* 銀色のチェーン */}
+                    <defs>
+                      <linearGradient id={`chainGradient-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stopColor="#d0d0d0" stopOpacity="1" />
+                        <stop offset="50%" stopColor="#f0f0f0" stopOpacity="1" />
+                        <stop offset="100%" stopColor="#b0b0b0" stopOpacity="1" />
+                      </linearGradient>
+                      <linearGradient id={`chainGradientVertical-${item.id}`} x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#c0c0c0" stopOpacity="1" />
+                        <stop offset="50%" stopColor="#e8e8e8" stopOpacity="1" />
+                        <stop offset="100%" stopColor="#a0a0a0" stopOpacity="1" />
+                      </linearGradient>
+                    </defs>
+                    {/* チェーンの縦線（アイテムの高さに合わせて） */}
+                    <line 
+                      x1="12" 
+                      y1="0" 
+                      x2="12" 
+                      y2="100" 
+                      stroke={`url(#chainGradientVertical-${item.id})`} 
+                      strokeWidth="2" 
+                      strokeLinecap="round"
+                    />
+                    {/* チェーンのリンク（上） */}
+                    <ellipse cx="12" cy="8" rx="3" ry="2.5" fill={`url(#chainGradient-${item.id})`} stroke="#808080" strokeWidth="0.5" />
+                    {/* チェーンのリンク（中央） */}
+                    <ellipse cx="12" cy="50" rx="3" ry="2.5" fill={`url(#chainGradient-${item.id})`} stroke="#808080" strokeWidth="0.5" />
+                    {/* チェーンのリンク（下） */}
+                    <ellipse cx="12" cy="92" rx="3" ry="2.5" fill={`url(#chainGradient-${item.id})`} stroke="#808080" strokeWidth="0.5" />
+                  </svg>
+                </button>
+              </div>
+            )}
+            
+            {/* アイテム間のチェーン（次のアイテムまで続く） */}
+            {rangeInfo && index >= rangeInfo.startIndex && index < rangeInfo.endIndex && onToggleRangeSelection && (
+              <div 
+                className={`absolute bottom-0 z-50 pointer-events-none ${
+                  columnType === 'candidate' 
+                    ? 'left-0' 
+                    : 'right-0'
+                }`}
+                style={{ 
+                  width: '24px',
+                  height: '16px',
+                  [columnType === 'candidate' ? 'left' : 'right']: '-28px',
+                }}
+              >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onToggleRangeSelection(columnType!);
+                  }}
+                  className={`pointer-events-auto absolute w-full h-full transition-opacity ${
+                    rangeInfo.onlyStartEndSelected ? 'opacity-50 hover:opacity-100' : 'opacity-100'
+                  }`}
+                  title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
+                  data-no-long-press
+                >
+                  <svg
+                    width="24"
+                    height="16"
+                    viewBox="0 0 24 16"
+                    fill="none"
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-full h-full"
+                  >
+                    {/* 銀色のチェーンリンク */}
+                    <defs>
+                      <linearGradient id={`chainLinkGradient-${item.id}`} x1="0%" y1="0%" x2="0%" y2="100%">
+                        <stop offset="0%" stopColor="#c0c0c0" stopOpacity="1" />
+                        <stop offset="50%" stopColor="#e8e8e8" stopOpacity="1" />
+                        <stop offset="100%" stopColor="#a0a0a0" stopOpacity="1" />
+                      </linearGradient>
+                    </defs>
+                    {/* チェーンのリンク（上） */}
+                    <ellipse cx="12" cy="4" rx="3" ry="2.5" fill={`url(#chainLinkGradient-${item.id})`} stroke="#808080" strokeWidth="0.5" />
+                    {/* チェーンのリンク（下） */}
+                    <ellipse cx="12" cy="12" rx="3" ry="2.5" fill={`url(#chainLinkGradient-${item.id})`} stroke="#808080" strokeWidth="0.5" />
+                    {/* チェーンの連結部分（縦線） */}
+                    <line x1="12" y1="6.5" x2="12" y2="9.5" stroke={`url(#chainLinkGradient-${item.id})`} strokeWidth="2" strokeLinecap="round" />
+                  </svg>
+                </button>
+              </div>
             )}
         </div>
       ))}
