@@ -1,7 +1,6 @@
 import React, { useRef, useState, useMemo } from 'react';
 import { ShoppingItem } from '../types';
 import ShoppingItemCard from './ShoppingItemCard';
-import ChainLinkIcon from './icons/ChainLinkIcon';
 
 interface ShoppingListProps {
   items: ShoppingItem[];
