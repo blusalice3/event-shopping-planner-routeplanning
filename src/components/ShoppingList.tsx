@@ -108,7 +108,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  // 改善: ドロップ位置を「どのアイテムの」「上か下か」で厳密に管理
   const [activeDropTarget, setActiveDropTarget] = useState<{ id: string; position: 'top' | 'bottom' } | null>(null);
 
   const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
@@ -128,7 +127,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     const maxIndex = Math.max(startIndex, endIndex);
     const rangeItems = items.slice(minIndex, maxIndex + 1);
     const allSelected = rangeItems.every(item => selectedItemIds.has(item.id));
-    // 起点と終点のみチェックされているか（間のアイテムがチェックされていないか）を判定
+    
     const onlyStartEndSelected = rangeItems.length > 2 && 
       selectedItemIds.has(rangeItems[0].id) && 
       selectedItemIds.has(rangeItems[rangeItems.length - 1].id) &&
@@ -166,7 +165,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     e.preventDefault();
     e.stopPropagation();
 
-    // 自動スクロール機能
     const clientY = e.clientY;
     const windowHeight = window.innerHeight;
     if (clientY < TOP_SCROLL_TRIGGER_PX) {
@@ -175,23 +173,19 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       window.scrollBy(0, SCROLL_SPEED);
     }
 
-    // 列間移動かどうかを判定
     const isCrossColumn = dragSourceColumn.current !== null && dragSourceColumn.current !== columnType;
     
-    // 列内移動の場合、自分の上にはドロップ表示しない
     if (!isCrossColumn) {
       if (dragItem.current === item.id && selectedItemIds.size === 0) {
         setActiveDropTarget(null);
         return;
       }
-      // 選択済みアイテム同士でのホバーは何もしない
       if (selectedItemIds.has(item.id) && selectedItemIds.has(dragItem.current || '')) {
         setActiveDropTarget(null);
         return;
       }
     }
 
-    // カーソル位置で上半分か下半分かを判定
     const rect = e.currentTarget.getBoundingClientRect();
     const relativeY = e.clientY - rect.top;
     const position = relativeY < rect.height / 2 ? 'top' : 'bottom';
@@ -202,12 +196,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const handleContainerDragOver = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    // 空のリストへのドロップを許可（列間移動の場合のみ）
-    if (items.length === 0 && dragItem.current) {
-      // 空のリストへのドロップ位置を示すために、特別なマーカーを設定
-      // 実際のドロップ処理はhandleDropで行う
-    }
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
@@ -216,32 +204,25 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     
     const sourceColumn = e.dataTransfer.getData('sourceColumn') as 'execute' | 'candidate' | undefined;
     
-    // 列タイプが設定されていない場合は処理しない
     if (!columnType || !dragItem.current) {
       cleanUp();
       return;
     }
 
-    // 列間移動の場合、sourceColumnとcolumnTypeが異なることを許可
-    // 列内移動の場合、sourceColumnとcolumnTypeが一致する必要がある
     if (sourceColumn && sourceColumn === columnType) {
-      // 列内移動: activeDropTargetが必要
       if (!activeDropTarget) {
         cleanUp();
         return;
       }
     } else if (sourceColumn && sourceColumn !== columnType) {
-      // 列間移動: activeDropTargetがあればそれを使用、なければ末尾に追加
+      // Allow cross-column drop
     } else {
-      // sourceColumnが不明な場合は処理しない
       cleanUp();
       return;
     }
 
-    // 列間移動でactiveDropTargetがない場合（空のリストへのドロップ）
     if (!activeDropTarget) {
       if (sourceColumn && sourceColumn !== columnType) {
-        // 空のリストへの列間移動: 末尾に追加
         onMoveItem(dragItem.current, '__END_OF_LIST__', columnType, sourceColumn);
         cleanUp();
         return;
@@ -252,18 +233,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
     const { id: targetId, position } = activeDropTarget;
 
-    // 同じアイテムへのドロップは無視（ただし列間移動の場合は許可）
     if (dragItem.current === targetId && sourceColumn === columnType) {
         cleanUp();
         return;
     }
 
     if (position === 'top') {
-        // アイテムの上半分にドロップ -> そのアイテムの「前」に挿入 (targetIdのインデックスに挿入)
         onMoveItem(dragItem.current, targetId, columnType, sourceColumn);
     } else {
-        // アイテムの下半分にドロップ -> そのアイテムの「後」に挿入
-        // -> 「次のアイテム」の前、と解釈する
         const targetIndex = items.findIndex(i => i.id === targetId);
         if (targetIndex === -1) {
             cleanUp();
@@ -271,10 +248,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         }
         
         if (targetIndex === items.length - 1) {
-            // 最後のアイテムの下 -> 末尾に追加するための特別シグナルを送る
             onMoveItem(dragItem.current, '__END_OF_LIST__', columnType, sourceColumn);
         } else {
-            // 次のアイテムの前に挿入
             const nextItem = items[targetIndex + 1];
             onMoveItem(dragItem.current, nextItem.id, columnType, sourceColumn);
         }
@@ -306,7 +281,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     <div 
       ref={containerRef}
       className="space-y-4 pb-24 relative"
-      // ここでインライン関数を使用しているため、handleDragLeaveの定義は不要
       onDragLeave={() => setActiveDropTarget(null)} 
     >
       {items.map((item, index) => (
@@ -321,7 +295,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             className="transition-opacity duration-200 relative"
             data-is-selected={selectedItemIds.has(item.id)}
         >
-            {/* 改善: 視覚的にわかりやすいガイドバー (上) */}
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'top' && (
                 <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
                     <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
@@ -345,7 +318,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               canMoveDown={index < items.length - 1}
             />
 
-            {/* 改善: 視覚的にわかりやすいガイドバー (下) */}
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (
                 <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
                     <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
@@ -362,7 +334,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     ? 'left-0' 
                     : 'right-0'
                 }`}
-                style={{ width: '32px' }}
+                style={{ width: '40px' }}
               >
                 <button
                   onClick={(e) => {
@@ -373,102 +345,94 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     rangeInfo.onlyStartEndSelected ? 'opacity-50 hover:opacity-100' : 'opacity-100'
                   }`}
                   style={{
-                    [columnType === 'candidate' ? 'left' : 'right']: '-34px',
+                    [columnType === 'candidate' ? 'left' : 'right']: '-42px',
                   }}
                   title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
                   data-no-long-press
                 >
                   <svg
-                    width="32"
+                    width="40"
                     height="100%"
-                    viewBox="0 0 32 100"
-                    preserveAspectRatio="none"
-                    fill="none"
+                    preserveAspectRatio="none" // これにより高さに合わせてSVGが引き伸ばされるのではなく、viewBox内で描画領域を確保
                     xmlns="http://www.w3.org/2000/svg"
                     className="w-full h-full"
                   >
                     <defs>
-                      {/* 金属光沢のあるグラデーション */}
-                      <linearGradient id={`chainMetal-${item.id}`} x1="0%" y1="0%" x2="100%" y2="100%">
-                        <stop offset="0%" stopColor="#e0e0e0" />
-                        <stop offset="50%" stopColor="#ffffff" />
-                        <stop offset="100%" stopColor="#a0a0a0" />
-                      </linearGradient>
-                      
-                      <linearGradient id={`chainShadow-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                         <stop offset="0%" stopColor="#888" />
-                         <stop offset="100%" stopColor="#ddd" />
+                      {/* 金属のグラデーション */}
+                      <linearGradient id={`chainMetal-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stopColor="#9CA3AF" />
+                        <stop offset="30%" stopColor="#F3F4F6" /> {/* ハイライト */}
+                        <stop offset="50%" stopColor="#D1D5DB" />
+                        <stop offset="70%" stopColor="#9CA3AF" />
+                        <stop offset="100%" stopColor="#6B7280" />
                       </linearGradient>
 
-                      {/* 鎖のパターン（縦方向の繰り返し） */}
-                      <pattern id={`chainPattern-${item.id}`} x="0" y="0" width="16" height="24" patternUnits="userSpaceOnUse">
-                        {/* 縦向きのコマ（メインの輪） */}
-                        <rect 
-                          x="3" y="2" 
-                          width="10" height="14" 
-                          rx="5" 
-                          stroke={`url(#chainMetal-${item.id})`} 
-                          strokeWidth="2.5" 
-                          fill="none"
-                          filter="drop-shadow(0 1px 1px rgb(0 0 0 / 0.3))"
-                        />
-                        {/* 繋ぎのコマ（横向きに見える部分） */}
-                        <rect 
-                          x="5.5" y="14" 
-                          width="5" height="10" 
-                          rx="2" 
-                          fill={`url(#chainShadow-${item.id})`} 
-                          stroke="#666" 
-                          strokeWidth="0.5" 
-                        />
+                       {/* パターンの定義: 高さ20pxで1単位の鎖を描画 */}
+                       {/* patternUnits="userSpaceOnUse" を使用して、連続性を保つ */}
+                      <pattern id={`chainPattern-${item.id}`} x="0" y="0" width="40" height="20" patternUnits="userSpaceOnUse">
+                         {/* 縦の大きなリング (メイン) */}
+                         <rect x="14" y="-2" width="12" height="18" rx="6" fill="none" stroke={`url(#chainMetal-${item.id})`} strokeWidth="3" />
+                         
+                         {/* 繋ぎ目の小さなリング (水平) */}
+                         {/* 縦リングの中央あたりに配置して次の縦リングと繋ぐ */}
+                         <rect x="17" y="13" width="6" height="8" rx="2" fill={`url(#chainMetal-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
                       </pattern>
                     </defs>
 
-                    {/* 垂直方向の鎖（パターンで描画） */}
-                    <rect 
-                      x="8" y="0" 
-                      width="16" height="100%" 
-                      fill={`url(#chainPattern-${item.id})`} 
-                    />
+                    {/* 鎖の描画 (背景として全体に) */}
+                    <rect x="0" y="0" width="40" height="100%" fill={`url(#chainPattern-${item.id})`} />
 
-                    {/* アイテムカードから伸びるフック（接続部） */}
-                    {/* 右列(candidate)の場合は左側(-34px)に鎖があるので、右から左へフックを描画 */}
-                    {/* 左列(execute)の場合は右側(-34px)に鎖があるので、左から右へフックを描画 */}
-                    <path
-                      d={columnType === 'candidate'
-                        ? "M 32 50 H 16" // カード左端(32)から鎖の中心(16)へ
-                        : "M 0 50 H 16"  // カード右端(0)から鎖の中心(16)へ
-                      }
-                      stroke={`url(#chainMetal-${item.id})`}
-                      strokeWidth="4"
-                      strokeLinecap="round"
-                      fill="none"
-                      filter="drop-shadow(0 1px 1px rgb(0 0 0 / 0.3))"
-                    />
-                    {/* フックの根元（カード側）の装飾 */}
-                    <circle 
-                      cx={columnType === 'candidate' ? 30 : 2} 
-                      cy="50" 
-                      r="3" 
-                      fill="#aaa" 
-                    />
+                    {/* フック（アイテムと鎖を繋ぐ金具） */}
+                    {/* アイテムの中央の高さに配置 */}
+                    <g transform="translate(0, 50)"> 
+                        {/* 左列(execute)の場合: 右側の鎖へフックを伸ばす */}
+                        {/* 右列(candidate)の場合: 左側の鎖へフックを伸ばす */}
+                        {columnType === 'candidate' ? (
+                            // 右列: 左の鎖(-42px地点)へ向かってカード左端からフックが出る
+                            <path 
+                                d="M 40 0 L 20 0" 
+                                stroke={`url(#chainMetal-${item.id})`} 
+                                strokeWidth="4" 
+                                strokeLinecap="round"
+                                fill="none"
+                            />
+                        ) : (
+                            // 左列: 右の鎖へ向かってカード右端からフックが出る
+                            <path 
+                                d="M 0 0 L 20 0" 
+                                stroke={`url(#chainMetal-${item.id})`} 
+                                strokeWidth="4" 
+                                strokeLinecap="round"
+                                fill="none"
+                            />
+                        )}
+                        
+                        {/* フックの先端（鎖を掴んでいる部分） */}
+                        <circle cx="20" cy="0" r="4" fill={`url(#chainMetal-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
+                        
+                        {/* フックの根元（カード側） */}
+                        <circle 
+                            cx={columnType === 'candidate' ? 38 : 2} 
+                            cy="0" 
+                            r="3" 
+                            fill="#9CA3AF" 
+                        />
+                    </g>
                   </svg>
                 </button>
               </div>
             )}
             
-            {/* アイテム間のチェーン（次のアイテムまで続く隙間埋め用） */}
+            {/* アイテム間の隙間を埋めるチェーン */}
             {rangeInfo && index >= rangeInfo.startIndex && index < rangeInfo.endIndex && onToggleRangeSelection && (
               <div 
                 className={`absolute bottom-0 z-50 pointer-events-none ${
-                  columnType === 'candidate' 
-                    ? 'left-0' 
-                    : 'right-0'
+                  columnType === 'candidate' ? 'left-0' : 'right-0'
                 }`}
                 style={{ 
-                  width: '32px',
-                  height: '16px', // アイテム間のマージン分
-                  [columnType === 'candidate' ? 'left' : 'right']: '-34px',
+                  width: '40px',
+                  height: '16px',
+                  [columnType === 'candidate' ? 'left' : 'right']: '-42px',
                 }}
               >
                 <button
@@ -482,20 +446,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
                   data-no-long-press
                 >
-                  <svg
-                    width="32"
-                    height="16"
-                    viewBox="0 0 32 16"
-                    preserveAspectRatio="none"
-                    fill="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="w-full h-full"
-                  >
-                     <rect 
-                      x="8" y="0" 
-                      width="16" height="100%" 
-                      fill={`url(#chainPattern-${item.id})`} // 同じパターンを使用
-                    />
+                  <svg width="40" height="16" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
+                     <rect x="0" y="0" width="40" height="100%" fill={`url(#chainPattern-${item.id})`} />
                   </svg>
                 </button>
               </div>
