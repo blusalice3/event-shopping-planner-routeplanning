@@ -283,7 +283,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       className="space-y-4 pb-24 relative"
       onDragLeave={() => setActiveDropTarget(null)} 
     >
-      {items.map((item, index) => (
+      {items.map((item, index) => {
+        // 範囲選択内かどうか判定
+        const isInRange = rangeInfo && index >= rangeInfo.startIndex && index <= rangeInfo.endIndex;
+        const isStart = rangeInfo && index === rangeInfo.startIndex;
+        const isEnd = rangeInfo && index === rangeInfo.endIndex;
+        const isMiddle = rangeInfo && index > rangeInfo.startIndex && index < rangeInfo.endIndex;
+
+        return (
         <div
             key={item.id}
             data-item-id={item.id}
@@ -327,7 +334,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             )}
 
             {/* チェーンをアイテムの右側（左列: execute）または左側（右列: candidate）に表示 */}
-            {rangeInfo && index >= rangeInfo.startIndex && index <= rangeInfo.endIndex && onToggleRangeSelection && (
+            {isInRange && onToggleRangeSelection && (
               <div 
                 className={`absolute top-0 bottom-0 z-40 pointer-events-none ${
                   columnType === 'candidate' 
@@ -353,42 +360,41 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   <svg
                     width="40"
                     height="100%"
-                    preserveAspectRatio="none" // これにより高さに合わせてSVGが引き伸ばされるのではなく、viewBox内で描画領域を確保
+                    preserveAspectRatio="none"
                     xmlns="http://www.w3.org/2000/svg"
                     className="w-full h-full"
                   >
                     <defs>
-                      {/* 金属のグラデーション */}
                       <linearGradient id={`chainMetal-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
                         <stop offset="0%" stopColor="#9CA3AF" />
-                        <stop offset="30%" stopColor="#F3F4F6" /> {/* ハイライト */}
+                        <stop offset="30%" stopColor="#F3F4F6" />
                         <stop offset="50%" stopColor="#D1D5DB" />
                         <stop offset="70%" stopColor="#9CA3AF" />
                         <stop offset="100%" stopColor="#6B7280" />
                       </linearGradient>
-
-                       {/* パターンの定義: 高さ20pxで1単位の鎖を描画 */}
-                       {/* patternUnits="userSpaceOnUse" を使用して、連続性を保つ */}
                       <pattern id={`chainPattern-${item.id}`} x="0" y="0" width="40" height="20" patternUnits="userSpaceOnUse">
-                         {/* 縦の大きなリング (メイン) */}
                          <rect x="14" y="-2" width="12" height="18" rx="6" fill="none" stroke={`url(#chainMetal-${item.id})`} strokeWidth="3" />
-                         
-                         {/* 繋ぎ目の小さなリング (水平) */}
-                         {/* 縦リングの中央あたりに配置して次の縦リングと繋ぐ */}
                          <rect x="17" y="13" width="6" height="8" rx="2" fill={`url(#chainMetal-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
                       </pattern>
                     </defs>
 
-                    {/* 鎖の描画 (背景として全体に) */}
-                    <rect x="0" y="0" width="40" height="100%" fill={`url(#chainPattern-${item.id})`} />
+                    {/* チェーンの描画範囲を制御 */}
+                    {isStart && (
+                        // 起点: 中央から下まで
+                        <rect x="0" y="50%" width="40" height="50%" fill={`url(#chainPattern-${item.id})`} />
+                    )}
+                    {isEnd && (
+                        // 終点: 上から中央まで
+                        <rect x="0" y="0" width="40" height="50%" fill={`url(#chainPattern-${item.id})`} />
+                    )}
+                    {isMiddle && (
+                        // 間: 全体
+                        <rect x="0" y="0" width="40" height="100%" fill={`url(#chainPattern-${item.id})`} />
+                    )}
 
-                    {/* フック（アイテムと鎖を繋ぐ金具） */}
-                    {/* アイテムの中央の高さに配置 */}
+                    {/* フック（アイテムと鎖を繋ぐ金具） - 全ての範囲内アイテムに表示 */}
                     <g transform="translate(0, 50)"> 
-                        {/* 左列(execute)の場合: 右側の鎖へフックを伸ばす */}
-                        {/* 右列(candidate)の場合: 左側の鎖へフックを伸ばす */}
                         {columnType === 'candidate' ? (
-                            // 右列: 左の鎖(-42px地点)へ向かってカード左端からフックが出る
                             <path 
                                 d="M 40 0 L 20 0" 
                                 stroke={`url(#chainMetal-${item.id})`} 
@@ -397,7 +403,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                 fill="none"
                             />
                         ) : (
-                            // 左列: 右の鎖へ向かってカード右端からフックが出る
                             <path 
                                 d="M 0 0 L 20 0" 
                                 stroke={`url(#chainMetal-${item.id})`} 
@@ -406,11 +411,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                 fill="none"
                             />
                         )}
-                        
-                        {/* フックの先端（鎖を掴んでいる部分） */}
                         <circle cx="20" cy="0" r="4" fill={`url(#chainMetal-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
-                        
-                        {/* フックの根元（カード側） */}
                         <circle 
                             cx={columnType === 'candidate' ? 38 : 2} 
                             cy="0" 
@@ -424,7 +425,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             )}
             
             {/* アイテム間の隙間を埋めるチェーン */}
-            {rangeInfo && index >= rangeInfo.startIndex && index < rangeInfo.endIndex && onToggleRangeSelection && (
+            {rangeInfo && (isStart || isMiddle) && onToggleRangeSelection && (
               <div 
                 className={`absolute bottom-0 z-50 pointer-events-none ${
                   columnType === 'candidate' ? 'left-0' : 'right-0'
@@ -447,13 +448,27 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   data-no-long-press
                 >
                   <svg width="40" height="16" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-                     <rect x="0" y="0" width="40" height="100%" fill={`url(#chainPattern-${item.id})`} />
+                     {/* パターン定義を再利用するためにdefsを定義（本当はuseタグを使いたいが、IDスコープが面倒なので再定義） */}
+                     <defs>
+                      <linearGradient id={`chainMetal-gap-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" stopColor="#9CA3AF" />
+                        <stop offset="30%" stopColor="#F3F4F6" />
+                        <stop offset="50%" stopColor="#D1D5DB" />
+                        <stop offset="70%" stopColor="#9CA3AF" />
+                        <stop offset="100%" stopColor="#6B7280" />
+                      </linearGradient>
+                      <pattern id={`chainPattern-gap-${item.id}`} x="0" y="0" width="40" height="20" patternUnits="userSpaceOnUse">
+                         <rect x="14" y="-2" width="12" height="18" rx="6" fill="none" stroke={`url(#chainMetal-gap-${item.id})`} strokeWidth="3" />
+                         <rect x="17" y="13" width="6" height="8" rx="2" fill={`url(#chainMetal-gap-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
+                      </pattern>
+                    </defs>
+                     <rect x="0" y="0" width="40" height="100%" fill={`url(#chainPattern-gap-${item.id})`} />
                   </svg>
                 </button>
               </div>
             )}
         </div>
-      ))}
+      )})}
     </div>
   );
 };
