@@ -1244,9 +1244,14 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         currentItems = executeIds.map(id => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
       } else {
         const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-        currentItems = items.filter(item => 
+        let filtered = items.filter(item => 
           item.eventDate === currentEventDate && !executeIds.has(item.id)
         );
+        // ブロックフィルタを適用
+        if (selectedBlockFilters.size > 0) {
+          filtered = filtered.filter(item => selectedBlockFilters.has(item.block));
+        }
+        currentItems = filtered;
       }
     }
     
@@ -1291,7 +1296,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         
         return newSet;
     });
-  }, [activeTab, activeEventName, executeModeItems, eventDates, rangeStart, rangeEnd, items]);
+  }, [activeTab, activeEventName, executeModeItems, eventDates, rangeStart, rangeEnd, items, selectedBlockFilters]);
 
   const handleToggleBlockFilter = useCallback((block: string) => {
     setSelectedBlockFilters(prev => {
@@ -1414,9 +1419,14 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       currentItems = executeIds.map(id => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
     } else {
       const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-      currentItems = items.filter(item => 
+      let filtered = items.filter(item => 
         item.eventDate === currentEventDate && !executeIds.has(item.id)
       );
+      // ブロックフィルタを適用
+      if (selectedBlockFilters.size > 0) {
+        filtered = filtered.filter(item => selectedBlockFilters.has(item.block));
+      }
+      currentItems = filtered;
     }
     
     const startIndex = currentItems.findIndex(item => item.id === rangeStart.itemId);
@@ -1444,7 +1454,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       }
       return newSet;
     });
-  }, [rangeStart, rangeEnd, activeTab, activeEventName, eventDates, executeModeItems, items]);
+  }, [rangeStart, rangeEnd, activeTab, activeEventName, eventDates, executeModeItems, items, selectedBlockFilters]);
 
   const handleBulkSort = useCallback((direction: BulkSortDirection) => {
     if (!activeEventName || selectedItemIds.size === 0) return;
