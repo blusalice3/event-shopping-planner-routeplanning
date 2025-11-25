@@ -100,6 +100,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   currentDay: _currentDay,
   onMoveItemUp,
   onMoveItemDown,
+  rangeStart,
+  rangeEnd,
+  onToggleRangeSelection,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
