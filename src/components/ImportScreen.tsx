@@ -8,7 +8,6 @@ interface ImportScreenProps {
   itemToEdit: ShoppingItem | null;
   onUpdateItem: (item: ShoppingItem) => void;
   onDoneEditing: () => void;
-  availableEventDates?: string[]; // 既存イベントの参加日リスト
 }
 
 const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName, itemToEdit, onUpdateItem, onDoneEditing }) => {
@@ -32,6 +31,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
   const [singleTitle, setSingleTitle] = useState('');
   const [singlePrice, setSinglePrice] = useState('0');
   const [singleRemarks, setSingleRemarks] = useState('');
+  const [isCustomEventDate, setIsCustomEventDate] = useState(false);
   
   const isEditing = itemToEdit !== null;
   const isCreatingNew = activeEventName === null;
@@ -39,7 +39,10 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
   useEffect(() => {
     if (isEditing) {
         setSingleCircle(itemToEdit.circle);
-        setSingleEventDate(itemToEdit.eventDate);
+        const eventDate = itemToEdit.eventDate;
+        setSingleEventDate(eventDate);
+        // 標準の参加日（1日目〜4日目）でない場合はカスタム入力モードにする
+        setIsCustomEventDate(!['1日目', '2日目', '3日目', '4日目'].includes(eventDate));
         setSingleBlock(itemToEdit.block);
         setSingleNumber(itemToEdit.number);
         setSingleTitle(itemToEdit.title);
@@ -293,6 +296,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
   const resetSingleForm = () => {
     setSingleCircle('');
     setSingleEventDate('1日目');
+    setIsCustomEventDate(false);
     setSingleBlock('');
     setSingleNumber('');
     setSingleTitle('');
@@ -507,21 +511,48 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <label htmlFor="singleEventDate" className={labelClass}>参加日</label>
-                        {availableEventDates.length > 0 ? (
-                            <select id="singleEventDate" value={singleEventDate} onChange={e => setSingleEventDate(e.target.value)} className={formInputClass}>
-                                {availableEventDates.map(date => (
-                                    <option key={date} value={date}>{date}</option>
-                                ))}
-                            </select>
+                        {isCustomEventDate ? (
+                            <div className="flex gap-2">
+                                <input 
+                                    type="text" 
+                                    id="singleEventDate" 
+                                    value={singleEventDate} 
+                                    onChange={e => setSingleEventDate(e.target.value)} 
+                                    className={formInputClass} 
+                                    placeholder="1日目" 
+                                />
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setIsCustomEventDate(false);
+                                        setSingleEventDate('1日目');
+                                    }}
+                                    className="px-3 py-2 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-md transition-colors whitespace-nowrap text-sm"
+                                >
+                                    選択に戻す
+                                </button>
+                            </div>
                         ) : (
-                            <input 
-                                type="text" 
+                            <select 
                                 id="singleEventDate" 
                                 value={singleEventDate} 
-                                onChange={e => setSingleEventDate(e.target.value)} 
-                                className={formInputClass} 
-                                placeholder="1日目" 
-                            />
+                                onChange={e => {
+                                    const value = e.target.value;
+                                    if (value === '__custom__') {
+                                        setIsCustomEventDate(true);
+                                        setSingleEventDate('');
+                                    } else {
+                                        setSingleEventDate(value);
+                                    }
+                                }} 
+                                className={formInputClass}
+                            >
+                                <option value="1日目">1日目</option>
+                                <option value="2日目">2日目</option>
+                                <option value="3日目">3日目</option>
+                                <option value="4日目">4日目</option>
+                                <option value="__custom__">任意の値を入力</option>
+                            </select>
                         )}
                     </div>
                     <div><label htmlFor="singleBlock" className={labelClass}>ブロック</label><input type="text" id="singleBlock" value={singleBlock} onChange={e => setSingleBlock(e.target.value)} className={formInputClass} placeholder="東1" /></div>
