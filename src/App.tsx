@@ -901,6 +901,14 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     
     const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
     
+    // 範囲選択の起点・終点が移動対象に含まれている場合、範囲選択をリセット
+    if (rangeStart && itemIds.includes(rangeStart.itemId) && rangeStart.columnType === 'candidate') {
+      setRangeStart(null);
+      setRangeEnd(null);
+    } else if (rangeEnd && itemIds.includes(rangeEnd.itemId) && rangeEnd.columnType === 'candidate') {
+      setRangeEnd(null);
+    }
+    
     setExecuteModeItems(prev => {
       const eventItems = prev[activeEventName] || {};
       const currentDayItems = new Set(eventItems[currentEventDate] || []);
@@ -918,12 +926,20 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     });
     
     setSelectedItemIds(new Set());
-  }, [activeEventName, activeTab, eventDates]);
+  }, [activeEventName, activeTab, eventDates, rangeStart, rangeEnd]);
 
   const handleRemoveFromExecuteColumn = useCallback((itemIds: string[]) => {
     if (!activeEventName) return;
     
     const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    
+    // 範囲選択の起点・終点が移動対象に含まれている場合、範囲選択をリセット
+    if (rangeStart && itemIds.includes(rangeStart.itemId) && rangeStart.columnType === 'execute') {
+      setRangeStart(null);
+      setRangeEnd(null);
+    } else if (rangeEnd && itemIds.includes(rangeEnd.itemId) && rangeEnd.columnType === 'execute') {
+      setRangeEnd(null);
+    }
     
     setExecuteModeItems(prev => {
       const eventItems = prev[activeEventName] || {};
@@ -939,7 +955,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     });
     
     setSelectedItemIds(new Set());
-  }, [activeEventName, activeTab, eventDates]);
+  }, [activeEventName, activeTab, eventDates, rangeStart, rangeEnd]);
 
   const handleToggleMode = useCallback(() => {
     if (!activeEventName) return;
