@@ -63,6 +63,9 @@ const App: React.FC = () => {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [selectedBlockFilters, setSelectedBlockFilters] = useState<Set<string>>(new Set());
   const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
+  // 起点と終点を管理（列タイプとアイテムIDのペア）
+  const [rangeStart, setRangeStart] = useState<{ itemId: string; columnType: 'execute' | 'candidate' } | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<{ itemId: string; columnType: 'execute' | 'candidate' } | null>(null);
 
   // 更新機能用の状態
   const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
@@ -898,6 +901,14 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     
     const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
     
+    // 範囲選択の起点・終点が移動対象に含まれている場合、範囲選択をリセット
+    if (rangeStart && itemIds.includes(rangeStart.itemId) && rangeStart.columnType === 'candidate') {
+      setRangeStart(null);
+      setRangeEnd(null);
+    } else if (rangeEnd && itemIds.includes(rangeEnd.itemId) && rangeEnd.columnType === 'candidate') {
+      setRangeEnd(null);
+    }
+    
     setExecuteModeItems(prev => {
       const eventItems = prev[activeEventName] || {};
       const currentDayItems = new Set(eventItems[currentEventDate] || []);
@@ -915,12 +926,20 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     });
     
     setSelectedItemIds(new Set());
-  }, [activeEventName, activeTab, eventDates]);
+  }, [activeEventName, activeTab, eventDates, rangeStart, rangeEnd]);
 
   const handleRemoveFromExecuteColumn = useCallback((itemIds: string[]) => {
     if (!activeEventName) return;
     
     const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    
+    // 範囲選択の起点・終点が移動対象に含まれている場合、範囲選択をリセット
+    if (rangeStart && itemIds.includes(rangeStart.itemId) && rangeStart.columnType === 'execute') {
+      setRangeStart(null);
+      setRangeEnd(null);
+    } else if (rangeEnd && itemIds.includes(rangeEnd.itemId) && rangeEnd.columnType === 'execute') {
+      setRangeEnd(null);
+    }
     
     setExecuteModeItems(prev => {
       const eventItems = prev[activeEventName] || {};
@@ -936,7 +955,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     });
     
     setSelectedItemIds(new Set());
-  }, [activeEventName, activeTab, eventDates]);
+  }, [activeEventName, activeTab, eventDates, rangeStart, rangeEnd]);
 
   const handleToggleMode = useCallback(() => {
     if (!activeEventName) return;
@@ -1207,19 +1226,77 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     }
   };
 
-  const handleSelectItem = useCallback((itemId: string) => {
+  const handleSelectItem = useCallback((itemId: string, columnType?: 'execute' | 'candidate') => {
     setSortState('Manual');
     setBlockSortDirection(null);
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const currentColumnType = columnType || (activeEventName ? 
+      (executeModeItems[activeEventName]?.[currentEventDate]?.includes(itemId) ? 'execute' : 'candidate') : 
+      'execute');
+    
+    // 現在の列のアイテムを直接計算
+    let currentItems: ShoppingItem[] = [];
+    if (activeEventName) {
+      if (currentColumnType === 'execute') {
+        const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+        const itemsMap = new Map(items.map(item => [item.id, item]));
+        currentItems = executeIds.map(id => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+      } else {
+        const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+        let filtered = items.filter(item => 
+          item.eventDate === currentEventDate && !executeIds.has(item.id)
+        );
+        // ブロックフィルタを適用
+        if (selectedBlockFilters.size > 0) {
+          filtered = filtered.filter(item => selectedBlockFilters.has(item.block));
+        }
+        currentItems = filtered;
+      }
+    }
+    
     setSelectedItemIds(prev => {
         const newSet = new Set(prev);
-        if (newSet.has(itemId)) {
+        const wasSelected = newSet.has(itemId);
+        
+        if (wasSelected) {
             newSet.delete(itemId);
+            // 選択解除時は起点・終点をリセット
+            if (rangeStart?.itemId === itemId && rangeStart.columnType === currentColumnType) {
+                setRangeStart(null);
+                setRangeEnd(null);
+            } else if (rangeEnd?.itemId === itemId && rangeEnd.columnType === currentColumnType) {
+                setRangeEnd(null);
+            }
         } else {
             newSet.add(itemId);
+            
+            // 起点が未設定の場合、または異なる列の場合は起点を設定
+            if (!rangeStart || rangeStart.columnType !== currentColumnType) {
+                setRangeStart({ itemId, columnType: currentColumnType });
+                setRangeEnd(null);
+            } else {
+                // 起点が設定済みで、同じ列の場合
+                // 起点の直上または直下のアイテムかチェック
+                const startIndex = currentItems.findIndex(item => item.id === rangeStart.itemId);
+                const currentIndex = currentItems.findIndex(item => item.id === itemId);
+                
+                // 起点の直上または直下でない場合のみ終点として設定
+                if (startIndex !== -1 && currentIndex !== -1) {
+                    const isAdjacent = Math.abs(startIndex - currentIndex) === 1;
+                    if (!isAdjacent) {
+                        setRangeEnd({ itemId, columnType: currentColumnType });
+                    } else {
+                        // 直上または直下の場合は終点をリセット
+                        setRangeEnd(null);
+                    }
+                }
+            }
         }
+        
         return newSet;
     });
-  }, []);
+  }, [activeTab, activeEventName, executeModeItems, eventDates, rangeStart, rangeEnd, items, selectedBlockFilters]);
 
   const handleToggleBlockFilter = useCallback((block: string) => {
     setSelectedBlockFilters(prev => {
@@ -1320,7 +1397,64 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
 
   const handleClearSelection = useCallback(() => {
     setSelectedItemIds(new Set());
+    setRangeStart(null);
+    setRangeEnd(null);
   }, []);
+
+  // 範囲内のアイテムを一括でチェック/チェック解除する関数
+  const handleToggleRangeSelection = useCallback((columnType: 'execute' | 'candidate') => {
+    if (!rangeStart || rangeStart.columnType !== columnType || !rangeEnd || rangeEnd.columnType !== columnType) {
+      return;
+    }
+
+    if (!activeEventName) return;
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    
+    // 現在の列のアイテムを直接計算
+    let currentItems: ShoppingItem[] = [];
+    if (columnType === 'execute') {
+      const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+      const itemsMap = new Map(items.map(item => [item.id, item]));
+      currentItems = executeIds.map(id => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+    } else {
+      const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+      let filtered = items.filter(item => 
+        item.eventDate === currentEventDate && !executeIds.has(item.id)
+      );
+      // ブロックフィルタを適用
+      if (selectedBlockFilters.size > 0) {
+        filtered = filtered.filter(item => selectedBlockFilters.has(item.block));
+      }
+      currentItems = filtered;
+    }
+    
+    const startIndex = currentItems.findIndex(item => item.id === rangeStart.itemId);
+    const endIndex = currentItems.findIndex(item => item.id === rangeEnd.itemId);
+    
+    if (startIndex === -1 || endIndex === -1) return;
+    
+    const minIndex = Math.min(startIndex, endIndex);
+    const maxIndex = Math.max(startIndex, endIndex);
+    const rangeItems = currentItems.slice(minIndex, maxIndex + 1);
+    
+    // 範囲内のアイテムが全てチェック済みかチェック
+    setSelectedItemIds(prev => {
+      const allSelected = rangeItems.every(item => prev.has(item.id));
+      const newSet = new Set(prev);
+      if (allSelected) {
+        // 全てチェック済みの場合はチェックを外す
+        // チェック解除時は起点・終点もリセット（画面右上の✖ボタンと同様の動作）
+        rangeItems.forEach(item => newSet.delete(item.id));
+        setRangeStart(null);
+        setRangeEnd(null);
+      } else {
+        // 未チェックのアイテムがある場合は全てチェックを入れる
+        rangeItems.forEach(item => newSet.add(item.id));
+      }
+      return newSet;
+    });
+  }, [rangeStart, rangeEnd, activeTab, activeEventName, eventDates, executeModeItems, items, selectedBlockFilters]);
 
   const handleBulkSort = useCallback((direction: BulkSortDirection) => {
     if (!activeEventName || selectedItemIds.size === 0) return;
@@ -2078,6 +2212,9 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     currentDay={eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}
                     onMoveItemUp={handleMoveItemUp}
                     onMoveItemDown={handleMoveItemDown}
+                    rangeStart={rangeStart}
+                    rangeEnd={rangeEnd}
+                    onToggleRangeSelection={handleToggleRangeSelection}
                   />
                 </div>
                 
@@ -2153,6 +2290,9 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     currentDay={eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}
                     onMoveItemUp={handleMoveItemUp}
                     onMoveItemDown={handleMoveItemDown}
+                    rangeStart={rangeStart}
+                    rangeEnd={rangeEnd}
+                    onToggleRangeSelection={handleToggleRangeSelection}
                   />
                 </div>
               </div>
@@ -2169,6 +2309,9 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 currentDay={eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}
                 onMoveItemUp={handleMoveItemUp}
                 onMoveItemDown={handleMoveItemDown}
+                rangeStart={rangeStart}
+                rangeEnd={rangeEnd}
+                onToggleRangeSelection={handleToggleRangeSelection}
               />
             )}
           </div>
