@@ -213,8 +213,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10 px-2">
           {hasDuplicateCircleWarning && hasRemarksWarning ? (
             <>
-              <span className="text-gray-500 dark:text-gray-400 text-3xl font-bold opacity-30 leading-tight">{duplicateCircleWarning}</span>
-              <span className="text-gray-500 dark:text-gray-400 text-3xl font-bold opacity-30 leading-tight mt-1">{remarksWarning}</span>
+              <span className="text-gray-500 dark:text-gray-400 text-3.5xl font-bold opacity-30 leading-tight">{duplicateCircleWarning}</span>
+              <span className="text-gray-500 dark:text-gray-400 text-3.5xl font-bold opacity-30 leading-tight mt-1">{remarksWarning}</span>
             </>
           ) : hasDuplicateCircleWarning ? (
             <span className="text-gray-500 dark:text-gray-400 text-5xl font-bold opacity-30">{duplicateCircleWarning}</span>
