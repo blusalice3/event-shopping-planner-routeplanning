@@ -23,6 +23,7 @@ export interface ShoppingItemCardProps {
   onMoveDown?: (itemId: string) => void;
   canMoveUp?: boolean;
   canMoveDown?: boolean;
+  isDuplicateCircle?: boolean;
 }
 
 const statusConfig: Record<PurchaseStatus, { label: string; icon: React.FC<any>; color: string; dim: boolean; bg: string; }> = {
@@ -48,6 +49,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   onMoveDown,
   canMoveUp = true,
   canMoveDown = true,
+  isDuplicateCircle = false,
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const longPressTimeout = useRef<number | null>(null);
@@ -142,6 +144,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     return null;
   }, [item.remarks]);
 
+  // 重複サークル警告と備考欄警告の両方を表示するかどうか
+  const hasDuplicateCircleWarning = isDuplicateCircle;
+  const hasRemarksWarning = remarksWarning !== null;
+  const duplicateCircleWarning = '⚠️複数購入サークル';
+
   // 未購入の場合はブロックベースの色を使用、それ以外は購入状態の色を優先
   const isUnpurchased = item.purchaseStatus === 'None';
   const useBlockColor = isUnpurchased && blockBackgroundColor;
@@ -202,9 +209,18 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     >
       {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>}
       {statusBgOverlay && <div className={statusBgOverlay}></div>}
-      {remarksWarning && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none z-10">
-          <span className="text-gray-500 dark:text-gray-400 text-5xl font-bold opacity-40">{remarksWarning}</span>
+      {(hasDuplicateCircleWarning || hasRemarksWarning) && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10 px-2">
+          {hasDuplicateCircleWarning && hasRemarksWarning ? (
+            <>
+              <span className="text-gray-500 dark:text-gray-400 text-2xl font-bold opacity-40 leading-tight">{duplicateCircleWarning}</span>
+              <span className="text-gray-500 dark:text-gray-400 text-2xl font-bold opacity-40 leading-tight mt-1">{remarksWarning}</span>
+            </>
+          ) : hasDuplicateCircleWarning ? (
+            <span className="text-gray-500 dark:text-gray-400 text-5xl font-bold opacity-40">{duplicateCircleWarning}</span>
+          ) : (
+            <span className="text-gray-500 dark:text-gray-400 text-5xl font-bold opacity-40">{remarksWarning}</span>
+          )}
         </div>
       )}
       <div data-drag-handle className="relative p-3 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-2 z-10">
