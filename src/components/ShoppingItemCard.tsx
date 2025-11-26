@@ -298,8 +298,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                             key={index}
                             src={`/${tag}.png`}
                             alt={tag}
-                            className="h-6 w-auto object-contain"
-                            style={{ height: '1.5rem' }}
+                            className="h-8 w-auto object-contain"
+                            style={{ height: '2rem' }}
                         />
                     ))}
                 </div>
@@ -330,7 +330,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         )}
         <button 
           onClick={togglePurchaseStatus} 
-          className="flex items-center space-x-2 p-2 -m-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors relative z-10"
+          className="flex items-center space-x-2 p-2 -m-2 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors relative z-10"
           aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         >
           <IconComponent className={`w-7 h-7 ${currentStatus.color}`} />
