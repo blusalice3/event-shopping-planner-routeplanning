@@ -900,7 +900,10 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
   const handleMoveToExecuteColumn = useCallback((itemIds: string[]) => {
     if (!activeEventName) return;
     
+    // 修正1: 表示側(View)と同じロジックで現在の対象日を特定する
     const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    
+    // 現在の実行列にあるIDセット
     const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
     
     // 範囲選択の起点・終点が移動対象に含まれている場合、範囲選択をリセット
@@ -911,16 +914,24 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       setRangeEnd(null);
     }
     
-    // candidateColumnItemsと同じロジックで候補リストのアイテムを取得（順序を維持）
-    const currentTabItemsForMove = items.filter(item => item.eventDate === activeTab);
+    // 修正2: activeTabではなく、特定したcurrentEventDateを使用してアイテムを抽出（表示側と一致させる）
+    // これにより、画面上の並び順（itemsの順序）が正であるという前提で母集団を作ります
+    const currentTabItemsForMove = items.filter(item => item.eventDate === currentEventDate);
+    
+    // 修正3: 表示されている「候補リスト」と完全に同じロジックでリストを再構築する
+    // 1. 既に左列にあるものを除外
     let candidateItems = currentTabItemsForMove.filter(item => !executeIdsSet.has(item.id));
     
-    // ブロックフィルタを適用（candidateColumnItemsと同じ）
+    // 2. ブロックフィルタが適用されている場合はそれも適用（見えていないアイテムは移動させない仕様の場合）
+    // もし「見えていないが選択されているアイテム」も移動させたい場合はこのブロックを外しますが、
+    // 通常は「見えている順序」を維持するため、このフィルタも含めるのが適切です。
     if (selectedBlockFilters.size > 0) {
       candidateItems = candidateItems.filter(item => selectedBlockFilters.has(item.block));
     }
     
-    // 候補リストの順序を維持しながら選択されたアイテムを抽出
+    // 修正4: 再構築した「画面と同じ順序のリスト(candidateItems)」を基準にして、
+    // 選択されたIDが含まれているかチェックして抽出する。
+    // これにより、itemIds（引数）の順序（選択順など）に関係なく、リスト上の上から下の順序で抽出される。
     const itemIdsSet = new Set(itemIds);
     const itemsToMove = candidateItems.filter(item => itemIdsSet.has(item.id));
     const orderedItemIds = itemsToMove.map(item => item.id);
@@ -929,7 +940,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       const eventItems = prev[activeEventName] || {};
       const currentDayItems = [...(eventItems[currentEventDate] || [])];
       
-      // 既存のアイテムを保持し、新しいアイテムを末尾に追加（順序を維持）
+      // 既存のアイテムを保持し、新しいアイテムを末尾に追加（画面上の順序を維持したorderedItemIdsを使用）
       const existingIdsSet = new Set(currentDayItems);
       const newItemIds = orderedItemIds.filter(id => !existingIdsSet.has(id));
       
@@ -944,7 +955,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     
     setSelectedItemIds(new Set());
   }, [activeEventName, activeTab, eventDates, rangeStart, rangeEnd, items, executeModeItems, selectedBlockFilters]);
-
   const handleRemoveFromExecuteColumn = useCallback((itemIds: string[]) => {
     if (!activeEventName) return;
     
