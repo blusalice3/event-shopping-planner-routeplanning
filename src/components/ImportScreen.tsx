@@ -32,6 +32,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
   const [singleTitle, setSingleTitle] = useState('');
   const [singlePrice, setSinglePrice] = useState('0');
   const [singleRemarks, setSingleRemarks] = useState('');
+  const [isCustomEventDate, setIsCustomEventDate] = useState(false);
   
   const isEditing = itemToEdit !== null;
   const isCreatingNew = activeEventName === null;
@@ -45,6 +46,9 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         setSingleTitle(itemToEdit.title);
         setSinglePrice(itemToEdit.price === null ? '' : String(itemToEdit.price));
         setSingleRemarks(itemToEdit.remarks);
+        // 編集時は、1日目～4日目に含まれない場合はカスタムモードにする
+        const defaultDates = ['1日目', '2日目', '3日目', '4日目'];
+        setIsCustomEventDate(!defaultDates.includes(itemToEdit.eventDate));
     }
   }, [itemToEdit, isEditing]);
 
@@ -298,6 +302,33 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
     setSingleTitle('');
     setSinglePrice('');
     setSingleRemarks('');
+    setIsCustomEventDate(false);
+  };
+  
+  const handleEventDateSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    if (value === '__custom__') {
+      setIsCustomEventDate(true);
+      setSingleEventDate('');
+    } else {
+      setIsCustomEventDate(false);
+      setSingleEventDate(value);
+    }
+  };
+  
+  const handleEventDateInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSingleEventDate(value);
+  };
+  
+  const handleEventDateInputBlur = (e: React.FocusEvent<HTMLInputElement>) => {
+    const value = e.target.value.trim();
+    // 1日目～4日目のいずれかが入力されたら、セレクトボックスに戻す
+    const defaultDates = ['1日目', '2日目', '3日目', '4日目'];
+    if (defaultDates.includes(value)) {
+      setIsCustomEventDate(false);
+      setSingleEventDate(value);
+    }
   };
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -507,21 +538,24 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                     <div>
                         <label htmlFor="singleEventDate" className={labelClass}>参加日</label>
-                        {availableEventDates.length > 0 ? (
-                            <select id="singleEventDate" value={singleEventDate} onChange={e => setSingleEventDate(e.target.value)} className={formInputClass}>
-                                {availableEventDates.map(date => (
-                                    <option key={date} value={date}>{date}</option>
-                                ))}
-                            </select>
-                        ) : (
+                        {isCustomEventDate ? (
                             <input 
                                 type="text" 
                                 id="singleEventDate" 
                                 value={singleEventDate} 
-                                onChange={e => setSingleEventDate(e.target.value)} 
+                                onChange={handleEventDateInputChange}
+                                onBlur={handleEventDateInputBlur}
                                 className={formInputClass} 
                                 placeholder="1日目" 
                             />
+                        ) : (
+                            <select id="singleEventDate" value={singleEventDate} onChange={handleEventDateSelectChange} className={formInputClass}>
+                                <option value="1日目">1日目</option>
+                                <option value="2日目">2日目</option>
+                                <option value="3日目">3日目</option>
+                                <option value="4日目">4日目</option>
+                                <option value="__custom__">任意の値を入力</option>
+                            </select>
                         )}
                     </div>
                     <div><label htmlFor="singleBlock" className={labelClass}>ブロック</label><input type="text" id="singleBlock" value={singleBlock} onChange={e => setSingleBlock(e.target.value)} className={formInputClass} placeholder="東1" /></div>
