@@ -8,10 +8,9 @@ interface ImportScreenProps {
   itemToEdit: ShoppingItem | null;
   onUpdateItem: (item: ShoppingItem) => void;
   onDoneEditing: () => void;
-  availableEventDates?: string[]; // 既存イベントの参加日リスト
 }
 
-const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName, itemToEdit, onUpdateItem, onDoneEditing, availableEventDates = [] }) => {
+const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName, itemToEdit, onUpdateItem, onDoneEditing }) => {
   // State for bulk add (creating new list)
   const [eventName, setEventName] = useState('');
   const [circles, setCircles] = useState('');
