@@ -147,7 +147,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   // 重複サークル警告と備考欄警告の両方を表示するかどうか
   const hasDuplicateCircleWarning = isDuplicateCircle;
   const hasRemarksWarning = remarksWarning !== null;
-  const duplicateCircleWarning = '⚠️複数購入サークル';
+  const duplicateCircleWarning = '⚠️複数購入サークル⚠️';
 
   // 未購入の場合はブロックベースの色を使用、それ以外は購入状態の色を優先
   const isUnpurchased = item.purchaseStatus === 'None';
