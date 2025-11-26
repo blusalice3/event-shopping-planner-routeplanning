@@ -317,13 +317,19 @@ const App: React.FC = () => {
         // 候補リスト → 実行列への移動
         setEventLists(prev => {
           const allItems = [...(prev[activeEventName] || [])];
-          const candidateItems = allItems.filter(item => 
-            item.eventDate.includes(currentEventDate) && !executeIdsSet.has(item.id)
-          );
+          // candidateColumnItemsと同じロジックで候補リストのアイテムを取得（順序を維持）
+          const currentTabItemsForMove = allItems.filter(item => item.eventDate === activeTab);
+          let candidateItems = currentTabItemsForMove.filter(item => !executeIdsSet.has(item.id));
           
-          // 移動するアイテムを取得
+          // ブロックフィルタを適用（candidateColumnItemsと同じ）
+          if (selectedBlockFilters.size > 0) {
+            candidateItems = candidateItems.filter(item => selectedBlockFilters.has(item.block));
+          }
+          
+          // 移動するアイテムを取得（候補リストの順序を維持）
           let itemsToMove: ShoppingItem[] = [];
           if (selectedItemIds.has(dragId)) {
+            // 候補リストの順序を維持しながら選択されたアイテムを抽出
             itemsToMove = candidateItems.filter(item => selectedItemIds.has(item.id));
           } else {
             const item = candidateItems.find(item => item.id === dragId);
@@ -590,7 +596,7 @@ const App: React.FC = () => {
         }
       });
     }
-  }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates]);
+  }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates, selectedBlockFilters]);
   const handleMoveItemUp = useCallback((itemId: string, targetColumn?: 'execute' | 'candidate') => {
     if (!activeEventName) return;
     setSortState('Manual');
