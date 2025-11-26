@@ -136,18 +136,25 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const locationString = `${item.block}-${item.number}`;
   const IconComponent = currentStatus.icon;
 
-  // 備考欄のチェック
-  const remarksWarning = useMemo(() => {
-    if (!item.remarks) return null;
-    if (item.remarks.includes('優先')) return '⚠️優先⚠️';
-    if (item.remarks.includes('委託無')) return '⚠️委託無⚠️';
-    return null;
-  }, [item.remarks]);
+  // 備考欄のチェック - 画像タグを決定
+  const warningTags = useMemo(() => {
+    const tags: string[] = [];
+    if (isDuplicateCircle) {
+      tags.push('複数種');
+    }
+    if (item.remarks) {
+      if (item.remarks.includes('優先')) {
+        tags.push('優先');
+      }
+      if (item.remarks.includes('委託無')) {
+        tags.push('委託無');
+      }
+    }
+    return tags;
+  }, [isDuplicateCircle, item.remarks]);
 
-  // 重複サークル警告と備考欄警告の両方を表示するかどうか
-  const hasDuplicateCircleWarning = isDuplicateCircle;
-  const hasRemarksWarning = remarksWarning !== null;
-  const duplicateCircleWarning = '⚠️複数種購入サークル⚠️';
+  // 警告タグが表示されるかどうか
+  const hasWarningTags = warningTags.length > 0;
 
   // 未購入の場合はブロックベースの色を使用、それ以外は購入状態の色を優先
   const isUnpurchased = item.purchaseStatus === 'None';
@@ -209,20 +216,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     >
       {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>}
       {statusBgOverlay && <div className={statusBgOverlay}></div>}
-      {(hasDuplicateCircleWarning || hasRemarksWarning) && (
-        <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-10 px-2">
-          {hasDuplicateCircleWarning && hasRemarksWarning ? (
-            <>
-              <span className="text-gray-500 dark:text-gray-400 text-4xl font-bold opacity-30 leading-tight">{duplicateCircleWarning}</span>
-              <span className="text-gray-500 dark:text-gray-400 text-4xl font-bold opacity-30 leading-tight mt-1">{remarksWarning}</span>
-            </>
-          ) : hasDuplicateCircleWarning ? (
-            <span className="text-gray-500 dark:text-gray-400 text-5xl font-bold opacity-30">{duplicateCircleWarning}</span>
-          ) : (
-            <span className="text-gray-500 dark:text-gray-400 text-5xl font-bold opacity-30">{remarksWarning}</span>
-          )}
-        </div>
-      )}
       <div data-drag-handle className="relative p-3 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-2 z-10">
         <input
             type="checkbox"
@@ -298,7 +291,18 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         <div className="relative z-10 flex justify-between items-start gap-4">
             <div>
                 <p className="font-bold text-md text-slate-900 dark:text-slate-100">{`${item.eventDate} ${locationString}`}</p>
-                <p className="mt-1 text-slate-600 dark:text-slate-300 truncate" title={item.circle}>{item.circle}</p>
+                <div className="mt-1 flex items-center gap-2 flex-wrap">
+                    <p className="text-slate-600 dark:text-slate-300 truncate" title={item.circle}>{item.circle}</p>
+                    {warningTags.map((tag, index) => (
+                        <img
+                            key={index}
+                            src={`/${tag}.png`}
+                            alt={tag}
+                            className="h-6 w-auto object-contain"
+                            style={{ height: '1.5rem' }}
+                        />
+                    ))}
+                </div>
             </div>
             <input
                 type="text"
@@ -314,15 +318,25 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       </div>
       
       <div className="relative flex flex-col items-end justify-between space-y-2 p-4 border-l border-slate-200/80 dark:border-slate-700/80 z-10">
+        {hasWarningTags && (
+          <div 
+            className="absolute inset-0 pointer-events-none rounded-r-lg"
+            style={{
+              backgroundImage: 'repeating-linear-gradient(45deg, #fef08a 0px, #fef08a 10px, #000 10px, #000 20px)',
+              backgroundSize: '28.28px 28.28px',
+              opacity: 0.4,
+            }}
+          ></div>
+        )}
         <button 
           onClick={togglePurchaseStatus} 
-          className="flex items-center space-x-2 p-2 -m-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+          className="flex items-center space-x-2 p-2 -m-2 rounded-md hover:bg-black/5 dark:hover:bg-white/5 transition-colors relative z-10"
           aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         >
           <IconComponent className={`w-7 h-7 ${currentStatus.color}`} />
           <span className={`font-semibold w-16 text-left ${currentStatus.color}`}>{currentStatus.label}</span>
         </button>
-        <div className="flex items-center">
+        <div className="flex items-center relative z-10">
             {item.price !== null && <span className="text-slate-500 dark:text-slate-400 mr-1">¥</span>}
             <select
               value={item.price === null ? '' : item.price}
