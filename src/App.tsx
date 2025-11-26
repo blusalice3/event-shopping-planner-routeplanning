@@ -2208,7 +2208,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
              itemToEdit={itemToEdit}
              onUpdateItem={handleUpdateItem}
              onDoneEditing={handleDoneEditing}
-             availableEventDates={eventDates}
            />
         )}
         {activeEventName && mainContentVisible && (
