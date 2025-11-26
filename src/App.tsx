@@ -2006,6 +2006,39 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     return itemsForTab;
   }, [activeTab, currentTabItems, sortState, activeEventName, dayModes, executeColumnItems, eventDates, recentlyChangedItemIds]);
 
+  // 各参加日タブ中のアイテムでサークル名が重複するアイテムのIDセットを計算
+  const duplicateCircleItemIds = useMemo(() => {
+    if (!activeEventName || !eventDates.includes(activeTab)) return new Set<string>();
+    const itemsForTab = currentTabItems;
+    const circleCountMap = new Map<string, number>();
+    const circleItemIdsMap = new Map<string, string[]>();
+    
+    // サークル名ごとにアイテム数をカウント
+    itemsForTab.forEach(item => {
+      const circle = item.circle.trim();
+      if (circle) {
+        const count = circleCountMap.get(circle) || 0;
+        circleCountMap.set(circle, count + 1);
+        
+        if (!circleItemIdsMap.has(circle)) {
+          circleItemIdsMap.set(circle, []);
+        }
+        circleItemIdsMap.get(circle)!.push(item.id);
+      }
+    });
+    
+    // 重複するサークル名のアイテムIDを収集
+    const duplicateIds = new Set<string>();
+    circleCountMap.forEach((count, circle) => {
+      if (count > 1) {
+        const itemIds = circleItemIdsMap.get(circle) || [];
+        itemIds.forEach(id => duplicateIds.add(id));
+      }
+    });
+    
+    return duplicateIds;
+  }, [activeEventName, activeTab, currentTabItems, eventDates]);
+
   // 候補リストから動的にブロック値を取得
   const availableBlocks = useMemo(() => {
     if (!activeEventName) return [];
@@ -2241,6 +2274,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     rangeStart={rangeStart}
                     rangeEnd={rangeEnd}
                     onToggleRangeSelection={handleToggleRangeSelection}
+                    duplicateCircleItemIds={duplicateCircleItemIds}
                   />
                 </div>
                 
@@ -2319,6 +2353,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     rangeStart={rangeStart}
                     rangeEnd={rangeEnd}
                     onToggleRangeSelection={handleToggleRangeSelection}
+                    duplicateCircleItemIds={duplicateCircleItemIds}
                   />
                 </div>
               </div>
@@ -2338,6 +2373,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 rangeStart={rangeStart}
                 rangeEnd={rangeEnd}
                 onToggleRangeSelection={handleToggleRangeSelection}
+                duplicateCircleItemIds={duplicateCircleItemIds}
               />
             )}
           </div>
