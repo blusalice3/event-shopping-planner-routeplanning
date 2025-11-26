@@ -298,8 +298,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                             key={index}
                             src={`/${tag}.png`}
                             alt={tag}
-                            className="h-8 w-auto object-contain"
-                            style={{ height: '2rem' }}
+                            className="h-10 w-auto object-contain"
+                            style={{ height: '2.5rem' }}
                         />
                     ))}
                 </div>
