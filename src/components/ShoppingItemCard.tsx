@@ -24,7 +24,6 @@ export interface ShoppingItemCardProps {
   canMoveUp?: boolean;
   canMoveDown?: boolean;
   isDuplicateCircle?: boolean;
-  isSearchMatch?: boolean;
 }
 
 const statusConfig: Record<PurchaseStatus, { label: string; icon: React.FC<any>; color: string; dim: boolean; bg: string; }> = {
@@ -51,7 +50,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   canMoveUp = true,
   canMoveDown = true,
   isDuplicateCircle = false,
-  isSearchMatch = false,
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const longPressTimeout = useRef<number | null>(null);
@@ -209,23 +207,14 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
   return (
     <div 
-        className={`${cardClasses} ${isSearchMatch ? 'ring-4 ring-red-500 ring-offset-2' : ''}`}
+        className={cardClasses} 
         ref={cardRef}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerLeave}
         onTouchMove={handlePointerLeave} // Cancel on scroll
-        style={isSearchMatch ? { 
-          boxShadow: '0 0 0 4px rgba(239, 68, 68, 0.5), 0 0 0 8px rgba(239, 68, 68, 0.3)',
-          zIndex: 50
-        } : undefined}
     >
       {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>}
-      {isSearchMatch && (
-        <div className="absolute inset-0 border-4 border-red-500 rounded-lg pointer-events-none z-50" style={{ 
-          boxShadow: 'inset 0 0 0 2px rgba(255, 255, 255, 0.8)',
-        }}></div>
-      )}
       {statusBgOverlay && <div className={statusBgOverlay}></div>}
       <div data-drag-handle className="relative p-3 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-2 z-10">
         <input
@@ -367,8 +356,19 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       
       {menuVisible && (
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20" onClick={(e) => e.stopPropagation()}>
-            <div className="flex gap-4 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-lg shadow-2xl border border-slate-300 dark:border-slate-600 p-4">
+            <div className="flex flex-col gap-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-lg shadow-2xl border border-slate-300 dark:border-slate-600 p-4">
                 <button onClick={() => { onEditRequest(item); setMenuVisible(false); }} className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors">編集</button>
+                {item.url && (
+                  <button 
+                    onClick={() => { 
+                      window.open(item.url, '_blank'); 
+                      setMenuVisible(false); 
+                    }} 
+                    className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors"
+                  >
+                    URLを開く
+                  </button>
+                )}
                 <button onClick={() => { onDeleteRequest(item); setMenuVisible(false); }} className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-red-600 hover:bg-red-700 transition-colors">削除</button>
             </div>
         </div>
