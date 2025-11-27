@@ -20,6 +20,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
   const [titles, setTitles] = useState('');
   const [prices, setPrices] = useState('');
   const [remarks, setRemarks] = useState('');
+  const [urls, setUrls] = useState('');
   const [spreadsheetUrl, setSpreadsheetUrl] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -31,6 +32,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
   const [singleTitle, setSingleTitle] = useState('');
   const [singlePrice, setSinglePrice] = useState('0');
   const [singleRemarks, setSingleRemarks] = useState('');
+  const [singleUrl, setSingleUrl] = useState('');
   const [isCustomEventDate, setIsCustomEventDate] = useState(false);
   
   const isEditing = itemToEdit !== null;
@@ -45,6 +47,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         setSingleTitle(itemToEdit.title);
         setSinglePrice(itemToEdit.price === null ? '' : String(itemToEdit.price));
         setSingleRemarks(itemToEdit.remarks);
+        setSingleUrl(itemToEdit.url || '');
         // 編集時は、1日目～4日目に含まれない場合はカスタムモードにする
         const defaultDates = ['1日目', '2日目', '3日目', '4日目'];
         setIsCustomEventDate(!defaultDates.includes(itemToEdit.eventDate));
@@ -57,7 +60,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
     const rows = pasteData.split('\n').filter(row => row.trim() !== '');
 
     const cols: { [key: string]: string[] } = {
-        circles: [], eventDates: [], blocks: [], numbers: [], titles: [], prices: [],
+        circles: [], eventDates: [], blocks: [], numbers: [], titles: [], prices: [], urls: [],
     };
 
     rows.forEach(row => {
@@ -68,6 +71,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         cols.numbers.push(cells[3] || '');
         cols.titles.push(cells[4] || '');
         cols.prices.push(cells[5] || '');
+        cols.urls.push(cells[6] || '');
     });
 
     setCircles(cols.circles.join('\n'));
@@ -76,6 +80,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
     setNumbers(cols.numbers.join('\n'));
     setTitles(cols.titles.join('\n'));
     setPrices(cols.prices.join('\n'));
+    setUrls(cols.urls.join('\n'));
   };
 
   const parseCSVLine = (line: string): string[] => {
@@ -157,6 +162,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
       let title = cells[4]?.trim() || ''; // E列: タイトル
       let priceStr = cells[5]?.trim() || ''; // F列: 頒布価格
       let remarks = cells[7]?.trim() || ''; // H列: 備考
+      let url = cells[10]?.trim() || ''; // K列: URL
       let columnType: 'execute' | 'candidate' | null = null; // I列: 列の種類
       let order = 0; // J列: 列内順番
       
@@ -181,6 +187,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         title = cells[16]?.trim() || ''; // Q列
         priceStr = cells[17]?.trim() || ''; // R列
         remarks = cells[22]?.trim() || ''; // W列
+        url = cells[24]?.trim() || ''; // Y列: URL
         
         // それでも必須項目が揃わない場合はスキップ
         if (!circle || !eventDate || !block || !number) {
@@ -199,6 +206,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         title,
         price,
         remarks,
+        ...(url ? { url } : {}),
       };
       
       newItems.push(item);
@@ -214,6 +222,43 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         });
       }
     }
+    
+    // 各参加日タブ中でサークル名が重複するアイテムのURL転記処理
+    const eventDateGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
+    newItems.forEach(item => {
+      if (!eventDateGroups.has(item.eventDate)) {
+        eventDateGroups.set(item.eventDate, []);
+      }
+      eventDateGroups.get(item.eventDate)!.push(item);
+    });
+    
+    eventDateGroups.forEach((items, eventDate) => {
+      // サークル名でグループ化
+      const circleGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
+      items.forEach(item => {
+        if (!circleGroups.has(item.circle)) {
+          circleGroups.set(item.circle, []);
+        }
+        circleGroups.get(item.circle)!.push(item);
+      });
+      
+      // サークル名が重複するアイテムが2つ以上ある場合
+      circleGroups.forEach((circleItems, circleName) => {
+        if (circleItems.length >= 2) {
+          // URLが入力されているアイテムを探す
+          const itemWithUrl = circleItems.find(item => item.url && item.url.trim() !== '');
+          
+          if (itemWithUrl && itemWithUrl.url) {
+            // URLが入力されていないアイテムにURLを転記
+            circleItems.forEach(item => {
+              if (!item.url || item.url.trim() === '') {
+                item.url = itemWithUrl.url;
+              }
+            });
+          }
+        }
+      });
+    });
     
     return {
       items: newItems,
@@ -301,6 +346,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
     setSingleTitle('');
     setSinglePrice('');
     setSingleRemarks('');
+    setSingleUrl('');
     setIsCustomEventDate(false);
   };
   
@@ -350,6 +396,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
             title: singleTitle.trim(),
             price: price,
             remarks: singleRemarks.trim(),
+            url: singleUrl.trim() || undefined,
         };
         onUpdateItem(updatedItem);
         onDoneEditing();
@@ -369,7 +416,8 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
       const titlesArr = titles.split('\n').map(s => s.trim());
       const pricesArr = prices.split('\n').map(s => s.trim());
       const remarksArr = remarks.split('\n').map(s => s.trim());
-      const numItems = Math.max(circlesArr.length, eventDatesArr.length, blocksArr.length, numbersArr.length, titlesArr.length, pricesArr.length, remarksArr.length);
+      const urlsArr = urls.split('\n').map(s => s.trim());
+      const numItems = Math.max(circlesArr.length, eventDatesArr.length, blocksArr.length, numbersArr.length, titlesArr.length, pricesArr.length, remarksArr.length, urlsArr.length);
       if (numItems === 0 || (circlesArr.length === 1 && circlesArr[0] === '')) {
         alert('インポートするデータがありません。');
         return;
@@ -387,13 +435,53 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         // 空欄の場合はnull、0と入力されている場合は0を設定
         const priceString = pricesArr[i] || '';
         const price = priceString === '' ? null : (parseInt(priceString.replace(/[^0-9]/g, ''), 10) || 0);
+        const url = urlsArr[i] || '';
         newItems.push({
           circle, eventDate, block, number, title: titlesArr[i] || '', price: price, remarks: remarksArr[i] || '',
+          ...(url ? { url } : {}),
         });
       }
+      
+      // 各参加日タブ中でサークル名が重複するアイテムのURL転記処理
+      const eventDateGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
+      newItems.forEach(item => {
+        if (!eventDateGroups.has(item.eventDate)) {
+          eventDateGroups.set(item.eventDate, []);
+        }
+        eventDateGroups.get(item.eventDate)!.push(item);
+      });
+      
+      eventDateGroups.forEach((items) => {
+        // サークル名でグループ化
+        const circleGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
+        items.forEach(item => {
+          if (!circleGroups.has(item.circle)) {
+            circleGroups.set(item.circle, []);
+          }
+          circleGroups.get(item.circle)!.push(item);
+        });
+        
+        // サークル名が重複するアイテムが2つ以上ある場合
+        circleGroups.forEach((circleItems) => {
+          if (circleItems.length >= 2) {
+            // URLが入力されているアイテムを探す
+            const itemWithUrl = circleItems.find(item => item.url && item.url.trim() !== '');
+            
+            if (itemWithUrl && itemWithUrl.url) {
+              // URLが入力されていないアイテムにURLを転記
+              circleItems.forEach(item => {
+                if (!item.url || item.url.trim() === '') {
+                  item.url = itemWithUrl.url;
+                }
+              });
+            }
+          }
+        });
+      });
+      
       if (newItems.length > 0) {
           onBulkAdd(finalEventName, newItems);
-          setEventName(''); setCircles(''); setEventDates(''); setBlocks(''); setNumbers(''); setTitles(''); setPrices(''); setRemarks('');
+          setEventName(''); setCircles(''); setEventDates(''); setBlocks(''); setNumbers(''); setTitles(''); setPrices(''); setRemarks(''); setUrls('');
       } else {
           alert('有効なアイテムデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。');
       }
@@ -413,6 +501,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
             title: singleTitle.trim(),
             price: price,
             remarks: singleRemarks.trim(),
+            url: singleUrl.trim() || undefined,
         };
         onBulkAdd(activeEventName, [newItem]);
         resetSingleForm();
@@ -523,9 +612,15 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
                     <div className="md:col-span-1"><label htmlFor="titles" className={labelClass}>タイトル </label><textarea id="titles" value={titles} onChange={e => setTitles(e.target.value)} className={formTextareaClass} placeholder="新刊セット&#10;既刊1" /></div>
                     <div className="md:col-span-1"><label htmlFor="prices" className={labelClass}>頒布価格 </label><textarea id="prices" value={prices} onChange={e => setPrices(e.target.value)} className={formTextareaClass} placeholder="1000&#10;500" /></div>
                 </div>
-                <div>
-                    <label htmlFor="remarks" className={labelClass}>備考 </label>
-                    <textarea id="remarks" value={remarks} onChange={e => setRemarks(e.target.value)} className={`${formTextareaClass} h-24`} placeholder="スケブお願い&#10;挨拶に行く" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label htmlFor="remarks" className={labelClass}>備考 </label>
+                        <textarea id="remarks" value={remarks} onChange={e => setRemarks(e.target.value)} className={`${formTextareaClass} h-16`} placeholder="スケブお願い&#10;挨拶に行く" />
+                    </div>
+                    <div>
+                        <label htmlFor="urls" className={labelClass}>URL </label>
+                        <textarea id="urls" value={urls} onChange={e => setUrls(e.target.value)} className={`${formTextareaClass} h-16`} placeholder="https://example.com&#10;https://example2.com" />
+                    </div>
                 </div>
             </>
         ) : (
@@ -591,9 +686,15 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
                         </select>
                     </div>
                 </div>
-                <div>
-                    <label htmlFor="singleRemarks" className={labelClass}>備考</label>
-                    <input type="text" id="singleRemarks" value={singleRemarks} onChange={e => setSingleRemarks(e.target.value)} className={formInputClass} placeholder="スケブお願い" />
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label htmlFor="singleRemarks" className={labelClass}>備考</label>
+                        <input type="text" id="singleRemarks" value={singleRemarks} onChange={e => setSingleRemarks(e.target.value)} className={formInputClass} placeholder="スケブお願い" />
+                    </div>
+                    <div>
+                        <label htmlFor="singleUrl" className={labelClass}>URL</label>
+                        <input type="text" id="singleUrl" value={singleUrl} onChange={e => setSingleUrl(e.target.value)} className={formInputClass} placeholder="https://example.com" />
+                    </div>
                 </div>
             </div>
         )}
