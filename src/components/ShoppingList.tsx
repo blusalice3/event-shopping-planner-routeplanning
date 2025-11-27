@@ -20,6 +20,7 @@ interface ShoppingListProps {
   rangeEnd?: { itemId: string; columnType: 'execute' | 'candidate' } | null;
   onToggleRangeSelection?: (columnType: 'execute' | 'candidate') => void;
   duplicateCircleItemIds?: Set<string>;
+  highlightedItemId?: string | null;
 }
 
 // Constants for drag-and-drop auto-scrolling
@@ -105,6 +106,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   rangeEnd,
   onToggleRangeSelection,
   duplicateCircleItemIds = new Set(),
+  highlightedItemId = null,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
@@ -326,6 +328,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               canMoveUp={index > 0}
               canMoveDown={index < items.length - 1}
               isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
+              isSearchMatch={highlightedItemId === item.id}
             />
 
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (
