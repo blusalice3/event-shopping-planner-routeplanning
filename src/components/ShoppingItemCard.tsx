@@ -24,6 +24,7 @@ export interface ShoppingItemCardProps {
   canMoveUp?: boolean;
   canMoveDown?: boolean;
   isDuplicateCircle?: boolean;
+  isSearchMatch?: boolean;
 }
 
 const statusConfig: Record<PurchaseStatus, { label: string; icon: React.FC<any>; color: string; dim: boolean; bg: string; }> = {
