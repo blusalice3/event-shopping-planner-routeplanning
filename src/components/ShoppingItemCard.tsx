@@ -24,6 +24,7 @@ export interface ShoppingItemCardProps {
   canMoveUp?: boolean;
   canMoveDown?: boolean;
   isDuplicateCircle?: boolean;
+  isSearchMatch?: boolean;
 }
 
 const statusConfig: Record<PurchaseStatus, { label: string; icon: React.FC<any>; color: string; dim: boolean; bg: string; }> = {
@@ -50,6 +51,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   canMoveUp = true,
   canMoveDown = true,
   isDuplicateCircle = false,
+  isSearchMatch = false,
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const longPressTimeout = useRef<number | null>(null);
@@ -207,14 +209,23 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
   return (
     <div 
-        className={cardClasses} 
+        className={`${cardClasses} ${isSearchMatch ? 'ring-4 ring-red-500 ring-offset-2' : ''}`}
         ref={cardRef}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerLeave}
         onTouchMove={handlePointerLeave} // Cancel on scroll
+        style={isSearchMatch ? { 
+          boxShadow: '0 0 0 4px rgba(239, 68, 68, 0.5), 0 0 0 8px rgba(239, 68, 68, 0.3)',
+          zIndex: 50
+        } : undefined}
     >
       {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>}
+      {isSearchMatch && (
+        <div className="absolute inset-0 border-4 border-red-500 rounded-lg pointer-events-none z-50" style={{ 
+          boxShadow: 'inset 0 0 0 2px rgba(255, 255, 255, 0.8)',
+        }}></div>
+      )}
       {statusBgOverlay && <div className={statusBgOverlay}></div>}
       <div data-drag-handle className="relative p-3 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-2 z-10">
         <input
