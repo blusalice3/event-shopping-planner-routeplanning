@@ -19,6 +19,7 @@ export interface ShoppingItem {
   price: number | null;
   purchaseStatus: PurchaseStatus;
   remarks: string;
+  url?: string;
 }
 
 export type ViewMode = 'edit' | 'execute';
