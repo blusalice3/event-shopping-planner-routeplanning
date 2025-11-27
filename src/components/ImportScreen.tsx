@@ -232,7 +232,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
       eventDateGroups.get(item.eventDate)!.push(item);
     });
     
-    eventDateGroups.forEach((items, eventDate) => {
+    eventDateGroups.forEach((items) => {
       // サークル名でグループ化
       const circleGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
       items.forEach(item => {
@@ -243,7 +243,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
       });
       
       // サークル名が重複するアイテムが2つ以上ある場合
-      circleGroups.forEach((circleItems, circleName) => {
+      circleGroups.forEach((circleItems) => {
         if (circleItems.length >= 2) {
           // URLが入力されているアイテムを探す
           const itemWithUrl = circleItems.find(item => item.url && item.url.trim() !== '');
