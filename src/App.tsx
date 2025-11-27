@@ -83,7 +83,6 @@ const App: React.FC = () => {
   
   // 検索機能の状態
   const [searchKeyword, setSearchKeyword] = useState('');
-  const [searchMatchIds, setSearchMatchIds] = useState<string[]>([]);
   const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
@@ -2080,34 +2079,9 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     return matches;
   }, [searchKeyword, activeEventName, activeTab, currentTabItems, eventDates]);
 
-  // 表示されているアイテムのみを検索対象とする
-  const visibleSearchMatches = useMemo(() => {
-    if (searchMatches.length === 0) return [];
-    
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
-    const mode = dayModes[activeEventName || '']?.[currentEventDate] || 'edit';
-    
-    let visibleItemIds: Set<string>;
-    
-    if (mode === 'execute') {
-      // 実行モード: executeColumnItemsまたはvisibleItems
-      visibleItemIds = new Set(visibleItems.map(item => item.id));
-    } else {
-      // 編集モード: executeColumnItems + candidateColumnItems
-      const allVisibleIds = new Set([
-        ...executeColumnItems.map(item => item.id),
-        ...candidateColumnItems.map(item => item.id)
-      ]);
-      visibleItemIds = allVisibleIds;
-    }
-    
-    return searchMatches.filter(id => visibleItemIds.has(id));
-  }, [searchMatches, activeEventName, activeTab, eventDates, dayModes, visibleItems, executeColumnItems, candidateColumnItems]);
-
   // 検索キーワードが変更されたときに検索結果をリセット
   useEffect(() => {
     if (searchKeyword.trim()) {
-      setSearchMatchIds(searchMatches);
       if (searchMatches.length > 0) {
         setCurrentSearchIndex(0);
       } else {
@@ -2115,7 +2089,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         setHighlightedItemId(null);
       }
     } else {
-      setSearchMatchIds([]);
       setCurrentSearchIndex(-1);
       setHighlightedItemId(null);
     }
@@ -2126,33 +2099,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setCurrentSearchIndex(-1);
     setHighlightedItemId(null);
   }, [activeTab]);
-
-  // 「次を検索」ボタンのハンドラ
-  const handleSearchNext = useCallback(() => {
-    if (!searchKeyword.trim() || visibleSearchMatches.length === 0) {
-      if (searchMatches.length > 0 && visibleSearchMatches.length === 0) {
-        alert('フィルタされています');
-      }
-      return;
-    }
-    
-    // 次のインデックスを計算（ループ）
-    // currentSearchIndexが-1の場合は0から始める
-    const startIndex = currentSearchIndex === -1 ? -1 : currentSearchIndex;
-    const nextIndex = (startIndex + 1) % visibleSearchMatches.length;
-    setCurrentSearchIndex(nextIndex);
-    
-    const nextItemId = visibleSearchMatches[nextIndex];
-    setHighlightedItemId(nextItemId);
-    
-    // スクロール処理
-    setTimeout(() => {
-      const element = document.querySelector(`[data-item-id="${nextItemId}"]`);
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }, 100);
-  }, [searchKeyword, visibleSearchMatches, currentSearchIndex, searchMatches]);
 
   // 各参加日タブ中のアイテムでサークル名が重複するアイテムのIDセットを計算
   const duplicateCircleItemIds = useMemo(() => {
@@ -2217,6 +2163,57 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     
     return filtered;
   }, [activeEventName, activeTab, executeModeItems, currentTabItems, selectedBlockFilters, eventDates]);
+
+  // 表示されているアイテムのみを検索対象とする
+  const visibleSearchMatches = useMemo(() => {
+    if (searchMatches.length === 0) return [];
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const mode = dayModes[activeEventName || '']?.[currentEventDate] || 'edit';
+    
+    let visibleItemIds: Set<string>;
+    
+    if (mode === 'execute') {
+      // 実行モード: executeColumnItemsまたはvisibleItems
+      visibleItemIds = new Set(visibleItems.map(item => item.id));
+    } else {
+      // 編集モード: executeColumnItems + candidateColumnItems
+      const allVisibleIds = new Set([
+        ...executeColumnItems.map(item => item.id),
+        ...candidateColumnItems.map(item => item.id)
+      ]);
+      visibleItemIds = allVisibleIds;
+    }
+    
+    return searchMatches.filter(id => visibleItemIds.has(id));
+  }, [searchMatches, activeEventName, activeTab, eventDates, dayModes, visibleItems, executeColumnItems, candidateColumnItems]);
+
+  // 「次を検索」ボタンのハンドラ
+  const handleSearchNext = useCallback(() => {
+    if (!searchKeyword.trim() || visibleSearchMatches.length === 0) {
+      if (searchMatches.length > 0 && visibleSearchMatches.length === 0) {
+        alert('フィルタされています');
+      }
+      return;
+    }
+    
+    // 次のインデックスを計算（ループ）
+    // currentSearchIndexが-1の場合は0から始める
+    const startIndex = currentSearchIndex === -1 ? -1 : currentSearchIndex;
+    const nextIndex = (startIndex + 1) % visibleSearchMatches.length;
+    setCurrentSearchIndex(nextIndex);
+    
+    const nextItemId = visibleSearchMatches[nextIndex];
+    setHighlightedItemId(nextItemId);
+    
+    // スクロール処理
+    setTimeout(() => {
+      const element = document.querySelector(`[data-item-id="${nextItemId}"]`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  }, [searchKeyword, visibleSearchMatches, currentSearchIndex, searchMatches]);
 
   // 各ブロックの候補リスト内のアイテムの備考欄に「優先」または「委託無」が含まれているかをチェック
   const blocksWithPriorityRemarks = useMemo(() => {
