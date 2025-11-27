@@ -79,6 +79,12 @@ const App: React.FC = () => {
   const [pendingUpdateEventName, setPendingUpdateEventName] = useState<string | null>(null);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [eventToRename, setEventToRename] = useState<string | null>(null);
+  
+  // 検索機能の状態
+  const [searchText, setSearchText] = useState('');
+  const [searchResults, setSearchResults] = useState<string[]>([]);
+  const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
+  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -1007,6 +1013,10 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setActiveEventName(eventName);
     setSelectedItemIds(new Set());
     setSelectedBlockFilters(new Set());
+    setSearchText('');
+    setSearchResults([]);
+    setCurrentSearchIndex(-1);
+    setHighlightedItemId(null);
     const eventItems = eventLists[eventName] || [];
     const dates = extractEventDates(eventItems);
     if (dates.length > 0) {
@@ -1922,6 +1932,83 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     return items.filter(item => item.eventDate === activeTab);
   }, [items, activeTab, activeEventName, eventDates]);
 
+  // 検索機能: アイテムを検索する関数
+  const performSearch = useCallback((query: string) => {
+    if (!query.trim() || !activeEventName) {
+      setSearchResults([]);
+      setCurrentSearchIndex(-1);
+      setHighlightedItemId(null);
+      return;
+    }
+
+    const searchQuery = query.toLowerCase().trim();
+    const matchingItems: ShoppingItem[] = [];
+    
+    // 現在表示されているアイテムを検索対象とする
+    const itemsToSearch = currentMode === 'edit' 
+      ? currentTabItems 
+      : visibleItems;
+    
+    itemsToSearch.forEach(item => {
+      const circleMatch = item.circle.toLowerCase().includes(searchQuery);
+      const titleMatch = item.title.toLowerCase().includes(searchQuery);
+      const remarksMatch = item.remarks.toLowerCase().includes(searchQuery);
+      const blockMatch = item.block.toLowerCase().includes(searchQuery);
+      const numberMatch = item.number.toLowerCase().includes(searchQuery);
+      
+      if (circleMatch || titleMatch || remarksMatch || blockMatch || numberMatch) {
+        matchingItems.push(item);
+      }
+    });
+    
+    const matchingIds = matchingItems.map(item => item.id);
+    setSearchResults(matchingIds);
+    
+    if (matchingIds.length > 0) {
+      setCurrentSearchIndex(0);
+      setHighlightedItemId(matchingIds[0]);
+      // 最初のマッチにスクロール
+      setTimeout(() => {
+        const element = document.querySelector(`[data-item-id="${matchingIds[0]}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    } else {
+      setCurrentSearchIndex(-1);
+      setHighlightedItemId(null);
+    }
+  }, [activeEventName, currentTabItems, visibleItems, currentMode]);
+
+  // 次を検索
+  const findNext = useCallback(() => {
+    if (searchResults.length === 0) return;
+    
+    const nextIndex = (currentSearchIndex + 1) % searchResults.length;
+    setCurrentSearchIndex(nextIndex);
+    const nextItemId = searchResults[nextIndex];
+    setHighlightedItemId(nextItemId);
+    
+    // スクロール
+    setTimeout(() => {
+      const element = document.querySelector(`[data-item-id="${nextItemId}"]`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  }, [searchResults, currentSearchIndex]);
+
+  // 検索テキスト変更時の処理
+  useEffect(() => {
+    if (searchText.trim() && activeEventName) {
+      performSearch(searchText);
+    } else {
+      setSearchResults([]);
+      setCurrentSearchIndex(-1);
+      setHighlightedItemId(null);
+    }
+  }, [searchText, activeEventName, performSearch]);
+
   const TabButton: React.FC<{tab: ActiveTab, label: string, count?: number, onClick?: () => void}> = ({ tab, label, count, onClick }) => {
     const longPressTimeout = React.useRef<number | null>(null);
 
@@ -1951,6 +2038,10 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         setSelectedItemIds(new Set());
         setSelectedBlockFilters(new Set());
         setCandidateNumberSortDirection(null);
+        setSearchText('');
+        setSearchResults([]);
+        setCurrentSearchIndex(-1);
+        setHighlightedItemId(null);
         setActiveTab(tab);
       }
     };
@@ -2190,7 +2281,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           </div>
         </div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-200 dark:border-slate-700">
-             <div className="flex space-x-2 pt-2 pb-2 overflow-x-auto">
+             <div className="flex space-x-2 pt-2 pb-2 overflow-x-auto items-center">
                 <TabButton tab="eventList" label="即売会リスト" onClick={() => { setActiveEventName(null); setItemToEdit(null); setSelectedItemIds(new Set()); setSelectedBlockFilters(new Set()); setActiveTab('eventList'); }}/>
                 {activeEventName ? (
                     <>
@@ -2206,6 +2297,48 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                           );
                         })}
                         <TabButton tab="import" label={itemToEdit ? "アイテム編集" : "アイテム追加"} />
+                        {mainContentVisible && (
+                          <div className="flex items-center gap-2 ml-4 px-3 py-1 bg-white dark:bg-slate-800 rounded-md border border-slate-300 dark:border-slate-600">
+                            <input
+                              type="text"
+                              value={searchText}
+                              onChange={(e) => setSearchText(e.target.value)}
+                              placeholder="検索..."
+                              className="text-sm px-2 py-1 bg-transparent border-none outline-none text-slate-700 dark:text-slate-300 w-32 focus:w-48 transition-all"
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' && searchText.trim()) {
+                                  findNext();
+                                }
+                              }}
+                            />
+                            <button
+                              onClick={findNext}
+                              disabled={searchResults.length === 0}
+                              className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
+                                searchResults.length > 0
+                                  ? 'bg-blue-600 text-white hover:bg-blue-700'
+                                  : 'bg-slate-300 dark:bg-slate-600 text-slate-500 dark:text-slate-400 cursor-not-allowed'
+                              }`}
+                              title={`次を検索 (${searchResults.length > 0 ? `${currentSearchIndex + 1}/${searchResults.length}` : '0件'})`}
+                            >
+                              次を検索
+                            </button>
+                            {searchText && (
+                              <button
+                                onClick={() => {
+                                  setSearchText('');
+                                  setSearchResults([]);
+                                  setCurrentSearchIndex(-1);
+                                  setHighlightedItemId(null);
+                                }}
+                                className="px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                                title="検索をクリア"
+                              >
+                                ✕
+                              </button>
+                            )}
+                          </div>
+                        )}
                     </>
                 ) : (
                     <button
@@ -2275,6 +2408,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     rangeEnd={rangeEnd}
                     onToggleRangeSelection={handleToggleRangeSelection}
                     duplicateCircleItemIds={duplicateCircleItemIds}
+                    highlightedItemId={highlightedItemId}
                   />
                 </div>
                 
@@ -2354,6 +2488,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     rangeEnd={rangeEnd}
                     onToggleRangeSelection={handleToggleRangeSelection}
                     duplicateCircleItemIds={duplicateCircleItemIds}
+                    highlightedItemId={highlightedItemId}
                   />
                 </div>
               </div>
@@ -2374,6 +2509,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 rangeEnd={rangeEnd}
                 onToggleRangeSelection={handleToggleRangeSelection}
                 duplicateCircleItemIds={duplicateCircleItemIds}
+                highlightedItemId={highlightedItemId}
               />
             )}
           </div>
