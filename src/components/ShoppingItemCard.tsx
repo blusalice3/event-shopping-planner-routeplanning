@@ -51,6 +51,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   canMoveUp = true,
   canMoveDown = true,
   isDuplicateCircle = false,
+  isSearchMatch = false,
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const longPressTimeout = useRef<number | null>(null);
@@ -201,6 +202,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     rounded-lg shadow-md transition-all duration-300 flex items-stretch relative overflow-hidden
     ${baseBg}
     ${currentStatus.dim ? 'opacity-60 dark:opacity-50' : 'opacity-100'}
+    ${isSearchMatch ? 'ring-4 ring-red-500 ring-offset-2' : ''}
   `;
   
   // 未購入の場合はブロック色を使用するため、購入状態の背景色は適用しない
@@ -214,6 +216,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerLeave}
         onTouchMove={handlePointerLeave} // Cancel on scroll
+        data-search-match={isSearchMatch ? 'true' : undefined}
     >
       {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>}
       {statusBgOverlay && <div className={statusBgOverlay}></div>}
