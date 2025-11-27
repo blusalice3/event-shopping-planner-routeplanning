@@ -12,6 +12,7 @@ import UrlUpdateDialog from './components/UrlUpdateDialog';
 import EventRenameDialog from './components/EventRenameDialog';
 import SortAscendingIcon from './components/icons/SortAscendingIcon';
 import SortDescendingIcon from './components/icons/SortDescendingIcon';
+import SearchBar from './components/SearchBar';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
 
 type ActiveTab = 'eventList' | 'import' | string; // string部分は動的な参加日（例: '1日目', '2日目', '3日目'など）
@@ -79,6 +80,12 @@ const App: React.FC = () => {
   const [pendingUpdateEventName, setPendingUpdateEventName] = useState<string | null>(null);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [eventToRename, setEventToRename] = useState<string | null>(null);
+  
+  // 検索機能の状態
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [searchMatchIds, setSearchMatchIds] = useState<string[]>([]);
+  const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
+  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -2050,6 +2057,103 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     return itemsForTab;
   }, [activeTab, currentTabItems, sortState, activeEventName, dayModes, executeColumnItems, eventDates, recentlyChangedItemIds]);
 
+  // 検索機能: 現在のタブのアイテムを検索
+  const searchMatches = useMemo(() => {
+    if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
+      return [];
+    }
+    
+    const keyword = searchKeyword.trim().toLowerCase();
+    const matches: string[] = [];
+    
+    // 現在のタブのアイテムを検索
+    currentTabItems.forEach(item => {
+      const circleMatch = item.circle.toLowerCase().includes(keyword);
+      const titleMatch = item.title.toLowerCase().includes(keyword);
+      const remarksMatch = item.remarks.toLowerCase().includes(keyword);
+      
+      if (circleMatch || titleMatch || remarksMatch) {
+        matches.push(item.id);
+      }
+    });
+    
+    return matches;
+  }, [searchKeyword, activeEventName, activeTab, currentTabItems, eventDates]);
+
+  // 表示されているアイテムのみを検索対象とする
+  const visibleSearchMatches = useMemo(() => {
+    if (searchMatches.length === 0) return [];
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const mode = dayModes[activeEventName || '']?.[currentEventDate] || 'edit';
+    
+    let visibleItemIds: Set<string>;
+    
+    if (mode === 'execute') {
+      // 実行モード: executeColumnItemsまたはvisibleItems
+      visibleItemIds = new Set(visibleItems.map(item => item.id));
+    } else {
+      // 編集モード: executeColumnItems + candidateColumnItems
+      const allVisibleIds = new Set([
+        ...executeColumnItems.map(item => item.id),
+        ...candidateColumnItems.map(item => item.id)
+      ]);
+      visibleItemIds = allVisibleIds;
+    }
+    
+    return searchMatches.filter(id => visibleItemIds.has(id));
+  }, [searchMatches, activeEventName, activeTab, eventDates, dayModes, visibleItems, executeColumnItems, candidateColumnItems]);
+
+  // 検索キーワードが変更されたときに検索結果をリセット
+  useEffect(() => {
+    if (searchKeyword.trim()) {
+      setSearchMatchIds(searchMatches);
+      if (searchMatches.length > 0) {
+        setCurrentSearchIndex(0);
+      } else {
+        setCurrentSearchIndex(-1);
+        setHighlightedItemId(null);
+      }
+    } else {
+      setSearchMatchIds([]);
+      setCurrentSearchIndex(-1);
+      setHighlightedItemId(null);
+    }
+  }, [searchKeyword, searchMatches]);
+
+  // タブが切り替わったときに検索結果をリセット
+  useEffect(() => {
+    setCurrentSearchIndex(-1);
+    setHighlightedItemId(null);
+  }, [activeTab]);
+
+  // 「次を検索」ボタンのハンドラ
+  const handleSearchNext = useCallback(() => {
+    if (!searchKeyword.trim() || visibleSearchMatches.length === 0) {
+      if (searchMatches.length > 0 && visibleSearchMatches.length === 0) {
+        alert('フィルタされています');
+      }
+      return;
+    }
+    
+    // 次のインデックスを計算（ループ）
+    // currentSearchIndexが-1の場合は0から始める
+    const startIndex = currentSearchIndex === -1 ? -1 : currentSearchIndex;
+    const nextIndex = (startIndex + 1) % visibleSearchMatches.length;
+    setCurrentSearchIndex(nextIndex);
+    
+    const nextItemId = visibleSearchMatches[nextIndex];
+    setHighlightedItemId(nextItemId);
+    
+    // スクロール処理
+    setTimeout(() => {
+      const element = document.querySelector(`[data-item-id="${nextItemId}"]`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  }, [searchKeyword, visibleSearchMatches, currentSearchIndex, searchMatches]);
+
   // 各参加日タブ中のアイテムでサークル名が重複するアイテムのIDセットを計算
   const duplicateCircleItemIds = useMemo(() => {
     if (!activeEventName || !eventDates.includes(activeTab)) return new Set<string>();
@@ -2250,6 +2354,15 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                           );
                         })}
                         <TabButton tab="import" label={itemToEdit ? "アイテム編集" : "アイテム追加"} />
+                        {activeEventName && mainContentVisible && (
+                          <SearchBar
+                            searchKeyword={searchKeyword}
+                            onSearchKeywordChange={setSearchKeyword}
+                            onSearchNext={handleSearchNext}
+                            matchCount={visibleSearchMatches.length}
+                            currentMatchIndex={currentSearchIndex}
+                          />
+                        )}
                     </>
                 ) : (
                     <button
@@ -2319,6 +2432,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     rangeEnd={rangeEnd}
                     onToggleRangeSelection={handleToggleRangeSelection}
                     duplicateCircleItemIds={duplicateCircleItemIds}
+                    highlightedItemId={highlightedItemId}
                   />
                 </div>
                 
@@ -2398,6 +2512,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     rangeEnd={rangeEnd}
                     onToggleRangeSelection={handleToggleRangeSelection}
                     duplicateCircleItemIds={duplicateCircleItemIds}
+                    highlightedItemId={highlightedItemId}
                   />
                 </div>
               </div>
@@ -2418,6 +2533,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 rangeEnd={rangeEnd}
                 onToggleRangeSelection={handleToggleRangeSelection}
                 duplicateCircleItemIds={duplicateCircleItemIds}
+                highlightedItemId={highlightedItemId}
               />
             )}
           </div>
