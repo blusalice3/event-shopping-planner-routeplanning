@@ -79,12 +79,6 @@ const App: React.FC = () => {
   const [pendingUpdateEventName, setPendingUpdateEventName] = useState<string | null>(null);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [eventToRename, setEventToRename] = useState<string | null>(null);
-  
-  // 検索機能の状態
-  const [searchText, setSearchText] = useState('');
-  const [searchResults, setSearchResults] = useState<string[]>([]);
-  const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
-  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
   useEffect(() => {
     try {
@@ -1013,10 +1007,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setActiveEventName(eventName);
     setSelectedItemIds(new Set());
     setSelectedBlockFilters(new Set());
-    setSearchText('');
-    setSearchResults([]);
-    setCurrentSearchIndex(-1);
-    setHighlightedItemId(null);
     const eventItems = eventLists[eventName] || [];
     const dates = extractEventDates(eventItems);
     if (dates.length > 0) {
@@ -1627,7 +1617,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     const csvRows: string[] = [];
 
     // ヘッダー行を最初に出力
-    const headers = ['サークル名', '参加日', 'ブロック', 'ナンバー', 'タイトル', '頒布価格', '購入状態', '備考', '列の種類', '列内順番'];
+    const headers = ['サークル名', '参加日', 'ブロック', 'ナンバー', 'タイトル', '頒布価格', '購入状態', '備考', '列の種類', '列内順番', 'URL'];
     csvRows.push(headers.join(','));
 
     // メタデータ行: スプレッドシートURL（コメント行として最後に出力）
@@ -1670,6 +1660,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           escapeCsvCell(item.remarks),
           escapeCsvCell('実行列'),
           escapeCsvCell(index + 1),
+          escapeCsvCell(item.url || ''),
         ];
         csvRows.push(row.join(','));
       });
@@ -1687,6 +1678,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           escapeCsvCell(item.remarks),
           escapeCsvCell('候補リスト'),
           escapeCsvCell(index + 1),
+          escapeCsvCell(item.url || ''),
         ];
         csvRows.push(row.join(','));
       });
@@ -1774,6 +1766,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         const priceStr = cells[17]?.trim() || '';
         const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0); // R列 (0-indexed: 17)
         const remarks = cells[22]?.trim() || ''; // W列 (0-indexed: 22)
+        const url = cells[24]?.trim() || ''; // Y列 (0-indexed: 24)
 
         const item: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
           circle,
@@ -1782,10 +1775,48 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           number,
           title,
           price,
-          remarks
+          remarks,
+          ...(url ? { url } : {}),
         };
         sheetItems.push(item);
       }
+      
+      // 各参加日タブ中でサークル名が重複するアイテムのURL転記処理
+      const eventDateGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
+      sheetItems.forEach(item => {
+        if (!eventDateGroups.has(item.eventDate)) {
+          eventDateGroups.set(item.eventDate, []);
+        }
+        eventDateGroups.get(item.eventDate)!.push(item);
+      });
+      
+      eventDateGroups.forEach((items) => {
+        // サークル名でグループ化
+        const circleGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
+        items.forEach(item => {
+          if (!circleGroups.has(item.circle)) {
+            circleGroups.set(item.circle, []);
+          }
+          circleGroups.get(item.circle)!.push(item);
+        });
+        
+        // サークル名が重複するアイテムが2つ以上ある場合
+        circleGroups.forEach((circleItems) => {
+          if (circleItems.length >= 2) {
+            // URLが入力されているアイテムを探す
+            const itemWithUrl = circleItems.find(item => item.url && item.url.trim() !== '');
+            
+            if (itemWithUrl && itemWithUrl.url) {
+              // URLが入力されていないアイテムにURLを転記
+              circleItems.forEach(item => {
+                if (!item.url || item.url.trim() === '') {
+                  item.url = itemWithUrl.url;
+                }
+              });
+            }
+          }
+        });
+      });
 
       const currentItems = eventLists[eventName] || [];
       
@@ -1816,15 +1847,17 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         // 完全一致（サークル名・参加日・ブロック・ナンバー・タイトル）で既存アイテムを検索
         const existingWithAll = currentItemsMapWithAll.get(keyWithAll);
         if (existingWithAll) {
-          // 完全一致した場合、価格や備考が変わっていれば更新
+          // 完全一致した場合、価格や備考、URLが変わっていれば更新
           if (
             existingWithAll.price !== sheetItem.price ||
-            existingWithAll.remarks !== sheetItem.remarks
+            existingWithAll.remarks !== sheetItem.remarks ||
+            existingWithAll.url !== sheetItem.url
           ) {
             itemsToUpdate.push({
               ...existingWithAll,
               price: sheetItem.price,
-              remarks: sheetItem.remarks
+              remarks: sheetItem.remarks,
+              url: sheetItem.url
             });
           }
           return;
@@ -1833,12 +1866,13 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         // タイトルなしで既存アイテムを検索（タイトルが変更された場合）
         const existingWithoutTitle = currentItemsMapWithoutTitle.get(keyWithoutTitle);
         if (existingWithoutTitle) {
-          // タイトルや価格、備考が変わっていれば更新
+          // タイトルや価格、備考、URLが変わっていれば更新
           itemsToUpdate.push({
             ...existingWithoutTitle,
             title: sheetItem.title,
             price: sheetItem.price,
-            remarks: sheetItem.remarks
+            remarks: sheetItem.remarks,
+            url: sheetItem.url
           });
           return;
         }
@@ -1961,10 +1995,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         setSelectedItemIds(new Set());
         setSelectedBlockFilters(new Set());
         setCandidateNumberSortDirection(null);
-        setSearchText('');
-        setSearchResults([]);
-        setCurrentSearchIndex(-1);
-        setHighlightedItemId(null);
         setActiveTab(tab);
       }
     };
@@ -2019,115 +2049,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     // 編集モード: すべてのアイテムを表示（列分けはコンポーネント側で処理）
     return itemsForTab;
   }, [activeTab, currentTabItems, sortState, activeEventName, dayModes, executeColumnItems, eventDates, recentlyChangedItemIds]);
-
-  // 検索機能: アイテムを検索する関数
-  const performSearch = useCallback((query: string): number => {
-    if (!query.trim() || !activeEventName) {
-      setSearchResults([]);
-      setCurrentSearchIndex(-1);
-      setHighlightedItemId(null);
-      return 0;
-    }
-
-    const searchQuery = query.toLowerCase().trim();
-    const matchingItems: ShoppingItem[] = [];
-    const allMatchingItems: ShoppingItem[] = []; // フィルタ前の全検索結果
-    
-    // 検索対象: 現在のタブの全アイテム（フィルタ前）
-    const allItemsToSearch = currentTabItems;
-    
-    // 全アイテムから検索（フィルタ前）
-    allItemsToSearch.forEach(item => {
-      const circleMatch = item.circle.toLowerCase().includes(searchQuery);
-      const titleMatch = item.title.toLowerCase().includes(searchQuery);
-      const remarksMatch = item.remarks.toLowerCase().includes(searchQuery);
-      const blockMatch = item.block.toLowerCase().includes(searchQuery);
-      const numberMatch = item.number.toLowerCase().includes(searchQuery);
-      
-      if (circleMatch || titleMatch || remarksMatch || blockMatch || numberMatch) {
-        allMatchingItems.push(item);
-      }
-    });
-    
-    // 現在表示されているアイテムを検索対象とする
-    const itemsToSearch = currentMode === 'edit' 
-      ? currentTabItems 
-      : visibleItems;
-    
-    // 表示されているアイテムから検索（フィルタ後）
-    itemsToSearch.forEach(item => {
-      const circleMatch = item.circle.toLowerCase().includes(searchQuery);
-      const titleMatch = item.title.toLowerCase().includes(searchQuery);
-      const remarksMatch = item.remarks.toLowerCase().includes(searchQuery);
-      const blockMatch = item.block.toLowerCase().includes(searchQuery);
-      const numberMatch = item.number.toLowerCase().includes(searchQuery);
-      
-      if (circleMatch || titleMatch || remarksMatch || blockMatch || numberMatch) {
-        matchingItems.push(item);
-      }
-    });
-    
-    const matchingIds = matchingItems.map(item => item.id);
-    setSearchResults(matchingIds);
-    
-    // フィルタで見えない検索結果がある場合のチェック
-    const filteredOutCount = allMatchingItems.length - matchingItems.length;
-    if (filteredOutCount > 0) {
-      // フィルタで見えない検索結果があることを示す状態を設定
-      // これは後でUIに表示される
-    }
-    
-    if (matchingIds.length > 0) {
-      setCurrentSearchIndex(0);
-      setHighlightedItemId(matchingIds[0]);
-      // 最初のマッチにスクロール
-      setTimeout(() => {
-        const element = document.querySelector(`[data-item-id="${matchingIds[0]}"]`);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 100);
-    } else {
-      setCurrentSearchIndex(-1);
-      setHighlightedItemId(null);
-    }
-    
-    return filteredOutCount;
-  }, [activeEventName, currentTabItems, visibleItems, currentMode]);
-
-  // 次を検索
-  const findNext = useCallback(() => {
-    if (searchResults.length === 0) return;
-    
-    const nextIndex = (currentSearchIndex + 1) % searchResults.length;
-    setCurrentSearchIndex(nextIndex);
-    const nextItemId = searchResults[nextIndex];
-    setHighlightedItemId(nextItemId);
-    
-    // スクロール
-    setTimeout(() => {
-      const element = document.querySelector(`[data-item-id="${nextItemId}"]`);
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }, 100);
-  }, [searchResults, currentSearchIndex]);
-
-  // フィルタで見えない検索結果の数を管理
-  const [filteredOutSearchCount, setFilteredOutSearchCount] = useState(0);
-
-  // 検索テキスト変更時の処理
-  useEffect(() => {
-    if (searchText.trim() && activeEventName) {
-      const filteredCount = performSearch(searchText);
-      setFilteredOutSearchCount(filteredCount || 0);
-    } else {
-      setSearchResults([]);
-      setCurrentSearchIndex(-1);
-      setHighlightedItemId(null);
-      setFilteredOutSearchCount(0);
-    }
-  }, [searchText, activeEventName, performSearch]);
 
   // 各参加日タブ中のアイテムでサークル名が重複するアイテムのIDセットを計算
   const duplicateCircleItemIds = useMemo(() => {
@@ -2313,7 +2234,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           </div>
         </div>
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-200 dark:border-slate-700">
-             <div className="flex space-x-2 pt-2 pb-2 overflow-x-auto items-center">
+             <div className="flex space-x-2 pt-2 pb-2 overflow-x-auto">
                 <TabButton tab="eventList" label="即売会リスト" onClick={() => { setActiveEventName(null); setItemToEdit(null); setSelectedItemIds(new Set()); setSelectedBlockFilters(new Set()); setActiveTab('eventList'); }}/>
                 {activeEventName ? (
                     <>
@@ -2329,56 +2250,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                           );
                         })}
                         <TabButton tab="import" label={itemToEdit ? "アイテム編集" : "アイテム追加"} />
-                        {mainContentVisible && (
-                          <div className="flex flex-col gap-1 ml-4">
-                            {filteredOutSearchCount > 0 && (
-                              <div className="px-3 py-1 text-xs text-yellow-700 dark:text-yellow-400 bg-yellow-100 dark:bg-yellow-900/30 rounded-md border border-yellow-300 dark:border-yellow-700">
-                                フィルタされています ({filteredOutSearchCount}件の検索結果が非表示)
-                              </div>
-                            )}
-                            <div className="flex items-center gap-2 px-3 py-1 bg-white dark:bg-slate-800 rounded-md border border-slate-300 dark:border-slate-600">
-                              <input
-                                type="text"
-                                value={searchText}
-                                onChange={(e) => setSearchText(e.target.value)}
-                                placeholder="検索..."
-                                className="text-sm px-2 py-1 bg-transparent border-none outline-none text-slate-700 dark:text-slate-300 w-32 focus:w-48 transition-all"
-                                onKeyDown={(e) => {
-                                  if (e.key === 'Enter' && searchText.trim()) {
-                                    findNext();
-                                  }
-                                }}
-                              />
-                              <button
-                                onClick={findNext}
-                                disabled={searchResults.length === 0}
-                                className={`px-2 py-1 text-xs font-medium rounded transition-colors ${
-                                  searchResults.length > 0
-                                    ? 'bg-blue-600 text-white hover:bg-blue-700'
-                                    : 'bg-slate-300 dark:bg-slate-600 text-slate-500 dark:text-slate-400 cursor-not-allowed'
-                                }`}
-                                title={`次を検索 (${searchResults.length > 0 ? `${currentSearchIndex + 1}/${searchResults.length}` : '0件'})`}
-                              >
-                                次を検索
-                              </button>
-                              {searchText && (
-                                <button
-                                  onClick={() => {
-                                    setSearchText('');
-                                    setSearchResults([]);
-                                    setCurrentSearchIndex(-1);
-                                    setHighlightedItemId(null);
-                                    setFilteredOutSearchCount(0);
-                                  }}
-                                  className="px-2 py-1 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-                                  title="検索をクリア"
-                                >
-                                  ✕
-                                </button>
-                              )}
-                            </div>
-                          </div>
-                        )}
                     </>
                 ) : (
                     <button
@@ -2448,7 +2319,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     rangeEnd={rangeEnd}
                     onToggleRangeSelection={handleToggleRangeSelection}
                     duplicateCircleItemIds={duplicateCircleItemIds}
-                    highlightedItemId={highlightedItemId}
                   />
                 </div>
                 
@@ -2528,7 +2398,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     rangeEnd={rangeEnd}
                     onToggleRangeSelection={handleToggleRangeSelection}
                     duplicateCircleItemIds={duplicateCircleItemIds}
-                    highlightedItemId={highlightedItemId}
                   />
                 </div>
               </div>
@@ -2549,7 +2418,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 rangeEnd={rangeEnd}
                 onToggleRangeSelection={handleToggleRangeSelection}
                 duplicateCircleItemIds={duplicateCircleItemIds}
-                highlightedItemId={highlightedItemId}
               />
             )}
           </div>
