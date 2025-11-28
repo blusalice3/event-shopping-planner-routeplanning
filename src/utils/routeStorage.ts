@@ -52,13 +52,13 @@ export function addRoutePoint(
   }
   
   // 既存のポイントを削除（同じIDの場合）
-  data.routes[eventDate] = data.routes[eventDate].filter(p => p.id !== routePoint.id);
+  data.routes[eventDate] = data.routes[eventDate].filter((p: RoutePoint) => p.id !== routePoint.id);
   
   // 新しいポイントを追加
   data.routes[eventDate].push(routePoint);
   
   // 順序でソート
-  data.routes[eventDate].sort((a, b) => a.order - b.order);
+  data.routes[eventDate].sort((a: RoutePoint, b: RoutePoint) => a.order - b.order);
   
   saveRoutePlanningData(data);
 }
@@ -74,10 +74,10 @@ export function removeRoutePoint(
     return;
   }
   
-  data.routes[eventDate] = data.routes[eventDate].filter(p => p.id !== routePointId);
+  data.routes[eventDate] = data.routes[eventDate].filter((p: RoutePoint) => p.id !== routePointId);
   
   // 順序を再割り当て
-  data.routes[eventDate].forEach((point, index) => {
+  data.routes[eventDate].forEach((point: RoutePoint, index: number) => {
     point.order = index;
   });
   
@@ -95,11 +95,11 @@ export function reorderRoutePoints(
     return;
   }
   
-  const pointMap = new Map(data.routes[eventDate].map(p => [p.id, p]));
+  const pointMap = new Map<string, RoutePoint>(data.routes[eventDate].map((p: RoutePoint) => [p.id, p]));
   const reorderedPoints: RoutePoint[] = [];
   
-  routePointIds.forEach((id, index) => {
-    const point = pointMap.get(id);
+  routePointIds.forEach((id: string, index: number) => {
+    const point: RoutePoint | undefined = pointMap.get(id);
     if (point) {
       point.order = index;
       reorderedPoints.push(point);
@@ -121,7 +121,7 @@ export function updateRoutePoint(
     return;
   }
   
-  const index = data.routes[eventDate].findIndex(p => p.id === routePoint.id);
+  const index = data.routes[eventDate].findIndex((p: RoutePoint) => p.id === routePoint.id);
   if (index !== -1) {
     data.routes[eventDate][index] = routePoint;
     saveRoutePlanningData(data);
@@ -138,6 +138,6 @@ export function getRoutePoints(
     return [];
   }
   
-  return [...data.routes[eventDate]].sort((a, b) => a.order - b.order);
+  return [...data.routes[eventDate]].sort((a: RoutePoint, b: RoutePoint) => a.order - b.order);
 }
 
