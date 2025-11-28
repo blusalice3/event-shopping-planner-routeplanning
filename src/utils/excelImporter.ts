@@ -248,7 +248,7 @@ function mapBorderWidth(style: string | undefined): number {
   return widthMap[style.toLowerCase()] || 1;
 }
 
-function parseMetadataSheet(sheet: XLSX.WorkSheet): RoutePlanningData | undefined {
+function parseMetadataSheet(_sheet: XLSX.WorkSheet): RoutePlanningData | undefined {
   // メタデータシートのパース実装（必要に応じて）
   // 現時点では未実装
   return undefined;
