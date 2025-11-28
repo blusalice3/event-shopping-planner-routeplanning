@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapData, RoutePoint } from './types';
+import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapData } from './types';
 import ImportScreen from './components/ImportScreen';
 import ShoppingList from './components/ShoppingList';
 import SummaryBar from './components/SummaryBar';
@@ -15,9 +15,8 @@ import SortDescendingIcon from './components/icons/SortDescendingIcon';
 import SearchBar from './components/SearchBar';
 import MapView from './components/MapView';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
-import { importExcelFile } from './utils/excelImporter';
 import { saveMapData, loadMapData, deleteMapData, loadMapMetadata } from './utils/mapStorage';
-import { saveRoutePlanningData, loadRoutePlanningData, addRoutePoint, removeRoutePoint, reorderRoutePoints, getRoutePoints } from './utils/routeStorage';
+import { addRoutePoint, removeRoutePoint, getRoutePoints } from './utils/routeStorage';
 import { importMapSheetsFromSpreadsheet } from './utils/spreadsheetMapImporter';
 
 type ActiveTab = 'eventList' | 'import' | string | `${string}マップ`; // string部分は動的な参加日（例: '1日目', '2日目', '3日目'など）またはマップタブ（例: '1日目マップ'）
@@ -26,7 +25,7 @@ export type BulkSortDirection = 'asc' | 'desc';
 type BlockSortDirection = 'asc' | 'desc';
 
 // データから参加日を抽出する関数
-const extractEventDates = (items: ShoppingItem[]): string[] => {
+const extractEventDates = (items: (ShoppingItem | Omit<ShoppingItem, 'id' | 'purchaseStatus'>)[]): string[] => {
   const eventDates = new Set<string>();
   items.forEach(item => {
     if (item.eventDate && item.eventDate.trim()) {
@@ -93,7 +92,6 @@ const App: React.FC = () => {
 
   // マップ関連の状態
   const [mapDataCache, setMapDataCache] = useState<Record<string, Record<string, MapData>>>({});
-  const [isBlockDefinitionMode, setIsBlockDefinitionMode] = useState(false);
 
   // マップデータの読み込み
   useEffect(() => {
@@ -2503,7 +2501,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           return (
             <div className="h-[calc(100vh-200px)]">
               <MapView
-                eventName={activeEventName}
                 eventDate={eventDate}
                 items={items}
                 mapData={mapData}
@@ -2516,12 +2513,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 onRoutePointRemove={(pointId) => {
                   removeRoutePoint(activeEventName, eventDate, pointId);
                 }}
-                onRoutePointReorder={(pointIds) => {
-                  reorderRoutePoints(activeEventName, eventDate, pointIds);
-                }}
-                onBlockDefine={() => {}}
-                isBlockDefinitionMode={isBlockDefinitionMode}
-                onToggleBlockDefinitionMode={() => setIsBlockDefinitionMode(!isBlockDefinitionMode)}
                 zoomLevel={zoomLevel}
               />
             </div>
