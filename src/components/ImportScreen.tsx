@@ -1,6 +1,8 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { ShoppingItem } from '../types';
 import { getItemKey } from '../utils/itemComparison';
+import { importExcelFile } from '../utils/excelImporter';
+import { saveMapData } from '../utils/mapStorage';
 
 interface ImportScreenProps {
   onBulkAdd: (eventName: string, items: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string, layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> }) => void;
@@ -271,28 +273,63 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
     const file = e.target.files?.[0];
     if (!file) return;
 
-    const text = await file.text();
-    const lines = text.split('\n').filter(line => line.trim() !== '');
-    const importResult = processImportData(lines);
-    
-    if (importResult.items.length > 0) {
-      const metadata: { url?: string; layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> } = {};
-      if (importResult.spreadsheetUrl) {
-        metadata.url = importResult.spreadsheetUrl;
+    try {
+      // Excelファイル（.xlsx）の場合
+      if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+        const excelResult = await importExcelFile(file);
+        
+        if (excelResult.items.length > 0) {
+          const finalEventName = eventName || 'インポートリスト';
+          
+          // アイテムデータを追加
+          onBulkAdd(finalEventName, excelResult.items);
+          
+          // マップデータを保存
+          for (const mapData of excelResult.mapData) {
+            await saveMapData(finalEventName, mapData.eventDate, mapData);
+          }
+          
+          if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+          }
+          
+          const mapMessage = excelResult.mapData.length > 0 
+            ? `マップデータ${excelResult.mapData.length}件も読み込みました。` 
+            : '';
+          alert(`${excelResult.items.length}件のアイテムをインポートしました。${mapMessage}`);
+        } else {
+          alert('インポートできるデータが見つかりませんでした。');
+        }
+        return;
       }
-      if (importResult.layoutInfo) {
-        metadata.layoutInfo = importResult.layoutInfo;
-      }
+
+      // CSVファイルの場合（既存の処理）
+      const text = await file.text();
+      const lines = text.split('\n').filter(line => line.trim() !== '');
+      const importResult = processImportData(lines);
       
-      onBulkAdd(eventName || 'インポートリスト', importResult.items, Object.keys(metadata).length > 0 ? metadata : undefined);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+      if (importResult.items.length > 0) {
+        const metadata: { url?: string; layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> } = {};
+        if (importResult.spreadsheetUrl) {
+          metadata.url = importResult.spreadsheetUrl;
+        }
+        if (importResult.layoutInfo) {
+          metadata.layoutInfo = importResult.layoutInfo;
+        }
+        
+        onBulkAdd(eventName || 'インポートリスト', importResult.items, Object.keys(metadata).length > 0 ? metadata : undefined);
+        if (fileInputRef.current) {
+          fileInputRef.current.value = '';
+        }
+        const urlMessage = importResult.spreadsheetUrl ? `スプレッドシートURLも保存されました。` : '';
+        const layoutMessage = importResult.layoutInfo && importResult.layoutInfo.length > 0 ? `配置情報も復元されました。` : '';
+        alert(`${importResult.items.length}件のアイテムをインポートしました。${urlMessage}${layoutMessage}`);
+      } else {
+        alert('インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。');
       }
-      const urlMessage = importResult.spreadsheetUrl ? `スプレッドシートURLも保存されました。` : '';
-      const layoutMessage = importResult.layoutInfo && importResult.layoutInfo.length > 0 ? `配置情報も復元されました。` : '';
-      alert(`${importResult.items.length}件のアイテムをインポートしました。${urlMessage}${layoutMessage}`);
-    } else {
-      alert('インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。');
+    } catch (error) {
+      console.error('Import error:', error);
+      alert(`インポート中にエラーが発生しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
     }
   };
 
@@ -594,11 +631,14 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
                       type="file"
                       id="csvFile"
                       ref={fileInputRef}
-                      accept=".csv"
+                      accept=".csv,.xlsx,.xls"
                       onChange={handleFileImport}
                       className={formInputClass}
                     />
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">A列からD列の値が全て入力されている行のみをインポートします</p>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                      CSVファイル: A列からD列の値が全て入力されている行のみをインポートします<br/>
+                      Excelファイル: 品目表シートからアイテムデータ、マップシートからマップデータを読み込みます
+                    </p>
                   </div>
                   
                   <div className="text-center text-slate-500 dark:text-slate-400 my-4">または</div>
