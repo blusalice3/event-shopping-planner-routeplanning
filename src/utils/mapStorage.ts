@@ -160,7 +160,7 @@ function updateMapMetadata(
   eventName: string,
   eventDate: string,
   mapData: MapData,
-  storageType: 'localStorage' | 'indexedDB'
+  _storageType: 'localStorage' | 'indexedDB'
 ): void {
   try {
     const metadataStr = localStorage.getItem(STORAGE_KEYS.MAP_METADATA);
