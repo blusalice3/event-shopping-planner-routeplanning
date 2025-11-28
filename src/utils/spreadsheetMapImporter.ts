@@ -1,5 +1,4 @@
 import { MapData, MapCell } from '../types';
-import * as XLSX from 'xlsx';
 
 /**
  * Googleスプレッドシートからマップシートを読み込む
