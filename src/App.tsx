@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems } from './types';
+import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapData, RoutePoint } from './types';
 import ImportScreen from './components/ImportScreen';
 import ShoppingList from './components/ShoppingList';
 import SummaryBar from './components/SummaryBar';
@@ -13,9 +13,14 @@ import EventRenameDialog from './components/EventRenameDialog';
 import SortAscendingIcon from './components/icons/SortAscendingIcon';
 import SortDescendingIcon from './components/icons/SortDescendingIcon';
 import SearchBar from './components/SearchBar';
+import MapView from './components/MapView';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
+import { importExcelFile } from './utils/excelImporter';
+import { saveMapData, loadMapData, deleteMapData, loadMapMetadata } from './utils/mapStorage';
+import { saveRoutePlanningData, loadRoutePlanningData, addRoutePoint, removeRoutePoint, reorderRoutePoints, getRoutePoints } from './utils/routeStorage';
+import { importMapSheetsFromSpreadsheet } from './utils/spreadsheetMapImporter';
 
-type ActiveTab = 'eventList' | 'import' | string; // string部分は動的な参加日（例: '1日目', '2日目', '3日目'など）
+type ActiveTab = 'eventList' | 'import' | string | `${string}マップ`; // string部分は動的な参加日（例: '1日目', '2日目', '3日目'など）またはマップタブ（例: '1日目マップ'）
 type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'Purchased';
 export type BulkSortDirection = 'asc' | 'desc';
 type BlockSortDirection = 'asc' | 'desc';
@@ -85,6 +90,37 @@ const App: React.FC = () => {
   const [searchKeyword, setSearchKeyword] = useState('');
   const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
+
+  // マップ関連の状態
+  const [mapDataCache, setMapDataCache] = useState<Record<string, Record<string, MapData>>>({});
+  const [isBlockDefinitionMode, setIsBlockDefinitionMode] = useState(false);
+
+  // マップデータの読み込み
+  useEffect(() => {
+    const loadMaps = async () => {
+      if (!activeEventName) return;
+      
+      const metadata = loadMapMetadata(activeEventName);
+      if (!metadata) return;
+      
+      const newCache: Record<string, MapData> = {};
+      for (const [eventDate] of Object.entries(metadata.maps)) {
+        const mapData = await loadMapData(activeEventName, eventDate);
+        if (mapData) {
+          newCache[eventDate] = mapData;
+        }
+      }
+      
+      if (Object.keys(newCache).length > 0) {
+        setMapDataCache(prev => ({
+          ...prev,
+          [activeEventName]: newCache,
+        }));
+      }
+    };
+    
+    loadMaps();
+  }, [activeEventName]);
 
   useEffect(() => {
     try {
@@ -1887,6 +1923,29 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         itemsToAdd.push(sheetItem);
       });
 
+      // マップシートの読み込み（参加日に対応するマップシートを読み込む）
+      const eventDatesFromItems = extractEventDates(sheetItems);
+      const mapDataList = await importMapSheetsFromSpreadsheet(url, eventDatesFromItems);
+      
+      // マップデータを保存
+      for (const mapData of mapDataList) {
+        await saveMapData(eventName, mapData.eventDate, mapData);
+      }
+      
+      // マップデータキャッシュを更新
+      if (mapDataList.length > 0) {
+        setMapDataCache(prev => {
+          const newCache = { ...prev };
+          if (!newCache[eventName]) {
+            newCache[eventName] = {};
+          }
+          mapDataList.forEach(mapData => {
+            newCache[eventName][mapData.eventDate] = mapData;
+          });
+          return newCache;
+        });
+      }
+
       setUpdateData({ itemsToDelete, itemsToUpdate, itemsToAdd });
       setUpdateEventName(eventName);
       setShowUpdateConfirmation(true);
@@ -1976,14 +2035,40 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     const longPressTimeout = React.useRef<number | null>(null);
 
     const handlePointerDown = () => {
-      if (!eventDates.includes(tab)) return;
       if (!activeEventName) return;
       
-      longPressTimeout.current = window.setTimeout(() => {
-        // 長押しでモード切り替え
-        handleToggleMode();
-        longPressTimeout.current = null;
-      }, 500);
+      // マップタブの長押しで削除
+      if (tab.endsWith('マップ')) {
+        longPressTimeout.current = window.setTimeout(() => {
+          const eventDate = tab.replace('マップ', '');
+          if (confirm(`${eventDate}のマップを削除しますか？`)) {
+            deleteMapData(activeEventName, eventDate);
+            setMapDataCache(prev => {
+              const newCache = { ...prev };
+              if (newCache[activeEventName]) {
+                delete newCache[activeEventName][eventDate];
+              }
+              return newCache;
+            });
+            // 現在マップタブを表示中の場合、対応する参加日タブに遷移
+            if (activeTab === tab) {
+              if (eventDates.includes(eventDate)) {
+                setActiveTab(eventDate);
+              } else {
+                setActiveTab('eventList');
+              }
+            }
+          }
+          longPressTimeout.current = null;
+        }, 500);
+      }
+      // 参加日タブの長押しでモード切り替え
+      else if (eventDates.includes(tab)) {
+        longPressTimeout.current = window.setTimeout(() => {
+          handleToggleMode();
+          longPressTimeout.current = null;
+        }, 500);
+      }
     };
 
     const handlePointerUp = () => {
@@ -2257,7 +2342,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     return null;
   }
 
-  const mainContentVisible = eventDates.includes(activeTab);
+  const mainContentVisible = eventDates.includes(activeTab) || activeTab.endsWith('マップ');
   
   const handleZoomChange = (newZoom: number) => {
     setZoomLevel(Math.max(30, Math.min(150, newZoom)));
@@ -2350,8 +2435,20 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                             />
                           );
                         })}
+                        {/* マップタブの追加 */}
+                        {eventDates.map(eventDate => {
+                          const hasMapData = mapDataCache[activeEventName]?.[eventDate] || loadMapMetadata(activeEventName)?.maps[eventDate];
+                          if (!hasMapData) return null;
+                          return (
+                            <TabButton
+                              key={`${eventDate}マップ`}
+                              tab={`${eventDate}マップ`}
+                              label={`${eventDate}マップ`}
+                            />
+                          );
+                        })}
                         <TabButton tab="import" label={itemToEdit ? "アイテム編集" : "アイテム追加"} />
-                        {activeEventName && mainContentVisible && (
+                        {activeEventName && mainContentVisible && !activeTab.endsWith('マップ') && (
                           <SearchBar
                             searchKeyword={searchKeyword}
                             onSearchKeywordChange={setSearchKeyword}
@@ -2397,7 +2494,41 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
              onDoneEditing={handleDoneEditing}
            />
         )}
-        {activeEventName && mainContentVisible && (
+        {/* マップ表示画面 */}
+        {activeEventName && activeTab.endsWith('マップ') && (() => {
+          const eventDate = activeTab.replace('マップ', '');
+          const mapData = mapDataCache[activeEventName]?.[eventDate] || null;
+          const routePoints = getRoutePoints(activeEventName, eventDate);
+          
+          return (
+            <div className="h-[calc(100vh-200px)]">
+              <MapView
+                eventName={activeEventName}
+                eventDate={eventDate}
+                items={items}
+                mapData={mapData}
+                routePoints={routePoints}
+                onCellClick={() => {}}
+                onRoutePointAdd={(point) => {
+                  addRoutePoint(activeEventName, eventDate, point);
+                  // 実行列への自動移動は後で実装
+                }}
+                onRoutePointRemove={(pointId) => {
+                  removeRoutePoint(activeEventName, eventDate, pointId);
+                }}
+                onRoutePointReorder={(pointIds) => {
+                  reorderRoutePoints(activeEventName, eventDate, pointIds);
+                }}
+                onBlockDefine={() => {}}
+                isBlockDefinitionMode={isBlockDefinitionMode}
+                onToggleBlockDefinitionMode={() => setIsBlockDefinitionMode(!isBlockDefinitionMode)}
+                zoomLevel={zoomLevel}
+              />
+            </div>
+          );
+        })()}
+
+        {activeEventName && mainContentVisible && !activeTab.endsWith('マップ') && (
           <div style={{
               transform: `scale(${zoomLevel / 100})`,
               transformOrigin: 'top left',
