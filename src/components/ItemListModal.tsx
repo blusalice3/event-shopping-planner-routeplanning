@@ -1,6 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ShoppingItem, RoutePoint } from '../types';
-import ShoppingItemCard from './ShoppingItemCard';
 
 interface ItemListModalProps {
   items: ShoppingItem[];

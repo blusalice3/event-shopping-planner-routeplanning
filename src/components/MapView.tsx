@@ -5,7 +5,6 @@ import RouteCanvas from './RouteCanvas';
 import ItemListModal from './ItemListModal';
 
 interface MapViewProps {
-  eventName: string;
   eventDate: string;
   items: ShoppingItem[];
   mapData: MapData | null;
@@ -13,15 +12,10 @@ interface MapViewProps {
   onCellClick: (row: number, col: number) => void;
   onRoutePointAdd: (point: RoutePoint) => void;
   onRoutePointRemove: (pointId: string) => void;
-  onRoutePointReorder: (pointIds: string[]) => void;
-  onBlockDefine: (block: { name: string; cells: { row: number; col: number }[]; isWallSide: boolean }) => void;
-  isBlockDefinitionMode: boolean;
-  onToggleBlockDefinitionMode: () => void;
   zoomLevel: number;
 }
 
 const MapView: React.FC<MapViewProps> = ({
-  eventName,
   eventDate,
   items,
   mapData,
@@ -29,34 +23,17 @@ const MapView: React.FC<MapViewProps> = ({
   onCellClick,
   onRoutePointAdd,
   onRoutePointRemove,
-  onRoutePointReorder,
-  onBlockDefine,
-  isBlockDefinitionMode,
-  onToggleBlockDefinitionMode,
   zoomLevel,
 }) => {
   const [selectedCell, setSelectedCell] = useState<{ row: number; col: number } | null>(null);
   const [showItemListModal, setShowItemListModal] = useState(false);
-  const [selectedCells, setSelectedCells] = useState<{ row: number; col: number }[]>([]);
 
   const handleCellClick = useCallback((row: number, col: number) => {
-    if (isBlockDefinitionMode) {
-      // ブロック定義モード: セル選択
-      setSelectedCells(prev => {
-        const exists = prev.some(c => c.row === row && c.col === col);
-        if (exists) {
-          return prev.filter(c => !(c.row === row && c.col === col));
-        } else {
-          return [...prev, { row, col }];
-        }
-      });
-    } else {
-      // 通常モード: セルクリックでアイテムリスト表示
-      setSelectedCell({ row, col });
-      setShowItemListModal(true);
-      onCellClick(row, col);
-    }
-  }, [isBlockDefinitionMode, onCellClick]);
+    // 通常モード: セルクリックでアイテムリスト表示
+    setSelectedCell({ row, col });
+    setShowItemListModal(true);
+    onCellClick(row, col);
+  }, [onCellClick]);
 
   const handleItemListClose = useCallback(() => {
     setShowItemListModal(false);
@@ -89,7 +66,7 @@ const MapView: React.FC<MapViewProps> = ({
       onRoutePointAdd(routePoint);
     } else {
       // 訪問先から除外
-      const point = routePoints.find(p => 
+      const point = routePoints.find((p: RoutePoint) => 
         p.row === selectedCell.row && 
         p.col === selectedCell.col &&
         p.itemIds.includes(item.id)
@@ -109,7 +86,7 @@ const MapView: React.FC<MapViewProps> = ({
     const block = getBlockForCell(mapData, selectedCell.row, selectedCell.col);
     const number = extractNumberFromCell(cell);
 
-    return items.filter(item => {
+    return items.filter((item: ShoppingItem) => {
       if (item.eventDate !== eventDate) return false;
       if (block && item.block !== block) return false;
       if (number) {
@@ -143,8 +120,8 @@ const MapView: React.FC<MapViewProps> = ({
             routePoints={routePoints}
             selectedCell={selectedCell}
             zoomLevel={zoomLevel}
-            isBlockDefinitionMode={isBlockDefinitionMode}
-            selectedCells={selectedCells}
+            isBlockDefinitionMode={false}
+            selectedCells={[]}
             onCellClick={handleCellClick}
           />
           <RouteCanvas
@@ -178,7 +155,7 @@ const MapView: React.FC<MapViewProps> = ({
 // ヘルパー関数
 function getBlockForCell(mapData: MapData, row: number, col: number): string | null {
   for (const block of mapData.blocks) {
-    if (block.cells.some(c => c.row === row && c.col === col)) {
+    if (block.cells.some((c: { row: number; col: number }) => c.row === row && c.col === col)) {
       return block.name;
     }
   }

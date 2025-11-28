@@ -1,5 +1,5 @@
 import React from 'react';
-import { MapData, RoutePoint } from '../types';
+import { MapData, RoutePoint, MapCell } from '../types';
 
 interface MapGridProps {
   mapData: MapData;
@@ -103,8 +103,8 @@ const MapGrid: React.FC<MapGridProps> = ({
 
   return (
     <div className="map-grid relative">
-      {mapData.cells.map((row, rowIndex) =>
-        row.map((cell, colIndex) => {
+      {mapData.cells.map((row: MapCell[], rowIndex: number) =>
+        row.map((cell: MapCell, colIndex: number) => {
           // 結合セルの場合は、結合範囲の最初のセルのみを描画
           if (cell.isMerged && cell.mergedRange) {
             if (
