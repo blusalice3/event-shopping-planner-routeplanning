@@ -1,12 +1,19 @@
-// @ts-ignore - xlsxライブラリの型定義の問題を回避
-import * as XLSX from 'xlsx';
-
 /**
  * xlsxファイルからマップデータを読み込む
  * @param file xlsxファイル
  * @returns マップデータ（参加日をキーとしたオブジェクト）
  */
 export async function readMapDataFromXlsx(file: File): Promise<Map<string, any[][]>> {
+  // グローバルにXLSXが読み込まれているか確認
+  if (typeof window === 'undefined') {
+    throw new Error('ブラウザ環境で実行してください');
+  }
+  
+  const XLSX = (window as any).XLSX;
+  if (!XLSX) {
+    throw new Error('xlsxライブラリが読み込まれていません。ページをリロードしてください。');
+  }
+  
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     
