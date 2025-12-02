@@ -1508,7 +1508,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     if (columnType === 'execute') {
       const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
       const itemsMap = new Map(items.map(item => [item.id, item]));
-      currentItems = executeIds.map(id => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+      currentItems = executeIds.map((id: string) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
     } else {
       const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
       let filtered = items.filter(item => 
