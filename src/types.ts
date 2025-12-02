@@ -38,3 +38,11 @@ export interface DayModeState {
 export interface ExecuteModeItems {
   [eventDate: string]: string[];
 }
+
+export interface MapData {
+  [eventDate: string]: any[][]; // マップデータは2次元配列として保存
+}
+
+export interface EventMapData {
+  [eventName: string]: MapData;
+}
