@@ -18,6 +18,7 @@ export interface ShoppingItem {
   title: string;
   price: number | null;
   purchaseStatus: PurchaseStatus;
+  quantity: number;
   remarks: string;
   url?: string;
 }
