@@ -1,5 +1,6 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems } from './types';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapData, EventMapData } from './types';
+import { readMapDataFromXlsx } from './utils/xlsxReader';
 import ImportScreen from './components/ImportScreen';
 import ShoppingList from './components/ShoppingList';
 import SummaryBar from './components/SummaryBar';
@@ -13,6 +14,7 @@ import EventRenameDialog from './components/EventRenameDialog';
 import SortAscendingIcon from './components/icons/SortAscendingIcon';
 import SortDescendingIcon from './components/icons/SortDescendingIcon';
 import SearchBar from './components/SearchBar';
+import MapView from './components/MapView';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
 
 type ActiveTab = 'eventList' | 'import' | string; // string部分は動的な参加日（例: '1日目', '2日目', '3日目'など）
@@ -52,6 +54,8 @@ const App: React.FC = () => {
   const [eventMetadata, setEventMetadata] = useState<Record<string, EventMetadata>>({});
   const [executeModeItems, setExecuteModeItems] = useState<Record<string, ExecuteModeItems>>({});
   const [dayModes, setDayModes] = useState<Record<string, DayModeState>>({});
+  const [eventMapData, setEventMapData] = useState<EventMapData>({});
+  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [activeEventName, setActiveEventName] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -92,6 +96,7 @@ const App: React.FC = () => {
       const storedMetadata = localStorage.getItem('eventMetadata');
       const storedExecuteItems = localStorage.getItem('executeModeItems');
       const storedDayModes = localStorage.getItem('dayModes');
+      const storedMapData = localStorage.getItem('eventMapData');
       
       if (storedLists) {
         const parsedLists = JSON.parse(storedLists);
@@ -114,6 +119,9 @@ const App: React.FC = () => {
       if (storedDayModes) {
         setDayModes(JSON.parse(storedDayModes));
       }
+      if (storedMapData) {
+        setEventMapData(JSON.parse(storedMapData));
+      }
     } catch (error) {
       console.error("Failed to load data from localStorage", error);
     }
@@ -127,11 +135,12 @@ const App: React.FC = () => {
         localStorage.setItem('eventMetadata', JSON.stringify(eventMetadata));
         localStorage.setItem('executeModeItems', JSON.stringify(executeModeItems));
         localStorage.setItem('dayModes', JSON.stringify(dayModes));
+        localStorage.setItem('eventMapData', JSON.stringify(eventMapData));
       } catch (error) {
         console.error("Failed to save data to localStorage", error);
       }
     }
-  }, [eventLists, eventMetadata, executeModeItems, dayModes, isInitialized]);
+  }, [eventLists, eventMetadata, executeModeItems, dayModes, eventMapData, isInitialized]);
 
   const items = useMemo(() => activeEventName ? eventLists[activeEventName] || [] : [], [activeEventName, eventLists]);
   
@@ -1053,6 +1062,11 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         delete newModes[eventName];
         return newModes;
     });
+    setEventMapData(prev => {
+        const newMapData = {...prev};
+        delete newMapData[eventName];
+        return newMapData;
+    });
     if (activeEventName === eventName) {
         setActiveEventName(null);
         setActiveTab('eventList');
@@ -1112,6 +1126,15 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         delete newItems[eventToRename];
       }
       return newItems;
+    });
+
+    setEventMapData(prev => {
+      const newMapData = { ...prev };
+      if (newMapData[eventToRename]) {
+        newMapData[newName] = newMapData[eventToRename];
+        delete newMapData[eventToRename];
+      }
+      return newMapData;
     });
 
     if (activeEventName === eventToRename) {
@@ -2274,7 +2297,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     return null;
   }
 
-  const mainContentVisible = eventDates.includes(activeTab);
+  const mainContentVisible = eventDates.includes(activeTab) || (activeEventName && eventMapData[activeEventName] && Object.keys(eventMapData[activeEventName]).includes(activeTab));
+  const isMapTab = activeEventName && eventMapData[activeEventName] && Object.keys(eventMapData[activeEventName]).includes(activeTab);
   
   const handleZoomChange = (newZoom: number) => {
     setZoomLevel(Math.max(30, Math.min(150, newZoom)));
@@ -2367,6 +2391,13 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                             />
                           );
                         })}
+                        {activeEventName && eventMapData[activeEventName] && Object.keys(eventMapData[activeEventName]).map(mapTab => (
+                          <TabButton 
+                            key={mapTab} 
+                            tab={mapTab} 
+                            label={mapTab} 
+                          />
+                        ))}
                         <TabButton tab="import" label={itemToEdit ? "アイテム編集" : "アイテム追加"} />
                         {activeEventName && mainContentVisible && (
                           <SearchBar
@@ -2403,6 +2434,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 onExport={handleExportEvent}
                 onUpdate={handleUpdateEvent}
                 onRename={(oldName) => handleRenameEvent(oldName)}
+                onImportMap={handleImportMap}
             />
         )}
         {activeTab === 'import' && (
@@ -2414,7 +2446,16 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
              onDoneEditing={handleDoneEditing}
            />
         )}
-        {activeEventName && mainContentVisible && (
+        {activeEventName && isMapTab && eventMapData[activeEventName] && eventMapData[activeEventName][activeTab] && (
+          <div style={{
+            transform: `scale(${zoomLevel / 100})`,
+            transformOrigin: 'top left',
+            width: `${100 * (100 / zoomLevel)}%`
+          }}>
+            <MapView mapData={eventMapData[activeEventName][activeTab]} />
+          </div>
+        )}
+        {activeEventName && mainContentVisible && !isMapTab && (
           <div style={{
               transform: `scale(${zoomLevel / 100})`,
               transformOrigin: 'top left',
