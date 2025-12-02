@@ -71,15 +71,68 @@ function extractCellInfo(worksheet: any, maxRow: number, maxCol: number, XLSX: a
       const value = actualCell && actualCell.v !== undefined ? actualCell.v : '';
       const isNumber = actualCell && (actualCell.t === 'n' || (typeof value === 'number'));
       
+      // マージ情報を取得
+      const mergeInfo = R === actualR && C === actualC ? mergeMap.get(cellAddress) : undefined;
+      
+      // マージされたセルの幅と高さを計算
+      let totalWidth = colWidths[C]?.wpx || colWidths[C]?.width ? (colWidths[C].wpx || colWidths[C].width * 7) : 48;
+      let totalHeight = rowHeights[R]?.hpt || rowHeights[R]?.height ? (rowHeights[R].hpt || rowHeights[R].height * 1.33) : 20;
+      
+      if (mergeInfo) {
+        // マージされたセルの幅を合計
+        totalWidth = 0;
+        for (let c = mergeInfo.c; c < mergeInfo.c + mergeInfo.cs; c++) {
+          const w = colWidths[c]?.wpx || colWidths[c]?.width ? (colWidths[c].wpx || colWidths[c].width * 7) : 48;
+          totalWidth += w;
+        }
+        // マージされたセルの高さを合計
+        totalHeight = 0;
+        for (let r = mergeInfo.r; r < mergeInfo.r + mergeInfo.rs; r++) {
+          const h = rowHeights[r]?.hpt || rowHeights[r]?.height ? (rowHeights[r].hpt || rowHeights[r].height * 1.33) : 20;
+          totalHeight += h;
+        }
+      }
+      
+      // スタイル情報を取得（xlsxライブラリでは通常取得できないが、試行）
+      let fillColor: string | undefined;
+      let borderStyle: any = {};
+      
+      if (actualCell && actualCell.s) {
+        // 塗りつぶし色
+        if (actualCell.s.fill && actualCell.s.fill.fgColor) {
+          const rgb = actualCell.s.fill.fgColor.rgb;
+          if (rgb) {
+            fillColor = `#${rgb}`;
+          } else if (actualCell.s.fill.fgColor.theme !== undefined) {
+            // テーマカラーの場合はデフォルトの色を使用
+            fillColor = undefined;
+          }
+        }
+        
+        // 罫線情報
+        if (actualCell.s.border) {
+          borderStyle = {
+            top: actualCell.s.border.top,
+            bottom: actualCell.s.border.bottom,
+            left: actualCell.s.border.left,
+            right: actualCell.s.border.right,
+          };
+        }
+      }
+      
       cells[R][C] = {
         value,
         isNumber,
         row: R,
         col: C,
         isMerged: R !== actualR || C !== actualC,
-        mergeInfo: R === actualR && C === actualC ? mergeMap.get(cellAddress) : undefined,
-        width: colWidths[C]?.wpx || colWidths[C]?.width ? (colWidths[C].wpx || colWidths[C].width * 7) : undefined,
-        height: rowHeights[R]?.hpt || rowHeights[R]?.height ? (rowHeights[R].hpt || rowHeights[R].height * 1.33) : undefined,
+        mergeInfo,
+        width: mergeInfo ? totalWidth : (colWidths[C]?.wpx || colWidths[C]?.width ? (colWidths[C].wpx || colWidths[C].width * 7) : 48),
+        height: mergeInfo ? totalHeight : (rowHeights[R]?.hpt || rowHeights[R]?.height ? (rowHeights[R].hpt || rowHeights[R].height * 1.33) : 20),
+        style: {
+          fill: fillColor ? { bgColor: fillColor } : undefined,
+          border: Object.keys(borderStyle).length > 0 ? borderStyle : undefined,
+        },
       };
     }
   }
@@ -109,7 +162,8 @@ export async function readMapDataFromXlsx(file: File): Promise<Map<string, CellI
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(data, { type: 'array' });
+        // スタイル情報を含めて読み込む（可能な場合）
+        const workbook = XLSX.read(data, { type: 'array', cellStyles: true });
         
         const mapData = new Map<string, CellInfo[][]>();
         
