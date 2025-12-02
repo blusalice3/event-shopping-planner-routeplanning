@@ -94,7 +94,16 @@ const App: React.FC = () => {
       const storedDayModes = localStorage.getItem('dayModes');
       
       if (storedLists) {
-        setEventLists(JSON.parse(storedLists));
+        const parsedLists = JSON.parse(storedLists);
+        // 既存データの互換性: quantityフィールドがない場合は1を設定
+        const migratedLists: Record<string, ShoppingItem[]> = {};
+        Object.keys(parsedLists).forEach(eventName => {
+          migratedLists[eventName] = parsedLists[eventName].map((item: ShoppingItem) => ({
+            ...item,
+            quantity: item.quantity ?? 1,
+          }));
+        });
+        setEventLists(migratedLists);
       }
       if (storedMetadata) {
         setEventMetadata(JSON.parse(storedMetadata));
@@ -140,10 +149,11 @@ const App: React.FC = () => {
     return 'edit';
   }, [activeEventName, dayModes, activeTab, eventDates]);
 
-  const handleBulkAdd = useCallback((eventName: string, newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string, layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> }) => {
+  const handleBulkAdd = useCallback((eventName: string, newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: sheetName?: string, layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> }) => {
     const newItems: ShoppingItem[] = newItemsData.map(itemData => ({
         id: crypto.randomUUID(),
         ...itemData,
+        quantity: itemData.quantity ?? 1,
         purchaseStatus: 'None' as PurchaseStatus,
     }));
 
@@ -1623,7 +1633,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     const csvRows: string[] = [];
 
     // ヘッダー行を最初に出力
-    const headers = ['サークル名', '参加日', 'ブロック', 'ナンバー', 'タイトル', '頒布価格', '購入状態', '備考', '列の種類', '列内順番', 'URL'];
+    const headers = ['サークル名', '参加日', 'ブロック', 'ナンバー', 'タイトル', '頒布価格', '数量', '購入状態', '備考', '列の種類', '列内順番', 'URL'];
     csvRows.push(headers.join(','));
 
     // メタデータ行: スプレッドシートURL（コメント行として最後に出力）
@@ -1662,6 +1672,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           escapeCsvCell(item.number),
           escapeCsvCell(item.title),
           escapeCsvCell(item.price === null ? '' : item.price),
+          escapeCsvCell(item.quantity || 1),
           escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
           escapeCsvCell(item.remarks),
           escapeCsvCell('実行列'),
@@ -1680,6 +1691,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           escapeCsvCell(item.number),
           escapeCsvCell(item.title),
           escapeCsvCell(item.price === null ? '' : item.price),
+          escapeCsvCell(item.quantity || 1),
           escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
           escapeCsvCell(item.remarks),
           escapeCsvCell('候補リスト'),
@@ -1773,6 +1785,9 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0); // R列 (0-indexed: 17)
         const remarks = cells[22]?.trim() || ''; // W列 (0-indexed: 22)
         const url = cells[24]?.trim() || ''; // Y列 (0-indexed: 24)
+        // AA列から数量を取得、空欄時は1、それ以外は数値を反映（1-10の範囲に制限）
+        const quantityStr = cells[26]?.trim() || ''; // AA列 (0-indexed: 26)
+        const quantity = quantityStr === '' ? 1 : Math.max(1, Math.min(10, parseInt(quantityStr.replace(/[^0-9]/g, ''), 10) || 1));
 
         const item: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
           circle,
@@ -1781,6 +1796,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           number,
           title,
           price,
+          quantity,
           remarks,
           ...(url ? { url } : {}),
         };
@@ -1924,6 +1940,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           number: itemData.number,
           title: itemData.title,
           price: itemData.price,
+          quantity: itemData.quantity ?? 1,
           remarks: itemData.remarks,
           purchaseStatus: 'None' as PurchaseStatus
         };
