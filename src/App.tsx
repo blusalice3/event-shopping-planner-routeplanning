@@ -412,7 +412,7 @@ const App: React.FC = () => {
           // executeModeItemsから削除
           setExecuteModeItems(prevExecute => {
             const eventItems = prevExecute[activeEventName] || {};
-            const dayItems = (eventItems[currentEventDate] || []).filter(id => !itemIdsToMove.includes(id));
+            const dayItems = (eventItems[currentEventDate] || []).filter((id: string) => !itemIdsToMove.includes(id));
             return {
               ...prevExecute,
               [activeEventName]: { ...eventItems, [currentEventDate]: dayItems }
@@ -994,7 +994,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     
     setExecuteModeItems(prev => {
       const eventItems = prev[activeEventName] || {};
-      const currentDayItems = (eventItems[currentEventDate] || []).filter(id => !itemIds.includes(id));
+      const currentDayItems = (eventItems[currentEventDate] || []).filter((id: string) => !itemIds.includes(id));
       
       return {
         ...prev,
@@ -1061,7 +1061,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         delete newModes[eventName];
         return newModes;
     });
-    setEventMapData(prev => {
+    setEventMapData((prev: EventMapData) => {
         const newMapData = {...prev};
         delete newMapData[eventName];
         return newMapData;
@@ -1127,7 +1127,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       return newItems;
     });
 
-    setEventMapData(prev => {
+    setEventMapData((prev: EventMapData) => {
       const newMapData = { ...prev };
       if (newMapData[eventToRename]) {
         newMapData[newName] = newMapData[eventToRename];
@@ -1158,9 +1158,9 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         mapDataMap.forEach((data, key) => {
           mapData[key] = data;
         });
-        setEventMapData(prev => ({
+        setEventMapData((prev: EventMapData) => ({
           ...prev,
-          [eventName]: mapData as any,
+          [eventName]: mapData,
         }));
         alert('マップデータの取り込みが完了しました。');
       } catch (error) {
@@ -1294,7 +1294,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       
       const updatedEventItems: ExecuteModeItems = {};
       Object.keys(eventItems).forEach(eventDate => {
-        updatedEventItems[eventDate] = eventItems[eventDate].filter(id => id !== deletedId);
+        updatedEventItems[eventDate] = eventItems[eventDate].filter((id: string) => id !== deletedId);
       });
       
       return {
@@ -1333,7 +1333,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       if (currentColumnType === 'execute') {
         const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
         const itemsMap = new Map(items.map(item => [item.id, item]));
-        currentItems = executeIds.map(id => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+        currentItems = executeIds.map((id: string) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
       } else {
         const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
         let filtered = items.filter(item => 
@@ -1704,7 +1704,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       
       // 実行列のアイテム（順序を保持）
       const executeItems: ShoppingItem[] = [];
-      executeIds.forEach(id => {
+      executeIds.forEach((id: string) => {
         const item = itemsMap.get(id);
         if (item) executeItems.push(item);
       });
@@ -2009,7 +2009,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       const updatedEventItems: ExecuteModeItems = {};
       
       Object.keys(eventItems).forEach(eventDate => {
-        updatedEventItems[eventDate] = eventItems[eventDate].filter(id => !deleteIds.has(id));
+        updatedEventItems[eventDate] = eventItems[eventDate].filter((id: string) => !deleteIds.has(id));
       });
       
       return {
@@ -2095,7 +2095,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
     const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
     const itemsMap = new Map(items.map(item => [item.id, item]));
-    return executeIds.map(id => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+    return executeIds.map((id: string) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
   }, [activeEventName, activeTab, executeModeItems, items, eventDates]);
 
   const visibleItems = useMemo(() => {
@@ -2484,7 +2484,11 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
               mapKey={mapKey}
               eventDate={eventDate}
               items={items}
-              onCellSave={(eventDate, number, block, side, data) => {
+              onCellSave={(eventDate: string, number: string, block: string | undefined, side: 'A' | 'B', data: {
+                circle: string;
+                title: string;
+                price: number | null;
+              }) => {
                 if (!activeEventName) return;
                 
                 setEventLists(prev => {
