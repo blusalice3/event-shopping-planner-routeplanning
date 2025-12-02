@@ -94,28 +94,72 @@ function extractCellInfo(worksheet: any, maxRow: number, maxCol: number, XLSX: a
       }
       
       // スタイル情報を取得（xlsxライブラリでは通常取得できないが、試行）
-      let fillColor: string | undefined;
+      let fillBgColor: string | undefined;
+      let fillFgColor: string | undefined;
       let borderStyle: any = {};
       
       if (actualCell && actualCell.s) {
-        // 塗りつぶし色
-        if (actualCell.s.fill && actualCell.s.fill.fgColor) {
-          const rgb = actualCell.s.fill.fgColor.rgb;
-          if (rgb) {
-            fillColor = `#${rgb}`;
-          } else if (actualCell.s.fill.fgColor.theme !== undefined) {
-            // テーマカラーの場合はデフォルトの色を使用
-            fillColor = undefined;
+        // 塗りつぶし色（bgColorとfgColorの両方を処理）
+        if (actualCell.s.fill) {
+          // 背景色（bgColor）
+          if (actualCell.s.fill.bgColor) {
+            const bgColorObj = actualCell.s.fill.bgColor;
+            if (bgColorObj.rgb) {
+              fillBgColor = bgColorObj.rgb.startsWith('#') ? bgColorObj.rgb : `#${bgColorObj.rgb}`;
+            } else if (bgColorObj.theme !== undefined) {
+              // テーマカラーの場合はデフォルトの色を使用
+              fillBgColor = undefined;
+            }
+          }
+          
+          // 前景色（fgColor）
+          if (actualCell.s.fill.fgColor) {
+            const fgColorObj = actualCell.s.fill.fgColor;
+            if (fgColorObj.rgb) {
+              fillFgColor = fgColorObj.rgb.startsWith('#') ? fgColorObj.rgb : `#${fgColorObj.rgb}`;
+            } else if (fgColorObj.theme !== undefined) {
+              // テーマカラーの場合はデフォルトの色を使用
+              fillFgColor = undefined;
+            }
+          }
+          
+          // patternTypeがsolidの場合はfgColorを優先
+          if (actualCell.s.fill.patternType === 'solid' && fillFgColor) {
+            fillBgColor = fillFgColor;
           }
         }
         
-        // 罫線情報
+        // 罫線情報（改善版）
         if (actualCell.s.border) {
+          const processBorder = (border: any) => {
+            if (!border) return undefined;
+            
+            const style = border.style || 'thin';
+            const colorObj = border.color;
+            
+            let color = '#000000';
+            if (colorObj) {
+              if (typeof colorObj === 'string') {
+                color = colorObj.startsWith('#') ? colorObj : `#${colorObj}`;
+              } else if (colorObj.rgb) {
+                color = colorObj.rgb.startsWith('#') ? colorObj.rgb : `#${colorObj.rgb}`;
+              } else if (colorObj.theme !== undefined) {
+                // テーマカラーの場合はデフォルトの黒色を使用
+                color = '#000000';
+              }
+            }
+            
+            return {
+              style,
+              color,
+            };
+          };
+          
           borderStyle = {
-            top: actualCell.s.border.top,
-            bottom: actualCell.s.border.bottom,
-            left: actualCell.s.border.left,
-            right: actualCell.s.border.right,
+            top: processBorder(actualCell.s.border.top),
+            bottom: processBorder(actualCell.s.border.bottom),
+            left: processBorder(actualCell.s.border.left),
+            right: processBorder(actualCell.s.border.right),
           };
         }
       }
@@ -130,8 +174,11 @@ function extractCellInfo(worksheet: any, maxRow: number, maxCol: number, XLSX: a
         width: mergeInfo ? totalWidth : (colWidths[C]?.wpx || colWidths[C]?.width ? (colWidths[C].wpx || colWidths[C].width * 7) : 48),
         height: mergeInfo ? totalHeight : (rowHeights[R]?.hpt || rowHeights[R]?.height ? (rowHeights[R].hpt || rowHeights[R].height * 1.33) : 20),
         style: {
-          fill: fillColor ? { bgColor: fillColor } : undefined,
-          border: Object.keys(borderStyle).length > 0 ? borderStyle : undefined,
+          fill: fillBgColor || fillFgColor ? { 
+            bgColor: fillBgColor, 
+            fgColor: fillFgColor 
+          } : undefined,
+          border: Object.values(borderStyle).some(b => b !== undefined) ? borderStyle : undefined,
         },
       };
     }
