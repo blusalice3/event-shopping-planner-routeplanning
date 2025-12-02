@@ -1,417 +1,258 @@
-import React, { useMemo, useRef, useCallback, useEffect, useState } from 'react';
-import { CellInfo, ShoppingItem } from '../types';
-import CellEditDialog from './CellEditDialog';
+import { CellInfo } from '../types';
 
-interface MapViewProps {
-  mapData: CellInfo[][];
-  zoomLevel?: number;
-  items?: ShoppingItem[]; // 関連アイテム
-  onCellSave?: (cellAddress: string, side: 'A' | 'B', data: {
-    boothName: string;
-    memo: string;
-    url: string;
-  }) => void;
+/**
+ * ワークシートからセル情報を取得
+ */
+function extractCellInfo(worksheet: any, maxRow: number, maxCol: number, XLSX: any): CellInfo[][] {
+  const cells: CellInfo[][] = [];
+  
+  // セルの幅と高さの情報を取得
+  const colWidths = worksheet['!cols'] || [];
+  const rowHeights = worksheet['!rows'] || [];
+  const merges = worksheet['!merges'] || [];
+  
+  // マージ情報をマップに変換（開始セルから終了セルへのマッピング）
+  const mergeMap = new Map<string, { r: number; c: number; rs: number; cs: number }>();
+  merges.forEach((merge: any) => {
+    const startCell = XLSX.utils.encode_cell({ r: merge.s.r, c: merge.s.c });
+    mergeMap.set(startCell, {
+      r: merge.s.r,
+      c: merge.s.c,
+      rs: merge.e.r - merge.s.r + 1,
+      cs: merge.e.c - merge.s.c + 1,
+    });
+  });
+  
+  // 2次元配列を初期化（すべてのセルを含む）
+  for (let r = 0; r <= maxRow; r++) {
+    cells[r] = [];
+    for (let c = 0; c <= maxCol; c++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: r, c: c });
+      const isMerged = Array.from(mergeMap.values()).some(merge => {
+        return r >= merge.r && r < merge.r + merge.rs && c >= merge.c && c < merge.c + merge.cs;
+      });
+      const isMergeStart = mergeMap.has(cellAddress);
+      
+      cells[r][c] = {
+        value: '',
+        isNumber: false,
+        row: r,
+        col: c,
+        isMerged: isMerged && !isMergeStart,
+        mergeInfo: isMergeStart ? mergeMap.get(cellAddress) : undefined,
+        width: colWidths[c]?.wpx || colWidths[c]?.width ? (colWidths[c].wpx || colWidths[c].width * 7) : undefined,
+        height: rowHeights[r]?.hpt || rowHeights[r]?.height ? (rowHeights[r].hpt || rowHeights[r].height * 1.33) : undefined,
+      };
+    }
+  }
+  
+  // ワークシートの各セルを処理
+  const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+      const cell = worksheet[cellAddress];
+      
+      // マージされたセルの場合は開始セルの情報を取得
+      let actualCell = cell;
+      let actualR = R;
+      let actualC = C;
+      for (const [startCell, mergeInfo] of mergeMap.entries()) {
+        if (R >= mergeInfo.r && R < mergeInfo.r + mergeInfo.rs && 
+            C >= mergeInfo.c && C < mergeInfo.c + mergeInfo.cs) {
+          actualR = mergeInfo.r;
+          actualC = mergeInfo.c;
+          actualCell = worksheet[startCell];
+          break;
+        }
+      }
+      
+      // セルが存在する場合も、存在しない場合も処理
+      const value = actualCell && actualCell.v !== undefined ? actualCell.v : '';
+      const isNumber = actualCell && (actualCell.t === 'n' || (typeof value === 'number'));
+      
+      // マージ情報を取得
+      const mergeInfo = R === actualR && C === actualC ? mergeMap.get(cellAddress) : undefined;
+      
+      // マージされたセルの幅と高さを計算
+      let totalWidth = colWidths[C]?.wpx || colWidths[C]?.width ? (colWidths[C].wpx || colWidths[C].width * 7) : 48;
+      let totalHeight = rowHeights[R]?.hpt || rowHeights[R]?.height ? (rowHeights[R].hpt || rowHeights[R].height * 1.33) : 20;
+      
+      if (mergeInfo) {
+        // マージされたセルの幅を合計
+        totalWidth = 0;
+        for (let c = mergeInfo.c; c < mergeInfo.c + mergeInfo.cs; c++) {
+          const w = colWidths[c]?.wpx || colWidths[c]?.width ? (colWidths[c].wpx || colWidths[c].width * 7) : 48;
+          totalWidth += w;
+        }
+        // マージされたセルの高さを合計
+        totalHeight = 0;
+        for (let r = mergeInfo.r; r < mergeInfo.r + mergeInfo.rs; r++) {
+          const h = rowHeights[r]?.hpt || rowHeights[r]?.height ? (rowHeights[r].hpt || rowHeights[r].height * 1.33) : 20;
+          totalHeight += h;
+        }
+      }
+      
+      // スタイル情報を取得（xlsxライブラリでは通常取得できないが、試行）
+      let fillBgColor: string | undefined;
+      let fillFgColor: string | undefined;
+      let borderStyle: any = {};
+      
+      if (actualCell && actualCell.s) {
+        // 塗りつぶし色（bgColorとfgColorの両方を処理）
+        if (actualCell.s.fill) {
+          // 背景色（bgColor）
+          if (actualCell.s.fill.bgColor) {
+            const bgColorObj = actualCell.s.fill.bgColor;
+            if (bgColorObj.rgb) {
+              fillBgColor = bgColorObj.rgb.startsWith('#') ? bgColorObj.rgb : `#${bgColorObj.rgb}`;
+            } else if (bgColorObj.theme !== undefined) {
+              // テーマカラーの場合はデフォルトの色を使用
+              fillBgColor = undefined;
+            }
+          }
+          
+          // 前景色（fgColor）
+          if (actualCell.s.fill.fgColor) {
+            const fgColorObj = actualCell.s.fill.fgColor;
+            if (fgColorObj.rgb) {
+              fillFgColor = fgColorObj.rgb.startsWith('#') ? fgColorObj.rgb : `#${fgColorObj.rgb}`;
+            } else if (fgColorObj.theme !== undefined) {
+              // テーマカラーの場合はデフォルトの色を使用
+              fillFgColor = undefined;
+            }
+          }
+          
+          // patternTypeがsolidの場合はfgColorを優先
+          if (actualCell.s.fill.patternType === 'solid' && fillFgColor) {
+            fillBgColor = fillFgColor;
+          }
+        }
+        
+        // 罫線情報（改善版）
+        if (actualCell.s.border) {
+          const processBorder = (border: any) => {
+            if (!border) return undefined;
+            
+            const style = border.style || 'thin';
+            const colorObj = border.color;
+            
+            let color = '#000000';
+            if (colorObj) {
+              if (typeof colorObj === 'string') {
+                color = colorObj.startsWith('#') ? colorObj : `#${colorObj}`;
+              } else if (colorObj.rgb) {
+                color = colorObj.rgb.startsWith('#') ? colorObj.rgb : `#${colorObj.rgb}`;
+              } else if (colorObj.theme !== undefined) {
+                // テーマカラーの場合はデフォルトの黒色を使用
+                color = '#000000';
+              }
+            }
+            
+            return {
+              style,
+              color,
+            };
+          };
+          
+          borderStyle = {
+            top: processBorder(actualCell.s.border.top),
+            bottom: processBorder(actualCell.s.border.bottom),
+            left: processBorder(actualCell.s.border.left),
+            right: processBorder(actualCell.s.border.right),
+          };
+        }
+      }
+      
+      cells[R][C] = {
+        value,
+        isNumber,
+        row: R,
+        col: C,
+        isMerged: R !== actualR || C !== actualC,
+        mergeInfo,
+        width: mergeInfo ? totalWidth : (colWidths[C]?.wpx || colWidths[C]?.width ? (colWidths[C].wpx || colWidths[C].width * 7) : 48),
+        height: mergeInfo ? totalHeight : (rowHeights[R]?.hpt || rowHeights[R]?.height ? (rowHeights[R].hpt || rowHeights[R].height * 1.33) : 20),
+        style: {
+          fill: fillBgColor || fillFgColor ? { 
+            bgColor: fillBgColor, 
+            fgColor: fillFgColor 
+          } : undefined,
+          border: Object.values(borderStyle).some(b => b !== undefined) ? borderStyle : undefined,
+        },
+      };
+    }
+  }
+  
+  return cells;
 }
 
-const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100, items = [], onCellSave }) => {
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const tbodyRef = useRef<HTMLTableSectionElement>(null);
-  const [visibleRange, setVisibleRange] = useState({ start: 0, end: 0 });
-  const [selectedCell, setSelectedCell] = useState<{ cell: CellInfo; row: number; col: number; address: string } | null>(null);
-  const rowHeightsRef = useRef<number[]>([]);
-
-  // 各行の高さを計算してキャッシュ
-  useEffect(() => {
-    if (!mapData) return;
-    rowHeightsRef.current = mapData.map((row) => {
-      const rowHeight = row.find(cell => cell.height)?.height || 20;
-      return rowHeight * (zoomLevel / 100);
-    });
-  }, [mapData, zoomLevel]);
-
-  // スクロール位置から表示範囲を計算
-  const updateVisibleRange = useCallback(() => {
-    if (!scrollContainerRef.current || !mapData || mapData.length === 0) return;
-
-    const scrollTop = scrollContainerRef.current.scrollTop;
-    const containerHeight = scrollContainerRef.current.clientHeight;
-    let accumulatedHeight = 0;
-    let start = 0;
-    let end = mapData.length - 1;
-
-    // 開始行を検索
-    for (let i = 0; i < mapData.length; i++) {
-      const rowHeight = rowHeightsRef.current[i] || 20;
-      if (accumulatedHeight + rowHeight > scrollTop) {
-        start = Math.max(0, i - 2); // バッファを追加
-        break;
-      }
-      accumulatedHeight += rowHeight;
-    }
-
-    // 終了行を検索
-    accumulatedHeight = 0;
-    for (let i = 0; i < mapData.length; i++) {
-      const rowHeight = rowHeightsRef.current[i] || 20;
-      accumulatedHeight += rowHeight;
-      if (accumulatedHeight > scrollTop + containerHeight) {
-        end = Math.min(mapData.length - 1, i + 2); // バッファを追加
-        break;
-      }
-    }
-
-    setVisibleRange({ start, end });
-  }, [mapData]);
-
-  // スクロールイベントハンドラ
-  useEffect(() => {
-    const container = scrollContainerRef.current;
-    if (!container) return;
-
-    updateVisibleRange();
-    container.addEventListener('scroll', updateVisibleRange);
-    return () => container.removeEventListener('scroll', updateVisibleRange);
-  }, [updateVisibleRange]);
-
-  // 初期表示範囲を設定
-  useEffect(() => {
-    if (mapData && mapData.length > 0) {
-      const initialEnd = Math.min(20, mapData.length - 1);
-      setVisibleRange({ start: 0, end: initialEnd });
-    }
-  }, [mapData]);
-
-  // 罫線のスタイルを取得する関数（改善版）
-  const getBorderStyle = useCallback((cell: CellInfo, side: 'top' | 'bottom' | 'left' | 'right') => {
-    if (!cell.style?.border) {
-      return 'none';
-    }
-
-    const border = cell.style.border[side];
-    if (!border) {
-      return 'none';
-    }
-
-    // borderオブジェクトからstyleとcolorを取得
-    // xlsxReader.tsから取得したborderは { style, color } の形式
-    const style = (border as any).style || 'thin';
-    const color = (border as any).color || '#000000';
-    
-    // colorが既に文字列形式（#RRGGBB）の場合はそのまま使用
-    const finalColor = typeof color === 'string' 
-      ? (color.startsWith('#') ? color : `#${color}`)
-      : '#000000';
-
-    const width = style === 'thick' ? '3px' : style === 'medium' ? '2px' : '1px';
-    return `${width} solid ${finalColor}`;
-  }, []);
-
-  // 背景色を取得する関数（改善版）
-  const getBackgroundColor = useCallback((cell: CellInfo) => {
-    let cellValue = cell.value !== null && cell.value !== undefined ? String(cell.value) : '';
-    const isEmpty = cellValue.trim() === '';
-    const isNumber = cell.isNumber && !isNaN(Number(cellValue));
-
-    // 塗りつぶし色の処理を改善
-    if (cell.style?.fill?.bgColor) {
-      return cell.style.fill.bgColor;
-    }
-    if (cell.style?.fill?.fgColor) {
-      return cell.style.fill.fgColor;
-    }
-    
-    if (isEmpty) {
-      return '#e5e7eb'; // 空のセルは灰色
-    }
-    if (isNumber) {
-      return '#ffffff'; // 数値のセルは白色
-    }
-    return '#ffffff';
-  }, []);
-
-  // セルアドレスを生成（例: "ク-19a"）
-  const getCellAddress = useCallback((cell: CellInfo) => {
-    // セルの値からアドレスを生成
-    const cellValue = cell.value !== null && cell.value !== undefined ? String(cell.value) : '';
-    if (cellValue.trim()) {
-      return cellValue;
-    }
-    // デフォルトのアドレス生成
-    return `${cell.row}-${cell.col}`;
-  }, []);
-
-  // セルに関連するアイテムを取得
-  const getRelatedItems = useCallback((cell: CellInfo) => {
-    const cellValue = cell.value !== null && cell.value !== undefined ? String(cell.value) : '';
-    if (!cellValue.trim()) {
-      return [];
-    }
-    
-    // 数値セルの場合、セルの値からblockやnumberを推測
-    const isNumber = cell.isNumber && !isNaN(Number(cellValue));
-    if (isNumber) {
-      // 数値からblockやnumberを推測（実際のロジックはマップの構造に依存）
-      // 暫定的に、すべてのアイテムを返す
-      return items;
-    }
-    
-    // テキストセルの場合、セルの値と一致するアイテムを検索
-    return items.filter(item => {
-      // セルの値がblockやnumberと一致するか確認
-      return item.block === cellValue || item.number === cellValue || item.circle === cellValue;
-    });
-  }, [items]);
-
-  // セルクリックハンドラ
-  const handleCellClick = useCallback((cell: CellInfo, row: number, col: number) => {
-    // 空のセルやマージされたセルはクリック不可
-    const cellValue = cell.value !== null && cell.value !== undefined ? String(cell.value) : '';
-    const isEmpty = cellValue.trim() === '';
-    
-    if (cell.isMerged || isEmpty) {
-      return;
-    }
-
-    // 数値セルまたはテキストセルの場合のみモーダルを表示
-    const address = getCellAddress(cell);
-    setSelectedCell({ cell, row, col, address });
-  }, [getCellAddress]);
-
-  // テーブルの総幅を計算
-  const totalWidth = useMemo(() => {
-    if (!mapData || mapData.length === 0) return 0;
-    const firstRow = mapData[0];
-    return firstRow.reduce((sum, cell) => {
-      if (cell.isMerged) return sum;
-      return sum + ((cell.width || 48) * (zoomLevel / 100));
-    }, 0);
-  }, [mapData, zoomLevel]);
-
-  // 総高さを計算
-  const totalHeight = useMemo(() => {
-    return rowHeightsRef.current.reduce((sum, height) => sum + height, 0);
-  }, [mapData, zoomLevel]);
-
-  // 上部のオフセット高さを計算
-  const offsetTop = useMemo(() => {
-    let sum = 0;
-    for (let i = 0; i < visibleRange.start; i++) {
-      sum += rowHeightsRef.current[i] || 20;
-    }
-    return sum;
-  }, [visibleRange.start]);
-
-  if (!mapData || mapData.length === 0) {
-    return (
-      <div className="text-center py-12 text-slate-500 dark:text-slate-400">
-        マップデータがありません
-      </div>
-    );
+/**
+ * xlsxファイルからマップデータを読み込む
+ * @param file xlsxファイル
+ * @returns マップデータ（参加日をキーとしたオブジェクト）
+ */
+export async function readMapDataFromXlsx(file: File): Promise<Map<string, CellInfo[][]>> {
+  // グローバルにXLSXが読み込まれているか確認
+  if (typeof window === 'undefined') {
+    throw new Error('ブラウザ環境で実行してください');
   }
-
-  // 表示する行を取得
-  const visibleRows = useMemo(() => {
-    return mapData.slice(visibleRange.start, visibleRange.end + 1);
-  }, [mapData, visibleRange]);
-
-  return (
-    <div 
-      ref={scrollContainerRef}
-      className="bg-gray-100 dark:bg-slate-900 rounded-lg shadow p-4 overflow-auto"
-      style={{
-        height: 'calc(100vh - 300px)',
-        width: '100%',
-      }}
-    >
-      <div style={{ width: `${totalWidth}px`, height: `${totalHeight}px`, position: 'relative' }}>
-        <table 
-          className="border-collapse"
-          style={{
-            width: '100%',
-            tableLayout: 'fixed',
-            position: 'absolute',
-            top: 0,
-            left: 0,
-          }}
-        >
-          <tbody ref={tbodyRef}>
-            {/* 上部のスペーサー */}
-            {visibleRange.start > 0 && (
-              <tr>
-                <td colSpan={mapData[0]?.length || 1} style={{ height: `${offsetTop}px`, padding: 0 }} />
-              </tr>
-            )}
-            
-            {/* 表示する行 */}
-            {visibleRows.map((row, relativeIndex) => {
-              const rowIndex = visibleRange.start + relativeIndex;
-              const rowHeight = rowHeightsRef.current[rowIndex] || 20;
-
-              return (
-                <tr key={rowIndex} style={{ height: `${rowHeight}px` }}>
-                  {row.map((cell, cellIndex) => {
-                    // マージされたセル（開始セル以外）は表示しない
-                    if (cell.isMerged) {
-                      return null;
-                    }
-                    
-                    let cellValue = cell.value !== null && cell.value !== undefined ? String(cell.value) : '';
-                    const isEmpty = cellValue.trim() === '';
-                    const isNumber = cell.isNumber && !isNaN(Number(cellValue));
-                    
-                    // 数値が1桁の場合は2桁表示にする
-                    if (isNumber && !isEmpty) {
-                      const numValue = Number(cellValue);
-                      if (numValue >= 1 && numValue <= 9) {
-                        cellValue = String(numValue).padStart(2, '0');
-                      }
-                    }
-                    
-                    // セルの幅と高さを決定
-                    const cellWidth = (cell.width || 48) * (zoomLevel / 100);
-                    const cellHeight = (cell.height || 20) * (zoomLevel / 100);
-                    const colSpan = cell.mergeInfo?.cs || 1;
-                    const rowSpan = cell.mergeInfo?.rs || 1;
-                    
-                    // 背景色を決定
-                    const backgroundColor = getBackgroundColor(cell);
-                    
-                    // 罫線を決定（改善版）
-                    const borderTop = getBorderStyle(cell, 'top');
-                    const borderBottom = getBorderStyle(cell, 'bottom');
-                    const borderLeft = getBorderStyle(cell, 'left');
-                    const borderRight = getBorderStyle(cell, 'right');
-                    
-                    // デフォルトの罫線（スタイル情報がない場合）
-                    let finalBorderTop = borderTop;
-                    let finalBorderBottom = borderBottom;
-                    let finalBorderLeft = borderLeft;
-                    let finalBorderRight = borderRight;
-                    
-                    // 数値セルの場合は罫線を適用しない（円形枠を使用）
-                    if (isNumber && !isEmpty) {
-                      finalBorderTop = 'none';
-                      finalBorderBottom = 'none';
-                      finalBorderLeft = 'none';
-                      finalBorderRight = 'none';
-                    } else if (borderTop === 'none' && borderBottom === 'none' && 
-                        borderLeft === 'none' && borderRight === 'none') {
-                      if (!isEmpty) {
-                        // その他は薄いグレーの枠線
-                        finalBorderTop = '1px solid #d1d5db';
-                        finalBorderBottom = '1px solid #d1d5db';
-                        finalBorderLeft = '1px solid #d1d5db';
-                        finalBorderRight = '1px solid #d1d5db';
-                      }
-                    }
-                    
-                    // セルのスタイルを決定
-                    const isClickable = !isEmpty && !cell.isMerged;
-                    const cellStyle: React.CSSProperties = {
-                      width: `${cellWidth}px`,
-                      height: `${cellHeight}px`,
-                      minWidth: `${cellWidth}px`,
-                      minHeight: `${cellHeight}px`,
-                      padding: isNumber && !isEmpty ? '0' : '2px 4px',
-                      fontSize: `${12 * (zoomLevel / 100)}px`,
-                      fontWeight: isEmpty ? '400' : '500',
-                      color: isEmpty ? '#9ca3af' : '#1f2937',
-                      backgroundColor: isNumber && !isEmpty ? 'transparent' : backgroundColor,
-                      borderTop: isNumber && !isEmpty ? 'none' : finalBorderTop,
-                      borderBottom: isNumber && !isEmpty ? 'none' : finalBorderBottom,
-                      borderLeft: isNumber && !isEmpty ? 'none' : finalBorderLeft,
-                      borderRight: isNumber && !isEmpty ? 'none' : finalBorderRight,
-                      borderRadius: isNumber && !isEmpty ? '0' : `${4 * (zoomLevel / 100)}px`,
-                      whiteSpace: 'nowrap',
-                      textAlign: 'center',
-                      verticalAlign: 'middle',
-                      boxSizing: 'border-box',
-                      userSelect: 'none',
-                      cursor: isClickable ? 'pointer' : 'default',
-                      transition: 'all 0.2s ease',
-                      position: 'relative',
-                    };
-                    
-                    // 数値セルの場合、緑色の円形枠を追加
-                    const circleSize = Math.min(cellWidth * 0.8, cellHeight * 0.8);
-                    const numberCellStyle: React.CSSProperties = isNumber && !isEmpty ? {
-                      border: '2px solid #86efac',
-                      borderRadius: '50%',
-                      width: `${circleSize}px`,
-                      height: `${circleSize}px`,
-                      minWidth: `${circleSize}px`,
-                      minHeight: `${circleSize}px`,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      margin: '0 auto',
-                      backgroundColor: '#ffffff',
-                      lineHeight: 1,
-                    } : {};
-                    
-                    return (
-                      <td
-                        key={cellIndex}
-                        style={cellStyle}
-                        className={`select-none ${isClickable ? 'hover:opacity-80 hover:shadow-md' : ''}`}
-                        colSpan={colSpan > 1 ? colSpan : undefined}
-                        rowSpan={rowSpan > 1 ? rowSpan : undefined}
-                        onClick={() => handleCellClick(cell, rowIndex, cellIndex)}
-                      >
-                        {isNumber && !isEmpty ? (
-                          <div style={numberCellStyle}>
-                            {cellValue}
-                          </div>
-                        ) : (
-                          cellValue
-                        )}
-                      </td>
-                    );
-                  })}
-                </tr>
-              );
-            })}
-            
-            {/* 下部のスペーサー */}
-            {visibleRange.end < mapData.length - 1 && (() => {
-              const visibleRowsHeight = visibleRows.reduce((sum, _, idx) => {
-                return sum + (rowHeightsRef.current[visibleRange.start + idx] || 20);
-              }, 0);
-              const bottomSpacerHeight = totalHeight - offsetTop - visibleRowsHeight;
-              return bottomSpacerHeight > 0 ? (
-                <tr>
-                  <td 
-                    colSpan={mapData[0]?.length || 1} 
-                    style={{ 
-                      height: `${bottomSpacerHeight}px`, 
-                      padding: 0 
-                    }} 
-                  />
-                </tr>
-              ) : null;
-            })()}
-          </tbody>
-        </table>
-      </div>
-
-      {/* セル編集モーダル */}
-      {selectedCell && (
-        <CellEditDialog
-          cell={selectedCell.cell}
-          cellAddress={selectedCell.address}
-          row={selectedCell.row}
-          col={selectedCell.col}
-          items={getRelatedItems(selectedCell.cell)}
-          onSave={(cellAddress, side, data) => {
-            if (onCellSave) {
-              onCellSave(cellAddress, side, data);
+  
+  const XLSX = (window as any).XLSX;
+  if (!XLSX) {
+    throw new Error('xlsxライブラリが読み込まれていません。ページをリロードしてください。');
+  }
+  
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target?.result as ArrayBuffer);
+        // スタイル情報を含めて読み込む（可能な場合）
+        const workbook = XLSX.read(data, { type: 'array', cellStyles: true });
+        
+        const mapData = new Map<string, CellInfo[][]>();
+        
+        // 「1日目」と「2日目」シートを探してマップデータとして読み込む
+        workbook.SheetNames.forEach((sheetName: string) => {
+          const trimmedSheetName = sheetName.trim();
+          // 「1日目」シートを検索（完全一致または含む）
+          if (trimmedSheetName === '1日目' || trimmedSheetName.includes('1日目')) {
+            const worksheet = workbook.Sheets[sheetName];
+            if (worksheet['!ref']) {
+              const range = XLSX.utils.decode_range(worksheet['!ref']);
+              const cellInfo = extractCellInfo(worksheet, range.e.r, range.e.c, XLSX);
+              mapData.set('1日目マップ', cellInfo);
             }
-          }}
-          onCancel={() => setSelectedCell(null)}
-        />
-      )}
-    </div>
-  );
-};
+          } 
+          // 「2日目」シートを検索（完全一致または含む）
+          else if (trimmedSheetName === '2日目' || trimmedSheetName.includes('2日目')) {
+            const worksheet = workbook.Sheets[sheetName];
+            if (worksheet['!ref']) {
+              const range = XLSX.utils.decode_range(worksheet['!ref']);
+              const cellInfo = extractCellInfo(worksheet, range.e.r, range.e.c, XLSX);
+              mapData.set('2日目マップ', cellInfo);
+            }
+          }
+        });
+        
+        // マップデータが見つからない場合の警告
+        if (mapData.size === 0) {
+          console.warn('マップデータが見つかりませんでした。「1日目」または「2日目」という名前のシートが含まれているか確認してください。');
+        }
+        
+        resolve(mapData);
+      } catch (error) {
+        reject(error);
+      }
+    };
+    
+    reader.onerror = () => {
+      reject(new Error('ファイルの読み込みに失敗しました'));
+    };
+    
+    reader.readAsArrayBuffer(file);
+  });
+}
 
-export default MapView;
