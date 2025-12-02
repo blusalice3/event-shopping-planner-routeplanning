@@ -1,3 +1,4 @@
+// @ts-ignore - xlsxライブラリの型定義の問題を回避
 import * as XLSX from 'xlsx';
 
 /**
@@ -17,18 +18,18 @@ export async function readMapDataFromXlsx(file: File): Promise<Map<string, any[]
         const mapData = new Map<string, any[][]>();
         
         // 「1日目」と「2日目」シートを探してマップデータとして読み込む
-        workbook.SheetNames.forEach((sheetName) => {
+        workbook.SheetNames.forEach((sheetName: string) => {
           const trimmedSheetName = sheetName.trim();
           // 「1日目」シートを検索（完全一致または含む）
           if (trimmedSheetName === '1日目' || trimmedSheetName.includes('1日目')) {
             const worksheet = workbook.Sheets[sheetName];
-            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as any[][];
             mapData.set('1日目マップ', jsonData);
           } 
           // 「2日目」シートを検索（完全一致または含む）
           else if (trimmedSheetName === '2日目' || trimmedSheetName.includes('2日目')) {
             const worksheet = workbook.Sheets[sheetName];
-            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+            const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' }) as any[][];
             mapData.set('2日目マップ', jsonData);
           }
         });
