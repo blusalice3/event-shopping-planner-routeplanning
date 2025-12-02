@@ -22,21 +22,38 @@ const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100 }) => {
         }}
       >
         <tbody>
-          {mapData.map((row, rowIndex) => (
-            <tr key={rowIndex}>
-              {row.map((cell, cellIndex) => {
+          {mapData.map((row, rowIndex) => {
+            // 行の高さを取得（最初のセルの高さを使用）
+            const rowHeight = row.find(cell => cell.height)?.height;
+            
+            return (
+              <tr key={rowIndex} style={{ height: rowHeight ? `${rowHeight}px` : 'auto' }}>
+                {row.map((cell, cellIndex) => {
+                // マージされたセル（開始セル以外）は表示しない
+                if (cell.isMerged) {
+                  return null;
+                }
+                
                 const cellValue = cell.value !== null && cell.value !== undefined ? String(cell.value) : '';
                 const isEmpty = cellValue.trim() === '';
                 const isNumber = cell.isNumber && !isNaN(Number(cellValue));
                 
+                // セルの幅と高さを決定
+                const cellWidth = cell.width || 48;
+                const cellHeight = cell.height || 20;
+                const colSpan = cell.mergeInfo?.cs || 1;
+                const rowSpan = cell.mergeInfo?.rs || 1;
+                
                 // セルのスタイルを決定
                 const cellStyle: React.CSSProperties = {
-                  width: '48px',
-                  height: '48px',
-                  padding: '6px 8px',
-                  fontSize: '14px',
-                  fontWeight: '500',
-                  color: '#1f2937',
+                  width: `${cellWidth}px`,
+                  height: `${cellHeight}px`,
+                  minWidth: `${cellWidth}px`,
+                  minHeight: `${cellHeight}px`,
+                  padding: '2px 4px',
+                  fontSize: '12px',
+                  fontWeight: isEmpty ? '400' : '500',
+                  color: isEmpty ? '#9ca3af' : '#1f2937',
                   backgroundColor: isEmpty 
                     ? '#e5e7eb' // 空のセルは灰色
                     : isNumber 
@@ -53,8 +70,6 @@ const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100 }) => {
                   verticalAlign: 'middle',
                   boxSizing: 'border-box',
                   userSelect: 'none',
-                  minWidth: '48px',
-                  minHeight: '48px',
                 };
                 
                 return (
@@ -62,13 +77,16 @@ const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100 }) => {
                     key={cellIndex}
                     style={cellStyle}
                     className="select-none"
+                    colSpan={colSpan > 1 ? colSpan : undefined}
+                    rowSpan={rowSpan > 1 ? rowSpan : undefined}
                   >
                     {cellValue}
                   </td>
                 );
-              })}
-            </tr>
-          ))}
+                })}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     );
