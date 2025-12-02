@@ -1,482 +1,2747 @@
-import React, { useRef, useState, useMemo } from 'react';
-import { ShoppingItem } from '../types';
-import ShoppingItemCard from './ShoppingItemCard';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, EventMapData } from './types';
+import { readMapDataFromXlsx } from './utils/xlsxReader';
+import ImportScreen from './components/ImportScreen';
+import ShoppingList from './components/ShoppingList';
+import SummaryBar from './components/SummaryBar';
+import EventListScreen from './components/EventListScreen';
+import DeleteConfirmationModal from './components/DeleteConfirmationModal';
+import ZoomControl from './components/ZoomControl';
+import BulkActionControls from './components/BulkActionControls';
+import UpdateConfirmationModal from './components/UpdateConfirmationModal';
+import UrlUpdateDialog from './components/UrlUpdateDialog';
+import EventRenameDialog from './components/EventRenameDialog';
+import SortAscendingIcon from './components/icons/SortAscendingIcon';
+import SortDescendingIcon from './components/icons/SortDescendingIcon';
+import SearchBar from './components/SearchBar';
+import MapView from './components/MapView';
+import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
 
-interface ShoppingListProps {
-  items: ShoppingItem[];
-  onUpdateItem: (item: ShoppingItem) => void;
-  onMoveItem: (dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate', sourceColumn?: 'execute' | 'candidate') => void;
-  onEditRequest: (item: ShoppingItem) => void;
-  onDeleteRequest: (item: ShoppingItem) => void;
-  selectedItemIds: Set<string>;
-  onSelectItem: (itemId: string, columnType?: 'execute' | 'candidate') => void;
-  onMoveToColumn?: (itemIds: string[]) => void;
-  onRemoveFromColumn?: (itemIds: string[]) => void;
-  columnType?: 'execute' | 'candidate';
-  currentDay?: string;
-  onMoveItemUp?: (itemId: string, targetColumn?: 'execute' | 'candidate') => void;
-  onMoveItemDown?: (itemId: string, targetColumn?: 'execute' | 'candidate') => void;
-  rangeStart?: { itemId: string; columnType: 'execute' | 'candidate' } | null;
-  rangeEnd?: { itemId: string; columnType: 'execute' | 'candidate' } | null;
-  onToggleRangeSelection?: (columnType: 'execute' | 'candidate') => void;
-  duplicateCircleItemIds?: Set<string>;
-  highlightedItemId?: string | null;
-}
+type ActiveTab = 'eventList' | 'import' | string; // string部分は動的な参加日（例: '1日目', '2日目', '3日目'など）
+type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'Purchased';
+export type BulkSortDirection = 'asc' | 'desc';
+type BlockSortDirection = 'asc' | 'desc';
 
-// Constants for drag-and-drop auto-scrolling
-const SCROLL_SPEED = 20;
-const TOP_SCROLL_TRIGGER_PX = 150;
-const BOTTOM_SCROLL_TRIGGER_PX = 100;
-
-// 色のパレット定義（変更なし）
-const colorPalette: Array<{ light: string; dark: string }> = [
-  { light: 'bg-red-50 dark:bg-red-950/30', dark: 'bg-red-100 dark:bg-red-900/40' },
-  { light: 'bg-blue-50 dark:bg-blue-950/30', dark: 'bg-blue-100 dark:bg-blue-900/40' },
-  { light: 'bg-yellow-50 dark:bg-yellow-950/30', dark: 'bg-yellow-100 dark:bg-yellow-900/40' },
-  { light: 'bg-purple-50 dark:bg-purple-950/30', dark: 'bg-purple-100 dark:bg-purple-900/40' },
-  { light: 'bg-green-50 dark:bg-green-950/30', dark: 'bg-green-100 dark:bg-green-900/40' },
-  { light: 'bg-pink-50 dark:bg-pink-950/30', dark: 'bg-pink-100 dark:bg-pink-900/40' },
-  { light: 'bg-cyan-50 dark:bg-cyan-950/30', dark: 'bg-cyan-100 dark:bg-cyan-900/40' },
-  { light: 'bg-orange-50 dark:bg-orange-950/30', dark: 'bg-orange-100 dark:bg-orange-900/40' },
-  { light: 'bg-indigo-50 dark:bg-indigo-950/30', dark: 'bg-indigo-100 dark:bg-indigo-900/40' },
-  { light: 'bg-lime-50 dark:bg-lime-950/30', dark: 'bg-lime-100 dark:bg-lime-900/40' },
-  { light: 'bg-rose-50 dark:bg-rose-950/30', dark: 'bg-rose-100 dark:bg-rose-900/40' },
-  { light: 'bg-sky-50 dark:bg-sky-950/30', dark: 'bg-sky-100 dark:bg-sky-900/40' },
-  { light: 'bg-amber-50 dark:bg-amber-950/30', dark: 'bg-amber-100 dark:bg-amber-900/40' },
-  { light: 'bg-violet-50 dark:bg-violet-950/30', dark: 'bg-violet-100 dark:bg-violet-900/40' },
-  { light: 'bg-emerald-50 dark:bg-emerald-950/30', dark: 'bg-emerald-100 dark:bg-emerald-900/40' },
-  { light: 'bg-fuchsia-50 dark:bg-fuchsia-950/30', dark: 'bg-fuchsia-100 dark:bg-fuchsia-900/40' },
-  { light: 'bg-teal-50 dark:bg-teal-950/30', dark: 'bg-teal-100 dark:bg-teal-900/40' },
-  { light: 'bg-slate-50 dark:bg-slate-950/30', dark: 'bg-slate-100 dark:bg-slate-900/40' },
-  { light: 'bg-gray-50 dark:bg-gray-950/30', dark: 'bg-gray-100 dark:bg-gray-900/40' },
-  { light: 'bg-stone-50 dark:bg-stone-950/30', dark: 'bg-stone-100 dark:bg-stone-900/40' },
-  { light: 'bg-neutral-50 dark:bg-neutral-950/30', dark: 'bg-neutral-100 dark:bg-neutral-900/40' },
-  { light: 'bg-zinc-50 dark:bg-zinc-950/30', dark: 'bg-zinc-100 dark:bg-zinc-900/40' },
-  { light: 'bg-red-100 dark:bg-red-900/40', dark: 'bg-red-200 dark:bg-red-800/50' },
-  { light: 'bg-blue-100 dark:bg-blue-900/40', dark: 'bg-blue-200 dark:bg-blue-800/50' },
-  { light: 'bg-yellow-100 dark:bg-yellow-900/40', dark: 'bg-yellow-200 dark:bg-yellow-800/50' },
-  { light: 'bg-purple-100 dark:bg-purple-900/40', dark: 'bg-purple-200 dark:bg-purple-800/50' },
-  { light: 'bg-green-100 dark:bg-green-900/40', dark: 'bg-green-200 dark:bg-green-800/50' },
-  { light: 'bg-pink-100 dark:bg-pink-900/40', dark: 'bg-pink-200 dark:bg-pink-800/50' },
-  { light: 'bg-cyan-100 dark:bg-cyan-900/40', dark: 'bg-cyan-200 dark:bg-cyan-800/50' },
-  { light: 'bg-orange-100 dark:bg-orange-900/40', dark: 'bg-orange-200 dark:bg-orange-800/50' },
-];
-
-// アイテムリストからブロックベースの色情報を計算（変更なし）
-const calculateBlockColors = (items: ShoppingItem[]): Map<string, string> => {
-  const colorMap = new Map<string, string>();
-  const uniqueBlocks = new Set<string>();
-  items.forEach(item => { if (item.purchaseStatus === 'None') { uniqueBlocks.add(item.block); } });
-  const sortedBlocks = Array.from(uniqueBlocks).sort((a, b) => {
-    const numA = Number(a); const numB = Number(b);
-    if (!isNaN(numA) && !isNaN(numB)) { return numA - numB; }
-    return a.localeCompare(b);
-  });
-  const blockColorMap = new Map<string, { light: string; dark: string }>();
-  sortedBlocks.forEach((block, index) => { const colorIndex = index % colorPalette.length; blockColorMap.set(block, colorPalette[colorIndex]); });
-  items.forEach((item, index) => {
-    if (item.purchaseStatus === 'None') {
-      const block = item.block; const blockColor = blockColorMap.get(block);
-      if (blockColor) {
-        const prevItem = index > 0 ? items[index - 1] : null;
-        const isSameBlockAsPrev = prevItem && prevItem.block === block && prevItem.purchaseStatus === 'None';
-        if (isSameBlockAsPrev) { const prevColor = colorMap.get(items[index - 1].id) || ''; const shouldUseDark = prevColor === blockColor.light; colorMap.set(item.id, shouldUseDark ? blockColor.dark : blockColor.light); }
-        else { colorMap.set(item.id, blockColor.light); }
-      }
+// データから参加日を抽出する関数
+const extractEventDates = (items: ShoppingItem[]): string[] => {
+  const eventDates = new Set<string>();
+  items.forEach(item => {
+    if (item.eventDate && item.eventDate.trim()) {
+      eventDates.add(item.eventDate.trim());
     }
   });
-  return colorMap;
+  // 参加日をソート（数値部分でソート）
+  return Array.from(eventDates).sort((a, b) => {
+    const numA = parseInt(a.match(/\d+/)?.[0] || '0', 10);
+    const numB = parseInt(b.match(/\d+/)?.[0] || '0', 10);
+    if (numA !== numB) return numA - numB;
+    return a.localeCompare(b, 'ja');
+  });
 };
 
-const ShoppingList: React.FC<ShoppingListProps> = ({
-  items,
-  onUpdateItem,
-  onMoveItem,
-  onEditRequest,
-  onDeleteRequest,
-  selectedItemIds,
-  onSelectItem,
-  onMoveToColumn: _onMoveToColumn,
-  onRemoveFromColumn: _onRemoveFromColumn,
-  columnType,
-  currentDay: _currentDay,
-  onMoveItemUp,
-  onMoveItemDown,
-  rangeStart,
-  rangeEnd,
-  onToggleRangeSelection,
-  duplicateCircleItemIds = new Set(),
-  highlightedItemId = null,
-}) => {
-  const dragItem = useRef<string | null>(null);
-  const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
+const sortCycle: SortState[] = ['Postpone', 'Late', 'Absent', 'SoldOut', 'Purchased', 'Manual'];
+const sortLabels: Record<SortState, string> = {
+    Manual: '巡回順',
+    Postpone: '後回し',
+    Late: '遅参',
+    Absent: '欠席',
+    SoldOut: '売切',
+    Purchased: '購入済',
+};
+
+const App: React.FC = () => {
+  const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>({});
+  const [eventMetadata, setEventMetadata] = useState<Record<string, EventMetadata>>({});
+  const [executeModeItems, setExecuteModeItems] = useState<Record<string, ExecuteModeItems>>({});
+  const [dayModes, setDayModes] = useState<Record<string, DayModeState>>({});
+  const [eventMapData, setEventMapData] = useState<EventMapData>({});
   
-  const [activeDropTarget, setActiveDropTarget] = useState<{ id: string; position: 'top' | 'bottom' } | null>(null);
+  const [activeEventName, setActiveEventName] = useState<string | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [activeTab, setActiveTab] = useState<ActiveTab>('eventList');
+  const [sortState, setSortState] = useState<SortState>('Manual');
+  const [blockSortDirection, setBlockSortDirection] = useState<BlockSortDirection | null>(null);
+  const [itemToEdit, setItemToEdit] = useState<ShoppingItem | null>(null);
+  const [itemToDelete, setItemToDelete] = useState<ShoppingItem | null>(null);
+  const [zoomLevel, setZoomLevel] = useState(100);
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [selectedBlockFilters, setSelectedBlockFilters] = useState<Set<string>>(new Set());
+  const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
+  // 起点と終点を管理（列タイプとアイテムIDのペア）
+  const [rangeStart, setRangeStart] = useState<{ itemId: string; columnType: 'execute' | 'candidate' } | null>(null);
+  const [rangeEnd, setRangeEnd] = useState<{ itemId: string; columnType: 'execute' | 'candidate' } | null>(null);
 
-  const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
+  // 更新機能用の状態
+  const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
+  const [updateData, setUpdateData] = useState<{
+    itemsToDelete: ShoppingItem[];
+    itemsToUpdate: ShoppingItem[];
+    itemsToAdd: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[];
+  } | null>(null);
+  const [updateEventName, setUpdateEventName] = useState<string | null>(null);
+  const [showUrlUpdateDialog, setShowUrlUpdateDialog] = useState(false);
+  const [pendingUpdateEventName, setPendingUpdateEventName] = useState<string | null>(null);
+  const [showRenameDialog, setShowRenameDialog] = useState(false);
+  const [eventToRename, setEventToRename] = useState<string | null>(null);
+  
+  // 検索機能の状態
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
+  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
-  // 範囲選択の状態を計算
-  const rangeInfo = useMemo(() => {
-    if (!rangeStart || !rangeEnd || !columnType || rangeStart.columnType !== columnType || rangeEnd.columnType !== columnType) {
-      return null;
-    }
-
-    const startIndex = items.findIndex(item => item.id === rangeStart.itemId);
-    const endIndex = items.findIndex(item => item.id === rangeEnd.itemId);
-
-    if (startIndex === -1 || endIndex === -1) return null;
-
-    const minIndex = Math.min(startIndex, endIndex);
-    const maxIndex = Math.max(startIndex, endIndex);
-    const rangeItems = items.slice(minIndex, maxIndex + 1);
-    const allSelected = rangeItems.every(item => selectedItemIds.has(item.id));
-    
-    const onlyStartEndSelected = rangeItems.length > 2 && 
-      selectedItemIds.has(rangeItems[0].id) && 
-      selectedItemIds.has(rangeItems[rangeItems.length - 1].id) &&
-      rangeItems.slice(1, -1).every(item => !selectedItemIds.has(item.id));
-
-    return {
-      startIndex: minIndex,
-      endIndex: maxIndex,
-      rangeItems,
-      allSelected,
-      onlyStartEndSelected,
-    };
-  }, [rangeStart, rangeEnd, columnType, items, selectedItemIds]);
-
-  const handleDragStart = (e: React.DragEvent<HTMLDivElement>, item: ShoppingItem) => {
-    dragItem.current = item.id;
-    dragSourceColumn.current = columnType || null;
-    if (columnType) {
-      e.dataTransfer.setData('sourceColumn', columnType);
-    }
-    const target = e.currentTarget;
-    setTimeout(() => {
-      if (target) {
-        target.classList.add('opacity-40');
-      }
-      if (selectedItemIds.has(item.id)) {
-        document.querySelectorAll('[data-is-selected="true"]').forEach(el => {
-          el.classList.add('opacity-40');
+  useEffect(() => {
+    try {
+      const storedLists = localStorage.getItem('eventShoppingLists');
+      const storedMetadata = localStorage.getItem('eventMetadata');
+      const storedExecuteItems = localStorage.getItem('executeModeItems');
+      const storedDayModes = localStorage.getItem('dayModes');
+      const storedMapData = localStorage.getItem('eventMapData');
+      
+      if (storedLists) {
+        const parsedLists = JSON.parse(storedLists);
+        // 既存データの互換性: quantityフィールドがない場合は1を設定
+        const migratedLists: Record<string, ShoppingItem[]> = {};
+        Object.keys(parsedLists).forEach(eventName => {
+          migratedLists[eventName] = parsedLists[eventName].map((item: ShoppingItem) => ({
+            ...item,
+            quantity: item.quantity ?? 1,
+          }));
         });
+        setEventLists(migratedLists);
       }
-    }, 0);
-  };
-
-  const handleDragOver = (e: React.DragEvent<HTMLDivElement>, item: ShoppingItem) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const clientY = e.clientY;
-    const windowHeight = window.innerHeight;
-    if (clientY < TOP_SCROLL_TRIGGER_PX) {
-      window.scrollBy(0, -SCROLL_SPEED);
-    } else if (clientY > windowHeight - BOTTOM_SCROLL_TRIGGER_PX) {
-      window.scrollBy(0, SCROLL_SPEED);
+      if (storedMetadata) {
+        setEventMetadata(JSON.parse(storedMetadata));
+      }
+      if (storedExecuteItems) {
+        setExecuteModeItems(JSON.parse(storedExecuteItems));
+      }
+      if (storedDayModes) {
+        setDayModes(JSON.parse(storedDayModes));
+      }
+      if (storedMapData) {
+        setEventMapData(JSON.parse(storedMapData));
+      }
+    } catch (error) {
+      console.error("Failed to load data from localStorage", error);
     }
+    setIsInitialized(true);
+  }, []);
 
-    const isCrossColumn = dragSourceColumn.current !== null && dragSourceColumn.current !== columnType;
-    
-    if (!isCrossColumn) {
-      if (dragItem.current === item.id && selectedItemIds.size === 0) {
-        setActiveDropTarget(null);
-        return;
-      }
-      if (selectedItemIds.has(item.id) && selectedItemIds.has(dragItem.current || '')) {
-        setActiveDropTarget(null);
-        return;
+  useEffect(() => {
+    if (isInitialized) {
+      try {
+        localStorage.setItem('eventShoppingLists', JSON.stringify(eventLists));
+        localStorage.setItem('eventMetadata', JSON.stringify(eventMetadata));
+        localStorage.setItem('executeModeItems', JSON.stringify(executeModeItems));
+        localStorage.setItem('dayModes', JSON.stringify(dayModes));
+        localStorage.setItem('eventMapData', JSON.stringify(eventMapData));
+      } catch (error) {
+        console.error("Failed to save data to localStorage", error);
       }
     }
+  }, [eventLists, eventMetadata, executeModeItems, dayModes, eventMapData, isInitialized]);
 
-    const rect = e.currentTarget.getBoundingClientRect();
-    const relativeY = e.clientY - rect.top;
-    const position = relativeY < rect.height / 2 ? 'top' : 'bottom';
-
-    setActiveDropTarget({ id: item.id, position });
-  };
-
-  const handleContainerDragOver = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-  };
-
-  const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    e.stopPropagation();
-    
-    const sourceColumn = e.dataTransfer.getData('sourceColumn') as 'execute' | 'candidate' | undefined;
-    
-    if (!columnType || !dragItem.current) {
-      cleanUp();
-      return;
+  const items = useMemo(() => activeEventName ? eventLists[activeEventName] || [] : [], [activeEventName, eventLists]);
+  
+  // 現在のイベントの参加日リストを取得
+  const eventDates = useMemo(() => extractEventDates(items), [items]);
+  
+  const currentMode = useMemo(() => {
+    if (!activeEventName) return 'execute';
+    const modes = dayModes[activeEventName];
+    if (!modes) return 'edit';
+    // activeTabが参加日（'1日目', '2日目'など）の場合
+    if (eventDates.includes(activeTab)) {
+      return modes[activeTab] || 'edit';
     }
+    return 'edit';
+  }, [activeEventName, dayModes, activeTab, eventDates]);
 
-    if (sourceColumn && sourceColumn === columnType) {
-      if (!activeDropTarget) {
-        cleanUp();
-        return;
-      }
-    } else if (sourceColumn && sourceColumn !== columnType) {
-      // Allow cross-column drop
+  const handleBulkAdd = useCallback((eventName: string, newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string; layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> }) => {
+    const newItems: ShoppingItem[] = newItemsData.map(itemData => ({
+        id: crypto.randomUUID(),
+        ...itemData,
+        quantity: itemData.quantity ?? 1,
+        purchaseStatus: 'None' as PurchaseStatus,
+    }));
+
+    const isNewEvent = !eventLists[eventName];
+
+    // 配置情報がある場合は、それに基づいてアイテムを配置
+    if (metadata?.layoutInfo && metadata.layoutInfo.length > 0 && isNewEvent) {
+      // 新規イベントの場合のみ、配置情報を適用
+      // アイテムキーでマップを作成（サークル名、参加日、ブロック、ナンバー、タイトルで照合）
+      const itemsMap = new Map<string, ShoppingItem>();
+      newItems.forEach(item => {
+        const key = getItemKey(item);
+        itemsMap.set(key, item);
+      });
+
+      // 各参加日ごとに配置情報を適用
+      const eventDatesForLayout = extractEventDates(newItems);
+      const newExecuteModeItems: ExecuteModeItems = {};
+      const sortedItemsByDate: ShoppingItem[] = [];
+      
+      // 配置情報がないアイテムを取得
+      const layoutItemKeys = new Set(metadata.layoutInfo!.map(layout => layout.itemKey));
+      const otherItems = newItems.filter(item => !layoutItemKeys.has(getItemKey(item)));
+      
+      // 配置情報がないアイテムを参加日ごとに分類
+      const otherItemsByDate: Record<string, ShoppingItem[]> = {};
+      otherItems.forEach(item => {
+        if (!otherItemsByDate[item.eventDate]) {
+          otherItemsByDate[item.eventDate] = [];
+        }
+        otherItemsByDate[item.eventDate].push(item);
+      });
+      
+      eventDatesForLayout.forEach(eventDate => {
+        // 実行列のアイテム
+        const executeItemsForDate = metadata.layoutInfo!
+          .filter(layout => layout.eventDate === eventDate && layout.columnType === 'execute')
+          .sort((a, b) => a.order - b.order)
+          .map(layout => itemsMap.get(layout.itemKey))
+          .filter(Boolean) as ShoppingItem[];
+        
+        // 候補リストのアイテム
+        const candidateItemsForDate = metadata.layoutInfo!
+          .filter(layout => layout.eventDate === eventDate && layout.columnType === 'candidate')
+          .sort((a, b) => a.order - b.order)
+          .map(layout => itemsMap.get(layout.itemKey))
+          .filter(Boolean) as ShoppingItem[];
+        
+        // 実行列のIDを保存
+        newExecuteModeItems[eventDate] = executeItemsForDate.map(item => item.id);
+        
+        // 実行列、候補リスト、配置情報がないアイテムの順で並べる
+        sortedItemsByDate.push(...executeItemsForDate, ...candidateItemsForDate, ...(otherItemsByDate[eventDate] || []));
+      });
+      
+      // 配置情報がないアイテムで、参加日がeventDatesForLayoutに含まれていないものを追加
+      const otherItemsWithoutDate = otherItems.filter(item => !eventDatesForLayout.includes(item.eventDate));
+      sortedItemsByDate.push(...otherItemsWithoutDate);
+      
+      setEventLists(prevLists => {
+        return {
+          ...prevLists,
+          [eventName]: sortedItemsByDate as ShoppingItem[]
+        };
+      });
+      
+      // 実行モードアイテムを設定
+      setExecuteModeItems(prev => ({
+        ...prev,
+        [eventName]: newExecuteModeItems
+      }));
     } else {
-      cleanUp();
-      return;
+      // 配置情報がない場合は従来通り
+      setEventLists(prevLists => {
+        const currentItems: ShoppingItem[] = prevLists[eventName] || [];
+        return {
+          ...prevLists,
+          [eventName]: [...currentItems, ...newItems] as ShoppingItem[]
+        };
+      });
     }
 
-    if (!activeDropTarget) {
-      if (sourceColumn && sourceColumn !== columnType) {
-        onMoveItem(dragItem.current, '__END_OF_LIST__', columnType, sourceColumn);
-        cleanUp();
-        return;
+    // メタデータの保存
+    if (metadata?.url) {
+      setEventMetadata(prev => ({
+        ...prev,
+        [eventName]: {
+          spreadsheetUrl: metadata.url!,
+          spreadsheetSheetName: metadata.sheetName || '',
+          lastImportDate: new Date().toISOString()
+        }
+      }));
+    }
+
+    // 初期モードを編集モードに設定
+    if (isNewEvent) {
+      const newEventDates = extractEventDates(newItems);
+      const initialDayModes: DayModeState = {};
+      const initialExecuteItems: ExecuteModeItems = {};
+      newEventDates.forEach(date => {
+        initialDayModes[date] = 'edit' as ViewMode;
+        if (!metadata?.layoutInfo) {
+          initialExecuteItems[date] = [];
+        }
+      });
+      
+      setDayModes(prev => ({
+        ...prev,
+        [eventName]: initialDayModes
+      }));
+      
+      if (!metadata?.layoutInfo) {
+        setExecuteModeItems(prev => ({
+          ...prev,
+          [eventName]: initialExecuteItems
+        }));
       }
-      cleanUp();
-      return;
     }
 
-    const { id: targetId, position } = activeDropTarget;
-
-    if (dragItem.current === targetId && sourceColumn === columnType) {
-        cleanUp();
-        return;
+    alert(`${newItems.length}件のアイテムが${isNewEvent ? 'リストにインポートされました。' : '追加されました。'}`);
+    
+    if (isNewEvent) {
+        setActiveEventName(eventName);
     }
+    
+    if (newItems.length > 0) {
+        // 新しいアイテムの参加日を取得
+        const newEventDates = extractEventDates(newItems);
+        if (newEventDates.length > 0) {
+            setActiveTab(newEventDates[0]);
+        } else {
+            // 既存のイベントの場合、最初の参加日を選択
+            const currentEventDates = extractEventDates(eventLists[eventName] || []);
+            if (currentEventDates.length > 0) {
+                setActiveTab(currentEventDates[0]);
+            }
+        }
+    }
+  }, [eventLists]);
 
-    if (position === 'top') {
-        onMoveItem(dragItem.current, targetId, columnType, sourceColumn);
-    } else {
-        const targetIndex = items.findIndex(i => i.id === targetId);
-        if (targetIndex === -1) {
-            cleanUp();
-            return;
+  const handleUpdateItem = useCallback((updatedItem: ShoppingItem) => {
+    if (!activeEventName) return;
+    
+    setEventLists(prev => {
+      // 購入状態が変更されたかチェック
+      const currentItem = prev[activeEventName]?.find(item => item.id === updatedItem.id);
+      const purchaseStatusChanged = currentItem && currentItem.purchaseStatus !== updatedItem.purchaseStatus;
+      
+      // 購入状態が変更された場合、最近変更されたアイテムとして記録
+      if (purchaseStatusChanged) {
+        setRecentlyChangedItemIds(prevIds => new Set(prevIds).add(updatedItem.id));
+      }
+      
+      return {
+        ...prev,
+        [activeEventName]: prev[activeEventName].map(item => (item.id === updatedItem.id ? updatedItem : item))
+      };
+    });
+  }, [activeEventName]);
+
+  const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate', sourceColumn?: 'execute' | 'candidate') => {
+    if (!activeEventName) return;
+    setSortState('Manual');
+    setBlockSortDirection(null);
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+
+    // リスト末尾への追加判定
+    const isAppendToEnd = hoverId === '__END_OF_LIST__';
+
+    // 列間移動の処理（編集モードのみ）
+    if (mode === 'edit' && sourceColumn && targetColumn && sourceColumn !== targetColumn) {
+      const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+      
+      if (sourceColumn === 'candidate' && targetColumn === 'execute') {
+        // 候補リスト → 実行列への移動
+        // candidateColumnItemsと同じロジックで候補リストのアイテムを取得（順序を維持）
+        const currentTabItemsForMove = items.filter(item => item.eventDate === activeTab);
+        let candidateItems = currentTabItemsForMove.filter(item => !executeIdsSet.has(item.id));
+        
+        // ブロックフィルタを適用（candidateColumnItemsと同じ）
+        if (selectedBlockFilters.size > 0) {
+          candidateItems = candidateItems.filter(item => selectedBlockFilters.has(item.block));
         }
         
-        if (targetIndex === items.length - 1) {
-            onMoveItem(dragItem.current, '__END_OF_LIST__', columnType, sourceColumn);
+        // 移動するアイテムを取得（候補リストの順序を維持）
+        let itemsToMove: ShoppingItem[] = [];
+        if (selectedItemIds.has(dragId)) {
+          // 候補リストの順序を維持しながら選択されたアイテムを抽出
+          itemsToMove = candidateItems.filter(item => selectedItemIds.has(item.id));
         } else {
-            const nextItem = items[targetIndex + 1];
-            onMoveItem(dragItem.current, nextItem.id, columnType, sourceColumn);
+          const item = candidateItems.find(item => item.id === dragId);
+          if (item) itemsToMove = [item];
         }
+        
+        if (itemsToMove.length === 0) return;
+        
+        const itemIdsToMove = itemsToMove.map(item => item.id);
+        
+        // executeModeItemsに追加
+          setExecuteModeItems(prevExecute => {
+            const eventItems = prevExecute[activeEventName] || {};
+            const dayItems = [...(eventItems[currentEventDate] || [])];
+            
+            if (isAppendToEnd) {
+              return {
+                ...prevExecute,
+                [activeEventName]: { ...eventItems, [currentEventDate]: [...dayItems, ...itemIdsToMove] }
+              };
+            } else {
+              const hoverIndex = dayItems.findIndex(id => id === hoverId);
+              if (hoverIndex === -1) {
+                return { ...prevExecute, [activeEventName]: { ...eventItems, [currentEventDate]: [...dayItems, ...itemIdsToMove] } };
+              }
+              dayItems.splice(hoverIndex, 0, ...itemIdsToMove);
+              return {
+                ...prevExecute,
+                [activeEventName]: { ...eventItems, [currentEventDate]: dayItems }
+              };
+            }
+          });
+        return;
+      } else if (sourceColumn === 'execute' && targetColumn === 'candidate') {
+        // 実行列 → 候補リストへの移動
+        setEventLists(prev => {
+          const allItems = [...(prev[activeEventName] || [])];
+          const executeItems = allItems.filter(item => 
+            item.eventDate.includes(currentEventDate) && executeIdsSet.has(item.id)
+          );
+          const candidateItems = allItems.filter(item => 
+            item.eventDate.includes(currentEventDate) && !executeIdsSet.has(item.id)
+          );
+          
+          // 移動するアイテムを取得
+          let itemsToMove: ShoppingItem[] = [];
+          if (selectedItemIds.has(dragId)) {
+            itemsToMove = executeItems.filter(item => selectedItemIds.has(item.id));
+          } else {
+            const item = executeItems.find(item => item.id === dragId);
+            if (item) itemsToMove = [item];
+          }
+          
+          if (itemsToMove.length === 0) return prev;
+          
+          const itemIdsToMove = itemsToMove.map(item => item.id);
+          
+          // executeModeItemsから削除
+          setExecuteModeItems(prevExecute => {
+            const eventItems = prevExecute[activeEventName] || {};
+            const dayItems = (eventItems[currentEventDate] || []).filter((id: string) => !itemIdsToMove.includes(id));
+            return {
+              ...prevExecute,
+              [activeEventName]: { ...eventItems, [currentEventDate]: dayItems }
+            };
+          });
+          
+          // 候補リストに挿入
+          let newCandidateList: ShoppingItem[] = [];
+          if (isAppendToEnd) {
+            newCandidateList = [...candidateItems, ...itemsToMove];
+          } else {
+            const hoverIndex = candidateItems.findIndex(item => item.id === hoverId);
+            if (hoverIndex === -1) {
+              newCandidateList = [...candidateItems, ...itemsToMove];
+            } else {
+              const listWithoutMoved = candidateItems.filter(item => !itemIdsToMove.includes(item.id));
+              listWithoutMoved.splice(hoverIndex, 0, ...itemsToMove);
+              newCandidateList = listWithoutMoved;
+            }
+          }
+          
+          // 再結合処理
+          const remainingExecuteItems = executeItems.filter(item => !itemIdsToMove.includes(item.id));
+          
+          const newItems = allItems.map(item => {
+            if (!item.eventDate.includes(currentEventDate)) {
+              return item;
+            }
+            if (executeIdsSet.has(item.id) && !itemIdsToMove.includes(item.id)) {
+              return remainingExecuteItems.shift() || item;
+            } else if (!executeIdsSet.has(item.id) || itemIdsToMove.includes(item.id)) {
+              return newCandidateList.shift() || item;
+            }
+            return item;
+          });
+          
+          return { ...prev, [activeEventName]: newItems };
+        });
+        return;
+      }
+    }
+
+    if (mode === 'edit' && targetColumn === 'execute') {
+      // 編集モード: 実行列内での並び替え
+      setExecuteModeItems(prev => {
+        const eventItems = prev[activeEventName] || {};
+        const dayItems = [...(eventItems[currentEventDate] || [])];
+        
+        if (selectedItemIds.has(dragId)) {
+          // 複数選択時
+          const selectedBlock = dayItems.filter(id => selectedItemIds.has(id));
+          const listWithoutSelection = dayItems.filter(id => !selectedItemIds.has(id));
+          
+          if (isAppendToEnd) {
+            return {
+              ...prev,
+              [activeEventName]: { ...eventItems, [currentEventDate]: [...listWithoutSelection, ...selectedBlock] }
+            };
+          }
+
+          const targetIndex = listWithoutSelection.findIndex(id => id === hoverId);
+          if (targetIndex === -1) return prev;
+          listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
+          
+          return {
+            ...prev,
+            [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection }
+          };
+        } else {
+          // 単一アイテム
+          const dragIndex = dayItems.findIndex(id => id === dragId);
+          if (dragIndex === -1) return prev; // 見つからない場合
+
+          const [draggedItem] = dayItems.splice(dragIndex, 1);
+          
+          if (isAppendToEnd) {
+             dayItems.push(draggedItem);
+          } else {
+             const hoverIndex = dayItems.findIndex(id => id === hoverId);
+             if (hoverIndex === -1) return prev;
+             dayItems.splice(hoverIndex, 0, draggedItem);
+          }
+          
+          return {
+            ...prev,
+            [activeEventName]: { ...eventItems, [currentEventDate]: dayItems }
+          };
+        }
+      });
+    } else if (mode === 'edit' && targetColumn === 'candidate') {
+      // 編集モード: 候補リスト内での並び替え
+      setEventLists(prev => {
+        const allItems = [...(prev[activeEventName] || [])];
+        const currentTabKey = currentEventDate;
+        const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+        
+        const candidateItems = allItems.filter(item => 
+          item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id)
+        );
+        
+        if (selectedItemIds.has(dragId)) {
+          // 複数選択時
+          const selectedBlock = candidateItems.filter(item => selectedItemIds.has(item.id));
+          const listWithoutSelection = candidateItems.filter(item => !selectedItemIds.has(item.id));
+          
+          let newCandidateList: ShoppingItem[] = [];
+
+          if (isAppendToEnd) {
+             newCandidateList = [...listWithoutSelection, ...selectedBlock];
+          } else {
+             const targetIndex = listWithoutSelection.findIndex(item => item.id === hoverId);
+             if (targetIndex === -1) return prev;
+             listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
+             newCandidateList = listWithoutSelection;
+          }
+          
+          // 再結合処理
+          const executeItems = allItems.filter(item => 
+            item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
+          );
+          
+          const newItems = allItems.map(item => {
+            if (!item.eventDate.includes(currentTabKey)) {
+              return item;
+            }
+            if (executeIdsSet.has(item.id)) {
+              return executeItems.shift() || item;
+            } else {
+              return newCandidateList.shift() || item;
+            }
+          });
+          
+          return { ...prev, [activeEventName]: newItems };
+        } else {
+          // 単一アイテム
+          const dragIndex = candidateItems.findIndex(item => item.id === dragId);
+          if (dragIndex === -1) return prev;
+
+          const [draggedItem] = candidateItems.splice(dragIndex, 1);
+          
+          if (isAppendToEnd) {
+              candidateItems.push(draggedItem);
+          } else {
+              const hoverIndex = candidateItems.findIndex(item => item.id === hoverId);
+              if (hoverIndex === -1) return prev;
+              candidateItems.splice(hoverIndex, 0, draggedItem);
+          }
+          
+          // 再結合
+          const executeItems = allItems.filter(item => 
+            item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
+          );
+          
+          const newItems = allItems.map(item => {
+            if (!item.eventDate.includes(currentTabKey)) {
+              return item;
+            }
+            if (executeIdsSet.has(item.id)) {
+              return executeItems.shift() || item;
+            } else {
+              return candidateItems.shift() || item;
+            }
+          });
+          
+          return { ...prev, [activeEventName]: newItems };
+        }
+      });
+    } else if (mode === 'execute') {
+      // 実行モード: 通常の並び替え
+      setEventLists(prev => {
+        const newItems = [...(prev[activeEventName] || [])];
+        
+        if (selectedItemIds.has(dragId)) {
+          const selectedBlock = newItems.filter(item => selectedItemIds.has(item.id));
+          const listWithoutSelection = newItems.filter(item => !selectedItemIds.has(item.id));
+          
+          if (isAppendToEnd) {
+             return { ...prev, [activeEventName]: [...listWithoutSelection, ...selectedBlock] };
+          }
+
+          const targetIndex = listWithoutSelection.findIndex(item => item.id === hoverId);
+          if (targetIndex === -1) return prev;
+          listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
+          
+          return { ...prev, [activeEventName]: listWithoutSelection };
+        } else {
+          const dragIndex = newItems.findIndex(item => item.id === dragId);
+          if (dragIndex === -1) return prev;
+
+          const [draggedItem] = newItems.splice(dragIndex, 1);
+          
+          if (isAppendToEnd) {
+              newItems.push(draggedItem);
+          } else {
+              const hoverIndex = newItems.findIndex(item => item.id === hoverId);
+              if (hoverIndex === -1) return prev;
+              newItems.splice(hoverIndex, 0, draggedItem);
+          }
+          return { ...prev, [activeEventName]: newItems };
+        }
+      });
+    }
+  }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates, selectedBlockFilters, items]);
+  const handleMoveItemUp = useCallback((itemId: string, targetColumn?: 'execute' | 'candidate') => {
+    if (!activeEventName) return;
+    setSortState('Manual');
+    setBlockSortDirection(null);
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+
+    if (mode === 'edit' && targetColumn === 'execute') {
+      // 編集モード: 実行列内での並び替え
+      setExecuteModeItems(prev => {
+        const eventItems = prev[activeEventName] || {};
+        const dayItems = [...(eventItems[currentEventDate] || [])];
+        const currentIndex = dayItems.findIndex(id => id === itemId);
+        
+        if (currentIndex <= 0) return prev; // 既に先頭または見つからない
+        
+        // 複数選択時は選択されたアイテムすべてを移動
+        if (selectedItemIds.has(itemId)) {
+          const selectedIds = dayItems.filter(id => selectedItemIds.has(id));
+          const listWithoutSelection = dayItems.filter(id => !selectedItemIds.has(id));
+          
+          // 選択されたアイテムの最初の位置を基準に移動
+          const firstSelectedIndex = dayItems.findIndex(id => selectedItemIds.has(id));
+          if (firstSelectedIndex > 0) {
+            const newTargetIndex = firstSelectedIndex - 1;
+            listWithoutSelection.splice(newTargetIndex, 0, ...selectedIds);
+            return {
+              ...prev,
+              [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection }
+            };
+          }
+          return prev;
+        } else {
+          // 単一アイテム
+          [dayItems[currentIndex - 1], dayItems[currentIndex]] = [dayItems[currentIndex], dayItems[currentIndex - 1]];
+          return {
+            ...prev,
+            [activeEventName]: { ...eventItems, [currentEventDate]: dayItems }
+          };
+        }
+      });
+    } else if (mode === 'edit' && targetColumn === 'candidate') {
+      // 編集モード: 候補リスト内での並び替え
+      setEventLists(prev => {
+        const allItems = [...(prev[activeEventName] || [])];
+        const currentTabKey = currentEventDate;
+        const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+        
+        // 候補リストのアイテムのみを取得
+        const candidateItems = allItems.filter(item => 
+          item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id)
+        );
+        
+        const currentIndex = candidateItems.findIndex(item => item.id === itemId);
+        if (currentIndex <= 0) return prev; // 既に先頭または見つからない
+        
+        if (selectedItemIds.has(itemId)) {
+          // 複数選択時
+          const selectedBlock = candidateItems.filter(item => selectedItemIds.has(item.id));
+          const listWithoutSelection = candidateItems.filter(item => !selectedItemIds.has(item.id));
+          const firstSelectedIndex = candidateItems.findIndex(item => selectedItemIds.has(item.id));
+          
+          if (firstSelectedIndex > 0) {
+            const newTargetIndex = firstSelectedIndex - 1;
+            listWithoutSelection.splice(newTargetIndex, 0, ...selectedBlock);
+            
+            // 実行モード列のアイテムはそのまま、候補リストのみ並び替え
+            const executeItems = allItems.filter(item => 
+              item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
+            );
+            
+            const newItems = allItems.map(item => {
+              if (!item.eventDate.includes(currentTabKey)) {
+                return item;
+              }
+              if (executeIdsSet.has(item.id)) {
+                return executeItems.shift() || item;
+              } else {
+                return listWithoutSelection.shift() || item;
+              }
+            });
+            
+            return { ...prev, [activeEventName]: newItems };
+          }
+          return prev;
+        } else {
+          // 単一アイテム
+          [candidateItems[currentIndex - 1], candidateItems[currentIndex]] = [candidateItems[currentIndex], candidateItems[currentIndex - 1]];
+          
+          // 実行モード列のアイテムはそのまま、候補リストのみ並び替え
+          const executeItems = allItems.filter(item => 
+            item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
+          );
+          
+          const newItems = allItems.map(item => {
+            if (!item.eventDate.includes(currentTabKey)) {
+              return item;
+            }
+            if (executeIdsSet.has(item.id)) {
+              return executeItems.shift() || item;
+            } else {
+              return candidateItems.shift() || item;
+            }
+          });
+          
+          return { ...prev, [activeEventName]: newItems };
+        }
+      });
+    } else if (mode === 'execute') {
+      // 実行モード: 通常の並び替え
+      setEventLists(prev => {
+        const newItems = [...(prev[activeEventName] || [])];
+        const currentIndex = newItems.findIndex(item => item.id === itemId);
+        
+        if (currentIndex <= 0) return prev; // 既に先頭または見つからない
+        
+        if (selectedItemIds.has(itemId)) {
+          const selectedBlock = newItems.filter(item => selectedItemIds.has(item.id));
+          const listWithoutSelection = newItems.filter(item => !selectedItemIds.has(item.id));
+          const firstSelectedIndex = newItems.findIndex(item => selectedItemIds.has(item.id));
+          
+          if (firstSelectedIndex > 0) {
+            const newTargetIndex = firstSelectedIndex - 1;
+            listWithoutSelection.splice(newTargetIndex, 0, ...selectedBlock);
+            return { ...prev, [activeEventName]: listWithoutSelection };
+          }
+          return prev;
+        } else {
+          [newItems[currentIndex - 1], newItems[currentIndex]] = [newItems[currentIndex], newItems[currentIndex - 1]];
+          return { ...prev, [activeEventName]: newItems };
+        }
+      });
+    }
+  }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates]);
+
+const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute' | 'candidate') => {
+    if (!activeEventName) return;
+    setSortState('Manual');
+    setBlockSortDirection(null);
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+
+    if (mode === 'edit' && targetColumn === 'execute') {
+      // 編集モード: 実行列内での並び替え
+      setExecuteModeItems(prev => {
+        const eventItems = prev[activeEventName] || {};
+        const dayItems = [...(eventItems[currentEventDate] || [])];
+        const currentIndex = dayItems.findIndex(id => id === itemId);
+        
+        if (currentIndex < 0 || currentIndex >= dayItems.length - 1) return prev; // 既に末尾または見つからない
+        
+        // 複数選択時は選択されたアイテムすべてを移動
+        if (selectedItemIds.has(itemId)) {
+          const selectedIds = dayItems.filter(id => selectedItemIds.has(id));
+          const listWithoutSelection = dayItems.filter(id => !selectedItemIds.has(id));
+          
+          // 選択されたアイテムの中で最も後ろの位置を見つける
+          let lastSelectedIndex = -1;
+          dayItems.forEach((id, index) => {
+              if (selectedItemIds.has(id)) lastSelectedIndex = index;
+          });
+          
+          // 選択されたアイテムが最後にない場合のみ移動
+          if (lastSelectedIndex >= 0 && lastSelectedIndex < dayItems.length - 1) {
+            // 飛び越える対象のアイテム（選択範囲の直後のアイテム）
+            const jumpOverItemId = dayItems[lastSelectedIndex + 1];
+            
+            // 非選択リスト内でのそのアイテムの位置
+            const targetIndexInListWithout = listWithoutSelection.findIndex(id => id === jumpOverItemId);
+            
+            if (targetIndexInListWithout !== -1) {
+              // そのアイテムの後ろに挿入
+              listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedIds);
+              return {
+                ...prev,
+                [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection }
+              };
+            }
+          }
+          return prev;
+        } else {
+          // 単一アイテム
+          [dayItems[currentIndex], dayItems[currentIndex + 1]] = [dayItems[currentIndex + 1], dayItems[currentIndex]];
+          return {
+            ...prev,
+            [activeEventName]: { ...eventItems, [currentEventDate]: dayItems }
+          };
+        }
+      });
+    } else if (mode === 'edit' && targetColumn === 'candidate') {
+      // 編集モード: 候補リスト内での並び替え
+      setEventLists(prev => {
+        const allItems = [...(prev[activeEventName] || [])];
+        const currentTabKey = currentEventDate;
+        const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+        
+        // 候補リストのアイテムのみを取得
+        const candidateItems = allItems.filter(item => 
+          item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id)
+        );
+        
+        const currentIndex = candidateItems.findIndex(item => item.id === itemId);
+        if (currentIndex < 0 || currentIndex >= candidateItems.length - 1) return prev; // 既に末尾または見つからない
+        
+        if (selectedItemIds.has(itemId)) {
+          // 複数選択時
+          const selectedBlock = candidateItems.filter(item => selectedItemIds.has(item.id));
+          const listWithoutSelection = candidateItems.filter(item => !selectedItemIds.has(item.id));
+          
+          // 選択されたアイテムの中で最も後ろの位置を見つける
+          let lastSelectedIndex = -1;
+          candidateItems.forEach((item, index) => {
+              if (selectedItemIds.has(item.id)) lastSelectedIndex = index;
+          });
+          
+          // 選択されたアイテムが最後にない場合のみ移動
+          if (lastSelectedIndex >= 0 && lastSelectedIndex < candidateItems.length - 1) {
+            const jumpOverItemId = candidateItems[lastSelectedIndex + 1].id;
+            const targetIndexInListWithout = listWithoutSelection.findIndex(item => item.id === jumpOverItemId);
+            
+            if (targetIndexInListWithout !== -1) {
+              listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedBlock);
+              
+              // 実行モード列のアイテムはそのまま、候補リストのみ並び替え
+              const executeItems = allItems.filter(item => 
+                item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
+              );
+              
+              const newItems = allItems.map(item => {
+                if (!item.eventDate.includes(currentTabKey)) {
+                  return item;
+                }
+                if (executeIdsSet.has(item.id)) {
+                  return executeItems.shift() || item;
+                } else {
+                  return listWithoutSelection.shift() || item;
+                }
+              });
+              
+              return { ...prev, [activeEventName]: newItems };
+            }
+          }
+          return prev;
+        } else {
+          // 単一アイテム
+          [candidateItems[currentIndex], candidateItems[currentIndex + 1]] = [candidateItems[currentIndex + 1], candidateItems[currentIndex]];
+          
+          // 実行モード列のアイテムはそのまま、候補リストのみ並び替え
+          const executeItems = allItems.filter(item => 
+            item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id)
+          );
+          
+          const newItems = allItems.map(item => {
+            if (!item.eventDate.includes(currentTabKey)) {
+              return item;
+            }
+            if (executeIdsSet.has(item.id)) {
+              return executeItems.shift() || item;
+            } else {
+              return candidateItems.shift() || item;
+            }
+          });
+          
+          return { ...prev, [activeEventName]: newItems };
+        }
+      });
+    } else if (mode === 'execute') {
+      // 実行モード: 通常の並び替え
+      setEventLists(prev => {
+        const newItems = [...(prev[activeEventName] || [])];
+        const currentIndex = newItems.findIndex(item => item.id === itemId);
+        
+        if (currentIndex < 0 || currentIndex >= newItems.length - 1) return prev; // 既に末尾または見つからない
+        
+        if (selectedItemIds.has(itemId)) {
+          const selectedBlock = newItems.filter(item => selectedItemIds.has(item.id));
+          const listWithoutSelection = newItems.filter(item => !selectedItemIds.has(item.id));
+          
+          // 選択されたアイテムの中で最も後ろの位置を見つける
+          let lastSelectedIndex = -1;
+          newItems.forEach((item, index) => {
+             if (selectedItemIds.has(item.id)) lastSelectedIndex = index;
+          });
+          
+          // 選択されたアイテムが最後にない場合のみ移動
+          if (lastSelectedIndex >= 0 && lastSelectedIndex < newItems.length - 1) {
+            const jumpOverItemId = newItems[lastSelectedIndex + 1].id;
+            const targetIndexInListWithout = listWithoutSelection.findIndex(item => item.id === jumpOverItemId);
+            
+            if (targetIndexInListWithout !== -1) {
+              listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedBlock);
+              return { ...prev, [activeEventName]: listWithoutSelection };
+            }
+          }
+          return prev;
+        } else {
+          [newItems[currentIndex], newItems[currentIndex + 1]] = [newItems[currentIndex + 1], newItems[currentIndex]];
+          return { ...prev, [activeEventName]: newItems };
+        }
+      });
+    }
+  }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates]);
+
+  const handleMoveToExecuteColumn = useCallback((itemIds: string[]) => {
+    if (!activeEventName) return;
+    
+    // 修正1: 表示側(View)と同じロジックで現在の対象日を特定する
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    
+    // 現在の実行列にあるIDセット
+    const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+    
+    // 範囲選択の起点・終点が移動対象に含まれている場合、範囲選択をリセット
+    if (rangeStart && itemIds.includes(rangeStart.itemId) && rangeStart.columnType === 'candidate') {
+      setRangeStart(null);
+      setRangeEnd(null);
+    } else if (rangeEnd && itemIds.includes(rangeEnd.itemId) && rangeEnd.columnType === 'candidate') {
+      setRangeEnd(null);
     }
     
-    cleanUp();
+    // 修正2: activeTabではなく、特定したcurrentEventDateを使用してアイテムを抽出（表示側と一致させる）
+    // これにより、画面上の並び順（itemsの順序）が正であるという前提で母集団を作ります
+    const currentTabItemsForMove = items.filter(item => item.eventDate === currentEventDate);
+    
+    // 修正3: 表示されている「候補リスト」と完全に同じロジックでリストを再構築する
+    // 1. 既に左列にあるものを除外
+    let candidateItems = currentTabItemsForMove.filter(item => !executeIdsSet.has(item.id));
+    
+    // 2. ブロックフィルタが適用されている場合はそれも適用（見えていないアイテムは移動させない仕様の場合）
+    // もし「見えていないが選択されているアイテム」も移動させたい場合はこのブロックを外しますが、
+    // 通常は「見えている順序」を維持するため、このフィルタも含めるのが適切です。
+    if (selectedBlockFilters.size > 0) {
+      candidateItems = candidateItems.filter(item => selectedBlockFilters.has(item.block));
+    }
+    
+    // 修正4: 再構築した「画面と同じ順序のリスト(candidateItems)」を基準にして、
+    // 選択されたIDが含まれているかチェックして抽出する。
+    // これにより、itemIds（引数）の順序（選択順など）に関係なく、リスト上の上から下の順序で抽出される。
+    const itemIdsSet = new Set(itemIds);
+    const itemsToMove = candidateItems.filter(item => itemIdsSet.has(item.id));
+    const orderedItemIds = itemsToMove.map(item => item.id);
+    
+    setExecuteModeItems(prev => {
+      const eventItems = prev[activeEventName] || {};
+      const currentDayItems = [...(eventItems[currentEventDate] || [])];
+      
+      // 既存のアイテムを保持し、新しいアイテムを末尾に追加（画面上の順序を維持したorderedItemIdsを使用）
+      const existingIdsSet = new Set(currentDayItems);
+      const newItemIds = orderedItemIds.filter(id => !existingIdsSet.has(id));
+      
+      return {
+        ...prev,
+        [activeEventName]: {
+          ...eventItems,
+          [currentEventDate]: [...currentDayItems, ...newItemIds]
+        }
+      };
+    });
+    
+    setSelectedItemIds(new Set());
+  }, [activeEventName, activeTab, eventDates, rangeStart, rangeEnd, items, executeModeItems, selectedBlockFilters]);
+  const handleRemoveFromExecuteColumn = useCallback((itemIds: string[]) => {
+    if (!activeEventName) return;
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    
+    // 範囲選択の起点・終点が移動対象に含まれている場合、範囲選択をリセット
+    if (rangeStart && itemIds.includes(rangeStart.itemId) && rangeStart.columnType === 'execute') {
+      setRangeStart(null);
+      setRangeEnd(null);
+    } else if (rangeEnd && itemIds.includes(rangeEnd.itemId) && rangeEnd.columnType === 'execute') {
+      setRangeEnd(null);
+    }
+    
+    setExecuteModeItems(prev => {
+      const eventItems = prev[activeEventName] || {};
+      const currentDayItems = (eventItems[currentEventDate] || []).filter((id: string) => !itemIds.includes(id));
+      
+      return {
+        ...prev,
+        [activeEventName]: {
+          ...eventItems,
+          [currentEventDate]: currentDayItems
+        }
+      };
+    });
+    
+    setSelectedItemIds(new Set());
+  }, [activeEventName, activeTab, eventDates, rangeStart, rangeEnd]);
+
+  const handleToggleMode = useCallback(() => {
+    if (!activeEventName) return;
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const currentModeValue = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+    const newMode: ViewMode = currentModeValue === 'edit' ? 'execute' : 'edit';
+    
+    setDayModes(prev => ({
+      ...prev,
+      [activeEventName]: {
+        ...(prev[activeEventName] || {}),
+        [currentEventDate]: newMode
+      }
+    }));
+    
+    setSelectedItemIds(new Set());
+    setCandidateNumberSortDirection(null);
+  }, [activeEventName, activeTab, dayModes, eventDates]);
+  
+  const handleSelectEvent = useCallback((eventName: string) => {
+    setActiveEventName(eventName);
+    setSelectedItemIds(new Set());
+    setSelectedBlockFilters(new Set());
+    const eventItems = eventLists[eventName] || [];
+    const dates = extractEventDates(eventItems);
+    if (dates.length > 0) {
+        setActiveTab(dates[0]);
+    } else {
+        setActiveTab('eventList');
+    }
+  }, [eventLists]);
+
+  const handleDeleteEvent = useCallback((eventName: string) => {
+    setEventLists(prev => {
+        const newLists = {...prev};
+        delete newLists[eventName];
+        return newLists;
+    });
+    setEventMetadata(prev => {
+        const newMetadata = {...prev};
+        delete newMetadata[eventName];
+        return newMetadata;
+    });
+    setExecuteModeItems(prev => {
+        const newItems = {...prev};
+        delete newItems[eventName];
+        return newItems;
+    });
+    setDayModes(prev => {
+        const newModes = {...prev};
+        delete newModes[eventName];
+        return newModes;
+    });
+    setEventMapData((prev: EventMapData) => {
+        const newMapData = {...prev};
+        delete newMapData[eventName];
+        return newMapData;
+    });
+    if (activeEventName === eventName) {
+        setActiveEventName(null);
+        setActiveTab('eventList');
+    }
+  }, [activeEventName]);
+
+  const handleRenameEvent = useCallback((oldName: string) => {
+    setEventToRename(oldName);
+    setShowRenameDialog(true);
+  }, []);
+
+  const handleConfirmRename = useCallback((newName: string) => {
+    if (!eventToRename) return;
+    
+    if (eventToRename === newName) {
+      setShowRenameDialog(false);
+      setEventToRename(null);
+      return;
+    }
+
+    if (eventLists[newName]) {
+      alert('その名前の即売会は既に存在します。別の名前を入力してください。');
+      return;
+    }
+
+    setEventLists(prev => {
+      const newLists = { ...prev };
+      if (newLists[eventToRename]) {
+        newLists[newName] = newLists[eventToRename];
+        delete newLists[eventToRename];
+      }
+      return newLists;
+    });
+
+    setEventMetadata(prev => {
+      const newMetadata = { ...prev };
+      if (newMetadata[eventToRename]) {
+        newMetadata[newName] = newMetadata[eventToRename];
+        delete newMetadata[eventToRename];
+      }
+      return newMetadata;
+    });
+
+    setDayModes(prev => {
+      const newModes = { ...prev };
+      if (newModes[eventToRename]) {
+        newModes[newName] = newModes[eventToRename];
+        delete newModes[eventToRename];
+      }
+      return newModes;
+    });
+
+    setExecuteModeItems(prev => {
+      const newItems = { ...prev };
+      if (newItems[eventToRename]) {
+        newItems[newName] = newItems[eventToRename];
+        delete newItems[eventToRename];
+      }
+      return newItems;
+    });
+
+    setEventMapData((prev: EventMapData) => {
+      const newMapData = { ...prev };
+      if (newMapData[eventToRename]) {
+        newMapData[newName] = newMapData[eventToRename];
+        delete newMapData[eventToRename];
+      }
+      return newMapData;
+    });
+
+    if (activeEventName === eventToRename) {
+      setActiveEventName(newName);
+    }
+
+    setShowRenameDialog(false);
+    setEventToRename(null);
+  }, [eventToRename, eventLists, activeEventName]);
+
+  const handleImportMap = useCallback((eventName: string) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xls';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      try {
+        const mapDataMap = await readMapDataFromXlsx(file);
+        const mapData: Record<string, any[][]> = {};
+        mapDataMap.forEach((data, key) => {
+          mapData[key] = data;
+        });
+        setEventMapData((prev: EventMapData) => ({
+          ...prev,
+          [eventName]: mapData,
+        }));
+        alert('マップデータの取り込みが完了しました。');
+      } catch (error) {
+        console.error('マップデータの読み込みに失敗しました:', error);
+        alert('マップデータの読み込みに失敗しました。ファイル形式を確認してください。');
+      }
+    };
+    input.click();
+  }, []);
+
+  const handleSortToggle = () => {
+    setSelectedItemIds(new Set());
+    setBlockSortDirection(null);
+    // フィルタ変更時に最近変更されたアイテムの追跡をリセット
+    setRecentlyChangedItemIds(new Set());
+    const currentIndex = sortCycle.indexOf(sortState);
+    const nextIndex = (currentIndex + 1) % sortCycle.length;
+    setSortState(sortCycle[nextIndex]);
   };
 
-  const cleanUp = () => {
-    document.querySelectorAll('.opacity-40').forEach(el => el.classList.remove('opacity-40'));
-    dragItem.current = null;
-    dragSourceColumn.current = null;
-    setActiveDropTarget(null);
+  const handleBlockSortToggle = () => {
+    if (!activeEventName) return;
+
+    const nextDirection = blockSortDirection === 'asc' ? 'desc' : 'asc';
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+
+    setEventLists(prev => {
+      const allItems = [...(prev[activeEventName] || [])];
+      const currentTabKey = currentEventDate;
+
+      const itemsForTab = allItems.filter(item => item.eventDate === currentTabKey);
+      
+      if (itemsForTab.length === 0) return prev;
+
+      const sortedItemsForTab = [...itemsForTab].sort((a, b) => {
+        if (!a.block && !b.block) return 0;
+        if (!a.block) return 1;
+        if (!b.block) return -1;
+        const comparison = a.block.localeCompare(b.block, 'ja', { numeric: true, sensitivity: 'base' });
+        return nextDirection === 'asc' ? comparison : -comparison;
+      });
+
+      let sortedIndex = 0;
+      const newItems = allItems.map(item => {
+          if (item.eventDate === currentTabKey) {
+              return sortedItemsForTab[sortedIndex++];
+          }
+          return item;
+      });
+
+      return { ...prev, [activeEventName]: newItems };
+    });
+
+    setBlockSortDirection(nextDirection);
+    setSelectedItemIds(new Set());
   };
 
-  if (items.length === 0) {
-      return (
-        <div 
-          className="text-center text-slate-500 dark:text-slate-400 py-12 min-h-[200px] border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg relative"
-          onDragOver={handleContainerDragOver}
-          onDrop={handleDrop}
-        >
-          この日のアイテムはありません。
-        </div>
+  const handleBlockSortToggleCandidate = () => {
+    if (!activeEventName) return;
+
+    const nextDirection = blockSortDirection === 'asc' ? 'desc' : 'asc';
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+
+    setEventLists(prev => {
+      const allItems = [...(prev[activeEventName] || [])];
+      const currentTabKey = currentEventDate;
+      const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+
+      // 候補リストのアイテムのみを取得
+      const candidateItems = allItems.filter(item => 
+        item.eventDate === currentTabKey && !executeIds.has(item.id)
       );
+      
+      if (candidateItems.length === 0) return prev;
+
+      const sortedCandidateItems = [...candidateItems].sort((a, b) => {
+        if (!a.block && !b.block) return 0;
+        if (!a.block) return 1;
+        if (!b.block) return -1;
+        const comparison = a.block.localeCompare(b.block, 'ja', { numeric: true, sensitivity: 'base' });
+        return nextDirection === 'asc' ? comparison : -comparison;
+      });
+
+      // 実行モード列のアイテムはそのまま、候補リストのアイテムのみ並び替え
+      const executeItems = allItems.filter(item => 
+        item.eventDate === currentTabKey && executeIds.has(item.id)
+      );
+      
+      // 実行モード列と候補リストを結合（実行モード列が先）
+      const newItems = allItems.map(item => {
+        if (item.eventDate !== currentTabKey) {
+          return item;
+        }
+        if (executeIds.has(item.id)) {
+          return executeItems.shift() || item;
+        } else {
+          return sortedCandidateItems.shift() || item;
+        }
+      });
+
+      return { ...prev, [activeEventName]: newItems };
+    });
+
+    setBlockSortDirection(nextDirection);
+    setSelectedItemIds(new Set());
+  };
+
+  const handleEditRequest = (item: ShoppingItem) => {
+    setItemToEdit(item);
+    setActiveTab('import');
+  };
+
+  const handleDeleteRequest = (item: ShoppingItem) => {
+    setItemToDelete(item);
+  };
+
+  const handleConfirmDelete = () => {
+    if (!itemToDelete || !activeEventName) return;
+    
+    const deletedId = itemToDelete.id;
+    
+    setEventLists(prev => ({
+      ...prev,
+      [activeEventName]: prev[activeEventName].filter(item => item.id !== deletedId)
+    }));
+    
+    // 実行モードアイテムからも削除
+    setExecuteModeItems(prev => {
+      const eventItems = prev[activeEventName];
+      if (!eventItems) return prev;
+      
+      const updatedEventItems: ExecuteModeItems = {};
+      Object.keys(eventItems).forEach(eventDate => {
+        updatedEventItems[eventDate] = eventItems[eventDate].filter((id: string) => id !== deletedId);
+      });
+      
+      return {
+        ...prev,
+        [activeEventName]: updatedEventItems
+      };
+    });
+    
+    setItemToDelete(null);
+  };
+
+  const handleDoneEditing = () => {
+    if (itemToEdit?.eventDate) {
+      setItemToEdit(null);
+      setActiveTab(itemToEdit.eventDate);
+    } else {
+      setItemToEdit(null);
+      if (eventDates.length > 0) {
+        setActiveTab(eventDates[0]);
+      }
+    }
+  };
+
+  const handleSelectItem = useCallback((itemId: string, columnType?: 'execute' | 'candidate') => {
+    setSortState('Manual');
+    setBlockSortDirection(null);
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const currentColumnType = columnType || (activeEventName ? 
+      (executeModeItems[activeEventName]?.[currentEventDate]?.includes(itemId) ? 'execute' : 'candidate') : 
+      'execute');
+    
+    // 現在の列のアイテムを直接計算
+    let currentItems: ShoppingItem[] = [];
+    if (activeEventName) {
+      if (currentColumnType === 'execute') {
+        const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+        const itemsMap = new Map(items.map(item => [item.id, item]));
+        currentItems = executeIds.map((id: string) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+      } else {
+        const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+        let filtered = items.filter(item => 
+          item.eventDate === currentEventDate && !executeIds.has(item.id)
+        );
+        // ブロックフィルタを適用
+        if (selectedBlockFilters.size > 0) {
+          filtered = filtered.filter(item => selectedBlockFilters.has(item.block));
+        }
+        currentItems = filtered;
+      }
+    }
+    
+    setSelectedItemIds(prev => {
+        const newSet = new Set(prev);
+        const wasSelected = newSet.has(itemId);
+        
+        if (wasSelected) {
+            newSet.delete(itemId);
+            // 選択解除時は起点・終点をリセット
+            if (rangeStart?.itemId === itemId && rangeStart.columnType === currentColumnType) {
+                setRangeStart(null);
+                setRangeEnd(null);
+            } else if (rangeEnd?.itemId === itemId && rangeEnd.columnType === currentColumnType) {
+                setRangeEnd(null);
+            }
+        } else {
+            newSet.add(itemId);
+            
+            // 起点が未設定の場合、または異なる列の場合は起点を設定
+            if (!rangeStart || rangeStart.columnType !== currentColumnType) {
+                setRangeStart({ itemId, columnType: currentColumnType });
+                setRangeEnd(null);
+            } else {
+                // 起点が設定済みで、同じ列の場合
+                // 起点の直上または直下のアイテムかチェック
+                const startIndex = currentItems.findIndex(item => item.id === rangeStart.itemId);
+                const currentIndex = currentItems.findIndex(item => item.id === itemId);
+                
+                // 起点の直上または直下でない場合のみ終点として設定
+                if (startIndex !== -1 && currentIndex !== -1) {
+                    const isAdjacent = Math.abs(startIndex - currentIndex) === 1;
+                    if (!isAdjacent) {
+                        setRangeEnd({ itemId, columnType: currentColumnType });
+                    } else {
+                        // 直上または直下の場合は終点をリセット
+                        setRangeEnd(null);
+                    }
+                }
+            }
+        }
+        
+        return newSet;
+    });
+  }, [activeTab, activeEventName, executeModeItems, eventDates, rangeStart, rangeEnd, items, selectedBlockFilters]);
+
+  const handleToggleBlockFilter = useCallback((block: string) => {
+    setSelectedBlockFilters(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(block)) {
+        newSet.delete(block);
+      } else {
+        newSet.add(block);
+      }
+      return newSet;
+    });
+  }, []);
+
+  const handleClearBlockFilters = useCallback(() => {
+    setSelectedBlockFilters(new Set());
+  }, []);
+
+  const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<'asc' | 'desc' | null>(null);
+
+  const handleCandidateNumberSort = useCallback(() => {
+    if (!activeEventName) return;
+    
+    const nextDirection = candidateNumberSortDirection === 'asc' ? 'desc' : 'asc';
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    
+    setEventLists(prev => {
+      const allItems = [...(prev[activeEventName] || [])];
+      const currentTabKey = currentEventDate;
+      const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+
+      // 候補リストのアイテムのみを取得
+      const candidateItems = allItems.filter(item => 
+        item.eventDate === currentTabKey && !executeIds.has(item.id)
+      );
+      
+      // ブロックフィルタを適用
+      let filteredCandidateItems = candidateItems;
+      if (selectedBlockFilters.size > 0) {
+        filteredCandidateItems = candidateItems.filter(item => selectedBlockFilters.has(item.block));
+      }
+      
+      if (filteredCandidateItems.length === 0) return prev;
+
+      // ナンバーでソート
+      const sortedCandidateItems = [...filteredCandidateItems].sort((a, b) => {
+        const comparison = a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: 'base' });
+        return nextDirection === 'asc' ? comparison : -comparison;
+      });
+
+      // 候補リストのアイテムのIDと順序をマップ
+      const sortedCandidateMap = new Map(sortedCandidateItems.map((item, index) => [item.id, { item, sortIndex: index }]));
+      
+      // 元のリストを維持しつつ、候補リストのアイテムのみをソート順に再配置
+      const otherItems: ShoppingItem[] = [];
+      const candidateItemsToSort: { item: ShoppingItem; originalIndex: number; sortIndex: number }[] = [];
+      
+      allItems.forEach((item, index) => {
+        if (item.eventDate !== currentTabKey) {
+          otherItems.push(item);
+        } else if (executeIds.has(item.id)) {
+          otherItems.push(item);
+        } else if (sortedCandidateMap.has(item.id)) {
+          const { item: sortedItem, sortIndex } = sortedCandidateMap.get(item.id)!;
+          candidateItemsToSort.push({ item: sortedItem, originalIndex: index, sortIndex });
+        } else {
+          otherItems.push(item);
+        }
+      });
+      
+      // ソートインデックスでソート
+      candidateItemsToSort.sort((a, b) => a.sortIndex - b.sortIndex);
+      
+      // 元の順序を保持しつつ、候補リストのアイテムをソート順に配置
+      const resultItems: ShoppingItem[] = [];
+      let candidateIndex = 0;
+      
+      allItems.forEach((item) => {
+        if (item.eventDate !== currentTabKey) {
+          resultItems.push(item);
+        } else if (executeIds.has(item.id)) {
+          resultItems.push(item);
+        } else if (sortedCandidateMap.has(item.id)) {
+          resultItems.push(candidateItemsToSort[candidateIndex++].item);
+        } else {
+          resultItems.push(item);
+        }
+      });
+      
+      return {
+        ...prev,
+        [activeEventName]: resultItems
+      };
+    });
+
+    setCandidateNumberSortDirection(nextDirection);
+    setSelectedItemIds(new Set());
+  }, [activeEventName, activeTab, executeModeItems, selectedBlockFilters, candidateNumberSortDirection, eventDates]);
+
+  const handleClearSelection = useCallback(() => {
+    setSelectedItemIds(new Set());
+    setRangeStart(null);
+    setRangeEnd(null);
+  }, []);
+
+  // 範囲内のアイテムを一括でチェック/チェック解除する関数
+  const handleToggleRangeSelection = useCallback((columnType: 'execute' | 'candidate') => {
+    if (!rangeStart || rangeStart.columnType !== columnType || !rangeEnd || rangeEnd.columnType !== columnType) {
+      return;
+    }
+
+    if (!activeEventName) return;
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    
+    // 現在の列のアイテムを直接計算
+    let currentItems: ShoppingItem[] = [];
+    if (columnType === 'execute') {
+      const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+      const itemsMap = new Map(items.map(item => [item.id, item]));
+      currentItems = executeIds.map(id => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+    } else {
+      const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+      let filtered = items.filter(item => 
+        item.eventDate === currentEventDate && !executeIds.has(item.id)
+      );
+      // ブロックフィルタを適用
+      if (selectedBlockFilters.size > 0) {
+        filtered = filtered.filter(item => selectedBlockFilters.has(item.block));
+      }
+      currentItems = filtered;
+    }
+    
+    const startIndex = currentItems.findIndex(item => item.id === rangeStart.itemId);
+    const endIndex = currentItems.findIndex(item => item.id === rangeEnd.itemId);
+    
+    if (startIndex === -1 || endIndex === -1) return;
+    
+    const minIndex = Math.min(startIndex, endIndex);
+    const maxIndex = Math.max(startIndex, endIndex);
+    const rangeItems = currentItems.slice(minIndex, maxIndex + 1);
+    
+    // 範囲内のアイテムが全てチェック済みかチェック
+    setSelectedItemIds(prev => {
+      const allSelected = rangeItems.every(item => prev.has(item.id));
+      const newSet = new Set(prev);
+      if (allSelected) {
+        // 全てチェック済みの場合はチェックを外す
+        // チェック解除時は起点・終点もリセット（画面右上の✖ボタンと同様の動作）
+        rangeItems.forEach(item => newSet.delete(item.id));
+        setRangeStart(null);
+        setRangeEnd(null);
+      } else {
+        // 未チェックのアイテムがある場合は全てチェックを入れる
+        rangeItems.forEach(item => newSet.add(item.id));
+      }
+      return newSet;
+    });
+  }, [rangeStart, rangeEnd, activeTab, activeEventName, eventDates, executeModeItems, items, selectedBlockFilters]);
+
+  const handleBulkSort = useCallback((direction: BulkSortDirection) => {
+    if (!activeEventName || selectedItemIds.size === 0) return;
+    setSortState('Manual');
+    setBlockSortDirection(null);
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+
+    if (mode === 'edit') {
+      // 編集モード: 選択されたアイテムが実行モード列か候補リストかを判定
+      const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+      const selectedItems = items.filter(item => selectedItemIds.has(item.id));
+      const isInExecuteColumn = selectedItems.some(item => executeIds.has(item.id));
+      const isInCandidateColumn = selectedItems.some(item => !executeIds.has(item.id));
+      
+      if (isInExecuteColumn && !isInCandidateColumn) {
+        // 実行モード列のみ
+        setExecuteModeItems(prev => {
+          const eventItems = prev[activeEventName] || {};
+          const dayItems = [...(eventItems[currentEventDate] || [])];
+          
+          const itemsMap = new Map(items.map(item => [item.id, item]));
+          const selectedItems = dayItems
+            .filter(id => selectedItemIds.has(id))
+            .map(id => itemsMap.get(id)!)
+            .filter(Boolean);
+          
+          const otherItems = dayItems.filter(id => !selectedItemIds.has(id));
+          selectedItems.sort((a, b) => {
+            const comparison = a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: 'base' });
+            return direction === 'asc' ? comparison : -comparison;
+          });
+          
+          const firstSelectedIndex = dayItems.findIndex(id => selectedItemIds.has(id));
+          if (firstSelectedIndex === -1) return prev;
+          const newDayItems = [...otherItems];
+          newDayItems.splice(firstSelectedIndex, 0, ...selectedItems.map(item => item.id));
+          return {
+            ...prev,
+            [activeEventName]: { ...eventItems, [currentEventDate]: newDayItems }
+          };
+        });
+      } else if (isInCandidateColumn && !isInExecuteColumn) {
+        // 候補リストのみ
+        setEventLists(prev => {
+          const allItems = [...(prev[activeEventName] || [])];
+          const currentTabKey = currentEventDate;
+          const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+          
+          const candidateItems = allItems.filter(item => 
+            item.eventDate === currentTabKey && !executeIdsSet.has(item.id)
+          );
+          const selectedCandidateItems = candidateItems.filter(item => selectedItemIds.has(item.id));
+          const otherCandidateItems = candidateItems.filter(item => !selectedItemIds.has(item.id));
+          
+          selectedCandidateItems.sort((a, b) => {
+            const comparison = a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: 'base' });
+            return direction === 'asc' ? comparison : -comparison;
+          });
+          
+          const firstSelectedIndex = candidateItems.findIndex(item => selectedItemIds.has(item.id));
+          if (firstSelectedIndex === -1) return prev;
+          
+          const sortedCandidateItems = [...otherCandidateItems];
+          sortedCandidateItems.splice(firstSelectedIndex, 0, ...selectedCandidateItems);
+          
+          // 実行モード列のアイテムはそのまま、候補リストのみ並び替え
+          const executeItems = allItems.filter(item => 
+            item.eventDate === currentTabKey && executeIdsSet.has(item.id)
+          );
+          
+          const newItems = allItems.map(item => {
+            if (item.eventDate !== currentTabKey) {
+              return item;
+            }
+            if (executeIdsSet.has(item.id)) {
+              return executeItems.shift() || item;
+            } else {
+              return sortedCandidateItems.shift() || item;
+            }
+          });
+          
+          return { ...prev, [activeEventName]: newItems };
+        });
+      }
+    } else {
+      // 実行モード: 通常ソート
+      setEventLists(prev => {
+        const currentItems = [...(prev[activeEventName] || [])];
+        const selectedItems = currentItems.filter(item => selectedItemIds.has(item.id));
+        const otherItems = currentItems.filter(item => !selectedItemIds.has(item.id));
+
+        selectedItems.sort((a, b) => {
+            const comparison = a.number.localeCompare(b.number, undefined, { numeric: true, sensitivity: 'base' });
+            return direction === 'asc' ? comparison : -comparison;
+        });
+        
+        const firstSelectedIndex = currentItems.findIndex(item => selectedItemIds.has(item.id));
+        if (firstSelectedIndex === -1) return prev;
+
+        const newItems = [...otherItems];
+        newItems.splice(firstSelectedIndex, 0, ...selectedItems);
+
+        return { ...prev, [activeEventName]: newItems };
+      });
+    }
+  }, [activeEventName, selectedItemIds, items, activeTab, dayModes, executeModeItems, eventDates]);
+
+  const handleExportEvent = useCallback((eventName: string) => {
+    const itemsToExport = eventLists[eventName];
+    if (!itemsToExport || itemsToExport.length === 0) {
+      alert('エクスポートするアイテムがありません。');
+      return;
+    }
+
+    const statusLabels: Record<PurchaseStatus, string> = {
+      None: '未購入',
+      Purchased: '購入済',
+      SoldOut: '売切',
+      Absent: '欠席',
+      Postpone: '後回し',
+      Late: '遅参',
+    };
+
+    const escapeCsvCell = (cellData: string | number) => {
+      const stringData = String(cellData);
+      if (stringData.includes(',') || stringData.includes('"') || stringData.includes('\n')) {
+        return `"${stringData.replace(/"/g, '""')}"`;
+      }
+      return stringData;
+    };
+
+    const csvRows: string[] = [];
+
+    // ヘッダー行を最初に出力
+    const headers = ['サークル名', '参加日', 'ブロック', 'ナンバー', 'タイトル', '頒布価格', '数量', '購入状態', '備考', '列の種類', '列内順番', 'URL'];
+    csvRows.push(headers.join(','));
+
+    // メタデータ行: スプレッドシートURL（コメント行として最後に出力）
+    const metadata = eventMetadata[eventName];
+    if (metadata?.spreadsheetUrl) {
+      csvRows.push(`#METADATA,spreadsheetUrl,${escapeCsvCell(metadata.spreadsheetUrl)}`);
+    }
+
+    // 各参加日ごとに配置情報を保持してエクスポート
+    const eventDatesForExport = extractEventDates(itemsToExport);
+    const itemsMap = new Map(itemsToExport.map(item => [item.id, item]));
+    
+    eventDatesForExport.forEach(eventDate => {
+      const executeIds = executeModeItems[eventName]?.[eventDate] || [];
+      const executeIdsSet = new Set(executeIds);
+      
+      // その参加日のアイテムを取得
+      const dayItems = itemsToExport.filter(item => item.eventDate === eventDate);
+      
+      // 実行列のアイテム（順序を保持）
+      const executeItems: ShoppingItem[] = [];
+      executeIds.forEach((id: string) => {
+        const item = itemsMap.get(id);
+        if (item) executeItems.push(item);
+      });
+      
+      // 候補リストのアイテム（元の順序を保持）
+      const candidateItems = dayItems.filter(item => !executeIdsSet.has(item.id));
+      
+      // 実行列のアイテムをエクスポート
+      executeItems.forEach((item, index) => {
+        const row = [
+          escapeCsvCell(item.circle),
+          escapeCsvCell(item.eventDate),
+          escapeCsvCell(item.block),
+          escapeCsvCell(item.number),
+          escapeCsvCell(item.title),
+          escapeCsvCell(item.price === null ? '' : item.price),
+          escapeCsvCell(item.quantity || 1),
+          escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
+          escapeCsvCell(item.remarks),
+          escapeCsvCell('実行列'),
+          escapeCsvCell(index + 1),
+          escapeCsvCell(item.url || ''),
+        ];
+        csvRows.push(row.join(','));
+      });
+      
+      // 候補リストのアイテムをエクスポート
+      candidateItems.forEach((item, index) => {
+        const row = [
+          escapeCsvCell(item.circle),
+          escapeCsvCell(item.eventDate),
+          escapeCsvCell(item.block),
+          escapeCsvCell(item.number),
+          escapeCsvCell(item.title),
+          escapeCsvCell(item.price === null ? '' : item.price),
+          escapeCsvCell(item.quantity || 1),
+          escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
+          escapeCsvCell(item.remarks),
+          escapeCsvCell('候補リスト'),
+          escapeCsvCell(index + 1),
+          escapeCsvCell(item.url || ''),
+        ];
+        csvRows.push(row.join(','));
+      });
+    });
+
+    const csvString = csvRows.join('\n');
+    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
+    const blob = new Blob([bom, csvString], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `${eventName}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }, [eventLists, executeModeItems, eventMetadata]);
+
+  // アイテム更新機能
+  const handleUpdateEvent = useCallback(async (eventName: string, urlOverride?: { url: string; sheetName: string }) => {
+    const metadata = eventMetadata[eventName];
+    let url = urlOverride?.url || metadata?.spreadsheetUrl;
+    let sheetName = urlOverride?.sheetName || metadata?.spreadsheetSheetName || '';
+
+    if (!url) {
+      alert('スプレッドシートのURLが保存されていません。');
+      return;
+    }
+
+    try {
+      const sheetIdMatch = url.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      if (!sheetIdMatch) {
+        throw new Error('無効なURL');
+      }
+
+      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetIdMatch[1]}/gviz/tq?tqx=out:csv${sheetName ? `&sheet=${encodeURIComponent(sheetName)}` : ''}`;
+      
+      const response = await fetch(csvUrl);
+      if (!response.ok) {
+        throw new Error('スプレッドシートの読み込みに失敗しました。');
+      }
+
+      const text = await response.text();
+      const lines = text.split('\n').filter(line => line.trim() !== '');
+      
+      const sheetItems: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[] = [];
+      
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        const cells: string[] = [];
+        let currentCell = '';
+        let insideQuotes = false;
+
+        for (let j = 0; j < line.length; j++) {
+          const char = line[j];
+          
+          if (char === '"') {
+            if (insideQuotes && line[j + 1] === '"') {
+              currentCell += '"';
+              j++;
+            } else {
+              insideQuotes = !insideQuotes;
+            }
+          } else if (char === ',' && !insideQuotes) {
+            cells.push(currentCell);
+            currentCell = '';
+          } else {
+            currentCell += char;
+          }
+        }
+        cells.push(currentCell);
+
+        // M列(12), N列(13), O列(14), P列(15)が全て入力されている行のみをインポート
+        const circle = cells[12]?.trim() || ''; // M列 (0-indexed: 12)
+        const eventDate = cells[13]?.trim() || ''; // N列 (0-indexed: 13)
+        const block = cells[14]?.trim() || ''; // O列 (0-indexed: 14)
+        const number = cells[15]?.trim() || ''; // P列 (0-indexed: 15)
+        
+        if (!circle || !eventDate || !block || !number) {
+          continue;
+        }
+
+        const title = cells[16]?.trim() || ''; // Q列 (0-indexed: 16)
+        // 空欄の場合はnull、0と入力されている場合は0を設定
+        const priceStr = cells[17]?.trim() || '';
+        const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0); // R列 (0-indexed: 17)
+        const remarks = cells[22]?.trim() || ''; // W列 (0-indexed: 22)
+        const url = cells[24]?.trim() || ''; // Y列 (0-indexed: 24)
+        // AA列から数量を取得、空欄時は1、それ以外は数値を反映（1-10の範囲に制限）
+        const quantityStr = cells[26]?.trim() || ''; // AA列 (0-indexed: 26)
+        const quantity = quantityStr === '' ? 1 : Math.max(1, Math.min(10, parseInt(quantityStr.replace(/[^0-9]/g, ''), 10) || 1));
+
+        const item: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
+          circle,
+          eventDate,
+          block,
+          number,
+          title,
+          price,
+          quantity,
+          remarks,
+          ...(url ? { url } : {}),
+        };
+        sheetItems.push(item);
+      }
+      
+      // 各参加日タブ中でサークル名が重複するアイテムのURL転記処理
+      const eventDateGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
+      sheetItems.forEach(item => {
+        if (!eventDateGroups.has(item.eventDate)) {
+          eventDateGroups.set(item.eventDate, []);
+        }
+        eventDateGroups.get(item.eventDate)!.push(item);
+      });
+      
+      eventDateGroups.forEach((items) => {
+        // サークル名でグループ化
+        const circleGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
+        items.forEach(item => {
+          if (!circleGroups.has(item.circle)) {
+            circleGroups.set(item.circle, []);
+          }
+          circleGroups.get(item.circle)!.push(item);
+        });
+        
+        // サークル名が重複するアイテムが2つ以上ある場合
+        circleGroups.forEach((circleItems) => {
+          if (circleItems.length >= 2) {
+            // URLが入力されているアイテムを探す
+            const itemWithUrl = circleItems.find(item => item.url && item.url.trim() !== '');
+            
+            if (itemWithUrl && itemWithUrl.url) {
+              // URLが入力されていないアイテムにURLを転記
+              circleItems.forEach(item => {
+                if (!item.url || item.url.trim() === '') {
+                  item.url = itemWithUrl.url;
+                }
+              });
+            }
+          }
+        });
+      });
+
+      const currentItems = eventLists[eventName] || [];
+      
+      // サークル名・参加日・ブロック・ナンバー・タイトルで照合するキーでマップを作成
+      const currentItemsMapWithAll = new Map(currentItems.map(item => [getItemKey(item), item]));
+      
+      // サークル名・参加日・ブロック・ナンバーで照合するキーでマップを作成（タイトル変更検出用）
+      const sheetItemsMapWithoutTitle = new Map(sheetItems.map(item => [getItemKeyWithoutTitle(item), item]));
+      const currentItemsMapWithoutTitle = new Map(currentItems.map(item => [getItemKeyWithoutTitle(item), item]));
+
+      const itemsToDelete: ShoppingItem[] = [];
+      const itemsToUpdate: ShoppingItem[] = [];
+      const itemsToAdd: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[] = [];
+
+      // 削除対象: スプレッドシートにないアイテム（サークル名・参加日・ブロック・ナンバーで照合）
+      currentItems.forEach(item => {
+        const keyWithoutTitle = getItemKeyWithoutTitle(item);
+        if (!sheetItemsMapWithoutTitle.has(keyWithoutTitle)) {
+          itemsToDelete.push(item);
+        }
+      });
+
+      // 更新・追加対象の処理
+      sheetItems.forEach(sheetItem => {
+        const keyWithAll = getItemKey(sheetItem);
+        const keyWithoutTitle = getItemKeyWithoutTitle(sheetItem);
+        
+        // 完全一致（サークル名・参加日・ブロック・ナンバー・タイトル）で既存アイテムを検索
+        const existingWithAll = currentItemsMapWithAll.get(keyWithAll);
+        if (existingWithAll) {
+          // 完全一致した場合、価格や備考、URLが変わっていれば更新
+          if (
+            existingWithAll.price !== sheetItem.price ||
+            existingWithAll.remarks !== sheetItem.remarks ||
+            existingWithAll.url !== sheetItem.url
+          ) {
+            itemsToUpdate.push({
+              ...existingWithAll,
+              price: sheetItem.price,
+              remarks: sheetItem.remarks,
+              url: sheetItem.url
+            });
+          }
+          return;
+        }
+        
+        // タイトルなしで既存アイテムを検索（タイトルが変更された場合）
+        const existingWithoutTitle = currentItemsMapWithoutTitle.get(keyWithoutTitle);
+        if (existingWithoutTitle) {
+          // タイトルや価格、備考、URLが変わっていれば更新
+          itemsToUpdate.push({
+            ...existingWithoutTitle,
+            title: sheetItem.title,
+            price: sheetItem.price,
+            remarks: sheetItem.remarks,
+            url: sheetItem.url
+          });
+          return;
+        }
+        
+        // 新規追加（候補リストに追加）
+        itemsToAdd.push(sheetItem);
+      });
+
+      setUpdateData({ itemsToDelete, itemsToUpdate, itemsToAdd });
+      setUpdateEventName(eventName);
+      setShowUpdateConfirmation(true);
+    } catch (error) {
+      console.error('Update error:', error);
+      setPendingUpdateEventName(eventName);
+      setShowUrlUpdateDialog(true);
+    }
+  }, [eventLists, eventMetadata]);
+
+  const handleConfirmUpdate = () => {
+    if (!updateData || !updateEventName) return;
+
+    const { itemsToDelete, itemsToUpdate, itemsToAdd } = updateData;
+    const eventName = updateEventName;
+    
+    setEventLists(prev => {
+      let newItems: ShoppingItem[] = [...(prev[eventName] || [])];
+      
+      // 削除
+      const deleteIds = new Set(itemsToDelete.map(item => item.id));
+      newItems = newItems.filter(item => !deleteIds.has(item.id));
+      
+      // 更新
+      const updateMap = new Map(itemsToUpdate.map(item => [item.id, item]));
+      newItems = newItems.map(item => updateMap.get(item.id) || item);
+      
+      // 追加（ソート挿入 - 候補リストに追加）
+      itemsToAdd.forEach(itemData => {
+        const newItem: ShoppingItem = {
+          id: crypto.randomUUID(),
+          circle: itemData.circle,
+          eventDate: itemData.eventDate,
+          block: itemData.block,
+          number: itemData.number,
+          title: itemData.title,
+          price: itemData.price,
+          quantity: itemData.quantity ?? 1,
+          remarks: itemData.remarks,
+          purchaseStatus: 'None' as PurchaseStatus
+        };
+        newItems = insertItemSorted(newItems, newItem);
+        // 候補リストに追加（実行モード列には追加しない）
+      });
+      
+      return { ...prev, [eventName]: newItems };
+    });
+
+    // 削除されたアイテムを実行モードアイテムからも削除
+    setExecuteModeItems(prev => {
+      const eventItems = prev[eventName];
+      if (!eventItems) return prev;
+      
+      const deleteIds = new Set(itemsToDelete.map(item => item.id));
+      const updatedEventItems: ExecuteModeItems = {};
+      
+      Object.keys(eventItems).forEach(eventDate => {
+        updatedEventItems[eventDate] = eventItems[eventDate].filter((id: string) => !deleteIds.has(id));
+      });
+      
+      return {
+        ...prev,
+        [eventName]: updatedEventItems
+      };
+    });
+
+    setShowUpdateConfirmation(false);
+    setUpdateData(null);
+    setUpdateEventName(null);
+    alert('アイテムを更新しました。');
+  };
+
+  const handleUrlUpdate = useCallback((newUrl: string, sheetName: string) => {
+    setShowUrlUpdateDialog(false);
+    if (pendingUpdateEventName) {
+      handleUpdateEvent(pendingUpdateEventName, { url: newUrl, sheetName });
+      setPendingUpdateEventName(null);
+    }
+  }, [pendingUpdateEventName, handleUpdateEvent]);
+  
+  // 現在のタブの参加日に該当するアイテムを取得
+  const currentTabItems = useMemo(() => {
+    if (!activeEventName || !eventDates.includes(activeTab)) return [];
+    return items.filter(item => item.eventDate === activeTab);
+  }, [items, activeTab, activeEventName, eventDates]);
+
+  const TabButton: React.FC<{tab: ActiveTab, label: string, count?: number, onClick?: () => void}> = ({ tab, label, count, onClick }) => {
+    const longPressTimeout = React.useRef<number | null>(null);
+
+    const handlePointerDown = () => {
+      if (!eventDates.includes(tab)) return;
+      if (!activeEventName) return;
+      
+      longPressTimeout.current = window.setTimeout(() => {
+        // 長押しでモード切り替え
+        handleToggleMode();
+        longPressTimeout.current = null;
+      }, 500);
+    };
+
+    const handlePointerUp = () => {
+      if (longPressTimeout.current) {
+        clearTimeout(longPressTimeout.current);
+        longPressTimeout.current = null;
+      }
+    };
+
+    const handleClick = () => {
+      if (onClick) {
+        onClick();
+      } else {
+        setItemToEdit(null);
+        setSelectedItemIds(new Set());
+        setSelectedBlockFilters(new Set());
+        setCandidateNumberSortDirection(null);
+        setActiveTab(tab);
+      }
+    };
+
+    return (
+      <div className="relative">
+        <button
+          onClick={handleClick}
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 whitespace-nowrap ${
+            activeTab === tab
+              ? 'bg-blue-600 text-white'
+              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+          }`}
+        >
+          {label} {typeof count !== 'undefined' && <span className="text-xs bg-slate-200 dark:text-slate-700 rounded-full px-2 py-0.5 ml-1">{count}</span>}
+        </button>
+      </div>
+    );
+  };
+
+  const executeColumnItems = useMemo(() => {
+    if (!activeEventName) return [];
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+    const itemsMap = new Map(items.map(item => [item.id, item]));
+    return executeIds.map((id: string) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+  }, [activeEventName, activeTab, executeModeItems, items, eventDates]);
+
+  const visibleItems = useMemo(() => {
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const itemsForTab = currentTabItems;
+    
+    if (!activeEventName) return itemsForTab;
+    
+    const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+    
+    if (mode === 'execute') {
+      // 実行モード: 実行列のアイテムのみ表示（編集モードで配置した順序を保持）
+      if (sortState === 'Manual') {
+        return executeColumnItems;
+      }
+      // フィルタに該当するアイテム、または最近変更されたアイテムを表示
+      const filterStatus = sortState as Exclude<SortState, 'Manual'>;
+      return executeColumnItems.filter(item => 
+        item.purchaseStatus === filterStatus || recentlyChangedItemIds.has(item.id)
+      );
+    }
+    
+    // 編集モード: すべてのアイテムを表示（列分けはコンポーネント側で処理）
+    return itemsForTab;
+  }, [activeTab, currentTabItems, sortState, activeEventName, dayModes, executeColumnItems, eventDates, recentlyChangedItemIds]);
+
+  // 検索機能: 現在のタブのアイテムを検索
+  const searchMatches = useMemo(() => {
+    if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
+      return [];
+    }
+    
+    const keyword = searchKeyword.trim().toLowerCase();
+    const matches: string[] = [];
+    
+    // 現在のタブのアイテムを検索
+    currentTabItems.forEach(item => {
+      const circleMatch = item.circle.toLowerCase().includes(keyword);
+      const titleMatch = item.title.toLowerCase().includes(keyword);
+      const remarksMatch = item.remarks.toLowerCase().includes(keyword);
+      
+      if (circleMatch || titleMatch || remarksMatch) {
+        matches.push(item.id);
+      }
+    });
+    
+    return matches;
+  }, [searchKeyword, activeEventName, activeTab, currentTabItems, eventDates]);
+
+  // 検索キーワードが変更されたときに検索結果をリセット
+  useEffect(() => {
+    if (searchKeyword.trim()) {
+      if (searchMatches.length > 0) {
+        setCurrentSearchIndex(0);
+      } else {
+        setCurrentSearchIndex(-1);
+        setHighlightedItemId(null);
+      }
+    } else {
+      setCurrentSearchIndex(-1);
+      setHighlightedItemId(null);
+    }
+  }, [searchKeyword, searchMatches]);
+
+  // タブが切り替わったときに検索結果をリセット
+  useEffect(() => {
+    setCurrentSearchIndex(-1);
+    setHighlightedItemId(null);
+  }, [activeTab]);
+
+  // 各参加日タブ中のアイテムでサークル名が重複するアイテムのIDセットを計算
+  const duplicateCircleItemIds = useMemo(() => {
+    if (!activeEventName || !eventDates.includes(activeTab)) return new Set<string>();
+    const itemsForTab = currentTabItems;
+    const circleCountMap = new Map<string, number>();
+    const circleItemIdsMap = new Map<string, string[]>();
+    
+    // サークル名ごとにアイテム数をカウント
+    itemsForTab.forEach(item => {
+      const circle = item.circle.trim();
+      if (circle) {
+        const count = circleCountMap.get(circle) || 0;
+        circleCountMap.set(circle, count + 1);
+        
+        if (!circleItemIdsMap.has(circle)) {
+          circleItemIdsMap.set(circle, []);
+        }
+        circleItemIdsMap.get(circle)!.push(item.id);
+      }
+    });
+    
+    // 重複するサークル名のアイテムIDを収集
+    const duplicateIds = new Set<string>();
+    circleCountMap.forEach((count, circle) => {
+      if (count > 1) {
+        const itemIds = circleItemIdsMap.get(circle) || [];
+        itemIds.forEach(id => duplicateIds.add(id));
+      }
+    });
+    
+    return duplicateIds;
+  }, [activeEventName, activeTab, currentTabItems, eventDates]);
+
+  // 候補リストから動的にブロック値を取得
+  const availableBlocks = useMemo(() => {
+    if (!activeEventName) return [];
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+    const candidateItems = currentTabItems.filter(item => !executeIds.has(item.id));
+    const blocks = new Set(candidateItems.map(item => item.block).filter(Boolean));
+    return Array.from(blocks).sort((a, b) => {
+      const numA = Number(a);
+      const numB = Number(b);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return numA - numB;
+      }
+      return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
+    });
+  }, [activeEventName, activeTab, executeModeItems, currentTabItems, eventDates]);
+
+  const candidateColumnItems = useMemo(() => {
+    if (!activeEventName) return [];
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+    let filtered = currentTabItems.filter(item => !executeIds.has(item.id));
+    
+    // ブロックフィルタを適用
+    if (selectedBlockFilters.size > 0) {
+      filtered = filtered.filter(item => selectedBlockFilters.has(item.block));
+    }
+    
+    return filtered;
+  }, [activeEventName, activeTab, executeModeItems, currentTabItems, selectedBlockFilters, eventDates]);
+
+  // 表示されているアイテムのみを検索対象とする
+  const visibleSearchMatches = useMemo(() => {
+    if (searchMatches.length === 0) return [];
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const mode = dayModes[activeEventName || '']?.[currentEventDate] || 'edit';
+    
+    let visibleItemIds: Set<string>;
+    
+    if (mode === 'execute') {
+      // 実行モード: executeColumnItemsまたはvisibleItems
+      visibleItemIds = new Set(visibleItems.map(item => item.id));
+    } else {
+      // 編集モード: executeColumnItems + candidateColumnItems
+      const allVisibleIds = new Set([
+        ...executeColumnItems.map(item => item.id),
+        ...candidateColumnItems.map(item => item.id)
+      ]);
+      visibleItemIds = allVisibleIds;
+    }
+    
+    return searchMatches.filter(id => visibleItemIds.has(id));
+  }, [searchMatches, activeEventName, activeTab, eventDates, dayModes, visibleItems, executeColumnItems, candidateColumnItems]);
+
+  // 「次を検索」ボタンのハンドラ
+  const handleSearchNext = useCallback(() => {
+    if (!searchKeyword.trim() || visibleSearchMatches.length === 0) {
+      if (searchMatches.length > 0 && visibleSearchMatches.length === 0) {
+        alert('フィルタされています');
+      }
+      return;
+    }
+    
+    // 次のインデックスを計算（ループ）
+    // currentSearchIndexが-1の場合は0から始める
+    const startIndex = currentSearchIndex === -1 ? -1 : currentSearchIndex;
+    const nextIndex = (startIndex + 1) % visibleSearchMatches.length;
+    setCurrentSearchIndex(nextIndex);
+    
+    const nextItemId = visibleSearchMatches[nextIndex];
+    setHighlightedItemId(nextItemId);
+    
+    // スクロール処理
+    setTimeout(() => {
+      const element = document.querySelector(`[data-item-id="${nextItemId}"]`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 100);
+  }, [searchKeyword, visibleSearchMatches, currentSearchIndex, searchMatches]);
+
+  // 各ブロックの候補リスト内のアイテムの備考欄に「優先」または「委託無」が含まれているかをチェック
+  const blocksWithPriorityRemarks = useMemo(() => {
+    if (!activeEventName) return new Set<string>();
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+    const candidateItems = currentTabItems.filter(item => !executeIds.has(item.id));
+    
+    const blocksWithPriority = new Set<string>();
+    candidateItems.forEach(item => {
+      if (item.remarks && (item.remarks.includes('優先') || item.remarks.includes('委託無'))) {
+        blocksWithPriority.add(item.block);
+      }
+    });
+    
+    return blocksWithPriority;
+  }, [activeEventName, activeTab, executeModeItems, currentTabItems, eventDates]);
+
+  // 候補リストのアイテムが選択されているかチェック
+  const hasCandidateSelection = useMemo(() => {
+    if (!activeEventName || currentMode !== 'edit' || selectedItemIds.size === 0) return false;
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+    const selectedItems = items.filter(item => selectedItemIds.has(item.id));
+    return selectedItems.some(item => currentTabItems.includes(item) && !executeIds.has(item.id));
+  }, [activeEventName, activeTab, currentMode, selectedItemIds, items, executeModeItems, currentTabItems, eventDates]);
+
+  // 実行モード列のアイテムが選択されているかチェック
+  const hasExecuteSelection = useMemo(() => {
+    if (!activeEventName || currentMode !== 'edit' || selectedItemIds.size === 0) return false;
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+    const selectedItems = items.filter(item => selectedItemIds.has(item.id));
+    return selectedItems.some(item => currentTabItems.includes(item) && executeIds.has(item.id));
+  }, [activeEventName, activeTab, currentMode, selectedItemIds, items, executeModeItems, currentTabItems, eventDates]);
+
+  // 左右両列のアイテムが同時に選択されている場合は移動ボタンを表示しない
+  const showMoveButtons = (hasCandidateSelection && !hasExecuteSelection) || (hasExecuteSelection && !hasCandidateSelection);
+  
+  if (!isInitialized) {
+    return null;
   }
 
+  const mainContentVisible = eventDates.includes(activeTab) || (activeEventName && eventMapData[activeEventName] && Object.keys(eventMapData[activeEventName]).includes(activeTab));
+  const isMapTab = activeEventName && eventMapData[activeEventName] && Object.keys(eventMapData[activeEventName]).includes(activeTab);
+  
+  const handleZoomChange = (newZoom: number) => {
+    setZoomLevel(Math.max(30, Math.min(150, newZoom)));
+  };
+
   return (
-    <div 
-      ref={containerRef}
-      className="space-y-4 pb-24 relative"
-      onDragLeave={() => setActiveDropTarget(null)} 
-    >
-      {items.map((item, index) => {
-        // 範囲選択内かどうか判定
-        const isInRange = rangeInfo && index >= rangeInfo.startIndex && index <= rangeInfo.endIndex;
-        const isStart = rangeInfo && index === rangeInfo.startIndex;
-        const isEnd = rangeInfo && index === rangeInfo.endIndex;
-        const isMiddle = rangeInfo && index > rangeInfo.startIndex && index < rangeInfo.endIndex;
-
-        return (
-        <div
-            key={item.id}
-            data-item-id={item.id}
-            draggable
-            onDragStart={(e) => handleDragStart(e, item)}
-            onDragOver={(e) => handleDragOver(e, item)}
-            onDrop={handleDrop}
-            onDragEnd={cleanUp}
-            className="transition-opacity duration-200 relative"
-            data-is-selected={selectedItemIds.has(item.id)}
-        >
-            {activeDropTarget?.id === item.id && activeDropTarget.position === 'top' && (
-                <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                    <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                    <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                    <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                </div>
-            )}
-
-            <ShoppingItemCard
-              item={item}
-              onUpdate={onUpdateItem}
-              isStriped={index % 2 !== 0}
-              onEditRequest={onEditRequest}
-              onDeleteRequest={onDeleteRequest}
-              isSelected={selectedItemIds.has(item.id)}
-              onSelectItem={(itemId) => onSelectItem(itemId, columnType)}
-              blockBackgroundColor={blockColorMap.get(item.id)}
-              onMoveUp={onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined}
-              onMoveDown={onMoveItemDown ? () => onMoveItemDown(item.id, columnType) : undefined}
-              canMoveUp={index > 0}
-              canMoveDown={index < items.length - 1}
-              isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
-              isSearchMatch={highlightedItemId === item.id}
-            />
-
-            {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (
-                <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                    <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                    <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                    <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                </div>
-            )}
-
-            {/* チェーンをアイテムの右側（左列: execute）または左側（右列: candidate）に表示 */}
-            {isInRange && onToggleRangeSelection && (
-              <div 
-                className={`absolute top-0 bottom-0 z-40 pointer-events-none ${
-                  columnType === 'candidate' 
-                    ? 'left-0' 
-                    : 'right-0'
-                }`}
-                style={{ width: '40px' }}
-              >
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleRangeSelection(columnType!);
-                  }}
-                  className={`pointer-events-auto absolute w-full h-full transition-opacity ${
-                    rangeInfo.onlyStartEndSelected ? 'opacity-50 hover:opacity-100' : 'opacity-100'
-                  }`}
-                  style={{
-                    [columnType === 'candidate' ? 'left' : 'right']: '-42px',
-                  }}
-                  title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
-                  data-no-long-press
-                >
-                  <svg
-                    width="40"
-                    height="100%"
-                    preserveAspectRatio="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="w-full h-full"
+    <div className="min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-200 font-sans">
+      <header className="bg-white dark:bg-slate-800 shadow-sm sticky top-0 z-10">
+        <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+          <div>
+            <div className="flex items-center gap-3">
+                <h1 className="text-2xl font-bold text-slate-900 dark:text-white">即売会 購入巡回表</h1>
+                {activeEventName && mainContentVisible && items.length > 0 && currentMode === 'execute' && (
+                  <button
+                    onClick={handleBlockSortToggle}
+                    className={`p-2 rounded-md transition-colors duration-200 ${
+                      blockSortDirection
+                        ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
+                        : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400'
+                    }`}
+                    title={blockSortDirection === 'desc' ? "ブロック降順 (昇順へ)" : blockSortDirection === 'asc' ? "ブロック昇順 (降順へ)" : "ブロック昇順でソート"}
                   >
-                    <defs>
-                      <linearGradient id={`chainMetal-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stopColor="#9CA3AF" />
-                        <stop offset="30%" stopColor="#F3F4F6" />
-                        <stop offset="50%" stopColor="#D1D5DB" />
-                        <stop offset="70%" stopColor="#9CA3AF" />
-                        <stop offset="100%" stopColor="#6B7280" />
-                      </linearGradient>
-                      <pattern id={`chainPattern-${item.id}`} x="0" y="0" width="40" height="20" patternUnits="userSpaceOnUse">
-                         <rect x="14" y="-2" width="12" height="18" rx="6" fill="none" stroke={`url(#chainMetal-${item.id})`} strokeWidth="3" />
-                         <rect x="17" y="13" width="6" height="8" rx="2" fill={`url(#chainMetal-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
-                      </pattern>
-                    </defs>
-
-                    {/* チェーンの描画範囲を制御 */}
-                    {isStart && (
-                        // 起点: 中央から下まで
-                        <rect x="0" y="50%" width="40" height="50%" fill={`url(#chainPattern-${item.id})`} />
-                    )}
-                    {isEnd && (
-                        // 終点: 上から中央まで
-                        <rect x="0" y="0" width="40" height="50%" fill={`url(#chainPattern-${item.id})`} />
-                    )}
-                    {isMiddle && (
-                        // 間: 全体
-                        <rect x="0" y="0" width="40" height="100%" fill={`url(#chainPattern-${item.id})`} />
-                    )}
-
-                    {/* フック（アイテムと鎖を繋ぐ金具） - 全ての範囲内アイテムに表示 */}
-                    <g transform="translate(0, 50)"> 
-                        {columnType === 'candidate' ? (
-                            <path 
-                                d="M 40 0 L 20 0" 
-                                stroke={`url(#chainMetal-${item.id})`} 
-                                strokeWidth="4" 
-                                strokeLinecap="round"
-                                fill="none"
-                            />
-                        ) : (
-                            <path 
-                                d="M 0 0 L 20 0" 
-                                stroke={`url(#chainMetal-${item.id})`} 
-                                strokeWidth="4" 
-                                strokeLinecap="round"
-                                fill="none"
-                            />
-                        )}
-                        <circle cx="20" cy="0" r="4" fill={`url(#chainMetal-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
-                        <circle 
-                            cx={columnType === 'candidate' ? 38 : 2} 
-                            cy="0" 
-                            r="3" 
-                            fill="#9CA3AF" 
-                        />
-                    </g>
-                  </svg>
-                </button>
-              </div>
-            )}
-            
-            {/* アイテム間の隙間を埋めるチェーン */}
-            {rangeInfo && (isStart || isMiddle) && onToggleRangeSelection && (
-              <div 
-                className={`absolute bottom-0 z-50 pointer-events-none ${
-                  columnType === 'candidate' ? 'left-0' : 'right-0'
-                }`}
-                style={{ 
-                  width: '40px',
-                  height: '16px',
-                  [columnType === 'candidate' ? 'left' : 'right']: '-42px',
-                }}
-              >
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleRangeSelection(columnType!);
-                  }}
-                  className={`pointer-events-auto absolute w-full h-full transition-opacity ${
-                    rangeInfo.onlyStartEndSelected ? 'opacity-50 hover:opacity-100' : 'opacity-100'
-                  }`}
-                  title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
-                  data-no-long-press
-                >
-                  <svg width="40" height="16" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-                     {/* パターン定義を再利用するためにdefsを定義（本当はuseタグを使いたいが、IDスコープが面倒なので再定義） */}
-                     <defs>
-                      <linearGradient id={`chainMetal-gap-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                        <stop offset="0%" stopColor="#9CA3AF" />
-                        <stop offset="30%" stopColor="#F3F4F6" />
-                        <stop offset="50%" stopColor="#D1D5DB" />
-                        <stop offset="70%" stopColor="#9CA3AF" />
-                        <stop offset="100%" stopColor="#6B7280" />
-                      </linearGradient>
-                      <pattern id={`chainPattern-gap-${item.id}`} x="0" y="0" width="40" height="20" patternUnits="userSpaceOnUse">
-                         <rect x="14" y="-2" width="12" height="18" rx="6" fill="none" stroke={`url(#chainMetal-gap-${item.id})`} strokeWidth="3" />
-                         <rect x="17" y="13" width="6" height="8" rx="2" fill={`url(#chainMetal-gap-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
-                      </pattern>
-                    </defs>
-                     <rect x="0" y="0" width="40" height="100%" fill={`url(#chainPattern-gap-${item.id})`} />
-                  </svg>
-                </button>
-              </div>
-            )}
+                    {blockSortDirection === 'desc' ? <SortDescendingIcon className="w-5 h-5" /> : <SortAscendingIcon className="w-5 h-5" />}
+                  </button>
+                )}
+                {activeEventName && mainContentVisible && items.length > 0 && currentMode === 'edit' && (
+                  <button
+                    onClick={handleBlockSortToggleCandidate}
+                    className={`p-2 rounded-md transition-colors duration-200 ${
+                      blockSortDirection
+                        ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
+                        : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400'
+                    }`}
+                    title={blockSortDirection === 'desc' ? "候補リスト ブロック降順 (昇順へ)" : blockSortDirection === 'asc' ? "候補リスト ブロック昇順 (降順へ)" : "候補リスト ブロック昇順でソート"}
+                  >
+                    {blockSortDirection === 'desc' ? <SortDescendingIcon className="w-5 h-5" /> : <SortAscendingIcon className="w-5 h-5" />}
+                  </button>
+                )}
+            </div>
+            {activeEventName && <h2 className="text-sm text-blue-600 dark:text-blue-400 font-semibold mt-1">{activeEventName}</h2>}
+          </div>
+          <div className="flex items-center gap-4">
+              {activeEventName && mainContentVisible && items.length > 0 && selectedItemIds.size > 0 && (
+                  <>
+                      <BulkActionControls
+                          onSort={handleBulkSort}
+                          onClear={handleClearSelection}
+                      />
+                      {showMoveButtons && hasCandidateSelection && (
+                          <button
+                              onClick={() => handleMoveToExecuteColumn(Array.from(selectedItemIds))}
+                              className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
+                          >
+                              選択したアイテムを左列に移動 ({selectedItemIds.size}件)
+                          </button>
+                      )}
+                      {showMoveButtons && hasExecuteSelection && (
+                          <button
+                              onClick={() => handleRemoveFromExecuteColumn(Array.from(selectedItemIds))}
+                              className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
+                          >
+                              選択したアイテムを右列に移動 ({selectedItemIds.size}件)
+                          </button>
+                      )}
+                  </>
+              )}
+              {activeEventName && mainContentVisible && items.length > 0 && currentMode === 'execute' && (
+                  <button
+                      onClick={handleSortToggle}
+                      className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 flex-shrink-0"
+                  >
+                      {sortLabels[sortState]}
+                  </button>
+              )}
+          </div>
         </div>
-      )})}
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-200 dark:border-slate-700">
+             <div className="flex space-x-2 pt-2 pb-2 overflow-x-auto">
+                <TabButton tab="eventList" label="即売会リスト" onClick={() => { setActiveEventName(null); setItemToEdit(null); setSelectedItemIds(new Set()); setSelectedBlockFilters(new Set()); setActiveTab('eventList'); }}/>
+                {activeEventName ? (
+                    <>
+                        {eventDates.map(eventDate => {
+                          const count = items.filter(item => item.eventDate === eventDate).length;
+                          return (
+                            <TabButton 
+                              key={eventDate} 
+                              tab={eventDate} 
+                              label={eventDate} 
+                              count={count} 
+                            />
+                          );
+                        })}
+                        {activeEventName && eventMapData[activeEventName] && Object.keys(eventMapData[activeEventName]).map(mapTab => (
+                          <TabButton 
+                            key={mapTab} 
+                            tab={mapTab} 
+                            label={mapTab} 
+                          />
+                        ))}
+                        <TabButton tab="import" label={itemToEdit ? "アイテム編集" : "アイテム追加"} />
+                        {activeEventName && mainContentVisible && (
+                          <SearchBar
+                            searchKeyword={searchKeyword}
+                            onSearchKeywordChange={setSearchKeyword}
+                            onSearchNext={handleSearchNext}
+                            matchCount={visibleSearchMatches.length}
+                            currentMatchIndex={currentSearchIndex}
+                          />
+                        )}
+                    </>
+                ) : (
+                    <button
+                        onClick={() => { setItemToEdit(null); setActiveTab('import'); }}
+                        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 whitespace-nowrap ${
+                            activeTab === 'import'
+                            ? 'bg-blue-600 text-white'
+                            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                    >
+                        新規リスト作成
+                    </button>
+                )}
+            </div>
+        </div>
+      </header>
+
+      <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
+        {activeTab === 'eventList' && (
+            <EventListScreen 
+                eventNames={Object.keys(eventLists).sort()}
+                onSelect={handleSelectEvent}
+                onDelete={handleDeleteEvent}
+                onExport={handleExportEvent}
+                onUpdate={handleUpdateEvent}
+                onRename={(oldName) => handleRenameEvent(oldName)}
+                onImportMap={handleImportMap}
+            />
+        )}
+        {activeTab === 'import' && (
+           <ImportScreen
+             onBulkAdd={handleBulkAdd}
+             activeEventName={activeEventName}
+             itemToEdit={itemToEdit}
+             onUpdateItem={handleUpdateItem}
+             onDoneEditing={handleDoneEditing}
+           />
+        )}
+        {activeEventName && isMapTab && eventMapData[activeEventName] && eventMapData[activeEventName][activeTab] && (() => {
+          // mapKeyからeventDateを取得（例: "1日目マップ" → "1日目"）
+          const mapKey = activeTab; // activeTabは"1日目マップ"などの形式
+          const eventDate = mapKey.replace('マップ', '');
+          
+          return (
+            <MapView 
+              mapData={eventMapData[activeEventName][activeTab]} 
+              zoomLevel={zoomLevel}
+              mapKey={mapKey}
+              eventDate={eventDate}
+              items={items}
+              onCellSave={(eventDate: string, number: string, block: string | undefined, side: 'A' | 'B', data: {
+                circle: string;
+                title: string;
+                price: number | null;
+              }) => {
+                if (!activeEventName) return;
+                
+                setEventLists(prev => {
+                  const allItems = [...(prev[activeEventName] || [])];
+                  
+                  // eventDate、number、blockで一致するアイテムを検索
+                  const matchingItems = allItems.filter(item => {
+                    const matchesEventDate = item.eventDate === eventDate;
+                    const matchesNumber = item.number === number;
+                    const matchesBlock = !block || item.block === block;
+                    return matchesEventDate && matchesNumber && matchesBlock;
+                  });
+                  
+                  // A側/B側の区別（暫定的に、順序で判断）
+                  let targetItem: ShoppingItem | undefined;
+                  if (side === 'A') {
+                    targetItem = matchingItems[0];
+                  } else {
+                    targetItem = matchingItems[1];
+                  }
+                  
+                  if (targetItem) {
+                    // 既存アイテムを更新（サークル名、タイトル、価格のみ）
+                    const updatedItem: ShoppingItem = {
+                      ...targetItem,
+                      circle: data.circle || targetItem.circle,
+                      title: data.title || targetItem.title,
+                      price: data.price !== null ? data.price : targetItem.price,
+                    };
+                    return {
+                      ...prev,
+                      [activeEventName]: prev[activeEventName].map(item => 
+                        item.id === targetItem!.id ? updatedItem : item
+                      )
+                    };
+                  } else {
+                    // 新規アイテムを作成
+                    const newItem: ShoppingItem = {
+                      id: crypto.randomUUID(),
+                      circle: data.circle,
+                      eventDate: eventDate,
+                      block: block || '',
+                      number: number,
+                      title: data.title,
+                      price: data.price,
+                      purchaseStatus: 'None' as PurchaseStatus,
+                      quantity: 1,
+                      remarks: '',
+                    };
+                    return {
+                      ...prev,
+                      [activeEventName]: insertItemSorted(prev[activeEventName], newItem)
+                    };
+                  }
+                });
+              }}
+            />
+          );
+        })()}
+        {activeEventName && mainContentVisible && !isMapTab && (
+          <div style={{
+              transform: `scale(${zoomLevel / 100})`,
+              transformOrigin: 'top left',
+              width: `${100 * (100 / zoomLevel)}%`
+          }}>
+            {currentMode === 'edit' ? (
+              <div className="grid grid-cols-2 gap-4">
+                {/* 左列: 実行モード表示列 */}
+                <div className="space-y-2">
+                  <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg p-3">
+                    <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2">実行モード表示列</h3>
+                    <p className="text-xs text-blue-700 dark:text-blue-300 mb-3">右の候補リストからアイテムを選択して移動</p>
+                  </div>
+                  <ShoppingList
+                    items={executeColumnItems}
+                    onUpdateItem={handleUpdateItem}
+                    onMoveItem={(dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate', sourceColumn?: 'execute' | 'candidate') => handleMoveItem(dragId, hoverId, targetColumn, sourceColumn)}
+                    onEditRequest={handleEditRequest}
+                    onDeleteRequest={handleDeleteRequest}
+                    selectedItemIds={selectedItemIds}
+                    onSelectItem={handleSelectItem}
+                    onRemoveFromColumn={handleRemoveFromExecuteColumn}
+                    onMoveToColumn={handleMoveToExecuteColumn}
+                    columnType="execute"
+                    currentDay={eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}
+                    onMoveItemUp={handleMoveItemUp}
+                    onMoveItemDown={handleMoveItemDown}
+                    rangeStart={rangeStart}
+                    rangeEnd={rangeEnd}
+                    onToggleRangeSelection={handleToggleRangeSelection}
+                    duplicateCircleItemIds={duplicateCircleItemIds}
+                    highlightedItemId={highlightedItemId}
+                  />
+                </div>
+                
+                {/* 右列: 候補リスト */}
+                <div className="space-y-2">
+                  <div className="bg-slate-100 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg p-3">
+                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">候補リスト</h3>
+                    <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">アイテムを選択してヘッダーのボタンから移動</p>
+                    {availableBlocks.length > 0 && (
+                      <div className="mt-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">ブロックでフィルタ:</span>
+                          <div className="flex items-center gap-2">
+                            {selectedBlockFilters.size > 0 && (
+                              <>
+                                <button
+                                  onClick={handleCandidateNumberSort}
+                                  className={`p-1.5 rounded-md transition-colors ${
+                                    candidateNumberSortDirection
+                                      ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
+                                      : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400 border border-slate-300 dark:border-slate-600'
+                                  }`}
+                                  title={candidateNumberSortDirection === 'desc' ? "ナンバー降順 (昇順へ)" : candidateNumberSortDirection === 'asc' ? "ナンバー昇順 (降順へ)" : "ナンバー昇順でソート"}
+                                >
+                                  {candidateNumberSortDirection === 'desc' ? <SortDescendingIcon className="w-4 h-4" /> : <SortAscendingIcon className="w-4 h-4" />}
+                                </button>
+                                <button
+                                  onClick={handleClearBlockFilters}
+                                  className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline"
+                                >
+                                  すべて解除
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {availableBlocks.map(block => (
+                            <button
+                              key={block}
+                              onClick={() => handleToggleBlockFilter(block)}
+                              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
+                                selectedBlockFilters.has(block)
+                                  ? 'bg-blue-600 text-white dark:bg-blue-500'
+                                  : blocksWithPriorityRemarks.has(block)
+                                  ? 'bg-yellow-300 dark:bg-yellow-600 text-slate-700 dark:text-slate-300 hover:bg-yellow-400 dark:hover:bg-yellow-500 border border-slate-300 dark:border-slate-600'
+                                  : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
+                              }`}
+                            >
+                              {block}
+                            </button>
+                          ))}
+                        </div>
+                        {selectedBlockFilters.size > 0 && (
+                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
+                            選択中: {selectedBlockFilters.size}件のブロック
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <ShoppingList
+                    items={candidateColumnItems}
+                    onUpdateItem={handleUpdateItem}
+                    onMoveItem={(dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate', sourceColumn?: 'execute' | 'candidate') => handleMoveItem(dragId, hoverId, targetColumn, sourceColumn)}
+                    onEditRequest={handleEditRequest}
+                    onDeleteRequest={handleDeleteRequest}
+                    selectedItemIds={selectedItemIds}
+                    onSelectItem={handleSelectItem}
+                    onMoveToColumn={handleMoveToExecuteColumn}
+                    onRemoveFromColumn={handleRemoveFromExecuteColumn}
+                    columnType="candidate"
+                    currentDay={eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}
+                    onMoveItemUp={handleMoveItemUp}
+                    onMoveItemDown={handleMoveItemDown}
+                    rangeStart={rangeStart}
+                    rangeEnd={rangeEnd}
+                    onToggleRangeSelection={handleToggleRangeSelection}
+                    duplicateCircleItemIds={duplicateCircleItemIds}
+                    highlightedItemId={highlightedItemId}
+                  />
+                </div>
+              </div>
+            ) : (
+              <ShoppingList
+                items={visibleItems}
+                onUpdateItem={handleUpdateItem}
+                onMoveItem={(dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate') => handleMoveItem(dragId, hoverId, targetColumn)}
+                onEditRequest={handleEditRequest}
+                onDeleteRequest={handleDeleteRequest}
+                selectedItemIds={selectedItemIds}
+                onSelectItem={handleSelectItem}
+                columnType="execute"
+                currentDay={eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}
+                onMoveItemUp={handleMoveItemUp}
+                onMoveItemDown={handleMoveItemDown}
+                rangeStart={rangeStart}
+                rangeEnd={rangeEnd}
+                onToggleRangeSelection={handleToggleRangeSelection}
+                duplicateCircleItemIds={duplicateCircleItemIds}
+                highlightedItemId={highlightedItemId}
+              />
+            )}
+          </div>
+        )}
+      </main>
+      
+      {itemToDelete && (
+          <DeleteConfirmationModal
+              item={itemToDelete}
+              onConfirm={handleConfirmDelete}
+              onCancel={() => setItemToDelete(null)}
+          />
+      )}
+
+      {showUpdateConfirmation && updateData && (
+        <UpdateConfirmationModal
+          itemsToDelete={updateData.itemsToDelete}
+          itemsToUpdate={updateData.itemsToUpdate}
+          itemsToAdd={updateData.itemsToAdd}
+          onConfirm={handleConfirmUpdate}
+          onCancel={() => {
+            setShowUpdateConfirmation(false);
+            setUpdateData(null);
+            setUpdateEventName(null);
+          }}
+        />
+      )}
+
+      {showUrlUpdateDialog && (
+        <UrlUpdateDialog
+          currentUrl={pendingUpdateEventName ? eventMetadata[pendingUpdateEventName]?.spreadsheetUrl || '' : ''}
+          onConfirm={handleUrlUpdate}
+          onCancel={() => {
+            setShowUrlUpdateDialog(false);
+            setPendingUpdateEventName(null);
+          }}
+        />
+      )}
+
+      {showRenameDialog && eventToRename && (
+        <EventRenameDialog
+          currentName={eventToRename}
+          onConfirm={handleConfirmRename}
+          onCancel={() => {
+            setShowRenameDialog(false);
+            setEventToRename(null);
+          }}
+        />
+      )}
+
+      {activeEventName && items.length > 0 && mainContentVisible && (
+        <>
+          {currentMode === 'execute' && <SummaryBar items={visibleItems} />}
+        </>
+      )}
+      {activeEventName && items.length > 0 && mainContentVisible && (
+        <ZoomControl zoomLevel={zoomLevel} onZoomChange={handleZoomChange} />
+      )}
     </div>
   );
 };
 
-export default ShoppingList;
+export default App;
