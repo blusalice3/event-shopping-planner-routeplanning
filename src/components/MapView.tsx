@@ -1,159 +1,91 @@
-import React, { useMemo } from 'react';
-import { CellInfo } from '../types';
+import React, { useMemo, useCallback, useRef, useEffect, useState } from 'react';
+import { Grid } from 'react-window';
 
 interface MapViewProps {
-  mapData: CellInfo[][];
-  zoomLevel?: number;
+  mapData: any[][];
 }
 
-const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100 }) => {
-  const renderedTable = useMemo(() => {
-    if (!mapData || mapData.length === 0) {
-      return null;
-    }
+const CELL_WIDTH = 50;
+const CELL_HEIGHT = 40;
+const CELL_PADDING = 8;
 
-    // すべての行とセルを表示（空のセルも含む）
+const MapView: React.FC<MapViewProps> = ({ mapData }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
+
+  // コンテナサイズを監視
+  useEffect(() => {
+    const updateSize = () => {
+      if (containerRef.current) {
+        const rect = containerRef.current.getBoundingClientRect();
+        setContainerSize({
+          width: rect.width - 32, // padding分を引く (p-4 = 16px * 2)
+          height: rect.height - 32, // padding分を引く
+        });
+      }
+    };
+
+    // 初期サイズを設定
+    updateSize();
+    
+    // ResizeObserverを使用してコンテナサイズの変更を監視
+    const resizeObserver = new ResizeObserver(updateSize);
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+    
+    window.addEventListener('resize', updateSize);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateSize);
+    };
+  }, []);
+
+  // 行数と列数を計算
+  const rowCount = mapData?.length || 0;
+  const columnCount = useMemo(() => {
+    if (!mapData || mapData.length === 0) return 0;
+    return Math.max(...mapData.map(row => row?.length || 0));
+  }, [mapData]);
+
+  // セルコンポーネント
+  const Cell = useCallback(({ columnIndex, rowIndex, style, ariaAttributes }: { 
+    columnIndex: number; 
+    rowIndex: number; 
+    style: React.CSSProperties;
+    ariaAttributes: { "aria-colindex": number; role: "gridcell" };
+  }) => {
+    const row = mapData[rowIndex];
+    const cell = row?.[columnIndex];
+    const cellValue = cell !== null && cell !== undefined ? String(cell) : '';
+    const isEmpty = cellValue.trim() === '';
+
     return (
-      <table 
-        className="border-collapse"
+      <div
+        {...ariaAttributes}
         style={{
-          transform: `scale(${zoomLevel / 100})`,
-          transformOrigin: 'top left',
+          ...style,
+          border: '1px solid rgb(203 213 225)', // border-slate-300
+          padding: `${CELL_PADDING}px`,
+          display: 'flex',
+          alignItems: 'center',
+          fontSize: '0.875rem', // text-sm
+          whiteSpace: 'pre-wrap',
+          minWidth: `${CELL_WIDTH}px`,
+          backgroundColor: isEmpty 
+            ? 'rgb(248 250 252)' // bg-slate-50
+            : 'rgb(255 255 255)', // bg-white
         }}
+        className={`dark:border-slate-600 ${
+          isEmpty 
+            ? 'dark:bg-slate-900' 
+            : 'dark:bg-slate-800'
+        }`}
       >
-        <tbody>
-          {mapData.map((row, rowIndex) => {
-            // 行の高さを取得（最初のセルの高さを使用）
-            const rowHeight = row.find(cell => cell.height)?.height;
-            
-            return (
-              <tr key={rowIndex} style={{ height: rowHeight ? `${rowHeight}px` : 'auto' }}>
-                {row.map((cell, cellIndex) => {
-                // マージされたセル（開始セル以外）は表示しない
-                if (cell.isMerged) {
-                  return null;
-                }
-                
-                let cellValue = cell.value !== null && cell.value !== undefined ? String(cell.value) : '';
-                const isEmpty = cellValue.trim() === '';
-                const isNumber = cell.isNumber && !isNaN(Number(cellValue));
-                
-                // 数値が1桁の場合は2桁表示にする
-                if (isNumber && !isEmpty) {
-                  const numValue = Number(cellValue);
-                  if (numValue >= 1 && numValue <= 9) {
-                    cellValue = String(numValue).padStart(2, '0');
-                  }
-                }
-                
-                // セルの幅と高さを決定
-                const cellWidth = cell.width || 48;
-                const cellHeight = cell.height || 20;
-                const colSpan = cell.mergeInfo?.cs || 1;
-                const rowSpan = cell.mergeInfo?.rs || 1;
-                
-                // 背景色を決定
-                let backgroundColor = '#ffffff';
-                if (isEmpty) {
-                  backgroundColor = '#e5e7eb'; // 空のセルは灰色
-                } else if (cell.style?.fill?.bgColor) {
-                  backgroundColor = cell.style.fill.bgColor; // xlsxファイルの塗りつぶし色
-                } else if (isNumber) {
-                  backgroundColor = '#ffffff'; // 数値のセルは白色
-                }
-                
-                // 罫線を決定
-                let borderTop = 'none';
-                let borderBottom = 'none';
-                let borderLeft = 'none';
-                let borderRight = 'none';
-                
-                if (cell.style?.border) {
-                  const border = cell.style.border;
-                  if (border.top) {
-                    const style = (border.top as any).style || 'thin';
-                    const colorObj = (border.top as any).color;
-                    const color = colorObj?.rgb ? `#${colorObj.rgb}` : '#000000';
-                    const width = style === 'thick' ? '3px' : style === 'medium' ? '2px' : '1px';
-                    borderTop = `${width} solid ${color}`;
-                  }
-                  if (border.bottom) {
-                    const style = (border.bottom as any).style || 'thin';
-                    const colorObj = (border.bottom as any).color;
-                    const color = colorObj?.rgb ? `#${colorObj.rgb}` : '#000000';
-                    const width = style === 'thick' ? '3px' : style === 'medium' ? '2px' : '1px';
-                    borderBottom = `${width} solid ${color}`;
-                  }
-                  if (border.left) {
-                    const style = (border.left as any).style || 'thin';
-                    const colorObj = (border.left as any).color;
-                    const color = colorObj?.rgb ? `#${colorObj.rgb}` : '#000000';
-                    const width = style === 'thick' ? '3px' : style === 'medium' ? '2px' : '1px';
-                    borderLeft = `${width} solid ${color}`;
-                  }
-                  if (border.right) {
-                    const style = (border.right as any).style || 'thin';
-                    const colorObj = (border.right as any).color;
-                    const color = colorObj?.rgb ? `#${colorObj.rgb}` : '#000000';
-                    const width = style === 'thick' ? '3px' : style === 'medium' ? '2px' : '1px';
-                    borderRight = `${width} solid ${color}`;
-                  }
-                } else if (isNumber && !isEmpty) {
-                  // 数値のセルは緑色の枠線（全方向）
-                  borderTop = '2px solid #86efac';
-                  borderBottom = '2px solid #86efac';
-                  borderLeft = '2px solid #86efac';
-                  borderRight = '2px solid #86efac';
-                } else if (!isEmpty) {
-                  // その他は薄いグレーの枠線
-                  borderTop = '1px solid #d1d5db';
-                  borderBottom = '1px solid #d1d5db';
-                  borderLeft = '1px solid #d1d5db';
-                  borderRight = '1px solid #d1d5db';
-                }
-                
-                // セルのスタイルを決定
-                const cellStyle: React.CSSProperties = {
-                  width: `${cellWidth}px`,
-                  height: `${cellHeight}px`,
-                  minWidth: `${cellWidth}px`,
-                  minHeight: `${cellHeight}px`,
-                  padding: '2px 4px',
-                  fontSize: '12px',
-                  fontWeight: isEmpty ? '400' : '500',
-                  color: isEmpty ? '#9ca3af' : '#1f2937',
-                  backgroundColor,
-                  borderTop,
-                  borderBottom,
-                  borderLeft,
-                  borderRight,
-                  borderRadius: isNumber && !isEmpty ? '8px' : '4px', // 数値のセルは丸くする
-                  whiteSpace: 'nowrap',
-                  textAlign: 'center',
-                  verticalAlign: 'middle',
-                  boxSizing: 'border-box',
-                  userSelect: 'none',
-                };
-                
-                return (
-                  <td
-                    key={cellIndex}
-                    style={cellStyle}
-                    className="select-none"
-                    colSpan={colSpan > 1 ? colSpan : undefined}
-                    rowSpan={rowSpan > 1 ? rowSpan : undefined}
-                  >
-                    {cellValue}
-                  </td>
-                );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+        {cellValue}
+      </div>
     );
-  }, [mapData, zoomLevel]);
+  }, [mapData]);
 
   if (!mapData || mapData.length === 0) {
     return (
@@ -163,17 +95,38 @@ const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100 }) => {
     );
   }
 
+  if (rowCount === 0 || columnCount === 0) {
+    return (
+      <div className="text-center py-12 text-slate-500 dark:text-slate-400">
+        マップデータがありません
+      </div>
+    );
+  }
+
+  // グリッドの幅を計算（必要な最小幅）
+  const gridWidth = columnCount * CELL_WIDTH;
+  const gridHeight = containerSize.height || window.innerHeight - 300;
+
   return (
     <div 
-      className="overflow-auto bg-gray-100 dark:bg-slate-900 rounded-lg shadow p-4"
-      style={{
-        height: 'calc(100vh - 300px)',
-        width: '100%',
-      }}
+      ref={containerRef}
+      className="bg-white dark:bg-slate-800 rounded-lg shadow p-4"
+      style={{ height: 'calc(100vh - 300px)', overflow: 'auto' }}
     >
-      <div className="inline-block">
-        {renderedTable}
-      </div>
+      <Grid
+        cellComponent={Cell}
+        cellProps={{} as Record<string, never>}
+        columnCount={columnCount}
+        columnWidth={CELL_WIDTH}
+        defaultHeight={gridHeight}
+        defaultWidth={gridWidth}
+        rowCount={rowCount}
+        rowHeight={CELL_HEIGHT}
+        style={{ 
+          height: gridHeight,
+          width: Math.max(gridWidth, containerSize.width || gridWidth)
+        }}
+      />
     </div>
   );
 };
