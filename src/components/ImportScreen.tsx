@@ -31,6 +31,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
   const [singleNumber, setSingleNumber] = useState('');
   const [singleTitle, setSingleTitle] = useState('');
   const [singlePrice, setSinglePrice] = useState('0');
+  const [singleQuantity, setSingleQuantity] = useState('1');
   const [singleRemarks, setSingleRemarks] = useState('');
   const [singleUrl, setSingleUrl] = useState('');
   const [isCustomEventDate, setIsCustomEventDate] = useState(false);
@@ -46,6 +47,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         setSingleNumber(itemToEdit.number);
         setSingleTitle(itemToEdit.title);
         setSinglePrice(itemToEdit.price === null ? '' : String(itemToEdit.price));
+        setSingleQuantity(String(itemToEdit.quantity ?? 1));
         setSingleRemarks(itemToEdit.remarks);
         setSingleUrl(itemToEdit.url || '');
         // 編集時は、1日目～4日目に含まれない場合はカスタムモードにする
@@ -161,20 +163,21 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
       let number = cells[3]?.trim() || ''; // D列: ナンバー
       let title = cells[4]?.trim() || ''; // E列: タイトル
       let priceStr = cells[5]?.trim() || ''; // F列: 頒布価格
-      let remarks = cells[7]?.trim() || ''; // H列: 備考
-      let url = cells[10]?.trim() || ''; // K列: URL
-      let columnType: 'execute' | 'candidate' | null = null; // I列: 列の種類
-      let order = 0; // J列: 列内順番
+      let quantityStr = cells[6]?.trim() || ''; // G列: 数量
+      let remarks = cells[8]?.trim() || ''; // I列: 備考
+      let url = cells[11]?.trim() || ''; // L列: URL
+      let columnType: 'execute' | 'candidate' | null = null; // J列: 列の種類
+      let order = 0; // K列: 列内順番
       
       // 配置情報がある場合（エクスポートされたCSV形式）
-      if (cells.length >= 10) {
-        const columnTypeStr = cells[8]?.trim() || '';
+      if (cells.length >= 11) {
+        const columnTypeStr = cells[9]?.trim() || '';
         if (columnTypeStr === '実行列') {
           columnType = 'execute';
         } else if (columnTypeStr === '候補リスト') {
           columnType = 'candidate';
         }
-        order = parseInt(cells[9]?.trim() || '0', 10) || 0;
+        order = parseInt(cells[10]?.trim() || '0', 10) || 0;
       }
       
       // A列からD列が全て入力されているかチェック
@@ -188,6 +191,8 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         priceStr = cells[17]?.trim() || ''; // R列
         remarks = cells[22]?.trim() || ''; // W列
         url = cells[24]?.trim() || ''; // Y列: URL
+        // AA列から数量を取得
+        quantityStr = cells[26]?.trim() || ''; // AA列 (0-indexed: 26)
         
         // それでも必須項目が揃わない場合はスキップ
         if (!circle || !eventDate || !block || !number) {
@@ -197,6 +202,8 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
       
       // 空欄の場合はnull、0と入力されている場合は0を設定
       const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0);
+      // 数量: 空欄時は1、それ以外は数値を反映（1-10の範囲に制限）
+      const quantity = quantityStr === '' ? 1 : Math.max(1, Math.min(10, parseInt(quantityStr.replace(/[^0-9]/g, ''), 10) || 1));
       
       const item: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
         circle,
@@ -205,6 +212,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         number,
         title,
         price,
+        quantity,
         remarks,
         ...(url ? { url } : {}),
       };
@@ -345,6 +353,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
     setSingleNumber('');
     setSingleTitle('');
     setSinglePrice('');
+    setSingleQuantity('1');
     setSingleRemarks('');
     setSingleUrl('');
     setIsCustomEventDate(false);
@@ -387,6 +396,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         // 空欄の場合はnull、0と入力されている場合は0を設定
         const priceStr = String(singlePrice).trim();
         const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0);
+        const quantity = Math.max(1, Math.min(10, parseInt(singleQuantity.replace(/[^0-9]/g, ''), 10) || 1));
         const updatedItem: ShoppingItem = {
             ...itemToEdit,
             circle: singleCircle.trim(),
@@ -395,6 +405,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
             number: singleNumber.trim(),
             title: singleTitle.trim(),
             price: price,
+            quantity: quantity,
             remarks: singleRemarks.trim(),
             url: singleUrl.trim() || undefined,
         };
@@ -437,7 +448,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         const price = priceString === '' ? null : (parseInt(priceString.replace(/[^0-9]/g, ''), 10) || 0);
         const url = urlsArr[i] || '';
         newItems.push({
-          circle, eventDate, block, number, title: titlesArr[i] || '', price: price, remarks: remarksArr[i] || '',
+          circle, eventDate, block, number, title: titlesArr[i] || '', price: price, quantity: 1, remarks: remarksArr[i] || '',
           ...(url ? { url } : {}),
         });
       }
@@ -493,6 +504,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         // 空欄の場合はnull、0と入力されている場合は0を設定
         const priceStr = String(singlePrice).trim();
         const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0);
+        const quantity = Math.max(1, Math.min(10, parseInt(singleQuantity.replace(/[^0-9]/g, ''), 10) || 1));
         const newItem: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
             circle: singleCircle.trim(),
             eventDate: singleEventDate,
@@ -500,6 +512,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
             number: singleNumber.trim(),
             title: singleTitle.trim(),
             price: price,
+            quantity: quantity,
             remarks: singleRemarks.trim(),
             url: singleUrl.trim() || undefined,
         };
@@ -683,6 +696,21 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
                         >
                             <option value="" disabled>金額を選択...</option>
                             {priceOptions.map(p => <option key={p} value={p}>{p.toLocaleString()}円</option>)}
+                        </select>
+                    </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label htmlFor="singleQuantity" className={labelClass}>数量</label>
+                        <select
+                            id="singleQuantity"
+                            value={singleQuantity}
+                            onChange={e => setSingleQuantity(e.target.value)}
+                            className={formInputClass}
+                        >
+                            {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
+                                <option key={num} value={num}>{num}</option>
+                            ))}
                         </select>
                     </div>
                 </div>
