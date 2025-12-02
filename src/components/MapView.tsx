@@ -1,93 +1,149 @@
-import React, { useMemo, useRef, useEffect, useState, useCallback } from 'react';
+import React, { useMemo, useRef, useCallback, useEffect, useState } from 'react';
+import { CellInfo } from '../types';
 
 interface MapViewProps {
-  mapData: any[][];
+  mapData: CellInfo[][];
+  zoomLevel?: number;
 }
 
-const CELL_WIDTH = 50;
-const CELL_HEIGHT = 40;
+const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100 }) => {
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const tbodyRef = useRef<HTMLTableSectionElement>(null);
+  const [visibleRange, setVisibleRange] = useState({ start: 0, end: 0 });
+  const rowHeightsRef = useRef<number[]>([]);
 
-const MapView: React.FC<MapViewProps> = ({ mapData }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const tableRef = useRef<HTMLTableElement>(null);
-  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
-  const [visibleRange, setVisibleRange] = useState({ startRow: 0, endRow: 0 });
-
-  // コンテナサイズを監視
+  // 各行の高さを計算してキャッシュ
   useEffect(() => {
-    const updateSize = () => {
-      if (containerRef.current) {
-        const rect = containerRef.current.getBoundingClientRect();
-        setContainerSize({
-          width: rect.width - 32, // padding分を引く (p-4 = 16px * 2)
-          height: rect.height - 32, // padding分を引く
-        });
+    if (!mapData) return;
+    rowHeightsRef.current = mapData.map((row) => {
+      const rowHeight = row.find(cell => cell.height)?.height || 20;
+      return rowHeight * (zoomLevel / 100);
+    });
+  }, [mapData, zoomLevel]);
+
+  // スクロール位置から表示範囲を計算
+  const updateVisibleRange = useCallback(() => {
+    if (!scrollContainerRef.current || !mapData || mapData.length === 0) return;
+
+    const scrollTop = scrollContainerRef.current.scrollTop;
+    const containerHeight = scrollContainerRef.current.clientHeight;
+    let accumulatedHeight = 0;
+    let start = 0;
+    let end = mapData.length - 1;
+
+    // 開始行を検索
+    for (let i = 0; i < mapData.length; i++) {
+      const rowHeight = rowHeightsRef.current[i] || 20;
+      if (accumulatedHeight + rowHeight > scrollTop) {
+        start = Math.max(0, i - 2); // バッファを追加
+        break;
       }
-    };
-
-    // 初期サイズを設定
-    updateSize();
-    
-    // ResizeObserverを使用してコンテナサイズの変更を監視
-    const resizeObserver = new ResizeObserver(updateSize);
-    if (containerRef.current) {
-      resizeObserver.observe(containerRef.current);
+      accumulatedHeight += rowHeight;
     }
-    
-    window.addEventListener('resize', updateSize);
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', updateSize);
-    };
-  }, []);
 
-  // 行数と列数を計算
-  const rowCount = mapData?.length || 0;
-  const columnCount = useMemo(() => {
-    if (!mapData || mapData.length === 0) return 0;
-    return Math.max(...mapData.map(row => row?.length || 0));
+    // 終了行を検索
+    accumulatedHeight = 0;
+    for (let i = 0; i < mapData.length; i++) {
+      const rowHeight = rowHeightsRef.current[i] || 20;
+      accumulatedHeight += rowHeight;
+      if (accumulatedHeight > scrollTop + containerHeight) {
+        end = Math.min(mapData.length - 1, i + 2); // バッファを追加
+        break;
+      }
+    }
+
+    setVisibleRange({ start, end });
   }, [mapData]);
 
-  // スクロール位置に基づいて表示範囲を計算
-  const handleScroll = useCallback(() => {
-    if (!containerRef.current) return;
-    
-    const scrollTop = containerRef.current.scrollTop;
-    const containerHeight = containerRef.current.clientHeight;
-    
-    const startRow = Math.max(0, Math.floor(scrollTop / CELL_HEIGHT) - 2); // 2行余分に表示
-    const endRow = Math.min(
-      rowCount - 1,
-      Math.ceil((scrollTop + containerHeight) / CELL_HEIGHT) + 2 // 2行余分に表示
-    );
-    
-    setVisibleRange({ startRow, endRow });
-  }, [rowCount]);
+  // スクロールイベントハンドラ
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    updateVisibleRange();
+    container.addEventListener('scroll', updateVisibleRange);
+    return () => container.removeEventListener('scroll', updateVisibleRange);
+  }, [updateVisibleRange]);
 
   // 初期表示範囲を設定
   useEffect(() => {
-    if (containerSize.height > 0) {
-      const startRow = 0;
-      const endRow = Math.min(
-        rowCount - 1,
-        Math.ceil(containerSize.height / CELL_HEIGHT) + 4
-      );
-      setVisibleRange({ startRow, endRow });
+    if (mapData && mapData.length > 0) {
+      const initialEnd = Math.min(20, mapData.length - 1);
+      setVisibleRange({ start: 0, end: initialEnd });
     }
-  }, [containerSize.height, rowCount]);
+  }, [mapData]);
 
-  // スクロールイベントリスナーを設定
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
+  // 罫線のスタイルを取得する関数（改善版）
+  const getBorderStyle = useCallback((cell: CellInfo, side: 'top' | 'bottom' | 'left' | 'right') => {
+    if (!cell.style?.border) {
+      return 'none';
+    }
+
+    const border = cell.style.border[side];
+    if (!border) {
+      return 'none';
+    }
+
+    // borderオブジェクトからstyleとcolorを取得
+    // xlsxReader.tsから取得したborderは { style, color } の形式
+    const style = (border as any).style || 'thin';
+    const color = (border as any).color || '#000000';
     
-    container.addEventListener('scroll', handleScroll);
-    handleScroll(); // 初期表示
+    // colorが既に文字列形式（#RRGGBB）の場合はそのまま使用
+    const finalColor = typeof color === 'string' 
+      ? (color.startsWith('#') ? color : `#${color}`)
+      : '#000000';
+
+    const width = style === 'thick' ? '3px' : style === 'medium' ? '2px' : '1px';
+    return `${width} solid ${finalColor}`;
+  }, []);
+
+  // 背景色を取得する関数（改善版）
+  const getBackgroundColor = useCallback((cell: CellInfo) => {
+    let cellValue = cell.value !== null && cell.value !== undefined ? String(cell.value) : '';
+    const isEmpty = cellValue.trim() === '';
+    const isNumber = cell.isNumber && !isNaN(Number(cellValue));
+
+    // 塗りつぶし色の処理を改善
+    if (cell.style?.fill?.bgColor) {
+      return cell.style.fill.bgColor;
+    }
+    if (cell.style?.fill?.fgColor) {
+      return cell.style.fill.fgColor;
+    }
     
-    return () => {
-      container.removeEventListener('scroll', handleScroll);
-    };
-  }, [handleScroll]);
+    if (isEmpty) {
+      return '#e5e7eb'; // 空のセルは灰色
+    }
+    if (isNumber) {
+      return '#ffffff'; // 数値のセルは白色
+    }
+    return '#ffffff';
+  }, []);
+
+  // テーブルの総幅を計算
+  const totalWidth = useMemo(() => {
+    if (!mapData || mapData.length === 0) return 0;
+    const firstRow = mapData[0];
+    return firstRow.reduce((sum, cell) => {
+      if (cell.isMerged) return sum;
+      return sum + ((cell.width || 48) * (zoomLevel / 100));
+    }, 0);
+  }, [mapData, zoomLevel]);
+
+  // 総高さを計算
+  const totalHeight = useMemo(() => {
+    return rowHeightsRef.current.reduce((sum, height) => sum + height, 0);
+  }, [mapData, zoomLevel]);
+
+  // 上部のオフセット高さを計算
+  const offsetTop = useMemo(() => {
+    let sum = 0;
+    for (let i = 0; i < visibleRange.start; i++) {
+      sum += rowHeightsRef.current[i] || 20;
+    }
+    return sum;
+  }, [visibleRange.start]);
 
   if (!mapData || mapData.length === 0) {
     return (
@@ -97,75 +153,132 @@ const MapView: React.FC<MapViewProps> = ({ mapData }) => {
     );
   }
 
-  if (rowCount === 0 || columnCount === 0) {
-    return (
-      <div className="text-center py-12 text-slate-500 dark:text-slate-400">
-        マップデータがありません
-      </div>
-    );
-  }
-
-  // 表示する行を計算
-  const visibleRows = [];
-  for (let i = visibleRange.startRow; i <= visibleRange.endRow && i < rowCount; i++) {
-    visibleRows.push(i);
-  }
-
-  // テーブルの総高さを計算（スクロールバーのために必要）
-  const totalHeight = rowCount * CELL_HEIGHT;
-  const totalWidth = columnCount * CELL_WIDTH;
+  // 表示する行を取得
+  const visibleRows = useMemo(() => {
+    return mapData.slice(visibleRange.start, visibleRange.end + 1);
+  }, [mapData, visibleRange]);
 
   return (
     <div 
-      ref={containerRef}
-      className="bg-white dark:bg-slate-800 rounded-lg shadow p-4 overflow-auto"
-      style={{ height: 'calc(100vh - 300px)' }}
+      ref={scrollContainerRef}
+      className="bg-gray-100 dark:bg-slate-900 rounded-lg shadow p-4 overflow-auto"
+      style={{
+        height: 'calc(100vh - 300px)',
+        width: '100%',
+      }}
     >
-      <div style={{ height: totalHeight, width: Math.max(totalWidth, containerSize.width || totalWidth), position: 'relative' }}>
+      <div style={{ width: `${totalWidth}px`, height: `${totalHeight}px`, position: 'relative' }}>
         <table 
-          ref={tableRef}
-          className="border-collapse border border-slate-300 dark:border-slate-600 w-full"
-          style={{ 
+          className="border-collapse"
+          style={{
+            width: '100%',
+            tableLayout: 'fixed',
             position: 'absolute',
             top: 0,
             left: 0,
-            width: '100%'
           }}
         >
-          <tbody>
+          <tbody ref={tbodyRef}>
             {/* 上部のスペーサー */}
-            {visibleRange.startRow > 0 && (
+            {visibleRange.start > 0 && (
               <tr>
-                <td 
-                  colSpan={columnCount}
-                  style={{ height: visibleRange.startRow * CELL_HEIGHT, padding: 0 }}
-                />
+                <td colSpan={mapData[0]?.length || 1} style={{ height: `${offsetTop}px`, padding: 0 }} />
               </tr>
             )}
+            
             {/* 表示する行 */}
-            {visibleRows.map((rowIndex) => {
-              const row = mapData[rowIndex];
+            {visibleRows.map((row, relativeIndex) => {
+              const rowIndex = visibleRange.start + relativeIndex;
+              const rowHeight = rowHeightsRef.current[rowIndex] || 20;
+
               return (
-                <tr key={rowIndex}>
-                  {Array.from({ length: columnCount }, (_, cellIndex) => {
-                    const cell = row?.[cellIndex];
-                    const cellValue = cell !== null && cell !== undefined ? String(cell) : '';
+                <tr key={rowIndex} style={{ height: `${rowHeight}px` }}>
+                  {row.map((cell, cellIndex) => {
+                    // マージされたセル（開始セル以外）は表示しない
+                    if (cell.isMerged) {
+                      return null;
+                    }
+                    
+                    let cellValue = cell.value !== null && cell.value !== undefined ? String(cell.value) : '';
                     const isEmpty = cellValue.trim() === '';
+                    const isNumber = cell.isNumber && !isNaN(Number(cellValue));
+                    
+                    // 数値が1桁の場合は2桁表示にする
+                    if (isNumber && !isEmpty) {
+                      const numValue = Number(cellValue);
+                      if (numValue >= 1 && numValue <= 9) {
+                        cellValue = String(numValue).padStart(2, '0');
+                      }
+                    }
+                    
+                    // セルの幅と高さを決定
+                    const cellWidth = (cell.width || 48) * (zoomLevel / 100);
+                    const cellHeight = (cell.height || 20) * (zoomLevel / 100);
+                    const colSpan = cell.mergeInfo?.cs || 1;
+                    const rowSpan = cell.mergeInfo?.rs || 1;
+                    
+                    // 背景色を決定
+                    const backgroundColor = getBackgroundColor(cell);
+                    
+                    // 罫線を決定（改善版）
+                    const borderTop = getBorderStyle(cell, 'top');
+                    const borderBottom = getBorderStyle(cell, 'bottom');
+                    const borderLeft = getBorderStyle(cell, 'left');
+                    const borderRight = getBorderStyle(cell, 'right');
+                    
+                    // デフォルトの罫線（スタイル情報がない場合）
+                    let finalBorderTop = borderTop;
+                    let finalBorderBottom = borderBottom;
+                    let finalBorderLeft = borderLeft;
+                    let finalBorderRight = borderRight;
+                    
+                    if (borderTop === 'none' && borderBottom === 'none' && 
+                        borderLeft === 'none' && borderRight === 'none') {
+                      if (isNumber && !isEmpty) {
+                        // 数値のセルは緑色の枠線（全方向）
+                        finalBorderTop = '2px solid #86efac';
+                        finalBorderBottom = '2px solid #86efac';
+                        finalBorderLeft = '2px solid #86efac';
+                        finalBorderRight = '2px solid #86efac';
+                      } else if (!isEmpty) {
+                        // その他は薄いグレーの枠線
+                        finalBorderTop = '1px solid #d1d5db';
+                        finalBorderBottom = '1px solid #d1d5db';
+                        finalBorderLeft = '1px solid #d1d5db';
+                        finalBorderRight = '1px solid #d1d5db';
+                      }
+                    }
+                    
+                    // セルのスタイルを決定
+                    const cellStyle: React.CSSProperties = {
+                      width: `${cellWidth}px`,
+                      height: `${cellHeight}px`,
+                      minWidth: `${cellWidth}px`,
+                      minHeight: `${cellHeight}px`,
+                      padding: '2px 4px',
+                      fontSize: `${12 * (zoomLevel / 100)}px`,
+                      fontWeight: isEmpty ? '400' : '500',
+                      color: isEmpty ? '#9ca3af' : '#1f2937',
+                      backgroundColor,
+                      borderTop: finalBorderTop,
+                      borderBottom: finalBorderBottom,
+                      borderLeft: finalBorderLeft,
+                      borderRight: finalBorderRight,
+                      borderRadius: isNumber && !isEmpty ? `${8 * (zoomLevel / 100)}px` : `${4 * (zoomLevel / 100)}px`,
+                      whiteSpace: 'nowrap',
+                      textAlign: 'center',
+                      verticalAlign: 'middle',
+                      boxSizing: 'border-box',
+                      userSelect: 'none',
+                    };
                     
                     return (
                       <td
                         key={cellIndex}
-                        className={`border border-slate-300 dark:border-slate-600 p-2 text-sm ${
-                          isEmpty 
-                            ? 'bg-slate-50 dark:bg-slate-900' 
-                            : 'bg-white dark:bg-slate-800'
-                        }`}
-                        style={{ 
-                          minWidth: `${CELL_WIDTH}px`,
-                          width: `${CELL_WIDTH}px`,
-                          height: `${CELL_HEIGHT}px`,
-                          whiteSpace: 'pre-wrap'
-                        }}
+                        style={cellStyle}
+                        className="select-none"
+                        colSpan={colSpan > 1 ? colSpan : undefined}
+                        rowSpan={rowSpan > 1 ? rowSpan : undefined}
                       >
                         {cellValue}
                       </td>
@@ -174,18 +287,25 @@ const MapView: React.FC<MapViewProps> = ({ mapData }) => {
                 </tr>
               );
             })}
+            
             {/* 下部のスペーサー */}
-            {visibleRange.endRow < rowCount - 1 && (
-              <tr>
-                <td 
-                  colSpan={columnCount}
-                  style={{ 
-                    height: (rowCount - visibleRange.endRow - 1) * CELL_HEIGHT, 
-                    padding: 0 
-                  }}
-                />
-              </tr>
-            )}
+            {visibleRange.end < mapData.length - 1 && (() => {
+              const visibleRowsHeight = visibleRows.reduce((sum, _, idx) => {
+                return sum + (rowHeightsRef.current[visibleRange.start + idx] || 20);
+              }, 0);
+              const bottomSpacerHeight = totalHeight - offsetTop - visibleRowsHeight;
+              return bottomSpacerHeight > 0 ? (
+                <tr>
+                  <td 
+                    colSpan={mapData[0]?.length || 1} 
+                    style={{ 
+                      height: `${bottomSpacerHeight}px`, 
+                      padding: 0 
+                    }} 
+                  />
+                </tr>
+              ) : null;
+            })()}
           </tbody>
         </table>
       </div>
@@ -194,4 +314,3 @@ const MapView: React.FC<MapViewProps> = ({ mapData }) => {
 };
 
 export default MapView;
-
