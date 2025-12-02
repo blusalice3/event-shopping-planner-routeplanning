@@ -149,7 +149,7 @@ const App: React.FC = () => {
     return 'edit';
   }, [activeEventName, dayModes, activeTab, eventDates]);
 
-  const handleBulkAdd = useCallback((eventName: string, newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: sheetName?: string, layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> }) => {
+  const handleBulkAdd = useCallback((eventName: string, newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string; layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> }) => {
     const newItems: ShoppingItem[] = newItemsData.map(itemData => ({
         id: crypto.randomUUID(),
         ...itemData,
