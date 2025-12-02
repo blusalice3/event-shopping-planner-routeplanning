@@ -1,15 +1,23 @@
 import React, { useMemo, useRef, useCallback, useEffect, useState } from 'react';
-import { CellInfo } from '../types';
+import { CellInfo, ShoppingItem } from '../types';
+import CellEditDialog from './CellEditDialog';
 
 interface MapViewProps {
   mapData: CellInfo[][];
   zoomLevel?: number;
+  items?: ShoppingItem[]; // 関連アイテム
+  onCellSave?: (cellAddress: string, side: 'A' | 'B', data: {
+    boothName: string;
+    memo: string;
+    url: string;
+  }) => void;
 }
 
-const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100 }) => {
+const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100, items = [], onCellSave }) => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const tbodyRef = useRef<HTMLTableSectionElement>(null);
   const [visibleRange, setVisibleRange] = useState({ start: 0, end: 0 });
+  const [selectedCell, setSelectedCell] = useState<{ cell: CellInfo; row: number; col: number; address: string } | null>(null);
   const rowHeightsRef = useRef<number[]>([]);
 
   // 各行の高さを計算してキャッシュ
@@ -120,6 +128,54 @@ const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100 }) => {
     }
     return '#ffffff';
   }, []);
+
+  // セルアドレスを生成（例: "ク-19a"）
+  const getCellAddress = useCallback((cell: CellInfo) => {
+    // セルの値からアドレスを生成
+    const cellValue = cell.value !== null && cell.value !== undefined ? String(cell.value) : '';
+    if (cellValue.trim()) {
+      return cellValue;
+    }
+    // デフォルトのアドレス生成
+    return `${cell.row}-${cell.col}`;
+  }, []);
+
+  // セルに関連するアイテムを取得
+  const getRelatedItems = useCallback((cell: CellInfo) => {
+    const cellValue = cell.value !== null && cell.value !== undefined ? String(cell.value) : '';
+    if (!cellValue.trim()) {
+      return [];
+    }
+    
+    // 数値セルの場合、セルの値からblockやnumberを推測
+    const isNumber = cell.isNumber && !isNaN(Number(cellValue));
+    if (isNumber) {
+      // 数値からblockやnumberを推測（実際のロジックはマップの構造に依存）
+      // 暫定的に、すべてのアイテムを返す
+      return items;
+    }
+    
+    // テキストセルの場合、セルの値と一致するアイテムを検索
+    return items.filter(item => {
+      // セルの値がblockやnumberと一致するか確認
+      return item.block === cellValue || item.number === cellValue || item.circle === cellValue;
+    });
+  }, [items]);
+
+  // セルクリックハンドラ
+  const handleCellClick = useCallback((cell: CellInfo, row: number, col: number) => {
+    // 空のセルやマージされたセルはクリック不可
+    const cellValue = cell.value !== null && cell.value !== undefined ? String(cell.value) : '';
+    const isEmpty = cellValue.trim() === '';
+    
+    if (cell.isMerged || isEmpty) {
+      return;
+    }
+
+    // 数値セルまたはテキストセルの場合のみモーダルを表示
+    const address = getCellAddress(cell);
+    setSelectedCell({ cell, row, col, address });
+  }, [getCellAddress]);
 
   // テーブルの総幅を計算
   const totalWidth = useMemo(() => {
@@ -232,15 +288,15 @@ const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100 }) => {
                     let finalBorderLeft = borderLeft;
                     let finalBorderRight = borderRight;
                     
-                    if (borderTop === 'none' && borderBottom === 'none' && 
+                    // 数値セルの場合は罫線を適用しない（円形枠を使用）
+                    if (isNumber && !isEmpty) {
+                      finalBorderTop = 'none';
+                      finalBorderBottom = 'none';
+                      finalBorderLeft = 'none';
+                      finalBorderRight = 'none';
+                    } else if (borderTop === 'none' && borderBottom === 'none' && 
                         borderLeft === 'none' && borderRight === 'none') {
-                      if (isNumber && !isEmpty) {
-                        // 数値のセルは緑色の枠線（全方向）
-                        finalBorderTop = '2px solid #86efac';
-                        finalBorderBottom = '2px solid #86efac';
-                        finalBorderLeft = '2px solid #86efac';
-                        finalBorderRight = '2px solid #86efac';
-                      } else if (!isEmpty) {
+                      if (!isEmpty) {
                         // その他は薄いグレーの枠線
                         finalBorderTop = '1px solid #d1d5db';
                         finalBorderBottom = '1px solid #d1d5db';
@@ -250,37 +306,65 @@ const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100 }) => {
                     }
                     
                     // セルのスタイルを決定
+                    const isClickable = !isEmpty && !cell.isMerged;
                     const cellStyle: React.CSSProperties = {
                       width: `${cellWidth}px`,
                       height: `${cellHeight}px`,
                       minWidth: `${cellWidth}px`,
                       minHeight: `${cellHeight}px`,
-                      padding: '2px 4px',
+                      padding: isNumber && !isEmpty ? '0' : '2px 4px',
                       fontSize: `${12 * (zoomLevel / 100)}px`,
                       fontWeight: isEmpty ? '400' : '500',
                       color: isEmpty ? '#9ca3af' : '#1f2937',
-                      backgroundColor,
-                      borderTop: finalBorderTop,
-                      borderBottom: finalBorderBottom,
-                      borderLeft: finalBorderLeft,
-                      borderRight: finalBorderRight,
-                      borderRadius: isNumber && !isEmpty ? `${8 * (zoomLevel / 100)}px` : `${4 * (zoomLevel / 100)}px`,
+                      backgroundColor: isNumber && !isEmpty ? 'transparent' : backgroundColor,
+                      borderTop: isNumber && !isEmpty ? 'none' : finalBorderTop,
+                      borderBottom: isNumber && !isEmpty ? 'none' : finalBorderBottom,
+                      borderLeft: isNumber && !isEmpty ? 'none' : finalBorderLeft,
+                      borderRight: isNumber && !isEmpty ? 'none' : finalBorderRight,
+                      borderRadius: isNumber && !isEmpty ? '0' : `${4 * (zoomLevel / 100)}px`,
                       whiteSpace: 'nowrap',
                       textAlign: 'center',
                       verticalAlign: 'middle',
                       boxSizing: 'border-box',
                       userSelect: 'none',
+                      cursor: isClickable ? 'pointer' : 'default',
+                      transition: 'all 0.2s ease',
+                      position: 'relative',
                     };
+                    
+                    // 数値セルの場合、緑色の円形枠を追加
+                    const circleSize = Math.min(cellWidth * 0.8, cellHeight * 0.8);
+                    const numberCellStyle: React.CSSProperties = isNumber && !isEmpty ? {
+                      border: '2px solid #86efac',
+                      borderRadius: '50%',
+                      width: `${circleSize}px`,
+                      height: `${circleSize}px`,
+                      minWidth: `${circleSize}px`,
+                      minHeight: `${circleSize}px`,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      margin: '0 auto',
+                      backgroundColor: '#ffffff',
+                      lineHeight: 1,
+                    } : {};
                     
                     return (
                       <td
                         key={cellIndex}
                         style={cellStyle}
-                        className="select-none"
+                        className={`select-none ${isClickable ? 'hover:opacity-80 hover:shadow-md' : ''}`}
                         colSpan={colSpan > 1 ? colSpan : undefined}
                         rowSpan={rowSpan > 1 ? rowSpan : undefined}
+                        onClick={() => handleCellClick(cell, rowIndex, cellIndex)}
                       >
-                        {cellValue}
+                        {isNumber && !isEmpty ? (
+                          <div style={numberCellStyle}>
+                            {cellValue}
+                          </div>
+                        ) : (
+                          cellValue
+                        )}
                       </td>
                     );
                   })}
@@ -309,6 +393,23 @@ const MapView: React.FC<MapViewProps> = ({ mapData, zoomLevel = 100 }) => {
           </tbody>
         </table>
       </div>
+
+      {/* セル編集モーダル */}
+      {selectedCell && (
+        <CellEditDialog
+          cell={selectedCell.cell}
+          cellAddress={selectedCell.address}
+          row={selectedCell.row}
+          col={selectedCell.col}
+          items={getRelatedItems(selectedCell.cell)}
+          onSave={(cellAddress, side, data) => {
+            if (onCellSave) {
+              onCellSave(cellAddress, side, data);
+            }
+          }}
+          onCancel={() => setSelectedCell(null)}
+        />
+      )}
     </div>
   );
 };
