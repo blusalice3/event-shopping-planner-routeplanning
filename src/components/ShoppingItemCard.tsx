@@ -66,6 +66,15 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     onUpdate(updatedItem);
   };
 
+  const handleQuantityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = parseInt(e.target.value, 10) || 1;
+    const updatedItem: ShoppingItem = {
+      ...item,
+      quantity: value
+    };
+    onUpdate(updatedItem);
+  };
+
   const togglePurchaseStatus = useCallback(() => {
     const currentIndex = PurchaseStatuses.indexOf(item.purchaseStatus);
     const nextIndex = (currentIndex + 1) % PurchaseStatuses.length;
@@ -340,6 +349,19 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           <IconComponent className={`w-7 h-7 ${currentStatus.color}`} />
           <span className={`font-semibold w-16 text-left ${currentStatus.color}`}>{currentStatus.label}</span>
         </button>
+        <div className="flex items-center relative z-10">
+          <select
+            value={item.quantity}
+            onChange={handleQuantityChange}
+            className="w-20 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none"
+          >
+            {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
+              <option key={num} value={num}>
+                {num}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="flex items-center relative z-10">
             {item.price !== null && <span className="text-slate-500 dark:text-slate-400 mr-1">¥</span>}
             <select
