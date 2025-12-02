@@ -6,15 +6,42 @@ import { CellInfo } from '../types';
 function extractCellInfo(worksheet: any, maxRow: number, maxCol: number, XLSX: any): CellInfo[][] {
   const cells: CellInfo[][] = [];
   
+  // セルの幅と高さの情報を取得
+  const colWidths = worksheet['!cols'] || [];
+  const rowHeights = worksheet['!rows'] || [];
+  const merges = worksheet['!merges'] || [];
+  
+  // マージ情報をマップに変換（開始セルから終了セルへのマッピング）
+  const mergeMap = new Map<string, { r: number; c: number; rs: number; cs: number }>();
+  merges.forEach((merge: any) => {
+    const startCell = XLSX.utils.encode_cell({ r: merge.s.r, c: merge.s.c });
+    mergeMap.set(startCell, {
+      r: merge.s.r,
+      c: merge.s.c,
+      rs: merge.e.r - merge.s.r + 1,
+      cs: merge.e.c - merge.s.c + 1,
+    });
+  });
+  
   // 2次元配列を初期化（すべてのセルを含む）
   for (let r = 0; r <= maxRow; r++) {
     cells[r] = [];
     for (let c = 0; c <= maxCol; c++) {
+      const cellAddress = XLSX.utils.encode_cell({ r: r, c: c });
+      const isMerged = Array.from(mergeMap.values()).some(merge => {
+        return r >= merge.r && r < merge.r + merge.rs && c >= merge.c && c < merge.c + merge.cs;
+      });
+      const isMergeStart = mergeMap.has(cellAddress);
+      
       cells[r][c] = {
         value: '',
         isNumber: false,
         row: r,
         col: c,
+        isMerged: isMerged && !isMergeStart,
+        mergeInfo: isMergeStart ? mergeMap.get(cellAddress) : undefined,
+        width: colWidths[c]?.wpx || colWidths[c]?.width ? (colWidths[c].wpx || colWidths[c].width * 7) : undefined,
+        height: rowHeights[r]?.hpt || rowHeights[r]?.height ? (rowHeights[r].hpt || rowHeights[r].height * 1.33) : undefined,
       };
     }
   }
@@ -26,15 +53,33 @@ function extractCellInfo(worksheet: any, maxRow: number, maxCol: number, XLSX: a
       const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
       const cell = worksheet[cellAddress];
       
+      // マージされたセルの場合は開始セルの情報を取得
+      let actualCell = cell;
+      let actualR = R;
+      let actualC = C;
+      for (const [startCell, mergeInfo] of mergeMap.entries()) {
+        if (R >= mergeInfo.r && R < mergeInfo.r + mergeInfo.rs && 
+            C >= mergeInfo.c && C < mergeInfo.c + mergeInfo.cs) {
+          actualR = mergeInfo.r;
+          actualC = mergeInfo.c;
+          actualCell = worksheet[startCell];
+          break;
+        }
+      }
+      
       // セルが存在する場合も、存在しない場合も処理
-      const value = cell && cell.v !== undefined ? cell.v : '';
-      const isNumber = cell && (cell.t === 'n' || (typeof value === 'number'));
+      const value = actualCell && actualCell.v !== undefined ? actualCell.v : '';
+      const isNumber = actualCell && (actualCell.t === 'n' || (typeof value === 'number'));
       
       cells[R][C] = {
         value,
         isNumber,
         row: R,
         col: C,
+        isMerged: R !== actualR || C !== actualC,
+        mergeInfo: R === actualR && C === actualC ? mergeMap.get(cellAddress) : undefined,
+        width: colWidths[C]?.wpx || colWidths[C]?.width ? (colWidths[C].wpx || colWidths[C].width * 7) : undefined,
+        height: rowHeights[R]?.hpt || rowHeights[R]?.height ? (rowHeights[R].hpt || rowHeights[R].height * 1.33) : undefined,
       };
     }
   }
