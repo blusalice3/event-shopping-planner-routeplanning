@@ -1160,7 +1160,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         });
         setEventMapData(prev => ({
           ...prev,
-          [eventName]: mapData,
+          [eventName]: mapData as any,
         }));
         alert('マップデータの取り込みが完了しました。');
       } catch (error) {
@@ -2473,13 +2473,10 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
            />
         )}
         {activeEventName && isMapTab && eventMapData[activeEventName] && eventMapData[activeEventName][activeTab] && (
-          <div style={{
-            transform: `scale(${zoomLevel / 100})`,
-            transformOrigin: 'top left',
-            width: `${100 * (100 / zoomLevel)}%`
-          }}>
-            <MapView mapData={eventMapData[activeEventName][activeTab]} />
-          </div>
+          <MapView 
+            mapData={eventMapData[activeEventName][activeTab]} 
+            zoomLevel={zoomLevel}
+          />
         )}
         {activeEventName && mainContentVisible && !isMapTab && (
           <div style={{
