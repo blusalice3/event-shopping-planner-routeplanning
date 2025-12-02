@@ -6,7 +6,7 @@ import { CellInfo } from '../types';
 function extractCellInfo(worksheet: any, maxRow: number, maxCol: number, XLSX: any): CellInfo[][] {
   const cells: CellInfo[][] = [];
   
-  // 2次元配列を初期化
+  // 2次元配列を初期化（すべてのセルを含む）
   for (let r = 0; r <= maxRow; r++) {
     cells[r] = [];
     for (let c = 0; c <= maxCol; c++) {
@@ -26,17 +26,16 @@ function extractCellInfo(worksheet: any, maxRow: number, maxCol: number, XLSX: a
       const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
       const cell = worksheet[cellAddress];
       
-      if (cell) {
-        const value = cell.v !== undefined ? cell.v : '';
-        const isNumber = cell.t === 'n' || (typeof value === 'number');
-        
-        cells[R][C] = {
-          value,
-          isNumber,
-          row: R,
-          col: C,
-        };
-      }
+      // セルが存在する場合も、存在しない場合も処理
+      const value = cell && cell.v !== undefined ? cell.v : '';
+      const isNumber = cell && (cell.t === 'n' || (typeof value === 'number'));
+      
+      cells[R][C] = {
+        value,
+        isNumber,
+        row: R,
+        col: C,
+      };
     }
   }
   
