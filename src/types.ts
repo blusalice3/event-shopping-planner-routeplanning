@@ -44,6 +44,15 @@ export interface CellInfo {
   isNumber: boolean;
   row: number;
   col: number;
+  isMerged?: boolean;
+  mergeInfo?: {
+    r: number;
+    c: number;
+    rs: number;
+    cs: number;
+  };
+  width?: number;
+  height?: number;
   style?: {
     font?: {
       name?: string;
