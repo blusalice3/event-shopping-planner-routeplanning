@@ -2472,12 +2472,78 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
              onDoneEditing={handleDoneEditing}
            />
         )}
-        {activeEventName && isMapTab && eventMapData[activeEventName] && eventMapData[activeEventName][activeTab] && (
-          <MapView 
-            mapData={eventMapData[activeEventName][activeTab]} 
-            zoomLevel={zoomLevel}
-          />
-        )}
+        {activeEventName && isMapTab && eventMapData[activeEventName] && eventMapData[activeEventName][activeTab] && (() => {
+          // mapKeyからeventDateを取得（例: "1日目マップ" → "1日目"）
+          const mapKey = activeTab; // activeTabは"1日目マップ"などの形式
+          const eventDate = mapKey.replace('マップ', '');
+          
+          return (
+            <MapView 
+              mapData={eventMapData[activeEventName][activeTab]} 
+              zoomLevel={zoomLevel}
+              mapKey={mapKey}
+              eventDate={eventDate}
+              items={items}
+              onCellSave={(eventDate, number, block, side, data) => {
+                if (!activeEventName) return;
+                
+                setEventLists(prev => {
+                  const allItems = [...(prev[activeEventName] || [])];
+                  
+                  // eventDate、number、blockで一致するアイテムを検索
+                  const matchingItems = allItems.filter(item => {
+                    const matchesEventDate = item.eventDate === eventDate;
+                    const matchesNumber = item.number === number;
+                    const matchesBlock = !block || item.block === block;
+                    return matchesEventDate && matchesNumber && matchesBlock;
+                  });
+                  
+                  // A側/B側の区別（暫定的に、順序で判断）
+                  let targetItem: ShoppingItem | undefined;
+                  if (side === 'A') {
+                    targetItem = matchingItems[0];
+                  } else {
+                    targetItem = matchingItems[1];
+                  }
+                  
+                  if (targetItem) {
+                    // 既存アイテムを更新（サークル名、タイトル、価格のみ）
+                    const updatedItem: ShoppingItem = {
+                      ...targetItem,
+                      circle: data.circle || targetItem.circle,
+                      title: data.title || targetItem.title,
+                      price: data.price !== null ? data.price : targetItem.price,
+                    };
+                    return {
+                      ...prev,
+                      [activeEventName]: prev[activeEventName].map(item => 
+                        item.id === targetItem!.id ? updatedItem : item
+                      )
+                    };
+                  } else {
+                    // 新規アイテムを作成
+                    const newItem: ShoppingItem = {
+                      id: crypto.randomUUID(),
+                      circle: data.circle,
+                      eventDate: eventDate,
+                      block: block || '',
+                      number: number,
+                      title: data.title,
+                      price: data.price,
+                      purchaseStatus: 'None' as PurchaseStatus,
+                      quantity: 1,
+                      remarks: '',
+                    };
+                    return {
+                      ...prev,
+                      [activeEventName]: insertItemSorted(prev[activeEventName], newItem)
+                    };
+                  }
+                });
+              }}
+            />
+          );
+        })()}
         {activeEventName && mainContentVisible && !isMapTab && (
           <div style={{
               transform: `scale(${zoomLevel / 100})`,
