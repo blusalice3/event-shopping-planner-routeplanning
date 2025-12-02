@@ -330,7 +330,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         </div>
       </div>
       
-      <div className="relative flex flex-col items-end justify-between space-y-2 p-4 border-l border-slate-200/80 dark:border-slate-700/80 z-10">
+      <div className="relative flex flex-col items-end justify-between space-y-3 p-4 border-l border-slate-200/80 dark:border-slate-700/80 z-10">
         {hasWarningTags && (
           <div 
             className="absolute inset-0 pointer-events-none rounded-r-lg"
@@ -343,17 +343,18 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         )}
         <button 
           onClick={togglePurchaseStatus} 
-          className="flex items-center space-x-2 p-2 -m-2 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors relative z-10"
+          className="flex items-center space-x-2 p-2 -m-2 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors relative z-10 w-full justify-start"
           aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         >
           <IconComponent className={`w-7 h-7 ${currentStatus.color}`} />
           <span className={`font-semibold w-16 text-left ${currentStatus.color}`}>{currentStatus.label}</span>
         </button>
-        <div className="flex items-center relative z-10">
+        <div className="flex items-center gap-2 relative z-10 w-full">
+          <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">数量</span>
           <select
             value={item.quantity}
             onChange={handleQuantityChange}
-            className="w-20 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none"
+            className="flex-1 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none min-w-[60px]"
           >
             {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
               <option key={num} value={num}>
@@ -362,12 +363,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             ))}
           </select>
         </div>
-        <div className="flex items-center relative z-10">
-            {item.price !== null && <span className="text-slate-500 dark:text-slate-400 mr-1">¥</span>}
+        <div className="flex items-center gap-1 relative z-10 w-full justify-end">
+            {item.price !== null && <span className="text-slate-500 dark:text-slate-400">¥</span>}
             <select
               value={item.price === null ? '' : item.price}
               onChange={handlePriceChange}
-              className={`w-28 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none ${
+              className={`flex-1 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none min-w-[100px] ${
                 item.price === null ? 'text-red-600 dark:text-red-400' : ''
               }`}
             >
