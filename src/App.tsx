@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapData, EventMapData } from './types';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, EventMapData } from './types';
 import { readMapDataFromXlsx } from './utils/xlsxReader';
 import ImportScreen from './components/ImportScreen';
 import ShoppingList from './components/ShoppingList';
@@ -55,7 +55,6 @@ const App: React.FC = () => {
   const [executeModeItems, setExecuteModeItems] = useState<Record<string, ExecuteModeItems>>({});
   const [dayModes, setDayModes] = useState<Record<string, DayModeState>>({});
   const [eventMapData, setEventMapData] = useState<EventMapData>({});
-  const fileInputRef = useRef<HTMLInputElement>(null);
   
   const [activeEventName, setActiveEventName] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -1144,6 +1143,33 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setShowRenameDialog(false);
     setEventToRename(null);
   }, [eventToRename, eventLists, activeEventName]);
+
+  const handleImportMap = useCallback((eventName: string) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.xlsx,.xls';
+    input.onchange = async (e) => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
+
+      try {
+        const mapDataMap = await readMapDataFromXlsx(file);
+        const mapData: Record<string, any[][]> = {};
+        mapDataMap.forEach((data, key) => {
+          mapData[key] = data;
+        });
+        setEventMapData(prev => ({
+          ...prev,
+          [eventName]: mapData,
+        }));
+        alert('マップデータの取り込みが完了しました。');
+      } catch (error) {
+        console.error('マップデータの読み込みに失敗しました:', error);
+        alert('マップデータの読み込みに失敗しました。ファイル形式を確認してください。');
+      }
+    };
+    input.click();
+  }, []);
 
   const handleSortToggle = () => {
     setSelectedItemIds(new Set());
