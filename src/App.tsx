@@ -2243,16 +2243,30 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     return items.filter(item => item.eventDate === activeTab);
   }, [items, activeTab, activeEventName, eventDates]);
 
-  const TabButton: React.FC<{tab: ActiveTab, label: string, count?: number, onClick?: () => void}> = ({ tab, label, count, onClick }) => {
+  // マップタブメニューの状態
+  const [mapTabMenuOpen, setMapTabMenuOpen] = useState<string | null>(null);
+  const [visitListPanelOpen, setVisitListPanelOpen] = useState(false);
+  const [blockDefinitionMode, setBlockDefinitionMode] = useState(false);
+  
+  // 将来機能用に保持
+  void visitListPanelOpen;
+  void blockDefinitionMode;
+
+  const TabButton: React.FC<{tab: ActiveTab, label: string, count?: number, onClick?: () => void, isMapTab?: boolean}> = ({ tab, label, count, onClick, isMapTab: isMapTabProp }) => {
     const longPressTimeout = React.useRef<number | null>(null);
+    const menuRef = React.useRef<HTMLDivElement>(null);
 
     const handlePointerDown = () => {
-      if (!eventDates.includes(tab)) return;
       if (!activeEventName) return;
       
       longPressTimeout.current = window.setTimeout(() => {
-        // 長押しでモード切り替え
-        handleToggleMode();
+        if (isMapTabProp) {
+          // マップタブの長押しメニュー
+          setMapTabMenuOpen(tab);
+        } else if (eventDates.includes(tab)) {
+          // 通常の日付タブの長押し（モード切り替え）
+          handleToggleMode();
+        }
         longPressTimeout.current = null;
       }, 500);
     };
@@ -2265,6 +2279,10 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     };
 
     const handleClick = () => {
+      if (mapTabMenuOpen) {
+        setMapTabMenuOpen(null);
+        return;
+      }
       if (onClick) {
         onClick();
       } else {
@@ -2276,8 +2294,21 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       }
     };
 
+    // メニュー外クリックで閉じる
+    React.useEffect(() => {
+      const handleClickOutside = (e: MouseEvent) => {
+        if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+          setMapTabMenuOpen(null);
+        }
+      };
+      if (mapTabMenuOpen === tab) {
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+      }
+    }, [tab]);
+
     return (
-      <div className="relative">
+      <div className="relative" ref={menuRef}>
         <button
           onClick={handleClick}
           onPointerDown={handlePointerDown}
@@ -2291,6 +2322,30 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         >
           {label} {typeof count !== 'undefined' && <span className="text-xs bg-slate-200 dark:text-slate-700 rounded-full px-2 py-0.5 ml-1">{count}</span>}
         </button>
+        
+        {/* マップタブ長押しメニュー */}
+        {mapTabMenuOpen === tab && isMapTabProp && (
+          <div className="absolute top-full left-0 mt-1 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 z-50 min-w-[160px]">
+            <button
+              onClick={() => {
+                setVisitListPanelOpen(true);
+                setMapTabMenuOpen(null);
+              }}
+              className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-t-lg"
+            >
+              📍 訪問先リスト
+            </button>
+            <button
+              onClick={() => {
+                setBlockDefinitionMode(true);
+                setMapTabMenuOpen(null);
+              }}
+              className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-b-lg"
+            >
+              🔲 ブロック定義
+            </button>
+          </div>
+        )}
       </div>
     );
   };
@@ -2624,7 +2679,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                               {hasMapData && (
                                 <TabButton 
                                   tab={mapTabName} 
-                                  label={`${eventDate}マップ`} 
+                                  label={`${eventDate}マップ`}
+                                  isMapTab={true}
                                 />
                               )}
                             </React.Fragment>

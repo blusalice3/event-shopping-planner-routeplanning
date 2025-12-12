@@ -78,21 +78,23 @@ export interface NumberCellInfo {
 }
 
 export interface BlockDefinition {
-  id: string;
   name: string;
-  cellRange: {
-    startRow: number;
-    startCol: number;
-    endRow: number;
-    endCol: number;
-  };
-  isAutoDetected: boolean;
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
   numberCells: NumberCellInfo[];
+  color?: string;
+  id?: string;
+  isAutoDetected?: boolean;
 }
 
 export interface DayMapData {
-  rows: number;
-  cols: number;
+  sheetName?: string;
+  rows?: number;
+  cols?: number;
+  maxRow: number;
+  maxCol: number;
   cells: CellData[];
   mergedCells: MergedCellInfo[];
   blocks: BlockDefinition[];
@@ -160,8 +162,17 @@ export interface ExportData {
   };
 }
 
-// マップセルの状態
-export type MapCellState = 'default' | 'hasItems' | 'partialVisit' | 'allVisit';
+// マップセルの状態（詳細版）
+export interface MapCellStateDetail {
+  hasItems: boolean;
+  itemCount: number;
+  isVisited: boolean;
+  isFullyVisited: boolean;
+  items: ShoppingItem[];
+}
+
+// マップセルの状態（シンプル版、後方互換用）
+export type MapCellState = 'default' | 'hasItems' | 'partialVisit' | 'allVisit' | MapCellStateDetail;
 
 // マップ表示用のセル情報
 export interface MapDisplayCell {

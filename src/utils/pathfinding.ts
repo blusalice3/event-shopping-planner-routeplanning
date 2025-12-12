@@ -49,7 +49,9 @@ export function findPath(
   endCol: number,
   blockNameCells: Set<string>
 ): { row: number; col: number }[] {
-  const { rows: maxRow, cols: maxCol, cells } = mapData;
+  const maxRow = mapData.maxRow;
+  const maxCol = mapData.maxCol;
+  const cells = mapData.cells;
   
   // セルマップを作成
   const cellsMap = new Map<string, CellData>();

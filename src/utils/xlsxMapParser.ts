@@ -1,3 +1,9 @@
+/**
+ * Excel マップファイル解析ユーティリティ
+ * 罫線、結合セル、背景色、ブロック定義を正確に抽出
+ */
+
+import * as XLSX from 'xlsx';
 import {
   CellData,
   CellBorders,
@@ -5,52 +11,53 @@ import {
   MergedCellInfo,
   BlockDefinition,
   DayMapData,
-  NumberCellInfo,
+  ShoppingItem,
 } from '../types';
 
-// SheetJS (xlsx) の型定義
-interface XLSXWorkbook {
-  SheetNames: string[];
-  Sheets: { [sheetName: string]: XLSXWorksheet };
-}
-
-interface XLSXWorksheet {
-  '!ref'?: string;
-  '!merges'?: XLSXRange[];
-  [cellAddress: string]: XLSXCell | string | XLSXRange[] | undefined;
-}
-
+// SheetJSのセル型定義
 interface XLSXCell {
   v?: string | number | boolean;
   t?: string;
-  s?: XLSXCellStyle;
-}
-
-interface XLSXCellStyle {
-  fill?: {
-    fgColor?: { rgb?: string; theme?: number };
-    bgColor?: { rgb?: string };
+  s?: {
+    fill?: {
+      fgColor?: { rgb?: string; theme?: number; tint?: number };
+      bgColor?: { rgb?: string };
+      patternType?: string;
+    };
     patternType?: string;
+    fgColor?: { rgb?: string };
+    bgColor?: { rgb?: string };
+    border?: {
+      top?: { style?: string; color?: { rgb?: string } };
+      right?: { style?: string; color?: { rgb?: string } };
+      bottom?: { style?: string; color?: { rgb?: string } };
+      left?: { style?: string; color?: { rgb?: string } };
+    };
+    font?: {
+      sz?: number;
+      bold?: boolean;
+      color?: { rgb?: string };
+    };
+    alignment?: {
+      horizontal?: string;
+      vertical?: string;
+    };
   };
-  border?: {
-    top?: XLSXBorder;
-    right?: XLSXBorder;
-    bottom?: XLSXBorder;
-    left?: XLSXBorder;
-  };
 }
 
-interface XLSXBorder {
-  style?: string;
-  color?: { rgb?: string; theme?: number };
+// 列番号を文字に変換
+function numberToColumnLetter(col: number): string {
+  let result = '';
+  let c = col;
+  while (c > 0) {
+    const remainder = (c - 1) % 26;
+    result = String.fromCharCode(65 + remainder) + result;
+    c = Math.floor((c - 1) / 26);
+  }
+  return result;
 }
 
-interface XLSXRange {
-  s: { r: number; c: number };
-  e: { r: number; c: number };
-}
-
-// セルアドレスを行・列に変換
+// セルアドレスを行・列番号に変換
 function cellAddressToRowCol(address: string): { row: number; col: number } | null {
   const match = address.match(/^([A-Z]+)(\d+)$/);
   if (!match) return null;
@@ -67,133 +74,89 @@ function cellAddressToRowCol(address: string): { row: number; col: number } | nu
 }
 
 // 罫線スタイルを変換
-function convertBorderStyle(xlsxBorder?: XLSXBorder): BorderStyle | null {
-  if (!xlsxBorder || !xlsxBorder.style) return null;
+function convertBorderStyle(border?: { style?: string; color?: { rgb?: string } }): BorderStyle | null {
+  if (!border || !border.style || border.style === 'none') return null;
   
-  const styleMap: { [key: string]: BorderStyle['style'] } = {
+  const styleMap: Record<string, 'thin' | 'medium' | 'thick' | 'double'> = {
     thin: 'thin',
     medium: 'medium',
     thick: 'thick',
     double: 'double',
+    hair: 'thin',
+    dotted: 'thin',
+    dashed: 'thin',
+    dashDot: 'thin',
+    dashDotDot: 'thin',
+    mediumDashed: 'medium',
+    mediumDashDot: 'medium',
+    mediumDashDotDot: 'medium',
+    slantDashDot: 'medium',
   };
   
-  const style = styleMap[xlsxBorder.style] || 'thin';
-  const color = xlsxBorder.color?.rgb ? `#${xlsxBorder.color.rgb}` : '#000000';
-  
-  return { style, color };
+  return {
+    style: styleMap[border.style] || 'thin',
+    color: border.color?.rgb ? `#${border.color.rgb}` : '#000000',
+  };
 }
 
 // 背景色を取得
-function getBackgroundColor(cellStyle?: XLSXCellStyle): string | null {
-  if (!cellStyle?.fill) return null;
+function getBackgroundColor(style?: XLSXCell['s']): string | null {
+  if (!style) return null;
   
-  const fill = cellStyle.fill;
-  if (fill.patternType === 'none') return null;
+  // fill プロパティをチェック
+  if (style.fill) {
+    if (style.fill.fgColor?.rgb && style.fill.fgColor.rgb !== 'FFFFFF' && style.fill.fgColor.rgb !== '000000') {
+      return `#${style.fill.fgColor.rgb}`;
+    }
+  }
   
-  if (fill.fgColor?.rgb) {
-    const rgb = fill.fgColor.rgb;
-    // FFFFFFFFは白なので無視
-    if (rgb === 'FFFFFFFF' || rgb === '00000000') return null;
-    return `#${rgb.slice(-6)}`;
+  // 直接のプロパティをチェック
+  if (style.fgColor?.rgb && style.fgColor.rgb !== 'FFFFFF' && style.fgColor.rgb !== '000000') {
+    return `#${style.fgColor.rgb}`;
   }
   
   return null;
 }
 
 // ブロック名かどうかを判定
-function isBlockNameValue(value: string | number | null): boolean {
+function isBlockName(value: string | number | null): boolean {
   if (value === null || value === undefined) return false;
   const str = String(value).trim();
   if (str.length === 0 || str.length > 3) return false;
   
-  // カタカナ、ひらがな、アルファベット1-3文字
-  return /^[ァ-ヶア-ンa-zA-Zぁ-んー]+$/.test(str);
+  // カタカナ、ひらがな、アルファベット（大文字・小文字）
+  const katakana = /^[ア-ンァ-ヴー]+$/;
+  const hiragana = /^[あ-んぁ-ゔー]+$/;
+  const alphabet = /^[A-Za-z]+$/;
+  
+  return katakana.test(str) || hiragana.test(str) || alphabet.test(str);
 }
 
 // 数値セルかどうかを判定
 function isNumberCell(value: string | number | null): boolean {
   if (value === null || value === undefined) return false;
-  if (typeof value === 'number') return true;
-  const num = parseInt(String(value), 10);
-  return !isNaN(num) && num > 0;
+  const num = typeof value === 'number' ? value : parseFloat(String(value));
+  return !isNaN(num) && num > 0 && num <= 100;
 }
 
-// 太い罫線で囲まれた範囲を検出
-function detectBlockBoundary(
-  cells: Map<string, CellData>,
-  startRow: number,
-  startCol: number,
-  maxRow: number,
-  maxCol: number
-): { startRow: number; startCol: number; endRow: number; endCol: number } | null {
-  const visited = new Set<string>();
-  const queue: { row: number; col: number }[] = [{ row: startRow, col: startCol }];
-  
-  let minRow = startRow, maxRowFound = startRow;
-  let minCol = startCol, maxColFound = startCol;
-  
-  while (queue.length > 0) {
-    const { row, col } = queue.shift()!;
-    const key = `${row}-${col}`;
-    
-    if (visited.has(key)) continue;
-    if (row < 1 || col < 1 || row > maxRow || col > maxCol) continue;
-    
-    visited.add(key);
-    
-    minRow = Math.min(minRow, row);
-    maxRowFound = Math.max(maxRowFound, row);
-    minCol = Math.min(minCol, col);
-    maxColFound = Math.max(maxColFound, col);
-    
-    const cell = cells.get(key);
-    const borders = cell?.borders;
-    
-    // 上に移動可能か（上に太い罫線がないか）
-    if (!borders?.top || borders.top.style === 'thin' || borders.top.style === 'none') {
-      queue.push({ row: row - 1, col });
-    }
-    // 下に移動可能か
-    if (!borders?.bottom || borders.bottom.style === 'thin' || borders.bottom.style === 'none') {
-      queue.push({ row: row + 1, col });
-    }
-    // 左に移動可能か
-    if (!borders?.left || borders.left.style === 'thin' || borders.left.style === 'none') {
-      queue.push({ row, col: col - 1 });
-    }
-    // 右に移動可能か
-    if (!borders?.right || borders.right.style === 'thin' || borders.right.style === 'none') {
-      queue.push({ row, col: col + 1 });
-    }
-  }
-  
-  if (visited.size < 4) return null;
-  
-  return {
-    startRow: minRow,
-    startCol: minCol,
-    endRow: maxRowFound,
-    endCol: maxColFound,
-  };
-}
-
-// シートからマップデータを抽出
+/**
+ * シートからマップデータを解析
+ */
 export function parseMapSheet(
-  workbook: XLSXWorkbook,
+  workbook: XLSX.WorkBook,
   sheetName: string
 ): DayMapData | null {
   const sheet = workbook.Sheets[sheetName];
   if (!sheet) return null;
   
-  const ref = sheet['!ref'];
-  if (!ref) return null;
+  const range = sheet['!ref'];
+  if (!range) return null;
   
-  // 範囲を解析
-  const refMatch = ref.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
-  if (!refMatch) return null;
+  const rangeMatch = range.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
+  if (!rangeMatch) return null;
   
-  const startAddr = cellAddressToRowCol(`${refMatch[1]}${refMatch[2]}`);
-  const endAddr = cellAddressToRowCol(`${refMatch[3]}${refMatch[4]}`);
+  const startAddr = cellAddressToRowCol(`${rangeMatch[1]}${rangeMatch[2]}`);
+  const endAddr = cellAddressToRowCol(`${rangeMatch[3]}${rangeMatch[4]}`);
   if (!startAddr || !endAddr) return null;
   
   const maxRow = endAddr.row;
@@ -205,37 +168,33 @@ export function parseMapSheet(
   const mergeMap = new Map<string, { row: number; col: number }>();
   
   merges.forEach((merge) => {
-    const startCell = cellAddressToRowCol(
-      `${String.fromCharCode(65 + merge.s.c)}${merge.s.r + 1}`
-    );
-    if (!startCell) return;
-    
     // 結合セルの値を取得
     let value: string | number | null = null;
-    const cellKey = Object.keys(sheet).find((key) => {
-      const addr = cellAddressToRowCol(key);
-      return addr && addr.row === merge.s.r + 1 && addr.col === merge.s.c + 1;
-    });
-    if (cellKey && sheet[cellKey]) {
-      const cell = sheet[cellKey] as XLSXCell;
+    const startCol = merge.s.c + 1;
+    const startRow = merge.s.r + 1;
+    const colLetter = numberToColumnLetter(startCol);
+    const addr = `${colLetter}${startRow}`;
+    
+    if (sheet[addr]) {
+      const cell = sheet[addr] as XLSXCell;
       const cellValue = cell.v;
       if (cellValue !== undefined && typeof cellValue !== 'boolean') {
-        value = cellValue;
+        value = cellValue as string | number;
       }
     }
     
     mergedCells.push({
-      startRow: merge.s.r + 1,
-      startCol: merge.s.c + 1,
+      startRow,
+      startCol,
       endRow: merge.e.r + 1,
       endCol: merge.e.c + 1,
-      value: value as string | number | null,
+      value,
     });
     
     // 結合セルのマップを作成
-    for (let r = merge.s.r + 1; r <= merge.e.r + 1; r++) {
-      for (let c = merge.s.c + 1; c <= merge.e.c + 1; c++) {
-        mergeMap.set(`${r}-${c}`, { row: merge.s.r + 1, col: merge.s.c + 1 });
+    for (let r = startRow; r <= merge.e.r + 1; r++) {
+      for (let c = startCol; c <= merge.e.c + 1; c++) {
+        mergeMap.set(`${r}-${c}`, { row: startRow, col: startCol });
       }
     }
   });
@@ -262,9 +221,13 @@ export function parseMapSheet(
       let borders: CellBorders = { top: null, right: null, bottom: null, left: null };
       
       if (xlsxCell) {
-        value = xlsxCell.v !== undefined ? (xlsxCell.v as string | number) : null;
+        // 値を取得（booleanは除外）
+        if (xlsxCell.v !== undefined && typeof xlsxCell.v !== 'boolean') {
+          value = xlsxCell.v as string | number;
+        }
         backgroundColor = getBackgroundColor(xlsxCell.s);
         
+        // 罫線を取得
         if (xlsxCell.s?.border) {
           borders = {
             top: convertBorderStyle(xlsxCell.s.border.top),
@@ -275,8 +238,9 @@ export function parseMapSheet(
         }
       }
       
-      // データが存在する範囲を更新
-      if (value !== null || backgroundColor !== null || 
+      // 実際のデータ範囲を更新
+      if (value !== null ||
+          backgroundColor ||
           borders.top || borders.right || borders.bottom || borders.left) {
         actualMaxRow = Math.max(actualMaxRow, row);
         actualMaxCol = Math.max(actualMaxCol, col);
@@ -303,171 +267,295 @@ export function parseMapSheet(
   );
   
   // ブロックを自動検出
-  const blocks: BlockDefinition[] = [];
-  const processedBlocks = new Set<string>();
-  
-  // 4セル以上の結合セルでブロック名っぽい値を持つものを探す
-  mergedCells.forEach((merge) => {
-    const size = (merge.endRow - merge.startRow + 1) * (merge.endCol - merge.startCol + 1);
-    if (size < 4) return;
-    if (!isBlockNameValue(merge.value)) return;
-    
-    const blockKey = `${merge.startRow}-${merge.startCol}`;
-    if (processedBlocks.has(blockKey)) return;
-    
-    // 太い罫線で囲まれた範囲を検出
-    const boundary = detectBlockBoundary(
-      cellsMap,
-      merge.startRow,
-      merge.startCol,
-      actualMaxRow,
-      actualMaxCol
-    );
-    
-    if (!boundary) return;
-    
-    // 範囲内の数値セルを収集
-    const numberCells: NumberCellInfo[] = [];
-    for (let r = boundary.startRow; r <= boundary.endRow; r++) {
-      for (let c = boundary.startCol; c <= boundary.endCol; c++) {
-        const cell = cellsMap.get(`${r}-${c}`);
-        if (cell && isNumberCell(cell.value)) {
-          numberCells.push({
-            row: r,
-            col: c,
-            value: typeof cell.value === 'number' ? cell.value : parseInt(String(cell.value), 10),
-          });
-        }
-      }
-    }
-    
-    if (numberCells.length === 0) return;
-    
-    processedBlocks.add(blockKey);
-    
-    blocks.push({
-      id: crypto.randomUUID(),
-      name: String(merge.value),
-      cellRange: boundary,
-      isAutoDetected: true,
-      numberCells,
-    });
-  });
+  const blocks = detectBlocks(mergedCells, cellsMap, actualMaxRow, actualMaxCol);
   
   return {
-    rows: actualMaxRow,
-    cols: actualMaxCol,
+    sheetName,
     cells: filteredCells,
     mergedCells: mergedCells.filter(
       (m) => m.startRow <= actualMaxRow && m.startCol <= actualMaxCol
     ),
     blocks,
+    maxRow: actualMaxRow,
+    maxCol: actualMaxCol,
   };
 }
 
-// 列番号を列文字に変換
-function numberToColumnLetter(col: number): string {
-  let result = '';
-  while (col > 0) {
-    col--;
-    result = String.fromCharCode(65 + (col % 26)) + result;
-    col = Math.floor(col / 26);
+/**
+ * ブロックを自動検出
+ * 4セル以上の結合セルでブロック名を持つものを探し、
+ * 周囲の数値セルをブロックのナンバーセルとして関連付ける
+ */
+function detectBlocks(
+  mergedCells: MergedCellInfo[],
+  cellsMap: Map<string, CellData>,
+  maxRow: number,
+  maxCol: number
+): BlockDefinition[] {
+  const blocks: BlockDefinition[] = [];
+  const processedCells = new Set<string>();
+  
+  // 4セル以上の結合セルでブロック名を持つものを探す
+  const blockNameMerges = mergedCells.filter((merge) => {
+    const rows = merge.endRow - merge.startRow + 1;
+    const cols = merge.endCol - merge.startCol + 1;
+    const cellCount = rows * cols;
+    return cellCount >= 4 && isBlockName(merge.value);
+  });
+  
+  blockNameMerges.forEach((merge) => {
+    const blockName = String(merge.value).trim();
+    
+    // 既に同じ名前のブロックがあるかチェック
+    const existingBlock = blocks.find((b) => b.name === blockName);
+    if (existingBlock) {
+      // 既存ブロックに追加（複数領域のブロック）
+      // 周囲の数値セルを探す
+      const numberCells = findSurroundingNumberCells(
+        merge,
+        cellsMap,
+        processedCells,
+        maxRow,
+        maxCol
+      );
+      existingBlock.numberCells.push(...numberCells);
+      
+      // 範囲を更新
+      existingBlock.startRow = Math.min(existingBlock.startRow, merge.startRow);
+      existingBlock.startCol = Math.min(existingBlock.startCol, merge.startCol);
+      existingBlock.endRow = Math.max(existingBlock.endRow, merge.endRow);
+      existingBlock.endCol = Math.max(existingBlock.endCol, merge.endCol);
+      return;
+    }
+    
+    // 周囲の数値セルを探す
+    const numberCells = findSurroundingNumberCells(
+      merge,
+      cellsMap,
+      processedCells,
+      maxRow,
+      maxCol
+    );
+    
+    if (numberCells.length > 0) {
+      // 数値セルの範囲を計算
+      let minRow = merge.startRow;
+      let minCol = merge.startCol;
+      let maxRowBlock = merge.endRow;
+      let maxColBlock = merge.endCol;
+      
+      numberCells.forEach((nc) => {
+        minRow = Math.min(minRow, nc.row);
+        minCol = Math.min(minCol, nc.col);
+        maxRowBlock = Math.max(maxRowBlock, nc.row);
+        maxColBlock = Math.max(maxColBlock, nc.col);
+      });
+      
+      blocks.push({
+        name: blockName,
+        startRow: minRow,
+        startCol: minCol,
+        endRow: maxRowBlock,
+        endCol: maxColBlock,
+        numberCells,
+        color: generateBlockColor(blocks.length),
+      });
+    }
+  });
+  
+  return blocks;
+}
+
+/**
+ * 結合セルの周囲にある数値セルを探す
+ */
+function findSurroundingNumberCells(
+  merge: MergedCellInfo,
+  cellsMap: Map<string, CellData>,
+  processedCells: Set<string>,
+  maxRow: number,
+  maxCol: number
+): Array<{ row: number; col: number; value: number }> {
+  const numberCells: Array<{ row: number; col: number; value: number }> = [];
+  
+  // 検索範囲を広げて周囲の数値セルを探す
+  const searchRadius = 50; // 検索半径
+  
+  const startRow = Math.max(1, merge.startRow - searchRadius);
+  const endRow = Math.min(maxRow, merge.endRow + searchRadius);
+  const startCol = Math.max(1, merge.startCol - searchRadius);
+  const endCol = Math.min(maxCol, merge.endCol + searchRadius);
+  
+  for (let r = startRow; r <= endRow; r++) {
+    for (let c = startCol; c <= endCol; c++) {
+      const key = `${r}-${c}`;
+      if (processedCells.has(key)) continue;
+      
+      const cell = cellsMap.get(key);
+      if (!cell || cell.isMerged) continue;
+      
+      if (isNumberCell(cell.value)) {
+        const numValue = typeof cell.value === 'number' 
+          ? cell.value 
+          : parseFloat(String(cell.value));
+        
+        // 近くにあるかチェック（距離ベース）
+        const distToMerge = Math.min(
+          Math.abs(r - merge.startRow),
+          Math.abs(r - merge.endRow),
+          Math.abs(c - merge.startCol),
+          Math.abs(c - merge.endCol)
+        );
+        
+        if (distToMerge <= searchRadius) {
+          numberCells.push({
+            row: r,
+            col: c,
+            value: numValue,
+          });
+          processedCells.add(key);
+        }
+      }
+    }
   }
-  return result;
+  
+  return numberCells;
 }
 
-// 「○日目」シートを検出
-export function findDaySheets(workbook: XLSXWorkbook): string[] {
-  const daySheetPattern = /^[0-9０-９]+日目$/;
-  return workbook.SheetNames.filter((name) => daySheetPattern.test(name));
+/**
+ * ブロック用の色を生成
+ */
+function generateBlockColor(index: number): string {
+  const colors = [
+    '#E3F2FD', // 青
+    '#E8F5E9', // 緑
+    '#FFF3E0', // オレンジ
+    '#F3E5F5', // 紫
+    '#E0F7FA', // シアン
+    '#FBE9E7', // 深いオレンジ
+    '#F1F8E9', // ライトグリーン
+    '#FCE4EC', // ピンク
+    '#E8EAF6', // インディゴ
+    '#FFFDE7', // 黄色
+  ];
+  return colors[index % colors.length];
 }
 
-// ファイルからマップデータを読み込む
+/**
+ * マップファイル（xlsx）を解析
+ */
 export async function parseMapFile(
   file: File
-): Promise<{ [dayName: string]: DayMapData } | null> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
+): Promise<Record<string, DayMapData> | null> {
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    const workbook = XLSX.read(arrayBuffer, { 
+      cellStyles: true,
+      cellNF: true,
+    });
     
-    reader.onload = async (e) => {
-      try {
-        const data = e.target?.result;
-        if (!data) {
-          reject(new Error('ファイルの読み込みに失敗しました'));
-          return;
+    const result: Record<string, DayMapData> = {};
+    
+    // "○日目" パターンのシートを探す
+    const dayPattern = /^(\d+日目)$/;
+    
+    workbook.SheetNames.forEach((sheetName) => {
+      const match = sheetName.match(dayPattern);
+      if (match) {
+        const mapData = parseMapSheet(workbook, sheetName);
+        if (mapData) {
+          // シート名を "○日目マップ" に変換
+          const mapName = `${match[1]}マップ`;
+          result[mapName] = mapData;
         }
-        
-        // SheetJSを動的にインポート
-        const XLSX = await import('xlsx');
-        
-        const workbook = XLSX.read(data, {
-          type: 'array',
-          cellStyles: true,
-          cellNF: true,
-        }) as unknown as XLSXWorkbook;
-        
-        const daySheets = findDaySheets(workbook);
-        if (daySheets.length === 0) {
-          reject(new Error('「○日目」という名前のシートが見つかりませんでした'));
-          return;
-        }
-        
-        const result: { [dayName: string]: DayMapData } = {};
-        
-        for (const sheetName of daySheets) {
-          const mapData = parseMapSheet(workbook, sheetName);
-          if (mapData) {
-            const mapName = `${sheetName}マップ`;
-            result[mapName] = mapData;
-          }
-        }
-        
-        if (Object.keys(result).length === 0) {
-          reject(new Error('マップデータの解析に失敗しました'));
-          return;
-        }
-        
-        resolve(result);
-      } catch (error) {
-        reject(error);
       }
-    };
+    });
     
-    reader.onerror = () => {
-      reject(new Error('ファイルの読み込みに失敗しました'));
-    };
-    
-    reader.readAsArrayBuffer(file);
-  });
+    return Object.keys(result).length > 0 ? result : null;
+  } catch (error) {
+    console.error('Error parsing map file:', error);
+    return null;
+  }
 }
 
-// ナンバーから数値部分を抽出
-export function extractNumberFromItemNumber(number: string): string {
-  const match = number.match(/^\d+/);
-  return match ? match[0] : '';
+/**
+ * "○日目" パターンのシートを検出
+ */
+export function findDaySheets(workbook: XLSX.WorkBook): string[] {
+  const dayPattern = /^\d+日目$/;
+  return workbook.SheetNames.filter((name) => dayPattern.test(name));
 }
 
-// アイテムとマップセルの照合
+/**
+ * アイテムの番号から数値部分を抽出
+ * 例: "26a" -> "26", "26b1" -> "26"
+ */
+export function extractNumberFromItemNumber(itemNumber: string): string | null {
+  const match = itemNumber.match(/^(\d+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * アイテムをマップのセルにマッチング
+ */
 export function matchItemToCell(
-  itemEventDate: string,
-  itemBlock: string,
-  itemNumber: string,
-  mapDayName: string,
-  block: BlockDefinition
-): NumberCellInfo | null {
-  // 参加日の照合（「1日目」と「1日目マップ」）
-  const expectedMapName = `${itemEventDate}マップ`;
-  if (mapDayName !== expectedMapName) return null;
+  item: ShoppingItem,
+  mapData: DayMapData,
+  dayName: string
+): { row: number; col: number } | null {
+  // 参加日をチェック
+  if (item.eventDate !== dayName) return null;
   
-  // ブロック名の照合
-  if (block.name !== itemBlock) return null;
+  // ブロックを探す
+  const block = mapData.blocks.find((b) => b.name === item.block);
+  if (!block) return null;
   
-  // ナンバーの数値部分を抽出して照合
-  const itemNum = extractNumberFromItemNumber(itemNumber);
-  if (!itemNum) return null;
+  // ナンバーの数値部分を抽出
+  const numStr = extractNumberFromItemNumber(item.number);
+  if (!numStr) return null;
   
-  const numValue = parseInt(itemNum, 10);
+  const numValue = parseInt(numStr, 10);
   
-  // ブロック内の数値セルから一致するものを探す
-  return block.numberCells.find((cell) => cell.value === numValue) || null;
+  // ブロック内の該当する数値セルを探す
+  const numberCell = block.numberCells.find((c) => c.value === numValue);
+  if (!numberCell) return null;
+  
+  return { row: numberCell.row, col: numberCell.col };
+}
+
+/**
+ * ブロック定義を手動で作成/更新
+ */
+export function createBlockDefinition(
+  name: string,
+  startRow: number,
+  startCol: number,
+  endRow: number,
+  endCol: number,
+  cellsMap: Map<string, CellData>
+): BlockDefinition {
+  const numberCells: Array<{ row: number; col: number; value: number }> = [];
+  
+  // 指定範囲内の数値セルを収集
+  for (let r = startRow; r <= endRow; r++) {
+    for (let c = startCol; c <= endCol; c++) {
+      const cell = cellsMap.get(`${r}-${c}`);
+      if (cell && !cell.isMerged && isNumberCell(cell.value)) {
+        const numValue = typeof cell.value === 'number'
+          ? cell.value
+          : parseFloat(String(cell.value));
+        numberCells.push({ row: r, col: c, value: numValue });
+      }
+    }
+  }
+  
+  return {
+    name,
+    startRow,
+    startCol,
+    endRow,
+    endCol,
+    numberCells,
+    color: '#E3F2FD',
+  };
 }

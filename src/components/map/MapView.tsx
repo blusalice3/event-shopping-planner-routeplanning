@@ -73,7 +73,7 @@ const MapView: React.FC<MapViewProps> = ({
       if (!block) return;
       
       const numStr = extractNumberFromItemNumber(firstItem.number);
-      const numValue = parseInt(numStr, 10);
+      const numValue = numStr ? parseInt(numStr, 10) : 0;
       
       // クリック位置を取得（簡易的にウィンドウ中央付近に表示）
       const position = {
