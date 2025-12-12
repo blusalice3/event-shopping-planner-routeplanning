@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems } from './types';
+import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapDataStore, RouteSettingsStore, ExportOptions } from './types';
 import ImportScreen from './components/ImportScreen';
 import ShoppingList from './components/ShoppingList';
 import SummaryBar from './components/SummaryBar';
@@ -10,10 +10,13 @@ import BulkActionControls from './components/BulkActionControls';
 import UpdateConfirmationModal from './components/UpdateConfirmationModal';
 import UrlUpdateDialog from './components/UrlUpdateDialog';
 import EventRenameDialog from './components/EventRenameDialog';
+import ExportOptionsDialog from './components/ExportOptionsDialog';
 import SortAscendingIcon from './components/icons/SortAscendingIcon';
 import SortDescendingIcon from './components/icons/SortDescendingIcon';
 import SearchBar from './components/SearchBar';
+import { MapView } from './components/map';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
+import { parseMapFile } from './utils/xlsxMapParser';
 
 type ActiveTab = 'eventList' | 'import' | string; // string部分は動的な参加日（例: '1日目', '2日目', '3日目'など）
 type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'Purchased';
@@ -86,12 +89,21 @@ const App: React.FC = () => {
   const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
+  // マップ機能の状態
+  const [mapData, setMapData] = useState<MapDataStore>({});
+  const [routeSettings, setRouteSettings] = useState<RouteSettingsStore>({});
+  const [showExportOptions, setShowExportOptions] = useState(false);
+  const [exportEventName, setExportEventName] = useState<string | null>(null);
+  const mapFileInputRef = React.useRef<HTMLInputElement>(null);
+
   useEffect(() => {
     try {
       const storedLists = localStorage.getItem('eventShoppingLists');
       const storedMetadata = localStorage.getItem('eventMetadata');
       const storedExecuteItems = localStorage.getItem('executeModeItems');
       const storedDayModes = localStorage.getItem('dayModes');
+      const storedMapData = localStorage.getItem('mapData');
+      const storedRouteSettings = localStorage.getItem('routeSettings');
       
       if (storedLists) {
         const parsedLists = JSON.parse(storedLists);
@@ -114,6 +126,12 @@ const App: React.FC = () => {
       if (storedDayModes) {
         setDayModes(JSON.parse(storedDayModes));
       }
+      if (storedMapData) {
+        setMapData(JSON.parse(storedMapData));
+      }
+      if (storedRouteSettings) {
+        setRouteSettings(JSON.parse(storedRouteSettings));
+      }
     } catch (error) {
       console.error("Failed to load data from localStorage", error);
     }
@@ -127,19 +145,44 @@ const App: React.FC = () => {
         localStorage.setItem('eventMetadata', JSON.stringify(eventMetadata));
         localStorage.setItem('executeModeItems', JSON.stringify(executeModeItems));
         localStorage.setItem('dayModes', JSON.stringify(dayModes));
+        localStorage.setItem('mapData', JSON.stringify(mapData));
+        localStorage.setItem('routeSettings', JSON.stringify(routeSettings));
       } catch (error) {
         console.error("Failed to save data to localStorage", error);
       }
     }
-  }, [eventLists, eventMetadata, executeModeItems, dayModes, isInitialized]);
+  }, [eventLists, eventMetadata, executeModeItems, dayModes, mapData, routeSettings, isInitialized]);
 
   const items = useMemo(() => activeEventName ? eventLists[activeEventName] || [] : [], [activeEventName, eventLists]);
   
   // 現在のイベントの参加日リストを取得
   const eventDates = useMemo(() => extractEventDates(items), [items]);
   
+  // 現在のイベントのマップタブリストを取得
+  const mapTabs = useMemo(() => {
+    if (!activeEventName || !mapData[activeEventName]) return [];
+    return Object.keys(mapData[activeEventName]).sort((a, b) => {
+      const numA = parseInt(a.match(/\d+/)?.[0] || '0', 10);
+      const numB = parseInt(b.match(/\d+/)?.[0] || '0', 10);
+      return numA - numB;
+    });
+  }, [activeEventName, mapData]);
+  
+  // マップタブかどうかを判定
+  const isMapTab = useMemo(() => {
+    return activeTab.endsWith('マップ');
+  }, [activeTab]);
+  
+  // 現在のマップデータを取得
+  const currentMapData = useMemo(() => {
+    if (!activeEventName || !isMapTab) return null;
+    return mapData[activeEventName]?.[activeTab] || null;
+  }, [activeEventName, activeTab, isMapTab, mapData]);
+  
   const currentMode = useMemo(() => {
     if (!activeEventName) return 'execute';
+    // マップタブの場合は編集モードを返す
+    if (isMapTab) return 'edit';
     const modes = dayModes[activeEventName];
     if (!modes) return 'edit';
     // activeTabが参加日（'1日目', '2日目'など）の場合
@@ -147,7 +190,7 @@ const App: React.FC = () => {
       return modes[activeTab] || 'edit';
     }
     return 'edit';
-  }, [activeEventName, dayModes, activeTab, eventDates]);
+  }, [activeEventName, dayModes, activeTab, eventDates, isMapTab]);
 
   const handleBulkAdd = useCallback((eventName: string, newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string; layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> }) => {
     const newItems: ShoppingItem[] = newItemsData.map(itemData => ({
@@ -1606,10 +1649,23 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     }
   }, [activeEventName, selectedItemIds, items, activeTab, dayModes, executeModeItems, eventDates]);
 
+  // エクスポートオプションダイアログを表示
   const handleExportEvent = useCallback((eventName: string) => {
     const itemsToExport = eventLists[eventName];
     if (!itemsToExport || itemsToExport.length === 0) {
       alert('エクスポートするアイテムがありません。');
+      return;
+    }
+    setExportEventName(eventName);
+    setShowExportOptions(true);
+  }, [eventLists]);
+
+  // 実際のエクスポート処理
+  const handleConfirmExport = useCallback((options: ExportOptions) => {
+    if (!exportEventName) return;
+    
+    const itemsToExport = eventLists[exportEventName];
+    if (!itemsToExport || itemsToExport.length === 0) {
       return;
     }
 
@@ -1632,12 +1688,18 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
 
     const csvRows: string[] = [];
 
+    // バージョンとメタデータ
+    csvRows.push(`#VERSION,${options.format === 'full' ? '2.0.0' : '1.0.0'}`);
+    csvRows.push(`#EXPORT_DATE,${new Date().toISOString()}`);
+
     // ヘッダー行を最初に出力
-    const headers = ['サークル名', '参加日', 'ブロック', 'ナンバー', 'タイトル', '頒布価格', '数量', '購入状態', '備考', '列の種類', '列内順番', 'URL'];
+    const headers = options.includeLayoutInfo 
+      ? ['サークル名', '参加日', 'ブロック', 'ナンバー', 'タイトル', '頒布価格', '数量', '購入状態', '備考', '列の種類', '列内順番', '訪問先順序', 'URL']
+      : ['サークル名', '参加日', 'ブロック', 'ナンバー', 'タイトル', '頒布価格', '数量', '購入状態', '備考', 'URL'];
     csvRows.push(headers.join(','));
 
     // メタデータ行: スプレッドシートURL（コメント行として最後に出力）
-    const metadata = eventMetadata[eventName];
+    const metadata = eventMetadata[exportEventName];
     if (metadata?.spreadsheetUrl) {
       csvRows.push(`#METADATA,spreadsheetUrl,${escapeCsvCell(metadata.spreadsheetUrl)}`);
     }
@@ -1647,7 +1709,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     const itemsMap = new Map(itemsToExport.map(item => [item.id, item]));
     
     eventDatesForExport.forEach(eventDate => {
-      const executeIds = executeModeItems[eventName]?.[eventDate] || [];
+      const executeIds = executeModeItems[exportEventName]?.[eventDate] || [];
       const executeIdsSet = new Set(executeIds);
       
       // その参加日のアイテムを取得
@@ -1665,42 +1727,78 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       
       // 実行列のアイテムをエクスポート
       executeItems.forEach((item, index) => {
-        const row = [
-          escapeCsvCell(item.circle),
-          escapeCsvCell(item.eventDate),
-          escapeCsvCell(item.block),
-          escapeCsvCell(item.number),
-          escapeCsvCell(item.title),
-          escapeCsvCell(item.price === null ? '' : item.price),
-          escapeCsvCell(item.quantity || 1),
-          escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
-          escapeCsvCell(item.remarks),
-          escapeCsvCell('実行列'),
-          escapeCsvCell(index + 1),
-          escapeCsvCell(item.url || ''),
-        ];
+        const row = options.includeLayoutInfo 
+          ? [
+              escapeCsvCell(item.circle),
+              escapeCsvCell(item.eventDate),
+              escapeCsvCell(item.block),
+              escapeCsvCell(item.number),
+              escapeCsvCell(item.title),
+              escapeCsvCell(item.price === null ? '' : item.price),
+              escapeCsvCell(item.quantity || 1),
+              escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
+              escapeCsvCell(item.remarks),
+              escapeCsvCell('実行列'),
+              escapeCsvCell(index + 1),
+              escapeCsvCell(index + 1), // 訪問先順序
+              escapeCsvCell(item.url || ''),
+            ]
+          : [
+              escapeCsvCell(item.circle),
+              escapeCsvCell(item.eventDate),
+              escapeCsvCell(item.block),
+              escapeCsvCell(item.number),
+              escapeCsvCell(item.title),
+              escapeCsvCell(item.price === null ? '' : item.price),
+              escapeCsvCell(item.quantity || 1),
+              escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
+              escapeCsvCell(item.remarks),
+              escapeCsvCell(item.url || ''),
+            ];
         csvRows.push(row.join(','));
       });
       
       // 候補リストのアイテムをエクスポート
       candidateItems.forEach((item, index) => {
-        const row = [
-          escapeCsvCell(item.circle),
-          escapeCsvCell(item.eventDate),
-          escapeCsvCell(item.block),
-          escapeCsvCell(item.number),
-          escapeCsvCell(item.title),
-          escapeCsvCell(item.price === null ? '' : item.price),
-          escapeCsvCell(item.quantity || 1),
-          escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
-          escapeCsvCell(item.remarks),
-          escapeCsvCell('候補リスト'),
-          escapeCsvCell(index + 1),
-          escapeCsvCell(item.url || ''),
-        ];
+        const row = options.includeLayoutInfo
+          ? [
+              escapeCsvCell(item.circle),
+              escapeCsvCell(item.eventDate),
+              escapeCsvCell(item.block),
+              escapeCsvCell(item.number),
+              escapeCsvCell(item.title),
+              escapeCsvCell(item.price === null ? '' : item.price),
+              escapeCsvCell(item.quantity || 1),
+              escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
+              escapeCsvCell(item.remarks),
+              escapeCsvCell('候補リスト'),
+              escapeCsvCell(index + 1),
+              escapeCsvCell(''), // 訪問先順序は空
+              escapeCsvCell(item.url || ''),
+            ]
+          : [
+              escapeCsvCell(item.circle),
+              escapeCsvCell(item.eventDate),
+              escapeCsvCell(item.block),
+              escapeCsvCell(item.number),
+              escapeCsvCell(item.title),
+              escapeCsvCell(item.price === null ? '' : item.price),
+              escapeCsvCell(item.quantity || 1),
+              escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
+              escapeCsvCell(item.remarks),
+              escapeCsvCell(item.url || ''),
+            ];
         csvRows.push(row.join(','));
       });
     });
+
+    // マップデータのエクスポート（v2.0のみ）
+    if (options.format === 'full' && options.includeMapData && mapData[exportEventName]) {
+      csvRows.push('');
+      csvRows.push('#MAP_DATA_START');
+      csvRows.push(JSON.stringify(mapData[exportEventName]));
+      csvRows.push('#MAP_DATA_END');
+    }
 
     const csvString = csvRows.join('\n');
     const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
@@ -1708,12 +1806,16 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.setAttribute('href', url);
-    link.setAttribute('download', `${eventName}.csv`);
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15);
+    const suffix = options.format === 'full' ? 'full' : 'simple';
+    link.setAttribute('download', `${exportEventName}_${timestamp}_${suffix}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-  }, [eventLists, executeModeItems, eventMetadata]);
+    
+    setExportEventName(null);
+  }, [eventLists, executeModeItems, eventMetadata, mapData, exportEventName]);
 
   // アイテム更新機能
   const handleUpdateEvent = useCallback(async (eventName: string, urlOverride?: { url: string; sheetName: string }) => {
@@ -1982,6 +2084,158 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       setPendingUpdateEventName(null);
     }
   }, [pendingUpdateEventName, handleUpdateEvent]);
+
+  // マップデータ取り込み
+  const handleImportMapData = useCallback(async (eventName: string) => {
+    if (mapFileInputRef.current) {
+      mapFileInputRef.current.dataset.eventName = eventName;
+      mapFileInputRef.current.click();
+    }
+  }, []);
+
+  const handleMapFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    const eventName = e.target.dataset.eventName;
+    
+    if (!file || !eventName) return;
+    
+    try {
+      const parsedMapData = await parseMapFile(file);
+      if (!parsedMapData) {
+        alert('マップデータの解析に失敗しました。');
+        return;
+      }
+      
+      setMapData(prev => ({
+        ...prev,
+        [eventName]: {
+          ...(prev[eventName] || {}),
+          ...parsedMapData,
+        },
+      }));
+      
+      const mapCount = Object.keys(parsedMapData).length;
+      alert(`${mapCount}件のマップデータを取り込みました。`);
+      
+      // 最初のマップタブに切り替え
+      const firstMapName = Object.keys(parsedMapData)[0];
+      if (firstMapName) {
+        setActiveTab(firstMapName);
+      }
+    } catch (error) {
+      console.error('Map import error:', error);
+      alert(`マップデータの取り込みに失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
+    }
+    
+    // ファイル入力をリセット
+    e.target.value = '';
+  }, []);
+
+  // マップビューでの訪問先追加
+  const handleAddToExecuteListFromMap = useCallback((itemId: string) => {
+    if (!activeEventName || !isMapTab) return;
+    
+    // マップ名から参加日を取得
+    const dayMatch = activeTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return;
+    const dayName = dayMatch[1];
+    
+    setExecuteModeItems(prev => {
+      const eventItems = prev[activeEventName] || {};
+      const dayItems = [...(eventItems[dayName] || [])];
+      
+      // 既に追加されている場合は何もしない
+      if (dayItems.includes(itemId)) return prev;
+      
+      dayItems.push(itemId);
+      
+      return {
+        ...prev,
+        [activeEventName]: {
+          ...eventItems,
+          [dayName]: dayItems,
+        },
+      };
+    });
+  }, [activeEventName, activeTab, isMapTab]);
+
+  // マップビューでの訪問先削除
+  const handleRemoveFromExecuteListFromMap = useCallback((itemId: string) => {
+    if (!activeEventName || !isMapTab) return;
+    
+    // マップ名から参加日を取得
+    const dayMatch = activeTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return;
+    const dayName = dayMatch[1];
+    
+    setExecuteModeItems(prev => {
+      const eventItems = prev[activeEventName] || {};
+      const dayItems = (eventItems[dayName] || []).filter(id => id !== itemId);
+      
+      return {
+        ...prev,
+        [activeEventName]: {
+          ...eventItems,
+          [dayName]: dayItems,
+        },
+      };
+    });
+  }, [activeEventName, activeTab, isMapTab]);
+
+  // マップビューでの先頭移動
+  const handleMoveToFirstFromMap = useCallback((itemId: string) => {
+    if (!activeEventName || !isMapTab) return;
+    
+    const dayMatch = activeTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return;
+    const dayName = dayMatch[1];
+    
+    setExecuteModeItems(prev => {
+      const eventItems = prev[activeEventName] || {};
+      const dayItems = (eventItems[dayName] || []).filter(id => id !== itemId);
+      
+      return {
+        ...prev,
+        [activeEventName]: {
+          ...eventItems,
+          [dayName]: [itemId, ...dayItems],
+        },
+      };
+    });
+  }, [activeEventName, activeTab, isMapTab]);
+
+  // マップビューでの末尾移動
+  const handleMoveToLastFromMap = useCallback((itemId: string) => {
+    if (!activeEventName || !isMapTab) return;
+    
+    const dayMatch = activeTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return;
+    const dayName = dayMatch[1];
+    
+    setExecuteModeItems(prev => {
+      const eventItems = prev[activeEventName] || {};
+      const dayItems = (eventItems[dayName] || []).filter(id => id !== itemId);
+      
+      return {
+        ...prev,
+        [activeEventName]: {
+          ...eventItems,
+          [dayName]: [...dayItems, itemId],
+        },
+      };
+    });
+  }, [activeEventName, activeTab, isMapTab]);
+
+  // 現在のマップに対応する参加日の実行列アイテムIDを取得
+  const currentMapExecuteItemIds = useMemo(() => {
+    if (!activeEventName || !isMapTab) return [];
+    
+    const dayMatch = activeTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return [];
+    const dayName = dayMatch[1];
+    
+    return executeModeItems[activeEventName]?.[dayName] || [];
+  }, [activeEventName, activeTab, isMapTab, executeModeItems]);
   
   // 現在のタブの参加日に該当するアイテムを取得
   const currentTabItems = useMemo(() => {
@@ -2358,17 +2612,26 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     <>
                         {eventDates.map(eventDate => {
                           const count = items.filter(item => item.eventDate === eventDate).length;
+                          const mapTabName = `${eventDate}マップ`;
+                          const hasMapData = mapTabs.includes(mapTabName);
                           return (
-                            <TabButton 
-                              key={eventDate} 
-                              tab={eventDate} 
-                              label={eventDate} 
-                              count={count} 
-                            />
+                            <React.Fragment key={eventDate}>
+                              <TabButton 
+                                tab={eventDate} 
+                                label={eventDate} 
+                                count={count} 
+                              />
+                              {hasMapData && (
+                                <TabButton 
+                                  tab={mapTabName} 
+                                  label={`${eventDate}マップ`} 
+                                />
+                              )}
+                            </React.Fragment>
                           );
                         })}
                         <TabButton tab="import" label={itemToEdit ? "アイテム編集" : "アイテム追加"} />
-                        {activeEventName && mainContentVisible && (
+                        {activeEventName && (mainContentVisible || isMapTab) && (
                           <SearchBar
                             searchKeyword={searchKeyword}
                             onSearchKeywordChange={setSearchKeyword}
@@ -2403,6 +2666,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 onExport={handleExportEvent}
                 onUpdate={handleUpdateEvent}
                 onRename={(oldName) => handleRenameEvent(oldName)}
+                onImportMap={handleImportMapData}
             />
         )}
         {activeTab === 'import' && (
@@ -2413,6 +2677,19 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
              onUpdateItem={handleUpdateItem}
              onDoneEditing={handleDoneEditing}
            />
+        )}
+        {/* マップビュー */}
+        {activeEventName && isMapTab && currentMapData && (
+          <MapView
+            mapData={currentMapData}
+            mapName={activeTab}
+            items={items}
+            executeModeItemIds={currentMapExecuteItemIds}
+            onAddToExecuteList={handleAddToExecuteListFromMap}
+            onRemoveFromExecuteList={handleRemoveFromExecuteListFromMap}
+            onMoveToFirst={handleMoveToFirstFromMap}
+            onMoveToLast={handleMoveToLastFromMap}
+          />
         )}
         {activeEventName && mainContentVisible && (
           <div style={{
@@ -2597,6 +2874,28 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           }}
         />
       )}
+
+      {/* エクスポートオプションダイアログ */}
+      {showExportOptions && exportEventName && (
+        <ExportOptionsDialog
+          isOpen={showExportOptions}
+          onClose={() => {
+            setShowExportOptions(false);
+            setExportEventName(null);
+          }}
+          onExport={handleConfirmExport}
+          hasMapData={!!(exportEventName && mapData[exportEventName] && Object.keys(mapData[exportEventName]).length > 0)}
+        />
+      )}
+
+      {/* マップファイル入力（非表示） */}
+      <input
+        type="file"
+        ref={mapFileInputRef}
+        accept=".xlsx"
+        onChange={handleMapFileChange}
+        style={{ display: 'none' }}
+      />
 
       {activeEventName && items.length > 0 && mainContentVisible && (
         <>

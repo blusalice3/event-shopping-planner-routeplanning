@@ -38,3 +38,168 @@ export interface DayModeState {
 export interface ExecuteModeItems {
   [eventDate: string]: string[];
 }
+
+// ===== マップ機能用の型定義 =====
+
+export interface BorderStyle {
+  style: 'thin' | 'medium' | 'thick' | 'double' | 'none';
+  color: string;
+}
+
+export interface CellBorders {
+  top: BorderStyle | null;
+  right: BorderStyle | null;
+  bottom: BorderStyle | null;
+  left: BorderStyle | null;
+}
+
+export interface CellData {
+  row: number;
+  col: number;
+  value: string | number | null;
+  backgroundColor: string | null;
+  borders: CellBorders;
+  isMerged?: boolean;
+  mergeParent?: { row: number; col: number };
+}
+
+export interface MergedCellInfo {
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+  value: string | number | null;
+}
+
+export interface NumberCellInfo {
+  row: number;
+  col: number;
+  value: number;
+}
+
+export interface BlockDefinition {
+  id: string;
+  name: string;
+  cellRange: {
+    startRow: number;
+    startCol: number;
+    endRow: number;
+    endCol: number;
+  };
+  isAutoDetected: boolean;
+  numberCells: NumberCellInfo[];
+}
+
+export interface DayMapData {
+  rows: number;
+  cols: number;
+  cells: CellData[];
+  mergedCells: MergedCellInfo[];
+  blocks: BlockDefinition[];
+}
+
+export interface MapDataStore {
+  [eventName: string]: {
+    [dayMapName: string]: DayMapData;
+  };
+}
+
+export interface BlockDefinitionsStore {
+  [eventName: string]: {
+    [dayMapName: string]: BlockDefinition[];
+  };
+}
+
+export interface VisitPoint {
+  row: number;
+  col: number;
+  blockName: string;
+  number: number;
+  order: number;
+  itemIds: string[];
+}
+
+export interface RouteSettings {
+  isRouteVisible: boolean;
+  visitOrder: VisitPoint[];
+}
+
+export interface RouteSettingsStore {
+  [eventName: string]: {
+    [dayMapName: string]: RouteSettings;
+  };
+}
+
+// ===== エクスポート機能用の型定義 =====
+
+export interface ExportOptions {
+  includeItems: boolean;
+  includeLayoutInfo: boolean;
+  includeMapData: boolean;
+  includeBlockDefinitions: boolean;
+  includeRouteInfo: boolean;
+  format: 'full' | 'simple';
+}
+
+export interface ExportData {
+  version: string;
+  exportDate: string;
+  eventName: string;
+  metadata: EventMetadata;
+  items: ShoppingItem[];
+  dayModes: DayModeState;
+  executeModeItems: ExecuteModeItems;
+  mapData?: {
+    [dayMapName: string]: DayMapData;
+  };
+  blockDefinitions?: {
+    [dayMapName: string]: BlockDefinition[];
+  };
+  routeSettings?: {
+    [dayMapName: string]: RouteSettings;
+  };
+}
+
+// マップセルの状態
+export type MapCellState = 'default' | 'hasItems' | 'partialVisit' | 'allVisit';
+
+// マップ表示用のセル情報
+export interface MapDisplayCell {
+  row: number;
+  col: number;
+  value: string | number | null;
+  backgroundColor: string | null;
+  borders: CellBorders;
+  width: number;
+  height: number;
+  isBlockName: boolean;
+  isMerged: boolean;
+  mergeWidth: number;
+  mergeHeight: number;
+  state: MapCellState;
+  matchingItemIds: string[];
+}
+
+// 経路探索用のノード
+export interface PathNode {
+  row: number;
+  col: number;
+  g: number;
+  h: number;
+  f: number;
+  parent: PathNode | null;
+}
+
+// ルート描画用のセグメント
+export interface RouteSegment {
+  fromRow: number;
+  fromCol: number;
+  toRow: number;
+  toCol: number;
+  path: { row: number; col: number }[];
+}
+
+// ズームレベル
+export type ZoomLevel = 30 | 50 | 75 | 100 | 125 | 150;
+
+export const ZOOM_LEVELS: ZoomLevel[] = [30, 50, 75, 100, 125, 150];
