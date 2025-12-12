@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapDataStore, RouteSettingsStore, ExportOptions } from './types';
+import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapDataStore, RouteSettingsStore, ExportOptions, BlockDefinition } from './types';
 import ImportScreen from './components/ImportScreen';
 import ShoppingList from './components/ShoppingList';
 import SummaryBar from './components/SummaryBar';
@@ -14,7 +14,7 @@ import ExportOptionsDialog from './components/ExportOptionsDialog';
 import SortAscendingIcon from './components/icons/SortAscendingIcon';
 import SortDescendingIcon from './components/icons/SortDescendingIcon';
 import SearchBar from './components/SearchBar';
-import { MapView } from './components/map';
+import { MapView, BlockDefinitionPanel } from './components/map';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
 import { parseMapFile } from './utils/xlsxMapParser';
 
@@ -2250,7 +2250,22 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
   
   // 将来機能用に保持
   void visitListPanelOpen;
-  void blockDefinitionMode;
+  
+  // ブロック定義を更新
+  const handleUpdateBlocks = useCallback((blocks: BlockDefinition[]) => {
+    if (!activeEventName || !isMapTab || !currentMapData) return;
+    
+    setMapData(prev => ({
+      ...prev,
+      [activeEventName]: {
+        ...prev[activeEventName],
+        [activeTab]: {
+          ...currentMapData,
+          blocks,
+        },
+      },
+    }));
+  }, [activeEventName, isMapTab, activeTab, currentMapData]);
 
   const TabButton: React.FC<{tab: ActiveTab, label: string, count?: number, onClick?: () => void, isMapTab?: boolean}> = ({ tab, label, count, onClick, isMapTab: isMapTabProp }) => {
     const longPressTimeout = React.useRef<number | null>(null);
@@ -2941,6 +2956,16 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           }}
           onExport={handleConfirmExport}
           hasMapData={!!(exportEventName && mapData[exportEventName] && Object.keys(mapData[exportEventName]).length > 0)}
+        />
+      )}
+
+      {/* ブロック定義パネル */}
+      {blockDefinitionMode && currentMapData && (
+        <BlockDefinitionPanel
+          isOpen={blockDefinitionMode}
+          onClose={() => setBlockDefinitionMode(false)}
+          mapData={currentMapData}
+          onUpdateBlocks={handleUpdateBlocks}
         />
       )}
 

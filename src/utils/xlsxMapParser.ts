@@ -368,56 +368,95 @@ function detectBlocks(
 
 /**
  * 結合セルの周囲にある数値セルを探す
+ * ブロック名セルに隣接する領域のみを検索（最大10セル）
  */
 function findSurroundingNumberCells(
   merge: MergedCellInfo,
   cellsMap: Map<string, CellData>,
   processedCells: Set<string>,
-  maxRow: number,
-  maxCol: number
+  _maxRow: number,
+  _maxCol: number
 ): Array<{ row: number; col: number; value: number }> {
   const numberCells: Array<{ row: number; col: number; value: number }> = [];
   
-  // 検索範囲を広げて周囲の数値セルを探す
-  const searchRadius = 50; // 検索半径
+  // ブロック名セルに隣接するセルのみを検索（最大10セルまで）
+  // 上下左右それぞれの方向に最大10セルまで探索
+  const searchRadius = 10;
   
-  const startRow = Math.max(1, merge.startRow - searchRadius);
-  const endRow = Math.min(maxRow, merge.endRow + searchRadius);
-  const startCol = Math.max(1, merge.startCol - searchRadius);
-  const endCol = Math.min(maxCol, merge.endCol + searchRadius);
+  // 4方向に隣接する数値セルを探す
+  const directions = [
+    { dr: -1, dc: 0, name: 'up' },    // 上
+    { dr: 1, dc: 0, name: 'down' },   // 下
+    { dr: 0, dc: -1, name: 'left' },  // 左
+    { dr: 0, dc: 1, name: 'right' },  // 右
+  ];
   
-  for (let r = startRow; r <= endRow; r++) {
-    for (let c = startCol; c <= endCol; c++) {
-      const key = `${r}-${c}`;
-      if (processedCells.has(key)) continue;
+  // 各方向に探索し、連続した数値セル群を見つける
+  directions.forEach((dir) => {
+    let foundNumbers = false;
+    
+    for (let dist = 1; dist <= searchRadius; dist++) {
+      // 結合セルの端から探索開始
+      let baseRow: number;
+      let baseCol: number;
+      let scanWidth: number;
+      let scanHeight: number;
       
-      const cell = cellsMap.get(key);
-      if (!cell || cell.isMerged) continue;
+      if (dir.name === 'up') {
+        baseRow = merge.startRow - dist;
+        baseCol = merge.startCol;
+        scanWidth = merge.endCol - merge.startCol + 1;
+        scanHeight = 1;
+      } else if (dir.name === 'down') {
+        baseRow = merge.endRow + dist;
+        baseCol = merge.startCol;
+        scanWidth = merge.endCol - merge.startCol + 1;
+        scanHeight = 1;
+      } else if (dir.name === 'left') {
+        baseRow = merge.startRow;
+        baseCol = merge.startCol - dist;
+        scanWidth = 1;
+        scanHeight = merge.endRow - merge.startRow + 1;
+      } else {
+        baseRow = merge.startRow;
+        baseCol = merge.endCol + dist;
+        scanWidth = 1;
+        scanHeight = merge.endRow - merge.startRow + 1;
+      }
       
-      if (isNumberCell(cell.value)) {
-        const numValue = typeof cell.value === 'number' 
-          ? cell.value 
-          : parseFloat(String(cell.value));
-        
-        // 近くにあるかチェック（距離ベース）
-        const distToMerge = Math.min(
-          Math.abs(r - merge.startRow),
-          Math.abs(r - merge.endRow),
-          Math.abs(c - merge.startCol),
-          Math.abs(c - merge.endCol)
-        );
-        
-        if (distToMerge <= searchRadius) {
-          numberCells.push({
-            row: r,
-            col: c,
-            value: numValue,
-          });
-          processedCells.add(key);
+      // この距離に数値セルがあるかチェック
+      let hasNumberInThisRow = false;
+      
+      for (let dr = 0; dr < scanHeight; dr++) {
+        for (let dc = 0; dc < scanWidth; dc++) {
+          const r = baseRow + dr;
+          const c = baseCol + dc;
+          const key = `${r}-${c}`;
+          
+          if (processedCells.has(key)) continue;
+          
+          const cell = cellsMap.get(key);
+          if (!cell || cell.isMerged) continue;
+          
+          if (isNumberCell(cell.value)) {
+            const numValue = typeof cell.value === 'number' 
+              ? cell.value 
+              : parseFloat(String(cell.value));
+            
+            numberCells.push({ row: r, col: c, value: numValue });
+            processedCells.add(key);
+            hasNumberInThisRow = true;
+            foundNumbers = true;
+          }
         }
       }
+      
+      // 数値セルが見つかった後、空白行/列があれば探索終了
+      if (foundNumbers && !hasNumberInThisRow) {
+        break;
+      }
     }
-  }
+  });
   
   return numberCells;
 }
