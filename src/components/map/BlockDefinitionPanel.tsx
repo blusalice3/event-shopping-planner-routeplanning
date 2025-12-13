@@ -30,6 +30,7 @@ interface EditingBlockData {
   selectedIndex: number | null;
   editMode: EditMode;
   wallCellGroups: CellGroup[];
+  currentBlocks: BlockDefinition[]; // 現在のブロック一覧を保持
 }
 
 const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
@@ -80,7 +81,10 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
     const data = editingData as EditingBlockData | undefined;
     
     if (data) {
-      // 編集中のデータを復元
+      // 編集中のデータを復元（blocksも含む）
+      if (data.currentBlocks) {
+        setBlocks(data.currentBlocks);
+      }
       setEditingBlock(data.block);
       setIsAddingNew(data.isAddingNew);
       setSelectedBlockIndex(data.selectedIndex);
@@ -126,9 +130,10 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       selectedIndex: selectedBlockIndex,
       editMode,
       wallCellGroups,
+      currentBlocks: blocks, // 現在のブロック一覧を保存
     };
     onStartCellSelection('corner', editingData);
-  }, [editingBlock, isAddingNew, selectedBlockIndex, editMode, wallCellGroups, onStartCellSelection]);
+  }, [editingBlock, isAddingNew, selectedBlockIndex, editMode, wallCellGroups, blocks, onStartCellSelection]);
 
   // 範囲選択を開始
   const handleStartRangeSelection = useCallback(() => {
@@ -138,9 +143,10 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       selectedIndex: selectedBlockIndex,
       editMode,
       wallCellGroups,
+      currentBlocks: blocks, // 現在のブロック一覧を保存
     };
     onStartCellSelection('rangeStart', editingData);
-  }, [editingBlock, isAddingNew, selectedBlockIndex, editMode, wallCellGroups, onStartCellSelection]);
+  }, [editingBlock, isAddingNew, selectedBlockIndex, editMode, wallCellGroups, blocks, onStartCellSelection]);
 
   // 個別セル選択を開始
   const handleStartIndividualSelection = useCallback(() => {
@@ -150,9 +156,10 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       selectedIndex: selectedBlockIndex,
       editMode,
       wallCellGroups,
+      currentBlocks: blocks, // 現在のブロック一覧を保存
     };
     onStartCellSelection('individual', editingData);
-  }, [editingBlock, isAddingNew, selectedBlockIndex, editMode, wallCellGroups, onStartCellSelection]);
+  }, [editingBlock, isAddingNew, selectedBlockIndex, editMode, wallCellGroups, blocks, onStartCellSelection]);
 
   const wallBlockNumberCells = useMemo(() => {
     if (editMode !== 'wall') return [];
