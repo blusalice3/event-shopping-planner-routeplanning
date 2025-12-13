@@ -2248,6 +2248,20 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
   const [visitListPanelOpen, setVisitListPanelOpen] = useState(false);
   const [blockDefinitionMode, setBlockDefinitionMode] = useState(false);
   
+  // セル選択モードの状態（ブロック定義用）
+  const [cellSelectionMode, setCellSelectionMode] = useState<{
+    type: 'corner' | 'rangeStart' | 'rangeEnd' | 'individual';
+    clickedCells: { row: number; col: number }[];
+    editingBlockData?: unknown;
+  } | null>(null);
+  
+  // セル選択完了時にBlockDefinitionPanelに渡すデータ
+  const [pendingCellSelection, setPendingCellSelection] = useState<{
+    type: string;
+    cells: { row: number; col: number }[];
+    editingData?: unknown;
+  } | null>(null);
+  
   // 将来機能用に保持
   void visitListPanelOpen;
   
@@ -2266,6 +2280,68 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       },
     }));
   }, [activeEventName, isMapTab, activeTab, currentMapData]);
+  
+  // セル選択モードを開始（BlockDefinitionPanelから呼ばれる）
+  const handleStartCellSelection = useCallback((
+    type: 'corner' | 'rangeStart' | 'rangeEnd' | 'individual',
+    editingData?: unknown
+  ) => {
+    setCellSelectionMode({ type, clickedCells: [], editingBlockData: editingData });
+    setBlockDefinitionMode(false); // パネルを一時的に非表示
+  }, []);
+  
+  // 範囲を反映してパネルを再表示
+  const handleConfirmCellSelection = useCallback(() => {
+    if (cellSelectionMode) {
+      // pendingCellSelectionをセットしてBlockDefinitionPanelに渡す
+      setPendingCellSelection({
+        type: cellSelectionMode.type,
+        cells: cellSelectionMode.clickedCells,
+        editingData: cellSelectionMode.editingBlockData,
+      });
+    }
+    setCellSelectionMode(null);
+    setBlockDefinitionMode(true); // パネルを再表示
+  }, [cellSelectionMode]);
+  
+  // セル選択をキャンセル
+  const handleCancelCellSelection = useCallback(() => {
+    setCellSelectionMode(null);
+    setBlockDefinitionMode(true); // パネルを再表示
+  }, []);
+  
+  // マップセルクリックをリッスンしてセル選択に追加
+  useEffect(() => {
+    const handleMapCellClick = (e: CustomEvent<{ row: number; col: number }>) => {
+      if (!cellSelectionMode) return;
+      
+      const { row, col } = e.detail;
+      
+      setCellSelectionMode(prev => {
+        if (!prev) return prev;
+        
+        // 既に選択されている場合は削除（個別モードのみ）
+        if (prev.type === 'individual') {
+          const existingIndex = prev.clickedCells.findIndex(c => c.row === row && c.col === col);
+          if (existingIndex >= 0) {
+            return {
+              ...prev,
+              clickedCells: prev.clickedCells.filter((_, i) => i !== existingIndex),
+            };
+          }
+        }
+        
+        // 選択を追加
+        return {
+          ...prev,
+          clickedCells: [...prev.clickedCells, { row, col }],
+        };
+      });
+    };
+    
+    window.addEventListener('mapCellClick', handleMapCellClick as EventListener);
+    return () => window.removeEventListener('mapCellClick', handleMapCellClick as EventListener);
+  }, [cellSelectionMode]);
 
   const TabButton: React.FC<{tab: ActiveTab, label: string, count?: number, onClick?: () => void, isMapTab?: boolean}> = ({ tab, label, count, onClick, isMapTab: isMapTabProp }) => {
     const longPressTimeout = React.useRef<number | null>(null);
@@ -2963,10 +3039,51 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       {blockDefinitionMode && currentMapData && (
         <BlockDefinitionPanel
           isOpen={blockDefinitionMode}
-          onClose={() => setBlockDefinitionMode(false)}
+          onClose={() => { setBlockDefinitionMode(false); setPendingCellSelection(null); }}
           mapData={currentMapData}
           onUpdateBlocks={handleUpdateBlocks}
+          onStartCellSelection={handleStartCellSelection}
+          pendingCellSelection={pendingCellSelection}
+          onClearPendingCellSelection={() => setPendingCellSelection(null)}
         />
+      )}
+
+      {/* セル選択モードのフローティングUI */}
+      {cellSelectionMode && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-4 min-w-80">
+          <div className="text-center mb-3">
+            <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
+              {cellSelectionMode.type === 'corner' && `📍 セルをクリックして角を選択 (${cellSelectionMode.clickedCells.length}/4)`}
+              {cellSelectionMode.type === 'rangeStart' && `📍 範囲の開始セルをクリック (${cellSelectionMode.clickedCells.length}/2)`}
+              {cellSelectionMode.type === 'rangeEnd' && `📍 範囲の終了セルをクリック (${cellSelectionMode.clickedCells.length}/2)`}
+              {cellSelectionMode.type === 'individual' && `📍 個別セルをクリック (${cellSelectionMode.clickedCells.length}個選択中)`}
+            </div>
+            {cellSelectionMode.clickedCells.length > 0 && (
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                選択: {cellSelectionMode.clickedCells.map(c => `(${c.row},${c.col})`).join(', ')}
+              </div>
+            )}
+          </div>
+          <div className="flex gap-2 justify-center">
+            <button
+              onClick={handleConfirmCellSelection}
+              disabled={
+                (cellSelectionMode.type === 'corner' && cellSelectionMode.clickedCells.length < 4) ||
+                ((cellSelectionMode.type === 'rangeStart' || cellSelectionMode.type === 'rangeEnd') && cellSelectionMode.clickedCells.length < 2) ||
+                (cellSelectionMode.type === 'individual' && cellSelectionMode.clickedCells.length === 0)
+              }
+              className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              範囲を反映
+            </button>
+            <button
+              onClick={handleCancelCellSelection}
+              className="px-4 py-2 text-sm font-medium rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
+            >
+              キャンセル
+            </button>
+          </div>
+        </div>
       )}
 
       {/* マップファイル入力（非表示） */}
