@@ -480,6 +480,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         return;
       }
       
+      // ブロック定義パネル用のカスタムイベントを発火
+      window.dispatchEvent(new CustomEvent('mapCellClick', {
+        detail: { row, col }
+      }));
+      
       // このセルに関連するアイテムを取得
       const state = cellStates.get(`${row}-${col}`);
       const matchingItems = state?.items || [];

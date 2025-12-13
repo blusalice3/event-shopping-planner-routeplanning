@@ -1,5 +1,5 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import { DayMapData, BlockDefinition, CellData } from '../../types';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import { DayMapData, BlockDefinition, CellData, NumberCellInfo, CellGroup } from '../../types';
 
 interface BlockDefinitionPanelProps {
   isOpen: boolean;
@@ -8,457 +8,261 @@ interface BlockDefinitionPanelProps {
   onUpdateBlocks: (blocks: BlockDefinition[]) => void;
 }
 
-// ブロック用の色パレット
 const BLOCK_COLORS = [
-  '#E3F2FD', // 青
-  '#E8F5E9', // 緑
-  '#FFF3E0', // オレンジ
-  '#F3E5F5', // 紫
-  '#E0F7FA', // シアン
-  '#FBE9E7', // 深いオレンジ
-  '#F1F8E9', // ライトグリーン
-  '#FCE4EC', // ピンク
-  '#E8EAF6', // インディゴ
-  '#FFFDE7', // 黄色
-  '#EFEBE9', // ブラウン
-  '#ECEFF1', // ブルーグレー
+  '#E3F2FD', '#E8F5E9', '#FFF3E0', '#F3E5F5', '#E0F7FA',
+  '#FBE9E7', '#F1F8E9', '#FCE4EC', '#E8EAF6', '#FFFDE7',
+  '#EFEBE9', '#ECEFF1',
 ];
 
+type SortDirection = 'asc' | 'desc';
+type EditMode = 'normal' | 'wall';
+type CellClickMode = 'corner' | 'rangeStart' | 'rangeEnd' | 'individual' | null;
+
 const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
-  isOpen,
-  onClose,
-  mapData,
-  onUpdateBlocks,
+  isOpen, onClose, mapData, onUpdateBlocks,
 }) => {
   const [blocks, setBlocks] = useState<BlockDefinition[]>(mapData.blocks);
   const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null);
   const [editingBlock, setEditingBlock] = useState<Partial<BlockDefinition> | null>(null);
   const [isAddingNew, setIsAddingNew] = useState(false);
+  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
+  const [editMode, setEditMode] = useState<EditMode>('normal');
+  const [cellClickMode, setCellClickMode] = useState<CellClickMode>(null);
+  const [clickedCorners, setClickedCorners] = useState<{ row: number; col: number }[]>([]);
+  const [wallCellGroups, setWallCellGroups] = useState<CellGroup[]>([]);
+  const [rangeStart, setRangeStart] = useState<{ row: number; col: number } | null>(null);
+  const [individualCells, setIndividualCells] = useState<{ row: number; col: number }[]>([]);
 
-  // セルマップを作成
   const cellsMap = useMemo(() => {
     const map = new Map<string, CellData>();
-    mapData.cells.forEach((cell) => {
-      map.set(`${cell.row}-${cell.col}`, cell);
-    });
+    mapData.cells.forEach(cell => map.set(`${cell.row}-${cell.col}`, cell));
     return map;
   }, [mapData.cells]);
 
-  // 指定範囲内の数値セルを検出
-  const detectNumberCells = useCallback(
-    (startRow: number, startCol: number, endRow: number, endCol: number) => {
-      const numberCells: Array<{ row: number; col: number; value: number }> = [];
+  const sortedBlocks = useMemo(() => {
+    return [...blocks].sort((a, b) => {
+      const cmp = a.name.localeCompare(b.name, 'ja');
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+  }, [blocks, sortDirection]);
 
-      for (let r = startRow; r <= endRow; r++) {
-        for (let c = startCol; c <= endCol; c++) {
-          const cell = cellsMap.get(`${r}-${c}`);
-          if (cell && !cell.isMerged && cell.value !== null) {
-            const num =
-              typeof cell.value === 'number'
-                ? cell.value
-                : parseFloat(String(cell.value));
-            if (!isNaN(num) && num > 0 && num <= 100) {
-              numberCells.push({ row: r, col: c, value: num });
-            }
-          }
+  const detectNumberCells = useCallback((startRow: number, startCol: number, endRow: number, endCol: number) => {
+    const cells: NumberCellInfo[] = [];
+    const minR = Math.min(startRow, endRow), maxR = Math.max(startRow, endRow);
+    const minC = Math.min(startCol, endCol), maxC = Math.max(startCol, endCol);
+    for (let r = minR; r <= maxR; r++) {
+      for (let c = minC; c <= maxC; c++) {
+        const cell = cellsMap.get(`${r}-${c}`);
+        if (cell && !cell.isMerged && cell.value !== null) {
+          const num = typeof cell.value === 'number' ? cell.value : parseFloat(String(cell.value));
+          if (!isNaN(num) && num > 0 && num <= 100) cells.push({ row: r, col: c, value: num });
         }
       }
-
-      return numberCells;
-    },
-    [cellsMap]
-  );
-
-  // ブロックを削除
-  const handleDeleteBlock = useCallback((index: number) => {
-    if (confirm(`ブロック「${blocks[index].name}」を削除しますか？`)) {
-      setBlocks((prev) => prev.filter((_, i) => i !== index));
-      setSelectedBlockIndex(null);
-      setEditingBlock(null);
     }
-  }, [blocks]);
+    return cells.sort((a, b) => a.value - b.value);
+  }, [cellsMap]);
 
-  // ブロックを編集開始
-  const handleEditBlock = useCallback((index: number) => {
-    const block = blocks[index];
-    setSelectedBlockIndex(index);
-    setEditingBlock({ ...block });
-    setIsAddingNew(false);
-  }, [blocks]);
+  const handleCellClick = useCallback((row: number, col: number) => {
+    if (!cellClickMode) return;
+    if (cellClickMode === 'corner') {
+      setClickedCorners(prev => {
+        const next = [...prev, { row, col }];
+        if (next.length === 4) {
+          const rows = next.map(c => c.row), cols = next.map(c => c.col);
+          const range = { startRow: Math.min(...rows), startCol: Math.min(...cols), endRow: Math.max(...rows), endCol: Math.max(...cols) };
+          const numCells = detectNumberCells(range.startRow, range.startCol, range.endRow, range.endCol);
+          setEditingBlock(eb => ({ ...eb, ...range, numberCells: numCells }));
+          setCellClickMode(null);
+          return [];
+        }
+        return next;
+      });
+    } else if (cellClickMode === 'rangeStart') {
+      setRangeStart({ row, col });
+      setCellClickMode('rangeEnd');
+    } else if (cellClickMode === 'rangeEnd' && rangeStart) {
+      const g: CellGroup = {
+        type: 'range',
+        startRow: Math.min(rangeStart.row, row), startCol: Math.min(rangeStart.col, col),
+        endRow: Math.max(rangeStart.row, row), endCol: Math.max(rangeStart.col, col),
+      };
+      setWallCellGroups(prev => prev.length >= 6 ? prev : [...prev, g]);
+      setRangeStart(null);
+      setCellClickMode(null);
+    } else if (cellClickMode === 'individual') {
+      setIndividualCells(prev => {
+        const idx = prev.findIndex(c => c.row === row && c.col === col);
+        return idx >= 0 ? prev.filter((_, i) => i !== idx) : [...prev, { row, col }];
+      });
+    }
+  }, [cellClickMode, rangeStart, detectNumberCells]);
 
-  // 新規追加開始
-  const handleStartAddNew = useCallback(() => {
-    setIsAddingNew(true);
-    setSelectedBlockIndex(null);
-    setEditingBlock({
-      name: '',
-      startRow: 1,
-      startCol: 1,
-      endRow: 20,
-      endCol: 20,
-      numberCells: [],
-      color: BLOCK_COLORS[blocks.length % BLOCK_COLORS.length],
+  useEffect(() => {
+    const handler = (e: CustomEvent) => handleCellClick(e.detail.row, e.detail.col);
+    window.addEventListener('mapCellClick', handler as EventListener);
+    return () => window.removeEventListener('mapCellClick', handler as EventListener);
+  }, [handleCellClick]);
+
+  const wallBlockNumberCells = useMemo(() => {
+    if (editMode !== 'wall') return [];
+    const all: NumberCellInfo[] = [];
+    wallCellGroups.forEach(g => {
+      if (g.type === 'range' && g.startRow && g.startCol && g.endRow && g.endCol) {
+        all.push(...detectNumberCells(g.startRow, g.startCol, g.endRow, g.endCol));
+      } else if (g.type === 'individual' && g.cells) {
+        g.cells.forEach(c => {
+          const cell = cellsMap.get(`${c.row}-${c.col}`);
+          if (cell && cell.value !== null && cell.value !== undefined) {
+            const num = typeof cell.value === 'number' ? cell.value : parseFloat(String(cell.value));
+            if (!isNaN(num) && num > 0 && num <= 100) all.push({ row: c.row, col: c.col, value: num });
+          }
+        });
+      }
     });
-  }, [blocks.length]);
+    return all.filter((c, i, s) => i === s.findIndex(x => x.row === c.row && x.col === c.col)).sort((a, b) => a.value - b.value);
+  }, [editMode, wallCellGroups, detectNumberCells, cellsMap]);
 
-  // 編集フォームの値を更新
-  const handleEditChange = useCallback((field: keyof BlockDefinition, value: string | number) => {
-    setEditingBlock((prev) => {
-      if (!prev) return prev;
-      return { ...prev, [field]: value };
-    });
-  }, []);
-
-  // 数値セルをプレビュー
   const previewNumberCells = useMemo(() => {
-    if (!editingBlock || !editingBlock.startRow || !editingBlock.startCol || !editingBlock.endRow || !editingBlock.endCol) {
-      return [];
-    }
-    return detectNumberCells(
-      editingBlock.startRow,
-      editingBlock.startCol,
-      editingBlock.endRow,
-      editingBlock.endCol
-    );
-  }, [editingBlock, detectNumberCells]);
+    if (editMode === 'wall') return wallBlockNumberCells;
+    if (!editingBlock?.startRow || !editingBlock?.endRow) return [];
+    return detectNumberCells(editingBlock.startRow, editingBlock.startCol || 1, editingBlock.endRow, editingBlock.endCol || 1);
+  }, [editingBlock, editMode, wallBlockNumberCells, detectNumberCells]);
 
-  // ブロックを保存
   const handleSaveBlock = useCallback(() => {
-    if (!editingBlock || !editingBlock.name?.trim()) {
-      alert('ブロック名を入力してください');
-      return;
+    if (!editingBlock?.name?.trim()) { alert('ブロック名を入力してください'); return; }
+    const name = editingBlock.name.trim();
+    if (isAddingNew && blocks.find(b => b.name === name)) {
+      if (!confirm(`「${name}」は既に存在します。置き換えますか？`)) return;
+      setBlocks(prev => prev.filter(b => b.name !== name));
     }
-
-    const numberCells = detectNumberCells(
-      editingBlock.startRow || 1,
-      editingBlock.startCol || 1,
-      editingBlock.endRow || 20,
-      editingBlock.endCol || 20
-    );
-
-    const savedBlock: BlockDefinition = {
-      name: editingBlock.name.trim(),
-      startRow: editingBlock.startRow || 1,
-      startCol: editingBlock.startCol || 1,
-      endRow: editingBlock.endRow || 20,
-      endCol: editingBlock.endCol || 20,
-      numberCells,
-      color: editingBlock.color || BLOCK_COLORS[0],
-      isAutoDetected: false,
-    };
-
-    if (isAddingNew) {
-      setBlocks((prev) => [...prev, savedBlock]);
-    } else if (selectedBlockIndex !== null) {
-      setBlocks((prev) =>
-        prev.map((b, i) => (i === selectedBlockIndex ? savedBlock : b))
-      );
+    let saved: BlockDefinition;
+    if (editMode === 'wall') {
+      if (!wallCellGroups.length) { alert('セル群を定義してください'); return; }
+      let minR = Infinity, minC = Infinity, maxR = 0, maxC = 0;
+      wallCellGroups.forEach(g => {
+        if (g.type === 'range') {
+          minR = Math.min(minR, g.startRow || Infinity); minC = Math.min(minC, g.startCol || Infinity);
+          maxR = Math.max(maxR, g.endRow || 0); maxC = Math.max(maxC, g.endCol || 0);
+        } else if (g.cells) g.cells.forEach(c => { minR = Math.min(minR, c.row); minC = Math.min(minC, c.col); maxR = Math.max(maxR, c.row); maxC = Math.max(maxC, c.col); });
+      });
+      saved = { name, startRow: minR, startCol: minC, endRow: maxR, endCol: maxC, numberCells: wallBlockNumberCells, color: editingBlock.color || BLOCK_COLORS[0], isAutoDetected: false, isWallBlock: true, cellGroups: [...wallCellGroups] };
+    } else {
+      if (!editingBlock.startRow || !editingBlock.endRow) { alert('4つの角をクリックして範囲を指定してください'); return; }
+      saved = { name, startRow: editingBlock.startRow, startCol: editingBlock.startCol || 1, endRow: editingBlock.endRow, endCol: editingBlock.endCol || 1, numberCells: previewNumberCells, color: editingBlock.color || BLOCK_COLORS[0], isAutoDetected: false, isWallBlock: false };
     }
-
-    setEditingBlock(null);
-    setSelectedBlockIndex(null);
-    setIsAddingNew(false);
-  }, [editingBlock, isAddingNew, selectedBlockIndex, detectNumberCells]);
-
-  // 編集キャンセル
-  const handleCancelEdit = useCallback(() => {
-    setEditingBlock(null);
-    setSelectedBlockIndex(null);
-    setIsAddingNew(false);
-  }, []);
-
-  // 変更を適用
-  const handleApply = useCallback(() => {
-    onUpdateBlocks(blocks);
-    onClose();
-  }, [blocks, onUpdateBlocks, onClose]);
-
-  // キャンセル（変更を破棄）
-  const handleCancel = useCallback(() => {
-    setBlocks(mapData.blocks);
-    setSelectedBlockIndex(null);
-    setEditingBlock(null);
-    setIsAddingNew(false);
-    onClose();
-  }, [mapData.blocks, onClose]);
-
-  // 全ブロックをクリア
-  const handleClearAll = useCallback(() => {
-    if (confirm('全てのブロック定義を削除しますか？')) {
-      setBlocks([]);
-      setSelectedBlockIndex(null);
-      setEditingBlock(null);
-    }
-  }, []);
+    if (isAddingNew) setBlocks(prev => [...prev, saved]);
+    else if (selectedBlockIndex !== null) { const orig = sortedBlocks[selectedBlockIndex]; setBlocks(prev => prev.map(b => b.name === orig.name ? saved : b)); }
+    setEditingBlock(null); setSelectedBlockIndex(null); setIsAddingNew(false); setCellClickMode(null); setClickedCorners([]); setWallCellGroups([]);
+  }, [editingBlock, isAddingNew, selectedBlockIndex, editMode, wallCellGroups, wallBlockNumberCells, previewNumberCells, blocks, sortedBlocks]);
 
   if (!isOpen) return null;
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
-        {/* ヘッダー */}
-        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between flex-shrink-0">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-            ブロック定義
-          </h2>
-          <button
-            onClick={handleCancel}
-            className="text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200 text-2xl"
-          >
-            ✕
-          </button>
+        <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">ブロック定義</h2>
+          <button onClick={() => { setBlocks(mapData.blocks); onClose(); }} className="text-2xl text-slate-500 hover:text-slate-700">✕</button>
         </div>
 
-        {/* コンテンツ */}
+        {cellClickMode && (
+          <div className="px-6 py-2 bg-blue-50 dark:bg-blue-900/30 border-b border-blue-200">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                {cellClickMode === 'corner' && `📍 角をクリック (${clickedCorners.length}/4)`}
+                {cellClickMode === 'rangeStart' && '📍 範囲の開始セルをクリック'}
+                {cellClickMode === 'rangeEnd' && '📍 範囲の終了セルをクリック'}
+                {cellClickMode === 'individual' && `📍 個別セルをクリック (${individualCells.length}個)`}
+              </span>
+              <button onClick={() => { setCellClickMode(null); setClickedCorners([]); setRangeStart(null); }} className="text-sm text-blue-600">キャンセル</button>
+            </div>
+          </div>
+        )}
+
         <div className="flex-1 overflow-auto p-6">
           <div className="grid grid-cols-2 gap-6">
-            {/* 左側：ブロック一覧 */}
+            {/* 左: ブロック一覧 */}
             <div>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                  定義済みブロック ({blocks.length}件)
-                </h3>
+                <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">定義済み ({blocks.length}件)</h3>
                 <div className="flex gap-2">
-                  <button
-                    onClick={handleStartAddNew}
-                    className="px-3 py-1.5 text-xs font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
-                  >
-                    + 新規追加
-                  </button>
-                  <button
-                    onClick={handleClearAll}
-                    className="px-3 py-1.5 text-xs font-medium rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400"
-                  >
-                    全削除
-                  </button>
+                  <button onClick={() => setSortDirection(d => d === 'asc' ? 'desc' : 'asc')} className="px-2 py-1 text-xs rounded bg-slate-200 dark:bg-slate-700">{sortDirection === 'asc' ? '↑昇順' : '↓降順'}</button>
+                  <button onClick={() => { setIsAddingNew(true); setSelectedBlockIndex(null); setEditMode('normal'); setEditingBlock({ name: '', startRow: 0, startCol: 0, endRow: 0, endCol: 0, numberCells: [], color: BLOCK_COLORS[blocks.length % BLOCK_COLORS.length] }); setClickedCorners([]); setCellClickMode(null); setWallCellGroups([]); }} className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white">+ 新規</button>
+                  <button onClick={() => confirm('全て削除？') && setBlocks([])} className="px-3 py-1.5 text-xs rounded bg-red-100 text-red-700">全削除</button>
                 </div>
               </div>
-
-              {/* ブロック一覧 */}
               <div className="space-y-2 max-h-[50vh] overflow-y-auto">
-                {blocks.length === 0 ? (
-                  <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-8">
-                    ブロックが定義されていません
-                  </p>
-                ) : (
-                  blocks.map((block, index) => (
-                    <div
-                      key={index}
-                      className={`p-3 rounded-lg border cursor-pointer transition-colors ${
-                        selectedBlockIndex === index
-                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                          : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                      }`}
-                      onClick={() => handleEditBlock(index)}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-6 h-6 rounded flex items-center justify-center text-xs font-bold"
-                            style={{ backgroundColor: block.color || '#E3F2FD' }}
-                          >
-                            {block.name}
-                          </div>
-                          <div>
-                            <div className="text-sm font-medium text-slate-900 dark:text-white">
-                              {block.name}
-                            </div>
-                            <div className="text-xs text-slate-500 dark:text-slate-400">
-                              行 {block.startRow}-{block.endRow}, 列 {block.startCol}-{block.endCol}
-                              {' '}({block.numberCells.length}個のナンバーセル)
-                            </div>
-                          </div>
+                {sortedBlocks.length === 0 ? <p className="text-sm text-slate-500 text-center py-8">ブロックなし</p> : sortedBlocks.map((b, i) => (
+                  <div key={`${b.name}-${i}`} className={`p-3 rounded-lg border cursor-pointer ${selectedBlockIndex === i ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-slate-200 hover:bg-slate-50'}`} onClick={() => { setSelectedBlockIndex(i); setEditingBlock({ ...b }); setIsAddingNew(false); setEditMode(b.isWallBlock ? 'wall' : 'normal'); setClickedCorners([]); setCellClickMode(null); setWallCellGroups(b.isWallBlock && b.cellGroups ? [...b.cellGroups] : []); }}>
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 rounded flex items-center justify-center text-sm font-bold" style={{ backgroundColor: b.color || '#E3F2FD' }}>{b.name}</div>
+                        <div>
+                          <div className="text-sm font-medium">{b.name}{b.isWallBlock && <span className="ml-2 text-xs text-orange-600">[壁]</span>}</div>
+                          <div className="text-xs text-slate-500">{b.numberCells.length}セル</div>
                         </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleDeleteBlock(index);
-                          }}
-                          className="p-1 text-red-500 hover:text-red-700 hover:bg-red-100 rounded"
-                        >
-                          🗑️
-                        </button>
                       </div>
-                      {block.isAutoDetected && (
-                        <div className="mt-1 text-xs text-blue-600 dark:text-blue-400">
-                          ⚡ 自動検出
-                        </div>
-                      )}
+                      <button onClick={e => { e.stopPropagation(); if (confirm(`「${b.name}」を削除？`)) { setBlocks(prev => prev.filter(x => x.name !== b.name)); setSelectedBlockIndex(null); setEditingBlock(null); } }} className="p-1 text-red-500">🗑️</button>
                     </div>
-                  ))
-                )}
+                    {b.isAutoDetected && <div className="mt-1 text-xs text-blue-600">⚡自動検出</div>}
+                  </div>
+                ))}
               </div>
             </div>
 
-            {/* 右側：編集フォーム */}
+            {/* 右: 編集 */}
             <div>
               {editingBlock ? (
                 <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg">
-                  <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300 mb-4">
-                    {isAddingNew ? '新規ブロック追加' : 'ブロック編集'}
-                  </h3>
-
+                  <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-sm font-semibold">{isAddingNew ? '新規追加' : '編集'}</h3>
+                    <button onClick={() => { setEditMode(editMode === 'normal' ? 'wall' : 'normal'); setWallCellGroups([]); }} className={`px-2 py-1 text-xs rounded ${editMode === 'wall' ? 'bg-blue-100 text-blue-700' : 'bg-orange-100 text-orange-700'}`}>{editMode === 'wall' ? '通常モード' : '壁ブロック'}</button>
+                  </div>
                   <div className="space-y-4">
-                    {/* ブロック名 */}
                     <div>
-                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                        ブロック名
-                      </label>
-                      <input
-                        type="text"
-                        value={editingBlock.name || ''}
-                        onChange={(e) => handleEditChange('name', e.target.value)}
-                        placeholder="例: ア, め, A"
-                        className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                      />
+                      <label className="block text-xs font-medium text-slate-600 mb-1">ブロック名</label>
+                      <input type="text" value={editingBlock.name || ''} onChange={e => setEditingBlock(eb => ({ ...eb, name: e.target.value }))} placeholder="例: ア, め" className="w-full px-3 py-2 text-sm border rounded bg-white dark:bg-slate-800" />
                     </div>
-
-                    {/* 範囲指定 */}
-                    <div className="grid grid-cols-2 gap-4">
+                    {editMode === 'normal' ? (
                       <div>
-                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                          開始行
-                        </label>
-                        <input
-                          type="number"
-                          value={editingBlock.startRow || 1}
-                          onChange={(e) => handleEditChange('startRow', parseInt(e.target.value) || 1)}
-                          min={1}
-                          max={mapData.maxRow}
-                          className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        />
+                        <label className="block text-xs font-medium text-slate-600 mb-1">範囲指定</label>
+                        <button onClick={() => { setCellClickMode('corner'); setClickedCorners([]); }} className="w-full px-3 py-2 text-sm rounded bg-blue-100 text-blue-700">📍 4つの角をクリック</button>
+                        {clickedCorners.length > 0 && <div className="mt-2 text-xs text-slate-600">選択: {clickedCorners.map(c => `(${c.row},${c.col})`).join(', ')}</div>}
+                        {editingBlock.startRow && editingBlock.endRow && <div className="mt-2 p-2 bg-green-50 rounded text-xs text-green-700">範囲: 行{editingBlock.startRow}-{editingBlock.endRow}, 列{editingBlock.startCol}-{editingBlock.endCol}</div>}
                       </div>
+                    ) : (
                       <div>
-                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                          終了行
-                        </label>
-                        <input
-                          type="number"
-                          value={editingBlock.endRow || 20}
-                          onChange={(e) => handleEditChange('endRow', parseInt(e.target.value) || 20)}
-                          min={1}
-                          max={mapData.maxRow}
-                          className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                          開始列
-                        </label>
-                        <input
-                          type="number"
-                          value={editingBlock.startCol || 1}
-                          onChange={(e) => handleEditChange('startCol', parseInt(e.target.value) || 1)}
-                          min={1}
-                          max={mapData.maxCol}
-                          className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                          終了列
-                        </label>
-                        <input
-                          type="number"
-                          value={editingBlock.endCol || 20}
-                          onChange={(e) => handleEditChange('endCol', parseInt(e.target.value) || 20)}
-                          min={1}
-                          max={mapData.maxCol}
-                          className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                        />
-                      </div>
-                    </div>
-
-                    {/* 色選択 */}
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                        ブロック色
-                      </label>
-                      <div className="flex flex-wrap gap-2">
-                        {BLOCK_COLORS.map((color) => (
-                          <button
-                            key={color}
-                            onClick={() => handleEditChange('color', color)}
-                            className={`w-8 h-8 rounded border-2 ${
-                              editingBlock.color === color
-                                ? 'border-blue-500'
-                                : 'border-transparent'
-                            }`}
-                            style={{ backgroundColor: color }}
-                          />
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* プレビュー */}
-                    <div className="p-3 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
-                      <div className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">
-                        検出される数値セル: {previewNumberCells.length}個
-                      </div>
-                      {previewNumberCells.length > 0 ? (
-                        <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
-                          {previewNumberCells.slice(0, 50).map((cell, idx) => (
-                            <span
-                              key={idx}
-                              className="px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded"
-                            >
-                              {cell.value}
-                            </span>
-                          ))}
-                          {previewNumberCells.length > 50 && (
-                            <span className="text-xs text-slate-500">
-                              ...他 {previewNumberCells.length - 50}個
-                            </span>
-                          )}
+                        <label className="block text-xs font-medium text-slate-600 mb-1">セル群 (最大6)</label>
+                        {wallCellGroups.length > 0 && <div className="mb-2 space-y-1">{wallCellGroups.map((g, i) => <div key={i} className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded border"><span className="text-xs">{g.type === 'range' ? `範囲(${g.startRow},${g.startCol})-(${g.endRow},${g.endCol})` : `個別${g.cells?.length}セル`}</span><button onClick={() => setWallCellGroups(prev => prev.filter((_, j) => j !== i))} className="text-red-500 text-sm">✕</button></div>)}</div>}
+                        <div className="flex gap-2">
+                          <button onClick={() => setCellClickMode('rangeStart')} disabled={wallCellGroups.length >= 6} className="flex-1 px-3 py-2 text-xs rounded bg-blue-100 text-blue-700 disabled:opacity-50">+ 範囲追加</button>
+                          <button onClick={() => { setIndividualCells([]); setCellClickMode('individual'); }} disabled={wallCellGroups.length >= 6} className="flex-1 px-3 py-2 text-xs rounded bg-orange-100 text-orange-700 disabled:opacity-50">+ 個別追加</button>
                         </div>
-                      ) : (
-                        <p className="text-xs text-slate-500">
-                          指定範囲に数値セル(1-100)が見つかりません
-                        </p>
-                      )}
+                        {cellClickMode === 'individual' && <div className="mt-3"><div className="text-xs text-slate-600 mb-2">選択中: {individualCells.map(c => `(${c.row},${c.col})`).join(', ')}</div><button onClick={() => { if (!individualCells.length) { alert('セルを選択'); return; } setWallCellGroups(prev => prev.length >= 6 ? prev : [...prev, { type: 'individual', cells: [...individualCells] }]); setIndividualCells([]); setCellClickMode(null); }} className="w-full px-3 py-2 text-sm rounded bg-green-600 text-white">確定</button></div>}
+                      </div>
+                    )}
+                    <div>
+                      <label className="block text-xs font-medium text-slate-600 mb-1">色</label>
+                      <div className="flex flex-wrap gap-2">{BLOCK_COLORS.map(c => <button key={c} onClick={() => setEditingBlock(eb => ({ ...eb, color: c }))} className={`w-8 h-8 rounded border-2 ${editingBlock.color === c ? 'border-blue-500' : 'border-transparent'}`} style={{ backgroundColor: c }} />)}</div>
                     </div>
-
-                    {/* ボタン */}
+                    <div className="p-3 bg-white dark:bg-slate-800 rounded border">
+                      <div className="text-xs font-medium text-slate-600 mb-2">検出セル: {previewNumberCells.length}個</div>
+                      {previewNumberCells.length > 0 ? <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">{previewNumberCells.map((c, i) => <span key={i} className="px-2 py-0.5 text-xs bg-green-100 text-green-700 rounded">{c.value}</span>)}</div> : <p className="text-xs text-slate-500">範囲を指定してください</p>}
+                    </div>
                     <div className="flex gap-2 pt-2">
-                      <button
-                        onClick={handleSaveBlock}
-                        className="flex-1 px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
-                      >
-                        {isAddingNew ? '追加' : '保存'}
-                      </button>
-                      <button
-                        onClick={handleCancelEdit}
-                        className="px-4 py-2 text-sm font-medium rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
-                      >
-                        キャンセル
-                      </button>
+                      <button onClick={handleSaveBlock} className="flex-1 px-4 py-2 text-sm rounded bg-blue-600 text-white">{isAddingNew ? '追加' : '保存'}</button>
+                      <button onClick={() => { setEditingBlock(null); setSelectedBlockIndex(null); setIsAddingNew(false); setCellClickMode(null); setClickedCorners([]); setWallCellGroups([]); setEditMode('normal'); }} className="px-4 py-2 text-sm rounded bg-slate-200 text-slate-700">キャンセル</button>
                     </div>
                   </div>
                 </div>
-              ) : (
-                <div className="p-8 text-center text-slate-500 dark:text-slate-400">
-                  <p className="mb-2">左のリストからブロックを選択して編集</p>
-                  <p className="text-sm">または「新規追加」ボタンで新しいブロックを定義</p>
-                </div>
-              )}
+              ) : <div className="p-8 text-center text-slate-500"><p className="mb-2">左から選択して編集</p><p className="text-sm">または「新規」で追加</p></div>}
             </div>
           </div>
         </div>
 
-        {/* フッター */}
-        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3 flex-shrink-0">
-          <button
-            onClick={handleCancel}
-            className="px-4 py-2 text-sm font-medium rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
-          >
-            キャンセル
-          </button>
-          <button
-            onClick={handleApply}
-            className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700"
-          >
-            適用
-          </button>
+        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3">
+          <button onClick={() => { setBlocks(mapData.blocks); onClose(); }} className="px-4 py-2 text-sm rounded bg-slate-200 text-slate-700">キャンセル</button>
+          <button onClick={() => { onUpdateBlocks(blocks); onClose(); }} className="px-4 py-2 text-sm rounded bg-blue-600 text-white">適用</button>
         </div>
       </div>
     </div>

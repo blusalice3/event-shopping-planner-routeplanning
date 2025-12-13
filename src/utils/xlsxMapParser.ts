@@ -283,8 +283,7 @@ export function parseMapSheet(
 
 /**
  * ブロックを自動検出
- * 4セル以上の結合セルでブロック名を持つものを探し、
- * 周囲の数値セルをブロックのナンバーセルとして関連付ける
+ * 太い罫線で囲まれた領域内のブロック名セルと数値セルを検出
  */
 function detectBlocks(
   mergedCells: MergedCellInfo[],
@@ -306,59 +305,45 @@ function detectBlocks(
   blockNameMerges.forEach((merge) => {
     const blockName = String(merge.value).trim();
     
-    // 既に同じ名前のブロックがあるかチェック
-    const existingBlock = blocks.find((b) => b.name === blockName);
-    if (existingBlock) {
-      // 既存ブロックに追加（複数領域のブロック）
-      // 周囲の数値セルを探す
-      const numberCells = findSurroundingNumberCells(
-        merge,
-        cellsMap,
-        processedCells,
-        maxRow,
-        maxCol
-      );
-      existingBlock.numberCells.push(...numberCells);
-      
-      // 範囲を更新
-      existingBlock.startRow = Math.min(existingBlock.startRow, merge.startRow);
-      existingBlock.startCol = Math.min(existingBlock.startCol, merge.startCol);
-      existingBlock.endRow = Math.max(existingBlock.endRow, merge.endRow);
-      existingBlock.endCol = Math.max(existingBlock.endCol, merge.endCol);
-      return;
-    }
-    
-    // 周囲の数値セルを探す
-    const numberCells = findSurroundingNumberCells(
+    // 太い罫線で囲まれた領域を検出
+    const boundedRegion = findBorderedRegion(
       merge,
       cellsMap,
-      processedCells,
       maxRow,
       maxCol
     );
     
+    // 領域内の数値セルを検出
+    const numberCells = findNumberCellsInRegion(
+      boundedRegion,
+      cellsMap,
+      processedCells
+    );
+    
+    // 既に同じ名前のブロックがあるかチェック
+    const existingBlock = blocks.find((b) => b.name === blockName);
+    if (existingBlock) {
+      // 既存ブロックに追加（複数領域のブロック）
+      existingBlock.numberCells.push(...numberCells);
+      
+      // 範囲を更新
+      existingBlock.startRow = Math.min(existingBlock.startRow, boundedRegion.startRow);
+      existingBlock.startCol = Math.min(existingBlock.startCol, boundedRegion.startCol);
+      existingBlock.endRow = Math.max(existingBlock.endRow, boundedRegion.endRow);
+      existingBlock.endCol = Math.max(existingBlock.endCol, boundedRegion.endCol);
+      return;
+    }
+    
     if (numberCells.length > 0) {
-      // 数値セルの範囲を計算
-      let minRow = merge.startRow;
-      let minCol = merge.startCol;
-      let maxRowBlock = merge.endRow;
-      let maxColBlock = merge.endCol;
-      
-      numberCells.forEach((nc) => {
-        minRow = Math.min(minRow, nc.row);
-        minCol = Math.min(minCol, nc.col);
-        maxRowBlock = Math.max(maxRowBlock, nc.row);
-        maxColBlock = Math.max(maxColBlock, nc.col);
-      });
-      
       blocks.push({
         name: blockName,
-        startRow: minRow,
-        startCol: minCol,
-        endRow: maxRowBlock,
-        endCol: maxColBlock,
+        startRow: boundedRegion.startRow,
+        startCol: boundedRegion.startCol,
+        endRow: boundedRegion.endRow,
+        endCol: boundedRegion.endCol,
         numberCells,
         color: generateBlockColor(blocks.length),
+        isAutoDetected: true,
       });
     }
   });
@@ -367,96 +352,153 @@ function detectBlocks(
 }
 
 /**
- * 結合セルの周囲にある数値セルを探す
- * ブロック名セルに隣接する領域のみを検索（最大10セル）
+ * 太い罫線で囲まれた領域を検出
+ * ブロック名セルから上下左右に探索し、太い罫線（medium/thick）があるまで拡張
  */
-function findSurroundingNumberCells(
+function findBorderedRegion(
   merge: MergedCellInfo,
   cellsMap: Map<string, CellData>,
-  processedCells: Set<string>,
-  _maxRow: number,
-  _maxCol: number
-): Array<{ row: number; col: number; value: number }> {
-  const numberCells: Array<{ row: number; col: number; value: number }> = [];
+  maxRow: number,
+  maxCol: number
+): { startRow: number; startCol: number; endRow: number; endCol: number } {
+  // ブロック名セルの位置から開始
+  let startRow = merge.startRow;
+  let startCol = merge.startCol;
+  let endRow = merge.endRow;
+  let endCol = merge.endCol;
   
-  // ブロック名セルに隣接するセルのみを検索（最大10セルまで）
-  // 上下左右それぞれの方向に最大10セルまで探索
-  const searchRadius = 10;
+  // 太い罫線かどうかを判定
+  const isThickBorder = (border: BorderStyle | null): boolean => {
+    if (!border) return false;
+    return border.style === 'medium' || border.style === 'thick' || border.style === 'double';
+  };
   
-  // 4方向に隣接する数値セルを探す
-  const directions = [
-    { dr: -1, dc: 0, name: 'up' },    // 上
-    { dr: 1, dc: 0, name: 'down' },   // 下
-    { dr: 0, dc: -1, name: 'left' },  // 左
-    { dr: 0, dc: 1, name: 'right' },  // 右
-  ];
-  
-  // 各方向に探索し、連続した数値セル群を見つける
-  directions.forEach((dir) => {
-    let foundNumbers = false;
-    
-    for (let dist = 1; dist <= searchRadius; dist++) {
-      // 結合セルの端から探索開始
-      let baseRow: number;
-      let baseCol: number;
-      let scanWidth: number;
-      let scanHeight: number;
-      
-      if (dir.name === 'up') {
-        baseRow = merge.startRow - dist;
-        baseCol = merge.startCol;
-        scanWidth = merge.endCol - merge.startCol + 1;
-        scanHeight = 1;
-      } else if (dir.name === 'down') {
-        baseRow = merge.endRow + dist;
-        baseCol = merge.startCol;
-        scanWidth = merge.endCol - merge.startCol + 1;
-        scanHeight = 1;
-      } else if (dir.name === 'left') {
-        baseRow = merge.startRow;
-        baseCol = merge.startCol - dist;
-        scanWidth = 1;
-        scanHeight = merge.endRow - merge.startRow + 1;
-      } else {
-        baseRow = merge.startRow;
-        baseCol = merge.endCol + dist;
-        scanWidth = 1;
-        scanHeight = merge.endRow - merge.startRow + 1;
+  // 上方向に探索
+  for (let r = merge.startRow - 1; r >= 1; r--) {
+    let hasThickBorder = false;
+    for (let c = startCol; c <= endCol; c++) {
+      const cell = cellsMap.get(`${r}-${c}`);
+      if (cell?.borders?.bottom && isThickBorder(cell.borders.bottom)) {
+        hasThickBorder = true;
+        break;
       }
-      
-      // この距離に数値セルがあるかチェック
-      let hasNumberInThisRow = false;
-      
-      for (let dr = 0; dr < scanHeight; dr++) {
-        for (let dc = 0; dc < scanWidth; dc++) {
-          const r = baseRow + dr;
-          const c = baseCol + dc;
-          const key = `${r}-${c}`;
-          
-          if (processedCells.has(key)) continue;
-          
-          const cell = cellsMap.get(key);
-          if (!cell || cell.isMerged) continue;
-          
-          if (isNumberCell(cell.value)) {
-            const numValue = typeof cell.value === 'number' 
-              ? cell.value 
-              : parseFloat(String(cell.value));
-            
-            numberCells.push({ row: r, col: c, value: numValue });
-            processedCells.add(key);
-            hasNumberInThisRow = true;
-            foundNumbers = true;
-          }
-        }
-      }
-      
-      // 数値セルが見つかった後、空白行/列があれば探索終了
-      if (foundNumbers && !hasNumberInThisRow) {
+      const cellAbove = cellsMap.get(`${r + 1}-${c}`);
+      if (cellAbove?.borders?.top && isThickBorder(cellAbove.borders.top)) {
+        hasThickBorder = true;
         break;
       }
     }
-  });
+    if (hasThickBorder) {
+      startRow = r + 1;
+      break;
+    }
+    startRow = r;
+  }
+  
+  // 下方向に探索
+  for (let r = merge.endRow + 1; r <= maxRow; r++) {
+    let hasThickBorder = false;
+    for (let c = startCol; c <= endCol; c++) {
+      const cell = cellsMap.get(`${r}-${c}`);
+      if (cell?.borders?.top && isThickBorder(cell.borders.top)) {
+        hasThickBorder = true;
+        break;
+      }
+      const cellAbove = cellsMap.get(`${r - 1}-${c}`);
+      if (cellAbove?.borders?.bottom && isThickBorder(cellAbove.borders.bottom)) {
+        hasThickBorder = true;
+        break;
+      }
+    }
+    if (hasThickBorder) {
+      endRow = r - 1;
+      break;
+    }
+    endRow = r;
+  }
+  
+  // 左方向に探索
+  for (let c = merge.startCol - 1; c >= 1; c--) {
+    let hasThickBorder = false;
+    for (let r = startRow; r <= endRow; r++) {
+      const cell = cellsMap.get(`${r}-${c}`);
+      if (cell?.borders?.right && isThickBorder(cell.borders.right)) {
+        hasThickBorder = true;
+        break;
+      }
+      const cellRight = cellsMap.get(`${r}-${c + 1}`);
+      if (cellRight?.borders?.left && isThickBorder(cellRight.borders.left)) {
+        hasThickBorder = true;
+        break;
+      }
+    }
+    if (hasThickBorder) {
+      startCol = c + 1;
+      break;
+    }
+    startCol = c;
+  }
+  
+  // 右方向に探索
+  for (let c = merge.endCol + 1; c <= maxCol; c++) {
+    let hasThickBorder = false;
+    for (let r = startRow; r <= endRow; r++) {
+      const cell = cellsMap.get(`${r}-${c}`);
+      if (cell?.borders?.left && isThickBorder(cell.borders.left)) {
+        hasThickBorder = true;
+        break;
+      }
+      const cellLeft = cellsMap.get(`${r}-${c - 1}`);
+      if (cellLeft?.borders?.right && isThickBorder(cellLeft.borders.right)) {
+        hasThickBorder = true;
+        break;
+      }
+    }
+    if (hasThickBorder) {
+      endCol = c - 1;
+      break;
+    }
+    endCol = c;
+  }
+  
+  // 最大範囲を制限（無限に広がらないように）
+  const maxExpansion = 30;
+  startRow = Math.max(startRow, merge.startRow - maxExpansion);
+  endRow = Math.min(endRow, merge.endRow + maxExpansion);
+  startCol = Math.max(startCol, merge.startCol - maxExpansion);
+  endCol = Math.min(endCol, merge.endCol + maxExpansion);
+  
+  return { startRow, startCol, endRow, endCol };
+}
+
+/**
+ * 指定領域内の数値セルを検出
+ */
+function findNumberCellsInRegion(
+  region: { startRow: number; startCol: number; endRow: number; endCol: number },
+  cellsMap: Map<string, CellData>,
+  processedCells: Set<string>
+): Array<{ row: number; col: number; value: number }> {
+  const numberCells: Array<{ row: number; col: number; value: number }> = [];
+  
+  for (let r = region.startRow; r <= region.endRow; r++) {
+    for (let c = region.startCol; c <= region.endCol; c++) {
+      const key = `${r}-${c}`;
+      if (processedCells.has(key)) continue;
+      
+      const cell = cellsMap.get(key);
+      if (!cell || cell.isMerged) continue;
+      
+      if (isNumberCell(cell.value)) {
+        const numValue = typeof cell.value === 'number' 
+          ? cell.value 
+          : parseFloat(String(cell.value));
+        
+        numberCells.push({ row: r, col: c, value: numValue });
+        processedCells.add(key);
+      }
+    }
+  }
   
   return numberCells;
 }

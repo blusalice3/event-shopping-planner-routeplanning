@@ -77,8 +77,21 @@ export interface NumberCellInfo {
   value: number;
 }
 
+// 壁ブロック用のセル群定義
+export interface CellGroup {
+  type: 'range' | 'individual';  // range: 2セル間の範囲, individual: 個別セル指定
+  // rangeタイプ用
+  startRow?: number;
+  startCol?: number;
+  endRow?: number;
+  endCol?: number;
+  // individualタイプ用
+  cells?: { row: number; col: number }[];
+}
+
 export interface BlockDefinition {
   name: string;
+  // 通常ブロック用（4セル指定）
   startRow: number;
   startCol: number;
   endRow: number;
@@ -87,6 +100,9 @@ export interface BlockDefinition {
   color?: string;
   id?: string;
   isAutoDetected?: boolean;
+  // 壁ブロック用
+  isWallBlock?: boolean;
+  cellGroups?: CellGroup[];  // 最大6群
 }
 
 export interface DayMapData {
