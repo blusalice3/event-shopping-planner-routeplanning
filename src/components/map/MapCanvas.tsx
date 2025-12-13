@@ -461,8 +461,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (!canvas) return;
       
       const rect = canvas.getBoundingClientRect();
-      const x = e.clientX - rect.left - offset.x;
-      const y = e.clientY - rect.top - offset.y;
+      // Canvas表示サイズに対するクリック位置を計算
+      const scaleX = canvas.width / dpr / rect.width;
+      const scaleY = canvas.height / dpr / rect.height;
+      
+      const x = (e.clientX - rect.left) * scaleX;
+      const y = (e.clientY - rect.top) * scaleY;
       
       const col = Math.floor(x / cellSize) + 1;
       const row = Math.floor(y / cellSize) + 1;
@@ -481,7 +485,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       
       onCellClick(row, col, matchingItems);
     },
-    [cellSize, offset, mapData.maxRow, mapData.maxCol, cellStates, onCellClick, isDragging]
+    [cellSize, mapData.maxRow, mapData.maxCol, cellStates, onCellClick, isDragging, dpr]
   );
   
   // ドラッグ処理
