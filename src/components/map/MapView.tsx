@@ -122,15 +122,15 @@ const MapView: React.FC<MapViewProps> = ({
   
   return (
     <div className="relative h-full">
-      {/* ツールバー */}
-      <div className="absolute top-4 right-4 z-30 flex items-center gap-3">
+      {/* ツールバー - 画面に固定 */}
+      <div className="fixed top-20 right-4 z-40 flex items-center gap-3">
         {/* ルート表示トグル */}
-        <label className="flex items-center gap-2 bg-white dark:bg-slate-800 px-3 py-2 rounded-lg shadow-md">
+        <label className="flex items-center gap-2 bg-white dark:bg-slate-800 px-3 py-2 rounded-lg shadow-md border border-slate-200 dark:border-slate-700">
           <span className="text-sm text-slate-700 dark:text-slate-300">ルート表示</span>
           <button
             onClick={() => setIsRouteVisible(!isRouteVisible)}
             className={`relative w-10 h-5 rounded-full transition-colors ${
-              isRouteVisible ? 'bg-red-500' : 'bg-slate-300 dark:bg-slate-600'
+              isRouteVisible ? 'bg-blue-500' : 'bg-slate-300 dark:bg-slate-600'
             }`}
           >
             <span
@@ -142,8 +142,8 @@ const MapView: React.FC<MapViewProps> = ({
         </label>
       </div>
       
-      {/* ズームコントロール（左下） */}
-      <div className="absolute bottom-4 left-4 z-30">
+      {/* ズームコントロール - 画面に固定 */}
+      <div className="fixed bottom-4 left-4 z-40">
         <select
           value={zoomLevel}
           onChange={(e) => setZoomLevel(Number(e.target.value) as ZoomLevel)}

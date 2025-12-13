@@ -123,8 +123,9 @@ function findBorderedRegion(
 ): Set<string> {
   const region = new Set<string>();
   const queue: Array<{ row: number; col: number }> = [{ row: startRow, col: startCol }];
+  const MAX_REGION_SIZE = 500; // 1つの領域の最大セル数
   
-  while (queue.length > 0) {
+  while (queue.length > 0 && region.size < MAX_REGION_SIZE) {
     const { row, col } = queue.shift()!;
     const key = `${row}-${col}`;
     
@@ -138,7 +139,6 @@ function findBorderedRegion(
     
     // 上方向へ
     if (!isMediumOrThickBorder(border?.top?.style)) {
-      // 上のセルの下罫線もチェック
       if (row > 1) {
         const aboveCell = worksheet.getCell(row - 1, col);
         if (!isMediumOrThickBorder(aboveCell.border?.bottom?.style)) {
@@ -257,7 +257,7 @@ function detectBlocksWithExcelJS(
   maxCol: number
 ): BlockDefinition[] {
   const blocks: BlockDefinition[] = [];
-  const processedRegions = new Set<string>(); // 処理済みセルを記録
+  const globalProcessedCells = new Set<string>(); // グローバルな処理済みセル
   
   // 4セル以上の結合セルでブロック名を持つものを探す
   const blockNameMerges = mergedCells.filter((merge) => {
@@ -276,22 +276,23 @@ function detectBlocksWithExcelJS(
   blockNameMerges.forEach((merge) => {
     const blockName = String(merge.value).trim();
     
-    // 既に処理済みの領域に含まれているかチェック
+    // このブロック名セルが既に処理済みかチェック
     const mergeKey = `${merge.startRow}-${merge.startCol}`;
-    if (processedRegions.has(mergeKey)) return;
+    if (globalProcessedCells.has(mergeKey)) return;
     
-    // ブロック名セルの中心から太い罫線で囲まれた領域を検出
+    // ブロック名セルから太い罫線で囲まれた領域を検出
+    // 各ブロック名から独立して検出するため、visited は空で開始
     const region = findBorderedRegion(
       merge.startRow,
       merge.startCol,
       worksheet,
       maxRow,
       maxCol,
-      new Set()
+      new Set() // 各検出は独立
     );
     
-    // 領域内のセルを処理済みとしてマーク
-    region.forEach((key) => processedRegions.add(key));
+    // この領域内のセルをグローバルに処理済みとしてマーク
+    region.forEach((key) => globalProcessedCells.add(key));
     
     // 領域内の数値セルを抽出
     const numberCells = extractNumberCellsFromRegion(region, worksheet, mergeMap);
