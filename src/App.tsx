@@ -2250,7 +2250,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
   
   // セル選択モードの状態（ブロック定義用）
   const [cellSelectionMode, setCellSelectionMode] = useState<{
-    type: 'corner' | 'rangeStart' | 'individual';
+    type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual';
     clickedCells: { row: number; col: number }[];
     editingBlockData?: unknown;
   } | null>(null);
@@ -2283,7 +2283,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
   
   // セル選択モードを開始（BlockDefinitionPanelから呼ばれる）
   const handleStartCellSelection = useCallback((
-    type: 'corner' | 'rangeStart' | 'individual',
+    type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual',
     editingData?: unknown
   ) => {
     setCellSelectionMode({ type, clickedCells: [], editingBlockData: editingData });
@@ -2304,11 +2304,19 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setBlockDefinitionMode(true); // パネルを再表示
   }, [cellSelectionMode]);
   
-  // セル選択をキャンセル
+  // セル選択をキャンセル（編集画面に戻る）
   const handleCancelCellSelection = useCallback(() => {
+    // 編集データを保持したままパネルを再表示
+    if (cellSelectionMode?.editingBlockData) {
+      setPendingCellSelection({
+        type: 'cancelled', // キャンセル用の特殊タイプ
+        cells: [],
+        editingData: cellSelectionMode.editingBlockData,
+      });
+    }
     setCellSelectionMode(null);
     setBlockDefinitionMode(true); // パネルを再表示
-  }, []);
+  }, [cellSelectionMode]);
   
   // マップセルクリックをリッスンしてセル選択に追加
   useEffect(() => {
@@ -3054,6 +3062,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           <div className="text-center mb-3">
             <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
               {cellSelectionMode.type === 'corner' && `📍 セルをクリックして角を選択 (${cellSelectionMode.clickedCells.length}/4)`}
+              {cellSelectionMode.type === 'multiCorner' && `📍 セルをクリックして角を選択 (${cellSelectionMode.clickedCells.length}/4)`}
               {cellSelectionMode.type === 'rangeStart' && `📍 範囲の2つのセルをクリック (${cellSelectionMode.clickedCells.length}/2)`}
               {cellSelectionMode.type === 'individual' && `📍 個別セルをクリック (${cellSelectionMode.clickedCells.length}個選択中)`}
             </div>
@@ -3067,7 +3076,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             <button
               onClick={handleConfirmCellSelection}
               disabled={
-                (cellSelectionMode.type === 'corner' && cellSelectionMode.clickedCells.length < 4) ||
+                ((cellSelectionMode.type === 'corner' || cellSelectionMode.type === 'multiCorner') && cellSelectionMode.clickedCells.length < 4) ||
                 (cellSelectionMode.type === 'rangeStart' && cellSelectionMode.clickedCells.length < 2) ||
                 (cellSelectionMode.type === 'individual' && cellSelectionMode.clickedCells.length === 0)
               }
