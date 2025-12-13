@@ -20,7 +20,7 @@ interface MapCanvasProps {
   onCellClick: (row: number, col: number, matchingItems: ShoppingItem[]) => void;
 }
 
-const CELL_SIZE = 24; // 基本セルサイズ（少し大きく）
+const BASE_CELL_SIZE = 28; // 基本セルサイズ
 
 const MapCanvas: React.FC<MapCanvasProps> = ({
   mapData,
@@ -38,9 +38,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
   
+  // デバイスピクセル比
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  
   // スケール計算
   const scale = zoomLevel / 100;
-  const cellSize = CELL_SIZE * scale;
+  const cellSize = BASE_CELL_SIZE * scale;
+  
+  // 詳細表示かどうか（拡大時は詳細、縮小時はシンプル）
+  const isDetailedView = zoomLevel >= 80;
+  const showNumbers = zoomLevel >= 60;
+  const showBorders = zoomLevel >= 40;
   
   // セルマップを作成
   const cellsMap = useMemo(() => {
@@ -55,7 +63,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const mergedCellsMap = useMemo(() => {
     const map = new Map<string, MergedCellInfo>();
     mapData.mergedCells.forEach((merge) => {
-      // 結合セルの開始位置にのみ登録
       map.set(`${merge.startRow}-${merge.startCol}`, merge);
     });
     return map;
@@ -65,119 +72,108 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const cellStates = useMemo(() => {
     const states = new Map<string, MapCellStateDetail>();
     
-    // mapNameから参加日を抽出
     const dayMatch = mapName.match(/^(.+)マップ$/);
     if (!dayMatch) return states;
     const dayName = dayMatch[1];
     
-    // アイテムをセルにマッピング
     items.forEach((item) => {
       if (item.eventDate !== dayName) return;
       
-      // ブロックを探す
       const block = mapData.blocks.find((b) => b.name === item.block);
       if (!block) return;
       
-      // ナンバーの数値部分を抽出
       const numStr = extractNumberFromItemNumber(item.number);
       if (!numStr) return;
-      const numValue = parseInt(numStr, 10);
       
-      // ブロック内の該当する数値セルを探す
-      const numberCell = block.numberCells.find((c) => c.value === numValue);
-      if (!numberCell) return;
+      const num = parseInt(numStr, 10);
+      const cell = block.numberCells.find((nc) => nc.value === num);
+      if (!cell) return;
       
-      const key = `${numberCell.row}-${numberCell.col}`;
-      const existing = states.get(key);
-      const isVisited = executeModeItemIds.has(item.id);
-      const isFullyVisited = item.purchaseStatus !== 'None';
+      const key = `${cell.row}-${cell.col}`;
+      const existing = states.get(key) || {
+        hasItems: false,
+        itemCount: 0,
+        isVisited: false,
+        isFullyVisited: false,
+        items: [],
+      };
       
-      if (!existing) {
-        states.set(key, {
-          hasItems: true,
-          itemCount: 1,
-          isVisited,
-          isFullyVisited,
-          items: [item],
-        });
-      } else {
-        existing.itemCount++;
-        existing.items.push(item);
-        existing.isVisited = existing.isVisited || isVisited;
-        existing.isFullyVisited = existing.isFullyVisited && isFullyVisited;
+      existing.hasItems = true;
+      existing.itemCount++;
+      existing.items.push(item);
+      
+      if (executeModeItemIds.has(item.id)) {
+        existing.isVisited = true;
+      }
+      
+      states.set(key, existing);
+    });
+    
+    states.forEach((state) => {
+      if (state.items.length > 0) {
+        const allVisited = state.items.every((item) => executeModeItemIds.has(item.id));
+        state.isFullyVisited = allVisited;
       }
     });
     
     return states;
-  }, [items, mapData.blocks, mapName, executeModeItemIds]);
+  }, [mapData.blocks, items, mapName, executeModeItemIds]);
   
-  // 訪問順序を計算
-  const visitOrder = useMemo(() => {
-    const order: Array<{ row: number; col: number; visitIndex: number; items: ShoppingItem[] }> = [];
-    const processedCells = new Set<string>();
+  // ルート生成
+  const routePoints = useMemo(() => {
+    if (!isRouteVisible) return [];
     
-    const executeItemIds = Array.from(executeModeItemIds);
     const dayMatch = mapName.match(/^(.+)マップ$/);
-    if (!dayMatch) return order;
+    if (!dayMatch) return [];
     const dayName = dayMatch[1];
     
-    executeItemIds.forEach((itemId) => {
-      const item = items.find((i) => i.id === itemId);
-      if (!item || item.eventDate !== dayName) return;
-      
+    const visitItems = items.filter(
+      (item) => item.eventDate === dayName && executeModeItemIds.has(item.id)
+    );
+    
+    const points: Array<{ row: number; col: number; order: number }> = [];
+    
+    visitItems.forEach((item, index) => {
       const block = mapData.blocks.find((b) => b.name === item.block);
       if (!block) return;
       
       const numStr = extractNumberFromItemNumber(item.number);
       if (!numStr) return;
-      const numValue = parseInt(numStr, 10);
       
-      const numberCell = block.numberCells.find((c) => c.value === numValue);
-      if (!numberCell) return;
-      
-      const key = `${numberCell.row}-${numberCell.col}`;
-      if (processedCells.has(key)) {
-        // 既存のエントリにアイテムを追加
-        const existing = order.find((o) => `${o.row}-${o.col}` === key);
-        if (existing) {
-          existing.items.push(item);
-        }
-        return;
+      const num = parseInt(numStr, 10);
+      const cell = block.numberCells.find((nc) => nc.value === num);
+      if (cell) {
+        points.push({ row: cell.row, col: cell.col, order: index });
       }
-      
-      processedCells.add(key);
-      order.push({
-        row: numberCell.row,
-        col: numberCell.col,
-        visitIndex: order.length + 1,
-        items: [item],
-      });
     });
     
-    return order;
-  }, [executeModeItemIds, items, mapData.blocks, mapName]);
-  
-  // ルートセグメントを計算
+    return points;
+  }, [mapData.blocks, items, mapName, executeModeItemIds, isRouteVisible]);
+
+  // ルートセグメント
   const routeSegments = useMemo(() => {
-    if (!isRouteVisible || visitOrder.length < 2) return [];
+    if (!isRouteVisible || routePoints.length < 2) return [];
     
-    const points = visitOrder.map((v) => ({ row: v.row, col: v.col }));
-    
-    // ブロック名セルを収集
     const blockNameCells = new Set<string>();
     mapData.blocks.forEach((block) => {
-      // ブロック名がある結合セルの位置を追加
-      blockNameCells.add(`${block.startRow}-${block.startCol}`);
+      for (let r = block.startRow; r <= block.endRow; r++) {
+        for (let c = block.startCol; c <= block.endCol; c++) {
+          const cell = cellsMap.get(`${r}-${c}`);
+          if (cell && cell.value !== null && typeof cell.value === 'string') {
+            blockNameCells.add(`${r}-${c}`);
+          }
+        }
+      }
     });
     
-    return generateRouteSegments(mapData, points, blockNameCells);
-  }, [isRouteVisible, visitOrder, mapData]);
-  
-  // キャンバスサイズ
-  const canvasWidth = mapData.maxCol * cellSize + 50;
-  const canvasHeight = mapData.maxRow * cellSize + 50;
-  
-  // 描画処理
+    const segments = generateRouteSegments(mapData, routePoints, blockNameCells);
+    return segments.map((seg) => ({
+      ...seg,
+      path: simplifyPath(seg.path),
+    }));
+  }, [isRouteVisible, routePoints, mapData, cellsMap]);
+
+  // 描画
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -185,28 +181,32 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    // キャンバスをクリア
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // キャンバスサイズを設定（高解像度対応）
+    const displayWidth = mapData.maxCol * cellSize;
+    const displayHeight = mapData.maxRow * cellSize;
     
-    // オフセット適用
-    ctx.save();
-    ctx.translate(offset.x, offset.y);
+    canvas.style.width = `${displayWidth}px`;
+    canvas.style.height = `${displayHeight}px`;
+    canvas.width = displayWidth * dpr;
+    canvas.height = displayHeight * dpr;
     
-    // 結合セルの親位置を追跡
-    const mergeParentSet = new Set<string>();
-    mapData.mergedCells.forEach((merge) => {
-      mergeParentSet.add(`${merge.startRow}-${merge.startCol}`);
-    });
+    // スケール調整
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     
-    // 1. 背景を描画（結合セルを考慮）
+    // クリア
+    ctx.clearRect(0, 0, displayWidth, displayHeight);
+    
+    // アンチエイリアス設定
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+
+    // 1. 背景を描画
     mapData.cells.forEach((cell) => {
-      if (cell.isMerged) return; // 結合セルの子は描画しない
+      if (cell.isMerged) return;
       
       const x = (cell.col - 1) * cellSize;
       const y = (cell.row - 1) * cellSize;
       
-      // 結合セルかチェック
       const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
       const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
       const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
@@ -221,246 +221,237 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const state = cellStates.get(`${cell.row}-${cell.col}`);
       if (state) {
         if (state.isFullyVisited) {
-          // 全訪問済み: 赤のグラデーション
-          const gradient = ctx.createRadialGradient(
-            x + width / 2, y + height / 2, 0,
-            x + width / 2, y + height / 2, Math.max(width, height) / 2
-          );
-          gradient.addColorStop(0, 'rgba(239, 83, 80, 0.6)');
-          gradient.addColorStop(1, 'rgba(239, 83, 80, 0)');
-          ctx.fillStyle = gradient;
+          ctx.fillStyle = 'rgba(239, 83, 80, 0.5)';
           ctx.fillRect(x, y, width, height);
         } else if (state.isVisited) {
-          // 一部訪問済み: 黄のグラデーション
-          const gradient = ctx.createRadialGradient(
-            x + width / 2, y + height / 2, 0,
-            x + width / 2, y + height / 2, Math.max(width, height) / 2
-          );
-          gradient.addColorStop(0, 'rgba(255, 238, 88, 0.6)');
-          gradient.addColorStop(1, 'rgba(255, 238, 88, 0)');
-          ctx.fillStyle = gradient;
+          ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';
           ctx.fillRect(x, y, width, height);
         } else if (state.hasItems) {
-          // アイテムあり: 薄い青
-          ctx.fillStyle = 'rgba(227, 242, 253, 0.7)';
+          ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';
           ctx.fillRect(x, y, width, height);
         }
       }
     });
     
-    // 2. 罫線を描画
-    mapData.cells.forEach((cell) => {
-      if (cell.isMerged) return;
-      
-      const x = (cell.col - 1) * cellSize;
-      const y = (cell.row - 1) * cellSize;
-      
-      const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-      const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
-      const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
-      
-      // 罫線の描画
-      const { borders } = cell;
-      
-      // 罫線がある場合は描画
-      const drawBorder = (
-        startX: number, startY: number,
-        endX: number, endY: number,
-        border: typeof borders.top
-      ) => {
-        if (!border) return;
+    // 2. 罫線を描画（ズームレベルに応じて）
+    if (showBorders) {
+      mapData.cells.forEach((cell) => {
+        if (cell.isMerged) return;
         
-        ctx.beginPath();
-        ctx.strokeStyle = border.color || '#4CAF50'; // デフォルトは緑色
+        const x = (cell.col - 1) * cellSize;
+        const y = (cell.row - 1) * cellSize;
         
-        // 線の太さ
-        switch (border.style) {
-          case 'thin':
-            ctx.lineWidth = 1 * scale;
-            break;
-          case 'medium':
-            ctx.lineWidth = 2 * scale;
-            break;
-          case 'thick':
-            ctx.lineWidth = 3 * scale;
-            break;
-          case 'double':
-            ctx.lineWidth = 1 * scale;
-            break;
-          default:
-            ctx.lineWidth = 1 * scale;
-        }
+        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+        const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
+        const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
         
-        ctx.moveTo(startX, startY);
-        ctx.lineTo(endX, endY);
-        ctx.stroke();
-      };
-      
-      // 上罫線
-      if (borders.top) {
-        drawBorder(x, y, x + width, y, borders.top);
-      }
-      // 右罫線
-      if (borders.right) {
-        drawBorder(x + width, y, x + width, y + height, borders.right);
-      }
-      // 下罫線
-      if (borders.bottom) {
-        drawBorder(x, y + height, x + width, y + height, borders.bottom);
-      }
-      // 左罫線
-      if (borders.left) {
-        drawBorder(x, y, x, y + height, borders.left);
-      }
-      
-      // 罫線がない場合でも数値セルには薄い枠を描画
-      if (typeof cell.value === 'number' && cell.value > 0 && cell.value <= 100) {
-        if (!borders.top && !borders.right && !borders.bottom && !borders.left) {
-          ctx.strokeStyle = '#4CAF50';
-          ctx.lineWidth = 1.5 * scale;
-          ctx.strokeRect(x + 1, y + 1, width - 2, height - 2);
-        }
-      }
-    });
-    
-    // 3. セルの値を描画
-    mapData.cells.forEach((cell) => {
-      if (cell.isMerged) return;
-      if (cell.value === null || cell.value === undefined) return;
-      
-      const x = (cell.col - 1) * cellSize;
-      const y = (cell.row - 1) * cellSize;
-      
-      const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-      const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
-      const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
-      
-      const valueStr = String(cell.value);
-      
-      // フォントサイズを計算
-      let fontSize = 10 * scale;
-      
-      // 結合セルの場合は大きいフォント
-      if (merge) {
-        const cellCount = (merge.endRow - merge.startRow + 1) * (merge.endCol - merge.startCol + 1);
-        if (cellCount >= 4) {
-          // ブロック名っぽい場合は大きく薄く
-          fontSize = Math.min(width, height) * 0.6;
-          ctx.fillStyle = 'rgba(0, 0, 0, 0.15)';
-        } else {
-          fontSize = Math.min(width, height) * 0.5;
-          ctx.fillStyle = '#333333';
-        }
-      } else {
-        // 数値セルの場合
-        if (typeof cell.value === 'number') {
-          fontSize = Math.min(cellSize * 0.6, 14 * scale);
-          ctx.fillStyle = '#333333';
-        } else {
-          ctx.fillStyle = '#666666';
-        }
-      }
-      
-      ctx.font = `${fontSize}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      
-      ctx.fillText(valueStr, x + width / 2, y + height / 2);
-    });
-    
-    // 4. ルートを描画
-    if (isRouteVisible && routeSegments.length > 0) {
-      ctx.strokeStyle = '#EF5350';
-      ctx.lineWidth = 3 * scale;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      
-      routeSegments.forEach((segment) => {
-        const simplified = simplifyPath(segment.path, 0.5);
-        if (simplified.length < 2) return;
+        const { borders } = cell;
         
-        ctx.beginPath();
-        const startX = (simplified[0].col - 0.5) * cellSize;
-        const startY = (simplified[0].row - 0.5) * cellSize;
-        ctx.moveTo(startX, startY);
-        
-        simplified.slice(1).forEach((point) => {
-          const px = (point.col - 0.5) * cellSize;
-          const py = (point.row - 0.5) * cellSize;
-          ctx.lineTo(px, py);
-        });
-        
-        ctx.stroke();
-        
-        // 矢印を描画（セグメントの中間点）
-        if (simplified.length >= 2) {
-          const midIdx = Math.floor(simplified.length / 2);
-          const p1 = simplified[midIdx - 1] || simplified[0];
-          const p2 = simplified[midIdx];
-          
-          const x1 = (p1.col - 0.5) * cellSize;
-          const y1 = (p1.row - 0.5) * cellSize;
-          const x2 = (p2.col - 0.5) * cellSize;
-          const y2 = (p2.row - 0.5) * cellSize;
-          
-          const angle = Math.atan2(y2 - y1, x2 - x1);
-          const arrowSize = 8 * scale;
-          
-          const midX = (x1 + x2) / 2;
-          const midY = (y1 + y2) / 2;
+        const drawBorder = (
+          startX: number, startY: number,
+          endX: number, endY: number,
+          border: typeof borders.top
+        ) => {
+          if (!border) return;
           
           ctx.beginPath();
-          ctx.moveTo(midX, midY);
-          ctx.lineTo(
-            midX - arrowSize * Math.cos(angle - Math.PI / 6),
-            midY - arrowSize * Math.sin(angle - Math.PI / 6)
-          );
-          ctx.moveTo(midX, midY);
-          ctx.lineTo(
-            midX - arrowSize * Math.cos(angle + Math.PI / 6),
-            midY - arrowSize * Math.sin(angle + Math.PI / 6)
-          );
+          ctx.strokeStyle = border.color || '#4CAF50';
+          
+          let lineWidth = 1;
+          switch (border.style) {
+            case 'thin': lineWidth = 1; break;
+            case 'medium': lineWidth = 2; break;
+            case 'thick': lineWidth = 3; break;
+            default: lineWidth = 1;
+          }
+          ctx.lineWidth = lineWidth;
+          
+          ctx.moveTo(startX, startY);
+          ctx.lineTo(endX, endY);
           ctx.stroke();
+        };
+        
+        if (borders.top) drawBorder(x, y, x + width, y, borders.top);
+        if (borders.right) drawBorder(x + width, y, x + width, y + height, borders.right);
+        if (borders.bottom) drawBorder(x, y + height, x + width, y + height, borders.bottom);
+        if (borders.left) drawBorder(x, y, x, y + height, borders.left);
+        
+        // 数値セルの枠
+        if (typeof cell.value === 'number' && cell.value > 0 && cell.value <= 100) {
+          if (!borders.top && !borders.right && !borders.bottom && !borders.left) {
+            ctx.strokeStyle = '#4CAF50';
+            ctx.lineWidth = 1.5;
+            ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
+          }
         }
       });
     }
     
-    // 5. 訪問順番号を描画
-    visitOrder.forEach((visit) => {
-      const x = (visit.col - 1) * cellSize;
-      const y = (visit.row - 1) * cellSize;
-      
-      // バッジを描画
-      const badgeSize = 16 * scale;
-      const badgeX = x + cellSize - badgeSize / 2;
-      const badgeY = y - badgeSize / 2;
-      
-      ctx.fillStyle = '#EF5350';
-      ctx.beginPath();
-      ctx.arc(badgeX, badgeY, badgeSize / 2, 0, Math.PI * 2);
-      ctx.fill();
-      
-      ctx.fillStyle = '#FFFFFF';
-      ctx.font = `bold ${10 * scale}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(String(visit.visitIndex), badgeX, badgeY);
-    });
+    // 3. テキストを描画（ズームレベルに応じて）
+    if (showNumbers) {
+      mapData.cells.forEach((cell) => {
+        if (cell.isMerged || cell.value === null) return;
+        
+        const x = (cell.col - 1) * cellSize;
+        const y = (cell.row - 1) * cellSize;
+        
+        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+        const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
+        const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
+        
+        const text = String(cell.value);
+        
+        // フォントサイズを計算
+        let fontSize: number;
+        if (merge) {
+          // 結合セルは大きめ
+          fontSize = Math.min(width, height) * (isDetailedView ? 0.5 : 0.4);
+        } else if (typeof cell.value === 'number') {
+          // 数値セル
+          fontSize = Math.min(cellSize * 0.45, 14);
+        } else {
+          // テキストセル
+          fontSize = Math.min(cellSize * 0.4, 12);
+        }
+        
+        fontSize = Math.max(fontSize, 8); // 最小サイズ
+        
+        ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        
+        // テキスト色
+        const state = cellStates.get(`${cell.row}-${cell.col}`);
+        if (state?.isFullyVisited) {
+          ctx.fillStyle = '#B71C1C';
+        } else if (state?.hasItems) {
+          ctx.fillStyle = '#1565C0';
+        } else {
+          ctx.fillStyle = '#333333';
+        }
+        
+        ctx.fillText(text, x + width / 2, y + height / 2);
+      });
+    } else {
+      // 縮小時は数値セルのみドット表示
+      mapData.cells.forEach((cell) => {
+        if (cell.isMerged) return;
+        
+        const state = cellStates.get(`${cell.row}-${cell.col}`);
+        if (!state?.hasItems) return;
+        
+        const x = (cell.col - 1) * cellSize;
+        const y = (cell.row - 1) * cellSize;
+        
+        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+        const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
+        const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
+        
+        // ドット表示
+        const dotSize = Math.max(cellSize * 0.4, 4);
+        ctx.beginPath();
+        
+        if (state.isFullyVisited) {
+          ctx.fillStyle = '#EF5350';
+        } else if (state.isVisited) {
+          ctx.fillStyle = '#FFEE58';
+        } else {
+          ctx.fillStyle = '#42A5F5';
+        }
+        
+        ctx.arc(x + width / 2, y + height / 2, dotSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+      });
+    }
     
-    ctx.restore();
+    // 4. ルートを描画
+    if (isRouteVisible && routeSegments.length > 0) {
+      routeSegments.forEach((segment) => {
+        if (segment.path.length < 2) return;
+        
+        ctx.beginPath();
+        ctx.strokeStyle = '#1976D2';
+        ctx.lineWidth = Math.max(2, cellSize * 0.1);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        
+        segment.path.forEach((point, i) => {
+          const px = (point.col - 0.5) * cellSize;
+          const py = (point.row - 0.5) * cellSize;
+          
+          if (i === 0) {
+            ctx.moveTo(px, py);
+          } else {
+            ctx.lineTo(px, py);
+          }
+        });
+        
+        ctx.stroke();
+        
+        // 矢印
+        if (segment.path.length >= 2) {
+          const last = segment.path[segment.path.length - 1];
+          const prev = segment.path[segment.path.length - 2];
+          
+          const endX = (last.col - 0.5) * cellSize;
+          const endY = (last.row - 0.5) * cellSize;
+          const angle = Math.atan2(
+            (last.row - prev.row) * cellSize,
+            (last.col - prev.col) * cellSize
+          );
+          
+          const arrowSize = Math.max(6, cellSize * 0.25);
+          ctx.beginPath();
+          ctx.fillStyle = '#1976D2';
+          ctx.moveTo(endX, endY);
+          ctx.lineTo(
+            endX - arrowSize * Math.cos(angle - Math.PI / 6),
+            endY - arrowSize * Math.sin(angle - Math.PI / 6)
+          );
+          ctx.lineTo(
+            endX - arrowSize * Math.cos(angle + Math.PI / 6),
+            endY - arrowSize * Math.sin(angle + Math.PI / 6)
+          );
+          ctx.closePath();
+          ctx.fill();
+        }
+      });
+      
+      // 訪問順番号
+      if (isDetailedView) {
+        routePoints.forEach((point) => {
+          const px = (point.col - 0.5) * cellSize;
+          const py = (point.row - 0.5) * cellSize;
+          
+          const circleSize = Math.max(12, cellSize * 0.5);
+          
+          ctx.beginPath();
+          ctx.fillStyle = '#1976D2';
+          ctx.arc(px, py, circleSize / 2, 0, Math.PI * 2);
+          ctx.fill();
+          
+          ctx.font = `bold ${Math.max(8, circleSize * 0.6)}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#FFFFFF';
+          ctx.fillText(String(point.order + 1), px, py);
+        });
+      }
+    }
   }, [
     mapData,
-    cellsMap,
-    mergedCellsMap,
-    cellStates,
-    visitOrder,
-    routeSegments,
-    isRouteVisible,
     cellSize,
-    scale,
-    offset,
+    cellStates,
+    mergedCellsMap,
+    isRouteVisible,
+    routeSegments,
+    routePoints,
+    dpr,
+    isDetailedView,
+    showNumbers,
+    showBorders,
   ]);
-  
+
   // クリック処理
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
@@ -485,7 +476,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         detail: { row, col }
       }));
       
-      // このセルに関連するアイテムを取得
       const state = cellStates.get(`${row}-${col}`);
       const matchingItems = state?.items || [];
       
@@ -518,30 +508,36 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   }, [dragStart, dragStartOffset]);
   
   const handlePointerUp = useCallback(() => {
-    // ドラッグ終了後、少し遅延してフラグをリセット
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
   }, []);
-  
+
   return (
     <div
       ref={containerRef}
-      className="relative overflow-hidden bg-white"
-      style={{ height: 'calc(100vh - 200px)', minHeight: '500px' }}
+      className="relative overflow-auto bg-white"
+      style={{ width: '100%', height: '100%' }}
     >
-      <canvas
-        ref={canvasRef}
-        width={canvasWidth}
-        height={canvasHeight}
-        onClick={handleClick}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
-        onPointerLeave={handlePointerUp}
-        className="cursor-grab active:cursor-grabbing"
-        style={{ touchAction: 'none' }}
-      />
+      <div
+        style={{
+          transform: `translate(${offset.x}px, ${offset.y}px)`,
+          transformOrigin: '0 0',
+        }}
+      >
+        <canvas
+          ref={canvasRef}
+          onClick={handleClick}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
+          style={{
+            cursor: isDragging ? 'grabbing' : 'grab',
+            touchAction: 'none',
+          }}
+        />
+      </div>
     </div>
   );
 };
