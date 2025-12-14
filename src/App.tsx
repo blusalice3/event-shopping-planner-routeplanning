@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
-import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapDataStore, RouteSettingsStore, ExportOptions, BlockDefinition } from './types';
+import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapDataStore, RouteSettingsStore, ExportOptions, BlockDefinition, HallDefinition, HallRouteSettings, HallDefinitionsStore, HallRouteSettingsStore } from './types';
 import ImportScreen from './components/ImportScreen';
 import ShoppingList from './components/ShoppingList';
 import SummaryBar from './components/SummaryBar';
@@ -14,7 +14,7 @@ import ExportOptionsDialog from './components/ExportOptionsDialog';
 import SortAscendingIcon from './components/icons/SortAscendingIcon';
 import SortDescendingIcon from './components/icons/SortDescendingIcon';
 import SearchBar from './components/SearchBar';
-import { MapView, BlockDefinitionPanel } from './components/map';
+import { MapView, BlockDefinitionPanel, HallDefinitionPanel, isPointInPolygon } from './components/map';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
 import { parseMapFile } from './utils/xlsxMapParser';
 
@@ -92,6 +92,8 @@ const App: React.FC = () => {
   // マップ機能の状態
   const [mapData, setMapData] = useState<MapDataStore>({});
   const [routeSettings, setRouteSettings] = useState<RouteSettingsStore>({});
+  const [hallDefinitions, setHallDefinitions] = useState<HallDefinitionsStore>({});
+  const [hallRouteSettings, setHallRouteSettings] = useState<HallRouteSettingsStore>({});
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [exportEventName, setExportEventName] = useState<string | null>(null);
   const mapFileInputRef = React.useRef<HTMLInputElement>(null);
@@ -104,6 +106,8 @@ const App: React.FC = () => {
       const storedDayModes = localStorage.getItem('dayModes');
       const storedMapData = localStorage.getItem('mapData');
       const storedRouteSettings = localStorage.getItem('routeSettings');
+      const storedHallDefinitions = localStorage.getItem('hallDefinitions');
+      const storedHallRouteSettings = localStorage.getItem('hallRouteSettings');
       
       if (storedLists) {
         const parsedLists = JSON.parse(storedLists);
@@ -132,6 +136,12 @@ const App: React.FC = () => {
       if (storedRouteSettings) {
         setRouteSettings(JSON.parse(storedRouteSettings));
       }
+      if (storedHallDefinitions) {
+        setHallDefinitions(JSON.parse(storedHallDefinitions));
+      }
+      if (storedHallRouteSettings) {
+        setHallRouteSettings(JSON.parse(storedHallRouteSettings));
+      }
     } catch (error) {
       console.error("Failed to load data from localStorage", error);
     }
@@ -147,11 +157,13 @@ const App: React.FC = () => {
         localStorage.setItem('dayModes', JSON.stringify(dayModes));
         localStorage.setItem('mapData', JSON.stringify(mapData));
         localStorage.setItem('routeSettings', JSON.stringify(routeSettings));
+        localStorage.setItem('hallDefinitions', JSON.stringify(hallDefinitions));
+        localStorage.setItem('hallRouteSettings', JSON.stringify(hallRouteSettings));
       } catch (error) {
         console.error("Failed to save data to localStorage", error);
       }
     }
-  }, [eventLists, eventMetadata, executeModeItems, dayModes, mapData, routeSettings, isInitialized]);
+  }, [eventLists, eventMetadata, executeModeItems, dayModes, mapData, routeSettings, hallDefinitions, hallRouteSettings, isInitialized]);
 
   const items = useMemo(() => activeEventName ? eventLists[activeEventName] || [] : [], [activeEventName, eventLists]);
   
@@ -178,6 +190,79 @@ const App: React.FC = () => {
     if (!activeEventName || !isMapTab) return null;
     return mapData[activeEventName]?.[activeTab] || null;
   }, [activeEventName, activeTab, isMapTab, mapData]);
+
+  // 現在のホール定義を取得
+  const currentHalls = useMemo((): HallDefinition[] => {
+    if (!activeEventName || !isMapTab) return [];
+    return hallDefinitions[activeEventName]?.[activeTab] || [];
+  }, [activeEventName, activeTab, isMapTab, hallDefinitions]);
+
+  // 現在のホールルート設定を取得
+  const currentHallRouteSettings = useMemo((): HallRouteSettings => {
+    if (!activeEventName || !isMapTab) {
+      return { hallOrder: [], hallVisitLists: [] };
+    }
+    return hallRouteSettings[activeEventName]?.[activeTab] || { hallOrder: currentHalls.map(h => h.id), hallVisitLists: [] };
+  }, [activeEventName, activeTab, isMapTab, hallRouteSettings, currentHalls]);
+
+  // 日付タブに対応するマップタブ名を取得（例: "1日目" → "1日目マップ"）
+  const getMapTabForDate = useCallback((eventDate: string): string => {
+    return `${eventDate}マップ`;
+  }, []);
+
+  // 日付タブに対応するホール定義を取得
+  const getHallsForDate = useCallback((eventDate: string): HallDefinition[] => {
+    if (!activeEventName) return [];
+    const mapTab = getMapTabForDate(eventDate);
+    return hallDefinitions[activeEventName]?.[mapTab] || [];
+  }, [activeEventName, hallDefinitions, getMapTabForDate]);
+
+  // 日付タブに対応するマップデータを取得
+  const getMapDataForDate = useCallback((eventDate: string) => {
+    if (!activeEventName) return null;
+    const mapTab = getMapTabForDate(eventDate);
+    return mapData[activeEventName]?.[mapTab] || null;
+  }, [activeEventName, mapData, getMapTabForDate]);
+
+  // アイテムがどのホールに属するかを判定
+  const getItemHallId = useCallback((item: ShoppingItem, eventDate: string): string | null => {
+    const halls = getHallsForDate(eventDate);
+    const mapDataForDate = getMapDataForDate(eventDate);
+    if (!halls.length || !mapDataForDate) return null;
+
+    // ブロックの中心点を取得
+    const block = mapDataForDate.blocks.find(b => b.name === item.block);
+    if (!block) return null;
+
+    const centerRow = (block.startRow + block.endRow) / 2;
+    const centerCol = (block.startCol + block.endCol) / 2;
+
+    // どのホールに属するか判定
+    for (const hall of halls) {
+      if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
+        return hall.id;
+      }
+    }
+    return null;
+  }, [getHallsForDate, getMapDataForDate]);
+
+  // 2つのアイテムが同じホールに属するかを判定
+  const areItemsInSameHall = useCallback((itemId1: string, itemId2: string, eventDate: string): boolean => {
+    const item1 = items.find(i => i.id === itemId1);
+    const item2 = items.find(i => i.id === itemId2);
+    if (!item1 || !item2) return true; // アイテムが見つからない場合は制限なし
+
+    const halls = getHallsForDate(eventDate);
+    if (!halls.length) return true; // ホール定義がない場合は制限なし
+
+    const hallId1 = getItemHallId(item1, eventDate);
+    const hallId2 = getItemHallId(item2, eventDate);
+
+    // どちらかがホールに属していない場合は制限なし
+    if (hallId1 === null || hallId2 === null) return true;
+
+    return hallId1 === hallId2;
+  }, [items, getHallsForDate, getItemHallId]);
   
   const currentMode = useMemo(() => {
     if (!activeEventName) return 'execute';
@@ -667,6 +752,12 @@ const App: React.FC = () => {
         const currentIndex = dayItems.findIndex(id => id === itemId);
         
         if (currentIndex <= 0) return prev; // 既に先頭または見つからない
+
+        // ホール間移動制限チェック
+        const targetId = dayItems[currentIndex - 1];
+        if (!areItemsInSameHall(itemId, targetId, currentEventDate)) {
+          return prev; // 異なるホールなので移動不可
+        }
         
         // 複数選択時は選択されたアイテムすべてを移動
         if (selectedItemIds.has(itemId)) {
@@ -676,6 +767,11 @@ const App: React.FC = () => {
           // 選択されたアイテムの最初の位置を基準に移動
           const firstSelectedIndex = dayItems.findIndex(id => selectedItemIds.has(id));
           if (firstSelectedIndex > 0) {
+            // ホール間移動制限チェック（選択グループ全体）
+            const targetIdForGroup = dayItems[firstSelectedIndex - 1];
+            if (!areItemsInSameHall(selectedIds[0], targetIdForGroup, currentEventDate)) {
+              return prev; // 異なるホールなので移動不可
+            }
             const newTargetIndex = firstSelectedIndex - 1;
             listWithoutSelection.splice(newTargetIndex, 0, ...selectedIds);
             return {
@@ -785,7 +881,7 @@ const App: React.FC = () => {
         }
       });
     }
-  }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates]);
+  }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates, areItemsInSameHall]);
 
 const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute' | 'candidate') => {
     if (!activeEventName) return;
@@ -804,6 +900,12 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         
         if (currentIndex < 0 || currentIndex >= dayItems.length - 1) return prev; // 既に末尾または見つからない
         
+        // ホール間移動制限チェック
+        const targetId = dayItems[currentIndex + 1];
+        if (!areItemsInSameHall(itemId, targetId, currentEventDate)) {
+          return prev; // 異なるホールなので移動不可
+        }
+        
         // 複数選択時は選択されたアイテムすべてを移動
         if (selectedItemIds.has(itemId)) {
           const selectedIds = dayItems.filter(id => selectedItemIds.has(id));
@@ -819,6 +921,11 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           if (lastSelectedIndex >= 0 && lastSelectedIndex < dayItems.length - 1) {
             // 飛び越える対象のアイテム（選択範囲の直後のアイテム）
             const jumpOverItemId = dayItems[lastSelectedIndex + 1];
+            
+            // ホール間移動制限チェック（選択グループ全体）
+            if (!areItemsInSameHall(selectedIds[selectedIds.length - 1], jumpOverItemId, currentEventDate)) {
+              return prev; // 異なるホールなので移動不可
+            }
             
             // 非選択リスト内でのそのアイテムの位置
             const targetIndexInListWithout = listWithoutSelection.findIndex(id => id === jumpOverItemId);
@@ -954,7 +1061,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         }
       });
     }
-  }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates]);
+  }, [activeEventName, selectedItemIds, activeTab, dayModes, executeModeItems, eventDates, areItemsInSameHall]);
 
   const handleMoveToExecuteColumn = useCallback((itemIds: string[]) => {
     if (!activeEventName) return;
@@ -2280,6 +2387,128 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       },
     }));
   }, [activeEventName, isMapTab, activeTab, currentMapData]);
+
+  // ホール定義を更新
+  const handleUpdateHalls = useCallback((halls: HallDefinition[]) => {
+    if (!activeEventName || !isMapTab) return;
+    
+    setHallDefinitions(prev => ({
+      ...prev,
+      [activeEventName]: {
+        ...prev[activeEventName],
+        [activeTab]: halls,
+      },
+    }));
+    
+    // ホール順序も更新（新規ホールはリストの最後に追加）
+    const existingOrder = currentHallRouteSettings.hallOrder;
+    const newHallIds = halls.map(h => h.id);
+    const updatedOrder = [
+      ...existingOrder.filter(id => newHallIds.includes(id)),
+      ...newHallIds.filter(id => !existingOrder.includes(id)),
+    ];
+    
+    setHallRouteSettings(prev => ({
+      ...prev,
+      [activeEventName]: {
+        ...prev[activeEventName],
+        [activeTab]: {
+          ...currentHallRouteSettings,
+          hallOrder: updatedOrder,
+        },
+      },
+    }));
+  }, [activeEventName, isMapTab, activeTab, currentHallRouteSettings]);
+
+  // ホールルート設定を更新
+  const handleUpdateHallRouteSettings = useCallback((settings: HallRouteSettings) => {
+    if (!activeEventName || !isMapTab) return;
+    
+    setHallRouteSettings(prev => ({
+      ...prev,
+      [activeEventName]: {
+        ...prev[activeEventName],
+        [activeTab]: settings,
+      },
+    }));
+  }, [activeEventName, isMapTab, activeTab]);
+
+  // ホール定義モードの状態
+  const [hallDefinitionMode, setHallDefinitionMode] = useState(false);
+
+  // ホール頂点選択モードの状態
+  const [vertexSelectionMode, setVertexSelectionMode] = useState<{
+    clickedVertices: { row: number; col: number }[];
+    editingData?: unknown;
+  } | null>(null);
+
+  // ホール頂点選択完了時にHallDefinitionPanelに渡すデータ
+  const [pendingVertexSelection, setPendingVertexSelection] = useState<{
+    vertices: { row: number; col: number }[];
+    editingData?: unknown;
+  } | null>(null);
+
+  // ホール頂点選択モードを開始
+  const handleStartVertexSelection = useCallback((editingData?: unknown) => {
+    setVertexSelectionMode({ clickedVertices: [], editingData });
+    setHallDefinitionMode(false);
+  }, []);
+
+  // ホール頂点選択を確定
+  const handleConfirmVertexSelection = useCallback(() => {
+    if (vertexSelectionMode) {
+      setPendingVertexSelection({
+        vertices: vertexSelectionMode.clickedVertices,
+        editingData: vertexSelectionMode.editingData,
+      });
+    }
+    setVertexSelectionMode(null);
+    setHallDefinitionMode(true);
+  }, [vertexSelectionMode]);
+
+  // ホール頂点選択をキャンセル
+  const handleCancelVertexSelection = useCallback(() => {
+    if (vertexSelectionMode?.editingData) {
+      setPendingVertexSelection({
+        vertices: [],
+        editingData: vertexSelectionMode.editingData,
+      });
+    }
+    setVertexSelectionMode(null);
+    setHallDefinitionMode(true);
+  }, [vertexSelectionMode]);
+
+  // マップセルクリック時にホール頂点選択に追加
+  useEffect(() => {
+    const handleMapCellClickForVertex = (e: CustomEvent<{ row: number; col: number }>) => {
+      if (!vertexSelectionMode) return;
+      
+      const { row, col } = e.detail;
+      
+      setVertexSelectionMode(prev => {
+        if (!prev) return prev;
+        
+        // 最大6頂点まで
+        if (prev.clickedVertices.length >= 6) {
+          return prev;
+        }
+        
+        // 重複チェック
+        const isDuplicate = prev.clickedVertices.some(v => v.row === row && v.col === col);
+        if (isDuplicate) return prev;
+        
+        return {
+          ...prev,
+          clickedVertices: [...prev.clickedVertices, { row, col }],
+        };
+      });
+    };
+    
+    window.addEventListener('mapCellClick', handleMapCellClickForVertex as EventListener);
+    return () => {
+      window.removeEventListener('mapCellClick', handleMapCellClickForVertex as EventListener);
+    };
+  }, [vertexSelectionMode]);
   
   // セル選択モードを開始（BlockDefinitionPanelから呼ばれる）
   const handleStartCellSelection = useCallback((
@@ -2439,9 +2668,18 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 setBlockDefinitionMode(true);
                 setMapTabMenuOpen(null);
               }}
-              className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-b-lg"
+              className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700"
             >
               🔲 ブロック定義
+            </button>
+            <button
+              onClick={() => {
+                setHallDefinitionMode(true);
+                setMapTabMenuOpen(null);
+              }}
+              className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-b-lg"
+            >
+              🏛️ ホール定義
             </button>
           </div>
         )}
@@ -2849,6 +3087,9 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
               const item = items.find(i => i.id === itemId);
               if (item) handleDeleteRequest(item);
             }}
+            halls={currentHalls}
+            hallRouteSettings={currentHallRouteSettings}
+            onUpdateHallRouteSettings={handleUpdateHallRouteSettings}
           />
         )}
         {activeEventName && mainContentVisible && (
@@ -3091,6 +3332,54 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             </button>
             <button
               onClick={handleCancelCellSelection}
+              className="px-4 py-2 text-sm font-medium rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
+            >
+              キャンセル
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ホール定義パネル */}
+      {hallDefinitionMode && currentMapData && (
+        <HallDefinitionPanel
+          isOpen={hallDefinitionMode}
+          onClose={() => { setHallDefinitionMode(false); setPendingVertexSelection(null); }}
+          mapData={currentMapData}
+          halls={currentHalls}
+          onUpdateHalls={handleUpdateHalls}
+          onStartVertexSelection={handleStartVertexSelection}
+          pendingVertexSelection={pendingVertexSelection}
+          onClearPendingVertexSelection={() => setPendingVertexSelection(null)}
+        />
+      )}
+
+      {/* ホール頂点選択モードのフローティングUI */}
+      {vertexSelectionMode && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-4 min-w-80">
+          <div className="text-center mb-3">
+            <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
+              📍 ホールの頂点をクリック ({vertexSelectionMode.clickedVertices.length}/4〜6)
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+              クリック順に多角形を作成します
+            </div>
+            {vertexSelectionMode.clickedVertices.length > 0 && (
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                選択: {vertexSelectionMode.clickedVertices.map(v => `(${v.row},${v.col})`).join(' → ')}
+              </div>
+            )}
+          </div>
+          <div className="flex gap-2 justify-center">
+            <button
+              onClick={handleConfirmVertexSelection}
+              disabled={vertexSelectionMode.clickedVertices.length < 4}
+              className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              確定
+            </button>
+            <button
+              onClick={handleCancelVertexSelection}
               className="px-4 py-2 text-sm font-medium rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
             >
               キャンセル

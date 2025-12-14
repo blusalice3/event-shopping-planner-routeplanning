@@ -4,11 +4,15 @@ import {
   ShoppingItem,
   ZoomLevel,
   ZOOM_LEVELS,
+  HallDefinition,
+  HallRouteSettings,
 } from '../../types';
 import MapCanvas from './MapCanvas';
 import CellItemsPopup from './CellItemsPopup';
 import VisitListPanel from './VisitListPanel';
+import HallOrderPanel from './HallOrderPanel';
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
+import { isPointInPolygon } from './HallDefinitionPanel';
 
 interface MapViewProps {
   mapData: DayMapData;
@@ -21,6 +25,10 @@ interface MapViewProps {
   onMoveToLast: (itemId: string) => void;
   onUpdateItem?: (item: ShoppingItem) => void;
   onDeleteItem?: (itemId: string) => void;
+  // ホール関連
+  halls: HallDefinition[];
+  hallRouteSettings: HallRouteSettings;
+  onUpdateHallRouteSettings: (settings: HallRouteSettings) => void;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -34,13 +42,18 @@ const MapView: React.FC<MapViewProps> = ({
   onMoveToLast: _onMoveToLast,
   onUpdateItem,
   onDeleteItem,
+  halls,
+  hallRouteSettings,
+  onUpdateHallRouteSettings,
 }) => {
-  // 将来の機能のために保持: _onMoveToFirst, _onMoveToLast
   void _onMoveToFirst;
   void _onMoveToLast;
+  
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>(100);
   const [isRouteVisible, setIsRouteVisible] = useState(true);
   const [isVisitListOpen, setIsVisitListOpen] = useState(false);
+  const [isHallOrderOpen, setIsHallOrderOpen] = useState(false);
+  const [selectedHallId, setSelectedHallId] = useState<string>('all'); // 'all' または ホールID
   
   // ポップアップの状態
   const [popupState, setPopupState] = useState<{
@@ -65,13 +78,108 @@ const MapView: React.FC<MapViewProps> = ({
     () => new Set(executeModeItemIds),
     [executeModeItemIds]
   );
-  
+
+  // ブロックがどのホールに属するか判定
+  const blockToHallMap = useMemo(() => {
+    const map = new Map<string, string>(); // blockName -> hallId
+    
+    mapData.blocks.forEach(block => {
+      const centerRow = (block.startRow + block.endRow) / 2;
+      const centerCol = (block.startCol + block.endCol) / 2;
+      
+      for (const hall of halls) {
+        if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
+          map.set(block.name, hall.id);
+          break;
+        }
+      }
+    });
+    
+    return map;
+  }, [mapData.blocks, halls]);
+
+  // アイテムがどのホールに属するか判定
+  const getItemHallId = useCallback((item: ShoppingItem): string | null => {
+    return blockToHallMap.get(item.block) || null;
+  }, [blockToHallMap]);
+
+  // ホールごとの訪問先アイテム数を取得
+  const getItemCountInHall = useCallback((hallId: string): number => {
+    return executeModeItemIds.filter(itemId => {
+      const item = items.find(i => i.id === itemId);
+      if (!item) return false;
+      return getItemHallId(item) === hallId;
+    }).length;
+  }, [executeModeItemIds, items, getItemHallId]);
+
+  // 選択中のホールに表示するマップデータをフィルタ
+  const filteredMapData = useMemo(() => {
+    if (selectedHallId === 'all' || halls.length === 0) {
+      return mapData;
+    }
+    
+    const selectedHall = halls.find(h => h.id === selectedHallId);
+    if (!selectedHall || selectedHall.vertices.length < 4) {
+      return mapData;
+    }
+    
+    // 選択ホール内のセルのみをフィルタ
+    const filteredCells = mapData.cells.filter(cell => {
+      return isPointInPolygon(cell.row, cell.col, selectedHall.vertices);
+    });
+    
+    // 選択ホール内のブロックのみをフィルタ
+    const filteredBlocks = mapData.blocks.filter(block => {
+      const centerRow = (block.startRow + block.endRow) / 2;
+      const centerCol = (block.startCol + block.endCol) / 2;
+      return isPointInPolygon(centerRow, centerCol, selectedHall.vertices);
+    });
+    
+    // 範囲を再計算
+    let minRow = Infinity, maxRow = 0, minCol = Infinity, maxCol = 0;
+    filteredCells.forEach(cell => {
+      minRow = Math.min(minRow, cell.row);
+      maxRow = Math.max(maxRow, cell.row);
+      minCol = Math.min(minCol, cell.col);
+      maxCol = Math.max(maxCol, cell.col);
+    });
+    
+    return {
+      ...mapData,
+      cells: filteredCells,
+      blocks: filteredBlocks,
+      maxRow: maxRow > 0 ? maxRow : mapData.maxRow,
+      maxCol: maxCol > 0 ? maxCol : mapData.maxCol,
+    };
+  }, [mapData, selectedHallId, halls]);
+
+  // 選択中のホール内のアイテムのみをフィルタ
+  const filteredItems = useMemo(() => {
+    if (selectedHallId === 'all' || halls.length === 0) {
+      return items;
+    }
+    
+    return items.filter(item => getItemHallId(item) === selectedHallId);
+  }, [items, selectedHallId, halls, getItemHallId]);
+
+  // 選択中のホール内の訪問先IDのみをフィルタ
+  const filteredExecuteModeItemIds = useMemo(() => {
+    if (selectedHallId === 'all' || halls.length === 0) {
+      return executeModeItemIds;
+    }
+    
+    return executeModeItemIds.filter(itemId => {
+      const item = items.find(i => i.id === itemId);
+      if (!item) return false;
+      return getItemHallId(item) === selectedHallId;
+    });
+  }, [executeModeItemIds, items, selectedHallId, halls, getItemHallId]);
+
   // セルクリック時のハンドラ
   const handleCellClick = useCallback(
     (row: number, col: number, matchingItems: ShoppingItem[]) => {
       if (matchingItems.length === 0) return;
       
-      // ブロック名とナンバーを取得
       const firstItem = matchingItems[0];
       const block = mapData.blocks.find((b) => b.name === firstItem.block);
       if (!block) return;
@@ -79,7 +187,6 @@ const MapView: React.FC<MapViewProps> = ({
       const numStr = extractNumberFromItemNumber(firstItem.number);
       const numValue = numStr ? parseInt(numStr, 10) : 0;
       
-      // クリック位置を取得（簡易的にウィンドウ中央付近に表示）
       const position = {
         x: window.innerWidth / 2 - 160,
         y: window.innerHeight / 3,
@@ -102,23 +209,60 @@ const MapView: React.FC<MapViewProps> = ({
     setPopupState((prev) => ({ ...prev, isOpen: false }));
   }, []);
   
+  // 訪問先に追加（ホールの訪問先リストにも追加）
   const handleAddToVisitList = useCallback(
     (itemId: string) => {
       onAddToExecuteList(itemId);
+      
+      // ホールの訪問先リストにも追加
+      const item = items.find(i => i.id === itemId);
+      if (item) {
+        const hallId = getItemHallId(item);
+        if (hallId) {
+          const updatedHallVisitLists = [...hallRouteSettings.hallVisitLists];
+          const hallListIndex = updatedHallVisitLists.findIndex(l => l.hallId === hallId);
+          
+          if (hallListIndex >= 0) {
+            if (!updatedHallVisitLists[hallListIndex].itemIds.includes(itemId)) {
+              updatedHallVisitLists[hallListIndex] = {
+                ...updatedHallVisitLists[hallListIndex],
+                itemIds: [...updatedHallVisitLists[hallListIndex].itemIds, itemId],
+              };
+            }
+          } else {
+            updatedHallVisitLists.push({ hallId, itemIds: [itemId] });
+          }
+          
+          onUpdateHallRouteSettings({
+            ...hallRouteSettings,
+            hallVisitLists: updatedHallVisitLists,
+          });
+        }
+      }
     },
-    [onAddToExecuteList]
+    [onAddToExecuteList, items, getItemHallId, hallRouteSettings, onUpdateHallRouteSettings]
   );
   
+  // 訪問先から除外
   const handleRemoveFromVisitList = useCallback(
     (itemId: string) => {
       onRemoveFromExecuteList(itemId);
+      
+      // ホールの訪問先リストからも削除
+      const updatedHallVisitLists = hallRouteSettings.hallVisitLists.map(list => ({
+        ...list,
+        itemIds: list.itemIds.filter(id => id !== itemId),
+      }));
+      
+      onUpdateHallRouteSettings({
+        ...hallRouteSettings,
+        hallVisitLists: updatedHallVisitLists,
+      });
     },
-    [onRemoveFromExecuteList]
+    [onRemoveFromExecuteList, hallRouteSettings, onUpdateHallRouteSettings]
   );
   
   const handleJumpToCell = useCallback((_row: number, _col: number) => {
-    // TODO: マップをスクロールしてセルにジャンプ
-    // _row, _col は将来の実装で使用予定
     void _row;
     void _col;
     setIsVisitListOpen(false);
@@ -128,6 +272,32 @@ const MapView: React.FC<MapViewProps> = ({
     <div className="relative h-full">
       {/* ツールバー - 画面に固定 */}
       <div className="fixed top-20 right-4 z-40 flex items-center gap-3">
+        {/* ホール選択ドロップダウン */}
+        {halls.length > 0 && (
+          <select
+            value={selectedHallId}
+            onChange={(e) => setSelectedHallId(e.target.value)}
+            className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="all">全ホール</option>
+            {halls.map((hall) => (
+              <option key={hall.id} value={hall.id}>
+                {hall.name} ({getItemCountInHall(hall.id)}件)
+              </option>
+            ))}
+          </select>
+        )}
+        
+        {/* ホール順序設定ボタン */}
+        {halls.length > 0 && (
+          <button
+            onClick={() => setIsHallOrderOpen(true)}
+            className="bg-white dark:bg-slate-800 px-3 py-2 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+          >
+            🔄 ホール順序
+          </button>
+        )}
+        
         {/* ルート表示トグル */}
         <label className="flex items-center gap-2 bg-white dark:bg-slate-800 px-3 py-2 rounded-lg shadow-md border border-slate-200 dark:border-slate-700">
           <span className="text-sm text-slate-700 dark:text-slate-300">ルート表示</span>
@@ -163,13 +333,14 @@ const MapView: React.FC<MapViewProps> = ({
       
       {/* マップキャンバス */}
       <MapCanvas
-        mapData={mapData}
+        mapData={filteredMapData}
         mapName={mapName}
-        items={items}
-        executeModeItemIds={executeModeItemIdsSet}
+        items={filteredItems}
+        executeModeItemIds={new Set(filteredExecuteModeItemIds)}
         zoomLevel={zoomLevel}
-        isRouteVisible={isRouteVisible}
+        isRouteVisible={isRouteVisible && selectedHallId !== 'all'}
         onCellClick={handleCellClick}
+        selectedHall={selectedHallId !== 'all' ? halls.find(h => h.id === selectedHallId) : undefined}
       />
       
       {/* セルアイテムポップアップ */}
@@ -191,10 +362,20 @@ const MapView: React.FC<MapViewProps> = ({
       <VisitListPanel
         isOpen={isVisitListOpen}
         onClose={() => setIsVisitListOpen(false)}
-        items={items}
-        executeModeItemIds={executeModeItemIds}
-        blocks={mapData.blocks}
+        items={filteredItems}
+        executeModeItemIds={filteredExecuteModeItemIds}
+        blocks={filteredMapData.blocks}
         onJumpToCell={handleJumpToCell}
+      />
+      
+      {/* ホール順序設定パネル */}
+      <HallOrderPanel
+        isOpen={isHallOrderOpen}
+        onClose={() => setIsHallOrderOpen(false)}
+        halls={halls}
+        hallRouteSettings={hallRouteSettings}
+        onUpdateHallRouteSettings={onUpdateHallRouteSettings}
+        getItemCountInHall={getItemCountInHall}
       />
     </div>
   );

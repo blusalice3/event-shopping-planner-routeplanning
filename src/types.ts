@@ -230,3 +230,40 @@ export interface RouteSegment {
 export type ZoomLevel = 30 | 50 | 75 | 100 | 125 | 150;
 
 export const ZOOM_LEVELS: ZoomLevel[] = [30, 50, 75, 100, 125, 150];
+
+// ===== ホール（表示エリア）定義用の型 =====
+
+// ホール定義（多角形エリア）
+export interface HallDefinition {
+  id: string;
+  name: string;
+  // 頂点座標（クリック順に結ぶ、4-6個）
+  vertices: { row: number; col: number }[];
+  color?: string;
+}
+
+// ホールごとの訪問先リスト
+export interface HallVisitList {
+  hallId: string;
+  itemIds: string[];  // 訪問順に並んだアイテムID
+}
+
+// ホール間移動順序を含むルート設定（拡張版）
+export interface HallRouteSettings {
+  hallOrder: string[];  // ホールIDの訪問順序
+  hallVisitLists: HallVisitList[];  // 各ホールの訪問先リスト
+}
+
+// ホール定義のストア
+export interface HallDefinitionsStore {
+  [eventName: string]: {
+    [dayMapName: string]: HallDefinition[];
+  };
+}
+
+// ホールルート設定のストア
+export interface HallRouteSettingsStore {
+  [eventName: string]: {
+    [dayMapName: string]: HallRouteSettings;
+  };
+}

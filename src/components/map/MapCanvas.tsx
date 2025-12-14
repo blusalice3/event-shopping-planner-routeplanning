@@ -6,6 +6,7 @@ import {
   ZoomLevel,
   MergedCellInfo,
   MapCellStateDetail,
+  HallDefinition,
 } from '../../types';
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { generateRouteSegments, simplifyPath } from '../../utils/pathfinding';
@@ -18,6 +19,7 @@ interface MapCanvasProps {
   zoomLevel: ZoomLevel;
   isRouteVisible: boolean;
   onCellClick: (row: number, col: number, matchingItems: ShoppingItem[]) => void;
+  selectedHall?: HallDefinition;
 }
 
 const BASE_CELL_SIZE = 28; // 基本セルサイズ
@@ -30,6 +32,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   zoomLevel,
   isRouteVisible,
   onCellClick,
+  selectedHall,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -37,6 +40,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
+  
+  // 未使用変数を明示
+  void selectedHall; // 将来的にホール境界線を描画する際に使用
   
   // デバイスピクセル比
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
