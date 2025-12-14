@@ -19,6 +19,8 @@ interface MapViewProps {
   onRemoveFromExecuteList: (itemId: string) => void;
   onMoveToFirst: (itemId: string) => void;
   onMoveToLast: (itemId: string) => void;
+  onUpdateItem?: (item: ShoppingItem) => void;
+  onDeleteItem?: (itemId: string) => void;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -30,6 +32,8 @@ const MapView: React.FC<MapViewProps> = ({
   onRemoveFromExecuteList,
   onMoveToFirst: _onMoveToFirst,
   onMoveToLast: _onMoveToLast,
+  onUpdateItem,
+  onDeleteItem,
 }) => {
   // 将来の機能のために保持: _onMoveToFirst, _onMoveToLast
   void _onMoveToFirst;
@@ -178,6 +182,8 @@ const MapView: React.FC<MapViewProps> = ({
         executeModeItemIds={executeModeItemIdsSet}
         onAddToVisitList={handleAddToVisitList}
         onRemoveFromVisitList={handleRemoveFromVisitList}
+        onUpdateItem={onUpdateItem}
+        onDeleteItem={onDeleteItem}
         position={popupState.position}
       />
       
