@@ -419,6 +419,10 @@ async function parseMapSheetWithExcelJS(
     });
   });
   
+  // 5行5列分の余白を追加
+  actualMaxRow += 5;
+  actualMaxCol += 5;
+  
   // 全セルを処理
   for (let row = 1; row <= actualMaxRow; row++) {
     for (let col = 1; col <= actualMaxCol; col++) {

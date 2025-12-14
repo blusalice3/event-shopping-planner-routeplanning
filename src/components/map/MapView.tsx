@@ -29,6 +29,10 @@ interface MapViewProps {
   halls: HallDefinition[];
   hallRouteSettings: HallRouteSettings;
   onUpdateHallRouteSettings: (settings: HallRouteSettings) => void;
+  // ホール頂点選択モード
+  vertexSelectionMode?: {
+    clickedVertices: { row: number; col: number }[];
+  } | null;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -45,6 +49,7 @@ const MapView: React.FC<MapViewProps> = ({
   halls,
   hallRouteSettings,
   onUpdateHallRouteSettings,
+  vertexSelectionMode,
 }) => {
   void _onMoveToFirst;
   void _onMoveToLast;
@@ -341,6 +346,7 @@ const MapView: React.FC<MapViewProps> = ({
         isRouteVisible={isRouteVisible && selectedHallId !== 'all'}
         onCellClick={handleCellClick}
         selectedHall={selectedHallId !== 'all' ? halls.find(h => h.id === selectedHallId) : undefined}
+        vertexSelectionMode={vertexSelectionMode}
       />
       
       {/* セルアイテムポップアップ */}

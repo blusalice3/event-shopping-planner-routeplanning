@@ -3090,6 +3090,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             halls={currentHalls}
             hallRouteSettings={currentHallRouteSettings}
             onUpdateHallRouteSettings={handleUpdateHallRouteSettings}
+            vertexSelectionMode={vertexSelectionMode}
           />
         )}
         {activeEventName && mainContentVisible && (

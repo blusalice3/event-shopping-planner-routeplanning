@@ -20,9 +20,13 @@ interface MapCanvasProps {
   isRouteVisible: boolean;
   onCellClick: (row: number, col: number, matchingItems: ShoppingItem[]) => void;
   selectedHall?: HallDefinition;
+  vertexSelectionMode?: {
+    clickedVertices: { row: number; col: number }[];
+  } | null;
 }
 
 const BASE_CELL_SIZE = 28; // 基本セルサイズ
+const SCROLL_MARGIN = 5; // スクロール余白（行/列数）
 
 const MapCanvas: React.FC<MapCanvasProps> = ({
   mapData,
@@ -33,6 +37,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   isRouteVisible,
   onCellClick,
   selectedHall,
+  vertexSelectionMode,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -40,9 +45,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
-  
-  // 未使用変数を明示
-  void selectedHall; // 将来的にホール境界線を描画する際に使用
   
   // デバイスピクセル比
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -55,6 +57,27 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const isDetailedView = zoomLevel >= 80;
   const showNumbers = zoomLevel >= 60;
   const showBorders = zoomLevel >= 40;
+
+  // スクロール範囲の計算（ホール選択時は制限）
+  const scrollBounds = useMemo(() => {
+    if (selectedHall && selectedHall.vertices.length >= 4) {
+      // ホールの頂点から範囲を計算
+      const rows = selectedHall.vertices.map(v => v.row);
+      const cols = selectedHall.vertices.map(v => v.col);
+      const minRow = Math.max(1, Math.min(...rows) - SCROLL_MARGIN);
+      const maxRow = Math.max(...rows) + SCROLL_MARGIN;
+      const minCol = Math.max(1, Math.min(...cols) - SCROLL_MARGIN);
+      const maxCol = Math.max(...cols) + SCROLL_MARGIN;
+      return { minRow, maxRow, minCol, maxCol };
+    }
+    // ホール未選択時は全範囲
+    return {
+      minRow: 1,
+      maxRow: mapData.maxRow,
+      minCol: 1,
+      maxCol: mapData.maxCol,
+    };
+  }, [selectedHall, mapData.maxRow, mapData.maxCol]);
   
   // セルマップを作成
   const cellsMap = useMemo(() => {
@@ -444,6 +467,96 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         });
       }
     }
+
+    // 5. ホール頂点選択プレビュー（多角形オーバーレイ）
+    if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length >= 3) {
+      const vertices = vertexSelectionMode.clickedVertices;
+      
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.4)'; // 不透明度40%の赤
+      
+      vertices.forEach((vertex, i) => {
+        // セルの中心座標
+        const px = (vertex.col - 0.5) * cellSize;
+        const py = (vertex.row - 0.5) * cellSize;
+        
+        if (i === 0) {
+          ctx.moveTo(px, py);
+        } else {
+          ctx.lineTo(px, py);
+        }
+      });
+      
+      ctx.closePath();
+      ctx.fill();
+      
+      // 頂点マーカーと番号を描画
+      vertices.forEach((vertex, i) => {
+        const px = (vertex.col - 0.5) * cellSize;
+        const py = (vertex.row - 0.5) * cellSize;
+        
+        // 頂点マーカー（白い円）
+        ctx.beginPath();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = '#FF0000';
+        ctx.lineWidth = 2;
+        const markerSize = Math.max(10, cellSize * 0.4);
+        ctx.arc(px, py, markerSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        
+        // 番号
+        ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#FF0000';
+        ctx.fillText(String(i + 1), px, py);
+      });
+    } else if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
+      // 3点未満の場合は点と線のみ表示
+      const vertices = vertexSelectionMode.clickedVertices;
+      
+      // 線を描画（2点以上の場合）
+      if (vertices.length >= 2) {
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+        ctx.lineWidth = Math.max(2, cellSize * 0.08);
+        
+        vertices.forEach((vertex, i) => {
+          const px = (vertex.col - 0.5) * cellSize;
+          const py = (vertex.row - 0.5) * cellSize;
+          
+          if (i === 0) {
+            ctx.moveTo(px, py);
+          } else {
+            ctx.lineTo(px, py);
+          }
+        });
+        
+        ctx.stroke();
+      }
+      
+      // 頂点マーカーと番号を描画
+      vertices.forEach((vertex, i) => {
+        const px = (vertex.col - 0.5) * cellSize;
+        const py = (vertex.row - 0.5) * cellSize;
+        
+        ctx.beginPath();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = '#FF0000';
+        ctx.lineWidth = 2;
+        const markerSize = Math.max(10, cellSize * 0.4);
+        ctx.arc(px, py, markerSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        
+        ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#FF0000';
+        ctx.fillText(String(i + 1), px, py);
+      });
+    }
   }, [
     mapData,
     cellSize,
@@ -456,6 +569,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     isDetailedView,
     showNumbers,
     showBorders,
+    vertexSelectionMode,
   ]);
 
   // クリック処理
@@ -511,11 +625,33 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       setIsDragging(true);
     }
     
+    // 新しいオフセットを計算
+    let newX = dragStartOffset.x + dx;
+    let newY = dragStartOffset.y + dy;
+    
+    // スクロール範囲を制限（ホール選択時）
+    if (selectedHall && selectedHall.vertices.length >= 4) {
+      const container = containerRef.current;
+      if (container) {
+        const containerWidth = container.clientWidth;
+        const containerHeight = container.clientHeight;
+        
+        // スクロール可能範囲の計算
+        const minX = Math.min(0, containerWidth - scrollBounds.maxCol * cellSize - cellSize);
+        const maxX = Math.max(0, -(scrollBounds.minCol - 1) * cellSize);
+        const minY = Math.min(0, containerHeight - scrollBounds.maxRow * cellSize - cellSize);
+        const maxY = Math.max(0, -(scrollBounds.minRow - 1) * cellSize);
+        
+        newX = Math.max(minX, Math.min(maxX, newX));
+        newY = Math.max(minY, Math.min(maxY, newY));
+      }
+    }
+    
     setOffset({
-      x: dragStartOffset.x + dx,
-      y: dragStartOffset.y + dy,
+      x: newX,
+      y: newY,
     });
-  }, [dragStart, dragStartOffset]);
+  }, [dragStart, dragStartOffset, selectedHall, scrollBounds, cellSize]);
   
   const handlePointerUp = useCallback(() => {
     setTimeout(() => {
