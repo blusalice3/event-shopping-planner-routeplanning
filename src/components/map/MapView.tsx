@@ -341,9 +341,9 @@ const MapView: React.FC<MapViewProps> = ({
         mapData={filteredMapData}
         mapName={mapName}
         items={filteredItems}
-        executeModeItemIds={new Set(filteredExecuteModeItemIds)}
+        executeModeItemIds={filteredExecuteModeItemIds}
         zoomLevel={zoomLevel}
-        isRouteVisible={isRouteVisible && selectedHallId !== 'all'}
+        isRouteVisible={isRouteVisible && (halls.length === 0 || selectedHallId !== 'all')}
         onCellClick={handleCellClick}
         selectedHall={selectedHallId !== 'all' ? halls.find(h => h.id === selectedHallId) : undefined}
         vertexSelectionMode={vertexSelectionMode}

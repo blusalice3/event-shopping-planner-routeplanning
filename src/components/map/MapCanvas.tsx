@@ -15,7 +15,7 @@ interface MapCanvasProps {
   mapData: DayMapData;
   mapName: string;
   items: ShoppingItem[];
-  executeModeItemIds: Set<string>;
+  executeModeItemIds: string[];  // 配列（順序維持）
   zoomLevel: ZoomLevel;
   isRouteVisible: boolean;
   onCellClick: (row: number, col: number, matchingItems: ShoppingItem[]) => void;
@@ -96,6 +96,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     });
     return map;
   }, [mapData.mergedCells]);
+
+  // executeModeItemIdsをSetに変換（状態計算用）
+  const executeModeItemIdsSet = useMemo(() => {
+    return new Set(executeModeItemIds);
+  }, [executeModeItemIds]);
   
   // セルがアイテムを持つかどうかの状態を計算
   const cellStates = useMemo(() => {
@@ -131,7 +136,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       existing.itemCount++;
       existing.items.push(item);
       
-      if (executeModeItemIds.has(item.id)) {
+      if (executeModeItemIdsSet.has(item.id)) {
         existing.isVisited = true;
       }
       
@@ -140,13 +145,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     
     states.forEach((state) => {
       if (state.items.length > 0) {
-        const allVisited = state.items.every((item) => executeModeItemIds.has(item.id));
+        const allVisited = state.items.every((item) => executeModeItemIdsSet.has(item.id));
         state.isFullyVisited = allVisited;
       }
     });
     
     return states;
-  }, [mapData.blocks, items, mapName, executeModeItemIds]);
+  }, [mapData.blocks, items, mapName, executeModeItemIdsSet]);
   
   // ルート生成
   const routePoints = useMemo(() => {
@@ -156,9 +161,15 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     if (!dayMatch) return [];
     const dayName = dayMatch[1];
     
-    const visitItems = items.filter(
-      (item) => item.eventDate === dayName && executeModeItemIds.has(item.id)
-    );
+    // executeModeItemIdsの順序を維持するために、IDの配列順にアイテムを取得
+    const itemsMap = new Map(items.map(item => [item.id, item]));
+    const executeModeItemIdsArray = Array.from(executeModeItemIds);
+    
+    const visitItems = executeModeItemIdsArray
+      .map(id => itemsMap.get(id))
+      .filter((item): item is typeof items[number] => 
+        item !== undefined && item.eventDate === dayName
+      );
     
     const points: Array<{ row: number; col: number; order: number }> = [];
     
