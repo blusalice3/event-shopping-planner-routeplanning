@@ -58,26 +58,37 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const showNumbers = zoomLevel >= 60;
   const showBorders = zoomLevel >= 40;
 
-  // スクロール範囲の計算（ホール選択時は制限）
-  const scrollBounds = useMemo(() => {
+  // ホール選択時にオフセットを自動調整してホールを中央に配置
+  useEffect(() => {
     if (selectedHall && selectedHall.vertices.length >= 4) {
-      // ホールの頂点から範囲を計算
+      const container = containerRef.current;
+      if (!container) return;
+      
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+      
+      // ホールの範囲を計算
       const rows = selectedHall.vertices.map(v => v.row);
       const cols = selectedHall.vertices.map(v => v.col);
-      const minRow = Math.max(1, Math.min(...rows) - SCROLL_MARGIN);
+      const minRow = Math.min(...rows) - SCROLL_MARGIN;
       const maxRow = Math.max(...rows) + SCROLL_MARGIN;
-      const minCol = Math.max(1, Math.min(...cols) - SCROLL_MARGIN);
+      const minCol = Math.min(...cols) - SCROLL_MARGIN;
       const maxCol = Math.max(...cols) + SCROLL_MARGIN;
-      return { minRow, maxRow, minCol, maxCol };
+      
+      // ホールの中心座標（ピクセル）
+      const hallCenterX = ((minCol + maxCol) / 2 - 0.5) * cellSize;
+      const hallCenterY = ((minRow + maxRow) / 2 - 0.5) * cellSize;
+      
+      // コンテナの中心にホールの中心が来るようにオフセットを設定
+      const newOffsetX = containerWidth / 2 - hallCenterX;
+      const newOffsetY = containerHeight / 2 - hallCenterY;
+      
+      setOffset({ x: newOffsetX, y: newOffsetY });
+    } else {
+      // ホール未選択時はオフセットをリセット
+      setOffset({ x: 0, y: 0 });
     }
-    // ホール未選択時は全範囲
-    return {
-      minRow: 1,
-      maxRow: mapData.maxRow,
-      minCol: 1,
-      maxCol: mapData.maxCol,
-    };
-  }, [selectedHall, mapData.maxRow, mapData.maxCol]);
+  }, [selectedHall, cellSize]);
   
   // セルマップを作成
   const cellsMap = useMemo(() => {
@@ -621,12 +632,21 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   
   // ドラッグ処理
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    // ホール選択時はドラッグを開始しない（スクロール禁止）
+    if (selectedHall && selectedHall.vertices.length >= 4) {
+      return;
+    }
     setIsDragging(false);
     setDragStart({ x: e.clientX, y: e.clientY });
     setDragStartOffset({ ...offset });
-  }, [offset]);
+  }, [offset, selectedHall]);
   
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    // ホール選択時はスクロールしない
+    if (selectedHall && selectedHall.vertices.length >= 4) {
+      return;
+    }
+    
     if (e.buttons !== 1) return;
     
     const dx = e.clientX - dragStart.x;
@@ -637,32 +657,14 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }
     
     // 新しいオフセットを計算
-    let newX = dragStartOffset.x + dx;
-    let newY = dragStartOffset.y + dy;
-    
-    // スクロール範囲を制限（ホール選択時）
-    if (selectedHall && selectedHall.vertices.length >= 4) {
-      const container = containerRef.current;
-      if (container) {
-        const containerWidth = container.clientWidth;
-        const containerHeight = container.clientHeight;
-        
-        // スクロール可能範囲の計算
-        const minX = Math.min(0, containerWidth - scrollBounds.maxCol * cellSize - cellSize);
-        const maxX = Math.max(0, -(scrollBounds.minCol - 1) * cellSize);
-        const minY = Math.min(0, containerHeight - scrollBounds.maxRow * cellSize - cellSize);
-        const maxY = Math.max(0, -(scrollBounds.minRow - 1) * cellSize);
-        
-        newX = Math.max(minX, Math.min(maxX, newX));
-        newY = Math.max(minY, Math.min(maxY, newY));
-      }
-    }
+    const newX = dragStartOffset.x + dx;
+    const newY = dragStartOffset.y + dy;
     
     setOffset({
       x: newX,
       y: newY,
     });
-  }, [dragStart, dragStartOffset, selectedHall, scrollBounds, cellSize]);
+  }, [dragStart, dragStartOffset, selectedHall]);
   
   const handlePointerUp = useCallback(() => {
     setTimeout(() => {
@@ -670,11 +672,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }, 100);
   }, []);
 
+  // ホール選択時はスクロール禁止なのでカーソルをデフォルトに
+  const isScrollDisabled = selectedHall && selectedHall.vertices.length >= 4;
+
   return (
     <div
       ref={containerRef}
-      className="relative overflow-auto bg-white"
-      style={{ width: '100%', height: '100%' }}
+      className="relative bg-white dark:bg-slate-800"
+      style={{ 
+        width: '100%', 
+        height: '100%',
+        overflow: isScrollDisabled ? 'hidden' : 'auto',
+      }}
     >
       <div
         style={{
@@ -690,7 +699,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           onPointerUp={handlePointerUp}
           onPointerLeave={handlePointerUp}
           style={{
-            cursor: isDragging ? 'grabbing' : 'grab',
+            cursor: isScrollDisabled ? 'default' : (isDragging ? 'grabbing' : 'grab'),
             touchAction: 'none',
           }}
         />

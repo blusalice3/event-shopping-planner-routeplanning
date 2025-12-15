@@ -274,9 +274,9 @@ const MapView: React.FC<MapViewProps> = ({
   }, []);
   
   return (
-    <div className="relative h-full">
+    <div className="fixed inset-0 top-[104px] z-30 bg-slate-100 dark:bg-slate-900 overflow-hidden">
       {/* ツールバー - 画面に固定 */}
-      <div className="fixed top-20 right-4 z-40 flex items-center gap-3">
+      <div className="absolute top-4 right-4 z-40 flex items-center gap-3">
         {/* ホール選択ドロップダウン */}
         {halls.length > 0 && (
           <select
@@ -321,8 +321,8 @@ const MapView: React.FC<MapViewProps> = ({
         </label>
       </div>
       
-      {/* ズームコントロール - 画面に固定 */}
-      <div className="fixed bottom-4 left-4 z-40">
+      {/* ズームコントロール - 画面左下に固定 */}
+      <div className="absolute bottom-4 left-4 z-40">
         <select
           value={zoomLevel}
           onChange={(e) => setZoomLevel(Number(e.target.value) as ZoomLevel)}
