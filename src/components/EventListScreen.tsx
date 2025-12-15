@@ -17,6 +17,22 @@ const DocumentArrowDownIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) =
   </svg>
 );
 
+const DocumentArrowUpIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <svg 
+    xmlns="http://www.w3.org/2000/svg" 
+    fill="none" 
+    viewBox="0 0 24 24" 
+    strokeWidth={1.5} 
+    stroke="currentColor" 
+    {...props}>
+    <path 
+      strokeLinecap="round" 
+      strokeLinejoin="round" 
+      d="M19.5 14.25v-2.625a3.375 3.375 0 0 0-3.375-3.375h-1.5A1.125 1.125 0 0 1 13.5 7.125v-1.5a3.375 3.375 0 0 0-3.375-3.375H8.25m6.75 12-3-3m0 0-3 3m3-3v6m-1.5-15H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 0 0-9-9Z" 
+    />
+  </svg>
+);
+
 interface EventListScreenProps {
   eventNames: string[];
   onSelect: (name: string) => void;
@@ -25,9 +41,10 @@ interface EventListScreenProps {
   onUpdate?: (name: string) => void;
   onRename?: (oldName: string) => void;
   onImportMap?: (name: string) => void;
+  onImportExportFile?: () => void;
 }
 
-const EventListScreen: React.FC<EventListScreenProps> = ({ eventNames, onSelect, onDelete, onExport, onUpdate, onRename, onImportMap }) => {
+const EventListScreen: React.FC<EventListScreenProps> = ({ eventNames, onSelect, onDelete, onExport, onUpdate, onRename, onImportMap, onImportExportFile }) => {
   const longPressTimeout = useRef<number | null>(null);
   const [menuVisibleFor, setMenuVisibleFor] = useState<string | null>(null);
 
@@ -81,14 +98,34 @@ const EventListScreen: React.FC<EventListScreenProps> = ({ eventNames, onSelect,
     return (
       <div className="text-center py-12 animate-fade-in">
         <h2 className="text-xl font-semibold text-slate-800 dark:text-slate-200 mb-2">保存されたリストはありません</h2>
-        <p className="text-slate-500 dark:text-slate-400">「新規リスト作成」から新しいイベントの巡回表を作成してください。</p>
+        <p className="text-slate-500 dark:text-slate-400 mb-6">「新規リスト作成」から新しいイベントの巡回表を作成してください。</p>
+        {onImportExportFile && (
+          <button
+            onClick={onImportExportFile}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+          >
+            <DocumentArrowUpIcon className="w-5 h-5" />
+            エクスポートファイルをインポート
+          </button>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-4 animate-fade-in">
-      <h2 className="text-lg font-semibold text-slate-900 dark:text-white">保存済みの即売会リスト</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold text-slate-900 dark:text-white">保存済みの即売会リスト</h2>
+        {onImportExportFile && (
+          <button
+            onClick={onImportExportFile}
+            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+          >
+            <DocumentArrowUpIcon className="w-4 h-4" />
+            インポート
+          </button>
+        )}
+      </div>
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow overflow-hidden">
         <ul className="divide-y divide-slate-200 dark:divide-slate-700">
           {eventNames.map(name => (

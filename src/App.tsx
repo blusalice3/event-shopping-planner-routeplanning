@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapDataStore, RouteSettingsStore, ExportOptions, BlockDefinition, HallDefinition, HallRouteSettings, HallDefinitionsStore, HallRouteSettingsStore } from './types';
 import ImportScreen from './components/ImportScreen';
 import ShoppingList from './components/ShoppingList';
@@ -17,6 +17,8 @@ import SearchBar from './components/SearchBar';
 import { MapView, BlockDefinitionPanel, HallDefinitionPanel, isPointInPolygon } from './components/map';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
 import { parseMapFile } from './utils/xlsxMapParser';
+import { db } from './utils/indexedDB';
+import { exportToXlsx, importFromXlsx, downloadBlob } from './utils/exportImport';
 
 type ActiveTab = 'eventList' | 'import' | string; // string部分は動的な参加日（例: '1日目', '2日目', '3日目'など）
 type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'Purchased';
@@ -96,73 +98,97 @@ const App: React.FC = () => {
   const [hallRouteSettings, setHallRouteSettings] = useState<HallRouteSettingsStore>({});
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [exportEventName, setExportEventName] = useState<string | null>(null);
-  const mapFileInputRef = React.useRef<HTMLInputElement>(null);
+  const mapFileInputRef = useRef<HTMLInputElement>(null);
+  const exportFileInputRef = useRef<HTMLInputElement>(null);
+  
+  // 保存フラグ（データ変更時のみ保存）
+  const isSavingRef = useRef(false);
 
+  // IndexedDBからデータを読み込み
   useEffect(() => {
-    try {
-      const storedLists = localStorage.getItem('eventShoppingLists');
-      const storedMetadata = localStorage.getItem('eventMetadata');
-      const storedExecuteItems = localStorage.getItem('executeModeItems');
-      const storedDayModes = localStorage.getItem('dayModes');
-      const storedMapData = localStorage.getItem('mapData');
-      const storedRouteSettings = localStorage.getItem('routeSettings');
-      const storedHallDefinitions = localStorage.getItem('hallDefinitions');
-      const storedHallRouteSettings = localStorage.getItem('hallRouteSettings');
-      
-      if (storedLists) {
-        const parsedLists = JSON.parse(storedLists);
+    const loadData = async () => {
+      try {
+        // localStorageからの移行を試みる
+        await db.migrateFromLocalStorage();
+        
+        // IndexedDBからデータを読み込み
+        const [
+          loadedEventLists,
+          loadedMetadata,
+          loadedExecuteItems,
+          loadedDayModes,
+          loadedMapData,
+          loadedRouteSettings,
+          loadedHallDefinitions,
+          loadedHallRouteSettings,
+        ] = await Promise.all([
+          db.loadEventLists(),
+          db.loadEventMetadata(),
+          db.loadExecuteModeItems(),
+          db.loadDayModes(),
+          db.loadMapData(),
+          db.loadRouteSettings(),
+          db.loadHallDefinitions(),
+          db.loadHallRouteSettings(),
+        ]);
+        
         // 既存データの互換性: quantityフィールドがない場合は1を設定
         const migratedLists: Record<string, ShoppingItem[]> = {};
-        Object.keys(parsedLists).forEach(eventName => {
-          migratedLists[eventName] = parsedLists[eventName].map((item: ShoppingItem) => ({
+        Object.keys(loadedEventLists).forEach(eventName => {
+          migratedLists[eventName] = (loadedEventLists[eventName] as ShoppingItem[]).map((item: ShoppingItem) => ({
             ...item,
             quantity: item.quantity ?? 1,
           }));
         });
+        
         setEventLists(migratedLists);
+        setEventMetadata(loadedMetadata as Record<string, EventMetadata>);
+        setExecuteModeItems(loadedExecuteItems);
+        setDayModes(loadedDayModes as Record<string, DayModeState>);
+        setMapData(loadedMapData as MapDataStore);
+        setRouteSettings(loadedRouteSettings as RouteSettingsStore);
+        setHallDefinitions(loadedHallDefinitions as HallDefinitionsStore);
+        setHallRouteSettings(loadedHallRouteSettings as HallRouteSettingsStore);
+        
+        console.log('Data loaded from IndexedDB');
+      } catch (error) {
+        console.error('Failed to load data from IndexedDB:', error);
       }
-      if (storedMetadata) {
-        setEventMetadata(JSON.parse(storedMetadata));
-      }
-      if (storedExecuteItems) {
-        setExecuteModeItems(JSON.parse(storedExecuteItems));
-      }
-      if (storedDayModes) {
-        setDayModes(JSON.parse(storedDayModes));
-      }
-      if (storedMapData) {
-        setMapData(JSON.parse(storedMapData));
-      }
-      if (storedRouteSettings) {
-        setRouteSettings(JSON.parse(storedRouteSettings));
-      }
-      if (storedHallDefinitions) {
-        setHallDefinitions(JSON.parse(storedHallDefinitions));
-      }
-      if (storedHallRouteSettings) {
-        setHallRouteSettings(JSON.parse(storedHallRouteSettings));
-      }
-    } catch (error) {
-      console.error("Failed to load data from localStorage", error);
-    }
-    setIsInitialized(true);
+      setIsInitialized(true);
+    };
+    
+    loadData();
   }, []);
 
+  // IndexedDBへデータを保存（デバウンス付き）
   useEffect(() => {
-    if (isInitialized) {
+    if (!isInitialized || isSavingRef.current) return;
+    
+    const saveData = async () => {
+      isSavingRef.current = true;
       try {
-        localStorage.setItem('eventShoppingLists', JSON.stringify(eventLists));
-        localStorage.setItem('eventMetadata', JSON.stringify(eventMetadata));
-        localStorage.setItem('executeModeItems', JSON.stringify(executeModeItems));
-        localStorage.setItem('dayModes', JSON.stringify(dayModes));
-        localStorage.setItem('mapData', JSON.stringify(mapData));
-        localStorage.setItem('routeSettings', JSON.stringify(routeSettings));
-        localStorage.setItem('hallDefinitions', JSON.stringify(hallDefinitions));
-        localStorage.setItem('hallRouteSettings', JSON.stringify(hallRouteSettings));
+        await Promise.all([
+          db.saveEventLists(eventLists),
+          db.saveEventMetadata(eventMetadata),
+          db.saveExecuteModeItems(executeModeItems),
+          db.saveDayModes(dayModes),
+          db.saveMapData(mapData),
+          db.saveRouteSettings(routeSettings),
+          db.saveHallDefinitions(hallDefinitions),
+          db.saveHallRouteSettings(hallRouteSettings),
+        ]);
+        console.log('Data saved to IndexedDB');
       } catch (error) {
-        console.error("Failed to save data to localStorage", error);
+        console.error('Failed to save data to IndexedDB:', error);
+        alert('データの保存に失敗しました。ストレージ容量を確認してください。');
+      } finally {
+        isSavingRef.current = false;
       }
-    }
+    };
+    
+    // デバウンス: 500ms後に保存
+    const timeoutId = setTimeout(saveData, 500);
+    return () => clearTimeout(timeoutId);
   }, [eventLists, eventMetadata, executeModeItems, dayModes, mapData, routeSettings, hallDefinitions, hallRouteSettings, isInitialized]);
 
   const items = useMemo(() => activeEventName ? eventLists[activeEventName] || [] : [], [activeEventName, eventLists]);
@@ -1767,8 +1793,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setShowExportOptions(true);
   }, [eventLists]);
 
-  // 実際のエクスポート処理
-  const handleConfirmExport = useCallback((options: ExportOptions) => {
+  // 実際のエクスポート処理（xlsx形式）
+  const handleConfirmExport = useCallback(async (options: ExportOptions) => {
     if (!exportEventName) return;
     
     const itemsToExport = eventLists[exportEventName];
@@ -1776,153 +1802,148 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       return;
     }
 
-    const statusLabels: Record<PurchaseStatus, string> = {
-      None: '未購入',
-      Purchased: '購入済',
-      SoldOut: '売切',
-      Absent: '欠席',
-      Postpone: '後回し',
-      Late: '遅参',
-    };
+    try {
+      const blob = await exportToXlsx(
+        exportEventName,
+        itemsToExport,
+        options,
+        {
+          metadata: eventMetadata[exportEventName],
+          executeModeItems,
+          dayModes,
+          mapData,
+          routeSettings,
+          hallDefinitions,
+          hallRouteSettings,
+        }
+      );
 
-    const escapeCsvCell = (cellData: string | number) => {
-      const stringData = String(cellData);
-      if (stringData.includes(',') || stringData.includes('"') || stringData.includes('\n')) {
-        return `"${stringData.replace(/"/g, '""')}"`;
-      }
-      return stringData;
-    };
-
-    const csvRows: string[] = [];
-
-    // バージョンとメタデータ
-    csvRows.push(`#VERSION,${options.format === 'full' ? '2.0.0' : '1.0.0'}`);
-    csvRows.push(`#EXPORT_DATE,${new Date().toISOString()}`);
-
-    // ヘッダー行を最初に出力
-    const headers = options.includeLayoutInfo 
-      ? ['サークル名', '参加日', 'ブロック', 'ナンバー', 'タイトル', '頒布価格', '数量', '購入状態', '備考', '列の種類', '列内順番', '訪問先順序', 'URL']
-      : ['サークル名', '参加日', 'ブロック', 'ナンバー', 'タイトル', '頒布価格', '数量', '購入状態', '備考', 'URL'];
-    csvRows.push(headers.join(','));
-
-    // メタデータ行: スプレッドシートURL（コメント行として最後に出力）
-    const metadata = eventMetadata[exportEventName];
-    if (metadata?.spreadsheetUrl) {
-      csvRows.push(`#METADATA,spreadsheetUrl,${escapeCsvCell(metadata.spreadsheetUrl)}`);
+      const timestamp = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15);
+      const suffix = options.format === 'full' ? 'full' : 'simple';
+      const filename = `${exportEventName}_${timestamp}_${suffix}.xlsx`;
+      
+      downloadBlob(blob, filename);
+    } catch (error) {
+      console.error('Export error:', error);
+      alert('エクスポートに失敗しました。');
     }
-
-    // 各参加日ごとに配置情報を保持してエクスポート
-    const eventDatesForExport = extractEventDates(itemsToExport);
-    const itemsMap = new Map(itemsToExport.map(item => [item.id, item]));
-    
-    eventDatesForExport.forEach(eventDate => {
-      const executeIds = executeModeItems[exportEventName]?.[eventDate] || [];
-      const executeIdsSet = new Set(executeIds);
-      
-      // その参加日のアイテムを取得
-      const dayItems = itemsToExport.filter(item => item.eventDate === eventDate);
-      
-      // 実行列のアイテム（順序を保持）
-      const executeItems: ShoppingItem[] = [];
-      executeIds.forEach(id => {
-        const item = itemsMap.get(id);
-        if (item) executeItems.push(item);
-      });
-      
-      // 候補リストのアイテム（元の順序を保持）
-      const candidateItems = dayItems.filter(item => !executeIdsSet.has(item.id));
-      
-      // 実行列のアイテムをエクスポート
-      executeItems.forEach((item, index) => {
-        const row = options.includeLayoutInfo 
-          ? [
-              escapeCsvCell(item.circle),
-              escapeCsvCell(item.eventDate),
-              escapeCsvCell(item.block),
-              escapeCsvCell(item.number),
-              escapeCsvCell(item.title),
-              escapeCsvCell(item.price === null ? '' : item.price),
-              escapeCsvCell(item.quantity || 1),
-              escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
-              escapeCsvCell(item.remarks),
-              escapeCsvCell('実行列'),
-              escapeCsvCell(index + 1),
-              escapeCsvCell(index + 1), // 訪問先順序
-              escapeCsvCell(item.url || ''),
-            ]
-          : [
-              escapeCsvCell(item.circle),
-              escapeCsvCell(item.eventDate),
-              escapeCsvCell(item.block),
-              escapeCsvCell(item.number),
-              escapeCsvCell(item.title),
-              escapeCsvCell(item.price === null ? '' : item.price),
-              escapeCsvCell(item.quantity || 1),
-              escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
-              escapeCsvCell(item.remarks),
-              escapeCsvCell(item.url || ''),
-            ];
-        csvRows.push(row.join(','));
-      });
-      
-      // 候補リストのアイテムをエクスポート
-      candidateItems.forEach((item, index) => {
-        const row = options.includeLayoutInfo
-          ? [
-              escapeCsvCell(item.circle),
-              escapeCsvCell(item.eventDate),
-              escapeCsvCell(item.block),
-              escapeCsvCell(item.number),
-              escapeCsvCell(item.title),
-              escapeCsvCell(item.price === null ? '' : item.price),
-              escapeCsvCell(item.quantity || 1),
-              escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
-              escapeCsvCell(item.remarks),
-              escapeCsvCell('候補リスト'),
-              escapeCsvCell(index + 1),
-              escapeCsvCell(''), // 訪問先順序は空
-              escapeCsvCell(item.url || ''),
-            ]
-          : [
-              escapeCsvCell(item.circle),
-              escapeCsvCell(item.eventDate),
-              escapeCsvCell(item.block),
-              escapeCsvCell(item.number),
-              escapeCsvCell(item.title),
-              escapeCsvCell(item.price === null ? '' : item.price),
-              escapeCsvCell(item.quantity || 1),
-              escapeCsvCell(statusLabels[item.purchaseStatus] || item.purchaseStatus),
-              escapeCsvCell(item.remarks),
-              escapeCsvCell(item.url || ''),
-            ];
-        csvRows.push(row.join(','));
-      });
-    });
-
-    // マップデータのエクスポート（v2.0のみ）
-    if (options.format === 'full' && options.includeMapData && mapData[exportEventName]) {
-      csvRows.push('');
-      csvRows.push('#MAP_DATA_START');
-      csvRows.push(JSON.stringify(mapData[exportEventName]));
-      csvRows.push('#MAP_DATA_END');
-    }
-
-    const csvString = csvRows.join('\n');
-    const bom = new Uint8Array([0xEF, 0xBB, 0xBF]);
-    const blob = new Blob([bom, csvString], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15);
-    const suffix = options.format === 'full' ? 'full' : 'simple';
-    link.setAttribute('download', `${exportEventName}_${timestamp}_${suffix}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
     
     setExportEventName(null);
-  }, [eventLists, executeModeItems, eventMetadata, mapData, exportEventName]);
+  }, [eventLists, executeModeItems, eventMetadata, dayModes, mapData, routeSettings, hallDefinitions, hallRouteSettings, exportEventName]);
+
+  // エクスポートファイルのインポート処理
+  const handleExportFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    // input をリセット
+    e.target.value = '';
+    
+    try {
+      const result = await importFromXlsx(file);
+      
+      if (!result.success) {
+        alert(`インポートに失敗しました:\n${result.errors.join('\n')}`);
+        return;
+      }
+      
+      if (result.items.length === 0) {
+        alert('インポートするアイテムがありません。');
+        return;
+      }
+      
+      // イベント名の重複チェック
+      let eventName = result.eventName;
+      if (eventLists[eventName]) {
+        const overwrite = confirm(`「${eventName}」は既に存在します。上書きしますか？\n\nキャンセルを押すと新しい名前で保存します。`);
+        if (!overwrite) {
+          const newName = prompt('新しいイベント名を入力してください:', `${eventName}_imported`);
+          if (!newName) return;
+          eventName = newName;
+        }
+      }
+      
+      // アイテムを保存
+      setEventLists(prev => ({
+        ...prev,
+        [eventName]: result.items,
+      }));
+      
+      // メタデータを保存
+      if (result.metadata) {
+        setEventMetadata(prev => ({
+          ...prev,
+          [eventName]: result.metadata as EventMetadata,
+        }));
+      }
+      
+      // 配置情報を保存
+      if (result.layoutInfo) {
+        if (Object.keys(result.layoutInfo.executeModeItems).length > 0) {
+          setExecuteModeItems(prev => ({
+            ...prev,
+            [eventName]: result.layoutInfo!.executeModeItems,
+          }));
+        }
+        if (Object.keys(result.layoutInfo.dayModes).length > 0) {
+          setDayModes(prev => ({
+            ...prev,
+            [eventName]: result.layoutInfo!.dayModes as unknown as DayModeState,
+          }));
+        }
+      }
+      
+      // マップデータを保存
+      if (result.mapData && Object.keys(result.mapData).length > 0) {
+        setMapData(prev => ({
+          ...prev,
+          [eventName]: result.mapData as MapDataStore[string],
+        }));
+      }
+      
+      // ルート設定を保存
+      if (result.routeSettings && Object.keys(result.routeSettings).length > 0) {
+        setRouteSettings(prev => ({
+          ...prev,
+          [eventName]: result.routeSettings as RouteSettingsStore[string],
+        }));
+      }
+      
+      // ホール定義を保存
+      if (result.hallDefinitions && Object.keys(result.hallDefinitions).length > 0) {
+        setHallDefinitions(prev => ({
+          ...prev,
+          [eventName]: result.hallDefinitions as HallDefinitionsStore[string],
+        }));
+      }
+      
+      // ホールルート設定を保存
+      if (result.hallRouteSettings && Object.keys(result.hallRouteSettings).length > 0) {
+        setHallRouteSettings(prev => ({
+          ...prev,
+          [eventName]: result.hallRouteSettings as HallRouteSettingsStore[string],
+        }));
+      }
+      
+      // エラーがあれば表示
+      if (result.errors.length > 0) {
+        alert(`インポート完了（一部エラーあり）:\n${result.errors.join('\n')}`);
+      } else {
+        alert(`「${eventName}」をインポートしました。\n${result.items.length}件のアイテム`);
+      }
+      
+      // インポートしたイベントを選択
+      setActiveEventName(eventName);
+      const eventDates = extractEventDates(result.items);
+      if (eventDates.length > 0) {
+        setActiveTab(eventDates[0]);
+      }
+      
+    } catch (error) {
+      console.error('Import error:', error);
+      alert('インポートに失敗しました。ファイル形式を確認してください。');
+    }
+  }, [eventLists]);
 
   // アイテム更新機能
   const handleUpdateEvent = useCallback(async (eventName: string, urlOverride?: { url: string; sheetName: string }) => {
@@ -3060,6 +3081,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 onUpdate={handleUpdateEvent}
                 onRename={(oldName) => handleRenameEvent(oldName)}
                 onImportMap={handleImportMapData}
+                onImportExportFile={() => exportFileInputRef.current?.click()}
             />
         )}
         {activeTab === 'import' && (
@@ -3395,6 +3417,15 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         ref={mapFileInputRef}
         accept=".xlsx"
         onChange={handleMapFileChange}
+        style={{ display: 'none' }}
+      />
+
+      {/* エクスポートファイルインポート用入力（非表示） */}
+      <input
+        type="file"
+        ref={exportFileInputRef}
+        accept=".xlsx"
+        onChange={handleExportFileImport}
         style={{ display: 'none' }}
       />
 
