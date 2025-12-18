@@ -58,7 +58,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const showNumbers = zoomLevel >= 60;
   const showBorders = zoomLevel >= 40;
 
-  // ホール選択時にオフセットを自動調整してホールを中央に配置
+  // ホール選択時にオフセットを自動調整してホールを画面内に配置
   useEffect(() => {
     if (selectedHall && selectedHall.vertices.length >= 4) {
       const container = containerRef.current;
@@ -67,21 +67,41 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const containerWidth = container.clientWidth;
       const containerHeight = container.clientHeight;
       
-      // ホールの範囲を計算
+      // ホールの範囲を計算（マージン込み）
       const rows = selectedHall.vertices.map(v => v.row);
       const cols = selectedHall.vertices.map(v => v.col);
-      const minRow = Math.min(...rows) - SCROLL_MARGIN;
+      const minRow = Math.max(1, Math.min(...rows) - SCROLL_MARGIN);
       const maxRow = Math.max(...rows) + SCROLL_MARGIN;
-      const minCol = Math.min(...cols) - SCROLL_MARGIN;
+      const minCol = Math.max(1, Math.min(...cols) - SCROLL_MARGIN);
       const maxCol = Math.max(...cols) + SCROLL_MARGIN;
       
-      // ホールの中心座標（ピクセル）
-      const hallCenterX = ((minCol + maxCol) / 2 - 0.5) * cellSize;
-      const hallCenterY = ((minRow + maxRow) / 2 - 0.5) * cellSize;
+      // ホール範囲のピクセル座標
+      const hallLeft = (minCol - 1) * cellSize;
+      const hallRight = maxCol * cellSize;
+      const hallTop = (minRow - 1) * cellSize;
+      const hallBottom = maxRow * cellSize;
+      const hallWidth = hallRight - hallLeft;
+      const hallHeight = hallBottom - hallTop;
       
-      // コンテナの中心にホールの中心が来るようにオフセットを設定
-      const newOffsetX = containerWidth / 2 - hallCenterX;
-      const newOffsetY = containerHeight / 2 - hallCenterY;
+      let newOffsetX: number;
+      let newOffsetY: number;
+      
+      // ホールが画面に収まる場合は中央に配置、収まらない場合は左上を基準に
+      if (hallWidth <= containerWidth) {
+        // ホールを水平方向中央に
+        newOffsetX = (containerWidth - hallWidth) / 2 - hallLeft;
+      } else {
+        // ホール左端を画面左端に合わせる
+        newOffsetX = -hallLeft;
+      }
+      
+      if (hallHeight <= containerHeight) {
+        // ホールを垂直方向中央に
+        newOffsetY = (containerHeight - hallHeight) / 2 - hallTop;
+      } else {
+        // ホール上端を画面上端に合わせる
+        newOffsetY = -hallTop;
+      }
       
       setOffset({ x: newOffsetX, y: newOffsetY });
     } else {
@@ -644,6 +664,53 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }
     return null;
   }, [selectedHall]);
+
+  // スクロール制限を計算する関数
+  const calculateScrollLimits = useCallback(() => {
+    if (!hallScrollBounds) return null;
+    const container = containerRef.current;
+    if (!container) return null;
+    
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    
+    // ホール範囲のピクセル座標
+    const hallLeft = (hallScrollBounds.minCol - 1) * cellSize;
+    const hallRight = hallScrollBounds.maxCol * cellSize;
+    const hallTop = (hallScrollBounds.minRow - 1) * cellSize;
+    const hallBottom = hallScrollBounds.maxRow * cellSize;
+    const hallWidth = hallRight - hallLeft;
+    const hallHeight = hallBottom - hallTop;
+    
+    // スクロール制限を計算
+    // 原則: ホール範囲が常に画面内に表示されるようにする
+    let minX: number, maxX: number, minY: number, maxY: number;
+    
+    if (hallWidth <= containerWidth) {
+      // ホール幅が画面幅以下の場合、ホールを画面内に収める
+      // offset.x = -hallLeft でホール左端が画面左端に来る
+      // offset.x = containerWidth - hallRight でホール右端が画面右端に来る
+      minX = containerWidth - hallRight;
+      maxX = -hallLeft;
+    } else {
+      // ホール幅が画面幅より大きい場合
+      // ホール左端が画面右端より左に、ホール右端が画面左端より右に
+      minX = containerWidth - hallRight;
+      maxX = -hallLeft;
+    }
+    
+    if (hallHeight <= containerHeight) {
+      // ホール高さが画面高さ以下の場合
+      minY = containerHeight - hallBottom;
+      maxY = -hallTop;
+    } else {
+      // ホール高さが画面高さより大きい場合
+      minY = containerHeight - hallBottom;
+      maxY = -hallTop;
+    }
+    
+    return { minX, maxX, minY, maxY };
+  }, [hallScrollBounds, cellSize]);
   
   // ドラッグ処理
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -667,35 +734,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     let newY = dragStartOffset.y + dy;
     
     // ホール選択時はスクロール範囲を制限
-    if (hallScrollBounds) {
-      const container = containerRef.current;
-      if (container) {
-        const containerWidth = container.clientWidth;
-        const containerHeight = container.clientHeight;
-        
-        // ホール範囲のピクセルサイズ
-        const hallWidth = (hallScrollBounds.maxCol - hallScrollBounds.minCol + 1) * cellSize;
-        const hallHeight = (hallScrollBounds.maxRow - hallScrollBounds.minRow + 1) * cellSize;
-        const hallStartX = (hallScrollBounds.minCol - 1) * cellSize;
-        const hallStartY = (hallScrollBounds.minRow - 1) * cellSize;
-        
-        // スクロール範囲を計算
-        // ホールの左端が画面左端より右に行かない、右端が画面右端より左に行かない
-        const minX = Math.min(0, containerWidth - hallStartX - hallWidth);
-        const maxX = Math.max(0, -hallStartX);
-        const minY = Math.min(0, containerHeight - hallStartY - hallHeight);
-        const maxY = Math.max(0, -hallStartY);
-        
-        newX = Math.max(minX, Math.min(maxX, newX));
-        newY = Math.max(minY, Math.min(maxY, newY));
-      }
+    const limits = calculateScrollLimits();
+    if (limits) {
+      newX = Math.max(limits.minX, Math.min(limits.maxX, newX));
+      newY = Math.max(limits.minY, Math.min(limits.maxY, newY));
     }
     
     setOffset({
       x: newX,
       y: newY,
     });
-  }, [dragStart, dragStartOffset, hallScrollBounds, cellSize]);
+  }, [dragStart, dragStartOffset, calculateScrollLimits]);
   
   const handlePointerUp = useCallback(() => {
     setTimeout(() => {
