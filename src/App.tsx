@@ -2268,6 +2268,35 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     if (!dayMatch) return;
     const dayName = dayMatch[1];
     
+    // アイテムのホールIDを取得
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+    
+    // ホール定義を取得
+    const halls = hallDefinitions[activeEventName]?.[activeTab] || [];
+    const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[activeTab] || { hallOrder: [], hallVisitLists: [] };
+    
+    // アイテムのブロックからホールIDを特定
+    const currentMapData = mapData[activeEventName]?.[activeTab];
+    let itemHallId: string | null = null;
+    
+    if (currentMapData && halls.length > 0) {
+      const itemBlockName = item.block?.trim() || '';
+      const block = currentMapData.blocks.find(b => b.name === itemBlockName);
+      
+      if (block) {
+        const centerRow = (block.startRow + block.endRow) / 2;
+        const centerCol = (block.startCol + block.endCol) / 2;
+        
+        for (const hall of halls) {
+          if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
+            itemHallId = hall.id;
+            break;
+          }
+        }
+      }
+    }
+    
     setExecuteModeItems(prev => {
       const eventItems = prev[activeEventName] || {};
       const dayItems = [...(eventItems[dayName] || [])];
@@ -2275,7 +2304,75 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       // 既に追加されている場合は何もしない
       if (dayItems.includes(itemId)) return prev;
       
-      dayItems.push(itemId);
+      // ホールが特定できない場合は末尾に追加
+      if (!itemHallId || halls.length === 0) {
+        dayItems.push(itemId);
+        return {
+          ...prev,
+          [activeEventName]: {
+            ...eventItems,
+            [dayName]: dayItems,
+          },
+        };
+      }
+      
+      // ホール順序を取得（設定がなければホールの定義順）
+      const hallOrder = hallRouteSettingsForMap.hallOrder.length > 0 
+        ? hallRouteSettingsForMap.hallOrder 
+        : halls.map(h => h.id);
+      
+      // 各アイテムのホールIDをマップ
+      const itemsMap = new Map(items.map(i => [i.id, i]));
+      const getHallIdForItem = (id: string): string | null => {
+        const targetItem = itemsMap.get(id);
+        if (!targetItem || !currentMapData) return null;
+        
+        const blockName = targetItem.block?.trim() || '';
+        const targetBlock = currentMapData.blocks.find(b => b.name === blockName);
+        if (!targetBlock) return null;
+        
+        const cRow = (targetBlock.startRow + targetBlock.endRow) / 2;
+        const cCol = (targetBlock.startCol + targetBlock.endCol) / 2;
+        
+        for (const hall of halls) {
+          if (hall.vertices.length >= 4 && isPointInPolygon(cRow, cCol, hall.vertices)) {
+            return hall.id;
+          }
+        }
+        return null;
+      };
+      
+      // 同じホールの最後の位置を探す
+      let insertIndex = dayItems.length; // デフォルトは末尾
+      const itemHallIndex = hallOrder.indexOf(itemHallId);
+      
+      if (itemHallIndex >= 0) {
+        // 同じホールの最後のアイテムの位置を探す
+        let lastSameHallIndex = -1;
+        let firstLaterHallIndex = -1;
+        
+        for (let i = 0; i < dayItems.length; i++) {
+          const existingItemHallId = getHallIdForItem(dayItems[i]);
+          if (existingItemHallId === itemHallId) {
+            lastSameHallIndex = i;
+          } else if (existingItemHallId) {
+            const existingHallIndex = hallOrder.indexOf(existingItemHallId);
+            if (existingHallIndex > itemHallIndex && firstLaterHallIndex === -1) {
+              firstLaterHallIndex = i;
+            }
+          }
+        }
+        
+        if (lastSameHallIndex >= 0) {
+          // 同じホールのアイテムがある場合、その次に挿入
+          insertIndex = lastSameHallIndex + 1;
+        } else if (firstLaterHallIndex >= 0) {
+          // 同じホールのアイテムがないが、後のホールのアイテムがある場合、その前に挿入
+          insertIndex = firstLaterHallIndex;
+        }
+      }
+      
+      dayItems.splice(insertIndex, 0, itemId);
       
       return {
         ...prev,
@@ -2285,7 +2382,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         },
       };
     });
-  }, [activeEventName, activeTab, isMapTab]);
+  }, [activeEventName, activeTab, isMapTab, items, hallDefinitions, hallRouteSettings, mapData]);
 
   // マップビューでの訪問先削除
   const handleRemoveFromExecuteListFromMap = useCallback((itemId: string) => {
