@@ -2499,7 +2499,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setHallDefinitionMode(true);
   }, [vertexSelectionMode]);
 
-  // マップセルクリック時にホール頂点選択に追加
+  // マップセルクリック時にホール頂点選択に追加/削除
   useEffect(() => {
     const handleMapCellClickForVertex = (e: CustomEvent<{ row: number; col: number }>) => {
       if (!vertexSelectionMode) return;
@@ -2509,14 +2509,19 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       setVertexSelectionMode(prev => {
         if (!prev) return prev;
         
+        // 既存の頂点をクリックした場合は削除
+        const existingIndex = prev.clickedVertices.findIndex(v => v.row === row && v.col === col);
+        if (existingIndex !== -1) {
+          return {
+            ...prev,
+            clickedVertices: prev.clickedVertices.filter((_, i) => i !== existingIndex),
+          };
+        }
+        
         // 最大6頂点まで
         if (prev.clickedVertices.length >= 6) {
           return prev;
         }
-        
-        // 重複チェック
-        const isDuplicate = prev.clickedVertices.some(v => v.row === row && v.col === col);
-        if (isDuplicate) return prev;
         
         return {
           ...prev,

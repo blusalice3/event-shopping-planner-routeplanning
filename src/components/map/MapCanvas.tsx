@@ -139,20 +139,48 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     
     const dayMatch = mapName.match(/^(.+)マップ$/);
     if (!dayMatch) return states;
-    const dayName = dayMatch[1];
+    const dayName = dayMatch[1].trim();
+    
+    // デバッグ用: マップ情報をログ出力
+    console.log(`[MapCanvas] mapName: "${mapName}", dayName: "${dayName}"`);
+    console.log(`[MapCanvas] blocks count: ${mapData.blocks.length}`);
+    console.log(`[MapCanvas] blocks: [${mapData.blocks.map(b => `"${b.name}"`).join(', ')}]`);
+    console.log(`[MapCanvas] items count: ${items.length}`);
+    
+    // マッチするアイテムの数をカウント
+    let matchedCount = 0;
+    let dateMatchCount = 0;
+    let blockMatchCount = 0;
+    let numberMatchCount = 0;
     
     items.forEach((item) => {
-      if (item.eventDate !== dayName) return;
+      // 日付の比較（トリム済み）
+      const itemEventDate = item.eventDate?.trim() || '';
+      if (itemEventDate !== dayName) return;
+      dateMatchCount++;
       
-      const block = mapData.blocks.find((b) => b.name === item.block);
-      if (!block) return;
+      // ブロック名の比較（大文字/小文字を区別しない）
+      const itemBlockName = item.block?.trim() || '';
+      const block = mapData.blocks.find((b) => 
+        b.name.toLowerCase() === itemBlockName.toLowerCase()
+      );
+      if (!block) {
+        console.debug(`[MapCanvas] Block not found: "${itemBlockName}" for item ${item.circle}`);
+        return;
+      }
+      blockMatchCount++;
       
       const numStr = extractNumberFromItemNumber(item.number);
       if (!numStr) return;
       
       const num = parseInt(numStr, 10);
       const cell = block.numberCells.find((nc) => nc.value === num);
-      if (!cell) return;
+      if (!cell) {
+        console.debug(`[MapCanvas] Number cell not found: ${num} in block "${block.name}" (has ${block.numberCells.length} cells)`);
+        return;
+      }
+      numberMatchCount++;
+      matchedCount++;
       
       const key = `${cell.row}-${cell.col}`;
       const existing = states.get(key) || {
@@ -173,6 +201,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       
       states.set(key, existing);
     });
+    
+    console.log(`[MapCanvas] Match stats: dateMatch=${dateMatchCount}, blockMatch=${blockMatchCount}, numberMatch=${numberMatchCount}, total=${matchedCount}`);
     
     states.forEach((state) => {
       if (state.items.length > 0) {
@@ -630,6 +660,26 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const x = (e.clientX - rect.left) * scaleX;
       const y = (e.clientY - rect.top) * scaleY;
       
+      // 頂点選択モード中は、まず頂点マーカーのクリックをチェック
+      if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
+        const markerSize = Math.max(10, cellSize * 0.4);
+        const clickRadius = markerSize; // クリック判定を少し広めに
+        
+        for (const vertex of vertexSelectionMode.clickedVertices) {
+          const markerX = (vertex.col - 0.5) * cellSize;
+          const markerY = (vertex.row - 0.5) * cellSize;
+          const distance = Math.sqrt(Math.pow(x - markerX, 2) + Math.pow(y - markerY, 2));
+          
+          if (distance <= clickRadius) {
+            // 頂点マーカーがクリックされた → その頂点のセル座標でイベント発火
+            window.dispatchEvent(new CustomEvent('mapCellClick', {
+              detail: { row: vertex.row, col: vertex.col }
+            }));
+            return; // 頂点クリックの場合は通常のセルクリック処理をスキップ
+          }
+        }
+      }
+      
       const col = Math.floor(x / cellSize) + 1;
       const row = Math.floor(y / cellSize) + 1;
       
@@ -647,7 +697,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       
       onCellClick(row, col, matchingItems);
     },
-    [cellSize, mapData.maxRow, mapData.maxCol, cellStates, onCellClick, isDragging, dpr]
+    [cellSize, mapData.maxRow, mapData.maxCol, cellStates, onCellClick, isDragging, dpr, vertexSelectionMode]
   );
 
   // ホールのスクロール範囲を計算
