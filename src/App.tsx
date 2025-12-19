@@ -2551,6 +2551,122 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     }));
   }, [activeEventName, isMapTab, activeTab]);
 
+  // 実行列をホール順序で並び替え
+  const handleReorderExecuteListByHallOrder = useCallback((hallOrder: string[]) => {
+    if (!activeEventName || !isMapTab) return;
+    
+    const dayMatch = activeTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return;
+    const dayName = dayMatch[1];
+    
+    const currentMapData = mapData[activeEventName]?.[activeTab];
+    const halls = hallDefinitions[activeEventName]?.[activeTab] || [];
+    const currentHallRouteSettings = hallRouteSettings[activeEventName]?.[activeTab] || { hallOrder: [], hallVisitLists: [] };
+    
+    if (!currentMapData || halls.length === 0) return;
+    
+    setExecuteModeItems(prev => {
+      const eventItems = prev[activeEventName] || {};
+      const dayItems = [...(eventItems[dayName] || [])];
+      
+      if (dayItems.length === 0) return prev;
+      
+      // 各アイテムのホールIDを取得する関数
+      const itemsMap = new Map(items.map(i => [i.id, i]));
+      const getHallIdForItem = (itemId: string): string | null => {
+        const item = itemsMap.get(itemId);
+        if (!item || !currentMapData) return null;
+        
+        const blockName = item.block?.trim() || '';
+        // 完全一致優先でブロックを検索
+        let block = currentMapData.blocks.find(b => b.name === blockName);
+        if (!block) {
+          const candidates = currentMapData.blocks.filter(b => 
+            b.name.toLowerCase() === blockName.toLowerCase()
+          );
+          if (candidates.length === 1) {
+            block = candidates[0];
+          }
+        }
+        if (!block) return null;
+        
+        const centerRow = (block.startRow + block.endRow) / 2;
+        const centerCol = (block.startCol + block.endCol) / 2;
+        
+        for (const hall of halls) {
+          if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
+            return hall.id;
+          }
+        }
+        return null;
+      };
+      
+      // アイテムをホールごとにグループ化
+      const itemsByHall = new Map<string | null, Set<string>>();
+      dayItems.forEach(itemId => {
+        const hallId = getHallIdForItem(itemId);
+        if (!itemsByHall.has(hallId)) {
+          itemsByHall.set(hallId, new Set());
+        }
+        itemsByHall.get(hallId)!.add(itemId);
+      });
+      
+      // hallVisitListsの順序マップを作成
+      const visitOrderMap = new Map<string, number>();
+      currentHallRouteSettings.hallVisitLists.forEach(list => {
+        list.itemIds.forEach((itemId, index) => {
+          visitOrderMap.set(itemId, index);
+        });
+      });
+      
+      // ホール内のアイテムを訪問先指定順でソート
+      const sortItemsInHall = (itemIds: Set<string>): string[] => {
+        const itemsArray = Array.from(itemIds);
+        return itemsArray.sort((a, b) => {
+          const orderA = visitOrderMap.get(a);
+          const orderB = visitOrderMap.get(b);
+          
+          // 両方とも訪問先リストにある場合、その順序で並べる
+          if (orderA !== undefined && orderB !== undefined) {
+            return orderA - orderB;
+          }
+          // 一方のみがリストにある場合、リストにある方を先に
+          if (orderA !== undefined) return -1;
+          if (orderB !== undefined) return 1;
+          // どちらもリストにない場合、元の実行列順序を維持
+          return dayItems.indexOf(a) - dayItems.indexOf(b);
+        });
+      };
+      
+      // ホール順序に従って並び替え
+      const reorderedItems: string[] = [];
+      
+      // まずホール順序に従って追加
+      hallOrder.forEach(hallId => {
+        const hallItems = itemsByHall.get(hallId);
+        if (hallItems && hallItems.size > 0) {
+          reorderedItems.push(...sortItemsInHall(hallItems));
+          itemsByHall.delete(hallId);
+        }
+      });
+      
+      // ホール順序に含まれていないホールのアイテムを追加
+      itemsByHall.forEach((hallItems) => {
+        if (hallItems.size > 0) {
+          reorderedItems.push(...sortItemsInHall(hallItems));
+        }
+      });
+      
+      return {
+        ...prev,
+        [activeEventName]: {
+          ...eventItems,
+          [dayName]: reorderedItems,
+        },
+      };
+    });
+  }, [activeEventName, isMapTab, activeTab, mapData, hallDefinitions, hallRouteSettings, items]);
+
   // ホール定義モードの状態
   const [hallDefinitionMode, setHallDefinitionMode] = useState(false);
 
@@ -3214,6 +3330,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             halls={currentHalls}
             hallRouteSettings={currentHallRouteSettings}
             onUpdateHallRouteSettings={handleUpdateHallRouteSettings}
+            onReorderExecuteList={handleReorderExecuteListByHallOrder}
             vertexSelectionMode={vertexSelectionMode}
           />
         )}

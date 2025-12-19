@@ -222,7 +222,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const points: Array<{ row: number; col: number; order: number }> = [];
     
     visitItems.forEach((item, index) => {
-      const block = mapData.blocks.find((b) => b.name === item.block);
+      const itemBlockName = item.block?.trim() || '';
+      
+      // 完全一致優先でブロックを検索
+      let block = mapData.blocks.find((b) => b.name === itemBlockName);
+      if (!block) {
+        const candidates = mapData.blocks.filter((b) => 
+          b.name.toLowerCase() === itemBlockName.toLowerCase()
+        );
+        if (candidates.length === 1) {
+          block = candidates[0];
+        }
+      }
       if (!block) return;
       
       const numStr = extractNumberFromItemNumber(item.number);

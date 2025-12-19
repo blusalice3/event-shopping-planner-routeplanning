@@ -8,6 +8,7 @@ interface HallOrderPanelProps {
   hallRouteSettings: HallRouteSettings;
   onUpdateHallRouteSettings: (settings: HallRouteSettings) => void;
   getItemCountInHall: (hallId: string) => number;
+  onReorderExecuteList?: (hallOrder: string[]) => void;  // 実行列並び替えコールバック
 }
 
 const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
@@ -17,6 +18,7 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
   hallRouteSettings,
   onUpdateHallRouteSettings,
   getItemCountInHall,
+  onReorderExecuteList,
 }) => {
   const [localOrder, setLocalOrder] = useState<string[]>(hallRouteSettings.hallOrder);
 
@@ -170,19 +172,38 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
         </div>
 
         {/* フッター */}
-        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            className="px-4 py-2 text-sm rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
-          >
-            キャンセル
-          </button>
-          <button
-            onClick={handleSave}
-            className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
-          >
-            保存
-          </button>
+        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-between">
+          <div>
+            {onReorderExecuteList && hallsWithItems.length > 0 && (
+              <button
+                onClick={() => {
+                  onReorderExecuteList(localOrder);
+                  onUpdateHallRouteSettings({
+                    ...hallRouteSettings,
+                    hallOrder: localOrder,
+                  });
+                }}
+                className="px-4 py-2 text-sm rounded bg-amber-500 text-white hover:bg-amber-600"
+                title="実行列のアイテムをホール順序に従って並び替えます"
+              >
+                🔄 実行列を並び替え
+              </button>
+            )}
+          </div>
+          <div className="flex gap-3">
+            <button
+              onClick={onClose}
+              className="px-4 py-2 text-sm rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
+            >
+              キャンセル
+            </button>
+            <button
+              onClick={handleSave}
+              className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+            >
+              保存
+            </button>
+          </div>
         </div>
       </div>
     </div>

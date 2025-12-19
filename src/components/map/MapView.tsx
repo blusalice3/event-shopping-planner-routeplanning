@@ -29,6 +29,7 @@ interface MapViewProps {
   halls: HallDefinition[];
   hallRouteSettings: HallRouteSettings;
   onUpdateHallRouteSettings: (settings: HallRouteSettings) => void;
+  onReorderExecuteList?: (hallOrder: string[]) => void;
   // ホール頂点選択モード
   vertexSelectionMode?: {
     clickedVertices: { row: number; col: number }[];
@@ -49,6 +50,7 @@ const MapView: React.FC<MapViewProps> = ({
   halls,
   hallRouteSettings,
   onUpdateHallRouteSettings,
+  onReorderExecuteList,
   vertexSelectionMode,
 }) => {
   void _onMoveToFirst;
@@ -410,6 +412,7 @@ const MapView: React.FC<MapViewProps> = ({
         hallRouteSettings={hallRouteSettings}
         onUpdateHallRouteSettings={onUpdateHallRouteSettings}
         getItemCountInHall={getItemCountInHall}
+        onReorderExecuteList={onReorderExecuteList}
       />
     </div>
   );
