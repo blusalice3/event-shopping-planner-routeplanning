@@ -141,46 +141,24 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     if (!dayMatch) return states;
     const dayName = dayMatch[1].trim();
     
-    // デバッグ用: マップ情報をログ出力
-    console.log(`[MapCanvas] mapName: "${mapName}", dayName: "${dayName}"`);
-    console.log(`[MapCanvas] blocks count: ${mapData.blocks.length}`);
-    console.log(`[MapCanvas] blocks: [${mapData.blocks.map(b => `"${b.name}"`).join(', ')}]`);
-    console.log(`[MapCanvas] items count: ${items.length}`);
-    
-    // マッチするアイテムの数をカウント
-    let matchedCount = 0;
-    let dateMatchCount = 0;
-    let blockMatchCount = 0;
-    let numberMatchCount = 0;
-    
     items.forEach((item) => {
       // 日付の比較（トリム済み）
       const itemEventDate = item.eventDate?.trim() || '';
       if (itemEventDate !== dayName) return;
-      dateMatchCount++;
       
       // ブロック名の比較（大文字/小文字を区別しない）
       const itemBlockName = item.block?.trim() || '';
       const block = mapData.blocks.find((b) => 
         b.name.toLowerCase() === itemBlockName.toLowerCase()
       );
-      if (!block) {
-        console.debug(`[MapCanvas] Block not found: "${itemBlockName}" for item ${item.circle}`);
-        return;
-      }
-      blockMatchCount++;
+      if (!block) return;
       
       const numStr = extractNumberFromItemNumber(item.number);
       if (!numStr) return;
       
       const num = parseInt(numStr, 10);
       const cell = block.numberCells.find((nc) => nc.value === num);
-      if (!cell) {
-        console.debug(`[MapCanvas] Number cell not found: ${num} in block "${block.name}" (has ${block.numberCells.length} cells)`);
-        return;
-      }
-      numberMatchCount++;
-      matchedCount++;
+      if (!cell) return;
       
       const key = `${cell.row}-${cell.col}`;
       const existing = states.get(key) || {
@@ -201,8 +179,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       
       states.set(key, existing);
     });
-    
-    console.log(`[MapCanvas] Match stats: dateMatch=${dateMatchCount}, blockMatch=${blockMatchCount}, numberMatch=${numberMatchCount}, total=${matchedCount}`);
     
     states.forEach((state) => {
       if (state.items.length > 0) {

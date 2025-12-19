@@ -128,16 +128,23 @@ const MapView: React.FC<MapViewProps> = ({
       return mapData;
     }
     
-    // 選択ホール内のセルのみをフィルタ
+    // 選択ホール内のセルのみをフィルタ（表示用）
     const filteredCells = mapData.cells.filter(cell => {
       return isPointInPolygon(cell.row, cell.col, selectedHall.vertices);
     });
     
-    // 選択ホール内のブロックのみをフィルタ
-    const filteredBlocks = mapData.blocks.filter(block => {
-      const centerRow = (block.startRow + block.endRow) / 2;
-      const centerCol = (block.startCol + block.endCol) / 2;
-      return isPointInPolygon(centerRow, centerCol, selectedHall.vertices);
+    // ブロックは全て保持する（アイテムマッチング用）
+    // ただし、numberCellsはホール内のセルのみにフィルタ
+    const filteredBlocks = mapData.blocks.map(block => {
+      const filteredNumberCells = block.numberCells.filter(nc => {
+        return isPointInPolygon(nc.row, nc.col, selectedHall.vertices);
+      });
+      
+      // ホール内にセルがないブロックはスキップしない（他の処理のため保持）
+      return {
+        ...block,
+        numberCells: filteredNumberCells.length > 0 ? filteredNumberCells : block.numberCells,
+      };
     });
     
     // 範囲を再計算
