@@ -146,11 +146,22 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const itemEventDate = item.eventDate?.trim() || '';
       if (itemEventDate !== dayName) return;
       
-      // ブロック名の比較（大文字/小文字を区別しない）
+      // ブロック名の比較
+      // まず完全一致を試み、見つからない場合のみ大文字/小文字無視
       const itemBlockName = item.block?.trim() || '';
-      const block = mapData.blocks.find((b) => 
-        b.name.toLowerCase() === itemBlockName.toLowerCase()
-      );
+      let block = mapData.blocks.find((b) => b.name === itemBlockName);
+      
+      // 完全一致がない場合、大文字/小文字を無視して検索（ただし同名ブロックが複数ある場合は除く）
+      if (!block) {
+        const candidates = mapData.blocks.filter((b) => 
+          b.name.toLowerCase() === itemBlockName.toLowerCase()
+        );
+        // 候補が1つだけなら採用（複数ある場合は曖昧なので採用しない）
+        if (candidates.length === 1) {
+          block = candidates[0];
+        }
+      }
+      
       if (!block) return;
       
       const numStr = extractNumberFromItemNumber(item.number);

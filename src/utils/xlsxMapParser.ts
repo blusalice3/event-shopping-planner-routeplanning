@@ -547,7 +547,21 @@ export function matchItemToCell(
 ): { row: number; col: number } | null {
   if (item.eventDate !== dayName) return null;
   
-  const block = mapData.blocks.find((b) => b.name === item.block);
+  const itemBlockName = item.block?.trim() || '';
+  
+  // まず完全一致を試みる
+  let block = mapData.blocks.find((b) => b.name === itemBlockName);
+  
+  // 完全一致がない場合、大文字/小文字を無視して検索（候補が1つの場合のみ）
+  if (!block) {
+    const candidates = mapData.blocks.filter((b) => 
+      b.name.toLowerCase() === itemBlockName.toLowerCase()
+    );
+    if (candidates.length === 1) {
+      block = candidates[0];
+    }
+  }
+  
   if (!block) return null;
   
   const numStr = extractNumberFromItemNumber(item.number);

@@ -105,7 +105,25 @@ const MapView: React.FC<MapViewProps> = ({
 
   // アイテムがどのホールに属するか判定
   const getItemHallId = useCallback((item: ShoppingItem): string | null => {
-    return blockToHallMap.get(item.block) || null;
+    const itemBlockName = item.block?.trim() || '';
+    
+    // まず完全一致を試みる
+    const exactMatch = blockToHallMap.get(itemBlockName);
+    if (exactMatch) return exactMatch;
+    
+    // 完全一致がない場合、大文字/小文字を無視して検索（候補が1つの場合のみ）
+    const candidates: string[] = [];
+    blockToHallMap.forEach((hallId, blockName) => {
+      if (blockName.toLowerCase() === itemBlockName.toLowerCase()) {
+        candidates.push(hallId);
+      }
+    });
+    
+    if (candidates.length === 1) {
+      return candidates[0];
+    }
+    
+    return null;
   }, [blockToHallMap]);
 
   // ホールごとの訪問先アイテム数を取得
