@@ -2821,6 +2821,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
 
   const TabButton: React.FC<{tab: ActiveTab, label: string, count?: number, onClick?: () => void, isMapTab?: boolean}> = ({ tab, label, count, onClick, isMapTab: isMapTabProp }) => {
     const longPressTimeout = React.useRef<number | null>(null);
+    const isLongPress = React.useRef(false);
     const menuRef = React.useRef<HTMLDivElement>(null);
     const buttonRef = React.useRef<HTMLButtonElement>(null);
     const [menuPosition, setMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
@@ -2828,7 +2829,11 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     const handlePointerDown = () => {
       if (!activeEventName) return;
       
+      isLongPress.current = false;
+      
       longPressTimeout.current = window.setTimeout(() => {
+        isLongPress.current = true;
+        
         if (isMapTabProp) {
           // マップタブの長押しメニュー - ボタン位置を取得
           if (buttonRef.current) {
@@ -2855,10 +2860,18 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     };
 
     const handleClick = () => {
-      if (mapTabMenuOpen) {
-        setMapTabMenuOpen(null);
+      // 長押し後のクリックは無視
+      if (isLongPress.current) {
+        isLongPress.current = false;
         return;
       }
+      
+      // メニューが開いている場合は閉じる
+      if (mapTabMenuOpen) {
+        setMapTabMenuOpen(null);
+      }
+      
+      // タブ遷移
       if (onClick) {
         onClick();
       } else {
