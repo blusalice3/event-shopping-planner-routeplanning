@@ -2823,13 +2823,21 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     const longPressTimeout = React.useRef<number | null>(null);
     const menuRef = React.useRef<HTMLDivElement>(null);
     const buttonRef = React.useRef<HTMLButtonElement>(null);
+    const [menuPosition, setMenuPosition] = React.useState<{ left: number; top: number }>({ left: 0, top: 0 });
 
     const handlePointerDown = () => {
       if (!activeEventName) return;
       
       longPressTimeout.current = window.setTimeout(() => {
         if (isMapTabProp) {
-          // マップタブの長押しメニュー
+          // マップタブの長押しメニュー - ボタン位置を取得してメニュー表示
+          if (buttonRef.current) {
+            const rect = buttonRef.current.getBoundingClientRect();
+            setMenuPosition({
+              left: rect.left + rect.width / 2,
+              top: rect.bottom + 4,
+            });
+          }
           setMapTabMenuOpen(tab);
         } else if (eventDates.includes(tab)) {
           // 通常の日付タブの長押し（モード切り替え）
@@ -2847,9 +2855,13 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     };
 
     const handleClick = () => {
+      // メニューが開いている場合は閉じるが、タブ遷移も実行する
       if (mapTabMenuOpen) {
         setMapTabMenuOpen(null);
-        return;
+        // このタブのメニューが開いている場合は遷移しない（メニューを閉じるだけ）
+        if (mapTabMenuOpen === tab) {
+          return;
+        }
       }
       if (onClick) {
         onClick();
@@ -2875,20 +2887,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         return () => document.removeEventListener('mousedown', handleClickOutside);
       }
     }, [tab]);
-
-    // ボタン位置を取得してメニュー位置を計算
-    const getMenuPosition = () => {
-      if (buttonRef.current) {
-        const rect = buttonRef.current.getBoundingClientRect();
-        return {
-          left: rect.left + rect.width / 2,
-          top: rect.bottom + 4,
-        };
-      }
-      return { left: 0, top: 0 };
-    };
-
-    const menuPosition = mapTabMenuOpen === tab ? getMenuPosition() : { left: 0, top: 0 };
 
     return (
       <div className="relative">
