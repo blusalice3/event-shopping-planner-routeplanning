@@ -2821,28 +2821,15 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
 
   const TabButton: React.FC<{tab: ActiveTab, label: string, count?: number, onClick?: () => void, isMapTab?: boolean}> = ({ tab, label, count, onClick, isMapTab: isMapTabProp }) => {
     const longPressTimeout = React.useRef<number | null>(null);
-    const isLongPress = React.useRef(false);
     const menuRef = React.useRef<HTMLDivElement>(null);
     const buttonRef = React.useRef<HTMLButtonElement>(null);
-    const [menuPosition, setMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
 
     const handlePointerDown = () => {
       if (!activeEventName) return;
       
-      isLongPress.current = false;
-      
       longPressTimeout.current = window.setTimeout(() => {
-        isLongPress.current = true;
-        
         if (isMapTabProp) {
-          // マップタブの長押しメニュー - ボタン位置を取得
-          if (buttonRef.current) {
-            const rect = buttonRef.current.getBoundingClientRect();
-            setMenuPosition({
-              x: rect.left + rect.width / 2,
-              y: rect.bottom,
-            });
-          }
+          // マップタブの長押しメニュー
           setMapTabMenuOpen(tab);
         } else if (eventDates.includes(tab)) {
           // 通常の日付タブの長押し（モード切り替え）
@@ -2857,25 +2844,13 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         clearTimeout(longPressTimeout.current);
         longPressTimeout.current = null;
       }
-      // ポインターを離した後、少し遅延してフラグをリセット
-      // （クリックイベントより後にリセットするため）
-      setTimeout(() => {
-        isLongPress.current = false;
-      }, 0);
     };
 
     const handleClick = () => {
-      // 長押し後のクリックは無視
-      if (isLongPress.current) {
-        return;
-      }
-      
-      // メニューが開いている場合は閉じる
       if (mapTabMenuOpen) {
         setMapTabMenuOpen(null);
+        return;
       }
-      
-      // タブ遷移
       if (onClick) {
         onClick();
       } else {
@@ -2901,6 +2876,20 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       }
     }, [tab]);
 
+    // ボタン位置を取得してメニュー位置を計算
+    const getMenuPosition = () => {
+      if (buttonRef.current) {
+        const rect = buttonRef.current.getBoundingClientRect();
+        return {
+          left: rect.left + rect.width / 2,
+          top: rect.bottom + 4,
+        };
+      }
+      return { left: 0, top: 0 };
+    };
+
+    const menuPosition = mapTabMenuOpen === tab ? getMenuPosition() : { left: 0, top: 0 };
+
     return (
       <div className="relative">
         <button
@@ -2919,21 +2908,19 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         </button>
         
         {/* マップタブ長押しメニュー - fixed配置でタブのすぐ下に表示 */}
-        {mapTabMenuOpen === tab && isMapTabProp && menuPosition && (
+        {mapTabMenuOpen === tab && isMapTabProp && (
           <div 
             ref={menuRef}
             className="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 min-w-[180px]"
             style={{
-              left: `${menuPosition.x}px`,
-              top: `${menuPosition.y + 4}px`,
+              left: `${menuPosition.left}px`,
+              top: `${menuPosition.top}px`,
               transform: 'translateX(-50%)',
               zIndex: 9999,
             }}
           >
             {/* 矢印（上向き） */}
-            <div 
-              className="absolute left-1/2 -translate-x-1/2 -top-2"
-            >
+            <div className="absolute left-1/2 -translate-x-1/2 -top-2">
               <div className="w-3 h-3 bg-white dark:bg-slate-800 border-l border-t border-slate-200 dark:border-slate-700 transform rotate-45" />
             </div>
             <div className="py-1">
