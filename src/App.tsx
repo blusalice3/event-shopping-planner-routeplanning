@@ -2835,7 +2835,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             const rect = buttonRef.current.getBoundingClientRect();
             setMenuPosition({
               x: rect.left + rect.width / 2,
-              y: rect.top,
+              y: rect.bottom,
             });
           }
           setMapTabMenuOpen(tab);
@@ -2902,24 +2902,24 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           </button>
         </div>
         
-        {/* マップタブ長押しメニュー - fixedオーバーレイ */}
+        {/* マップタブ長押しメニュー - タブの下にオーバーレイ表示 */}
         {mapTabMenuOpen === tab && isMapTabProp && (
           <div 
             ref={menuRef}
             className="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 min-w-[180px]"
             style={{
               left: menuPosition.x,
-              top: menuPosition.y - 8,
-              transform: 'translate(-50%, -100%)',
+              top: menuPosition.y + 8,
+              transform: 'translateX(-50%)',
               zIndex: 9999,
             }}
           >
-            {/* 矢印 */}
+            {/* 矢印（上向き） */}
             <div 
               className="absolute left-1/2 -translate-x-1/2"
-              style={{ top: '100%', marginTop: '-1px' }}
+              style={{ bottom: '100%', marginBottom: '-6px' }}
             >
-              <div className="w-3 h-3 bg-white dark:bg-slate-800 border-r border-b border-slate-200 dark:border-slate-700 transform rotate-45" />
+              <div className="w-3 h-3 bg-white dark:bg-slate-800 border-l border-t border-slate-200 dark:border-slate-700 transform rotate-45" />
             </div>
             <div className="py-1">
               <button
