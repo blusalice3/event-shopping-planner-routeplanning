@@ -2857,12 +2857,16 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         clearTimeout(longPressTimeout.current);
         longPressTimeout.current = null;
       }
+      // ポインターを離した後、少し遅延してフラグをリセット
+      // （クリックイベントより後にリセットするため）
+      setTimeout(() => {
+        isLongPress.current = false;
+      }, 0);
     };
 
     const handleClick = () => {
       // 長押し後のクリックは無視
       if (isLongPress.current) {
-        isLongPress.current = false;
         return;
       }
       
