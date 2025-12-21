@@ -141,6 +141,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     if (!dayMatch) return states;
     const dayName = dayMatch[1].trim();
     
+    // 優先アイテムかどうかを判定する関数
+    const isPriorityItem = (item: typeof items[number]) => {
+      const remarks = item.remarks?.toLowerCase() || '';
+      return remarks.includes('優先') || remarks.includes('委託無');
+    };
+    
     items.forEach((item) => {
       // 日付の比較（トリム済み）
       const itemEventDate = item.eventDate?.trim() || '';
@@ -178,11 +184,22 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         isVisited: false,
         isFullyVisited: false,
         items: [],
+        hasPriorityItem: false,
+        hasPriorityUnvisited: false,
       };
       
       existing.hasItems = true;
       existing.itemCount++;
       existing.items.push(item);
+      
+      // 優先アイテムかどうかをチェック
+      if (isPriorityItem(item)) {
+        existing.hasPriorityItem = true;
+        // 訪問先に未指定の優先アイテムがあるかチェック
+        if (!executeModeItemIdsSet.has(item.id)) {
+          existing.hasPriorityUnvisited = true;
+        }
+      }
       
       if (executeModeItemIdsSet.has(item.id)) {
         existing.isVisited = true;
@@ -299,6 +316,37 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
+    // 黄色と黒の斜めストライプパターンを作成
+    const createWarningStripePattern = () => {
+      const patternCanvas = document.createElement('canvas');
+      const stripeSize = Math.max(8, cellSize * 0.4); // ストライプの太さ
+      patternCanvas.width = stripeSize * 2;
+      patternCanvas.height = stripeSize * 2;
+      const patternCtx = patternCanvas.getContext('2d');
+      if (!patternCtx) return null;
+      
+      // 背景を黄色で塗りつぶし
+      patternCtx.fillStyle = '#FFD600';
+      patternCtx.fillRect(0, 0, stripeSize * 2, stripeSize * 2);
+      
+      // 黒の斜めストライプを描画
+      patternCtx.fillStyle = '#212121';
+      patternCtx.beginPath();
+      // 左下から右上への斜め線（パターンとして繰り返される）
+      patternCtx.moveTo(0, stripeSize * 2);
+      patternCtx.lineTo(stripeSize, stripeSize * 2);
+      patternCtx.lineTo(stripeSize * 2, stripeSize);
+      patternCtx.lineTo(stripeSize * 2, 0);
+      patternCtx.lineTo(stripeSize, 0);
+      patternCtx.lineTo(0, stripeSize);
+      patternCtx.closePath();
+      patternCtx.fill();
+      
+      return ctx.createPattern(patternCanvas, 'repeat');
+    };
+    
+    const warningPattern = createWarningStripePattern();
+
     // 1. 背景を描画
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
@@ -320,13 +368,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const state = cellStates.get(`${cell.row}-${cell.col}`);
       if (state) {
         if (state.isFullyVisited) {
-          ctx.fillStyle = 'rgba(239, 83, 80, 0.5)';
+          ctx.fillStyle = 'rgba(239, 83, 80, 0.5)';  // 赤：全訪問済み
           ctx.fillRect(x, y, width, height);
         } else if (state.isVisited) {
-          ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';
+          ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';  // 黄：一部訪問済み
+          ctx.fillRect(x, y, width, height);
+        } else if (state.hasPriorityUnvisited && warningPattern) {
+          // 黄色と黒の斜めストライプ：優先/委託無の未訪問アイテムあり
+          ctx.fillStyle = warningPattern;
           ctx.fillRect(x, y, width, height);
         } else if (state.hasItems) {
-          ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';
+          ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';  // 青：通常の未訪問アイテムあり
           ctx.fillRect(x, y, width, height);
         }
       }
@@ -419,12 +471,36 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         
-        // テキスト色
+        // テキスト色とスタイル
         const state = cellStates.get(`${cell.row}-${cell.col}`);
-        if (state?.isFullyVisited) {
-          ctx.fillStyle = '#B71C1C';
+        
+        // 優先アイテム（黄黒ストライプ背景）の場合は白背景を描画
+        if (state?.hasPriorityUnvisited && typeof cell.value === 'number') {
+          const textMetrics = ctx.measureText(text);
+          const textWidth = textMetrics.width;
+          const textHeight = fontSize;
+          const padding = fontSize * 0.3;
+          
+          // 角丸の白背景を描画
+          const bgX = x + width / 2 - textWidth / 2 - padding;
+          const bgY = y + height / 2 - textHeight / 2 - padding * 0.5;
+          const bgWidth = textWidth + padding * 2;
+          const bgHeight = textHeight + padding;
+          const radius = Math.min(padding, bgHeight / 2);
+          
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+          ctx.beginPath();
+          ctx.roundRect(bgX, bgY, bgWidth, bgHeight, radius);
+          ctx.fill();
+          
+          // テキスト色は黒で目立たせる
+          ctx.fillStyle = '#212121';
+        } else if (state?.isFullyVisited) {
+          ctx.fillStyle = '#B71C1C';  // 濃い赤：全訪問済み
+        } else if (state?.isVisited) {
+          ctx.fillStyle = '#F57F17';  // オレンジ：一部訪問済み
         } else if (state?.hasItems) {
-          ctx.fillStyle = '#1565C0';
+          ctx.fillStyle = '#1565C0';  // 青：通常の未訪問アイテムあり
         } else {
           ctx.fillStyle = '#333333';
         }
@@ -451,11 +527,20 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.beginPath();
         
         if (state.isFullyVisited) {
-          ctx.fillStyle = '#EF5350';
+          ctx.fillStyle = '#EF5350';  // 赤：全訪問済み
         } else if (state.isVisited) {
-          ctx.fillStyle = '#FFEE58';
+          ctx.fillStyle = '#FFEE58';  // 黄：一部訪問済み
+        } else if (state.hasPriorityUnvisited) {
+          // 黄黒の警告色（ドットでは黄色に黒枠）
+          ctx.arc(x + width / 2, y + height / 2, dotSize / 2, 0, Math.PI * 2);
+          ctx.fillStyle = '#FFD600';
+          ctx.fill();
+          ctx.strokeStyle = '#212121';
+          ctx.lineWidth = Math.max(1, dotSize * 0.2);
+          ctx.stroke();
+          return; // 既に描画済みなので戻る
         } else {
-          ctx.fillStyle = '#42A5F5';
+          ctx.fillStyle = '#42A5F5';  // 青：通常の未訪問アイテムあり
         }
         
         ctx.arc(x + width / 2, y + height / 2, dotSize / 2, 0, Math.PI * 2);
