@@ -2470,6 +2470,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
 
   // マップタブメニューの状態
   const [mapTabMenuOpen, setMapTabMenuOpen] = useState<string | null>(null);
+  const [mapTabMenuPosition, setMapTabMenuPosition] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
   const [visitListPanelOpen, setVisitListPanelOpen] = useState(false);
   const [blockDefinitionMode, setBlockDefinitionMode] = useState(false);
   
@@ -2823,21 +2824,20 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     const longPressTimeout = React.useRef<number | null>(null);
     const menuRef = React.useRef<HTMLDivElement>(null);
     const buttonRef = React.useRef<HTMLButtonElement>(null);
-    const [menuPosition, setMenuPosition] = React.useState<{ left: number; top: number }>({ left: 0, top: 0 });
 
-    const handlePointerDown = () => {
+    const handlePointerDown = (e: React.PointerEvent) => {
       if (!activeEventName) return;
+      
+      // 長押し開始時にボタンの位置を記録
+      const target = e.currentTarget as HTMLButtonElement;
+      const rect = target.getBoundingClientRect();
+      const menuLeft = rect.left + rect.width / 2;
+      const menuTop = rect.bottom + 4;
       
       longPressTimeout.current = window.setTimeout(() => {
         if (isMapTabProp) {
-          // マップタブの長押しメニュー - ボタン位置を取得してメニュー表示
-          if (buttonRef.current) {
-            const rect = buttonRef.current.getBoundingClientRect();
-            setMenuPosition({
-              left: rect.left + rect.width / 2,
-              top: rect.bottom + 4,
-            });
-          }
+          // マップタブの長押しメニュー - 記録した位置でメニューを表示
+          setMapTabMenuPosition({ left: menuLeft, top: menuTop });
           setMapTabMenuOpen(tab);
         } else if (eventDates.includes(tab)) {
           // 通常の日付タブの長押し（モード切り替え）
@@ -2855,13 +2855,15 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     };
 
     const handleClick = () => {
-      // メニューが開いている場合は閉じるが、タブ遷移も実行する
+      // メニューが開いている場合
       if (mapTabMenuOpen) {
-        setMapTabMenuOpen(null);
-        // このタブのメニューが開いている場合は遷移しない（メニューを閉じるだけ）
+        // このタブのメニューが開いている場合は閉じるだけ
         if (mapTabMenuOpen === tab) {
+          setMapTabMenuOpen(null);
           return;
         }
+        // 他のタブのメニューが開いている場合は閉じてタブ遷移
+        setMapTabMenuOpen(null);
       }
       if (onClick) {
         onClick();
@@ -2888,6 +2890,34 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       }
     }, [tab]);
 
+    // メニュー項目クリック時：まずそのタブに遷移してから機能を開く
+    const handleMenuItemClick = (action: 'visitList' | 'blockDefinition' | 'hallDefinition') => {
+      // まずメニューを閉じる
+      setMapTabMenuOpen(null);
+      
+      // 長押ししたタブに遷移
+      setItemToEdit(null);
+      setSelectedItemIds(new Set());
+      setSelectedBlockFilters(new Set());
+      setCandidateNumberSortDirection(null);
+      setActiveTab(tab);
+      
+      // 機能を開く（タブ遷移後に実行されるようsetTimeoutで遅延）
+      setTimeout(() => {
+        switch (action) {
+          case 'visitList':
+            setVisitListPanelOpen(true);
+            break;
+          case 'blockDefinition':
+            setBlockDefinitionMode(true);
+            break;
+          case 'hallDefinition':
+            setHallDefinitionMode(true);
+            break;
+        }
+      }, 0);
+    };
+
     return (
       <div className="relative">
         <button
@@ -2911,8 +2941,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             ref={menuRef}
             className="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 min-w-[180px]"
             style={{
-              left: `${menuPosition.left}px`,
-              top: `${menuPosition.top}px`,
+              left: `${mapTabMenuPosition.left}px`,
+              top: `${mapTabMenuPosition.top}px`,
               transform: 'translateX(-50%)',
               zIndex: 9999,
             }}
@@ -2923,28 +2953,19 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             </div>
             <div className="py-1">
               <button
-                onClick={() => {
-                  setVisitListPanelOpen(true);
-                  setMapTabMenuOpen(null);
-                }}
+                onClick={() => handleMenuItemClick('visitList')}
                 className="w-full px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-t-lg flex items-center gap-2"
               >
                 <span>📍</span> 訪問先リスト
               </button>
               <button
-                onClick={() => {
-                  setBlockDefinitionMode(true);
-                  setMapTabMenuOpen(null);
-                }}
+                onClick={() => handleMenuItemClick('blockDefinition')}
                 className="w-full px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
               >
                 <span>🔲</span> ブロック定義
               </button>
               <button
-                onClick={() => {
-                  setHallDefinitionMode(true);
-                  setMapTabMenuOpen(null);
-                }}
+                onClick={() => handleMenuItemClick('hallDefinition')}
                 className="w-full px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-b-lg flex items-center gap-2"
               >
                 <span>🏛️</span> ホール定義
