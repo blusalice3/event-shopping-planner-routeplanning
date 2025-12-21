@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useMemo } from 'react';
 import { ShoppingItem, PurchaseStatus, PurchaseStatuses } from '../../types';
 
 interface CellItemsPopupProps {
@@ -12,7 +12,7 @@ interface CellItemsPopupProps {
   onRemoveFromVisitList: (itemId: string) => void;
   onUpdateItem?: (item: ShoppingItem) => void;
   onDeleteItem?: (itemId: string) => void;
-  position: { x: number; y: number };
+  position: { x: number; y: number };  // クリック位置
 }
 
 const statusLabels: Record<PurchaseStatus, string> = {
@@ -42,6 +42,61 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   const [editingItem, setEditingItem] = useState<ShoppingItem | null>(null);
   const longPressTimeout = useRef<number | null>(null);
   const isLongPress = useRef(false);
+  const [popupSize, setPopupSize] = useState({ width: 320, height: 300 });
+  
+  // ポップアップサイズを測定
+  useEffect(() => {
+    if (popupRef.current && isOpen) {
+      const rect = popupRef.current.getBoundingClientRect();
+      setPopupSize({ width: rect.width, height: rect.height });
+    }
+  }, [isOpen, items.length]);
+  
+  // 最適なポップアップ位置を計算
+  const computedPosition = useMemo(() => {
+    const screenWidth = window.innerWidth;
+    const screenHeight = window.innerHeight;
+    const padding = 16; // 画面端からのマージン
+    const offsetFromClick = 40; // クリック位置からの距離
+    
+    // モバイル/タブレット判定（画面幅768px以下）
+    const isMobileOrTablet = screenWidth <= 768;
+    
+    let x: number;
+    let y: number;
+    
+    if (isMobileOrTablet) {
+      // モバイル/タブレット: 画面下部に表示
+      x = Math.max(padding, Math.min(
+        position.x - popupSize.width / 2,
+        screenWidth - popupSize.width - padding
+      ));
+      // 画面下部の左寄りまたは右寄り
+      const isLeftSide = position.x < screenWidth / 2;
+      x = isLeftSide 
+        ? Math.max(padding, padding) 
+        : Math.max(padding, screenWidth - popupSize.width - padding);
+      y = screenHeight - popupSize.height - padding - 60; // 60pxは下部ナビゲーション用
+    } else {
+      // デスクトップ: クリック位置から少し離れた位置
+      // 水平位置: クリック位置から離れた側に表示
+      if (position.x < screenWidth / 2) {
+        // クリックが左半分 → 右側に表示
+        x = Math.min(position.x + offsetFromClick, screenWidth - popupSize.width - padding);
+      } else {
+        // クリックが右半分 → 左側に表示
+        x = Math.max(padding, position.x - popupSize.width - offsetFromClick);
+      }
+      
+      // 垂直位置: クリック位置を中心に、画面内に収まるように調整
+      y = position.y - popupSize.height / 2;
+      
+      // 画面上端・下端の制限
+      y = Math.max(padding + 104, Math.min(y, screenHeight - popupSize.height - padding));
+    }
+    
+    return { x, y };
+  }, [position, popupSize]);
   
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -138,10 +193,10 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     <>
       <div
         ref={popupRef}
-        className="fixed z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 max-w-sm w-80"
+        className="fixed z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 max-w-sm w-80 transition-all duration-150"
         style={{
-          left: Math.min(position.x, window.innerWidth - 340),
-          top: Math.min(position.y, window.innerHeight - 400),
+          left: computedPosition.x,
+          top: computedPosition.y,
         }}
       >
         {/* ヘッダー */}

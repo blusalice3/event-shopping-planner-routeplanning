@@ -137,6 +137,19 @@ const MapView: React.FC<MapViewProps> = ({
     }).length;
   }, [executeModeItemIds, items, getItemHallId]);
 
+  // ホールごとの全アイテム数を取得
+  const getTotalItemCountInHall = useCallback((hallId: string): number => {
+    // マップ名から日付を取得
+    const dayMatch = mapName.match(/^(.+)マップ$/);
+    if (!dayMatch) return 0;
+    const dayName = dayMatch[1];
+    
+    return items.filter(item => {
+      if (item.eventDate !== dayName) return false;
+      return getItemHallId(item) === hallId;
+    }).length;
+  }, [items, mapName, getItemHallId]);
+
   // 選択中のホールに表示するマップデータをフィルタ
   const filteredMapData = useMemo(() => {
     if (selectedHallId === 'all' || halls.length === 0) {
@@ -317,7 +330,7 @@ const MapView: React.FC<MapViewProps> = ({
             <option value="all">全ホール</option>
             {halls.map((hall) => (
               <option key={hall.id} value={hall.id}>
-                {hall.name} ({getItemCountInHall(hall.id)}件)
+                {hall.name} ({getItemCountInHall(hall.id)}/{getTotalItemCountInHall(hall.id)}件)
               </option>
             ))}
           </select>
