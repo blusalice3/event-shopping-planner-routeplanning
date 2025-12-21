@@ -370,12 +370,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         if (state.isFullyVisited) {
           ctx.fillStyle = 'rgba(239, 83, 80, 0.5)';  // 赤：全訪問済み
           ctx.fillRect(x, y, width, height);
-        } else if (state.isVisited) {
-          ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';  // 黄：一部訪問済み
-          ctx.fillRect(x, y, width, height);
         } else if (state.hasPriorityUnvisited && warningPattern) {
-          // 黄色と黒の斜めストライプ：優先/委託無の未訪問アイテムあり
+          // 黄色と黒の斜めストライプ：優先/委託無の未訪問アイテムあり（一部訪問より優先）
           ctx.fillStyle = warningPattern;
+          ctx.fillRect(x, y, width, height);
+        } else if (state.isVisited) {
+          ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';  // 黄：一部訪問済み（優先アイテムは訪問済み）
           ctx.fillRect(x, y, width, height);
         } else if (state.hasItems) {
           ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';  // 青：通常の未訪問アイテムあり
@@ -528,10 +528,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         
         if (state.isFullyVisited) {
           ctx.fillStyle = '#EF5350';  // 赤：全訪問済み
-        } else if (state.isVisited) {
-          ctx.fillStyle = '#FFEE58';  // 黄：一部訪問済み
         } else if (state.hasPriorityUnvisited) {
-          // 黄黒の警告色（ドットでは黄色に黒枠）
+          // 黄黒の警告色（ドットでは黄色に黒枠）- 一部訪問より優先
           ctx.arc(x + width / 2, y + height / 2, dotSize / 2, 0, Math.PI * 2);
           ctx.fillStyle = '#FFD600';
           ctx.fill();
@@ -539,6 +537,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           ctx.lineWidth = Math.max(1, dotSize * 0.2);
           ctx.stroke();
           return; // 既に描画済みなので戻る
+        } else if (state.isVisited) {
+          ctx.fillStyle = '#FFEE58';  // 黄：一部訪問済み
         } else {
           ctx.fillStyle = '#42A5F5';  // 青：通常の未訪問アイテムあり
         }

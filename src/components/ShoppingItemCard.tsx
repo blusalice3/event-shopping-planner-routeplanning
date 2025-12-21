@@ -25,6 +25,7 @@ export interface ShoppingItemCardProps {
   canMoveDown?: boolean;
   isDuplicateCircle?: boolean;
   isSearchMatch?: boolean;
+  layoutMode?: 'pc' | 'smartphone';
 }
 
 const statusConfig: Record<PurchaseStatus, { label: string; icon: React.FC<any>; color: string; dim: boolean; bg: string; }> = {
@@ -52,6 +53,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   canMoveDown = true,
   isDuplicateCircle = false,
   isSearchMatch = false,
+  layoutMode = 'pc',
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const longPressTimeout = useRef<number | null>(null);
@@ -208,7 +210,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     : 'bg-white dark:bg-slate-800';
 
   const cardClasses = `
-    rounded-lg shadow-md transition-all duration-300 flex items-stretch relative overflow-hidden
+    rounded-lg shadow-md transition-all duration-300 relative overflow-hidden
     ${baseBg}
     ${currentStatus.dim ? 'opacity-60 dark:opacity-50' : 'opacity-100'}
     ${isSearchMatch ? 'ring-4 ring-red-500 ring-offset-2' : ''}
@@ -217,9 +219,171 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   // 未購入の場合はブロック色を使用するため、購入状態の背景色は適用しない
   const statusBgOverlay = isUnpurchased ? '' : `absolute inset-0 rounded-lg ${currentStatus.bg} pointer-events-none`;
 
+  // スマートフォンモード用レイアウト
+  if (layoutMode === 'smartphone') {
+    return (
+      <div 
+          className={cardClasses} 
+          ref={cardRef}
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerLeave}
+          onTouchMove={handlePointerLeave}
+          data-search-match={isSearchMatch ? 'true' : undefined}
+      >
+        {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>}
+        {statusBgOverlay && <div className={statusBgOverlay}></div>}
+        
+        {/* 警告ストライプ背景（右側全体） */}
+        {hasWarningTags && (
+          <div 
+            className="absolute right-0 top-0 bottom-0 w-32 pointer-events-none"
+            style={{
+              backgroundImage: 'repeating-linear-gradient(45deg, #fef08a 0px, #fef08a 10px, #000 10px, #000 20px)',
+              backgroundSize: '28.28px 28.28px',
+              opacity: 0.3,
+            }}
+          ></div>
+        )}
+        
+        <div className="flex">
+          {/* 左側：チェックボックス・移動ボタン */}
+          <div data-drag-handle className="relative p-2 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-1 z-10">
+            <input
+                type="checkbox"
+                checked={isSelected}
+                onChange={() => onSelectItem(item.id)}
+                onClick={(e) => e.stopPropagation()}
+                data-no-long-press
+                className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
+                aria-label={`Select item ${item.circle} - ${item.title}`}
+            />
+            {onMoveUp && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onMoveUp(item.id); }}
+                disabled={!canMoveUp}
+                data-no-long-press
+                className={`p-0.5 rounded-md transition-colors ${canMoveUp ? 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer' : 'text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50'}`}
+                aria-label="上に移動"
+              >
+                <ChevronUpIcon className="w-4 h-4" />
+              </button>
+            )}
+            <GripVerticalIcon className="w-5 h-5" />
+            {onMoveDown && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onMoveDown(item.id); }}
+                disabled={!canMoveDown}
+                data-no-long-press
+                className={`p-0.5 rounded-md transition-colors ${canMoveDown ? 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer' : 'text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50'}`}
+                aria-label="下に移動"
+              >
+                <ChevronDownIcon className="w-4 h-4" />
+              </button>
+            )}
+          </div>
+          
+          {/* メインコンテンツエリア */}
+          <div className="flex-grow flex flex-col min-w-0 relative z-10">
+            {/* 上段: 日付・ブロック・サークル名・警告タグ + 備考欄 */}
+            <div className="p-2 pb-1">
+              <div className="flex justify-between items-start gap-2">
+                <div className="flex-grow min-w-0">
+                  <p className="font-bold text-sm text-slate-900 dark:text-slate-100">{`${item.eventDate} ${locationString}`}</p>
+                  <div className="flex items-center gap-1 flex-wrap mt-0.5">
+                    <p className="text-sm text-slate-600 dark:text-slate-300 truncate" title={item.circle}>{item.circle}</p>
+                    {warningTags.map((tag, index) => (
+                      <img key={index} src={`/${tag}.png`} alt={tag} className="h-8 w-auto object-contain" />
+                    ))}
+                  </div>
+                </div>
+              </div>
+              {/* タイトル */}
+              <p className={`text-sm font-semibold text-slate-700 dark:text-slate-200 truncate mt-1 ${currentStatus.dim ? 'line-through' : ''}`} title={item.title}>
+                {item.title || '（タイトルなし）'}
+              </p>
+            </div>
+            
+            {/* 下段: 備考欄 + 購入状態・数量・価格 */}
+            <div className="p-2 pt-1 flex flex-col gap-1.5 border-t border-slate-200/50 dark:border-slate-700/50">
+              {/* 備考欄（購入状態トグルの上） */}
+              <input
+                type="text"
+                value={item.remarks}
+                onChange={handleRemarksChange}
+                placeholder="備考"
+                className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+              />
+              
+              {/* 操作エリア: 購入状態・数量・価格 */}
+              <div className="flex items-center gap-2">
+                <button 
+                  onClick={togglePurchaseStatus} 
+                  className="flex items-center space-x-1 p-1.5 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                  aria-label={`Current status: ${currentStatus.label}. Click to change.`}
+                >
+                  <IconComponent className={`w-5 h-5 ${currentStatus.color}`} />
+                  <span className={`text-xs font-semibold ${currentStatus.color}`}>{currentStatus.label}</span>
+                </button>
+                
+                <div className="flex items-center gap-1">
+                  <span className="text-xs text-slate-600 dark:text-slate-400">数量</span>
+                  <select
+                    value={item.quantity}
+                    onChange={handleQuantityChange}
+                    className="text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-12"
+                  >
+                    {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
+                      <option key={num} value={num}>{num}</option>
+                    ))}
+                  </select>
+                </div>
+                
+                <div className="flex items-center gap-0.5 flex-grow justify-end">
+                  {item.price !== null && <span className="text-xs text-slate-500 dark:text-slate-400">¥</span>}
+                  <select
+                    value={item.price === null ? '' : item.price}
+                    onChange={handlePriceChange}
+                    className={`text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-20 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''}`}
+                  >
+                    {priceOptions.map(p => (
+                      <option key={p === null ? '' : p} value={p === null ? '' : p}>
+                        {p === null ? '価格未定' : p === 0 ? '0' : p.toLocaleString()}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        
+        {menuVisible && (
+          <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20" onClick={(e) => e.stopPropagation()}>
+              <div className="flex flex-col gap-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-lg shadow-2xl border border-slate-300 dark:border-slate-600 p-4">
+                  <button onClick={() => { onEditRequest(item); setMenuVisible(false); }} className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors">編集</button>
+                  {item.url && (
+                    <button onClick={() => { window.open(item.url, '_blank'); setMenuVisible(false); }} className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors">URLを開く</button>
+                  )}
+                  <button onClick={() => { onDeleteRequest(item); setMenuVisible(false); }} className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-red-600 hover:bg-red-700 transition-colors">削除</button>
+              </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // PCモード（従来のレイアウト）
+  const pcCardClasses = `
+    rounded-lg shadow-md transition-all duration-300 flex items-stretch relative overflow-hidden
+    ${baseBg}
+    ${currentStatus.dim ? 'opacity-60 dark:opacity-50' : 'opacity-100'}
+    ${isSearchMatch ? 'ring-4 ring-red-500 ring-offset-2' : ''}
+  `;
+
   return (
     <div 
-        className={cardClasses} 
+        className={pcCardClasses} 
         ref={cardRef}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}

@@ -91,6 +91,9 @@ const App: React.FC = () => {
   const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
+  // レイアウトモード状態
+  const [layoutMode, setLayoutMode] = useState<'pc' | 'smartphone'>('pc');
+
   // マップ機能の状態
   const [mapData, setMapData] = useState<MapDataStore>({});
   const [routeSettings, setRouteSettings] = useState<RouteSettingsStore>({});
@@ -3418,6 +3421,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     onToggleRangeSelection={handleToggleRangeSelection}
                     duplicateCircleItemIds={duplicateCircleItemIds}
                     highlightedItemId={highlightedItemId}
+                    layoutMode={layoutMode}
                   />
                 </div>
                 
@@ -3498,6 +3502,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     onToggleRangeSelection={handleToggleRangeSelection}
                     duplicateCircleItemIds={duplicateCircleItemIds}
                     highlightedItemId={highlightedItemId}
+                    layoutMode={layoutMode}
                   />
                 </div>
               </div>
@@ -3519,6 +3524,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 onToggleRangeSelection={handleToggleRangeSelection}
                 duplicateCircleItemIds={duplicateCircleItemIds}
                 highlightedItemId={highlightedItemId}
+                layoutMode={layoutMode}
               />
             )}
           </div>
@@ -3701,7 +3707,13 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
 
       {activeEventName && items.length > 0 && mainContentVisible && (
         <>
-          {currentMode === 'execute' && <SummaryBar items={visibleItems} />}
+          {currentMode === 'execute' && (
+            <SummaryBar 
+              items={visibleItems} 
+              layoutMode={layoutMode}
+              onLayoutModeChange={setLayoutMode}
+            />
+          )}
         </>
       )}
       {activeEventName && items.length > 0 && mainContentVisible && (
