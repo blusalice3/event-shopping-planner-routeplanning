@@ -2821,9 +2821,9 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
 
   const TabButton: React.FC<{tab: ActiveTab, label: string, count?: number, onClick?: () => void, isMapTab?: boolean}> = ({ tab, label, count, onClick, isMapTab: isMapTabProp }) => {
     const longPressTimeout = React.useRef<number | null>(null);
-    const buttonRef = React.useRef<HTMLButtonElement>(null);
     const menuRef = React.useRef<HTMLDivElement>(null);
-    const [menuPosition, setMenuPosition] = React.useState({ x: 0, y: 0 });
+    const buttonRef = React.useRef<HTMLButtonElement>(null);
+    const [menuPosition, setMenuPosition] = React.useState<{ x: number; y: number } | null>(null);
 
     const handlePointerDown = () => {
       if (!activeEventName) return;
@@ -2873,7 +2873,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     // メニュー外クリックで閉じる
     React.useEffect(() => {
       const handleClickOutside = (e: MouseEvent) => {
-        if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        if (menuRef.current && !menuRef.current.contains(e.target as Node) &&
+            buttonRef.current && !buttonRef.current.contains(e.target as Node)) {
           setMapTabMenuOpen(null);
         }
       };
@@ -2884,40 +2885,37 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     }, [tab]);
 
     return (
-      <>
-        <div className="relative">
-          <button
-            ref={buttonRef}
-            onClick={handleClick}
-            onPointerDown={handlePointerDown}
-            onPointerUp={handlePointerUp}
-            onPointerLeave={handlePointerUp}
-            className={`px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 whitespace-nowrap ${
-              activeTab === tab
-                ? 'bg-blue-600 text-white'
-                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-            }`}
-          >
-            {label} {typeof count !== 'undefined' && <span className="text-xs bg-slate-200 dark:text-slate-700 rounded-full px-2 py-0.5 ml-1">{count}</span>}
-          </button>
-        </div>
+      <div className="relative">
+        <button
+          ref={buttonRef}
+          onClick={handleClick}
+          onPointerDown={handlePointerDown}
+          onPointerUp={handlePointerUp}
+          onPointerLeave={handlePointerUp}
+          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 whitespace-nowrap ${
+            activeTab === tab
+              ? 'bg-blue-600 text-white'
+              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+          }`}
+        >
+          {label} {typeof count !== 'undefined' && <span className="text-xs bg-slate-200 dark:text-slate-700 rounded-full px-2 py-0.5 ml-1">{count}</span>}
+        </button>
         
-        {/* マップタブ長押しメニュー - タブの下にオーバーレイ表示 */}
-        {mapTabMenuOpen === tab && isMapTabProp && (
+        {/* マップタブ長押しメニュー - fixed配置でタブのすぐ下に表示 */}
+        {mapTabMenuOpen === tab && isMapTabProp && menuPosition && (
           <div 
             ref={menuRef}
             className="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 min-w-[180px]"
             style={{
-              left: menuPosition.x,
-              top: menuPosition.y + 8,
+              left: `${menuPosition.x}px`,
+              top: `${menuPosition.y + 4}px`,
               transform: 'translateX(-50%)',
               zIndex: 9999,
             }}
           >
             {/* 矢印（上向き） */}
             <div 
-              className="absolute left-1/2 -translate-x-1/2"
-              style={{ bottom: '100%', marginBottom: '-6px' }}
+              className="absolute left-1/2 -translate-x-1/2 -top-2"
             >
               <div className="w-3 h-3 bg-white dark:bg-slate-800 border-l border-t border-slate-200 dark:border-slate-700 transform rotate-45" />
             </div>
@@ -2952,7 +2950,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             </div>
           </div>
         )}
-      </>
+      </div>
     );
   };
 
