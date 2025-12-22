@@ -1294,6 +1294,46 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       return newItems;
     });
 
+    // マップデータの名前変更
+    setMapData(prev => {
+      const newData = { ...prev };
+      if (newData[eventToRename]) {
+        newData[newName] = newData[eventToRename];
+        delete newData[eventToRename];
+      }
+      return newData;
+    });
+
+    // ルート設定の名前変更
+    setRouteSettings(prev => {
+      const newSettings = { ...prev };
+      if (newSettings[eventToRename]) {
+        newSettings[newName] = newSettings[eventToRename];
+        delete newSettings[eventToRename];
+      }
+      return newSettings;
+    });
+
+    // ホール定義の名前変更
+    setHallDefinitions(prev => {
+      const newDefs = { ...prev };
+      if (newDefs[eventToRename]) {
+        newDefs[newName] = newDefs[eventToRename];
+        delete newDefs[eventToRename];
+      }
+      return newDefs;
+    });
+
+    // ホールルート設定の名前変更
+    setHallRouteSettings(prev => {
+      const newSettings = { ...prev };
+      if (newSettings[eventToRename]) {
+        newSettings[newName] = newSettings[eventToRename];
+        delete newSettings[eventToRename];
+      }
+      return newSettings;
+    });
+
     if (activeEventName === eventToRename) {
       setActiveEventName(newName);
     }
