@@ -15,6 +15,7 @@ interface VisitListPanelProps {
   hasUnsavedChanges: boolean;
   onConfirm: () => void;
   onCancel: () => void;
+  selectedHallId?: string;  // 選択中のホールID（'all'は全ホール）
 }
 
 interface HistoryState {
@@ -31,11 +32,10 @@ const groupItemsByHall = (
     return [{ hallName: null, items: items.map((item, index) => ({ item, index })) }];
   }
 
-  // アイテムのセル位置を取得するヘルパー
+  // アイテムのセル位置を取得するヘルパー（大文字/小文字を区別）
   const getCellPosition = (item: ShoppingItem): { row: number; col: number } | null => {
-    const block = mapData.blocks.find((b: BlockDefinition) => 
-      b.name === item.block || b.name.toLowerCase() === item.block?.toLowerCase()
-    );
+    // 完全一致でブロックを検索（大文字/小文字を区別）
+    const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
     if (!block) return null;
     
     const numMatch = item.number?.match(/\d+/);
@@ -147,6 +147,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   hasUnsavedChanges,
   onConfirm,
   onCancel,
+  selectedHallId = 'all',
 }) => {
   // 将来使用する可能性のあるprops
   void hasUnsavedChanges;
@@ -157,7 +158,8 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   // 折りたたみ状態（ホール名 -> 展開/折りたたみ）
   const [collapsedHalls, setCollapsedHalls] = useState<Set<string | null>>(new Set());
   
-  // 範囲選択状態
+  // 範囲選択状態（rangeSelectionModeがtrueの時のみ有効）
+  const [rangeSelectionMode, setRangeSelectionMode] = useState(false);
   const [rangeStart, setRangeStart] = useState<number | null>(null);
   const [rangeEnd, setRangeEnd] = useState<number | null>(null);
   
@@ -305,18 +307,75 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
         setSwapFirst(null);
         setSwapMode(false);
       }
-    } else if (rangeStart !== null && rangeEnd === null) {
-      setRangeEnd(index);
+    } else if (rangeSelectionMode) {
+      if (rangeStart === null) {
+        // 開始点を設定
+        setRangeStart(index);
+        setRangeEnd(null);
+      } else if (rangeEnd === null) {
+        // 終了点を設定（同一ホール内のみ）
+        // ホールを跨いでいないかチェック
+        const checkSameHall = () => {
+          if (selectedHallId !== 'all') return true; // 特定ホール表示中は常にOK
+          if (!mapData) return true;
+          
+          const startItem = items[rangeStart];
+          const endItem = items[index];
+          if (!startItem || !endItem) return false;
+          
+          // アイテムのホールを取得するヘルパー
+          const getHallName = (item: ShoppingItem): string | null => {
+            const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
+            if (!block) return null;
+            const numMatch = item.number?.match(/\d+/);
+            if (!numMatch) return null;
+            const num = parseInt(numMatch[0], 10);
+            const cell = block.numberCells.find((nc: { row: number; col: number; value: number }) => nc.value === num);
+            if (!cell) return null;
+            
+            for (const hall of hallDefinitions) {
+              for (const vertex of hall.vertices) {
+                if (vertex.row === cell.row && vertex.col === cell.col) return hall.name;
+              }
+              // 多角形内判定
+              const vertices = hall.vertices;
+              if (vertices.length >= 3) {
+                let inside = false;
+                for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+                  const xi = vertices[i].col, yi = vertices[i].row;
+                  const xj = vertices[j].col, yj = vertices[j].row;
+                  if (((yi > cell.row) !== (yj > cell.row)) && (cell.col < (xj - xi) * (cell.row - yi) / (yj - yi) + xi)) {
+                    inside = !inside;
+                  }
+                }
+                if (inside) return hall.name;
+              }
+            }
+            return null;
+          };
+          
+          return getHallName(startItem) === getHallName(endItem);
+        };
+        
+        if (checkSameHall()) {
+          setRangeEnd(index);
+        } else {
+          alert('ホールを跨いだ範囲選択はできません');
+        }
+      } else {
+        // 既に範囲が選択されている場合は開始点を再設定
+        setRangeStart(index);
+        setRangeEnd(null);
+      }
     }
-  }, [swapMode, swapFirst, rangeStart, rangeEnd, swapItems]);
+  }, [swapMode, swapFirst, rangeSelectionMode, rangeStart, rangeEnd, swapItems, selectedHallId, mapData, items, hallDefinitions]);
 
   // アイテムホバー処理
   const handleItemHover = useCallback((item: ShoppingItem) => {
     if (!mapData) return;
     
-    const block = mapData.blocks.find((b: BlockDefinition) => 
-      b.name === item.block || b.name.toLowerCase() === item.block?.toLowerCase()
-    );
+    // 完全一致でブロックを検索（大文字/小文字を区別）
+    const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
     if (!block) return;
     
     const numMatch = item.number?.match(/\d+/);
@@ -386,8 +445,22 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     [items, mapData, hallDefinitions]
   );
 
+  // 選択ホールでフィルタされたグループ
+  const filteredGroupedItems = useMemo(() => {
+    if (selectedHallId === 'all') {
+      return groupedItems;
+    }
+    
+    const selectedHall = hallDefinitions.find(h => h.id === selectedHallId);
+    if (!selectedHall) return groupedItems;
+    
+    // 選択ホールのみを含むグループを返す
+    return groupedItems.filter(group => group.hallName === selectedHall.name);
+  }, [groupedItems, selectedHallId, hallDefinitions]);
+
   // 範囲選択の表示用
   const rangeIndices = useMemo(() => {
+    if (!rangeSelectionMode) return new Set<number>();
     if (rangeStart === null) return new Set<number>();
     if (rangeEnd === null) return new Set([rangeStart]);
     
@@ -397,7 +470,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
       indices.add(i);
     }
     return indices;
-  }, [rangeStart, rangeEnd]);
+  }, [rangeSelectionMode, rangeStart, rangeEnd]);
 
   if (!isOpen) return null;
 
@@ -464,6 +537,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
               onClick={() => {
                 setSwapMode(!swapMode);
                 setSwapFirst(null);
+                setRangeSelectionMode(false);
                 setRangeStart(null);
                 setRangeEnd(null);
               }}
@@ -473,16 +547,18 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
             </button>
             <button
               onClick={() => {
-                setRangeStart(rangeStart === null ? 0 : null);
+                const newMode = !rangeSelectionMode;
+                setRangeSelectionMode(newMode);
+                setRangeStart(null);
                 setRangeEnd(null);
                 setSwapMode(false);
                 setSwapFirst(null);
               }}
-              className={`px-3 py-1.5 text-sm rounded-md ${rangeStart !== null ? 'bg-purple-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'}`}
+              className={`px-3 py-1.5 text-sm rounded-md ${rangeSelectionMode ? 'bg-purple-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'}`}
             >
               範囲選択
             </button>
-            {rangeStart !== null && rangeEnd !== null && (
+            {rangeSelectionMode && rangeStart !== null && rangeEnd !== null && (
               <button
                 onClick={() => reverseRange(rangeStart, rangeEnd)}
                 className="px-3 py-1.5 text-sm rounded-md bg-orange-500 text-white"
@@ -490,11 +566,18 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                 区間反転
               </button>
             )}
+            {/* 操作ヒント */}
+            {rangeSelectionMode && rangeStart === null && (
+              <span className="text-xs text-purple-600 dark:text-purple-400 ml-2">開始点を選択</span>
+            )}
+            {rangeSelectionMode && rangeStart !== null && rangeEnd === null && (
+              <span className="text-xs text-purple-600 dark:text-purple-400 ml-2">終了点を選択</span>
+            )}
           </div>
           
           {/* アイテムリスト */}
           <div className="flex-1 overflow-y-auto">
-            {groupedItems.map((group, groupIndex) => (
+            {filteredGroupedItems.map((group, groupIndex) => (
               <div key={group.hallName || `no-hall-${groupIndex}`}>
                 {/* ホールヘッダー */}
                 <div
@@ -579,6 +662,16 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                       <p className="text-xs text-slate-600 dark:text-slate-400 truncate">
                         {item.circle}
                       </p>
+                      {item.title && (
+                        <p className="text-xs text-slate-500 dark:text-slate-500 truncate">
+                          {item.title}
+                        </p>
+                      )}
+                      {item.remarks && (
+                        <p className="text-xs text-orange-600 dark:text-orange-400 truncate">
+                          {item.remarks}
+                        </p>
+                      )}
                     </div>
                   </div>
                 ))}
@@ -673,6 +766,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
           onClick={() => {
             setSwapMode(!swapMode);
             setSwapFirst(null);
+            setRangeSelectionMode(false);
             setRangeStart(null);
             setRangeEnd(null);
           }}
@@ -682,20 +776,18 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
         </button>
         <button
           onClick={() => {
-            if (rangeStart === null) {
-              setRangeStart(0);
-            } else {
-              setRangeStart(null);
-            }
+            const newMode = !rangeSelectionMode;
+            setRangeSelectionMode(newMode);
+            setRangeStart(null);
             setRangeEnd(null);
             setSwapMode(false);
             setSwapFirst(null);
           }}
-          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${rangeStart !== null ? 'bg-purple-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'}`}
+          className={`px-3 py-1.5 text-sm rounded-md transition-colors ${rangeSelectionMode ? 'bg-purple-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'}`}
         >
           範囲選択
         </button>
-        {rangeStart !== null && rangeEnd !== null && (
+        {rangeSelectionMode && rangeStart !== null && rangeEnd !== null && (
           <button
             onClick={() => reverseRange(rangeStart, rangeEnd)}
             className="px-3 py-1.5 text-sm rounded-md bg-orange-500 text-white hover:bg-orange-600 transition-colors"
@@ -712,15 +804,18 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
           {swapMode && swapFirst !== null && (
             <span className="text-xs text-green-600 dark:text-green-400">2つ目を選択してください</span>
           )}
-          {rangeStart !== null && rangeEnd === null && (
-            <span className="text-xs text-purple-600 dark:text-purple-400">終点を選択してください</span>
+          {rangeSelectionMode && rangeStart === null && (
+            <span className="text-xs text-purple-600 dark:text-purple-400">開始点を選択してください</span>
+          )}
+          {rangeSelectionMode && rangeStart !== null && rangeEnd === null && (
+            <span className="text-xs text-purple-600 dark:text-purple-400">終了点を選択してください</span>
           )}
         </div>
       </div>
       
       {/* アイテムリスト */}
       <div className="flex-1 overflow-y-auto">
-        {groupedItems.map((group, groupIndex) => (
+        {filteredGroupedItems.map((group, groupIndex) => (
           <div key={group.hallName || `no-hall-${groupIndex}`}>
             {/* ホールヘッダー */}
             <div
@@ -807,6 +902,16 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                   <p className="text-xs text-slate-600 dark:text-slate-400 truncate">
                     {item.circle}
                   </p>
+                  {item.title && (
+                    <p className="text-xs text-slate-500 dark:text-slate-500 truncate">
+                      {item.title}
+                    </p>
+                  )}
+                  {item.remarks && (
+                    <p className="text-xs text-orange-600 dark:text-orange-400 truncate">
+                      {item.remarks}
+                    </p>
+                  )}
                 </div>
               </div>
             ))}
