@@ -23,6 +23,7 @@ interface MapCanvasProps {
   vertexSelectionMode?: {
     clickedVertices: { row: number; col: number }[];
   } | null;
+  highlightedCell?: { row: number; col: number } | null;
 }
 
 const BASE_CELL_SIZE = 28; // 基本セルサイズ
@@ -38,6 +39,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   onCellClick,
   selectedHall,
   vertexSelectionMode,
+  highlightedCell,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -623,7 +625,28 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     }
 
-    // 5. ホール頂点選択プレビュー（多角形オーバーレイ）
+    // 5. 訪問先リストからのセルハイライト
+    if (highlightedCell) {
+      const x = (highlightedCell.col - 1) * cellSize;
+      const y = (highlightedCell.row - 1) * cellSize;
+      
+      // パルスアニメーション風のハイライト
+      ctx.save();
+      
+      // 外側のリング
+      ctx.strokeStyle = '#FF6B00';
+      ctx.lineWidth = Math.max(4, cellSize * 0.15);
+      ctx.strokeRect(x - 2, y - 2, cellSize + 4, cellSize + 4);
+      
+      // 内側のリング
+      ctx.strokeStyle = '#FFD600';
+      ctx.lineWidth = Math.max(2, cellSize * 0.08);
+      ctx.strokeRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
+      
+      ctx.restore();
+    }
+
+    // 6. ホール頂点選択プレビュー（多角形オーバーレイ）
     if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length >= 3) {
       const vertices = vertexSelectionMode.clickedVertices;
       
@@ -725,6 +748,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     showNumbers,
     showBorders,
     vertexSelectionMode,
+    highlightedCell,
   ]);
 
   // クリック処理

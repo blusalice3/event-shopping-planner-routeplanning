@@ -15,6 +15,7 @@ import SortAscendingIcon from './components/icons/SortAscendingIcon';
 import SortDescendingIcon from './components/icons/SortDescendingIcon';
 import SearchBar from './components/SearchBar';
 import { MapView, BlockDefinitionPanel, HallDefinitionPanel, isPointInPolygon } from './components/map';
+import VisitListPanel from './components/VisitListPanel';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
 import { parseMapFile } from './utils/xlsxMapParser';
 import { db } from './utils/indexedDB';
@@ -2475,6 +2476,12 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
   const [mapTabMenuOpen, setMapTabMenuOpen] = useState<string | null>(null);
   const [mapTabMenuPosition, setMapTabMenuPosition] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
   const [visitListPanelOpen, setVisitListPanelOpen] = useState(false);
+  const [visitListPanelMapTab, setVisitListPanelMapTab] = useState<string | null>(null);  // 訪問先リストを開いた時のマップタブ
+  const [visitListHasUnsavedChanges, setVisitListHasUnsavedChanges] = useState(false);
+  const [visitListOriginalOrder, setVisitListOriginalOrder] = useState<string[]>([]);  // 元の順序（アイテムID）
+  const [highlightedMapCell, setHighlightedMapCell] = useState<{ row: number; col: number } | null>(null);
+  const [showVisitListConfirmDialog, setShowVisitListConfirmDialog] = useState(false);
+  const [pendingTabChange, setPendingTabChange] = useState<string | null>(null);
   const [blockDefinitionMode, setBlockDefinitionMode] = useState(false);
   
   // セル選択モードの状態（ブロック定義用）
@@ -2490,9 +2497,140 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     cells: { row: number; col: number }[];
     editingData?: unknown;
   } | null>(null);
-  
-  // 将来機能用に保持
-  void visitListPanelOpen;
+
+  // 訪問先リストパネルを開く
+  const openVisitListPanel = useCallback((mapTab: string) => {
+    if (!activeEventName) return;
+    
+    // 対応する日付を取得（例：「1日目マップ」→「1日目」）
+    const dayMatch = mapTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return;
+    const dayName = dayMatch[1];
+    
+    // 実行列のアイテムIDを取得
+    const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
+    
+    // 元の順序を保存
+    setVisitListOriginalOrder([...executeIds]);
+    setVisitListPanelMapTab(mapTab);
+    setVisitListHasUnsavedChanges(false);
+    setVisitListPanelOpen(true);
+  }, [activeEventName, executeModeItems]);
+
+  // 訪問先リストの順序を更新
+  const handleVisitListOrderUpdate = useCallback((newOrderItems: ShoppingItem[]) => {
+    if (!visitListPanelMapTab || !activeEventName) return;
+    
+    const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return;
+    const dayName = dayMatch[1];
+    
+    // 新しい順序のID配列
+    const newIds = newOrderItems.map(item => item.id);
+    
+    // executeModeItemsを更新
+    setExecuteModeItems(prev => ({
+      ...prev,
+      [activeEventName]: {
+        ...prev[activeEventName],
+        [dayName]: newIds,
+      },
+    }));
+    setVisitListHasUnsavedChanges(true);
+  }, [visitListPanelMapTab, activeEventName]);
+
+  // 訪問先リストの確定
+  const handleVisitListConfirm = useCallback(() => {
+    setVisitListHasUnsavedChanges(false);
+    setVisitListOriginalOrder([]);
+  }, []);
+
+  // 訪問先リストのキャンセル
+  const handleVisitListCancel = useCallback(() => {
+    if (!visitListPanelMapTab || !activeEventName) return;
+    
+    const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return;
+    const dayName = dayMatch[1];
+    
+    // 元の順序に戻す
+    if (visitListOriginalOrder.length > 0) {
+      setExecuteModeItems(prev => ({
+        ...prev,
+        [activeEventName]: {
+          ...prev[activeEventName],
+          [dayName]: [...visitListOriginalOrder],
+        },
+      }));
+    }
+    setVisitListHasUnsavedChanges(false);
+    setVisitListOriginalOrder([]);
+  }, [visitListOriginalOrder, visitListPanelMapTab, activeEventName]);
+
+  // 訪問先リストパネルを閉じる（変更を保持）
+  const handleVisitListClose = useCallback(() => {
+    setVisitListPanelOpen(false);
+    // 履歴と状態は保持（閉じただけでは破棄しない）
+  }, []);
+
+  // マップセルのハイライト
+  const handleHighlightMapCell = useCallback((row: number, col: number) => {
+    setHighlightedMapCell({ row, col });
+  }, []);
+
+  const handleClearMapCellHighlight = useCallback(() => {
+    setHighlightedMapCell(null);
+  }, []);
+
+  // 訪問先リスト用の実行列アイテム
+  const visitListItems = useMemo(() => {
+    if (!visitListPanelMapTab || !activeEventName) return [];
+    
+    const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return [];
+    const dayName = dayMatch[1];
+    
+    const dayItems = items.filter(item => item.eventDate === dayName);
+    const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
+    
+    // executeIdsの順序で返す
+    return executeIds
+      .filter((id: string) => dayItems.some(item => item.id === id))
+      .map((id: string) => dayItems.find(item => item.id === id)!)
+      .filter(Boolean);
+  }, [visitListPanelMapTab, activeEventName, items, executeModeItems]);
+
+  // タブ変更時の確認ダイアログ処理（将来的にTabButtonで使用）
+  void function handleTabChangeWithVisitListCheck(newTab: string) {
+    if (visitListPanelOpen && visitListHasUnsavedChanges) {
+      setPendingTabChange(newTab);
+      setShowVisitListConfirmDialog(true);
+      return false;
+    }
+    return true;
+  };
+
+  // 確認ダイアログで確定を選択
+  const handleVisitListDialogConfirm = useCallback(() => {
+    handleVisitListConfirm();
+    setShowVisitListConfirmDialog(false);
+    setVisitListPanelOpen(false);
+    if (pendingTabChange) {
+      setActiveTab(pendingTabChange as ActiveTab);
+      setPendingTabChange(null);
+    }
+  }, [handleVisitListConfirm, pendingTabChange]);
+
+  // 確認ダイアログでキャンセルを選択
+  const handleVisitListDialogCancel = useCallback(() => {
+    handleVisitListCancel();
+    setShowVisitListConfirmDialog(false);
+    setVisitListPanelOpen(false);
+    if (pendingTabChange) {
+      setActiveTab(pendingTabChange as ActiveTab);
+      setPendingTabChange(null);
+    }
+  }, [handleVisitListCancel, pendingTabChange]);
   
   // ブロック定義を更新
   const handleUpdateBlocks = useCallback((blocks: BlockDefinition[]) => {
@@ -2909,7 +3047,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       setTimeout(() => {
         switch (action) {
           case 'visitList':
-            setVisitListPanelOpen(true);
+            openVisitListPanel(tab);
             break;
           case 'blockDefinition':
             setBlockDefinitionMode(true);
@@ -3386,6 +3524,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             onUpdateHallRouteSettings={handleUpdateHallRouteSettings}
             onReorderExecuteList={handleReorderExecuteListByHallOrder}
             vertexSelectionMode={vertexSelectionMode}
+            highlightedCell={visitListPanelOpen ? highlightedMapCell : null}
           />
         )}
         {activeEventName && mainContentVisible && (
@@ -3651,6 +3790,52 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           pendingVertexSelection={pendingVertexSelection}
           onClearPendingVertexSelection={() => setPendingVertexSelection(null)}
         />
+      )}
+
+      {/* 訪問先リストパネル */}
+      {visitListPanelOpen && currentMapData && (
+        <VisitListPanel
+          isOpen={visitListPanelOpen}
+          onClose={handleVisitListClose}
+          items={visitListItems}
+          onUpdateOrder={handleVisitListOrderUpdate}
+          mapData={currentMapData}
+          hallDefinitions={currentHalls}
+          layoutMode={layoutMode}
+          onHighlightCell={handleHighlightMapCell}
+          onClearHighlight={handleClearMapCellHighlight}
+          hasUnsavedChanges={visitListHasUnsavedChanges}
+          onConfirm={handleVisitListConfirm}
+          onCancel={handleVisitListCancel}
+        />
+      )}
+
+      {/* 訪問先リスト確認ダイアログ */}
+      {showVisitListConfirmDialog && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
+          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-3">
+              変更を保存しますか？
+            </h3>
+            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
+              訪問先リストに未保存の変更があります。確定して保存するか、キャンセルして破棄してください。
+            </p>
+            <div className="flex justify-end gap-3">
+              <button
+                onClick={handleVisitListDialogCancel}
+                className="px-4 py-2 text-sm font-semibold rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
+              >
+                キャンセル（破棄）
+              </button>
+              <button
+                onClick={handleVisitListDialogConfirm}
+                className="px-4 py-2 text-sm font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700"
+              >
+                確定（保存）
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ホール頂点選択モードのフローティングUI */}

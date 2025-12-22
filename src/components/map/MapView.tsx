@@ -34,6 +34,8 @@ interface MapViewProps {
   vertexSelectionMode?: {
     clickedVertices: { row: number; col: number }[];
   } | null;
+  // 訪問先リストからのハイライト
+  highlightedCell?: { row: number; col: number } | null;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -52,6 +54,7 @@ const MapView: React.FC<MapViewProps> = ({
   onUpdateHallRouteSettings,
   onReorderExecuteList,
   vertexSelectionMode,
+  highlightedCell,
 }) => {
   void _onMoveToFirst;
   void _onMoveToLast;
@@ -390,6 +393,7 @@ const MapView: React.FC<MapViewProps> = ({
         onCellClick={handleCellClick}
         selectedHall={selectedHallId !== 'all' ? halls.find(h => h.id === selectedHallId) : undefined}
         vertexSelectionMode={vertexSelectionMode}
+        highlightedCell={highlightedCell}
       />
       
       {/* セルアイテムポップアップ */}
