@@ -315,17 +315,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
               />
               
-              {/* 操作エリア: 購入状態・数量・価格 */}
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={togglePurchaseStatus} 
-                  className="flex items-center space-x-1 p-1.5 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-                  aria-label={`Current status: ${currentStatus.label}. Click to change.`}
-                >
-                  <IconComponent className={`w-5 h-5 ${currentStatus.color}`} />
-                  <span className={`text-xs font-semibold ${currentStatus.color}`}>{currentStatus.label}</span>
-                </button>
+              {/* 操作エリア: 数量（中央）・価格（右）・購入状態（右端） */}
+              <div className="flex items-center justify-between">
+                {/* 左側スペーサー */}
+                <div className="flex-1"></div>
                 
+                {/* 中央: 数量 */}
                 <div className="flex items-center gap-1">
                   <span className="text-xs text-slate-600 dark:text-slate-400">数量</span>
                   <select
@@ -339,19 +334,36 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                   </select>
                 </div>
                 
-                <div className="flex items-center gap-0.5 flex-grow justify-end">
-                  {item.price !== null && <span className="text-xs text-slate-500 dark:text-slate-400">¥</span>}
-                  <select
-                    value={item.price === null ? '' : item.price}
-                    onChange={handlePriceChange}
-                    className={`text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-20 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''}`}
+                {/* 右側スペーサー */}
+                <div className="flex-1"></div>
+                
+                {/* 右: 価格 + 購入状態 */}
+                <div className="flex items-center gap-2">
+                  {/* 価格 */}
+                  <div className="flex items-center gap-0.5">
+                    {item.price !== null && <span className="text-xs text-slate-500 dark:text-slate-400">¥</span>}
+                    <select
+                      value={item.price === null ? '' : item.price}
+                      onChange={handlePriceChange}
+                      className={`text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-20 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''}`}
+                    >
+                      {priceOptions.map(p => (
+                        <option key={p === null ? '' : p} value={p === null ? '' : p}>
+                          {p === null ? '価格未定' : p === 0 ? '0' : p.toLocaleString()}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  
+                  {/* 購入状態（右端） */}
+                  <button 
+                    onClick={togglePurchaseStatus} 
+                    className="flex items-center space-x-1 p-1.5 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                    aria-label={`Current status: ${currentStatus.label}. Click to change.`}
                   >
-                    {priceOptions.map(p => (
-                      <option key={p === null ? '' : p} value={p === null ? '' : p}>
-                        {p === null ? '価格未定' : p === 0 ? '0' : p.toLocaleString()}
-                      </option>
-                    ))}
-                  </select>
+                    <IconComponent className={`w-5 h-5 ${currentStatus.color}`} />
+                    <span className={`text-xs font-semibold ${currentStatus.color}`}>{currentStatus.label}</span>
+                  </button>
                 </div>
               </div>
             </div>
