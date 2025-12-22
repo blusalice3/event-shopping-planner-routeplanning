@@ -903,7 +903,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                     {item.circle}
                   </p>
                   {item.title && (
-                    <p className="text-sm font-medium text-slate-500 dark:text-slate-500 truncate">
+                    <p className="text-xs font-medium text-slate-500 dark:text-slate-900 truncate">
                       {item.title}
                     </p>
                   )}
