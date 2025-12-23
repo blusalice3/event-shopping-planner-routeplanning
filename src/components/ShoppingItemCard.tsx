@@ -26,6 +26,7 @@ export interface ShoppingItemCardProps {
   isDuplicateCircle?: boolean;
   isSearchMatch?: boolean;
   layoutMode?: 'pc' | 'smartphone';
+  hallIndex?: number;  // ホール内での訪問順番号（0始まり）
 }
 
 const statusConfig: Record<PurchaseStatus, { label: string; icon: React.FC<any>; color: string; dim: boolean; bg: string; }> = {
@@ -54,6 +55,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   isDuplicateCircle = false,
   isSearchMatch = false,
   layoutMode = 'pc',
+  hallIndex,
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const longPressTimeout = useRef<number | null>(null);
@@ -249,6 +251,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         <div className="flex">
           {/* 左側：チェックボックス・移動ボタン */}
           <div data-drag-handle className="relative p-2 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-1 z-10">
+            {/* ホール内番号表示 */}
+            {hallIndex !== undefined && (
+              <div className="w-7 h-7 flex items-center justify-center bg-blue-600 text-white rounded-full text-xs font-bold flex-shrink-0">
+                {hallIndex + 1}
+              </div>
+            )}
             <input
                 type="checkbox"
                 checked={isSelected}
@@ -406,6 +414,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>}
       {statusBgOverlay && <div className={statusBgOverlay}></div>}
       <div data-drag-handle className="relative p-3 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-2 z-10">
+        {/* ホール内番号表示 */}
+        {hallIndex !== undefined && (
+          <div className="w-8 h-8 flex items-center justify-center bg-blue-600 text-white rounded-full text-sm font-bold flex-shrink-0">
+            {hallIndex + 1}
+          </div>
+        )}
         <input
             type="checkbox"
             checked={isSelected}

@@ -1,6 +1,13 @@
 import React, { useRef, useState, useMemo } from 'react';
-import { ShoppingItem } from '../types';
+import { ShoppingItem, HallDefinition, DayMapData, BlockDefinition } from '../types';
 import ShoppingItemCard from './ShoppingItemCard';
+
+interface HallGroup {
+  hallId: string | null;
+  hallName: string | null;
+  hallColor?: string;
+  items: ShoppingItem[];
+}
 
 interface ShoppingListProps {
   items: ShoppingItem[];
@@ -22,6 +29,11 @@ interface ShoppingListProps {
   duplicateCircleItemIds?: Set<string>;
   highlightedItemId?: string | null;
   layoutMode?: 'pc' | 'smartphone';
+  // ホールグループ化用のprops
+  showHallGroups?: boolean;
+  hallDefinitions?: HallDefinition[];
+  hallOrder?: string[];
+  mapData?: DayMapData | null;
 }
 
 // Constants for drag-and-drop auto-scrolling
@@ -109,12 +121,117 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   duplicateCircleItemIds = new Set(),
   highlightedItemId = null,
   layoutMode = 'pc',
+  showHallGroups = false,
+  hallDefinitions = [],
+  hallOrder = [],
+  mapData = null,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
   const [activeDropTarget, setActiveDropTarget] = useState<{ id: string; position: 'top' | 'bottom' } | null>(null);
+
+  // ホールごとにアイテムをグループ化
+  const hallGroups = useMemo((): HallGroup[] => {
+    if (!showHallGroups || hallDefinitions.length === 0) {
+      return [{ hallId: null, hallName: null, items }];
+    }
+
+    // アイテムのホールIDを取得するヘルパー（useMemo内で定義）
+    const getHallIdForItem = (item: ShoppingItem): string | null => {
+      if (!mapData) return null;
+      
+      const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
+      if (!block) return null;
+      
+      const numMatch = item.number?.match(/\d+/);
+      if (!numMatch) return null;
+      const num = parseInt(numMatch[0], 10);
+      
+      const cell = block.numberCells.find((nc: { row: number; col: number; value: number }) => nc.value === num);
+      if (!cell) return null;
+      
+      // 多角形内判定（レイキャスティング法）
+      const isPointInPoly = (row: number, col: number, vertices: { row: number; col: number }[]): boolean => {
+        if (vertices.length < 3) return false;
+        let inside = false;
+        for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+          const xi = vertices[i].col, yi = vertices[i].row;
+          const xj = vertices[j].col, yj = vertices[j].row;
+          if (((yi > row) !== (yj > row)) && (col < (xj - xi) * (row - yi) / (yj - yi) + xi)) {
+            inside = !inside;
+          }
+        }
+        return inside;
+      };
+      
+      for (const hall of hallDefinitions) {
+        for (const vertex of hall.vertices) {
+          if (vertex.row === cell.row && vertex.col === cell.col) {
+            return hall.id;
+          }
+        }
+        if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
+          return hall.id;
+        }
+      }
+      return null;
+    };
+
+    const hallMap = new Map<string, HallDefinition>();
+    hallDefinitions.forEach(hall => hallMap.set(hall.id, hall));
+
+    const groups = new Map<string | null, ShoppingItem[]>();
+    
+    items.forEach((item) => {
+      const hallId = getHallIdForItem(item);
+      if (!groups.has(hallId)) {
+        groups.set(hallId, []);
+      }
+      groups.get(hallId)!.push(item);
+    });
+
+    const result: HallGroup[] = [];
+    
+    // まずhallOrderに従って定義済みホールを追加
+    hallOrder.forEach(hallId => {
+      const hall = hallMap.get(hallId);
+      if (hall && groups.has(hallId)) {
+        result.push({
+          hallId,
+          hallName: hall.name,
+          hallColor: hall.color || '#6366f1',
+          items: groups.get(hallId)!,
+        });
+        groups.delete(hallId);
+      }
+    });
+    
+    // hallOrderに含まれないがhallDefinitionsに含まれるホールを追加
+    hallDefinitions.forEach(hall => {
+      if (groups.has(hall.id)) {
+        result.push({
+          hallId: hall.id,
+          hallName: hall.name,
+          hallColor: hall.color || '#6366f1',
+          items: groups.get(hall.id)!,
+        });
+        groups.delete(hall.id);
+      }
+    });
+    
+    // ホール未定義のアイテム（null）を最後に追加
+    if (groups.has(null)) {
+      result.push({
+        hallId: null,
+        hallName: null,
+        items: groups.get(null)!,
+      });
+    }
+
+    return result;
+  }, [items, showHallGroups, hallDefinitions, hallOrder, mapData]);
 
   const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
 
@@ -282,6 +399,120 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         </div>
       );
   }
+
+  // ホールグループ化表示
+  if (showHallGroups && hallDefinitions.length > 0) {
+    return (
+      <div 
+        ref={containerRef}
+        className="space-y-2 pb-24 relative"
+        onDragLeave={() => setActiveDropTarget(null)} 
+      >
+        {hallGroups.map((group, groupIndex) => (
+          <div key={group.hallId || `no-hall-${groupIndex}`} className="mb-4">
+            {/* ホールヘッダー */}
+            <div
+              className={`sticky top-0 z-20 flex items-center justify-between px-4 py-2 rounded-t-lg ${
+                group.hallName 
+                  ? 'bg-slate-100 dark:bg-slate-800' 
+                  : 'bg-slate-50 dark:bg-slate-900'
+              }`}
+              style={group.hallColor ? { borderLeft: `4px solid ${group.hallColor}` } : { borderLeft: '4px solid #9CA3AF' }}
+            >
+              <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
+                {group.hallName || 'ホール未定義'}
+              </span>
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                {group.items.length}件
+              </span>
+            </div>
+            
+            {/* ホール内アイテム */}
+            <div className="space-y-4 mt-2">
+              {group.items.map((item, hallIndex) => {
+                const globalIndex = items.findIndex(i => i.id === item.id);
+                const isInRange = rangeInfo && globalIndex >= rangeInfo.startIndex && globalIndex <= rangeInfo.endIndex;
+                const isStart = rangeInfo && globalIndex === rangeInfo.startIndex;
+                const isEnd = rangeInfo && globalIndex === rangeInfo.endIndex;
+                // isMiddleは既存の通常表示で使用されているが、グループ化表示では簡略化
+                void rangeInfo;
+
+                return (
+                  <div
+                    key={item.id}
+                    data-item-id={item.id}
+                    draggable
+                    onDragStart={(e) => handleDragStart(e, item)}
+                    onDragOver={(e) => handleDragOver(e, item)}
+                    onDrop={handleDrop}
+                    onDragEnd={cleanUp}
+                    className="transition-opacity duration-200 relative"
+                    data-is-selected={selectedItemIds.has(item.id)}
+                  >
+                    {activeDropTarget?.id === item.id && activeDropTarget.position === 'top' && (
+                      <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                        <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                        <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                        <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+                      </div>
+                    )}
+
+                    <ShoppingItemCard
+                      item={item}
+                      onUpdate={onUpdateItem}
+                      isStriped={globalIndex % 2 !== 0}
+                      onEditRequest={onEditRequest}
+                      onDeleteRequest={onDeleteRequest}
+                      isSelected={selectedItemIds.has(item.id)}
+                      onSelectItem={(itemId) => onSelectItem(itemId, columnType)}
+                      blockBackgroundColor={blockColorMap.get(item.id)}
+                      onMoveUp={onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined}
+                      onMoveDown={onMoveItemDown ? () => onMoveItemDown(item.id, columnType) : undefined}
+                      canMoveUp={globalIndex > 0}
+                      canMoveDown={globalIndex < items.length - 1}
+                      isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
+                      isSearchMatch={highlightedItemId === item.id}
+                      layoutMode={layoutMode}
+                      hallIndex={hallIndex}
+                    />
+
+                    {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (
+                      <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                        <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                        <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                        <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+                      </div>
+                    )}
+
+                    {/* 範囲選択表示（ホールグループ化表示でも維持） */}
+                    {isInRange && onToggleRangeSelection && (
+                      <div 
+                        className={`absolute top-0 bottom-0 z-40 pointer-events-none ${
+                          columnType === 'candidate' ? 'left-0' : 'right-0'
+                        }`}
+                        style={{ width: '40px' }}
+                      >
+                        <div
+                          className="absolute w-full h-full"
+                          style={{
+                            [columnType === 'candidate' ? 'left' : 'right']: '-42px',
+                          }}
+                        >
+                          <div className={`w-1 h-full ${isStart || isEnd ? 'bg-blue-500' : 'bg-purple-400'}`} />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  // 通常表示（既存のコード）
 
   return (
     <div 

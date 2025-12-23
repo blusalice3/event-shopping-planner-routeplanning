@@ -254,6 +254,21 @@ const App: React.FC = () => {
     return mapData[activeEventName]?.[mapTab] || null;
   }, [activeEventName, mapData, getMapTabForDate]);
 
+  // 日付タブに対応するホール順序を取得
+  const getHallOrderForDate = useCallback((eventDate: string): string[] => {
+    if (!activeEventName) return [];
+    const mapTab = getMapTabForDate(eventDate);
+    const halls = hallDefinitions[activeEventName]?.[mapTab] || [];
+    const routeSettings = hallRouteSettings[activeEventName]?.[mapTab];
+    
+    if (routeSettings?.hallOrder && routeSettings.hallOrder.length > 0) {
+      return routeSettings.hallOrder;
+    }
+    
+    // デフォルトはホール定義順
+    return halls.map(h => h.id);
+  }, [activeEventName, hallDefinitions, hallRouteSettings, getMapTabForDate]);
+
   // アイテムがどのホールに属するかを判定
   const getItemHallId = useCallback((item: ShoppingItem, eventDate: string): string | null => {
     const halls = getHallsForDate(eventDate);
@@ -3616,6 +3631,10 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     duplicateCircleItemIds={duplicateCircleItemIds}
                     highlightedItemId={highlightedItemId}
                     layoutMode={layoutMode}
+                    showHallGroups={true}
+                    hallDefinitions={getHallsForDate(eventDates.includes(activeTab) ? activeTab : (eventDates[0] || ''))}
+                    hallOrder={getHallOrderForDate(eventDates.includes(activeTab) ? activeTab : (eventDates[0] || ''))}
+                    mapData={getMapDataForDate(eventDates.includes(activeTab) ? activeTab : (eventDates[0] || ''))}
                   />
                 </div>
                 
