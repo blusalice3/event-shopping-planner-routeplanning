@@ -2640,6 +2640,21 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       .filter(Boolean);
   }, [visitListPanelMapTab, activeEventName, items, executeModeItems]);
 
+  // 訪問先リスト用のホール順序
+  const visitListHallOrder = useMemo(() => {
+    if (!visitListPanelMapTab || !activeEventName) return [];
+    
+    const halls = hallDefinitions[activeEventName]?.[visitListPanelMapTab] || [];
+    const routeSettings = hallRouteSettings[activeEventName]?.[visitListPanelMapTab];
+    
+    if (routeSettings?.hallOrder && routeSettings.hallOrder.length > 0) {
+      return routeSettings.hallOrder;
+    }
+    
+    // デフォルトはホール定義順
+    return halls.map(h => h.id);
+  }, [visitListPanelMapTab, activeEventName, hallDefinitions, hallRouteSettings]);
+
   // タブ変更時の確認ダイアログ処理（将来的にTabButtonで使用）
   void function handleTabChangeWithVisitListCheck(newTab: string) {
     if (visitListPanelOpen && visitListHasUnsavedChanges) {
@@ -3841,6 +3856,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           onUpdateOrder={handleVisitListOrderUpdate}
           mapData={currentMapData}
           hallDefinitions={currentHalls}
+          hallOrder={visitListHallOrder}
           layoutMode={layoutMode}
           onHighlightCell={handleHighlightMapCell}
           onClearHighlight={handleClearMapCellHighlight}

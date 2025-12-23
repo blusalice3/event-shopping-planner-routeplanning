@@ -9,6 +9,7 @@ interface VisitListPanelProps {
   onUpdateOrder: (newOrder: ShoppingItem[]) => void;
   mapData: DayMapData | null;
   hallDefinitions: HallDefinition[];
+  hallOrder: string[];  // ホールIDの訪問順序
   layoutMode: 'pc' | 'smartphone';
   onHighlightCell: (row: number, col: number) => void;
   onClearHighlight: () => void;
@@ -22,114 +23,118 @@ interface HistoryState {
   items: ShoppingItem[];
 }
 
-// ホールごとにアイテムをグループ化するヘルパー
-const groupItemsByHall = (
-  items: ShoppingItem[],
+// アイテムのホールIDを取得するヘルパー
+const getItemHallId = (
+  item: ShoppingItem,
   mapData: DayMapData | null,
   hallDefinitions: HallDefinition[]
-): { hallName: string | null; hallColor?: string; items: { item: ShoppingItem; index: number }[] }[] => {
-  if (!mapData) {
-    return [{ hallName: null, items: items.map((item, index) => ({ item, index })) }];
-  }
-
-  // アイテムのセル位置を取得するヘルパー（大文字/小文字を区別）
-  const getCellPosition = (item: ShoppingItem): { row: number; col: number } | null => {
-    // 完全一致でブロックを検索（大文字/小文字を区別）
-    const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
-    if (!block) return null;
-    
-    const numMatch = item.number?.match(/\d+/);
-    if (!numMatch) return null;
-    const num = parseInt(numMatch[0], 10);
-    
-    const cell = block.numberCells.find((nc: { row: number; col: number; value: number }) => nc.value === num);
-    if (!cell) return null;
-    
-    return { row: cell.row, col: cell.col };
-  };
-
-  // セルがどのホールに属するかを判定
-  const getHallForCell = (row: number, col: number): HallDefinition | null => {
-    for (const hall of hallDefinitions) {
-      for (const vertex of hall.vertices) {
-        if (vertex.row === row && vertex.col === col) {
-          return hall;
-        }
-      }
-      // ホール領域内かどうかをチェック（頂点で定義された多角形内）
-      if (isPointInPolygon(row, col, hall.vertices)) {
-        return hall;
-      }
-    }
-    return null;
-  };
-
+): string | null => {
+  if (!mapData) return null;
+  
+  const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
+  if (!block) return null;
+  
+  const numMatch = item.number?.match(/\d+/);
+  if (!numMatch) return null;
+  const num = parseInt(numMatch[0], 10);
+  
+  const cell = block.numberCells.find((nc: { row: number; col: number; value: number }) => nc.value === num);
+  if (!cell) return null;
+  
   // 多角形内判定（レイキャスティング法）
   const isPointInPolygon = (row: number, col: number, vertices: { row: number; col: number }[]): boolean => {
     if (vertices.length < 3) return false;
-    
     let inside = false;
     for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
       const xi = vertices[i].col, yi = vertices[i].row;
       const xj = vertices[j].col, yj = vertices[j].row;
-      
       if (((yi > row) !== (yj > row)) && (col < (xj - xi) * (row - yi) / (yj - yi) + xi)) {
         inside = !inside;
       }
     }
     return inside;
   };
-
-  // グループ化
-  const groups = new Map<string | null, { item: ShoppingItem; index: number }[]>();
-  const hallColorMap = new Map<string, string>();
   
-  hallDefinitions.forEach(hall => {
-    hallColorMap.set(hall.name, hall.color || '#6366f1');
-  });
-
-  items.forEach((item, index) => {
-    const cellPos = getCellPosition(item);
-    let hallName: string | null = null;
-    
-    if (cellPos) {
-      const hall = getHallForCell(cellPos.row, cellPos.col);
-      hallName = hall?.name || null;
+  for (const hall of hallDefinitions) {
+    for (const vertex of hall.vertices) {
+      if (vertex.row === cell.row && vertex.col === cell.col) {
+        return hall.id;
+      }
     }
-    
-    if (!groups.has(hallName)) {
-      groups.set(hallName, []);
+    if (isPointInPolygon(cell.row, cell.col, hall.vertices)) {
+      return hall.id;
     }
-    groups.get(hallName)!.push({ item, index });
-  });
+  }
+  return null;
+};
 
-  // 訪問順でソートされた結果を返す
-  const result: { hallName: string | null; hallColor?: string; items: { item: ShoppingItem; index: number }[] }[] = [];
+// ホールごとにアイテムをグループ化するヘルパー（ホール順序対応版）
+const groupItemsByHallWithOrder = (
+  items: ShoppingItem[],
+  mapData: DayMapData | null,
+  hallDefinitions: HallDefinition[],
+  hallOrder: string[]  // ホールIDの順序
+): { hallId: string | null; hallName: string | null; hallColor?: string; items: { item: ShoppingItem; hallIndex: number }[] }[] => {
+  if (!mapData) {
+    return [{ hallId: null, hallName: null, items: items.map((item, hallIndex) => ({ item, hallIndex })) }];
+  }
+
+  // ホールID→ホール情報のマップ
+  const hallMap = new Map<string, HallDefinition>();
+  hallDefinitions.forEach(hall => hallMap.set(hall.id, hall));
+
+  // グループ化（ホールIDをキーに）
+  const groups = new Map<string | null, ShoppingItem[]>();
   
-  // 最初に出現するアイテムの順序でホールをソート
-  const hallOrder: (string | null)[] = [];
-  items.forEach((item, _index) => {
-    const cellPos = getCellPosition(item);
-    let hallName: string | null = null;
-    if (cellPos) {
-      const hall = getHallForCell(cellPos.row, cellPos.col);
-      hallName = hall?.name || null;
+  items.forEach((item) => {
+    const hallId = getItemHallId(item, mapData, hallDefinitions);
+    if (!groups.has(hallId)) {
+      groups.set(hallId, []);
     }
-    if (!hallOrder.includes(hallName)) {
-      hallOrder.push(hallName);
-    }
+    groups.get(hallId)!.push(item);
   });
 
-  hallOrder.forEach(hallName => {
-    const groupItems = groups.get(hallName);
-    if (groupItems && groupItems.length > 0) {
+  // ホール順序に従ってソート
+  const result: { hallId: string | null; hallName: string | null; hallColor?: string; items: { item: ShoppingItem; hallIndex: number }[] }[] = [];
+  
+  // まずhallOrderに従って定義済みホールを追加
+  hallOrder.forEach(hallId => {
+    const hall = hallMap.get(hallId);
+    if (hall && groups.has(hallId)) {
+      const hallItems = groups.get(hallId)!;
       result.push({
-        hallName,
-        hallColor: hallName ? hallColorMap.get(hallName) : undefined,
-        items: groupItems,
+        hallId,
+        hallName: hall.name,
+        hallColor: hall.color || '#6366f1',
+        items: hallItems.map((item, hallIndex) => ({ item, hallIndex })),
       });
+      groups.delete(hallId);
     }
   });
+  
+  // hallOrderに含まれないがhallDefinitionsに含まれるホールを追加
+  hallDefinitions.forEach(hall => {
+    if (groups.has(hall.id)) {
+      const hallItems = groups.get(hall.id)!;
+      result.push({
+        hallId: hall.id,
+        hallName: hall.name,
+        hallColor: hall.color || '#6366f1',
+        items: hallItems.map((item, hallIndex) => ({ item, hallIndex })),
+      });
+      groups.delete(hall.id);
+    }
+  });
+  
+  // ホール未定義のアイテム（null）を最後に追加
+  if (groups.has(null)) {
+    const hallItems = groups.get(null)!;
+    result.push({
+      hallId: null,
+      hallName: null,
+      items: hallItems.map((item, hallIndex) => ({ item, hallIndex })),
+    });
+  }
 
   return result;
 };
@@ -141,6 +146,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   onUpdateOrder,
   mapData,
   hallDefinitions,
+  hallOrder,
   layoutMode,
   onHighlightCell,
   onClearHighlight,
@@ -155,19 +161,22 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   // パネル位置（PC: left/right）
   const [panelPosition, setPanelPosition] = useState<'left' | 'right'>('right');
   
-  // 折りたたみ状態（ホール名 -> 展開/折りたたみ）
+  // 折りたたみ状態（ホールID -> 展開/折りたたみ）
   const [collapsedHalls, setCollapsedHalls] = useState<Set<string | null>>(new Set());
   
   // 範囲選択状態（rangeSelectionModeがtrueの時のみ有効）
   const [rangeSelectionMode, setRangeSelectionMode] = useState(false);
-  const [rangeStart, setRangeStart] = useState<number | null>(null);
-  const [rangeEnd, setRangeEnd] = useState<number | null>(null);
+  const [rangeStartHallId, setRangeStartHallId] = useState<string | null>(null);
+  const [rangeStartIndex, setRangeStartIndex] = useState<number | null>(null);
+  const [rangeEndIndex, setRangeEndIndex] = useState<number | null>(null);
   
   // 2つ選択して入れ替えモード
   const [swapMode, setSwapMode] = useState(false);
-  const [swapFirst, setSwapFirst] = useState<number | null>(null);
+  const [swapFirstHallId, setSwapFirstHallId] = useState<string | null>(null);
+  const [swapFirstIndex, setSwapFirstIndex] = useState<number | null>(null);
   
-  // ドラッグ状態
+  // ドラッグ状態（ホールIDと内部インデックス）
+  const [dragHallId, setDragHallId] = useState<string | null>(null);
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   
@@ -245,130 +254,141 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     onCancel();
   }, [history, onUpdateOrder, clearHistory, onCancel]);
 
-  // アイテムの順序変更
-  const moveItem = useCallback((fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex) return;
+  // グループ化されたアイテム（ホール順序に従う）
+  const groupedItems = useMemo(() => 
+    groupItemsByHallWithOrder(items, mapData, hallDefinitions, hallOrder),
+    [items, mapData, hallDefinitions, hallOrder]
+  );
+
+  // グループ化されたアイテムからフラットな配列を再構築するヘルパー
+  const rebuildItemsFromGroups = useCallback((
+    groups: { hallId: string | null; items: { item: ShoppingItem; hallIndex: number }[] }[]
+  ): ShoppingItem[] => {
+    const result: ShoppingItem[] = [];
+    groups.forEach(group => {
+      group.items.forEach(({ item }) => {
+        result.push(item);
+      });
+    });
+    return result;
+  }, []);
+
+  // ホール内でアイテムを移動
+  const moveItemInHall = useCallback((hallId: string | null, fromHallIndex: number, toHallIndex: number) => {
+    if (fromHallIndex === toHallIndex) return;
     
-    const newItems = [...items];
-    const [movedItem] = newItems.splice(fromIndex, 1);
-    newItems.splice(toIndex, 0, movedItem);
+    const newGroups = groupedItems.map(group => {
+      if (group.hallId === hallId) {
+        const newHallItems = [...group.items];
+        const [movedItem] = newHallItems.splice(fromHallIndex, 1);
+        newHallItems.splice(toHallIndex, 0, movedItem);
+        return { ...group, items: newHallItems.map((item, idx) => ({ ...item, hallIndex: idx })) };
+      }
+      return group;
+    });
     
+    const newItems = rebuildItemsFromGroups(newGroups);
     pushHistory(newItems);
     onUpdateOrder(newItems);
-  }, [items, pushHistory, onUpdateOrder]);
+  }, [groupedItems, rebuildItemsFromGroups, pushHistory, onUpdateOrder]);
 
-  // 2つのアイテムを入れ替え
-  const swapItems = useCallback((index1: number, index2: number) => {
+  // ホール内で2つのアイテムを入れ替え
+  const swapItemsInHall = useCallback((hallId: string | null, index1: number, index2: number) => {
     if (index1 === index2) return;
     
-    const newItems = [...items];
-    [newItems[index1], newItems[index2]] = [newItems[index2], newItems[index1]];
+    const newGroups = groupedItems.map(group => {
+      if (group.hallId === hallId) {
+        const newHallItems = [...group.items];
+        [newHallItems[index1], newHallItems[index2]] = [newHallItems[index2], newHallItems[index1]];
+        return { ...group, items: newHallItems.map((item, idx) => ({ ...item, hallIndex: idx })) };
+      }
+      return group;
+    });
     
+    const newItems = rebuildItemsFromGroups(newGroups);
     pushHistory(newItems);
     onUpdateOrder(newItems);
-  }, [items, pushHistory, onUpdateOrder]);
+  }, [groupedItems, rebuildItemsFromGroups, pushHistory, onUpdateOrder]);
 
-  // 区間反転
-  const reverseRange = useCallback((start: number, end: number) => {
+  // ホール内で区間反転
+  const reverseRangeInHall = useCallback((hallId: string | null, start: number, end: number) => {
     const [minIndex, maxIndex] = start < end ? [start, end] : [end, start];
     
-    const newItems = [...items];
-    const rangeItems = newItems.slice(minIndex, maxIndex + 1).reverse();
-    newItems.splice(minIndex, maxIndex - minIndex + 1, ...rangeItems);
+    const newGroups = groupedItems.map(group => {
+      if (group.hallId === hallId) {
+        const newHallItems = [...group.items];
+        const rangeItems = newHallItems.slice(minIndex, maxIndex + 1).reverse();
+        newHallItems.splice(minIndex, maxIndex - minIndex + 1, ...rangeItems);
+        return { ...group, items: newHallItems.map((item, idx) => ({ ...item, hallIndex: idx })) };
+      }
+      return group;
+    });
     
+    const newItems = rebuildItemsFromGroups(newGroups);
     pushHistory(newItems);
     onUpdateOrder(newItems);
     
     // 範囲選択をクリア
-    setRangeStart(null);
-    setRangeEnd(null);
-  }, [items, pushHistory, onUpdateOrder]);
+    setRangeStartHallId(null);
+    setRangeStartIndex(null);
+    setRangeEndIndex(null);
+    setRangeSelectionMode(false);
+  }, [groupedItems, rebuildItemsFromGroups, pushHistory, onUpdateOrder]);
 
   // ホールの折りたたみ切り替え
-  const toggleHallCollapse = useCallback((hallName: string | null) => {
+  const toggleHallCollapse = useCallback((hallId: string | null) => {
     setCollapsedHalls(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(hallName)) {
-        newSet.delete(hallName);
+      if (newSet.has(hallId)) {
+        newSet.delete(hallId);
       } else {
-        newSet.add(hallName);
+        newSet.add(hallId);
       }
       return newSet;
     });
   }, []);
 
-  // アイテムクリック処理
-  const handleItemClick = useCallback((index: number, _item: ShoppingItem) => {
+  // アイテムクリック処理（ホールIDとホール内インデックスを受け取る）
+  const handleItemClick = useCallback((hallId: string | null, hallIndex: number) => {
     if (swapMode) {
-      if (swapFirst === null) {
-        setSwapFirst(index);
+      if (swapFirstIndex === null) {
+        // 1つ目を選択
+        setSwapFirstHallId(hallId);
+        setSwapFirstIndex(hallIndex);
       } else {
-        swapItems(swapFirst, index);
-        setSwapFirst(null);
+        // 2つ目を選択
+        if (swapFirstHallId === hallId) {
+          // 同一ホール内なので入れ替え実行
+          swapItemsInHall(hallId, swapFirstIndex, hallIndex);
+        } else {
+          // 異なるホールなので警告
+          alert('異なるホールのアイテム同士は入れ替えできません');
+        }
+        setSwapFirstHallId(null);
+        setSwapFirstIndex(null);
         setSwapMode(false);
       }
     } else if (rangeSelectionMode) {
-      if (rangeStart === null) {
+      if (rangeStartIndex === null) {
         // 開始点を設定
-        setRangeStart(index);
-        setRangeEnd(null);
-      } else if (rangeEnd === null) {
+        setRangeStartHallId(hallId);
+        setRangeStartIndex(hallIndex);
+        setRangeEndIndex(null);
+      } else if (rangeEndIndex === null) {
         // 終了点を設定（同一ホール内のみ）
-        // ホールを跨いでいないかチェック
-        const checkSameHall = () => {
-          if (selectedHallId !== 'all') return true; // 特定ホール表示中は常にOK
-          if (!mapData) return true;
-          
-          const startItem = items[rangeStart];
-          const endItem = items[index];
-          if (!startItem || !endItem) return false;
-          
-          // アイテムのホールを取得するヘルパー
-          const getHallName = (item: ShoppingItem): string | null => {
-            const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
-            if (!block) return null;
-            const numMatch = item.number?.match(/\d+/);
-            if (!numMatch) return null;
-            const num = parseInt(numMatch[0], 10);
-            const cell = block.numberCells.find((nc: { row: number; col: number; value: number }) => nc.value === num);
-            if (!cell) return null;
-            
-            for (const hall of hallDefinitions) {
-              for (const vertex of hall.vertices) {
-                if (vertex.row === cell.row && vertex.col === cell.col) return hall.name;
-              }
-              // 多角形内判定
-              const vertices = hall.vertices;
-              if (vertices.length >= 3) {
-                let inside = false;
-                for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-                  const xi = vertices[i].col, yi = vertices[i].row;
-                  const xj = vertices[j].col, yj = vertices[j].row;
-                  if (((yi > cell.row) !== (yj > cell.row)) && (cell.col < (xj - xi) * (cell.row - yi) / (yj - yi) + xi)) {
-                    inside = !inside;
-                  }
-                }
-                if (inside) return hall.name;
-              }
-            }
-            return null;
-          };
-          
-          return getHallName(startItem) === getHallName(endItem);
-        };
-        
-        if (checkSameHall()) {
-          setRangeEnd(index);
+        if (rangeStartHallId === hallId) {
+          setRangeEndIndex(hallIndex);
         } else {
           alert('ホールを跨いだ範囲選択はできません');
         }
       } else {
         // 既に範囲が選択されている場合は開始点を再設定
-        setRangeStart(index);
-        setRangeEnd(null);
+        setRangeStartHallId(hallId);
+        setRangeStartIndex(hallIndex);
+        setRangeEndIndex(null);
       }
     }
-  }, [swapMode, swapFirst, rangeSelectionMode, rangeStart, rangeEnd, swapItems, selectedHallId, mapData, items, hallDefinitions]);
+  }, [swapMode, swapFirstHallId, swapFirstIndex, rangeSelectionMode, rangeStartHallId, rangeStartIndex, rangeEndIndex, swapItemsInHall]);
 
   // アイテムホバー処理
   const handleItemHover = useCallback((item: ShoppingItem) => {
@@ -388,30 +408,36 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     }
   }, [mapData, onHighlightCell]);
 
-  // ドラッグ開始
-  const handleDragStart = useCallback((e: React.DragEvent, index: number) => {
-    setDragIndex(index);
+  // ドラッグ開始（ホールIDとホール内インデックスを受け取る）
+  const handleDragStart = useCallback((e: React.DragEvent, hallId: string | null, hallIndex: number) => {
+    setDragHallId(hallId);
+    setDragIndex(hallIndex);
     e.dataTransfer.effectAllowed = 'move';
   }, []);
 
   // ドラッグオーバー
-  const handleDragOver = useCallback((e: React.DragEvent, index: number) => {
+  const handleDragOver = useCallback((e: React.DragEvent, hallId: string | null, hallIndex: number) => {
     e.preventDefault();
-    setDragOverIndex(index);
-  }, []);
+    // 同一ホール内のみドロップ可能
+    if (dragHallId === hallId) {
+      setDragOverIndex(hallIndex);
+    }
+  }, [dragHallId]);
 
   // ドロップ
-  const handleDrop = useCallback((e: React.DragEvent, toIndex: number) => {
+  const handleDrop = useCallback((e: React.DragEvent, hallId: string | null, toHallIndex: number) => {
     e.preventDefault();
-    if (dragIndex !== null && dragIndex !== toIndex) {
-      moveItem(dragIndex, toIndex);
+    if (dragHallId === hallId && dragIndex !== null && dragIndex !== toHallIndex) {
+      moveItemInHall(hallId, dragIndex, toHallIndex);
     }
+    setDragHallId(null);
     setDragIndex(null);
     setDragOverIndex(null);
-  }, [dragIndex, moveItem]);
+  }, [dragHallId, dragIndex, moveItemInHall]);
 
   // ドラッグ終了
   const handleDragEnd = useCallback(() => {
+    setDragHallId(null);
     setDragIndex(null);
     setDragOverIndex(null);
   }, []);
@@ -439,12 +465,6 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     (e.target as HTMLElement).releasePointerCapture(e.pointerId);
   }, []);
 
-  // グループ化されたアイテム
-  const groupedItems = useMemo(() => 
-    groupItemsByHall(items, mapData, hallDefinitions),
-    [items, mapData, hallDefinitions]
-  );
-
   // 選択ホールでフィルタされたグループ
   const filteredGroupedItems = useMemo(() => {
     if (selectedHallId === 'all') {
@@ -455,22 +475,19 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     if (!selectedHall) return groupedItems;
     
     // 選択ホールのみを含むグループを返す
-    return groupedItems.filter(group => group.hallName === selectedHall.name);
+    return groupedItems.filter(group => group.hallId === selectedHall.id);
   }, [groupedItems, selectedHallId, hallDefinitions]);
 
-  // 範囲選択の表示用
-  const rangeIndices = useMemo(() => {
-    if (!rangeSelectionMode) return new Set<number>();
-    if (rangeStart === null) return new Set<number>();
-    if (rangeEnd === null) return new Set([rangeStart]);
+  // 範囲選択の表示用（ホール内インデックス）
+  const isInRange = useCallback((hallId: string | null, hallIndex: number): boolean => {
+    if (!rangeSelectionMode) return false;
+    if (rangeStartHallId !== hallId) return false;
+    if (rangeStartIndex === null) return false;
+    if (rangeEndIndex === null) return hallIndex === rangeStartIndex;
     
-    const [min, max] = rangeStart < rangeEnd ? [rangeStart, rangeEnd] : [rangeEnd, rangeStart];
-    const indices = new Set<number>();
-    for (let i = min; i <= max; i++) {
-      indices.add(i);
-    }
-    return indices;
-  }, [rangeSelectionMode, rangeStart, rangeEnd]);
+    const [min, max] = rangeStartIndex < rangeEndIndex ? [rangeStartIndex, rangeEndIndex] : [rangeEndIndex, rangeStartIndex];
+    return hallIndex >= min && hallIndex <= max;
+  }, [rangeSelectionMode, rangeStartHallId, rangeStartIndex, rangeEndIndex]);
 
   if (!isOpen) return null;
 
@@ -536,10 +553,12 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
             <button
               onClick={() => {
                 setSwapMode(!swapMode);
-                setSwapFirst(null);
+                setSwapFirstHallId(null);
+                setSwapFirstIndex(null);
                 setRangeSelectionMode(false);
-                setRangeStart(null);
-                setRangeEnd(null);
+                setRangeStartHallId(null);
+                setRangeStartIndex(null);
+                setRangeEndIndex(null);
               }}
               className={`px-3 py-1.5 text-sm rounded-md ${swapMode ? 'bg-blue-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'}`}
             >
@@ -549,45 +568,53 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
               onClick={() => {
                 const newMode = !rangeSelectionMode;
                 setRangeSelectionMode(newMode);
-                setRangeStart(null);
-                setRangeEnd(null);
+                setRangeStartHallId(null);
+                setRangeStartIndex(null);
+                setRangeEndIndex(null);
                 setSwapMode(false);
-                setSwapFirst(null);
+                setSwapFirstHallId(null);
+                setSwapFirstIndex(null);
               }}
               className={`px-3 py-1.5 text-sm rounded-md ${rangeSelectionMode ? 'bg-purple-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'}`}
             >
               範囲選択
             </button>
-            {rangeSelectionMode && rangeStart !== null && rangeEnd !== null && (
+            {rangeSelectionMode && rangeStartIndex !== null && rangeEndIndex !== null && rangeStartHallId !== null && (
               <button
-                onClick={() => reverseRange(rangeStart, rangeEnd)}
+                onClick={() => reverseRangeInHall(rangeStartHallId, rangeStartIndex, rangeEndIndex)}
                 className="px-3 py-1.5 text-sm rounded-md bg-orange-500 text-white"
               >
                 区間反転
               </button>
             )}
             {/* 操作ヒント */}
-            {rangeSelectionMode && rangeStart === null && (
+            {rangeSelectionMode && rangeStartIndex === null && (
               <span className="text-xs text-purple-600 dark:text-purple-400 ml-2">開始点を選択</span>
             )}
-            {rangeSelectionMode && rangeStart !== null && rangeEnd === null && (
+            {rangeSelectionMode && rangeStartIndex !== null && rangeEndIndex === null && (
               <span className="text-xs text-purple-600 dark:text-purple-400 ml-2">終了点を選択</span>
+            )}
+            {swapMode && swapFirstIndex === null && (
+              <span className="text-xs text-blue-600 dark:text-blue-400 ml-2">1つ目を選択</span>
+            )}
+            {swapMode && swapFirstIndex !== null && (
+              <span className="text-xs text-green-600 dark:text-green-400 ml-2">2つ目を選択（同一ホール内）</span>
             )}
           </div>
           
           {/* アイテムリスト */}
           <div className="flex-1 overflow-y-auto">
             {filteredGroupedItems.map((group, groupIndex) => (
-              <div key={group.hallName || `no-hall-${groupIndex}`}>
+              <div key={group.hallId || `no-hall-${groupIndex}`}>
                 {/* ホールヘッダー */}
                 <div
-                  className={`sticky top-0 flex items-center justify-between px-4 py-2 cursor-pointer ${
+                  className={`sticky top-0 flex items-center justify-between px-4 py-2 cursor-pointer z-10 ${
                     group.hallName 
                       ? 'bg-slate-100 dark:bg-slate-800' 
                       : 'bg-slate-50 dark:bg-slate-900 border-l-4 border-slate-300 dark:border-slate-600'
                   }`}
                   style={group.hallColor ? { borderLeftColor: group.hallColor, borderLeftWidth: '4px' } : {}}
-                  onClick={() => toggleHallCollapse(group.hallName)}
+                  onClick={() => toggleHallCollapse(group.hallId)}
                 >
                   <span className="font-semibold text-sm text-slate-700 dark:text-slate-300">
                     {group.hallName || 'ホール未定義'}
@@ -597,7 +624,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                       {group.items.length}件
                     </span>
                     <svg 
-                      className={`w-4 h-4 text-slate-500 transition-transform ${collapsedHalls.has(group.hallName) ? '' : 'rotate-180'}`}
+                      className={`w-4 h-4 text-slate-500 transition-transform ${collapsedHalls.has(group.hallId) ? '' : 'rotate-180'}`}
                       fill="none" 
                       stroke="currentColor" 
                       viewBox="0 0 24 24"
@@ -608,39 +635,39 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                 </div>
                 
                 {/* アイテム */}
-                {!collapsedHalls.has(group.hallName) && group.items.map(({ item, index }) => (
+                {!collapsedHalls.has(group.hallId) && group.items.map(({ item, hallIndex }) => (
                   <div
                     key={item.id}
                     draggable
-                    onDragStart={(e) => handleDragStart(e, index)}
-                    onDragOver={(e) => handleDragOver(e, index)}
-                    onDrop={(e) => handleDrop(e, index)}
+                    onDragStart={(e) => handleDragStart(e, group.hallId, hallIndex)}
+                    onDragOver={(e) => handleDragOver(e, group.hallId, hallIndex)}
+                    onDrop={(e) => handleDrop(e, group.hallId, hallIndex)}
                     onDragEnd={handleDragEnd}
-                    onClick={() => handleItemClick(index, item)}
+                    onClick={() => handleItemClick(group.hallId, hallIndex)}
                     onMouseEnter={() => handleItemHover(item)}
                     onMouseLeave={onClearHighlight}
                     className={`relative flex items-center gap-2 px-4 py-2 border-b border-slate-100 dark:border-slate-800 cursor-pointer transition-colors ${
-                      dragOverIndex === index ? 'bg-blue-100 dark:bg-blue-900/30' : ''
+                      dragHallId === group.hallId && dragOverIndex === hallIndex ? 'bg-blue-100 dark:bg-blue-900/30' : ''
                     } ${
-                      rangeIndices.has(index) ? 'bg-purple-100 dark:bg-purple-900/30' : ''
+                      isInRange(group.hallId, hallIndex) ? 'bg-purple-100 dark:bg-purple-900/30' : ''
                     } ${
-                      swapFirst === index ? 'bg-green-100 dark:bg-green-900/30' : ''
+                      swapFirstHallId === group.hallId && swapFirstIndex === hallIndex ? 'bg-green-100 dark:bg-green-900/30' : ''
                     } ${
                       !group.hallName ? 'bg-slate-50/50 dark:bg-slate-950/50' : ''
                     }`}
                   >
                     {/* 範囲選択インジケーター */}
-                    {rangeIndices.has(index) && rangeStart !== null && rangeEnd !== null && (
+                    {isInRange(group.hallId, hallIndex) && rangeStartIndex !== null && rangeEndIndex !== null && (
                       <div className="absolute left-0 top-0 bottom-0 w-1 bg-purple-500 flex items-center justify-center">
-                        {index === Math.min(rangeStart, rangeEnd) && (
+                        {hallIndex === Math.min(rangeStartIndex, rangeEndIndex) && (
                           <div className="absolute -left-2 text-purple-500 text-lg">↕</div>
                         )}
                       </div>
                     )}
                     
-                    {/* 訪問順番号 */}
+                    {/* ホール内訪問順番号 */}
                     <div className="w-8 h-8 flex items-center justify-center bg-blue-600 text-white rounded-full text-sm font-bold">
-                      {index + 1}
+                      {hallIndex + 1}
                     </div>
                     
                     {/* ドラッグハンドル */}
@@ -765,10 +792,12 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
         <button
           onClick={() => {
             setSwapMode(!swapMode);
-            setSwapFirst(null);
+            setSwapFirstHallId(null);
+            setSwapFirstIndex(null);
             setRangeSelectionMode(false);
-            setRangeStart(null);
-            setRangeEnd(null);
+            setRangeStartHallId(null);
+            setRangeStartIndex(null);
+            setRangeEndIndex(null);
           }}
           className={`px-3 py-1.5 text-sm rounded-md transition-colors ${swapMode ? 'bg-blue-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'}`}
         >
@@ -778,18 +807,20 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
           onClick={() => {
             const newMode = !rangeSelectionMode;
             setRangeSelectionMode(newMode);
-            setRangeStart(null);
-            setRangeEnd(null);
+            setRangeStartHallId(null);
+            setRangeStartIndex(null);
+            setRangeEndIndex(null);
             setSwapMode(false);
-            setSwapFirst(null);
+            setSwapFirstHallId(null);
+            setSwapFirstIndex(null);
           }}
           className={`px-3 py-1.5 text-sm rounded-md transition-colors ${rangeSelectionMode ? 'bg-purple-600 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600'}`}
         >
           範囲選択
         </button>
-        {rangeSelectionMode && rangeStart !== null && rangeEnd !== null && (
+        {rangeSelectionMode && rangeStartIndex !== null && rangeEndIndex !== null && rangeStartHallId !== null && (
           <button
-            onClick={() => reverseRange(rangeStart, rangeEnd)}
+            onClick={() => reverseRangeInHall(rangeStartHallId, rangeStartIndex, rangeEndIndex)}
             className="px-3 py-1.5 text-sm rounded-md bg-orange-500 text-white hover:bg-orange-600 transition-colors"
           >
             区間反転
@@ -798,17 +829,17 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
         
         {/* 操作ヒント */}
         <div className="flex-1 text-right">
-          {swapMode && swapFirst === null && (
+          {swapMode && swapFirstIndex === null && (
             <span className="text-xs text-slate-500 dark:text-slate-400">1つ目を選択してください</span>
           )}
-          {swapMode && swapFirst !== null && (
-            <span className="text-xs text-green-600 dark:text-green-400">2つ目を選択してください</span>
+          {swapMode && swapFirstIndex !== null && (
+            <span className="text-xs text-green-600 dark:text-green-400">2つ目を選択してください（同一ホール内）</span>
           )}
-          {rangeSelectionMode && rangeStart === null && (
+          {rangeSelectionMode && rangeStartIndex === null && (
             <span className="text-xs text-purple-600 dark:text-purple-400">開始点を選択してください</span>
           )}
-          {rangeSelectionMode && rangeStart !== null && rangeEnd === null && (
-            <span className="text-xs text-purple-600 dark:text-purple-400">終了点を選択してください</span>
+          {rangeSelectionMode && rangeStartIndex !== null && rangeEndIndex === null && (
+            <span className="text-xs text-purple-600 dark:text-purple-400">終了点を選択してください（同一ホール内）</span>
           )}
         </div>
       </div>
@@ -816,7 +847,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
       {/* アイテムリスト */}
       <div className="flex-1 overflow-y-auto">
         {filteredGroupedItems.map((group, groupIndex) => (
-          <div key={group.hallName || `no-hall-${groupIndex}`}>
+          <div key={group.hallId || `no-hall-${groupIndex}`}>
             {/* ホールヘッダー */}
             <div
               className={`sticky top-0 flex items-center justify-between px-4 py-2 cursor-pointer z-10 ${
@@ -825,7 +856,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                   : 'bg-slate-50 dark:bg-slate-900 border-l-4 border-slate-300 dark:border-slate-600'
               }`}
               style={group.hallColor ? { borderLeftColor: group.hallColor, borderLeftWidth: '4px' } : {}}
-              onClick={() => toggleHallCollapse(group.hallName)}
+              onClick={() => toggleHallCollapse(group.hallId)}
             >
               <span className="font-semibold text-sm text-slate-700 dark:text-slate-300">
                 {group.hallName || 'ホール未定義'}
@@ -835,7 +866,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                   {group.items.length}件
                 </span>
                 <svg 
-                  className={`w-4 h-4 text-slate-500 transition-transform ${collapsedHalls.has(group.hallName) ? '' : 'rotate-180'}`}
+                  className={`w-4 h-4 text-slate-500 transition-transform ${collapsedHalls.has(group.hallId) ? '' : 'rotate-180'}`}
                   fill="none" 
                   stroke="currentColor" 
                   viewBox="0 0 24 24"
@@ -846,41 +877,41 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
             </div>
             
             {/* アイテム */}
-            {!collapsedHalls.has(group.hallName) && group.items.map(({ item, index }) => (
+            {!collapsedHalls.has(group.hallId) && group.items.map(({ item, hallIndex }) => (
               <div
                 key={item.id}
                 draggable
-                onDragStart={(e) => handleDragStart(e, index)}
-                onDragOver={(e) => handleDragOver(e, index)}
-                onDrop={(e) => handleDrop(e, index)}
+                onDragStart={(e) => handleDragStart(e, group.hallId, hallIndex)}
+                onDragOver={(e) => handleDragOver(e, group.hallId, hallIndex)}
+                onDrop={(e) => handleDrop(e, group.hallId, hallIndex)}
                 onDragEnd={handleDragEnd}
-                onClick={() => handleItemClick(index, item)}
+                onClick={() => handleItemClick(group.hallId, hallIndex)}
                 onMouseEnter={() => handleItemHover(item)}
                 onMouseLeave={onClearHighlight}
                 className={`relative flex items-center gap-2 px-4 py-2 border-b border-slate-100 dark:border-slate-800 cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 ${
-                  dragOverIndex === index ? 'bg-blue-100 dark:bg-blue-900/30' : ''
+                  dragHallId === group.hallId && dragOverIndex === hallIndex ? 'bg-blue-100 dark:bg-blue-900/30' : ''
                 } ${
-                  rangeIndices.has(index) ? 'bg-purple-100 dark:bg-purple-900/30' : ''
+                  isInRange(group.hallId, hallIndex) ? 'bg-purple-100 dark:bg-purple-900/30' : ''
                 } ${
-                  swapFirst === index ? 'bg-green-100 dark:bg-green-900/30 ring-2 ring-green-500' : ''
+                  swapFirstHallId === group.hallId && swapFirstIndex === hallIndex ? 'bg-green-100 dark:bg-green-900/30 ring-2 ring-green-500' : ''
                 } ${
                   !group.hallName ? 'bg-slate-50/50 dark:bg-slate-950/50' : ''
                 }`}
               >
                 {/* 範囲選択インジケーター */}
-                {rangeIndices.has(index) && rangeStart !== null && rangeEnd !== null && (
+                {isInRange(group.hallId, hallIndex) && rangeStartIndex !== null && rangeEndIndex !== null && (
                   <div 
                     className="absolute left-0 top-0 bottom-0 w-1.5 bg-purple-500"
                   >
-                    {index === Math.min(rangeStart, rangeEnd) && (
+                    {hallIndex === Math.min(rangeStartIndex, rangeEndIndex) && (
                       <div className="absolute -left-3 top-1/2 -translate-y-1/2 text-purple-600 dark:text-purple-400 text-xl font-bold">↕</div>
                     )}
                   </div>
                 )}
                 
-                {/* 訪問順番号 */}
+                {/* ホール内訪問順番号 */}
                 <div className="w-8 h-8 flex items-center justify-center bg-blue-600 text-white rounded-full text-sm font-bold flex-shrink-0">
-                  {index + 1}
+                  {hallIndex + 1}
                 </div>
                 
                 {/* ドラッグハンドル */}
@@ -903,7 +934,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                     {item.circle}
                   </p>
                   {item.title && (
-                    <p className="text-xs font-medium text-slate-900 dark:text-slate-900 truncate">
+                    <p className="text-xs text-slate-500 dark:text-slate-500 truncate">
                       {item.title}
                     </p>
                   )}
