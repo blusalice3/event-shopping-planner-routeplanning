@@ -2231,7 +2231,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           price: itemData.price,
           quantity: itemData.quantity ?? 1,
           remarks: itemData.remarks,
-          purchaseStatus: 'None' as PurchaseStatus
+          purchaseStatus: 'None' as PurchaseStatus,
+          ...(itemData.url ? { url: itemData.url } : {})
         };
         newItems = insertItemSorted(newItems, newItem);
         // 候補リストに追加（実行モード列には追加しない）
