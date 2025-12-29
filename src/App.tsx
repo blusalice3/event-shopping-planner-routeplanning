@@ -2734,11 +2734,11 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     }
     
     // グループIDを生成
-    const buildGroupId = (hallId: string | null, priority: 'none' | 'priority' | 'highest'): string | null => {
+    const buildGroupId = (hallId: string | null, priority: 'none' | 'priority' | 'highest'): string => {
       if (hallId === null) {
         if (priority === 'highest') return 'undefined:highest';
         if (priority === 'priority') return 'undefined:priority';
-        return null;
+        return 'undefined';
       }
       if (priority === 'highest') return `${hallId}:highest`;
       if (priority === 'priority') return `${hallId}:priority`;
@@ -2748,22 +2748,21 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     const newGroupId = buildGroupId(itemHallId, priorityLevel);
     const oldPriority = item.priorityLevel || 'none';
     const oldGroupId = buildGroupId(itemHallId, oldPriority);
+    const baseGroupId = buildGroupId(itemHallId, 'none');
     
     // hallOrderを更新
     setHallRouteSettings(prev => {
       const currentSettings = prev[activeEventName]?.[visitListPanelMapTab] || { hallOrder: [], hallVisitLists: [] };
       let newHallOrder = [...currentSettings.hallOrder];
       
-      // 現在のhallOrderにないホール（通常グループ）があれば追加
-      const baseHallId = itemHallId || 'undefined';
-      if (!newHallOrder.some(id => id === baseHallId || id.startsWith(`${baseHallId}:`))) {
-        newHallOrder.push(baseHallId === 'undefined' ? null as any : baseHallId);
+      // 現在のhallOrderにベースホール（通常グループ）がなければ追加
+      if (!newHallOrder.includes(baseGroupId)) {
+        newHallOrder.push(baseGroupId);
       }
       
-      // 新しいグループが必要か確認
-      if (priorityLevel !== 'none' && newGroupId && !newHallOrder.includes(newGroupId)) {
+      // 新しいグループが必要か確認（通常グループに戻す場合は不要）
+      if (priorityLevel !== 'none' && !newHallOrder.includes(newGroupId)) {
         // 通常グループ（または優先グループ）の直前に挿入
-        const baseGroupId = itemHallId || null;
         const priorityGroupId = buildGroupId(itemHallId, 'priority');
         
         // 挿入位置を決定
@@ -2771,8 +2770,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         
         if (priorityLevel === 'highest') {
           // 最優先は、優先グループまたは通常グループの直前
-          const priorityIndex = newHallOrder.indexOf(priorityGroupId!);
-          const baseIndex = newHallOrder.indexOf(baseGroupId as any);
+          const priorityIndex = newHallOrder.indexOf(priorityGroupId);
+          const baseIndex = newHallOrder.indexOf(baseGroupId);
           
           if (priorityIndex !== -1) {
             insertIndex = priorityIndex;
@@ -2781,7 +2780,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           }
         } else if (priorityLevel === 'priority') {
           // 優先は通常グループの直前
-          const baseIndex = newHallOrder.indexOf(baseGroupId as any);
+          const baseIndex = newHallOrder.indexOf(baseGroupId);
           if (baseIndex !== -1) {
             insertIndex = baseIndex;
           }
@@ -2791,10 +2790,12 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       }
       
       // 古いグループが空になるか確認（同じホールの他のアイテムがあるか）
-      if (oldPriority !== 'none' && oldGroupId) {
+      // 注意: この時点ではitemの優先度は既に更新されているため、更新後のitemsを使う必要がある
+      // しかし、setEventListsとsetHallRouteSettingsは非同期なので、現在のitemsを使う
+      if (oldPriority !== 'none') {
         const otherItemsInOldGroup = items.filter(i => 
           i.id !== itemId && 
-          i.priorityLevel === oldPriority
+          (i.priorityLevel || 'none') === oldPriority
         );
         
         // 同じホールに他のアイテムがあるか確認（簡略化：同じ優先度のアイテムが他にあれば削除しない）

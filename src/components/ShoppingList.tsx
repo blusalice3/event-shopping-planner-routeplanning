@@ -327,7 +327,61 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
 
-  // 範囲選択の状態を計算
+  // グループ化表示時の範囲選択情報を計算（同一グループ内のみ）
+  const groupRangeInfo = useMemo(() => {
+    if (!showHallGroups || !rangeStart || !rangeEnd || !columnType || 
+        rangeStart.columnType !== columnType || rangeEnd.columnType !== columnType) {
+      return null;
+    }
+
+    // rangeStartとrangeEndのアイテムがどのグループに属するか確認
+    let startGroupId: string | null = null;
+    let endGroupId: string | null = null;
+    let startHallIndex = -1;
+    let endHallIndex = -1;
+
+    for (const group of hallGroups) {
+      const startIdx = group.items.findIndex(item => item.id === rangeStart.itemId);
+      if (startIdx !== -1) {
+        startGroupId = group.groupId;
+        startHallIndex = startIdx;
+      }
+      const endIdx = group.items.findIndex(item => item.id === rangeEnd.itemId);
+      if (endIdx !== -1) {
+        endGroupId = group.groupId;
+        endHallIndex = endIdx;
+      }
+    }
+
+    // 異なるグループ間では範囲選択を無効化
+    if (startGroupId !== endGroupId || startHallIndex === -1 || endHallIndex === -1) {
+      return null;
+    }
+
+    const group = hallGroups.find(g => g.groupId === startGroupId);
+    if (!group) return null;
+
+    const minIndex = Math.min(startHallIndex, endHallIndex);
+    const maxIndex = Math.max(startHallIndex, endHallIndex);
+    const rangeItems = group.items.slice(minIndex, maxIndex + 1);
+    const allSelected = rangeItems.every(item => selectedItemIds.has(item.id));
+    
+    const onlyStartEndSelected = rangeItems.length > 2 && 
+      selectedItemIds.has(rangeItems[0].id) && 
+      selectedItemIds.has(rangeItems[rangeItems.length - 1].id) &&
+      rangeItems.slice(1, -1).every(item => !selectedItemIds.has(item.id));
+
+    return {
+      groupId: startGroupId,
+      startIndex: minIndex,
+      endIndex: maxIndex,
+      rangeItems,
+      allSelected,
+      onlyStartEndSelected,
+    };
+  }, [showHallGroups, rangeStart, rangeEnd, columnType, hallGroups, selectedItemIds]);
+
+  // 通常表示時の範囲選択の状態を計算
   const rangeInfo = useMemo(() => {
     if (!rangeStart || !rangeEnd || !columnType || rangeStart.columnType !== columnType || rangeEnd.columnType !== columnType) {
       return null;
@@ -504,6 +558,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
           const headerStyle = getGroupHeaderStyle(group.groupId, hallDefinitions);
           const displayName = getGroupDisplayName(group.groupId, hallDefinitions);
           
+          // このグループ内での範囲選択情報
+          const isThisGroupInRange = groupRangeInfo && groupRangeInfo.groupId === group.groupId;
+          
           return (
           <div key={group.groupId ?? `no-hall-${groupIndex}`} className="mb-4">
             {/* グループヘッダー */}
@@ -523,11 +580,16 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             <div className="space-y-4 mt-2">
               {group.items.map((item, hallIndex) => {
                 const globalIndex = items.findIndex(i => i.id === item.id);
-                const isInRange = rangeInfo && globalIndex >= rangeInfo.startIndex && globalIndex <= rangeInfo.endIndex;
-                const isStart = rangeInfo && globalIndex === rangeInfo.startIndex;
-                const isEnd = rangeInfo && globalIndex === rangeInfo.endIndex;
-                // isMiddleは既存の通常表示で使用されているが、グループ化表示では簡略化
-                void rangeInfo;
+                
+                // グループ内での範囲選択状態
+                const isInRange = isThisGroupInRange && 
+                  hallIndex >= groupRangeInfo!.startIndex && 
+                  hallIndex <= groupRangeInfo!.endIndex;
+                const isStart = isThisGroupInRange && hallIndex === groupRangeInfo!.startIndex;
+                const isEnd = isThisGroupInRange && hallIndex === groupRangeInfo!.endIndex;
+                const isMiddle = isThisGroupInRange && 
+                  hallIndex > groupRangeInfo!.startIndex && 
+                  hallIndex < groupRangeInfo!.endIndex;
 
                 return (
                   <div
@@ -580,22 +642,68 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       </div>
                     )}
 
-                    {/* 範囲選択表示（ホールグループ化表示でも維持） */}
+                    {/* 範囲選択表示とチェーン選択UI（グループ内のみ） */}
                     {isInRange && onToggleRangeSelection && (
                       <div 
-                        className={`absolute top-0 bottom-0 z-40 pointer-events-none ${
+                        className={`absolute top-0 bottom-0 z-40 ${
                           columnType === 'candidate' ? 'left-0' : 'right-0'
+                        } cursor-pointer ${
+                          groupRangeInfo!.onlyStartEndSelected ? 'opacity-50 hover:opacity-100' : 'opacity-100'
                         }`}
                         style={{ width: '40px' }}
+                        onClick={() => onToggleRangeSelection(columnType!)}
                       >
-                        <div
+                        <svg
                           className="absolute w-full h-full"
                           style={{
                             [columnType === 'candidate' ? 'left' : 'right']: '-42px',
                           }}
+                          preserveAspectRatio="none"
                         >
-                          <div className={`w-1 h-full ${isStart || isEnd ? 'bg-blue-500' : 'bg-purple-400'}`} />
-                        </div>
+                          <defs>
+                            <linearGradient id={`chainMetal-group-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                              <stop offset="0%" stopColor="#9CA3AF" />
+                              <stop offset="50%" stopColor="#D1D5DB" />
+                              <stop offset="100%" stopColor="#9CA3AF" />
+                            </linearGradient>
+                            <pattern id={`chainPattern-group-${item.id}`} x="0" y="0" width="40" height="20" patternUnits="userSpaceOnUse">
+                               <rect x="14" y="-2" width="12" height="18" rx="6" fill="none" stroke={`url(#chainMetal-group-${item.id})`} strokeWidth="3" />
+                               <rect x="17" y="13" width="6" height="8" rx="2" fill={`url(#chainMetal-group-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
+                            </pattern>
+                          </defs>
+                          
+                          {isStart && (
+                            <rect x="0" y="50%" width="40" height="50%" fill={`url(#chainPattern-group-${item.id})`} />
+                          )}
+                          {isEnd && (
+                            <rect x="0" y="0" width="40" height="50%" fill={`url(#chainPattern-group-${item.id})`} />
+                          )}
+                          {isMiddle && (
+                            <rect x="0" y="0" width="40" height="100%" fill={`url(#chainPattern-group-${item.id})`} />
+                          )}
+                          
+                          {/* 端点のリング */}
+                          {isStart && (
+                            <ellipse 
+                              cx="20" cy="100%" rx="10" ry="5"
+                              fill="none"
+                              stroke={`url(#chainMetal-group-${item.id})`} 
+                              strokeWidth="3"
+                            />
+                          )}
+                          {isEnd && (
+                            <ellipse 
+                              cx="20" cy="0" rx="10" ry="5"
+                              fill="none"
+                              stroke={`url(#chainMetal-group-${item.id})`} 
+                              strokeWidth="3"
+                            />
+                          )}
+                          
+                          {/* 中心の丸 */}
+                          {isStart && <circle cx="20" cy="100%" r="4" fill={`url(#chainMetal-group-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />}
+                          {isEnd && <circle cx="20" cy="0" r="4" fill={`url(#chainMetal-group-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />}
+                        </svg>
                       </div>
                     )}
                   </div>
