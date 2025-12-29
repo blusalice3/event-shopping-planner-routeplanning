@@ -65,6 +65,11 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
 }) => {
   const [localOrder, setLocalOrder] = useState<string[]>(hallRouteSettings.hallOrder);
 
+  // hallRouteSettingsが変更されたらlocalOrderを更新
+  React.useEffect(() => {
+    setLocalOrder(hallRouteSettings.hallOrder);
+  }, [hallRouteSettings.hallOrder]);
+
   // グループ順序を上に移動
   const handleMoveUp = useCallback((index: number) => {
     if (index <= 0) return;
