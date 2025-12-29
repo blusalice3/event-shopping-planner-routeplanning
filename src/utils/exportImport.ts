@@ -90,6 +90,7 @@ export async function exportToXlsx(
     { header: 'ステータス', key: 'purchaseStatus', width: 12 },
     { header: '備考', key: 'remarks', width: 30 },
     { header: 'URL', key: 'url', width: 50 },
+    { header: '優先度', key: 'priorityLevel', width: 10 },
   ];
 
   // データ
@@ -106,6 +107,7 @@ export async function exportToXlsx(
       purchaseStatus: item.purchaseStatus,
       remarks: item.remarks,
       url: item.url || '',
+      priorityLevel: item.priorityLevel || 'none',
     });
   });
 
@@ -273,6 +275,17 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
     itemsSheet.eachRow((row, rowNumber) => {
       if (rowNumber === 1) return; // ヘッダーをスキップ
 
+      // 優先度の値を取得（列12）
+      const priorityValue = String(row.getCell(12).value || '');
+      let priorityLevel: 'none' | 'priority' | 'highest' | undefined;
+      if (priorityValue === 'highest') {
+        priorityLevel = 'highest';
+      } else if (priorityValue === 'priority') {
+        priorityLevel = 'priority';
+      } else if (priorityValue === 'none' || priorityValue === '') {
+        priorityLevel = undefined;  // 'none'は保存しない（デフォルト値）
+      }
+
       const item: ShoppingItem = {
         id: String(row.getCell(1).value || crypto.randomUUID()),
         circle: String(row.getCell(2).value || ''),
@@ -285,6 +298,7 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         purchaseStatus: (String(row.getCell(9).value || 'None') as ShoppingItem['purchaseStatus']),
         remarks: String(row.getCell(10).value || ''),
         url: String(row.getCell(11).value || ''),
+        priorityLevel,
       };
 
       if (item.circle || item.title) {

@@ -163,6 +163,18 @@ const MapView: React.FC<MapViewProps> = ({
     }).length;
   }, [executeModeItemIds, items, getItemHallId, parseGroupId]);
 
+  // ホール内の全優先度の訪問先アイテム数を取得（プルダウン用）
+  const getHallTotalExecuteCount = useCallback((hallId: string): number => {
+    return executeModeItemIds.filter(itemId => {
+      const item = items.find(i => i.id === itemId);
+      if (!item) return false;
+      
+      // ホールIDの一致を確認（優先度は問わない）
+      const itemHallId = getItemHallId(item);
+      return itemHallId === hallId;
+    }).length;
+  }, [executeModeItemIds, items, getItemHallId]);
+
   // ホールごとの全アイテム数を取得
   const getTotalItemCountInHall = useCallback((hallId: string): number => {
     // マップ名から日付を取得
@@ -356,7 +368,7 @@ const MapView: React.FC<MapViewProps> = ({
             <option value="all">全ホール</option>
             {halls.map((hall) => (
               <option key={hall.id} value={hall.id}>
-                {hall.name} ({getItemCountInHall(hall.id)}/{getTotalItemCountInHall(hall.id)}件)
+                {hall.name} ({getHallTotalExecuteCount(hall.id)}/{getTotalItemCountInHall(hall.id)}件)
               </option>
             ))}
           </select>
