@@ -227,6 +227,8 @@ export interface RouteSegment {
   toRow: number;
   toCol: number;
   path: { row: number; col: number }[];
+  fromPriority?: 'none' | 'priority' | 'highest';  // 出発点の優先度
+  toPriority?: 'none' | 'priority' | 'highest';  // 到着点の優先度
 }
 
 // ズームレベル

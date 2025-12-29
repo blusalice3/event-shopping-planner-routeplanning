@@ -220,7 +220,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return states;
   }, [mapData.blocks, items, mapName, executeModeItemIdsSet]);
   
-  // ルート生成
+  // ルート生成（優先度情報付き）
   const routePoints = useMemo(() => {
     if (!isRouteVisible) return [];
     
@@ -238,7 +238,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         item !== undefined && item.eventDate === dayName
       );
     
-    const points: Array<{ row: number; col: number; order: number }> = [];
+    const points: Array<{ row: number; col: number; order: number; priorityLevel: 'none' | 'priority' | 'highest' }> = [];
     
     visitItems.forEach((item, index) => {
       const itemBlockName = item.block?.trim() || '';
@@ -261,7 +261,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const num = parseInt(numStr, 10);
       const cell = block.numberCells.find((nc) => nc.value === num);
       if (cell) {
-        points.push({ row: cell.row, col: cell.col, order: index });
+        points.push({ 
+          row: cell.row, 
+          col: cell.col, 
+          order: index,
+          priorityLevel: item.priorityLevel || 'none'
+        });
       }
     });
     
@@ -550,13 +555,25 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
     
-    // 4. ルートを描画
+    // 4. ルートを描画（優先度で色分け）
     if (isRouteVisible && routeSegments.length > 0) {
+      // 優先度ごとの色を定義
+      const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
+        switch (priority) {
+          case 'highest': return '#EF4444';  // 赤
+          case 'priority': return '#F97316';  // オレンジ
+          default: return '#1976D2';  // 青
+        }
+      };
+      
       routeSegments.forEach((segment) => {
         if (segment.path.length < 2) return;
         
+        // セグメントの色は出発点の優先度で決定
+        const segmentColor = getPriorityColor(segment.fromPriority);
+        
         ctx.beginPath();
-        ctx.strokeStyle = '#1976D2';
+        ctx.strokeStyle = segmentColor;
         ctx.lineWidth = Math.max(2, cellSize * 0.1);
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
@@ -588,7 +605,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           
           const arrowSize = Math.max(6, cellSize * 0.25);
           ctx.beginPath();
-          ctx.fillStyle = '#1976D2';
+          ctx.fillStyle = segmentColor;
           ctx.moveTo(endX, endY);
           ctx.lineTo(
             endX - arrowSize * Math.cos(angle - Math.PI / 6),
@@ -603,16 +620,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       });
       
-      // 訪問順番号
+      // 訪問順番号（優先度で色分け）
       if (isDetailedView) {
         routePoints.forEach((point) => {
           const px = (point.col - 0.5) * cellSize;
           const py = (point.row - 0.5) * cellSize;
           
           const circleSize = Math.max(12, cellSize * 0.5);
+          const pointColor = getPriorityColor(point.priorityLevel);
           
           ctx.beginPath();
-          ctx.fillStyle = '#1976D2';
+          ctx.fillStyle = pointColor;
           ctx.arc(px, py, circleSize / 2, 0, Math.PI * 2);
           ctx.fill();
           

@@ -2895,19 +2895,58 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         newHallOrder.splice(insertIndex, 0, newGroupId);
       }
       
-      // 古いグループが空になるか確認（同じホールの他のアイテムがあるか）
+      // 古いグループが空になるか確認（同じホール・同じ優先度の他のアイテムがあるか）
       // 注意: この時点ではitemの優先度は既に更新されているため、更新後のitemsを使う必要がある
       // しかし、setEventListsとsetHallRouteSettingsは非同期なので、現在のitemsを使う
-      if (oldPriority !== 'none') {
-        const otherItemsInOldGroup = items.filter(i => 
-          i.id !== itemId && 
-          (i.priorityLevel || 'none') === oldPriority
-        );
+      if (oldPriority !== 'none' && oldGroupId !== newGroupId) {
+        // 同じホール・同じ優先度の他のアイテムがあるか確認
+        const otherItemsInOldGroup = items.filter(i => {
+          if (i.id === itemId) return false;
+          if ((i.priorityLevel || 'none') !== oldPriority) return false;
+          
+          // 同じホールかどうか確認
+          if (!mapDataForTab) return false;
+          const iBlock = mapDataForTab.blocks.find(b => b.name === i.block);
+          if (!iBlock) return false;
+          const iNumMatch = i.number?.match(/\d+/);
+          if (!iNumMatch) return false;
+          const iNum = parseInt(iNumMatch[0], 10);
+          const iCell = iBlock.numberCells.find(nc => nc.value === iNum);
+          if (!iCell) return false;
+          
+          // このアイテムのホールIDを特定
+          let iHallId: string | null = null;
+          for (const h of halls) {
+            const inPoly = (() => {
+              if (h.vertices.length < 3) return false;
+              let inside = false;
+              for (let ii = 0, j = h.vertices.length - 1; ii < h.vertices.length; j = ii++) {
+                const xi = h.vertices[ii].col, yi = h.vertices[ii].row;
+                const xj = h.vertices[j].col, yj = h.vertices[j].row;
+                if (((yi > iCell.row) !== (yj > iCell.row)) && (iCell.col < (xj - xi) * (iCell.row - yi) / (yj - yi) + xi)) {
+                  inside = !inside;
+                }
+              }
+              return inside;
+            })();
+            
+            if (inPoly) {
+              iHallId = h.id;
+              break;
+            }
+            for (const vertex of h.vertices) {
+              if (vertex.row === iCell.row && vertex.col === iCell.col) {
+                iHallId = h.id;
+                break;
+              }
+            }
+            if (iHallId) break;
+          }
+          
+          return iHallId === itemHallId;
+        });
         
-        // 同じホールに他のアイテムがあるか確認（簡略化：同じ優先度のアイテムが他にあれば削除しない）
-        const hasOtherItems = otherItemsInOldGroup.length > 0;
-        
-        if (!hasOtherItems) {
+        if (otherItemsInOldGroup.length === 0) {
           newHallOrder = newHallOrder.filter(id => id !== oldGroupId);
         }
       }

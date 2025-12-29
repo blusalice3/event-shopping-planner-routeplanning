@@ -184,7 +184,7 @@ export function findPath(
 // 訪問先間のルートセグメントを生成
 export function generateRouteSegments(
   mapData: DayMapData,
-  visitPoints: { row: number; col: number }[],
+  visitPoints: { row: number; col: number; priorityLevel?: 'none' | 'priority' | 'highest' }[],
   blockNameCells: Set<string>
 ): RouteSegment[] {
   if (visitPoints.length < 2) return [];
@@ -210,6 +210,8 @@ export function generateRouteSegments(
       toRow: to.row,
       toCol: to.col,
       path,
+      fromPriority: from.priorityLevel || 'none',
+      toPriority: to.priorityLevel || 'none',
     });
   }
   
