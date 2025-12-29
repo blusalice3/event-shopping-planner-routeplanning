@@ -268,10 +268,9 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   const [swapFirstHallId, setSwapFirstHallId] = useState<string | null>(null);
   const [swapFirstIndex, setSwapFirstIndex] = useState<number | null>(null);
   
-  // 長押しメニュー用のstate
-  const [longPressItem, setLongPressItem] = useState<ShoppingItem | null>(null);
-  const [longPressMenuPosition, setLongPressMenuPosition] = useState<{ x: number; y: number } | null>(null);
-  const longPressTimerRef = useRef<number | null>(null);
+  // 優先度メニュー用のstate（クリックで表示）
+  const [menuItem, setMenuItem] = useState<ShoppingItem | null>(null);
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   
   // ドラッグ状態（ホールIDと内部インデックス）
   const [dragHallId, setDragHallId] = useState<string | null>(null);
@@ -446,42 +445,27 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     });
   }, []);
 
-  // 長押し開始
-  const handleLongPressStart = useCallback((e: React.PointerEvent | React.TouchEvent, item: ShoppingItem) => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-    }
-    
-    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    
-    longPressTimerRef.current = window.setTimeout(() => {
-      setLongPressItem(item);
-      setLongPressMenuPosition({ x: clientX, y: clientY });
-    }, 500);
+  // メニューを開く（クリックで表示）
+  const handleOpenMenu = useCallback((e: React.MouseEvent, item: ShoppingItem) => {
+    e.stopPropagation();
+    e.preventDefault();
+    setMenuItem(item);
+    setMenuPosition({ x: e.clientX, y: e.clientY });
   }, []);
 
-  // 長押しキャンセル
-  const handleLongPressCancel = useCallback(() => {
-    if (longPressTimerRef.current) {
-      clearTimeout(longPressTimerRef.current);
-      longPressTimerRef.current = null;
-    }
-  }, []);
-
-  // 長押しメニューを閉じる
-  const closeLongPressMenu = useCallback(() => {
-    setLongPressItem(null);
-    setLongPressMenuPosition(null);
+  // メニューを閉じる
+  const closeMenu = useCallback(() => {
+    setMenuItem(null);
+    setMenuPosition(null);
   }, []);
 
   // 優先度変更ハンドラ
   const handleSetPriority = useCallback((priority: PriorityLevel) => {
-    if (longPressItem && onUpdateItemPriority) {
-      onUpdateItemPriority(longPressItem.id, priority);
+    if (menuItem && onUpdateItemPriority) {
+      onUpdateItemPriority(menuItem.id, priority);
     }
-    closeLongPressMenu();
-  }, [longPressItem, onUpdateItemPriority, closeLongPressMenu]);
+    closeMenu();
+  }, [menuItem, onUpdateItemPriority, closeMenu]);
 
   // アイテムクリック処理（グループIDとグループ内インデックスを受け取る）
   const handleItemClick = useCallback((groupId: string | null, hallIndex: number) => {
@@ -778,9 +762,6 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                     onDrop={(e) => handleDrop(e, group.groupId, hallIndex)}
                     onDragEnd={handleDragEnd}
                     onClick={() => handleItemClick(group.groupId, hallIndex)}
-                    onPointerDown={(e) => handleLongPressStart(e, item)}
-                    onPointerUp={handleLongPressCancel}
-                    onPointerLeave={handleLongPressCancel}
                     onMouseEnter={() => handleItemHover(item)}
                     onMouseLeave={onClearHighlight}
                     className={`relative flex items-center gap-2 px-4 py-2 border-b border-slate-100 dark:border-slate-800 cursor-pointer transition-colors ${
@@ -841,6 +822,19 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                         </p>
                       )}
                     </div>
+                    
+                    {/* 優先度メニューボタン */}
+                    {onUpdateItemPriority && (
+                      <button
+                        onClick={(e) => handleOpenMenu(e, item)}
+                        className="p-1.5 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400"
+                        title="優先度を変更"
+                      >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                        </svg>
+                      </button>
+                    )}
                   </div>
                 ))}
               </div>
@@ -1026,9 +1020,6 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                 onDrop={(e) => handleDrop(e, group.groupId, hallIndex)}
                 onDragEnd={handleDragEnd}
                 onClick={() => handleItemClick(group.groupId, hallIndex)}
-                onPointerDown={(e) => handleLongPressStart(e, item)}
-                onPointerUp={handleLongPressCancel}
-                onPointerLeave={handleLongPressCancel}
                 onMouseEnter={() => handleItemHover(item)}
                 onMouseLeave={onClearHighlight}
                 className={`relative flex items-center gap-2 px-4 py-2 border-b border-slate-100 dark:border-slate-800 cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 ${
@@ -1091,25 +1082,38 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                     </p>
                   )}
                 </div>
+                
+                {/* 優先度メニューボタン */}
+                {onUpdateItemPriority && (
+                  <button
+                    onClick={(e) => handleOpenMenu(e, item)}
+                    className="p-2 rounded hover:bg-slate-200 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400"
+                    title="優先度を変更"
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 5v.01M12 12v.01M12 19v.01M12 6a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2zm0 7a1 1 0 110-2 1 1 0 010 2z" />
+                    </svg>
+                  </button>
+                )}
               </div>
             ))}
           </div>
         );})}
       </div>
       
-      {/* 長押しメニュー */}
-      {longPressItem && longPressMenuPosition && (
+      {/* 優先度メニュー */}
+      {menuItem && menuPosition && (
         <div 
           className="fixed z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 py-2 min-w-[160px]"
           style={{ 
-            left: Math.min(longPressMenuPosition.x, window.innerWidth - 180),
-            top: Math.min(longPressMenuPosition.y, window.innerHeight - 150)
+            left: Math.min(menuPosition.x, window.innerWidth - 180),
+            top: Math.min(menuPosition.y, window.innerHeight - 150)
           }}
         >
           <div className="px-3 py-1 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 mb-1">
             優先度設定
           </div>
-          {longPressItem.priorityLevel !== 'highest' && (
+          {menuItem.priorityLevel !== 'highest' && (
             <button
               onClick={() => handleSetPriority('highest')}
               className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 flex items-center gap-2"
@@ -1118,7 +1122,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
               最優先
             </button>
           )}
-          {longPressItem.priorityLevel !== 'priority' && (
+          {menuItem.priorityLevel !== 'priority' && (
             <button
               onClick={() => handleSetPriority('priority')}
               className="w-full px-3 py-2 text-left text-sm hover:bg-orange-50 dark:hover:bg-orange-900/30 text-orange-600 dark:text-orange-400 flex items-center gap-2"
@@ -1127,18 +1131,18 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
               優先
             </button>
           )}
-          {(longPressItem.priorityLevel === 'highest' || longPressItem.priorityLevel === 'priority') && (
+          {(menuItem.priorityLevel === 'highest' || menuItem.priorityLevel === 'priority') && (
             <button
               onClick={() => handleSetPriority('none')}
               className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 flex items-center gap-2"
             >
               <span className="w-3 h-3 bg-slate-400 rounded-full" />
-              {longPressItem.priorityLevel === 'highest' ? '最優先解除' : '優先解除'}
+              {menuItem.priorityLevel === 'highest' ? '最優先解除' : '優先解除'}
             </button>
           )}
           <div className="border-t border-slate-200 dark:border-slate-700 mt-1 pt-1">
             <button
-              onClick={closeLongPressMenu}
+              onClick={closeMenu}
               className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400"
             >
               キャンセル
@@ -1147,10 +1151,10 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
         </div>
       )}
       {/* メニュー背景クリックで閉じる */}
-      {longPressItem && longPressMenuPosition && (
+      {menuItem && menuPosition && (
         <div 
           className="fixed inset-0 z-40"
-          onClick={closeLongPressMenu}
+          onClick={closeMenu}
         />
       )}
       
