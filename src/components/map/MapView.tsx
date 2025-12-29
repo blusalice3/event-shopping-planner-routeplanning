@@ -131,14 +131,37 @@ const MapView: React.FC<MapViewProps> = ({
     return null;
   }, [blockToHallMap]);
 
-  // ホールごとの訪問先アイテム数を取得
-  const getItemCountInHall = useCallback((hallId: string): number => {
+  // グループIDからホールIDと優先度を分離するヘルパー
+  const parseGroupId = useCallback((groupId: string | null): { hallId: string | null; priority: 'none' | 'priority' | 'highest' } => {
+    if (groupId === null) return { hallId: null, priority: 'none' };
+    if (groupId === 'undefined:highest') return { hallId: null, priority: 'highest' };
+    if (groupId === 'undefined:priority') return { hallId: null, priority: 'priority' };
+    if (groupId.endsWith(':highest')) {
+      return { hallId: groupId.replace(':highest', ''), priority: 'highest' };
+    }
+    if (groupId.endsWith(':priority')) {
+      return { hallId: groupId.replace(':priority', ''), priority: 'priority' };
+    }
+    return { hallId: groupId, priority: 'none' };
+  }, []);
+
+  // グループごとの訪問先アイテム数を取得（優先度対応）
+  const getItemCountInHall = useCallback((groupId: string): number => {
+    const { hallId, priority } = parseGroupId(groupId);
+    
     return executeModeItemIds.filter(itemId => {
       const item = items.find(i => i.id === itemId);
       if (!item) return false;
-      return getItemHallId(item) === hallId;
+      
+      // ホールIDの一致を確認
+      const itemHallId = getItemHallId(item);
+      if (itemHallId !== hallId) return false;
+      
+      // 優先度の一致を確認
+      const itemPriority = item.priorityLevel || 'none';
+      return itemPriority === priority;
     }).length;
-  }, [executeModeItemIds, items, getItemHallId]);
+  }, [executeModeItemIds, items, getItemHallId, parseGroupId]);
 
   // ホールごとの全アイテム数を取得
   const getTotalItemCountInHall = useCallback((hallId: string): number => {

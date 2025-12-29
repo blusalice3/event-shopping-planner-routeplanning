@@ -1,6 +1,9 @@
 import React, { useState, useCallback } from 'react';
 import { HallDefinition, HallRouteSettings } from '../../types';
 
+// 優先度レベルの型
+type PriorityLevel = 'none' | 'priority' | 'highest';
+
 interface HallOrderPanelProps {
   isOpen: boolean;
   onClose: () => void;
@@ -10,6 +13,46 @@ interface HallOrderPanelProps {
   getItemCountInHall: (hallId: string) => number;
   onReorderExecuteList?: (hallOrder: string[]) => void;  // 実行列並び替えコールバック
 }
+
+// グループIDからホールIDと優先度を分離するヘルパー
+const parseGroupId = (groupId: string | null): { hallId: string | null; priority: PriorityLevel } => {
+  if (groupId === null) return { hallId: null, priority: 'none' };
+  if (groupId === 'undefined:highest') return { hallId: null, priority: 'highest' };
+  if (groupId === 'undefined:priority') return { hallId: null, priority: 'priority' };
+  if (groupId.endsWith(':highest')) {
+    return { hallId: groupId.replace(':highest', ''), priority: 'highest' };
+  }
+  if (groupId.endsWith(':priority')) {
+    return { hallId: groupId.replace(':priority', ''), priority: 'priority' };
+  }
+  return { hallId: groupId, priority: 'none' };
+};
+
+// グループの表示名を取得
+const getGroupDisplayName = (groupId: string | null, halls: HallDefinition[]): string => {
+  if (groupId === null) return 'ホール未定義';
+  if (groupId === 'undefined:highest') return '未定義最優先';
+  if (groupId === 'undefined:priority') return '未定義優先';
+  
+  const { hallId, priority } = parseGroupId(groupId);
+  const hall = halls.find(h => h.id === hallId);
+  const hallName = hall?.name || 'ホール未定義';
+  
+  if (priority === 'highest') return `${hallName}最優先`;
+  if (priority === 'priority') return `${hallName}優先`;
+  return hallName;
+};
+
+// グループの色を取得
+const getGroupColor = (groupId: string | null, halls: HallDefinition[]): string => {
+  const { hallId, priority } = parseGroupId(groupId);
+  
+  if (priority === 'highest') return '#EF4444';  // 赤
+  if (priority === 'priority') return '#F97316';  // オレンジ
+  
+  const hall = halls.find(h => h.id === hallId);
+  return hall?.color || '#9CA3AF';  // グレー
+};
 
 const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
   isOpen,
@@ -22,7 +65,7 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
 }) => {
   const [localOrder, setLocalOrder] = useState<string[]>(hallRouteSettings.hallOrder);
 
-  // ホール順序を上に移動
+  // グループ順序を上に移動
   const handleMoveUp = useCallback((index: number) => {
     if (index <= 0) return;
     setLocalOrder(prev => {
@@ -32,7 +75,7 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
     });
   }, []);
 
-  // ホール順序を下に移動
+  // グループ順序を下に移動
   const handleMoveDown = useCallback((index: number) => {
     if (index >= localOrder.length - 1) return;
     setLocalOrder(prev => {
@@ -51,23 +94,27 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
     onClose();
   }, [localOrder, hallRouteSettings, onUpdateHallRouteSettings, onClose]);
 
-  // ホール名を取得
-  const getHallName = useCallback((hallId: string): string => {
-    const hall = halls.find(h => h.id === hallId);
-    return hall?.name || '不明なホール';
-  }, [halls]);
-
-  // ホール色を取得
-  const getHallColor = useCallback((hallId: string): string => {
-    const hall = halls.find(h => h.id === hallId);
-    return hall?.color || '#E0E0E0';
-  }, [halls]);
+  // グループ内のアイテム数を取得（優先度対応）
+  const getGroupItemCount = useCallback((groupId: string): number => {
+    // 通常のホールIDの場合はそのまま
+    const { hallId, priority } = parseGroupId(groupId);
+    
+    // 優先度付きグループは個別にカウントが必要
+    // ここでは簡略化のため、ベースのホールIDでカウントを取得
+    // 実際には優先度ごとのカウントが必要な場合は、propsを拡張する
+    if (priority !== 'none') {
+      // 優先度付きグループは常に表示（アイテムがあると仮定）
+      return getItemCountInHall(groupId);
+    }
+    
+    return getItemCountInHall(hallId || groupId);
+  }, [getItemCountInHall]);
 
   if (!isOpen) return null;
 
-  // 訪問先があるホールのみ表示
-  const hallsWithItems = localOrder.filter(hallId => getItemCountInHall(hallId) > 0);
-  const hallsWithoutItems = localOrder.filter(hallId => getItemCountInHall(hallId) === 0);
+  // 訪問先があるグループのみ表示
+  const groupsWithItems = localOrder.filter(groupId => getGroupItemCount(groupId) > 0);
+  const groupsWithoutItems = localOrder.filter(groupId => getGroupItemCount(groupId) === 0);
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -91,30 +138,40 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
             </p>
           ) : (
             <>
-              {/* 訪問先があるホール */}
-              {hallsWithItems.length > 0 && (
+              {/* 訪問先があるグループ */}
+              {groupsWithItems.length > 0 && (
                 <div className="mb-4">
                   <h3 className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">
-                    訪問先があるホール（この順序で回ります）
+                    訪問先があるグループ（この順序で回ります）
                   </h3>
                   <div className="space-y-2">
-                    {hallsWithItems.map((hallId, displayIndex) => {
-                      const actualIndex = localOrder.indexOf(hallId);
-                      const itemCount = getItemCountInHall(hallId);
+                    {groupsWithItems.map((groupId, displayIndex) => {
+                      const actualIndex = localOrder.indexOf(groupId);
+                      const itemCount = getGroupItemCount(groupId);
+                      const { priority } = parseGroupId(groupId);
+                      const displayName = getGroupDisplayName(groupId, halls);
+                      const color = getGroupColor(groupId, halls);
+                      
                       return (
                         <div
-                          key={hallId}
-                          className="flex items-center gap-2 p-3 bg-white dark:bg-slate-700 rounded-lg border border-slate-200 dark:border-slate-600"
+                          key={groupId}
+                          className={`flex items-center gap-2 p-3 rounded-lg border ${
+                            priority === 'highest' 
+                              ? 'bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800' 
+                              : priority === 'priority'
+                              ? 'bg-orange-50 dark:bg-orange-900/20 border-orange-200 dark:border-orange-800'
+                              : 'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600'
+                          }`}
                         >
                           <span
                             className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold text-white"
-                            style={{ backgroundColor: getHallColor(hallId) }}
+                            style={{ backgroundColor: color }}
                           >
                             {displayIndex + 1}
                           </span>
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-slate-900 dark:text-white truncate">
-                              {getHallName(hallId)}
+                              {displayName}
                             </div>
                             <div className="text-xs text-slate-500 dark:text-slate-400">
                               {itemCount}件の訪問先
@@ -143,27 +200,32 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
                 </div>
               )}
 
-              {/* 訪問先がないホール */}
-              {hallsWithoutItems.length > 0 && (
+              {/* 訪問先がないグループ */}
+              {groupsWithoutItems.length > 0 && (
                 <div>
                   <h3 className="text-xs font-medium text-slate-400 dark:text-slate-500 mb-2">
-                    訪問先がないホール（スキップされます）
+                    訪問先がないグループ（スキップされます）
                   </h3>
                   <div className="space-y-1">
-                    {hallsWithoutItems.map((hallId) => (
-                      <div
-                        key={hallId}
-                        className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded border border-slate-100 dark:border-slate-700 opacity-50"
-                      >
-                        <span
-                          className="flex-shrink-0 w-6 h-6 rounded-full"
-                          style={{ backgroundColor: getHallColor(hallId) }}
-                        />
-                        <span className="text-sm text-slate-500 dark:text-slate-400">
-                          {getHallName(hallId)}
-                        </span>
-                      </div>
-                    ))}
+                    {groupsWithoutItems.map((groupId) => {
+                      const displayName = getGroupDisplayName(groupId, halls);
+                      const color = getGroupColor(groupId, halls);
+                      
+                      return (
+                        <div
+                          key={groupId}
+                          className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded border border-slate-100 dark:border-slate-700 opacity-50"
+                        >
+                          <span
+                            className="flex-shrink-0 w-6 h-6 rounded-full"
+                            style={{ backgroundColor: color }}
+                          />
+                          <span className="text-sm text-slate-500 dark:text-slate-400">
+                            {displayName}
+                          </span>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}
@@ -174,7 +236,7 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
         {/* フッター */}
         <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-between">
           <div>
-            {onReorderExecuteList && hallsWithItems.length > 0 && (
+            {onReorderExecuteList && groupsWithItems.length > 0 && (
               <button
                 onClick={() => {
                   onReorderExecuteList(localOrder);
@@ -184,7 +246,7 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
                   });
                 }}
                 className="px-4 py-2 text-sm rounded bg-amber-500 text-white hover:bg-amber-600"
-                title="実行列のアイテムをホール順序に従って並び替えます"
+                title="実行列のアイテムをグループ順序に従って並び替えます"
               >
                 🔄 実行列を並び替え
               </button>

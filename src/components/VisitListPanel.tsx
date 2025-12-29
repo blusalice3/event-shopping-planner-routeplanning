@@ -2,6 +2,9 @@ import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { ShoppingItem, DayMapData, HallDefinition, BlockDefinition } from '../types';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 
+// 優先度レベルの型
+type PriorityLevel = 'none' | 'priority' | 'highest';
+
 interface VisitListPanelProps {
   isOpen: boolean;
   onClose: () => void;
@@ -9,7 +12,7 @@ interface VisitListPanelProps {
   onUpdateOrder: (newOrder: ShoppingItem[]) => void;
   mapData: DayMapData | null;
   hallDefinitions: HallDefinition[];
-  hallOrder: string[];  // ホールIDの訪問順序
+  hallOrder: string[];  // グループIDの訪問順序（{hallId}, {hallId}:priority, {hallId}:highest）
   layoutMode: 'pc' | 'smartphone';
   onHighlightCell: (row: number, col: number) => void;
   onClearHighlight: () => void;
@@ -17,11 +20,36 @@ interface VisitListPanelProps {
   onConfirm: () => void;
   onCancel: () => void;
   selectedHallId?: string;  // 選択中のホールID（'all'は全ホール）
+  onUpdateItemPriority?: (itemId: string, priorityLevel: PriorityLevel) => void;  // 優先度変更コールバック
 }
 
 interface HistoryState {
   items: ShoppingItem[];
 }
+
+// グループIDからホールIDと優先度を分離するヘルパー
+const parseGroupId = (groupId: string | null): { hallId: string | null; priority: PriorityLevel } => {
+  if (groupId === null) return { hallId: null, priority: 'none' };
+  if (groupId.endsWith(':highest')) {
+    return { hallId: groupId.replace(':highest', ''), priority: 'highest' };
+  }
+  if (groupId.endsWith(':priority')) {
+    return { hallId: groupId.replace(':priority', ''), priority: 'priority' };
+  }
+  return { hallId: groupId, priority: 'none' };
+};
+
+// ホールIDと優先度からグループIDを生成するヘルパー
+const buildGroupId = (hallId: string | null, priority: PriorityLevel): string | null => {
+  if (hallId === null) {
+    if (priority === 'highest') return 'undefined:highest';
+    if (priority === 'priority') return 'undefined:priority';
+    return null;
+  }
+  if (priority === 'highest') return `${hallId}:highest`;
+  if (priority === 'priority') return `${hallId}:priority`;
+  return hallId;
+};
 
 // アイテムのホールIDを取得するヘルパー
 const getItemHallId = (
@@ -68,71 +96,135 @@ const getItemHallId = (
   return null;
 };
 
-// ホールごとにアイテムをグループ化するヘルパー（ホール順序対応版）
+// アイテムのグループID（ホールID + 優先度）を取得
+const getItemGroupId = (
+  item: ShoppingItem,
+  mapData: DayMapData | null,
+  hallDefinitions: HallDefinition[]
+): string | null => {
+  const hallId = getItemHallId(item, mapData, hallDefinitions);
+  const priority = item.priorityLevel || 'none';
+  return buildGroupId(hallId, priority);
+};
+
+// グループの表示名を取得
+const getGroupDisplayName = (groupId: string | null, hallDefinitions: HallDefinition[]): string => {
+  if (groupId === null) return 'ホール未定義';
+  if (groupId === 'undefined:highest') return '未定義最優先';
+  if (groupId === 'undefined:priority') return '未定義優先';
+  
+  const { hallId, priority } = parseGroupId(groupId);
+  const hall = hallDefinitions.find(h => h.id === hallId);
+  const hallName = hall?.name || 'ホール未定義';
+  
+  if (priority === 'highest') return `${hallName}最優先`;
+  if (priority === 'priority') return `${hallName}優先`;
+  return hallName;
+};
+
+// グループのヘッダー色を取得
+const getGroupHeaderStyle = (groupId: string | null, hallDefinitions: HallDefinition[]): { bgClass: string; borderColor: string } => {
+  const { hallId, priority } = parseGroupId(groupId);
+  const hall = hallDefinitions.find(h => h.id === hallId);
+  const baseColor = hall?.color || '#9CA3AF';
+  
+  if (priority === 'highest') {
+    return { bgClass: 'bg-red-100 dark:bg-red-900/40', borderColor: '#EF4444' };
+  }
+  if (priority === 'priority') {
+    return { bgClass: 'bg-orange-100 dark:bg-orange-900/40', borderColor: '#F97316' };
+  }
+  return { bgClass: 'bg-slate-100 dark:bg-slate-800', borderColor: baseColor };
+};
+
+// ホールごとにアイテムをグループ化するヘルパー（優先度対応版）
 const groupItemsByHallWithOrder = (
   items: ShoppingItem[],
   mapData: DayMapData | null,
   hallDefinitions: HallDefinition[],
-  hallOrder: string[]  // ホールIDの順序
-): { hallId: string | null; hallName: string | null; hallColor?: string; items: { item: ShoppingItem; hallIndex: number }[] }[] => {
+  hallOrder: string[]  // グループIDの順序
+): { groupId: string | null; hallId: string | null; hallName: string | null; hallColor?: string; priority: PriorityLevel; items: { item: ShoppingItem; hallIndex: number }[] }[] => {
   if (!mapData) {
-    return [{ hallId: null, hallName: null, items: items.map((item, hallIndex) => ({ item, hallIndex })) }];
+    return [{ groupId: null, hallId: null, hallName: null, priority: 'none', items: items.map((item, hallIndex) => ({ item, hallIndex })) }];
   }
 
   // ホールID→ホール情報のマップ
   const hallMap = new Map<string, HallDefinition>();
   hallDefinitions.forEach(hall => hallMap.set(hall.id, hall));
 
-  // グループ化（ホールIDをキーに）
+  // グループ化（グループIDをキーに）
   const groups = new Map<string | null, ShoppingItem[]>();
   
   items.forEach((item) => {
-    const hallId = getItemHallId(item, mapData, hallDefinitions);
-    if (!groups.has(hallId)) {
-      groups.set(hallId, []);
+    const groupId = getItemGroupId(item, mapData, hallDefinitions);
+    if (!groups.has(groupId)) {
+      groups.set(groupId, []);
     }
-    groups.get(hallId)!.push(item);
+    groups.get(groupId)!.push(item);
   });
 
-  // ホール順序に従ってソート
-  const result: { hallId: string | null; hallName: string | null; hallColor?: string; items: { item: ShoppingItem; hallIndex: number }[] }[] = [];
+  // グループ順序に従ってソート
+  const result: { groupId: string | null; hallId: string | null; hallName: string | null; hallColor?: string; priority: PriorityLevel; items: { item: ShoppingItem; hallIndex: number }[] }[] = [];
   
-  // まずhallOrderに従って定義済みホールを追加
-  hallOrder.forEach(hallId => {
-    const hall = hallMap.get(hallId);
-    if (hall && groups.has(hallId)) {
-      const hallItems = groups.get(hallId)!;
+  // まずhallOrderに従ってグループを追加
+  hallOrder.forEach(groupId => {
+    if (groups.has(groupId)) {
+      const { hallId, priority } = parseGroupId(groupId);
+      const hall = hallMap.get(hallId || '');
+      const groupItems = groups.get(groupId)!;
       result.push({
+        groupId,
         hallId,
-        hallName: hall.name,
-        hallColor: hall.color || '#6366f1',
-        items: hallItems.map((item, hallIndex) => ({ item, hallIndex })),
+        hallName: hall?.name || null,
+        hallColor: hall?.color || '#6366f1',
+        priority,
+        items: groupItems.map((item, hallIndex) => ({ item, hallIndex })),
       });
-      groups.delete(hallId);
+      groups.delete(groupId);
     }
   });
   
-  // hallOrderに含まれないがhallDefinitionsに含まれるホールを追加
+  // hallOrderに含まれないがhallDefinitionsに含まれるホール（通常グループ）を追加
   hallDefinitions.forEach(hall => {
-    if (groups.has(hall.id)) {
-      const hallItems = groups.get(hall.id)!;
+    const groupId = hall.id;
+    if (groups.has(groupId)) {
+      const groupItems = groups.get(groupId)!;
       result.push({
+        groupId,
         hallId: hall.id,
         hallName: hall.name,
         hallColor: hall.color || '#6366f1',
-        items: hallItems.map((item, hallIndex) => ({ item, hallIndex })),
+        priority: 'none',
+        items: groupItems.map((item, hallIndex) => ({ item, hallIndex })),
       });
-      groups.delete(hall.id);
+      groups.delete(groupId);
     }
+  });
+  
+  // 優先度付きグループで残っているものを追加
+  const remainingGroups = Array.from(groups.entries()).filter(([gId]) => gId !== null);
+  remainingGroups.forEach(([groupId, groupItems]) => {
+    const { hallId, priority } = parseGroupId(groupId);
+    const hall = hallMap.get(hallId || '');
+    result.push({
+      groupId,
+      hallId,
+      hallName: hall?.name || null,
+      hallColor: hall?.color || '#6366f1',
+      priority,
+      items: groupItems.map((item, hallIndex) => ({ item, hallIndex })),
+    });
   });
   
   // ホール未定義のアイテム（null）を最後に追加
   if (groups.has(null)) {
-    const hallItems = groups.get(null)!;
+    const groupItems = groups.get(null)!;
     result.push({
+      groupId: null,
       hallId: null,
       hallName: null,
-      items: hallItems.map((item, hallIndex) => ({ item, hallIndex })),
+      priority: 'none',
+      items: groupItems.map((item, hallIndex) => ({ item, hallIndex })),
     });
   }
 
@@ -154,6 +246,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   onConfirm,
   onCancel,
   selectedHallId = 'all',
+  onUpdateItemPriority,
 }) => {
   // 将来使用する可能性のあるprops
   void hasUnsavedChanges;
@@ -161,7 +254,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   // パネル位置（PC: left/right）
   const [panelPosition, setPanelPosition] = useState<'left' | 'right'>('right');
   
-  // 折りたたみ状態（ホールID -> 展開/折りたたみ）
+  // 折りたたみ状態（グループID -> 展開/折りたたみ）
   const [collapsedHalls, setCollapsedHalls] = useState<Set<string | null>>(new Set());
   
   // 範囲選択状態（rangeSelectionModeがtrueの時のみ有効）
@@ -174,6 +267,11 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   const [swapMode, setSwapMode] = useState(false);
   const [swapFirstHallId, setSwapFirstHallId] = useState<string | null>(null);
   const [swapFirstIndex, setSwapFirstIndex] = useState<number | null>(null);
+  
+  // 長押しメニュー用のstate
+  const [longPressItem, setLongPressItem] = useState<ShoppingItem | null>(null);
+  const [longPressMenuPosition, setLongPressMenuPosition] = useState<{ x: number; y: number } | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
   
   // ドラッグ状態（ホールIDと内部インデックス）
   const [dragHallId, setDragHallId] = useState<string | null>(null);
@@ -273,12 +371,12 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     return result;
   }, []);
 
-  // ホール内でアイテムを移動
-  const moveItemInHall = useCallback((hallId: string | null, fromHallIndex: number, toHallIndex: number) => {
+  // グループ内でアイテムを移動
+  const moveItemInHall = useCallback((groupId: string | null, fromHallIndex: number, toHallIndex: number) => {
     if (fromHallIndex === toHallIndex) return;
     
     const newGroups = groupedItems.map(group => {
-      if (group.hallId === hallId) {
+      if (group.groupId === groupId) {
         const newHallItems = [...group.items];
         const [movedItem] = newHallItems.splice(fromHallIndex, 1);
         newHallItems.splice(toHallIndex, 0, movedItem);
@@ -292,12 +390,12 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     onUpdateOrder(newItems);
   }, [groupedItems, rebuildItemsFromGroups, pushHistory, onUpdateOrder]);
 
-  // ホール内で2つのアイテムを入れ替え
-  const swapItemsInHall = useCallback((hallId: string | null, index1: number, index2: number) => {
+  // グループ内で2つのアイテムを入れ替え
+  const swapItemsInHall = useCallback((groupId: string | null, index1: number, index2: number) => {
     if (index1 === index2) return;
     
     const newGroups = groupedItems.map(group => {
-      if (group.hallId === hallId) {
+      if (group.groupId === groupId) {
         const newHallItems = [...group.items];
         [newHallItems[index1], newHallItems[index2]] = [newHallItems[index2], newHallItems[index1]];
         return { ...group, items: newHallItems.map((item, idx) => ({ ...item, hallIndex: idx })) };
@@ -310,12 +408,12 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     onUpdateOrder(newItems);
   }, [groupedItems, rebuildItemsFromGroups, pushHistory, onUpdateOrder]);
 
-  // ホール内で区間反転
-  const reverseRangeInHall = useCallback((hallId: string | null, start: number, end: number) => {
+  // グループ内で区間反転
+  const reverseRangeInHall = useCallback((groupId: string | null, start: number, end: number) => {
     const [minIndex, maxIndex] = start < end ? [start, end] : [end, start];
     
     const newGroups = groupedItems.map(group => {
-      if (group.hallId === hallId) {
+      if (group.groupId === groupId) {
         const newHallItems = [...group.items];
         const rangeItems = newHallItems.slice(minIndex, maxIndex + 1).reverse();
         newHallItems.splice(minIndex, maxIndex - minIndex + 1, ...rangeItems);
@@ -335,34 +433,71 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     setRangeSelectionMode(false);
   }, [groupedItems, rebuildItemsFromGroups, pushHistory, onUpdateOrder]);
 
-  // ホールの折りたたみ切り替え
-  const toggleHallCollapse = useCallback((hallId: string | null) => {
+  // グループの折りたたみ切り替え
+  const toggleHallCollapse = useCallback((groupId: string | null) => {
     setCollapsedHalls(prev => {
       const newSet = new Set(prev);
-      if (newSet.has(hallId)) {
-        newSet.delete(hallId);
+      if (newSet.has(groupId)) {
+        newSet.delete(groupId);
       } else {
-        newSet.add(hallId);
+        newSet.add(groupId);
       }
       return newSet;
     });
   }, []);
 
-  // アイテムクリック処理（ホールIDとホール内インデックスを受け取る）
-  const handleItemClick = useCallback((hallId: string | null, hallIndex: number) => {
+  // 長押し開始
+  const handleLongPressStart = useCallback((e: React.PointerEvent | React.TouchEvent, item: ShoppingItem) => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+    }
+    
+    const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+    
+    longPressTimerRef.current = window.setTimeout(() => {
+      setLongPressItem(item);
+      setLongPressMenuPosition({ x: clientX, y: clientY });
+    }, 500);
+  }, []);
+
+  // 長押しキャンセル
+  const handleLongPressCancel = useCallback(() => {
+    if (longPressTimerRef.current) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
+
+  // 長押しメニューを閉じる
+  const closeLongPressMenu = useCallback(() => {
+    setLongPressItem(null);
+    setLongPressMenuPosition(null);
+  }, []);
+
+  // 優先度変更ハンドラ
+  const handleSetPriority = useCallback((priority: PriorityLevel) => {
+    if (longPressItem && onUpdateItemPriority) {
+      onUpdateItemPriority(longPressItem.id, priority);
+    }
+    closeLongPressMenu();
+  }, [longPressItem, onUpdateItemPriority, closeLongPressMenu]);
+
+  // アイテムクリック処理（グループIDとグループ内インデックスを受け取る）
+  const handleItemClick = useCallback((groupId: string | null, hallIndex: number) => {
     if (swapMode) {
       if (swapFirstIndex === null) {
         // 1つ目を選択
-        setSwapFirstHallId(hallId);
+        setSwapFirstHallId(groupId);
         setSwapFirstIndex(hallIndex);
       } else {
         // 2つ目を選択
-        if (swapFirstHallId === hallId) {
-          // 同一ホール内なので入れ替え実行
-          swapItemsInHall(hallId, swapFirstIndex, hallIndex);
+        if (swapFirstHallId === groupId) {
+          // 同一グループ内なので入れ替え実行
+          swapItemsInHall(groupId, swapFirstIndex, hallIndex);
         } else {
-          // 異なるホールなので警告
-          alert('異なるホールのアイテム同士は入れ替えできません');
+          // 異なるグループなので警告
+          alert('異なるグループのアイテム同士は入れ替えできません');
         }
         setSwapFirstHallId(null);
         setSwapFirstIndex(null);
@@ -371,19 +506,19 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     } else if (rangeSelectionMode) {
       if (rangeStartIndex === null) {
         // 開始点を設定
-        setRangeStartHallId(hallId);
+        setRangeStartHallId(groupId);
         setRangeStartIndex(hallIndex);
         setRangeEndIndex(null);
       } else if (rangeEndIndex === null) {
-        // 終了点を設定（同一ホール内のみ）
-        if (rangeStartHallId === hallId) {
+        // 終了点を設定（同一グループ内のみ）
+        if (rangeStartHallId === groupId) {
           setRangeEndIndex(hallIndex);
         } else {
-          alert('ホールを跨いだ範囲選択はできません');
+          alert('グループを跨いだ範囲選択はできません');
         }
       } else {
         // 既に範囲が選択されている場合は開始点を再設定
-        setRangeStartHallId(hallId);
+        setRangeStartHallId(groupId);
         setRangeStartIndex(hallIndex);
         setRangeEndIndex(null);
       }
@@ -408,27 +543,27 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     }
   }, [mapData, onHighlightCell]);
 
-  // ドラッグ開始（ホールIDとホール内インデックスを受け取る）
-  const handleDragStart = useCallback((e: React.DragEvent, hallId: string | null, hallIndex: number) => {
-    setDragHallId(hallId);
+  // ドラッグ開始（グループIDとグループ内インデックスを受け取る）
+  const handleDragStart = useCallback((e: React.DragEvent, groupId: string | null, hallIndex: number) => {
+    setDragHallId(groupId);
     setDragIndex(hallIndex);
     e.dataTransfer.effectAllowed = 'move';
   }, []);
 
   // ドラッグオーバー
-  const handleDragOver = useCallback((e: React.DragEvent, hallId: string | null, hallIndex: number) => {
+  const handleDragOver = useCallback((e: React.DragEvent, groupId: string | null, hallIndex: number) => {
     e.preventDefault();
-    // 同一ホール内のみドロップ可能
-    if (dragHallId === hallId) {
+    // 同一グループ内のみドロップ可能
+    if (dragHallId === groupId) {
       setDragOverIndex(hallIndex);
     }
   }, [dragHallId]);
 
   // ドロップ
-  const handleDrop = useCallback((e: React.DragEvent, hallId: string | null, toHallIndex: number) => {
+  const handleDrop = useCallback((e: React.DragEvent, groupId: string | null, toHallIndex: number) => {
     e.preventDefault();
-    if (dragHallId === hallId && dragIndex !== null && dragIndex !== toHallIndex) {
-      moveItemInHall(hallId, dragIndex, toHallIndex);
+    if (dragHallId === groupId && dragIndex !== null && dragIndex !== toHallIndex) {
+      moveItemInHall(groupId, dragIndex, toHallIndex);
     }
     setDragHallId(null);
     setDragIndex(null);
@@ -474,14 +609,14 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     const selectedHall = hallDefinitions.find(h => h.id === selectedHallId);
     if (!selectedHall) return groupedItems;
     
-    // 選択ホールのみを含むグループを返す
+    // 選択ホールに関連するグループ（通常/優先/最優先）を返す
     return groupedItems.filter(group => group.hallId === selectedHall.id);
   }, [groupedItems, selectedHallId, hallDefinitions]);
 
-  // 範囲選択の表示用（ホール内インデックス）
-  const isInRange = useCallback((hallId: string | null, hallIndex: number): boolean => {
+  // 範囲選択の表示用（グループ内インデックス）
+  const isInRange = useCallback((groupId: string | null, hallIndex: number): boolean => {
     if (!rangeSelectionMode) return false;
-    if (rangeStartHallId !== hallId) return false;
+    if (rangeStartHallId !== groupId) return false;
     if (rangeStartIndex === null) return false;
     if (rangeEndIndex === null) return hallIndex === rangeStartIndex;
     
@@ -598,33 +733,32 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
               <span className="text-xs text-blue-600 dark:text-blue-400 ml-2">1つ目を選択</span>
             )}
             {swapMode && swapFirstIndex !== null && (
-              <span className="text-xs text-green-600 dark:text-green-400 ml-2">2つ目を選択（同一ホール内）</span>
+              <span className="text-xs text-green-600 dark:text-green-400 ml-2">2つ目を選択（同一グループ内）</span>
             )}
           </div>
           
           {/* アイテムリスト */}
           <div className="flex-1 overflow-y-auto">
-            {filteredGroupedItems.map((group, groupIndex) => (
-              <div key={group.hallId || `no-hall-${groupIndex}`}>
-                {/* ホールヘッダー */}
+            {filteredGroupedItems.map((group, groupIndex) => {
+              const headerStyle = getGroupHeaderStyle(group.groupId, hallDefinitions);
+              const displayName = getGroupDisplayName(group.groupId, hallDefinitions);
+              return (
+              <div key={group.groupId ?? `no-hall-${groupIndex}`}>
+                {/* グループヘッダー */}
                 <div
-                  className={`sticky top-0 flex items-center justify-between px-4 py-2 cursor-pointer z-10 ${
-                    group.hallName 
-                      ? 'bg-slate-100 dark:bg-slate-800' 
-                      : 'bg-slate-50 dark:bg-slate-900 border-l-4 border-slate-300 dark:border-slate-600'
-                  }`}
-                  style={group.hallColor ? { borderLeftColor: group.hallColor, borderLeftWidth: '4px' } : {}}
-                  onClick={() => toggleHallCollapse(group.hallId)}
+                  className={`sticky top-0 flex items-center justify-between px-4 py-2 cursor-pointer z-10 ${headerStyle.bgClass}`}
+                  style={{ borderLeftColor: headerStyle.borderColor, borderLeftWidth: '4px' }}
+                  onClick={() => toggleHallCollapse(group.groupId)}
                 >
                   <span className="font-semibold text-sm text-slate-700 dark:text-slate-300">
-                    {group.hallName || 'ホール未定義'}
+                    {displayName}
                   </span>
                   <div className="flex items-center gap-2">
                     <span className="text-xs text-slate-500 dark:text-slate-400">
                       {group.items.length}件
                     </span>
                     <svg 
-                      className={`w-4 h-4 text-slate-500 transition-transform ${collapsedHalls.has(group.hallId) ? '' : 'rotate-180'}`}
+                      className={`w-4 h-4 text-slate-500 transition-transform ${collapsedHalls.has(group.groupId) ? '' : 'rotate-180'}`}
                       fill="none" 
                       stroke="currentColor" 
                       viewBox="0 0 24 24"
@@ -635,29 +769,33 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                 </div>
                 
                 {/* アイテム */}
-                {!collapsedHalls.has(group.hallId) && group.items.map(({ item, hallIndex }) => (
+                {!collapsedHalls.has(group.groupId) && group.items.map(({ item, hallIndex }) => (
                   <div
                     key={item.id}
                     draggable
-                    onDragStart={(e) => handleDragStart(e, group.hallId, hallIndex)}
-                    onDragOver={(e) => handleDragOver(e, group.hallId, hallIndex)}
-                    onDrop={(e) => handleDrop(e, group.hallId, hallIndex)}
+                    onDragStart={(e) => handleDragStart(e, group.groupId, hallIndex)}
+                    onDragOver={(e) => handleDragOver(e, group.groupId, hallIndex)}
+                    onDrop={(e) => handleDrop(e, group.groupId, hallIndex)}
                     onDragEnd={handleDragEnd}
-                    onClick={() => handleItemClick(group.hallId, hallIndex)}
+                    onClick={() => handleItemClick(group.groupId, hallIndex)}
+                    onPointerDown={(e) => handleLongPressStart(e, item)}
+                    onPointerUp={handleLongPressCancel}
+                    onPointerLeave={handleLongPressCancel}
                     onMouseEnter={() => handleItemHover(item)}
                     onMouseLeave={onClearHighlight}
                     className={`relative flex items-center gap-2 px-4 py-2 border-b border-slate-100 dark:border-slate-800 cursor-pointer transition-colors ${
-                      dragHallId === group.hallId && dragOverIndex === hallIndex ? 'bg-blue-100 dark:bg-blue-900/30' : ''
+                      dragHallId === group.groupId && dragOverIndex === hallIndex ? 'bg-blue-100 dark:bg-blue-900/30' : ''
                     } ${
-                      isInRange(group.hallId, hallIndex) ? 'bg-purple-100 dark:bg-purple-900/30' : ''
+                      isInRange(group.groupId, hallIndex) ? 'bg-purple-100 dark:bg-purple-900/30' : ''
                     } ${
-                      swapFirstHallId === group.hallId && swapFirstIndex === hallIndex ? 'bg-green-100 dark:bg-green-900/30' : ''
+                      swapFirstHallId === group.groupId && swapFirstIndex === hallIndex ? 'bg-green-100 dark:bg-green-900/30' : ''
                     } ${
-                      !group.hallName ? 'bg-slate-50/50 dark:bg-slate-950/50' : ''
+                      group.priority === 'highest' ? 'bg-red-50/50 dark:bg-red-950/30' : 
+                      group.priority === 'priority' ? 'bg-orange-50/50 dark:bg-orange-950/30' : ''
                     }`}
                   >
                     {/* 範囲選択インジケーター */}
-                    {isInRange(group.hallId, hallIndex) && rangeStartIndex !== null && rangeEndIndex !== null && (
+                    {isInRange(group.groupId, hallIndex) && rangeStartIndex !== null && rangeEndIndex !== null && (
                       <div className="absolute left-0 top-0 bottom-0 w-1 bg-purple-500 flex items-center justify-center">
                         {hallIndex === Math.min(rangeStartIndex, rangeEndIndex) && (
                           <div className="absolute -left-2 text-purple-500 text-lg">↕</div>
@@ -665,8 +803,11 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                       </div>
                     )}
                     
-                    {/* ホール内訪問順番号 */}
-                    <div className="w-8 h-8 flex items-center justify-center bg-blue-600 text-white rounded-full text-sm font-bold">
+                    {/* グループ内訪問順番号 */}
+                    <div className={`w-8 h-8 flex items-center justify-center text-white rounded-full text-sm font-bold ${
+                      group.priority === 'highest' ? 'bg-red-600' :
+                      group.priority === 'priority' ? 'bg-orange-500' : 'bg-blue-600'
+                    }`}>
                       {hallIndex + 1}
                     </div>
                     
@@ -703,7 +844,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                   </div>
                 ))}
               </div>
-            ))}
+            );})}
           </div>
           
           {/* フッター */}
@@ -833,40 +974,39 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
             <span className="text-xs text-slate-500 dark:text-slate-400">1つ目を選択してください</span>
           )}
           {swapMode && swapFirstIndex !== null && (
-            <span className="text-xs text-green-600 dark:text-green-400">2つ目を選択してください（同一ホール内）</span>
+            <span className="text-xs text-green-600 dark:text-green-400">2つ目を選択してください（同一グループ内）</span>
           )}
           {rangeSelectionMode && rangeStartIndex === null && (
             <span className="text-xs text-purple-600 dark:text-purple-400">開始点を選択してください</span>
           )}
           {rangeSelectionMode && rangeStartIndex !== null && rangeEndIndex === null && (
-            <span className="text-xs text-purple-600 dark:text-purple-400">終了点を選択してください（同一ホール内）</span>
+            <span className="text-xs text-purple-600 dark:text-purple-400">終了点を選択してください（同一グループ内）</span>
           )}
         </div>
       </div>
       
       {/* アイテムリスト */}
       <div className="flex-1 overflow-y-auto">
-        {filteredGroupedItems.map((group, groupIndex) => (
-          <div key={group.hallId || `no-hall-${groupIndex}`}>
-            {/* ホールヘッダー */}
+        {filteredGroupedItems.map((group, groupIndex) => {
+          const headerStyle = getGroupHeaderStyle(group.groupId, hallDefinitions);
+          const displayName = getGroupDisplayName(group.groupId, hallDefinitions);
+          return (
+          <div key={group.groupId ?? `no-hall-${groupIndex}`}>
+            {/* グループヘッダー */}
             <div
-              className={`sticky top-0 flex items-center justify-between px-4 py-2 cursor-pointer z-10 ${
-                group.hallName 
-                  ? 'bg-slate-100 dark:bg-slate-800' 
-                  : 'bg-slate-50 dark:bg-slate-900 border-l-4 border-slate-300 dark:border-slate-600'
-              }`}
-              style={group.hallColor ? { borderLeftColor: group.hallColor, borderLeftWidth: '4px' } : {}}
-              onClick={() => toggleHallCollapse(group.hallId)}
+              className={`sticky top-0 flex items-center justify-between px-4 py-2 cursor-pointer z-10 ${headerStyle.bgClass}`}
+              style={{ borderLeftColor: headerStyle.borderColor, borderLeftWidth: '4px' }}
+              onClick={() => toggleHallCollapse(group.groupId)}
             >
               <span className="font-semibold text-sm text-slate-700 dark:text-slate-300">
-                {group.hallName || 'ホール未定義'}
+                {displayName}
               </span>
               <div className="flex items-center gap-2">
                 <span className="text-xs text-slate-500 dark:text-slate-400">
                   {group.items.length}件
                 </span>
                 <svg 
-                  className={`w-4 h-4 text-slate-500 transition-transform ${collapsedHalls.has(group.hallId) ? '' : 'rotate-180'}`}
+                  className={`w-4 h-4 text-slate-500 transition-transform ${collapsedHalls.has(group.groupId) ? '' : 'rotate-180'}`}
                   fill="none" 
                   stroke="currentColor" 
                   viewBox="0 0 24 24"
@@ -877,29 +1017,33 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
             </div>
             
             {/* アイテム */}
-            {!collapsedHalls.has(group.hallId) && group.items.map(({ item, hallIndex }) => (
+            {!collapsedHalls.has(group.groupId) && group.items.map(({ item, hallIndex }) => (
               <div
                 key={item.id}
                 draggable
-                onDragStart={(e) => handleDragStart(e, group.hallId, hallIndex)}
-                onDragOver={(e) => handleDragOver(e, group.hallId, hallIndex)}
-                onDrop={(e) => handleDrop(e, group.hallId, hallIndex)}
+                onDragStart={(e) => handleDragStart(e, group.groupId, hallIndex)}
+                onDragOver={(e) => handleDragOver(e, group.groupId, hallIndex)}
+                onDrop={(e) => handleDrop(e, group.groupId, hallIndex)}
                 onDragEnd={handleDragEnd}
-                onClick={() => handleItemClick(group.hallId, hallIndex)}
+                onClick={() => handleItemClick(group.groupId, hallIndex)}
+                onPointerDown={(e) => handleLongPressStart(e, item)}
+                onPointerUp={handleLongPressCancel}
+                onPointerLeave={handleLongPressCancel}
                 onMouseEnter={() => handleItemHover(item)}
                 onMouseLeave={onClearHighlight}
                 className={`relative flex items-center gap-2 px-4 py-2 border-b border-slate-100 dark:border-slate-800 cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 ${
-                  dragHallId === group.hallId && dragOverIndex === hallIndex ? 'bg-blue-100 dark:bg-blue-900/30' : ''
+                  dragHallId === group.groupId && dragOverIndex === hallIndex ? 'bg-blue-100 dark:bg-blue-900/30' : ''
                 } ${
-                  isInRange(group.hallId, hallIndex) ? 'bg-purple-100 dark:bg-purple-900/30' : ''
+                  isInRange(group.groupId, hallIndex) ? 'bg-purple-100 dark:bg-purple-900/30' : ''
                 } ${
-                  swapFirstHallId === group.hallId && swapFirstIndex === hallIndex ? 'bg-green-100 dark:bg-green-900/30 ring-2 ring-green-500' : ''
+                  swapFirstHallId === group.groupId && swapFirstIndex === hallIndex ? 'bg-green-100 dark:bg-green-900/30 ring-2 ring-green-500' : ''
                 } ${
-                  !group.hallName ? 'bg-slate-50/50 dark:bg-slate-950/50' : ''
+                  group.priority === 'highest' ? 'bg-red-50/50 dark:bg-red-950/30' : 
+                  group.priority === 'priority' ? 'bg-orange-50/50 dark:bg-orange-950/30' : ''
                 }`}
               >
                 {/* 範囲選択インジケーター */}
-                {isInRange(group.hallId, hallIndex) && rangeStartIndex !== null && rangeEndIndex !== null && (
+                {isInRange(group.groupId, hallIndex) && rangeStartIndex !== null && rangeEndIndex !== null && (
                   <div 
                     className="absolute left-0 top-0 bottom-0 w-1.5 bg-purple-500"
                   >
@@ -909,8 +1053,11 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                   </div>
                 )}
                 
-                {/* ホール内訪問順番号 */}
-                <div className="w-8 h-8 flex items-center justify-center bg-blue-600 text-white rounded-full text-sm font-bold flex-shrink-0">
+                {/* グループ内訪問順番号 */}
+                <div className={`w-8 h-8 flex items-center justify-center text-white rounded-full text-sm font-bold flex-shrink-0 ${
+                  group.priority === 'highest' ? 'bg-red-600' :
+                  group.priority === 'priority' ? 'bg-orange-500' : 'bg-blue-600'
+                }`}>
                   {hallIndex + 1}
                 </div>
                 
@@ -947,8 +1094,65 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
               </div>
             ))}
           </div>
-        ))}
+        );})}
       </div>
+      
+      {/* 長押しメニュー */}
+      {longPressItem && longPressMenuPosition && (
+        <div 
+          className="fixed z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 py-2 min-w-[160px]"
+          style={{ 
+            left: Math.min(longPressMenuPosition.x, window.innerWidth - 180),
+            top: Math.min(longPressMenuPosition.y, window.innerHeight - 150)
+          }}
+        >
+          <div className="px-3 py-1 text-xs text-slate-500 dark:text-slate-400 border-b border-slate-200 dark:border-slate-700 mb-1">
+            優先度設定
+          </div>
+          {longPressItem.priorityLevel !== 'highest' && (
+            <button
+              onClick={() => handleSetPriority('highest')}
+              className="w-full px-3 py-2 text-left text-sm hover:bg-red-50 dark:hover:bg-red-900/30 text-red-600 dark:text-red-400 flex items-center gap-2"
+            >
+              <span className="w-3 h-3 bg-red-500 rounded-full" />
+              最優先
+            </button>
+          )}
+          {longPressItem.priorityLevel !== 'priority' && (
+            <button
+              onClick={() => handleSetPriority('priority')}
+              className="w-full px-3 py-2 text-left text-sm hover:bg-orange-50 dark:hover:bg-orange-900/30 text-orange-600 dark:text-orange-400 flex items-center gap-2"
+            >
+              <span className="w-3 h-3 bg-orange-500 rounded-full" />
+              優先
+            </button>
+          )}
+          {(longPressItem.priorityLevel === 'highest' || longPressItem.priorityLevel === 'priority') && (
+            <button
+              onClick={() => handleSetPriority('none')}
+              className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 flex items-center gap-2"
+            >
+              <span className="w-3 h-3 bg-slate-400 rounded-full" />
+              {longPressItem.priorityLevel === 'highest' ? '最優先解除' : '優先解除'}
+            </button>
+          )}
+          <div className="border-t border-slate-200 dark:border-slate-700 mt-1 pt-1">
+            <button
+              onClick={closeLongPressMenu}
+              className="w-full px-3 py-2 text-left text-sm hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-500 dark:text-slate-400"
+            >
+              キャンセル
+            </button>
+          </div>
+        </div>
+      )}
+      {/* メニュー背景クリックで閉じる */}
+      {longPressItem && longPressMenuPosition && (
+        <div 
+          className="fixed inset-0 z-40"
+          onClick={closeLongPressMenu}
+        />
+      )}
       
       {/* フッター */}
       <div className="flex items-center justify-between px-4 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800">

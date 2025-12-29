@@ -27,6 +27,7 @@ export interface ShoppingItemCardProps {
   isSearchMatch?: boolean;
   layoutMode?: 'pc' | 'smartphone';
   hallIndex?: number;  // ホール内での訪問順番号（0始まり）
+  priorityLevel?: 'none' | 'priority' | 'highest';  // グループの優先度レベル
 }
 
 const statusConfig: Record<PurchaseStatus, { label: string; icon: React.FC<any>; color: string; dim: boolean; bg: string; }> = {
@@ -56,6 +57,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   isSearchMatch = false,
   layoutMode = 'pc',
   hallIndex,
+  priorityLevel = 'none',
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const longPressTimeout = useRef<number | null>(null);
@@ -253,7 +255,10 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           <div data-drag-handle className="relative p-2 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-1 z-10">
             {/* ホール内番号表示 */}
             {hallIndex !== undefined && (
-              <div className="w-7 h-7 flex items-center justify-center bg-blue-600 text-white rounded-full text-xs font-bold flex-shrink-0">
+              <div className={`w-7 h-7 flex items-center justify-center text-white rounded-full text-xs font-bold flex-shrink-0 ${
+                priorityLevel === 'highest' ? 'bg-red-600' :
+                priorityLevel === 'priority' ? 'bg-orange-500' : 'bg-blue-600'
+              }`}>
                 {hallIndex + 1}
               </div>
             )}
@@ -416,7 +421,10 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       <div data-drag-handle className="relative p-3 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-2 z-10">
         {/* ホール内番号表示 */}
         {hallIndex !== undefined && (
-          <div className="w-8 h-8 flex items-center justify-center bg-blue-600 text-white rounded-full text-sm font-bold flex-shrink-0">
+          <div className={`w-8 h-8 flex items-center justify-center text-white rounded-full text-sm font-bold flex-shrink-0 ${
+            priorityLevel === 'highest' ? 'bg-red-600' :
+            priorityLevel === 'priority' ? 'bg-orange-500' : 'bg-blue-600'
+          }`}>
             {hallIndex + 1}
           </div>
         )}

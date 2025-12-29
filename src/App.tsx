@@ -2671,6 +2671,153 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     return halls.map(h => h.id);
   }, [visitListPanelMapTab, activeEventName, hallDefinitions, hallRouteSettings]);
 
+  // アイテムの優先度を変更するハンドラ
+  const handleUpdateItemPriority = useCallback((itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
+    if (!activeEventName || !visitListPanelMapTab) return;
+    
+    // アイテムの優先度を更新
+    setEventLists(prev => ({
+      ...prev,
+      [activeEventName]: (prev[activeEventName] || []).map(item => 
+        item.id === itemId ? { ...item, priorityLevel } : item
+      )
+    }));
+    
+    // アイテムのホールIDを取得
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+    
+    const halls = hallDefinitions[activeEventName]?.[visitListPanelMapTab] || [];
+    const mapDataForTab = mapData[activeEventName]?.[visitListPanelMapTab];
+    
+    // アイテムのホールIDを特定
+    let itemHallId: string | null = null;
+    if (mapDataForTab) {
+      const block = mapDataForTab.blocks.find(b => b.name === item.block);
+      if (block) {
+        const numMatch = item.number?.match(/\d+/);
+        if (numMatch) {
+          const num = parseInt(numMatch[0], 10);
+          const cell = block.numberCells.find(nc => nc.value === num);
+          if (cell) {
+            for (const hall of halls) {
+              // 多角形内判定
+              const isPointInPolygon = (row: number, col: number, vertices: { row: number; col: number }[]): boolean => {
+                if (vertices.length < 3) return false;
+                let inside = false;
+                for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+                  const xi = vertices[i].col, yi = vertices[i].row;
+                  const xj = vertices[j].col, yj = vertices[j].row;
+                  if (((yi > row) !== (yj > row)) && (col < (xj - xi) * (row - yi) / (yj - yi) + xi)) {
+                    inside = !inside;
+                  }
+                }
+                return inside;
+              };
+              
+              if (isPointInPolygon(cell.row, cell.col, hall.vertices)) {
+                itemHallId = hall.id;
+                break;
+              }
+              // 頂点上にあるか
+              for (const vertex of hall.vertices) {
+                if (vertex.row === cell.row && vertex.col === cell.col) {
+                  itemHallId = hall.id;
+                  break;
+                }
+              }
+              if (itemHallId) break;
+            }
+          }
+        }
+      }
+    }
+    
+    // グループIDを生成
+    const buildGroupId = (hallId: string | null, priority: 'none' | 'priority' | 'highest'): string | null => {
+      if (hallId === null) {
+        if (priority === 'highest') return 'undefined:highest';
+        if (priority === 'priority') return 'undefined:priority';
+        return null;
+      }
+      if (priority === 'highest') return `${hallId}:highest`;
+      if (priority === 'priority') return `${hallId}:priority`;
+      return hallId;
+    };
+    
+    const newGroupId = buildGroupId(itemHallId, priorityLevel);
+    const oldPriority = item.priorityLevel || 'none';
+    const oldGroupId = buildGroupId(itemHallId, oldPriority);
+    
+    // hallOrderを更新
+    setHallRouteSettings(prev => {
+      const currentSettings = prev[activeEventName]?.[visitListPanelMapTab] || { hallOrder: [], hallVisitLists: [] };
+      let newHallOrder = [...currentSettings.hallOrder];
+      
+      // 現在のhallOrderにないホール（通常グループ）があれば追加
+      const baseHallId = itemHallId || 'undefined';
+      if (!newHallOrder.some(id => id === baseHallId || id.startsWith(`${baseHallId}:`))) {
+        newHallOrder.push(baseHallId === 'undefined' ? null as any : baseHallId);
+      }
+      
+      // 新しいグループが必要か確認
+      if (priorityLevel !== 'none' && newGroupId && !newHallOrder.includes(newGroupId)) {
+        // 通常グループ（または優先グループ）の直前に挿入
+        const baseGroupId = itemHallId || null;
+        const priorityGroupId = buildGroupId(itemHallId, 'priority');
+        
+        // 挿入位置を決定
+        let insertIndex = newHallOrder.length;
+        
+        if (priorityLevel === 'highest') {
+          // 最優先は、優先グループまたは通常グループの直前
+          const priorityIndex = newHallOrder.indexOf(priorityGroupId!);
+          const baseIndex = newHallOrder.indexOf(baseGroupId as any);
+          
+          if (priorityIndex !== -1) {
+            insertIndex = priorityIndex;
+          } else if (baseIndex !== -1) {
+            insertIndex = baseIndex;
+          }
+        } else if (priorityLevel === 'priority') {
+          // 優先は通常グループの直前
+          const baseIndex = newHallOrder.indexOf(baseGroupId as any);
+          if (baseIndex !== -1) {
+            insertIndex = baseIndex;
+          }
+        }
+        
+        newHallOrder.splice(insertIndex, 0, newGroupId);
+      }
+      
+      // 古いグループが空になるか確認（同じホールの他のアイテムがあるか）
+      if (oldPriority !== 'none' && oldGroupId) {
+        const otherItemsInOldGroup = items.filter(i => 
+          i.id !== itemId && 
+          i.priorityLevel === oldPriority
+        );
+        
+        // 同じホールに他のアイテムがあるか確認（簡略化：同じ優先度のアイテムが他にあれば削除しない）
+        const hasOtherItems = otherItemsInOldGroup.length > 0;
+        
+        if (!hasOtherItems) {
+          newHallOrder = newHallOrder.filter(id => id !== oldGroupId);
+        }
+      }
+      
+      return {
+        ...prev,
+        [activeEventName]: {
+          ...prev[activeEventName],
+          [visitListPanelMapTab]: {
+            ...currentSettings,
+            hallOrder: newHallOrder,
+          },
+        },
+      };
+    });
+  }, [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData]);
+
   // タブ変更時の確認ダイアログ処理（将来的にTabButtonで使用）
   void function handleTabChangeWithVisitListCheck(newTab: string) {
     if (visitListPanelOpen && visitListHasUnsavedChanges) {
@@ -3883,6 +4030,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           hasUnsavedChanges={visitListHasUnsavedChanges}
           onConfirm={handleVisitListConfirm}
           onCancel={handleVisitListCancel}
+          onUpdateItemPriority={handleUpdateItemPriority}
         />
       )}
 

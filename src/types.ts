@@ -21,6 +21,7 @@ export interface ShoppingItem {
   quantity: number;
   remarks: string;
   url?: string;
+  priorityLevel?: 'none' | 'priority' | 'highest';  // 優先度レベル
 }
 
 export type ViewMode = 'edit' | 'execute';
