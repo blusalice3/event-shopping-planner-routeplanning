@@ -7,7 +7,6 @@ import {
   MergedCellInfo,
   MapCellStateDetail,
   HallDefinition,
-  RouteSegment,
 } from '../../types';
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { generateRouteSegments, simplifyPath } from '../../utils/pathfinding';
@@ -30,10 +29,6 @@ interface MapCanvasProps {
 const BASE_CELL_SIZE = 28; // 基本セルサイズ
 const SCROLL_MARGIN = 5; // スクロール余白（行/列数）
 
-// ルートキャッシュ（コンポーネント外で保持）
-const routeCache = new Map<string, RouteSegment[]>();
-const ROUTE_CACHE_MAX_SIZE = 50;
-
 const MapCanvas: React.FC<MapCanvasProps> = ({
   mapData,
   mapName,
@@ -53,9 +48,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
   
-  // コンテナサイズ（可視領域計算用）
-  const [containerSize, setContainerSize] = useState({ width: 0, height: 0 });
-  
   // デバイスピクセル比
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
   
@@ -67,46 +59,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const isDetailedView = zoomLevel >= 80;
   const showNumbers = zoomLevel >= 60;
   const showBorders = zoomLevel >= 40;
-  
-  // コンテナサイズの監視
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    
-    const updateSize = () => {
-      setContainerSize({
-        width: container.clientWidth,
-        height: container.clientHeight,
-      });
-    };
-    
-    updateSize();
-    
-    const resizeObserver = new ResizeObserver(updateSize);
-    resizeObserver.observe(container);
-    
-    return () => resizeObserver.disconnect();
-  }, []);
-  
-  // 可視領域の計算（パフォーマンス最適化）
-  const visibleRange = useMemo(() => {
-    const padding = 2; // 余白（セル数）
-    const minCol = Math.max(1, Math.floor(-offset.x / cellSize) - padding);
-    const maxCol = Math.min(mapData.maxCol, Math.ceil((-offset.x + containerSize.width) / cellSize) + padding);
-    const minRow = Math.max(1, Math.floor(-offset.y / cellSize) - padding);
-    const maxRow = Math.min(mapData.maxRow, Math.ceil((-offset.y + containerSize.height) / cellSize) + padding);
-    
-    return { minRow, maxRow, minCol, maxCol };
-  }, [offset, containerSize, cellSize, mapData.maxRow, mapData.maxCol]);
-  
-  // セルが可視領域内かどうかを判定
-  const isCellVisible = useCallback((row: number, col: number, mergeEndRow?: number, mergeEndCol?: number): boolean => {
-    const cellEndRow = mergeEndRow || row;
-    const cellEndCol = mergeEndCol || col;
-    
-    return !(cellEndCol < visibleRange.minCol || col > visibleRange.maxCol ||
-             cellEndRow < visibleRange.minRow || row > visibleRange.maxRow);
-  }, [visibleRange]);
 
   // ホール選択時にオフセットを自動調整してホールを画面内に配置
   useEffect(() => {
@@ -321,19 +273,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return points;
   }, [mapData.blocks, items, mapName, executeModeItemIds, isRouteVisible]);
 
-  // ルートセグメント（キャッシュ付き）
+  // ルートセグメント
   const routeSegments = useMemo(() => {
     if (!isRouteVisible || routePoints.length < 2) return [];
     
-    // キャッシュキーを生成（ルートポイントの座標と優先度のハッシュ）
-    const cacheKey = `${mapName}-${routePoints.map(p => `${p.row},${p.col},${p.priorityLevel}`).join('|')}`;
-    
-    // キャッシュにあればそれを返す
-    if (routeCache.has(cacheKey)) {
-      return routeCache.get(cacheKey)!;
-    }
-    
-    // キャッシュになければ計算
     const blockNameCells = new Set<string>();
     mapData.blocks.forEach((block) => {
       for (let r = block.startRow; r <= block.endRow; r++) {
@@ -347,21 +290,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     });
     
     const segments = generateRouteSegments(mapData, routePoints, blockNameCells);
-    const simplifiedSegments = segments.map((seg) => ({
+    return segments.map((seg) => ({
       ...seg,
       path: simplifyPath(seg.path),
     }));
-    
-    // キャッシュに保存（サイズ制限）
-    if (routeCache.size >= ROUTE_CACHE_MAX_SIZE) {
-      // 古いエントリを削除（最初のキーを削除）
-      const firstKey = routeCache.keys().next().value;
-      if (firstKey) routeCache.delete(firstKey);
-    }
-    routeCache.set(cacheKey, simplifiedSegments);
-    
-    return simplifiedSegments;
-  }, [isRouteVisible, routePoints, mapData, cellsMap, mapName]);
+  }, [isRouteVisible, routePoints, mapData, cellsMap]);
 
   // 描画
   useEffect(() => {
@@ -421,20 +354,14 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     
     const warningPattern = createWarningStripePattern();
 
-    // 1. 背景を描画（可視領域のみ）
+    // 1. 背景を描画
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
-      
-      const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-      const mergeEndRow = merge ? merge.endRow : cell.row;
-      const mergeEndCol = merge ? merge.endCol : cell.col;
-      
-      // 可視領域外はスキップ
-      if (!isCellVisible(cell.row, cell.col, mergeEndRow, mergeEndCol)) return;
       
       const x = (cell.col - 1) * cellSize;
       const y = (cell.row - 1) * cellSize;
       
+      const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
       const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
       const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
       
@@ -464,21 +391,15 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     });
     
-    // 2. 罫線を描画（ズームレベルに応じて、可視領域のみ）
+    // 2. 罫線を描画（ズームレベルに応じて）
     if (showBorders) {
       mapData.cells.forEach((cell) => {
         if (cell.isMerged) return;
         
-        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-        const mergeEndRow = merge ? merge.endRow : cell.row;
-        const mergeEndCol = merge ? merge.endCol : cell.col;
-        
-        // 可視領域外はスキップ
-        if (!isCellVisible(cell.row, cell.col, mergeEndRow, mergeEndCol)) return;
-        
         const x = (cell.col - 1) * cellSize;
         const y = (cell.row - 1) * cellSize;
         
+        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
         const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
         const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
         
@@ -524,21 +445,15 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
     
-    // 3. テキストを描画（ズームレベルに応じて、可視領域のみ）
+    // 3. テキストを描画（ズームレベルに応じて）
     if (showNumbers) {
       mapData.cells.forEach((cell) => {
         if (cell.isMerged || cell.value === null) return;
         
-        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-        const mergeEndRow = merge ? merge.endRow : cell.row;
-        const mergeEndCol = merge ? merge.endCol : cell.col;
-        
-        // 可視領域外はスキップ
-        if (!isCellVisible(cell.row, cell.col, mergeEndRow, mergeEndCol)) return;
-        
         const x = (cell.col - 1) * cellSize;
         const y = (cell.row - 1) * cellSize;
         
+        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
         const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
         const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
         
@@ -607,16 +522,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const state = cellStates.get(`${cell.row}-${cell.col}`);
         if (!state?.hasItems) return;
         
-        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-        const mergeEndRow = merge ? merge.endRow : cell.row;
-        const mergeEndCol = merge ? merge.endCol : cell.col;
-        
-        // 可視領域外はスキップ
-        if (!isCellVisible(cell.row, cell.col, mergeEndRow, mergeEndCol)) return;
-        
         const x = (cell.col - 1) * cellSize;
         const y = (cell.row - 1) * cellSize;
         
+        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
         const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
         const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
         
@@ -858,7 +767,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     showBorders,
     vertexSelectionMode,
     highlightedCell,
-    isCellVisible,
   ]);
 
   // クリック処理
