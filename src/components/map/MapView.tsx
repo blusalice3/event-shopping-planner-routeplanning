@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   DayMapData,
   ShoppingItem,
@@ -58,6 +58,19 @@ const MapView: React.FC<MapViewProps> = ({
 }) => {
   void _onMoveToFirst;
   void _onMoveToLast;
+  
+  // 遅延レンダリング用の状態
+  const [isMapReady, setIsMapReady] = useState(false);
+  
+  // マップデータが変更されたら遅延レンダリングをリセット
+  useEffect(() => {
+    setIsMapReady(false);
+    // 次のフレームでマップを表示（UIのブロッキングを回避）
+    const timer = requestAnimationFrame(() => {
+      setIsMapReady(true);
+    });
+    return () => cancelAnimationFrame(timer);
+  }, [mapName]);
   
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>(100);
   const [isRouteVisible, setIsRouteVisible] = useState(true);
@@ -417,19 +430,28 @@ const MapView: React.FC<MapViewProps> = ({
         </select>
       </div>
       
-      {/* マップキャンバス */}
-      <MapCanvas
-        mapData={filteredMapData}
-        mapName={mapName}
-        items={filteredItems}
-        executeModeItemIds={filteredExecuteModeItemIds}
-        zoomLevel={zoomLevel}
-        isRouteVisible={isRouteVisible && (halls.length === 0 || selectedHallId !== 'all')}
-        onCellClick={handleCellClick}
-        selectedHall={selectedHallId !== 'all' ? halls.find(h => h.id === selectedHallId) : undefined}
-        vertexSelectionMode={vertexSelectionMode}
-        highlightedCell={highlightedCell}
-      />
+      {/* マップキャンバス（遅延レンダリング） */}
+      {isMapReady ? (
+        <MapCanvas
+          mapData={filteredMapData}
+          mapName={mapName}
+          items={filteredItems}
+          executeModeItemIds={filteredExecuteModeItemIds}
+          zoomLevel={zoomLevel}
+          isRouteVisible={isRouteVisible && (halls.length === 0 || selectedHallId !== 'all')}
+          onCellClick={handleCellClick}
+          selectedHall={selectedHallId !== 'all' ? halls.find(h => h.id === selectedHallId) : undefined}
+          vertexSelectionMode={vertexSelectionMode}
+          highlightedCell={highlightedCell}
+        />
+      ) : (
+        <div className="flex-1 flex items-center justify-center bg-slate-100 dark:bg-slate-800">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+            <p className="text-slate-600 dark:text-slate-400">マップを読み込み中...</p>
+          </div>
+        </div>
+      )}
       
       {/* セルアイテムポップアップ */}
       <CellItemsPopup
