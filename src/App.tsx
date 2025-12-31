@@ -16,6 +16,7 @@ import SortDescendingIcon from './components/icons/SortDescendingIcon';
 import SearchBar from './components/SearchBar';
 import { MapView, BlockDefinitionPanel, HallDefinitionPanel, isPointInPolygon } from './components/map';
 import VisitListPanel from './components/VisitListPanel';
+import OfflineNotification from './components/OfflineNotification';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
 import { parseMapFile } from './utils/xlsxMapParser';
 import { db } from './utils/indexedDB';
@@ -3723,6 +3724,9 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-200 font-sans">
+      {/* オフライン通知 */}
+      <OfflineNotification />
+      
       <header className="bg-white dark:bg-slate-800 shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
           <div>

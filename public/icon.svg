@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="64" fill="#2563eb"/>
+  <text x="256" y="200" text-anchor="middle" font-size="120" font-family="Arial, sans-serif" fill="white" font-weight="bold">📋</text>
+  <text x="256" y="350" text-anchor="middle" font-size="80" font-family="Arial, sans-serif" fill="white" font-weight="bold">巡回</text>
+  <text x="256" y="430" text-anchor="middle" font-size="60" font-family="Arial, sans-serif" fill="white">リスト</text>
+</svg>

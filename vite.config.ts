@@ -7,7 +7,7 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico'],
+      includeAssets: ['favicon.ico', '*.png'],
       manifest: {
         name: '即売会 購入巡回表',
         short_name: '巡回表',
@@ -17,22 +17,72 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
-        icons: []
+        icons: [
+          {
+            src: '/icon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any maskable'
+          }
+        ]
       },
       workbox: {
-        globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
-        cleanupOutdatedCaches: true, // 追加: 古いキャッシュを自動削除
-        skipWaiting: true, // 追加: 新しいService Workerを即座にアクティブ化
-        clientsClaim: true, // 追加: アクティブ化後すぐに制御を開始
+        // 全ての静的アセットをプリキャッシュ
+        globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2,ttf,eot}'],
+        cleanupOutdatedCaches: true,
+        skipWaiting: true,
+        clientsClaim: true,
+        // ナビゲーションリクエストのフォールバック
+        navigateFallback: '/index.html',
+        navigateFallbackDenylist: [/^\/api/],
         runtimeCaching: [
           {
+            // Google Fonts
+            urlPattern: /^https:\/\/fonts\.googleapis\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-stylesheets',
+              expiration: {
+                maxEntries: 10,
+                maxAgeSeconds: 60 * 60 * 24 * 365 // 1年
+              }
+            }
+          },
+          {
+            urlPattern: /^https:\/\/fonts\.gstatic\.com\/.*/i,
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'google-fonts-webfonts',
+              expiration: {
+                maxEntries: 30,
+                maxAgeSeconds: 60 * 60 * 24 * 365 // 1年
+              },
+              cacheableResponse: {
+                statuses: [0, 200]
+              }
+            }
+          },
+          {
+            // Tailwind CDN
             urlPattern: /^https:\/\/cdn\.tailwindcss\.com\/.*/i,
             handler: 'CacheFirst',
             options: {
               cacheName: 'tailwind-cache',
               expiration: {
                 maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 30 // 30 days
+                maxAgeSeconds: 60 * 60 * 24 * 30 // 30日
+              }
+            }
+          },
+          {
+            // その他の外部リソース
+            urlPattern: /^https:\/\/.*\.(js|css|woff|woff2|ttf|eot)$/i,
+            handler: 'StaleWhileRevalidate',
+            options: {
+              cacheName: 'external-resources',
+              expiration: {
+                maxEntries: 50,
+                maxAgeSeconds: 60 * 60 * 24 * 7 // 7日
               }
             }
           }
