@@ -10,6 +10,87 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="巡回表" />
     <title>即売会 購入巡回表</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+      /* Android用タッチ最適化 */
+      * {
+        -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
+        -webkit-touch-callout: none;
+      }
+      
+      body {
+        overscroll-behavior-y: contain;
+        -webkit-overflow-scrolling: touch;
+      }
+      
+      /* セレクト・インプット要素のズーム防止 */
+      input, select, textarea {
+        font-size: 16px !important;
+      }
+      
+      /* カスタムスクロールバー（Android Chromeでは無効） */
+      ::-webkit-scrollbar {
+        width: 8px;
+      }
+      
+      ::-webkit-scrollbar-track {
+        background: #f1f5f9;
+      }
+      
+      ::-webkit-scrollbar-thumb {
+        background: #94a3b8;
+        border-radius: 4px;
+      }
+      
+      /* フェードインアニメーション */
+      @keyframes fade-in {
+        from {
+          opacity: 0;
+          transform: translateY(10px);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0);
+        }
+      }
+      
+      .animate-fade-in {
+        animation: fade-in 0.3s ease-out;
+      }
+      
+      /* ダークモード対応 */
+      @media (prefers-color-scheme: dark) {
+        ::-webkit-scrollbar-track {
+          background: #1e293b;
+        }
+        ::-webkit-scrollbar-thumb {
+          background: #475569;
+        }
+      }
+      
+      /* ローディング画面 */
+      #loading-screen {
+        position: fixed;
+        inset: 0;
+        background: white;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 9999;
+        transition: opacity 0.3s;
+      }
+      
+      #loading-screen.hidden {
+        opacity: 0;
+        pointer-events: none;
+      }
+      
+      @media (prefers-color-scheme: dark) {
+        #loading-screen {
+          background: #0f172a;
+        }
+      }
+    </style>
   </head>
   <body class="bg-slate-50 dark:bg-slate-900">
     <div id="loading-screen">
