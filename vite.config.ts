@@ -63,18 +63,6 @@ export default defineConfig({
             }
           },
           {
-            // Tailwind CDN
-            urlPattern: /^https:\/\/cdn\.tailwindcss\.com\/.*/i,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'tailwind-cache',
-              expiration: {
-                maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 30 // 30日
-              }
-            }
-          },
-          {
             // その他の外部リソース
             urlPattern: /^https:\/\/.*\.(js|css|woff|woff2|ttf|eot)$/i,
             handler: 'StaleWhileRevalidate',
