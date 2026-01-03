@@ -575,6 +575,14 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   // 自動スクロール用のref
   const autoScrollTimer = useRef<NodeJS.Timeout | null>(null);
   const listContainerRef = useRef<HTMLDivElement>(null);
+  
+  // ドラッグ状態をrefでも追跡（イベントリスナー内で参照するため）
+  const isDraggingRef = useRef(false);
+  const touchDragDataRef = useRef<{
+    groupId: string | null;
+    hallIndex: number;
+    item: ShoppingItem;
+  } | null>(null);
 
   // 自動スクロールの停止
   const stopAutoScroll = useCallback(() => {
@@ -596,36 +604,91 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     }, 16); // 約60fps
   }, [stopAutoScroll]);
 
-  // ドラッグ中のスクロール防止（ネイティブイベントリスナー）
+  // グローバルタッチイベントハンドラ（常に登録）
   useEffect(() => {
-    if (!touchDragItem) return;
-    
-    const container = listContainerRef.current;
-    
-    // touchmoveイベントをキャプチャしてスクロールを防止
-    const preventScroll = (e: TouchEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
+    const handleGlobalTouchMove = (e: TouchEvent) => {
+      // ドラッグ中の場合のみスクロールを防止
+      if (isDraggingRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        
+        const touch = e.touches[0];
+        setTouchDragPosition({ x: touch.clientX, y: touch.clientY });
+        
+        // リストコンテナの位置を取得して自動スクロール判定
+        const container = listContainerRef.current;
+        if (container) {
+          const rect = container.getBoundingClientRect();
+          const touchY = touch.clientY;
+          
+          // 上部エッジに近づいたら上にスクロール
+          const topThreshold = rect.top + 60;
+          // 下部エッジに近づいたら下にスクロール
+          const bottomThreshold = rect.bottom - 80;
+          
+          if (touchY < topThreshold) {
+            if (!autoScrollTimer.current) startAutoScroll('up');
+          } else if (touchY > bottomThreshold) {
+            if (!autoScrollTimer.current) startAutoScroll('down');
+          } else {
+            stopAutoScroll();
+          }
+        }
+        
+        // ドロップ先を検出
+        const dragData = touchDragDataRef.current;
+        if (dragData) {
+          const elements = document.elementsFromPoint(touch.clientX, touch.clientY);
+          let found = false;
+          for (const el of elements) {
+            const itemEl = el.closest('[data-drag-item]') as HTMLElement;
+            if (itemEl) {
+              const targetGroupId = itemEl.dataset.groupId || null;
+              const targetHallIndex = parseInt(itemEl.dataset.hallIndex || '-1', 10);
+              
+              if (targetGroupId === dragData.groupId && targetHallIndex !== dragData.hallIndex) {
+                setDragOverIndex(targetHallIndex);
+                found = true;
+              }
+              break;
+            }
+          }
+          if (!found) {
+            setDragOverIndex(null);
+          }
+        }
+      }
     };
     
-    // passiveをfalseにしてpreventDefaultを有効にする
-    // コンテナとdocument両方でブロック
-    if (container) {
-      container.addEventListener('touchmove', preventScroll, { passive: false });
-    }
-    document.addEventListener('touchmove', preventScroll, { passive: false });
-    document.body.style.overflow = 'hidden';
-    document.body.style.touchAction = 'none';
+    const handleGlobalTouchEnd = () => {
+      if (isDraggingRef.current) {
+        // 自動スクロールを停止
+        stopAutoScroll();
+        
+        // ドロップ処理はstateベースで行う（useEffectで処理）
+        isDraggingRef.current = false;
+        document.body.style.overflow = '';
+        document.body.style.touchAction = '';
+      }
+      
+      // 長押しタイマーをクリア
+      if (longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    };
+    
+    // passive: false でイベントリスナーを登録
+    document.addEventListener('touchmove', handleGlobalTouchMove, { passive: false });
+    document.addEventListener('touchend', handleGlobalTouchEnd);
+    document.addEventListener('touchcancel', handleGlobalTouchEnd);
     
     return () => {
-      if (container) {
-        container.removeEventListener('touchmove', preventScroll);
-      }
-      document.removeEventListener('touchmove', preventScroll);
-      document.body.style.overflow = '';
-      document.body.style.touchAction = '';
+      document.removeEventListener('touchmove', handleGlobalTouchMove);
+      document.removeEventListener('touchend', handleGlobalTouchEnd);
+      document.removeEventListener('touchcancel', handleGlobalTouchEnd);
     };
-  }, [touchDragItem]);
+  }, [startAutoScroll, stopAutoScroll]);
 
   // タッチドラッグ用ハンドラ
   const handleTouchStart = useCallback((e: React.TouchEvent, groupId: string | null, hallIndex: number, item: ShoppingItem) => {
@@ -636,10 +699,17 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     // 長押しタイマー開始（300ms）
     longPressTimer.current = setTimeout(() => {
       // 長押し成功 - ドラッグ開始
+      isDraggingRef.current = true;
+      touchDragDataRef.current = { groupId, hallIndex, item };
+      
       setTouchDragItem({ groupId, hallIndex, item });
       setTouchDragPosition({ x: touch.clientX, y: touch.clientY });
       setDragHallId(groupId);
       setDragIndex(hallIndex);
+      
+      // スクロール防止を即座に適用
+      document.body.style.overflow = 'hidden';
+      document.body.style.touchAction = 'none';
       
       // 振動フィードバック（対応デバイスのみ）
       if (navigator.vibrate) {
@@ -660,57 +730,10 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
         longPressTimer.current = null;
       }
     }
-    
-    // ドラッグ中の場合
-    if (touchDragItem) {
-      setTouchDragPosition({ x: touch.clientX, y: touch.clientY });
-      
-      // リストコンテナの位置を取得
-      const container = listContainerRef.current;
-      if (container) {
-        const rect = container.getBoundingClientRect();
-        const touchY = touch.clientY;
-        
-        // 上部エッジ（ヘッダーバー付近）に近づいたら上にスクロール
-        const topThreshold = rect.top + 60; // 上から60px
-        // 下部エッジ（確定ボタン付近）に近づいたら下にスクロール
-        const bottomThreshold = rect.bottom - 80; // 下から80px
-        
-        if (touchY < topThreshold) {
-          startAutoScroll('up');
-        } else if (touchY > bottomThreshold) {
-          startAutoScroll('down');
-        } else {
-          stopAutoScroll();
-        }
-      }
-      
-      // ドロップ先を検出
-      const elements = document.elementsFromPoint(touch.clientX, touch.clientY);
-      let found = false;
-      for (const el of elements) {
-        const itemEl = el.closest('[data-drag-item]') as HTMLElement;
-        if (itemEl) {
-          const targetGroupId = itemEl.dataset.groupId || null;
-          const targetHallIndex = parseInt(itemEl.dataset.hallIndex || '-1', 10);
-          
-          if (targetGroupId === touchDragItem.groupId && targetHallIndex !== touchDragItem.hallIndex) {
-            setDragOverIndex(targetHallIndex);
-            found = true;
-          }
-          break;
-        }
-      }
-      if (!found) {
-        setDragOverIndex(null);
-      }
-    }
-  }, [touchDragItem, startAutoScroll, stopAutoScroll]);
+    // タッチ移動処理はグローバルハンドラで行う
+  }, []);
 
   const handleTouchEnd = useCallback(() => {
-    // 自動スクロールを停止
-    stopAutoScroll();
-    
     // 長押しタイマーをクリア
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current);
@@ -718,18 +741,28 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     }
     
     // ドラッグ中の場合はドロップ処理
-    if (touchDragItem && dragOverIndex !== null && dragOverIndex !== touchDragItem.hallIndex) {
-      moveItemInHall(touchDragItem.groupId, touchDragItem.hallIndex, dragOverIndex);
+    const dragData = touchDragDataRef.current;
+    if (isDraggingRef.current && dragData && dragOverIndex !== null && dragOverIndex !== dragData.hallIndex) {
+      moveItemInHall(dragData.groupId, dragData.hallIndex, dragOverIndex);
     }
     
+    // 自動スクロールを停止
+    stopAutoScroll();
+    
     // 状態をリセット
+    isDraggingRef.current = false;
+    touchDragDataRef.current = null;
     setTouchDragItem(null);
     setTouchDragPosition(null);
     setDragHallId(null);
     setDragIndex(null);
     setDragOverIndex(null);
     touchStartPos.current = null;
-  }, [touchDragItem, dragOverIndex, moveItemInHall, stopAutoScroll]);
+    
+    // スクロール防止を解除
+    document.body.style.overflow = '';
+    document.body.style.touchAction = '';
+  }, [dragOverIndex, moveItemInHall, stopAutoScroll]);
 
   // ボトムシートのドラッグハンドル
   const handleSheetDragStart = useCallback((e: React.PointerEvent) => {
