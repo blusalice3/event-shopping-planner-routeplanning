@@ -11,6 +11,27 @@
     <meta name="apple-mobile-web-app-title" content="巡回表" />
     <title>即売会 購入巡回表</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      // Tailwind CDNのダークモード設定（classベース）
+      tailwind.config = {
+        darkMode: 'class',
+      }
+      
+      // 初期ロード時にダークモードを適用（フラッシュ防止）
+      (function() {
+        const themeMode = localStorage.getItem('themeMode') || 'system';
+        if (themeMode === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else if (themeMode === 'light') {
+          document.documentElement.classList.remove('dark');
+        } else {
+          // システム設定に従う
+          if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark');
+          }
+        }
+      })();
+    </script>
     <style>
       /* Android用タッチ最適化 */
       * {

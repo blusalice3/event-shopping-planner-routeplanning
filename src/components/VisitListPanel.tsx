@@ -572,6 +572,30 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     setDragOverIndex(null);
   }, []);
 
+  // 自動スクロール用のref
+  const autoScrollTimer = useRef<NodeJS.Timeout | null>(null);
+  const listContainerRef = useRef<HTMLDivElement>(null);
+
+  // 自動スクロールの停止
+  const stopAutoScroll = useCallback(() => {
+    if (autoScrollTimer.current) {
+      clearInterval(autoScrollTimer.current);
+      autoScrollTimer.current = null;
+    }
+  }, []);
+
+  // 自動スクロールの開始
+  const startAutoScroll = useCallback((direction: 'up' | 'down') => {
+    stopAutoScroll();
+    autoScrollTimer.current = setInterval(() => {
+      const container = listContainerRef.current;
+      if (container) {
+        const scrollAmount = direction === 'up' ? -15 : 15;
+        container.scrollTop += scrollAmount;
+      }
+    }, 16); // 約60fps
+  }, [stopAutoScroll]);
+
   // タッチドラッグ用ハンドラ
   const handleTouchStart = useCallback((e: React.TouchEvent, groupId: string | null, hallIndex: number, item: ShoppingItem) => {
     const touch = e.touches[0];
@@ -609,10 +633,32 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     // ドラッグ中の場合
     if (touchDragItem) {
       e.preventDefault();
+      e.stopPropagation();
       setTouchDragPosition({ x: touch.clientX, y: touch.clientY });
+      
+      // リストコンテナの位置を取得
+      const container = listContainerRef.current;
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        const touchY = touch.clientY;
+        
+        // 上部エッジ（ヘッダーバー付近）に近づいたら上にスクロール
+        const topThreshold = rect.top + 60; // 上から60px
+        // 下部エッジ（確定ボタン付近）に近づいたら下にスクロール
+        const bottomThreshold = rect.bottom - 80; // 下から80px
+        
+        if (touchY < topThreshold) {
+          startAutoScroll('up');
+        } else if (touchY > bottomThreshold) {
+          startAutoScroll('down');
+        } else {
+          stopAutoScroll();
+        }
+      }
       
       // ドロップ先を検出
       const elements = document.elementsFromPoint(touch.clientX, touch.clientY);
+      let found = false;
       for (const el of elements) {
         const itemEl = el.closest('[data-drag-item]') as HTMLElement;
         if (itemEl) {
@@ -621,14 +667,21 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
           
           if (targetGroupId === touchDragItem.groupId && targetHallIndex !== touchDragItem.hallIndex) {
             setDragOverIndex(targetHallIndex);
+            found = true;
           }
           break;
         }
       }
+      if (!found) {
+        setDragOverIndex(null);
+      }
     }
-  }, [touchDragItem]);
+  }, [touchDragItem, startAutoScroll, stopAutoScroll]);
 
   const handleTouchEnd = useCallback(() => {
+    // 自動スクロールを停止
+    stopAutoScroll();
+    
     // 長押しタイマーをクリア
     if (longPressTimer.current) {
       clearTimeout(longPressTimer.current);
@@ -647,7 +700,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     setDragIndex(null);
     setDragOverIndex(null);
     touchStartPos.current = null;
-  }, [touchDragItem, dragOverIndex, moveItemInHall]);
+  }, [touchDragItem, dragOverIndex, moveItemInHall, stopAutoScroll]);
 
   // ボトムシートのドラッグハンドル
   const handleSheetDragStart = useCallback((e: React.PointerEvent) => {
@@ -810,7 +863,11 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
           </div>
           
           {/* アイテムリスト */}
-          <div className="flex-1 overflow-y-auto">
+          <div 
+            ref={listContainerRef}
+            className={`flex-1 overflow-y-auto ${touchDragItem ? 'touch-none' : ''}`}
+            style={{ touchAction: touchDragItem ? 'none' : 'auto' }}
+          >
             {filteredGroupedItems.map((group, groupIndex) => {
               const headerStyle = getGroupHeaderStyle(group.groupId, hallDefinitions);
               const displayName = getGroupDisplayName(group.groupId, hallDefinitions);
@@ -1102,7 +1159,11 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
       </div>
       
       {/* アイテムリスト */}
-      <div className="flex-1 overflow-y-auto">
+      <div 
+        ref={listContainerRef}
+        className={`flex-1 overflow-y-auto ${touchDragItem ? 'touch-none' : ''}`}
+        style={{ touchAction: touchDragItem ? 'none' : 'auto' }}
+      >
         {filteredGroupedItems.map((group, groupIndex) => {
           const headerStyle = getGroupHeaderStyle(group.groupId, hallDefinitions);
           const displayName = getGroupDisplayName(group.groupId, hallDefinitions);
