@@ -277,6 +277,17 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
   
+  // タッチドラッグ用の状態
+  const [touchDragItem, setTouchDragItem] = useState<{
+    groupId: string | null;
+    hallIndex: number;
+    item: ShoppingItem;
+  } | null>(null);
+  const [touchDragPosition, setTouchDragPosition] = useState<{ x: number; y: number } | null>(null);
+  const touchStartPos = useRef<{ x: number; y: number } | null>(null);
+  const touchStartTime = useRef<number>(0);
+  const longPressTimer = useRef<NodeJS.Timeout | null>(null);
+  
   // Undo/Redo履歴
   const [history, setHistory] = useState<HistoryState[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -561,6 +572,83 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     setDragOverIndex(null);
   }, []);
 
+  // タッチドラッグ用ハンドラ
+  const handleTouchStart = useCallback((e: React.TouchEvent, groupId: string | null, hallIndex: number, item: ShoppingItem) => {
+    const touch = e.touches[0];
+    touchStartPos.current = { x: touch.clientX, y: touch.clientY };
+    touchStartTime.current = Date.now();
+    
+    // 長押しタイマー開始（300ms）
+    longPressTimer.current = setTimeout(() => {
+      // 長押し成功 - ドラッグ開始
+      setTouchDragItem({ groupId, hallIndex, item });
+      setTouchDragPosition({ x: touch.clientX, y: touch.clientY });
+      setDragHallId(groupId);
+      setDragIndex(hallIndex);
+      
+      // 振動フィードバック（対応デバイスのみ）
+      if (navigator.vibrate) {
+        navigator.vibrate(50);
+      }
+    }, 300);
+  }, []);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    const touch = e.touches[0];
+    
+    // 長押し前に移動した場合はキャンセル
+    if (longPressTimer.current && touchStartPos.current) {
+      const dx = Math.abs(touch.clientX - touchStartPos.current.x);
+      const dy = Math.abs(touch.clientY - touchStartPos.current.y);
+      if (dx > 10 || dy > 10) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    }
+    
+    // ドラッグ中の場合
+    if (touchDragItem) {
+      e.preventDefault();
+      setTouchDragPosition({ x: touch.clientX, y: touch.clientY });
+      
+      // ドロップ先を検出
+      const elements = document.elementsFromPoint(touch.clientX, touch.clientY);
+      for (const el of elements) {
+        const itemEl = el.closest('[data-drag-item]') as HTMLElement;
+        if (itemEl) {
+          const targetGroupId = itemEl.dataset.groupId || null;
+          const targetHallIndex = parseInt(itemEl.dataset.hallIndex || '-1', 10);
+          
+          if (targetGroupId === touchDragItem.groupId && targetHallIndex !== touchDragItem.hallIndex) {
+            setDragOverIndex(targetHallIndex);
+          }
+          break;
+        }
+      }
+    }
+  }, [touchDragItem]);
+
+  const handleTouchEnd = useCallback(() => {
+    // 長押しタイマーをクリア
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    
+    // ドラッグ中の場合はドロップ処理
+    if (touchDragItem && dragOverIndex !== null && dragOverIndex !== touchDragItem.hallIndex) {
+      moveItemInHall(touchDragItem.groupId, touchDragItem.hallIndex, dragOverIndex);
+    }
+    
+    // 状態をリセット
+    setTouchDragItem(null);
+    setTouchDragPosition(null);
+    setDragHallId(null);
+    setDragIndex(null);
+    setDragOverIndex(null);
+    touchStartPos.current = null;
+  }, [touchDragItem, dragOverIndex, moveItemInHall]);
+
   // ボトムシートのドラッグハンドル
   const handleSheetDragStart = useCallback((e: React.PointerEvent) => {
     isDraggingSheet.current = true;
@@ -756,15 +844,21 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                 {!collapsedHalls.has(group.groupId) && group.items.map(({ item, hallIndex }) => (
                   <div
                     key={item.id}
+                    data-drag-item
+                    data-group-id={group.groupId}
+                    data-hall-index={hallIndex}
                     draggable
                     onDragStart={(e) => handleDragStart(e, group.groupId, hallIndex)}
                     onDragOver={(e) => handleDragOver(e, group.groupId, hallIndex)}
                     onDrop={(e) => handleDrop(e, group.groupId, hallIndex)}
                     onDragEnd={handleDragEnd}
-                    onClick={() => handleItemClick(group.groupId, hallIndex)}
+                    onTouchStart={(e) => handleTouchStart(e, group.groupId, hallIndex, item)}
+                    onTouchMove={handleTouchMove}
+                    onTouchEnd={handleTouchEnd}
+                    onClick={() => !touchDragItem && handleItemClick(group.groupId, hallIndex)}
                     onMouseEnter={() => handleItemHover(item)}
                     onMouseLeave={onClearHighlight}
-                    className={`relative flex items-center gap-2 px-4 py-2 border-b border-slate-100 dark:border-slate-800 cursor-pointer transition-colors ${
+                    className={`relative flex items-center gap-2 px-4 py-2 border-b border-slate-100 dark:border-slate-800 cursor-pointer transition-colors touch-manipulation ${
                       dragHallId === group.groupId && dragOverIndex === hallIndex ? 'bg-blue-100 dark:bg-blue-900/30' : ''
                     } ${
                       isInRange(group.groupId, hallIndex) ? 'bg-purple-100 dark:bg-purple-900/30' : ''
@@ -773,6 +867,8 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                     } ${
                       group.priority === 'highest' ? 'bg-red-50/50 dark:bg-red-950/30' : 
                       group.priority === 'priority' ? 'bg-orange-50/50 dark:bg-orange-950/30' : ''
+                    } ${
+                      touchDragItem?.item.id === item.id ? 'opacity-50' : ''
                     }`}
                   >
                     {/* 範囲選択インジケーター */}
@@ -857,6 +953,32 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
             </button>
           </div>
         </div>
+        
+        {/* フローティングドラッグアイテム */}
+        {touchDragItem && touchDragPosition && (
+          <div
+            className="fixed z-[100] pointer-events-none bg-white dark:bg-slate-800 shadow-2xl rounded-lg px-4 py-2 border-2 border-blue-500"
+            style={{
+              left: touchDragPosition.x - 100,
+              top: touchDragPosition.y - 30,
+              width: '200px',
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <div className="w-6 h-6 flex items-center justify-center text-white rounded-full text-xs font-bold bg-blue-600">
+                {touchDragItem.hallIndex + 1}
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="font-semibold text-sm text-slate-900 dark:text-slate-100 truncate">
+                  {touchDragItem.item.block}-{touchDragItem.item.number}
+                </p>
+                <p className="text-xs text-slate-600 dark:text-slate-400 truncate">
+                  {touchDragItem.item.circle}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1014,15 +1136,21 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
             {!collapsedHalls.has(group.groupId) && group.items.map(({ item, hallIndex }) => (
               <div
                 key={item.id}
+                data-drag-item
+                data-group-id={group.groupId}
+                data-hall-index={hallIndex}
                 draggable
                 onDragStart={(e) => handleDragStart(e, group.groupId, hallIndex)}
                 onDragOver={(e) => handleDragOver(e, group.groupId, hallIndex)}
                 onDrop={(e) => handleDrop(e, group.groupId, hallIndex)}
                 onDragEnd={handleDragEnd}
-                onClick={() => handleItemClick(group.groupId, hallIndex)}
+                onTouchStart={(e) => handleTouchStart(e, group.groupId, hallIndex, item)}
+                onTouchMove={handleTouchMove}
+                onTouchEnd={handleTouchEnd}
+                onClick={() => !touchDragItem && handleItemClick(group.groupId, hallIndex)}
                 onMouseEnter={() => handleItemHover(item)}
                 onMouseLeave={onClearHighlight}
-                className={`relative flex items-center gap-2 px-4 py-2 border-b border-slate-100 dark:border-slate-800 cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 ${
+                className={`relative flex items-center gap-2 px-4 py-2 border-b border-slate-100 dark:border-slate-800 cursor-pointer transition-colors hover:bg-slate-50 dark:hover:bg-slate-800/50 touch-manipulation ${
                   dragHallId === group.groupId && dragOverIndex === hallIndex ? 'bg-blue-100 dark:bg-blue-900/30' : ''
                 } ${
                   isInRange(group.groupId, hallIndex) ? 'bg-purple-100 dark:bg-purple-900/30' : ''
@@ -1031,6 +1159,8 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                 } ${
                   group.priority === 'highest' ? 'bg-red-50/50 dark:bg-red-950/30' : 
                   group.priority === 'priority' ? 'bg-orange-50/50 dark:bg-orange-950/30' : ''
+                } ${
+                  touchDragItem?.item.id === item.id ? 'opacity-50' : ''
                 }`}
               >
                 {/* 範囲選択インジケーター */}
@@ -1178,6 +1308,32 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
           </button>
         </div>
       </div>
+      
+      {/* フローティングドラッグアイテム */}
+      {touchDragItem && touchDragPosition && (
+        <div
+          className="fixed z-[100] pointer-events-none bg-white dark:bg-slate-800 shadow-2xl rounded-lg px-4 py-2 border-2 border-blue-500"
+          style={{
+            left: touchDragPosition.x - 100,
+            top: touchDragPosition.y - 30,
+            width: '200px',
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 flex items-center justify-center text-white rounded-full text-xs font-bold bg-blue-600">
+              {touchDragItem.hallIndex + 1}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-semibold text-sm text-slate-900 dark:text-slate-100 truncate">
+                {touchDragItem.item.block}-{touchDragItem.item.number}
+              </p>
+              <p className="text-xs text-slate-600 dark:text-slate-400 truncate">
+                {touchDragItem.item.circle}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
