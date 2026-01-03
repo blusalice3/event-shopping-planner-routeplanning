@@ -596,6 +596,37 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     }, 16); // 約60fps
   }, [stopAutoScroll]);
 
+  // ドラッグ中のスクロール防止（ネイティブイベントリスナー）
+  useEffect(() => {
+    if (!touchDragItem) return;
+    
+    const container = listContainerRef.current;
+    
+    // touchmoveイベントをキャプチャしてスクロールを防止
+    const preventScroll = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+    };
+    
+    // passiveをfalseにしてpreventDefaultを有効にする
+    // コンテナとdocument両方でブロック
+    if (container) {
+      container.addEventListener('touchmove', preventScroll, { passive: false });
+    }
+    document.addEventListener('touchmove', preventScroll, { passive: false });
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+    
+    return () => {
+      if (container) {
+        container.removeEventListener('touchmove', preventScroll);
+      }
+      document.removeEventListener('touchmove', preventScroll);
+      document.body.style.overflow = '';
+      document.body.style.touchAction = '';
+    };
+  }, [touchDragItem]);
+
   // タッチドラッグ用ハンドラ
   const handleTouchStart = useCallback((e: React.TouchEvent, groupId: string | null, hallIndex: number, item: ShoppingItem) => {
     const touch = e.touches[0];
@@ -632,8 +663,6 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     
     // ドラッグ中の場合
     if (touchDragItem) {
-      e.preventDefault();
-      e.stopPropagation();
       setTouchDragPosition({ x: touch.clientX, y: touch.clientY });
       
       // リストコンテナの位置を取得
