@@ -121,14 +121,16 @@ const App: React.FC = () => {
     const applyTheme = () => {
       const html = document.documentElement;
       
-      // まず両方のクラスを削除してからセット
-      html.classList.remove('dark', 'light');
+      // data-theme属性を設定（CSS変数用）
+      html.setAttribute('data-theme', themeMode);
+      
+      // Tailwindのdarkクラスも同期
+      html.classList.remove('dark');
       
       if (themeMode === 'dark') {
         html.classList.add('dark');
       } else if (themeMode === 'light') {
-        // lightの場合はdarkクラスを付けない（既に削除済み）
-        // 明示的にlightクラスも追加（CSSで使う場合用）
+        // lightの場合はdarkクラスを付けない
       } else {
         // システム設定に従う
         if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
