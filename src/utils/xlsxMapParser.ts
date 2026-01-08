@@ -78,18 +78,24 @@ function getBackgroundColorFromExcelJS(fill?: ExcelJS.Fill): string | null {
   return null;
 }
 
-// ブロック名かどうかを判定（1〜3文字のカタカナ、ひらがな、アルファベット）
+// ブロック名かどうかを判定（1〜3文字のカタカナ、ひらがな、アルファベット、漢字、またはそれらの組み合わせ）
 function isBlockName(value: ExcelJS.CellValue): boolean {
   if (value === null || value === undefined) return false;
   const str = String(value).trim();
   if (str.length === 0 || str.length > 3) return false;
   
-  // カタカナ、ひらがな、アルファベット（大文字・小文字）
-  const katakana = /^[ア-ンァ-ヴー]+$/;
-  const hiragana = /^[あ-んぁ-ゔー]+$/;
-  const alphabet = /^[A-Za-z]+$/;
+  // 各文字種の正規表現
+  const katakana = /[ア-ンァ-ヴー]/;
+  const hiragana = /[あ-んぁ-ゔー]/;
+  const alphabet = /[A-Za-z]/;
+  const kanji = /[\u4E00-\u9FFF\u3400-\u4DBF]/;  // CJK統合漢字 + CJK統合漢字拡張A
   
-  return katakana.test(str) || hiragana.test(str) || alphabet.test(str);
+  // 全ての文字が許可された文字種であることを確認
+  const allowedChars = /^[ア-ンァ-ヴーあ-んぁ-ゔーA-Za-z\u4E00-\u9FFF\u3400-\u4DBF]+$/;
+  if (!allowedChars.test(str)) return false;
+  
+  // 少なくとも1つの文字種に該当する文字が含まれていればOK
+  return katakana.test(str) || hiragana.test(str) || alphabet.test(str) || kanji.test(str);
 }
 
 // 数値セルかどうかを判定（1〜100の整数）
@@ -112,6 +118,7 @@ function generateBlockColor(index: number): string {
 /**
  * 太い罫線で囲まれた領域を検出（Flood Fill方式）
  * 指定セルから開始し、太い罫線に囲まれた領域全体を返す
+ * 多角形（凹型含む）に対応
  */
 function findBorderedRegion(
   startRow: number,
@@ -123,7 +130,7 @@ function findBorderedRegion(
 ): Set<string> {
   const region = new Set<string>();
   const queue: Array<{ row: number; col: number }> = [{ row: startRow, col: startCol }];
-  const MAX_REGION_SIZE = 500; // 1つの領域の最大セル数
+  const MAX_REGION_SIZE = 2000; // 1つの領域の最大セル数（大きな多角形ブロック対応）
   
   while (queue.length > 0 && region.size < MAX_REGION_SIZE) {
     const { row, col } = queue.shift()!;
@@ -329,7 +336,12 @@ function detectBlocksWithExcelJS(
         index === self.findIndex((c) => c.row === cell.row && c.col === cell.col)
     ).sort((a, b) => a.value - b.value);
     
-    blocks.push({
+    // 領域が矩形かどうかを判定（多角形の場合はcellGroupsを作成）
+    const boxArea = (boundingBox.endRow - boundingBox.startRow + 1) * 
+                    (boundingBox.endCol - boundingBox.startCol + 1);
+    const isPolygon = allCells.size < boxArea * 0.95; // 5%以上の差があれば多角形とみなす
+    
+    const blockDef: BlockDefinition = {
       name: blockName,
       startRow: boundingBox.startRow,
       startCol: boundingBox.startCol,
@@ -338,7 +350,21 @@ function detectBlocksWithExcelJS(
       numberCells: uniqueNumberCells,
       color: generateBlockColor(colorIndex++),
       isAutoDetected: true,
-    });
+    };
+    
+    // 多角形ブロックの場合、実際のセル群を保存
+    if (isPolygon) {
+      // 各領域をcellGroupとして保存（individualタイプ）
+      blockDef.cellGroups = group.regions.map(region => ({
+        type: 'individual' as const,
+        cells: Array.from(region).map(key => {
+          const [rowStr, colStr] = key.split('-');
+          return { row: parseInt(rowStr, 10), col: parseInt(colStr, 10) };
+        }),
+      }));
+    }
+    
+    blocks.push(blockDef);
   });
   
   return blocks;
