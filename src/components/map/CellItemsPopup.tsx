@@ -219,6 +219,9 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
           {items.map((item) => {
             const isInVisitList = executeModeItemIds.has(item.id);
             
+            // ナンバーから数字以外の部分（a, b等）を抽出
+            const numberSuffix = item.number.replace(/^\d+/, '');
+            
             return (
               <div
                 key={item.id}
@@ -238,6 +241,11 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                       <span className="font-medium text-slate-900 dark:text-white">
                         {item.circle}
                       </span>
+                      {numberSuffix && (
+                        <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                          [{numberSuffix}]
+                        </span>
+                      )}
                     </div>
                     <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
                       {item.title}
