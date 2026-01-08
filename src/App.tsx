@@ -121,16 +121,18 @@ const App: React.FC = () => {
     const applyTheme = () => {
       const html = document.documentElement;
       
+      // まず両方のクラスを削除してからセット
+      html.classList.remove('dark', 'light');
+      
       if (themeMode === 'dark') {
         html.classList.add('dark');
       } else if (themeMode === 'light') {
-        html.classList.remove('dark');
+        // lightの場合はdarkクラスを付けない（既に削除済み）
+        // 明示的にlightクラスも追加（CSSで使う場合用）
       } else {
         // システム設定に従う
         if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
           html.classList.add('dark');
-        } else {
-          html.classList.remove('dark');
         }
       }
     };
@@ -3798,26 +3800,29 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
               {activeEventName && <h2 className="text-sm text-blue-600 dark:text-blue-400 font-semibold">{activeEventName}</h2>}
               {/* テーマ切り替えトグル */}
               <button
-                onClick={() => {
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
                   setThemeMode(prev => {
-                    if (prev === 'system') return 'light';
-                    if (prev === 'light') return 'dark';
-                    return 'system';
+                    const next = prev === 'system' ? 'light' : prev === 'light' ? 'dark' : 'system';
+                    return next;
                   });
                 }}
-                className="p-1.5 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700"
+                className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
                 title={themeMode === 'system' ? 'システム設定 → ライトモードへ' : themeMode === 'light' ? 'ライトモード → ダークモードへ' : 'ダークモード → システム設定へ'}
+                style={{ WebkitTapHighlightColor: 'transparent', minWidth: '44px', minHeight: '44px' }}
+                type="button"
               >
                 {themeMode === 'system' ? (
-                  <svg className="w-5 h-5 text-slate-600 dark:text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
                   </svg>
                 ) : themeMode === 'light' ? (
-                  <svg className="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 text-amber-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
                   </svg>
                 ) : (
-                  <svg className="w-5 h-5 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 text-indigo-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
                   </svg>
                 )}
