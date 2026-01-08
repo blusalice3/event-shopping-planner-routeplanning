@@ -211,52 +211,6 @@ const EventListScreen: React.FC<EventListScreenProps> = ({ eventNames, onSelect,
                             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                           </svg>
                       </button>
-                      {/* サブメニュー */}
-                      {syncMenuVisibleFor === name && (
-                        <div className="absolute top-full left-0 mt-1 bg-white dark:bg-slate-900 rounded-md shadow-lg border border-slate-200 dark:border-slate-700 min-w-[180px] z-20">
-                          <button
-                            onClick={(e) => { 
-                              e.stopPropagation(); 
-                              onQRSend?.(name); 
-                              setMenuVisibleFor(null); 
-                              setSyncMenuVisibleFor(null); 
-                            }}
-                            className="flex items-center space-x-2 w-full px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-t-md transition-colors"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                            </svg>
-                            <span>QRコードで送信</span>
-                          </button>
-                          <button
-                            onClick={(e) => { 
-                              e.stopPropagation(); 
-                              onQRReceive?.(name); 
-                              setMenuVisibleFor(null); 
-                              setSyncMenuVisibleFor(null); 
-                            }}
-                            className="flex items-center space-x-2 w-full px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-                          >
-                            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                            </svg>
-                            <span>QRコードで受信</span>
-                          </button>
-                          <div className="border-t border-slate-200 dark:border-slate-700" />
-                          <button 
-                              onClick={(e) => { 
-                                e.stopPropagation(); 
-                                onExport(name); 
-                                setMenuVisibleFor(null); 
-                                setSyncMenuVisibleFor(null); 
-                              }}
-                              className="flex items-center space-x-2 w-full px-4 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-b-md transition-colors"
-                          >
-                              <DocumentArrowDownIcon className="w-4 h-4" />
-                              <span>Excel形式で出力</span>
-                          </button>
-                        </div>
-                      )}
                     </div>
                     <button 
                         onClick={(e) => { e.stopPropagation(); handleDelete(name); }}
@@ -271,6 +225,75 @@ const EventListScreen: React.FC<EventListScreenProps> = ({ eventNames, onSelect,
           ))}
         </ul>
       </div>
+      
+      {/* データ同期サブメニュー（オーバーレイ） */}
+      {syncMenuVisibleFor && (
+        <div 
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
+          onClick={() => setSyncMenuVisibleFor(null)}
+        >
+          <div 
+            className="bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 min-w-[280px] overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+              <h3 className="text-sm font-semibold text-slate-800 dark:text-white">データ同期</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">{syncMenuVisibleFor}</p>
+            </div>
+            <div className="py-2">
+              <button
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  onQRSend?.(syncMenuVisibleFor); 
+                  setMenuVisibleFor(null); 
+                  setSyncMenuVisibleFor(null); 
+                }}
+                className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                <svg className="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                <span>QRコードで送信</span>
+              </button>
+              <button
+                onClick={(e) => { 
+                  e.stopPropagation(); 
+                  onQRReceive?.(syncMenuVisibleFor); 
+                  setMenuVisibleFor(null); 
+                  setSyncMenuVisibleFor(null); 
+                }}
+                className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                <svg className="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                </svg>
+                <span>QRコードで受信</span>
+              </button>
+              <div className="border-t border-slate-200 dark:border-slate-700 my-2" />
+              <button 
+                  onClick={(e) => { 
+                    e.stopPropagation(); 
+                    onExport(syncMenuVisibleFor); 
+                    setMenuVisibleFor(null); 
+                    setSyncMenuVisibleFor(null); 
+                  }}
+                  className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+              >
+                  <DocumentArrowDownIcon className="w-5 h-5 text-indigo-500" />
+                  <span>Excel形式で出力</span>
+              </button>
+            </div>
+            <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+              <button
+                onClick={() => setSyncMenuVisibleFor(null)}
+                className="w-full py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+              >
+                キャンセル
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

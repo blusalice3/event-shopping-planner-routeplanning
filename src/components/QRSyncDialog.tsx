@@ -172,26 +172,40 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
     
     if (sendOptions.includeItems) {
       data.items = items;
+    } else {
+      data.items = [];
     }
+    
     if (sendOptions.includeVisitList) {
       data.executeModeItems = executeModeItems;
+    } else {
+      data.executeModeItems = {};
     }
-    if (sendOptions.includeMapData && mapData) {
+    
+    // mapDataは { [dayMapName: string]: DayMapData } 形式
+    if (sendOptions.includeMapData && mapData && Object.keys(mapData).length > 0) {
       data.mapData = mapData;
     }
-    if (sendOptions.includeBlockDefinitions && blockDefinitions) {
+    
+    if (sendOptions.includeBlockDefinitions && blockDefinitions && Object.keys(blockDefinitions).length > 0) {
       data.blockDefinitions = blockDefinitions;
     }
+    
     if (sendOptions.includeHallDefinitions) {
-      if (hallDefinitions) data.hallDefinitions = hallDefinitions;
-      if (hallRouteSettings) data.hallRouteSettings = hallRouteSettings;
+      if (hallDefinitions && Object.keys(hallDefinitions).length > 0) {
+        data.hallDefinitions = hallDefinitions;
+      }
+      if (hallRouteSettings && Object.keys(hallRouteSettings).length > 0) {
+        data.hallRouteSettings = hallRouteSettings;
+      }
     }
     
     try {
       const encoded = compressAndEncode(data as SyncData);
       setEstimatedSize(Math.round(encoded.length / 1024 * 10) / 10);
       setEstimatedQRCount(Math.ceil(encoded.length / PACKET_SIZE));
-    } catch {
+    } catch (err) {
+      console.error('推定サイズ計算エラー:', err);
       setEstimatedSize(0);
       setEstimatedQRCount(0);
     }
@@ -207,15 +221,19 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
       executeModeItems: sendOptions.includeVisitList ? executeModeItems : {},
     };
     
-    if (sendOptions.includeMapData && mapData) {
+    if (sendOptions.includeMapData && mapData && Object.keys(mapData).length > 0) {
       data.mapData = mapData;
     }
-    if (sendOptions.includeBlockDefinitions && blockDefinitions) {
+    if (sendOptions.includeBlockDefinitions && blockDefinitions && Object.keys(blockDefinitions).length > 0) {
       data.blockDefinitions = blockDefinitions;
     }
     if (sendOptions.includeHallDefinitions) {
-      if (hallDefinitions) data.hallDefinitions = hallDefinitions;
-      if (hallRouteSettings) data.hallRouteSettings = hallRouteSettings;
+      if (hallDefinitions && Object.keys(hallDefinitions).length > 0) {
+        data.hallDefinitions = hallDefinitions;
+      }
+      if (hallRouteSettings && Object.keys(hallRouteSettings).length > 0) {
+        data.hallRouteSettings = hallRouteSettings;
+      }
     }
     
     try {

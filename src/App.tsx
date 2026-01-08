@@ -2036,8 +2036,17 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     hallDefinitions?: { [dayMapName: string]: HallDefinition[] };
     hallRouteSettings?: { [dayMapName: string]: HallRouteSettings };
   }) => {
-    // 受信データをインポート（上書きモード）
+    // qrSyncEventNameがnullの場合は新規リスト作成
+    const isNewList = qrSyncEventName === null;
     const targetEventName = qrSyncEventName || receivedData.eventName;
+    
+    // 既存リストがあるか確認（新規の場合）
+    if (isNewList && eventLists[targetEventName]) {
+      // 同名のリストが存在する場合、確認ダイアログ
+      if (!window.confirm(`「${targetEventName}」という名前のリストが既に存在します。上書きしますか？`)) {
+        return;
+      }
+    }
     
     // アイテムを更新
     if (receivedData.items && receivedData.items.length > 0) {
@@ -2104,8 +2113,19 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setQRSyncMode(null);
     setQRSyncEventName(null);
     
-    alert(`「${targetEventName}」のデータを受信しました。`);
-  }, [qrSyncEventName]);
+    // 新規リストの場合はそのリストを選択状態にする
+    if (isNewList) {
+      setActiveEventName(targetEventName);
+      // 日付タブを取得
+      const eventDates = extractEventDates(receivedData.items || []);
+      if (eventDates.length > 0) {
+        setActiveTab(eventDates[0]);
+      }
+      alert(`「${targetEventName}」を新規作成しました。`);
+    } else {
+      alert(`「${targetEventName}」のデータを受信しました。`);
+    }
+  }, [qrSyncEventName, eventLists]);
 
   // 実際のエクスポート処理（xlsx形式）
   const handleConfirmExport = useCallback(async (options: ExportOptions) => {
@@ -4047,6 +4067,11 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
              itemToEdit={itemToEdit}
              onUpdateItem={handleUpdateItem}
              onDoneEditing={handleDoneEditing}
+             onQRCreateNew={() => {
+               setQRSyncEventName(null);
+               setQRSyncMode('receive');
+               setShowQRSyncDialog(true);
+             }}
            />
         )}
         {/* マップビュー */}
@@ -4278,7 +4303,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       )}
 
       {/* QRコード同期ダイアログ */}
-      {showQRSyncDialog && qrSyncEventName && (
+      {showQRSyncDialog && (qrSyncEventName || qrSyncMode === 'receive') && (
         <QRSyncDialog
           isOpen={showQRSyncDialog}
           onClose={() => {
@@ -4287,15 +4312,15 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             setQRSyncEventName(null);
           }}
           mode={qrSyncMode}
-          eventName={qrSyncEventName}
-          items={eventLists[qrSyncEventName] || []}
-          executeModeItems={executeModeItems[qrSyncEventName] || {}}
-          mapData={mapData[qrSyncEventName]}
-          blockDefinitions={mapData[qrSyncEventName] ? Object.fromEntries(
+          eventName={qrSyncEventName || '新規リスト'}
+          items={qrSyncEventName ? (eventLists[qrSyncEventName] || []) : []}
+          executeModeItems={qrSyncEventName ? (executeModeItems[qrSyncEventName] || {}) : {}}
+          mapData={qrSyncEventName ? mapData[qrSyncEventName] : undefined}
+          blockDefinitions={qrSyncEventName && mapData[qrSyncEventName] ? Object.fromEntries(
             Object.entries(mapData[qrSyncEventName]).map(([key, data]) => [key, data.blocks || []])
           ) : undefined}
-          hallDefinitions={hallDefinitions[qrSyncEventName]}
-          hallRouteSettings={hallRouteSettings[qrSyncEventName]}
+          hallDefinitions={qrSyncEventName ? hallDefinitions[qrSyncEventName] : undefined}
+          hallRouteSettings={qrSyncEventName ? hallRouteSettings[qrSyncEventName] : undefined}
           onReceiveComplete={handleQRReceiveComplete}
         />
       )}
