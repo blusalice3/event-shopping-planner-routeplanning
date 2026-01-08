@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ja">
+<html lang="ja" data-theme="system">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/x-icon" href="/favicon.ico" />
@@ -16,23 +16,40 @@
       tailwind.config = {
         darkMode: 'class',
       }
-      
-      // 初期ロード時にダークモードを適用（フラッシュ防止）
-      (function() {
-        const themeMode = localStorage.getItem('themeMode') || 'system';
-        if (themeMode === 'dark') {
-          document.documentElement.classList.add('dark');
-        } else if (themeMode === 'light') {
-          document.documentElement.classList.remove('dark');
-        } else {
-          // システム設定に従う
-          if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-            document.documentElement.classList.add('dark');
-          }
-        }
-      })();
     </script>
     <style>
+      /* ===== ダークモード用CSS変数 ===== */
+      :root {
+        --bg-primary: #f8fafc;
+        --bg-secondary: #ffffff;
+        --bg-tertiary: #f1f5f9;
+        --text-primary: #1e293b;
+        --text-secondary: #64748b;
+        --border-color: #e2e8f0;
+      }
+      
+      /* data-theme="dark" の場合 */
+      [data-theme="dark"] {
+        --bg-primary: #0f172a;
+        --bg-secondary: #1e293b;
+        --bg-tertiary: #334155;
+        --text-primary: #f1f5f9;
+        --text-secondary: #94a3b8;
+        --border-color: #334155;
+      }
+      
+      /* data-theme="system" でシステムがダークモードの場合 */
+      @media (prefers-color-scheme: dark) {
+        [data-theme="system"] {
+          --bg-primary: #0f172a;
+          --bg-secondary: #1e293b;
+          --bg-tertiary: #334155;
+          --text-primary: #f1f5f9;
+          --text-secondary: #94a3b8;
+          --border-color: #334155;
+        }
+      }
+      
       /* Android用タッチ最適化 */
       * {
         -webkit-tap-highlight-color: rgba(0, 0, 0, 0.1);
@@ -42,6 +59,9 @@
       body {
         overscroll-behavior-y: contain;
         -webkit-overflow-scrolling: touch;
+        background-color: var(--bg-primary);
+        color: var(--text-primary);
+        transition: background-color 0.3s ease, color 0.3s ease;
       }
       
       /* セレクト・インプット要素のズーム防止 */
@@ -49,17 +69,17 @@
         font-size: 16px !important;
       }
       
-      /* カスタムスクロールバー（Android Chromeでは無効） */
+      /* カスタムスクロールバー */
       ::-webkit-scrollbar {
         width: 8px;
       }
       
       ::-webkit-scrollbar-track {
-        background: #f1f5f9;
+        background: var(--bg-tertiary);
       }
       
       ::-webkit-scrollbar-thumb {
-        background: #94a3b8;
+        background: var(--text-secondary);
         border-radius: 4px;
       }
       
@@ -79,26 +99,16 @@
         animation: fade-in 0.3s ease-out;
       }
       
-      /* ダークモード対応 */
-      @media (prefers-color-scheme: dark) {
-        ::-webkit-scrollbar-track {
-          background: #1e293b;
-        }
-        ::-webkit-scrollbar-thumb {
-          background: #475569;
-        }
-      }
-      
       /* ローディング画面 */
       #loading-screen {
         position: fixed;
         inset: 0;
-        background: white;
+        background: var(--bg-primary);
         display: flex;
         align-items: center;
         justify-content: center;
         z-index: 9999;
-        transition: opacity 0.3s;
+        transition: opacity 0.3s, background-color 0.3s;
       }
       
       #loading-screen.hidden {
@@ -106,18 +116,37 @@
         pointer-events: none;
       }
       
-      @media (prefers-color-scheme: dark) {
-        #loading-screen {
-          background: #0f172a;
-        }
+      #loading-text {
+        color: var(--text-secondary);
       }
     </style>
+    <script>
+      // 初期ロード時にテーマを適用（フラッシュ防止）
+      (function() {
+        const themeMode = localStorage.getItem('themeMode') || 'system';
+        document.documentElement.setAttribute('data-theme', themeMode);
+        
+        // Tailwindのdarkクラスも同期
+        if (themeMode === 'dark') {
+          document.documentElement.classList.add('dark');
+        } else if (themeMode === 'light') {
+          document.documentElement.classList.remove('dark');
+        } else {
+          // システム設定に従う
+          if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+            document.documentElement.classList.add('dark');
+          } else {
+            document.documentElement.classList.remove('dark');
+          }
+        }
+      })();
+    </script>
   </head>
-  <body class="bg-slate-50 dark:bg-slate-900">
+  <body>
     <div id="loading-screen">
       <div class="text-center">
         <div class="inline-block animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600"></div>
-        <p class="mt-4 text-slate-600 dark:text-slate-300">読み込み中...</p>
+        <p id="loading-text" class="mt-4">読み込み中...</p>
       </div>
     </div>
     <div id="root"></div>
