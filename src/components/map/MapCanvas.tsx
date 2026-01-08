@@ -413,7 +413,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           if (!border) return;
           
           ctx.beginPath();
-          ctx.strokeStyle = border.color || '#4CAF50';
+          ctx.strokeStyle = border.color || '#000000';  // デフォルト色を黒に変更
           
           let lineWidth = 1;
           switch (border.style) {
@@ -434,14 +434,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         if (borders.bottom) drawBorder(x, y + height, x + width, y + height, borders.bottom);
         if (borders.left) drawBorder(x, y, x, y + height, borders.left);
         
-        // 数値セルの枠
-        if (typeof cell.value === 'number' && cell.value > 0 && cell.value <= 100) {
-          if (!borders.top && !borders.right && !borders.bottom && !borders.left) {
-            ctx.strokeStyle = '#4CAF50';
-            ctx.lineWidth = 1.5;
-            ctx.strokeRect(x + 0.5, y + 0.5, width - 1, height - 1);
-          }
-        }
+        // 数値セルの枠（罫線がない場合のみ、薄いグレーの点線で表示）
+        // 緑枠は削除 - 訪問先のセルは別の方法でハイライト
       });
     }
     
@@ -458,12 +452,19 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
         
         const text = String(cell.value);
+        const isVertical = cell.isVerticalText;
         
         // フォントサイズを計算
         let fontSize: number;
         if (merge) {
           // 結合セルは大きめ
-          fontSize = Math.min(width, height) * (isDetailedView ? 0.5 : 0.4);
+          if (isVertical) {
+            // 縦書きの場合は高さに基づいてサイズを調整
+            const charCount = text.replace(/\n/g, '').length;
+            fontSize = Math.min(width * 0.6, height / (charCount + 1) * 0.9, 16);
+          } else {
+            fontSize = Math.min(width, height) * (isDetailedView ? 0.5 : 0.4);
+          }
         } else if (typeof cell.value === 'number') {
           // 数値セル
           fontSize = Math.min(cellSize * 0.45, 14);
@@ -512,7 +513,28 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           ctx.fillStyle = '#333333';
         }
         
-        ctx.fillText(text, x + width / 2, y + height / 2);
+        // 縦書きの場合
+        if (isVertical) {
+          // 改行で分割されている場合は各行を別々に描画
+          const lines = text.split(/\n/);
+          const lineSpacing = fontSize * 1.2;
+          const totalWidth = lines.length * lineSpacing;
+          const startX = x + width / 2 + (totalWidth - lineSpacing) / 2;
+          
+          lines.forEach((line, lineIndex) => {
+            const chars = line.split('');
+            const totalHeight = chars.length * fontSize * 1.1;
+            const startY = y + (height - totalHeight) / 2 + fontSize / 2;
+            const lineX = startX - lineIndex * lineSpacing;
+            
+            chars.forEach((char, charIndex) => {
+              const charY = startY + charIndex * fontSize * 1.1;
+              ctx.fillText(char, lineX, charY);
+            });
+          });
+        } else {
+          ctx.fillText(text, x + width / 2, y + height / 2);
+        }
       });
     } else {
       // 縮小時は数値セルのみドット表示

@@ -62,6 +62,7 @@ export interface CellData {
   borders: CellBorders;
   isMerged?: boolean;
   mergeParent?: { row: number; col: number };
+  isVerticalText?: boolean;  // 縦書きかどうか
 }
 
 export interface MergedCellInfo {

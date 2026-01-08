@@ -478,6 +478,11 @@ async function parseMapSheetWithExcelJS(
         left: convertExcelJSBorder(cell.border?.left),
       };
       
+      // 縦書き判定（textRotation が 'vertical' または 255 の場合）
+      const alignment = cell.alignment;
+      const isVerticalText = alignment?.textRotation === 'vertical' || 
+                             alignment?.textRotation === 255;
+      
       cells.push({
         row,
         col,
@@ -486,6 +491,7 @@ async function parseMapSheetWithExcelJS(
         borders,
         isMerged,
         mergeParent,
+        isVerticalText,
       });
     }
   }
