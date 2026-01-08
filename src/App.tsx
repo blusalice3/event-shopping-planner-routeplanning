@@ -11,6 +11,7 @@ import UpdateConfirmationModal from './components/UpdateConfirmationModal';
 import UrlUpdateDialog from './components/UrlUpdateDialog';
 import EventRenameDialog from './components/EventRenameDialog';
 import ExportOptionsDialog from './components/ExportOptionsDialog';
+import QRSyncDialog from './components/QRSyncDialog';
 import SortAscendingIcon from './components/icons/SortAscendingIcon';
 import SortDescendingIcon from './components/icons/SortDescendingIcon';
 import SearchBar from './components/SearchBar';
@@ -112,6 +113,11 @@ const App: React.FC = () => {
   const [exportEventName, setExportEventName] = useState<string | null>(null);
   const mapFileInputRef = useRef<HTMLInputElement>(null);
   const exportFileInputRef = useRef<HTMLInputElement>(null);
+  
+  // QRコード同期用state
+  const [showQRSyncDialog, setShowQRSyncDialog] = useState(false);
+  const [qrSyncMode, setQRSyncMode] = useState<'send' | 'receive' | null>(null);
+  const [qrSyncEventName, setQRSyncEventName] = useState<string | null>(null);
   
   // 保存フラグ（データ変更時のみ保存）
   const isSavingRef = useRef(false);
@@ -2000,6 +2006,106 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setExportEventName(eventName);
     setShowExportOptions(true);
   }, [eventLists]);
+
+  // QRコード送信を開始
+  const handleQRSend = useCallback((eventName: string) => {
+    const itemsToExport = eventLists[eventName];
+    if (!itemsToExport || itemsToExport.length === 0) {
+      alert('送信するアイテムがありません。');
+      return;
+    }
+    setQRSyncEventName(eventName);
+    setQRSyncMode('send');
+    setShowQRSyncDialog(true);
+  }, [eventLists]);
+
+  // QRコード受信を開始
+  const handleQRReceive = useCallback((eventName: string) => {
+    setQRSyncEventName(eventName);
+    setQRSyncMode('receive');
+    setShowQRSyncDialog(true);
+  }, []);
+
+  // QR受信完了時の処理
+  const handleQRReceiveComplete = useCallback((receivedData: {
+    eventName: string;
+    items: ShoppingItem[];
+    executeModeItems: ExecuteModeItems;
+    mapData?: MapDataStore[string];
+    blockDefinitions?: { [dayMapName: string]: BlockDefinition[] };
+    hallDefinitions?: { [dayMapName: string]: HallDefinition[] };
+    hallRouteSettings?: { [dayMapName: string]: HallRouteSettings };
+  }) => {
+    // 受信データをインポート（上書きモード）
+    const targetEventName = qrSyncEventName || receivedData.eventName;
+    
+    // アイテムを更新
+    if (receivedData.items && receivedData.items.length > 0) {
+      setEventLists(prev => ({
+        ...prev,
+        [targetEventName]: receivedData.items
+      }));
+    }
+    
+    // 訪問先リストを更新
+    if (receivedData.executeModeItems) {
+      setExecuteModeItems(prev => ({
+        ...prev,
+        [targetEventName]: receivedData.executeModeItems
+      }));
+    }
+    
+    // マップデータを更新
+    if (receivedData.mapData) {
+      setMapData(prev => ({
+        ...prev,
+        [targetEventName]: receivedData.mapData!
+      }));
+    }
+    
+    // ブロック定義を更新
+    if (receivedData.blockDefinitions) {
+      // ブロック定義はmapData内に含まれるため、mapDataと一緒に更新
+      setMapData(prev => {
+        const updated = { ...prev };
+        if (!updated[targetEventName]) {
+          updated[targetEventName] = {};
+        }
+        Object.entries(receivedData.blockDefinitions!).forEach(([mapName, blocks]) => {
+          if (updated[targetEventName][mapName]) {
+            updated[targetEventName][mapName] = {
+              ...updated[targetEventName][mapName],
+              blocks
+            };
+          }
+        });
+        return updated;
+      });
+    }
+    
+    // ホール定義を更新
+    if (receivedData.hallDefinitions) {
+      setHallDefinitions(prev => ({
+        ...prev,
+        [targetEventName]: receivedData.hallDefinitions!
+      }));
+    }
+    
+    // ホールルート設定を更新
+    if (receivedData.hallRouteSettings) {
+      setHallRouteSettings(prev => ({
+        ...prev,
+        [targetEventName]: receivedData.hallRouteSettings!
+      }));
+    }
+    
+    // ダイアログを閉じる
+    setShowQRSyncDialog(false);
+    setQRSyncMode(null);
+    setQRSyncEventName(null);
+    
+    alert(`「${targetEventName}」のデータを受信しました。`);
+  }, [qrSyncEventName]);
 
   // 実際のエクスポート処理（xlsx形式）
   const handleConfirmExport = useCallback(async (options: ExportOptions) => {
@@ -3930,6 +4036,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 onRename={(oldName) => handleRenameEvent(oldName)}
                 onImportMap={handleImportMapData}
                 onImportExportFile={() => exportFileInputRef.current?.click()}
+                onQRSend={handleQRSend}
+                onQRReceive={handleQRReceive}
             />
         )}
         {activeTab === 'import' && (
@@ -4166,6 +4274,29 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           }}
           onExport={handleConfirmExport}
           hasMapData={!!(exportEventName && mapData[exportEventName] && Object.keys(mapData[exportEventName]).length > 0)}
+        />
+      )}
+
+      {/* QRコード同期ダイアログ */}
+      {showQRSyncDialog && qrSyncEventName && (
+        <QRSyncDialog
+          isOpen={showQRSyncDialog}
+          onClose={() => {
+            setShowQRSyncDialog(false);
+            setQRSyncMode(null);
+            setQRSyncEventName(null);
+          }}
+          mode={qrSyncMode}
+          eventName={qrSyncEventName}
+          items={eventLists[qrSyncEventName] || []}
+          executeModeItems={executeModeItems[qrSyncEventName] || {}}
+          mapData={mapData[qrSyncEventName]}
+          blockDefinitions={mapData[qrSyncEventName] ? Object.fromEntries(
+            Object.entries(mapData[qrSyncEventName]).map(([key, data]) => [key, data.blocks || []])
+          ) : undefined}
+          hallDefinitions={hallDefinitions[qrSyncEventName]}
+          hallRouteSettings={hallRouteSettings[qrSyncEventName]}
+          onReceiveComplete={handleQRReceiveComplete}
         />
       )}
 
