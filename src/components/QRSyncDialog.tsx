@@ -50,8 +50,8 @@ interface QRSyncDialogProps {
   onReceiveComplete?: (data: SyncData) => void;
 }
 
-const PACKET_SIZE = 2200; // 1パートあたりのデータサイズ（Base64エンコード後）
-const QR_INTERVAL = 200; // QRコード切替間隔（ミリ秒）
+const PACKET_SIZE = 500; // 1パートあたりのデータサイズ（小さくして読み取りやすく）
+const QR_INTERVAL = 800; // QRコード切替間隔（ミリ秒）- 読み取り時間を確保
 
 // セッションID生成（8文字）
 const generateSessionId = (): string => {
@@ -73,14 +73,19 @@ const generateChecksum = (data: string): string => {
 // データ圧縮・エンコード
 const compressAndEncode = (data: SyncData): string => {
   const jsonStr = JSON.stringify(data);
+  console.log('圧縮前サイズ:', jsonStr.length, 'bytes');
   const compressed = pako.gzip(jsonStr);
+  console.log('圧縮後サイズ:', compressed.length, 'bytes');
   // Uint8Array → Base64
   const binary = String.fromCharCode(...compressed);
-  return btoa(binary);
+  const encoded = btoa(binary);
+  console.log('Base64サイズ:', encoded.length, 'bytes');
+  return encoded;
 };
 
 // データ解凍・デコード
 const decodeAndDecompress = (encoded: string): SyncData => {
+  console.log('解凍開始、エンコードデータ長:', encoded.length);
   // Base64 → Uint8Array
   const binary = atob(encoded);
   const bytes = new Uint8Array(binary.length);
@@ -88,6 +93,7 @@ const decodeAndDecompress = (encoded: string): SyncData => {
     bytes[i] = binary.charCodeAt(i);
   }
   const decompressed = pako.ungzip(bytes, { to: 'string' });
+  console.log('解凍完了、JSONサイズ:', decompressed.length);
   return JSON.parse(decompressed);
 };
 
@@ -96,6 +102,7 @@ const splitData = (encodedData: string, sessionId: string): TransferPacket[] => 
   const packets: TransferPacket[] = [];
   const totalParts = Math.ceil(encodedData.length / PACKET_SIZE);
   const checksum = generateChecksum(encodedData);
+  console.log('パケット分割:', totalParts, '個、チェックサム:', checksum);
   
   for (let i = 0; i < totalParts; i++) {
     const start = i * PACKET_SIZE;
@@ -261,12 +268,16 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
       
       try {
         await QRCode.toCanvas(qrCanvasRef.current, packetStr, {
-          width: 280,
-          margin: 2,
-          errorCorrectionLevel: 'L',
+          width: 320,
+          margin: 4,
+          errorCorrectionLevel: 'M', // エラー訂正レベルを上げる
+          color: {
+            dark: '#000000',
+            light: '#FFFFFF',
+          },
         });
       } catch (error) {
-        console.error('QR生成エラー:', error);
+        console.error('QR生成エラー:', error, 'パケットサイズ:', packetStr.length);
       }
     };
     
@@ -342,15 +353,28 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
               qrbox: { width: 250, height: 250 },
             },
             (decodedText) => {
+              console.log('QRコード検出! データ長:', decodedText.length);
               try {
                 const packet: TransferPacket = JSON.parse(decodedText);
+                console.log('パケット解析成功:', {
+                  version: packet.v,
+                  sessionId: packet.sid,
+                  index: packet.i,
+                  total: packet.t,
+                  hasChecksum: !!packet.cs,
+                  dataLength: packet.d?.length
+                });
                 
                 // バージョンチェック
-                if (packet.v !== '1') return;
+                if (packet.v !== '1') {
+                  console.log('バージョン不一致:', packet.v);
+                  return;
+                }
                 
                 setReceiveSessionId((prevSid) => {
                   // 新しいセッションの場合はリセット
                   if (prevSid && prevSid !== packet.sid) {
+                    console.log('新しいセッション検出、リセット');
                     setReceivedPackets(new Map());
                     setReceiveChecksum(null);
                   }
@@ -361,6 +385,7 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
                 
                 // チェックサムを保存
                 if (packet.cs) {
+                  console.log('チェックサム受信:', packet.cs);
                   setReceiveChecksum(packet.cs);
                 }
                 
@@ -368,16 +393,17 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
                 setReceivedPackets((prev) => {
                   const newMap = new Map(prev);
                   if (!newMap.has(packet.i)) {
+                    console.log(`パケット ${packet.i + 1}/${packet.t} を保存`);
                     newMap.set(packet.i, packet.d);
                   }
                   return newMap;
                 });
-              } catch {
-                // パースエラーは無視
+              } catch (e) {
+                console.log('パースエラー:', e, 'データ:', decodedText.substring(0, 100));
               }
             },
-            () => {
-              // スキャンエラーは無視
+            _errorMessage => {
+              // スキャン中のエラー（QRコードが見つからない等）は頻繁に発生するので無視
             }
           );
           
@@ -392,13 +418,26 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
               qrbox: { width: 250, height: 250 },
             },
             (decodedText) => {
+              console.log('QRコード検出(facingMode)! データ長:', decodedText.length);
               try {
                 const packet: TransferPacket = JSON.parse(decodedText);
+                console.log('パケット解析成功:', {
+                  version: packet.v,
+                  sessionId: packet.sid,
+                  index: packet.i,
+                  total: packet.t,
+                  hasChecksum: !!packet.cs,
+                  dataLength: packet.d?.length
+                });
                 
-                if (packet.v !== '1') return;
+                if (packet.v !== '1') {
+                  console.log('バージョン不一致:', packet.v);
+                  return;
+                }
                 
                 setReceiveSessionId((prevSid) => {
                   if (prevSid && prevSid !== packet.sid) {
+                    console.log('新しいセッション検出、リセット');
                     setReceivedPackets(new Map());
                     setReceiveChecksum(null);
                   }
@@ -408,22 +447,24 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
                 setTotalPackets(packet.t);
                 
                 if (packet.cs) {
+                  console.log('チェックサム受信:', packet.cs);
                   setReceiveChecksum(packet.cs);
                 }
                 
                 setReceivedPackets((prev) => {
                   const newMap = new Map(prev);
                   if (!newMap.has(packet.i)) {
+                    console.log(`パケット ${packet.i + 1}/${packet.t} を保存`);
                     newMap.set(packet.i, packet.d);
                   }
                   return newMap;
                 });
-              } catch {
-                // パースエラーは無視
+              } catch (e) {
+                console.log('パースエラー:', e, 'データ:', decodedText.substring(0, 100));
               }
             },
-            () => {
-              // スキャンエラーは無視
+            _errorMessage => {
+              // スキャン中のエラーは無視
             }
           );
           
@@ -456,23 +497,32 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
 
   // 全パケット受信完了チェック
   useEffect(() => {
+    console.log(`受信状況チェック: ${receivedPackets.size}/${totalPackets}`);
     if (totalPackets === 0 || receivedPackets.size < totalPackets) return;
+    
+    console.log('全パケット受信完了！データ結合中...');
     
     // 全パケット揃った
     const sortedParts = Array.from({ length: totalPackets }, (_, i) => receivedPackets.get(i) || '');
     const fullData = sortedParts.join('');
+    console.log('結合データ長:', fullData.length);
     
     // チェックサム検証
     if (receiveChecksum) {
       const calculatedChecksum = generateChecksum(fullData);
+      console.log('チェックサム比較:', { expected: receiveChecksum, calculated: calculatedChecksum });
       if (calculatedChecksum !== receiveChecksum) {
+        console.error('チェックサム不一致！');
         setReceiveError('データが破損しています。再度送信してください。');
         return;
       }
+      console.log('チェックサム検証OK');
     }
     
     try {
+      console.log('データ解凍開始...');
       const data = decodeAndDecompress(fullData);
+      console.log('データ解凍成功:', { eventName: data.eventName, itemCount: data.items?.length });
       setReceivedData(data);
       stopScanning();
     } catch (error) {
@@ -611,23 +661,26 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
                 受信端末のカメラをこの画面に向けてください
               </p>
               
-              <div className="flex justify-center mb-4">
-                <canvas ref={qrCanvasRef} className="border border-slate-200 dark:border-slate-600 rounded-lg" />
+              <div className="flex justify-center mb-4 bg-white p-2 rounded-lg">
+                <canvas ref={qrCanvasRef} className="border-2 border-slate-300 rounded-lg" />
               </div>
               
-              <div className="text-center mb-4">
-                <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                  セッションID: <span className="font-mono font-semibold">{sessionId}</span>
+              <div className="text-center mb-4 p-3 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                  セッションID: <span className="font-mono font-semibold text-blue-600">{sessionId}</span>
                 </p>
-                <p className="text-sm text-slate-600 dark:text-slate-400">
-                  進行状況: {currentPacketIndex + 1}/{packets.length} パート
+                <p className="text-lg font-bold text-slate-700 dark:text-slate-300">
+                  パート {currentPacketIndex + 1} / {packets.length}
                 </p>
-                <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 mt-2">
+                <div className="w-full bg-slate-300 dark:bg-slate-600 rounded-full h-3 mt-2">
                   <div
-                    className="bg-blue-600 h-2 rounded-full transition-all duration-200"
+                    className="bg-blue-500 h-3 rounded-full transition-all duration-200"
                     style={{ width: `${((currentPacketIndex + 1) / packets.length) * 100}%` }}
                   />
                 </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                  更新間隔: {QR_INTERVAL}ms / パケットサイズ: {PACKET_SIZE}文字
+                </p>
               </div>
               
               <button
@@ -669,25 +722,41 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
               <div 
                 id="qr-scanner-container" 
                 ref={scannerContainerRef}
-                className="w-full aspect-square mb-4 rounded-lg overflow-hidden"
+                className="w-full aspect-square mb-4 rounded-lg overflow-hidden bg-black"
+                style={{ minHeight: '280px' }}
               />
               
-              {receiveSessionId && (
-                <div className="text-center mb-4">
-                  <p className="text-xs text-slate-500 dark:text-slate-400 mb-2">
-                    セッションID: <span className="font-mono font-semibold">{receiveSessionId}</span>
+              {/* デバッグ情報（常に表示） */}
+              <div className="text-center mb-4 p-3 bg-slate-100 dark:bg-slate-700 rounded-lg">
+                <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                  スキャン状態: <span className="font-semibold text-green-600">アクティブ</span>
+                </p>
+                {receiveSessionId ? (
+                  <>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 mb-1">
+                      セッションID: <span className="font-mono font-semibold text-blue-600">{receiveSessionId}</span>
+                    </p>
+                    <p className="text-sm font-semibold text-slate-700 dark:text-slate-300">
+                      受信: {receivedPackets.size} / {totalPackets} パート
+                    </p>
+                    <div className="w-full bg-slate-300 dark:bg-slate-600 rounded-full h-3 mt-2">
+                      <div
+                        className="bg-green-500 h-3 rounded-full transition-all duration-200"
+                        style={{ width: totalPackets > 0 ? `${(receivedPackets.size / totalPackets) * 100}%` : '0%' }}
+                      />
+                    </div>
+                    {receivedPackets.size > 0 && (
+                      <p className="text-xs text-slate-500 dark:text-slate-400 mt-2">
+                        受信済みパート: {Array.from(receivedPackets.keys()).sort((a, b) => a - b).map(i => i + 1).join(', ')}
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <p className="text-sm text-amber-600 dark:text-amber-400">
+                    QRコードを待機中...
                   </p>
-                  <p className="text-sm text-slate-600 dark:text-slate-400">
-                    受信状況: {receivedPackets.size}/{totalPackets} パート
-                  </p>
-                  <div className="w-full bg-slate-200 dark:bg-slate-700 rounded-full h-2 mt-2">
-                    <div
-                      className="bg-green-600 h-2 rounded-full transition-all duration-200"
-                      style={{ width: totalPackets > 0 ? `${(receivedPackets.size / totalPackets) * 100}%` : '0%' }}
-                    />
-                  </div>
-                </div>
-              )}
+                )}
+              </div>
               
               {receiveError && (
                 <div className="bg-red-100 dark:bg-red-900/30 border border-red-300 dark:border-red-700 rounded-lg p-3 mb-4">
