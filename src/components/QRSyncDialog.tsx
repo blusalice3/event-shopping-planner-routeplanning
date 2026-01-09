@@ -293,72 +293,165 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
     }
   }, []);
 
-  // スキャン開始
-  const startScanning = useCallback(async () => {
-    if (!scannerContainerRef.current) return;
-    
+  // スキャン開始（UIの状態のみ変更、実際の開始はuseEffectで）
+  const startScanning = useCallback(() => {
     setReceiveError(null);
     setReceivedPackets(new Map());
     setReceiveSessionId(null);
     setTotalPackets(0);
     setReceiveChecksum(null);
     setReceivedData(null);
+    setIsScanning(true);
+  }, []);
+
+  // スキャナーの実際の開始（DOMにコンテナが存在してから）
+  useEffect(() => {
+    if (!isScanning || scannerRef.current) return;
     
-    try {
-      const scanner = new Html5Qrcode('qr-scanner-container');
-      scannerRef.current = scanner;
+    // DOMにコンテナが追加されるのを待つ
+    const timer = setTimeout(async () => {
+      const container = document.getElementById('qr-scanner-container');
+      if (!container) {
+        console.error('スキャナーコンテナが見つかりません');
+        setReceiveError('カメラの初期化に失敗しました。');
+        setIsScanning(false);
+        return;
+      }
       
-      await scanner.start(
-        { facingMode: 'environment' },
-        {
-          fps: 10,
-          qrbox: { width: 250, height: 250 },
-        },
-        (decodedText) => {
-          try {
-            const packet: TransferPacket = JSON.parse(decodedText);
-            
-            // バージョンチェック
-            if (packet.v !== '1') return;
-            
-            setReceiveSessionId((prevSid) => {
-              // 新しいセッションの場合はリセット
-              if (prevSid && prevSid !== packet.sid) {
-                setReceivedPackets(new Map());
-                setReceiveChecksum(null);
+      try {
+        const scanner = new Html5Qrcode('qr-scanner-container');
+        scannerRef.current = scanner;
+        
+        // カメラデバイスを取得
+        const devices = await Html5Qrcode.getCameras();
+        console.log('利用可能なカメラ:', devices);
+        
+        if (devices && devices.length > 0) {
+          // バックカメラを優先的に選択
+          const backCamera = devices.find(d => 
+            d.label.toLowerCase().includes('back') || 
+            d.label.toLowerCase().includes('rear') ||
+            d.label.toLowerCase().includes('環境')
+          );
+          const cameraId = backCamera ? backCamera.id : devices[0].id;
+          
+          await scanner.start(
+            cameraId,
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 250 },
+            },
+            (decodedText) => {
+              try {
+                const packet: TransferPacket = JSON.parse(decodedText);
+                
+                // バージョンチェック
+                if (packet.v !== '1') return;
+                
+                setReceiveSessionId((prevSid) => {
+                  // 新しいセッションの場合はリセット
+                  if (prevSid && prevSid !== packet.sid) {
+                    setReceivedPackets(new Map());
+                    setReceiveChecksum(null);
+                  }
+                  return packet.sid;
+                });
+                
+                setTotalPackets(packet.t);
+                
+                // チェックサムを保存
+                if (packet.cs) {
+                  setReceiveChecksum(packet.cs);
+                }
+                
+                // パケットを保存
+                setReceivedPackets((prev) => {
+                  const newMap = new Map(prev);
+                  if (!newMap.has(packet.i)) {
+                    newMap.set(packet.i, packet.d);
+                  }
+                  return newMap;
+                });
+              } catch {
+                // パースエラーは無視
               }
-              return packet.sid;
-            });
-            
-            setTotalPackets(packet.t);
-            
-            // チェックサムを保存
-            if (packet.cs) {
-              setReceiveChecksum(packet.cs);
+            },
+            () => {
+              // スキャンエラーは無視
             }
-            
-            // パケットを保存
-            setReceivedPackets((prev) => {
-              const newMap = new Map(prev);
-              if (!newMap.has(packet.i)) {
-                newMap.set(packet.i, packet.d);
+          );
+          
+          console.log('カメラ起動成功');
+        } else {
+          // デバイスリストが取得できない場合、facingModeで試行
+          console.log('デバイスリストが空、facingModeで試行');
+          await scanner.start(
+            { facingMode: 'environment' },
+            {
+              fps: 10,
+              qrbox: { width: 250, height: 250 },
+            },
+            (decodedText) => {
+              try {
+                const packet: TransferPacket = JSON.parse(decodedText);
+                
+                if (packet.v !== '1') return;
+                
+                setReceiveSessionId((prevSid) => {
+                  if (prevSid && prevSid !== packet.sid) {
+                    setReceivedPackets(new Map());
+                    setReceiveChecksum(null);
+                  }
+                  return packet.sid;
+                });
+                
+                setTotalPackets(packet.t);
+                
+                if (packet.cs) {
+                  setReceiveChecksum(packet.cs);
+                }
+                
+                setReceivedPackets((prev) => {
+                  const newMap = new Map(prev);
+                  if (!newMap.has(packet.i)) {
+                    newMap.set(packet.i, packet.d);
+                  }
+                  return newMap;
+                });
+              } catch {
+                // パースエラーは無視
               }
-              return newMap;
-            });
-          } catch {
-            // パースエラーは無視
-          }
-        },
-        () => {
-          // スキャンエラーは無視
+            },
+            () => {
+              // スキャンエラーは無視
+            }
+          );
+          
+          console.log('カメラ起動成功（facingMode）');
         }
-      );
-      
-      setIsScanning(true);
-    } catch (error) {
-      console.error('スキャン開始エラー:', error);
-      setReceiveError('カメラの起動に失敗しました。カメラへのアクセスを許可してください。');
+      } catch (error) {
+        console.error('スキャン開始エラー:', error);
+        const errorMessage = error instanceof Error ? error.message : '不明なエラー';
+        setReceiveError(`カメラの起動に失敗しました: ${errorMessage}`);
+        setIsScanning(false);
+        scannerRef.current = null;
+      }
+    }, 100); // DOMの更新を待つ
+    
+    return () => clearTimeout(timer);
+  }, [isScanning]);
+
+  // スキャン停止
+  const stopScanning = useCallback(async () => {
+    if (scannerRef.current) {
+      try {
+        await scannerRef.current.stop();
+      } catch {
+        // 停止エラーは無視
+      }
+      scannerRef.current = null;
     }
+    setIsScanning(false);
   }, []);
 
   // 全パケット受信完了チェック
@@ -386,20 +479,7 @@ const QRSyncDialog: React.FC<QRSyncDialogProps> = ({
       console.error('データ解凍エラー:', error);
       setReceiveError('データの解凍に失敗しました。');
     }
-  }, [receivedPackets, totalPackets, receiveChecksum]);
-
-  // スキャン停止
-  const stopScanning = useCallback(async () => {
-    if (scannerRef.current) {
-      try {
-        await scannerRef.current.stop();
-      } catch {
-        // 停止エラーは無視
-      }
-      scannerRef.current = null;
-    }
-    setIsScanning(false);
-  }, []);
+  }, [receivedPackets, totalPackets, receiveChecksum, stopScanning]);
 
   // インポート実行
   const handleImport = useCallback(() => {
