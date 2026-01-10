@@ -2047,8 +2047,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       return;
     }
 
-    // Web Share API がサポートされているかチェック
-    if (!navigator.share || !navigator.canShare) {
+    // Web Share API の基本サポートチェック
+    if (!navigator.share) {
       alert('このブラウザは共有機能に対応していません。\n「Excel形式で保存」からファイルをダウンロードし、手動で共有してください。');
       return;
     }
@@ -2085,23 +2085,36 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
       });
 
-      // 共有可能かチェック
-      if (navigator.canShare({ files: [file] })) {
+      // まずファイル共有を試みる（canShareのチェックをスキップ）
+      try {
         await navigator.share({
           files: [file],
           title: `${eventName} - 即売会巡回リスト`,
-          text: `即売会巡回リスト「${eventName}」のデータです`,
         });
-      } else {
-        // ファイル共有が非対応の場合はダウンロード
-        alert('このブラウザはファイル共有に対応していません。\nファイルをダウンロードします。');
-        downloadBlob(blob, filename);
-      }
-    } catch (error) {
-      // ユーザーがキャンセルした場合は何もしない
-      if (error instanceof Error && error.name === 'AbortError') {
+        // 成功した場合はここで終了
         return;
+      } catch (fileShareError) {
+        // ファイル共有が失敗した場合
+        console.log('ファイル共有失敗、テキスト共有を試行:', fileShareError);
+        
+        // AbortError（ユーザーキャンセル）の場合は何もしない
+        if (fileShareError instanceof Error && fileShareError.name === 'AbortError') {
+          return;
+        }
+        
+        // ファイルをダウンロードしてから共有メニューを表示
+        // （一部のブラウザではファイル共有が非対応）
       }
+
+      // ファイル共有が非対応の場合：ダウンロード後に共有を案内
+      downloadBlob(blob, filename);
+      
+      // ダウンロード完了後にユーザーに案内
+      setTimeout(() => {
+        alert(`ファイル「${filename}」をダウンロードしました。\n\nダウンロードフォルダから該当ファイルを選択し、共有メニューからQuickShare/AirDrop等で送信してください。`);
+      }, 500);
+      
+    } catch (error) {
       console.error('Share error:', error);
       alert('共有に失敗しました。');
     }
