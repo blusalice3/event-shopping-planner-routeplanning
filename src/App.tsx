@@ -2039,123 +2039,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setExportEventName(null);
   }, [eventLists, executeModeItems, eventMetadata, dayModes, mapData, routeSettings, hallDefinitions, hallRouteSettings, exportEventName]);
 
-  // Web Share APIを使った共有（QuickShare/AirDrop等）
-  const handleShareEvent = useCallback(async (eventName: string) => {
-    const itemsToExport = eventLists[eventName];
-    if (!itemsToExport || itemsToExport.length === 0) {
-      alert('共有するアイテムがありません。');
-      return;
-    }
-
-    // Web Share API の基本サポートチェック
-    if (!navigator.share) {
-      alert('このブラウザは共有機能に対応していません。\n「Excel形式で保存」からファイルをダウンロードし、手動で共有してください。');
-      return;
-    }
-
-    let blob: Blob;
-    let filename: string;
-    
-    try {
-      // フルエクスポートでxlsxファイルを生成
-      blob = await exportToXlsx(
-        eventName,
-        itemsToExport,
-        { 
-          format: 'full', 
-          includeItems: true,
-          includeLayoutInfo: true,
-          includeMapData: true,
-          includeBlockDefinitions: true,
-          includeRouteInfo: true,
-        },
-        {
-          metadata: eventMetadata[eventName],
-          executeModeItems,
-          dayModes,
-          mapData,
-          routeSettings,
-          hallDefinitions,
-          hallRouteSettings,
-        }
-      );
-
-      const timestamp = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15);
-      // ファイル名から問題のある文字を除去（英数字とアンダースコアのみ）
-      const safeEventName = eventName.replace(/[^a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/g, '_');
-      filename = `${safeEventName}_${timestamp}.xlsx`;
-      
-      console.log('共有準備:', { eventName, filename, blobSize: blob.size });
-      
-    } catch (exportError) {
-      console.error('エクスポートエラー:', exportError);
-      alert(`ファイル生成に失敗しました: ${exportError instanceof Error ? exportError.message : '不明なエラー'}`);
-      return;
-    }
-
-    try {
-      // BlobをFileに変換
-      const file = new File([blob], filename, { 
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
-      });
-      
-      console.log('Fileオブジェクト作成:', { name: file.name, size: file.size, type: file.type });
-
-      // canShareが使える場合は事前チェック
-      if (navigator.canShare) {
-        const canShareFiles = navigator.canShare({ files: [file] });
-        console.log('canShare結果:', canShareFiles);
-        
-        if (!canShareFiles) {
-          // ファイル共有非対応 - ダウンロードにフォールバック
-          console.log('ファイル共有非対応、ダウンロードにフォールバック');
-          downloadBlob(blob, filename);
-          setTimeout(() => {
-            alert(`ファイル「${filename}」をダウンロードしました。\n\nダウンロードフォルダから該当ファイルを選択し、共有メニューからQuickShare/AirDrop等で送信してください。`);
-          }, 300);
-          return;
-        }
-      }
-
-      // ファイル共有を実行
-      console.log('navigator.share呼び出し開始');
-      await navigator.share({
-        files: [file],
-      });
-      console.log('共有成功');
-      
-    } catch (shareError) {
-      console.error('共有エラー:', shareError);
-      
-      // AbortError（ユーザーキャンセル）の場合は何もしない
-      if (shareError instanceof Error && shareError.name === 'AbortError') {
-        console.log('ユーザーがキャンセル');
-        return;
-      }
-      
-      // NotAllowedError: ユーザージェスチャーが必要
-      if (shareError instanceof Error && shareError.name === 'NotAllowedError') {
-        alert('共有を開始できませんでした。もう一度「共有」ボタンをタップしてください。');
-        return;
-      }
-      
-      // TypeError: ファイル共有非対応
-      if (shareError instanceof Error && shareError.name === 'TypeError') {
-        console.log('TypeError - ファイル共有非対応、ダウンロードにフォールバック');
-        downloadBlob(blob, filename);
-        setTimeout(() => {
-          alert(`ファイル「${filename}」をダウンロードしました。\n\nダウンロードフォルダから該当ファイルを選択し、共有メニューからQuickShare/AirDrop等で送信してください。`);
-        }, 300);
-        return;
-      }
-      
-      // その他のエラー
-      const errorMessage = shareError instanceof Error ? `${shareError.name}: ${shareError.message}` : '不明なエラー';
-      alert(`共有に失敗しました:\n${errorMessage}\n\nファイルをダウンロードします。`);
-      downloadBlob(blob, filename);
-    }
-  }, [eventLists, executeModeItems, eventMetadata, dayModes, mapData, routeSettings, hallDefinitions, hallRouteSettings]);
-
   // エクスポートファイルのインポート処理
   const handleExportFileImport = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2800,6 +2683,11 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
   const [showVisitListConfirmDialog, setShowVisitListConfirmDialog] = useState(false);
   const [pendingTabChange, setPendingTabChange] = useState<string | null>(null);
   const [blockDefinitionMode, setBlockDefinitionMode] = useState(false);
+  
+  // マップビューのコントロール用状態（ヘッダーから制御）
+  const [mapSelectedHallId, setMapSelectedHallId] = useState<string>('all');
+  const [mapIsRouteVisible, setMapIsRouteVisible] = useState(true);
+  const [mapIsHallOrderOpen, setMapIsHallOrderOpen] = useState(false);
   
   // セル選択モードの状態（ブロック定義用）
   const [cellSelectionMode, setCellSelectionMode] = useState<{
@@ -3941,6 +3829,69 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                   </svg>
                 )}
               </button>
+              
+              {/* マップコントロール（マップタブ表示時のみ） */}
+              {activeEventName && isMapTab && currentMapData && currentHalls.length > 0 && (
+                <>
+                  {/* ホール選択 */}
+                  <div className="relative">
+                    <button
+                      onClick={() => {
+                        const hallList = ['all', ...currentHalls.map(h => h.id)];
+                        const currentIndex = hallList.indexOf(mapSelectedHallId);
+                        const nextIndex = (currentIndex + 1) % hallList.length;
+                        setMapSelectedHallId(hallList[nextIndex]);
+                      }}
+                      className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
+                      title={`表示ホール: ${mapSelectedHallId === 'all' ? '全ホール' : currentHalls.find(h => h.id === mapSelectedHallId)?.name || ''}`}
+                      style={{ WebkitTapHighlightColor: 'transparent', minWidth: '44px', minHeight: '44px' }}
+                      type="button"
+                    >
+                      {/* ホールアイコン（ビッグサイトシルエット風） */}
+                      <svg className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none" viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M2 18h3v-4h2v4h2v-6H7l-2-4-2 4H2v6zm5-8h2V8h2V6h2v2h2v2h2v8h-3v-4h-2v4h-3v-8z"/>
+                        <path d="M14 10h2v2h-2zM14 14h2v2h-2zM18 10h2v2h-2zM18 14h2v2h-2z"/>
+                      </svg>
+                    </button>
+                    {mapSelectedHallId !== 'all' && (
+                      <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full"></span>
+                    )}
+                  </div>
+                  
+                  {/* ホール順序 */}
+                  <button
+                    onClick={() => setMapIsHallOrderOpen(true)}
+                    className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
+                    title="ホール順序を編集"
+                    style={{ WebkitTapHighlightColor: 'transparent', minWidth: '44px', minHeight: '44px' }}
+                    type="button"
+                  >
+                    <svg className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                    </svg>
+                  </button>
+                  
+                  {/* ルート表示ON/OFF */}
+                  <button
+                    onClick={() => setMapIsRouteVisible(!mapIsRouteVisible)}
+                    className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                      mapIsRouteVisible 
+                        ? 'bg-blue-100 dark:bg-blue-900/50 hover:bg-blue-200 dark:hover:bg-blue-800' 
+                        : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
+                    }`}
+                    title={mapIsRouteVisible ? 'ルート表示ON' : 'ルート表示OFF'}
+                    style={{ WebkitTapHighlightColor: 'transparent', minWidth: '44px', minHeight: '44px' }}
+                    type="button"
+                  >
+                    {/* ルートアイコン */}
+                    <svg className={`w-5 h-5 pointer-events-none ${mapIsRouteVisible ? 'text-blue-600 dark:text-blue-400' : 'text-slate-600 dark:text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <circle cx="6" cy="6" r="2" strokeWidth={2} />
+                      <circle cx="18" cy="18" r="2" strokeWidth={2} />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 8v4a4 4 0 004 4h4M14 12l4 4m0 0l-4 4" />
+                    </svg>
+                  </button>
+                </>
+              )}
             </div>
           </div>
           <div className="flex items-center gap-4">
@@ -4038,7 +3989,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 onSelect={handleSelectEvent}
                 onDelete={handleDeleteEvent}
                 onExport={handleExportEvent}
-                onShare={handleShareEvent}
                 onUpdate={handleUpdateEvent}
                 onRename={(oldName) => handleRenameEvent(oldName)}
                 onImportMap={handleImportMapData}
@@ -4076,6 +4026,13 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             onReorderExecuteList={handleReorderExecuteListByHallOrder}
             vertexSelectionMode={vertexSelectionMode}
             highlightedCell={visitListPanelOpen ? highlightedMapCell : null}
+            externalSelectedHallId={mapSelectedHallId}
+            onSelectedHallIdChange={setMapSelectedHallId}
+            externalIsRouteVisible={mapIsRouteVisible}
+            onRouteVisibleChange={setMapIsRouteVisible}
+            externalIsHallOrderOpen={mapIsHallOrderOpen}
+            onHallOrderOpenChange={setMapIsHallOrderOpen}
+            hideInternalControls={true}
           />
         )}
         {activeEventName && mainContentVisible && (

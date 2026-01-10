@@ -36,6 +36,14 @@ interface MapViewProps {
   } | null;
   // 訪問先リストからのハイライト
   highlightedCell?: { row: number; col: number } | null;
+  // 外部制御用props（ヘッダーから制御する場合）
+  externalSelectedHallId?: string;
+  onSelectedHallIdChange?: (hallId: string) => void;
+  externalIsRouteVisible?: boolean;
+  onRouteVisibleChange?: (visible: boolean) => void;
+  externalIsHallOrderOpen?: boolean;
+  onHallOrderOpenChange?: (open: boolean) => void;
+  hideInternalControls?: boolean;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -55,15 +63,30 @@ const MapView: React.FC<MapViewProps> = ({
   onReorderExecuteList,
   vertexSelectionMode,
   highlightedCell,
+  externalSelectedHallId,
+  onSelectedHallIdChange,
+  externalIsRouteVisible,
+  onRouteVisibleChange,
+  externalIsHallOrderOpen,
+  onHallOrderOpenChange,
+  hideInternalControls = false,
 }) => {
   void _onMoveToFirst;
   void _onMoveToLast;
   
   const [zoomLevel, setZoomLevel] = useState<ZoomLevel>(100);
-  const [isRouteVisible, setIsRouteVisible] = useState(true);
+  const [internalIsRouteVisible, setInternalIsRouteVisible] = useState(true);
   const [isVisitListOpen, setIsVisitListOpen] = useState(false);
-  const [isHallOrderOpen, setIsHallOrderOpen] = useState(false);
-  const [selectedHallId, setSelectedHallId] = useState<string>('all'); // 'all' または ホールID
+  const [internalIsHallOrderOpen, setInternalIsHallOrderOpen] = useState(false);
+  const [internalSelectedHallId, setInternalSelectedHallId] = useState<string>('all');
+  
+  // 外部制御か内部制御かを判定
+  const selectedHallId = externalSelectedHallId !== undefined ? externalSelectedHallId : internalSelectedHallId;
+  const setSelectedHallId = onSelectedHallIdChange || setInternalSelectedHallId;
+  const isRouteVisible = externalIsRouteVisible !== undefined ? externalIsRouteVisible : internalIsRouteVisible;
+  const setIsRouteVisible = onRouteVisibleChange || setInternalIsRouteVisible;
+  const isHallOrderOpen = externalIsHallOrderOpen !== undefined ? externalIsHallOrderOpen : internalIsHallOrderOpen;
+  const setIsHallOrderOpen = onHallOrderOpenChange || setInternalIsHallOrderOpen;
   
   // ポップアップの状態
   const [popupState, setPopupState] = useState<{
@@ -356,51 +379,53 @@ const MapView: React.FC<MapViewProps> = ({
       className="relative bg-slate-100 dark:bg-slate-900 overflow-hidden"
       style={{ height: 'calc(100vh - 140px)' }}
     >
-      {/* ツールバー - MapView内に固定 */}
-      <div className="absolute top-4 right-4 z-10 flex items-center gap-3">
-        {/* ホール選択ドロップダウン */}
-        {halls.length > 0 && (
-          <select
-            value={selectedHallId}
-            onChange={(e) => setSelectedHallId(e.target.value)}
-            className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="all">全ホール</option>
-            {halls.map((hall) => (
-              <option key={hall.id} value={hall.id}>
-                {hall.name} ({getHallTotalExecuteCount(hall.id)}/{getTotalItemCountInHall(hall.id)}件)
-              </option>
-            ))}
-          </select>
-        )}
-        
-        {/* ホール順序設定ボタン */}
-        {halls.length > 0 && (
-          <button
-            onClick={() => setIsHallOrderOpen(true)}
-            className="bg-white dark:bg-slate-800 px-3 py-2 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
-          >
-            🔄 ホール順序
-          </button>
-        )}
-        
-        {/* ルート表示トグル */}
-        <label className="flex items-center gap-2 bg-white dark:bg-slate-800 px-3 py-2 rounded-lg shadow-md border border-slate-200 dark:border-slate-700">
-          <span className="text-sm text-slate-700 dark:text-slate-300">ルート表示</span>
-          <button
-            onClick={() => setIsRouteVisible(!isRouteVisible)}
-            className={`relative w-10 h-5 rounded-full transition-colors ${
-              isRouteVisible ? 'bg-blue-500' : 'bg-slate-300 dark:bg-slate-600'
-            }`}
-          >
-            <span
-              className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
-                isRouteVisible ? 'translate-x-5' : ''
+      {/* ツールバー - MapView内に固定（外部制御時は非表示） */}
+      {!hideInternalControls && (
+        <div className="absolute top-4 right-4 z-10 flex items-center gap-3">
+          {/* ホール選択ドロップダウン */}
+          {halls.length > 0 && (
+            <select
+              value={selectedHallId}
+              onChange={(e) => setSelectedHallId(e.target.value)}
+              className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="all">全ホール</option>
+              {halls.map((hall) => (
+                <option key={hall.id} value={hall.id}>
+                  {hall.name} ({getHallTotalExecuteCount(hall.id)}/{getTotalItemCountInHall(hall.id)}件)
+                </option>
+              ))}
+            </select>
+          )}
+          
+          {/* ホール順序設定ボタン */}
+          {halls.length > 0 && (
+            <button
+              onClick={() => setIsHallOrderOpen(true)}
+              className="bg-white dark:bg-slate-800 px-3 py-2 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
+            >
+              🔄 ホール順序
+            </button>
+          )}
+          
+          {/* ルート表示トグル */}
+          <label className="flex items-center gap-2 bg-white dark:bg-slate-800 px-3 py-2 rounded-lg shadow-md border border-slate-200 dark:border-slate-700">
+            <span className="text-sm text-slate-700 dark:text-slate-300">ルート表示</span>
+            <button
+              onClick={() => setIsRouteVisible(!isRouteVisible)}
+              className={`relative w-10 h-5 rounded-full transition-colors ${
+                isRouteVisible ? 'bg-blue-500' : 'bg-slate-300 dark:bg-slate-600'
               }`}
-            />
-          </button>
-        </label>
-      </div>
+            >
+              <span
+                className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${
+                  isRouteVisible ? 'translate-x-5' : ''
+                }`}
+              />
+            </button>
+          </label>
+        </div>
+      )}
       
       {/* ズームコントロール - MapView内左下に固定 */}
       <div className="absolute bottom-4 left-4 z-10">
