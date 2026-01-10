@@ -2688,6 +2688,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
   const [mapSelectedHallId, setMapSelectedHallId] = useState<string>('all');
   const [mapIsRouteVisible, setMapIsRouteVisible] = useState(true);
   const [mapIsHallOrderOpen, setMapIsHallOrderOpen] = useState(false);
+  const [mapHallSelectorOpen, setMapHallSelectorOpen] = useState(false);
   
   // セル選択モードの状態（ブロック定義用）
   const [cellSelectionMode, setCellSelectionMode] = useState<{
@@ -3836,13 +3837,12 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                   {/* ホール選択 */}
                   <div className="relative">
                     <button
-                      onClick={() => {
-                        const hallList = ['all', ...currentHalls.map(h => h.id)];
-                        const currentIndex = hallList.indexOf(mapSelectedHallId);
-                        const nextIndex = (currentIndex + 1) % hallList.length;
-                        setMapSelectedHallId(hallList[nextIndex]);
-                      }}
-                      className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
+                      onClick={() => setMapHallSelectorOpen(!mapHallSelectorOpen)}
+                      className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                        mapHallSelectorOpen 
+                          ? 'bg-slate-200 dark:bg-slate-700' 
+                          : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
+                      }`}
                       title={`表示ホール: ${mapSelectedHallId === 'all' ? '全ホール' : currentHalls.find(h => h.id === mapSelectedHallId)?.name || ''}`}
                       style={{ WebkitTapHighlightColor: 'transparent', minWidth: '44px', minHeight: '44px' }}
                       type="button"
@@ -3855,6 +3855,48 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     </button>
                     {mapSelectedHallId !== 'all' && (
                       <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full"></span>
+                    )}
+                    
+                    {/* ホール選択ドロップダウンメニュー */}
+                    {mapHallSelectorOpen && (
+                      <>
+                        {/* 背景オーバーレイ（クリックで閉じる） */}
+                        <div 
+                          className="fixed inset-0 z-40"
+                          onClick={() => setMapHallSelectorOpen(false)}
+                        />
+                        <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 py-1 min-w-[160px]">
+                          <button
+                            onClick={() => {
+                              setMapSelectedHallId('all');
+                              setMapHallSelectorOpen(false);
+                            }}
+                            className={`w-full px-4 py-2 text-left text-sm transition-colors ${
+                              mapSelectedHallId === 'all'
+                                ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
+                                : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            全ホール
+                          </button>
+                          {currentHalls.map((hall) => (
+                            <button
+                              key={hall.id}
+                              onClick={() => {
+                                setMapSelectedHallId(hall.id);
+                                setMapHallSelectorOpen(false);
+                              }}
+                              className={`w-full px-4 py-2 text-left text-sm transition-colors ${
+                                mapSelectedHallId === hall.id
+                                  ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
+                                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                              }`}
+                            >
+                              {hall.name}
+                            </button>
+                          ))}
+                        </div>
+                      </>
                     )}
                   </div>
                   
