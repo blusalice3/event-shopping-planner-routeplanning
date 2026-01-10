@@ -2053,9 +2053,12 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       return;
     }
 
+    let blob: Blob;
+    let filename: string;
+    
     try {
       // フルエクスポートでxlsxファイルを生成
-      const blob = await exportToXlsx(
+      blob = await exportToXlsx(
         eventName,
         itemsToExport,
         { 
@@ -2078,45 +2081,78 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       );
 
       const timestamp = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15);
-      const filename = `${eventName}_${timestamp}.xlsx`;
+      // ファイル名から問題のある文字を除去（英数字とアンダースコアのみ）
+      const safeEventName = eventName.replace(/[^a-zA-Z0-9\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/g, '_');
+      filename = `${safeEventName}_${timestamp}.xlsx`;
       
+      console.log('共有準備:', { eventName, filename, blobSize: blob.size });
+      
+    } catch (exportError) {
+      console.error('エクスポートエラー:', exportError);
+      alert(`ファイル生成に失敗しました: ${exportError instanceof Error ? exportError.message : '不明なエラー'}`);
+      return;
+    }
+
+    try {
       // BlobをFileに変換
       const file = new File([blob], filename, { 
         type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
       });
+      
+      console.log('Fileオブジェクト作成:', { name: file.name, size: file.size, type: file.type });
 
-      // まずファイル共有を試みる（canShareのチェックをスキップ）
-      try {
-        await navigator.share({
-          files: [file],
-          title: `${eventName} - 即売会巡回リスト`,
-        });
-        // 成功した場合はここで終了
-        return;
-      } catch (fileShareError) {
-        // ファイル共有が失敗した場合
-        console.log('ファイル共有失敗、テキスト共有を試行:', fileShareError);
+      // canShareが使える場合は事前チェック
+      if (navigator.canShare) {
+        const canShareFiles = navigator.canShare({ files: [file] });
+        console.log('canShare結果:', canShareFiles);
         
-        // AbortError（ユーザーキャンセル）の場合は何もしない
-        if (fileShareError instanceof Error && fileShareError.name === 'AbortError') {
+        if (!canShareFiles) {
+          // ファイル共有非対応 - ダウンロードにフォールバック
+          console.log('ファイル共有非対応、ダウンロードにフォールバック');
+          downloadBlob(blob, filename);
+          setTimeout(() => {
+            alert(`ファイル「${filename}」をダウンロードしました。\n\nダウンロードフォルダから該当ファイルを選択し、共有メニューからQuickShare/AirDrop等で送信してください。`);
+          }, 300);
           return;
         }
-        
-        // ファイルをダウンロードしてから共有メニューを表示
-        // （一部のブラウザではファイル共有が非対応）
       }
 
-      // ファイル共有が非対応の場合：ダウンロード後に共有を案内
+      // ファイル共有を実行
+      console.log('navigator.share呼び出し開始');
+      await navigator.share({
+        files: [file],
+      });
+      console.log('共有成功');
+      
+    } catch (shareError) {
+      console.error('共有エラー:', shareError);
+      
+      // AbortError（ユーザーキャンセル）の場合は何もしない
+      if (shareError instanceof Error && shareError.name === 'AbortError') {
+        console.log('ユーザーがキャンセル');
+        return;
+      }
+      
+      // NotAllowedError: ユーザージェスチャーが必要
+      if (shareError instanceof Error && shareError.name === 'NotAllowedError') {
+        alert('共有を開始できませんでした。もう一度「共有」ボタンをタップしてください。');
+        return;
+      }
+      
+      // TypeError: ファイル共有非対応
+      if (shareError instanceof Error && shareError.name === 'TypeError') {
+        console.log('TypeError - ファイル共有非対応、ダウンロードにフォールバック');
+        downloadBlob(blob, filename);
+        setTimeout(() => {
+          alert(`ファイル「${filename}」をダウンロードしました。\n\nダウンロードフォルダから該当ファイルを選択し、共有メニューからQuickShare/AirDrop等で送信してください。`);
+        }, 300);
+        return;
+      }
+      
+      // その他のエラー
+      const errorMessage = shareError instanceof Error ? `${shareError.name}: ${shareError.message}` : '不明なエラー';
+      alert(`共有に失敗しました:\n${errorMessage}\n\nファイルをダウンロードします。`);
       downloadBlob(blob, filename);
-      
-      // ダウンロード完了後にユーザーに案内
-      setTimeout(() => {
-        alert(`ファイル「${filename}」をダウンロードしました。\n\nダウンロードフォルダから該当ファイルを選択し、共有メニューからQuickShare/AirDrop等で送信してください。`);
-      }, 500);
-      
-    } catch (error) {
-      console.error('Share error:', error);
-      alert('共有に失敗しました。');
     }
   }, [eventLists, executeModeItems, eventMetadata, dayModes, mapData, routeSettings, hallDefinitions, hallRouteSettings]);
 
