@@ -54,8 +54,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   // 自動進行カウントダウン
   const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null);
-  // ユーザーが購入状態を変更したかどうかのフラグ
-  const [userChangedStatus, setUserChangedStatus] = useState(false);
   // アイテムリストのコンテナref
   const itemListRef = useRef<HTMLDivElement>(null);
 
@@ -205,40 +203,37 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
   }, [currentVisit, hasUndefinedPricePurchased]);
 
-  // ユーザーが購入状態を変更して全アイテムが後回し/遅参になったら3秒後に自動進行
-  useEffect(() => {
-    // ユーザー操作による変更で、かつ全アイテムが後回し/遅参の場合のみ
-    if (userChangedStatus && allPostponedOrLate && currentVisit) {
-      // カウントダウン開始
-      setAutoAdvanceCountdown(3);
-      
-      countdownIntervalRef.current = setInterval(() => {
-        setAutoAdvanceCountdown(prev => {
-          if (prev === null || prev <= 1) {
-            return prev;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      
-      autoAdvanceTimerRef.current = setTimeout(() => {
-        // 次の訪問先へ移動
-        moveToNext();
-        clearAutoAdvanceTimer();
-        setUserChangedStatus(false);
-      }, 3000);
-    }
+  // 自動進行を開始する関数（ユーザー操作から呼び出す）
+  const startAutoAdvance = useCallback(() => {
+    // 既にタイマーが動いている場合は何もしない
+    if (autoAdvanceTimerRef.current) return;
     
-    return () => {
+    // カウントダウン開始
+    setAutoAdvanceCountdown(3);
+    
+    countdownIntervalRef.current = setInterval(() => {
+      setAutoAdvanceCountdown(prev => {
+        if (prev === null || prev <= 1) {
+          return prev;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    
+    autoAdvanceTimerRef.current = setTimeout(() => {
+      // 次の訪問先へ移動
+      moveToNextRef.current();
       clearAutoAdvanceTimer();
-    };
-  }, [userChangedStatus, allPostponedOrLate, currentVisit]);
+    }, 3000);
+  }, [clearAutoAdvanceTimer]);
+
+  // moveToNextをrefで保持（循環依存を避けるため）
+  const moveToNextRef = useRef<() => void>(() => {});
 
   // 後回し/遅参でなくなった場合、タイマーをクリア
   useEffect(() => {
     if (!allPostponedOrLate) {
       clearAutoAdvanceTimer();
-      setUserChangedStatus(false);
     }
   }, [allPostponedOrLate, clearAutoAdvanceTimer]);
 
@@ -258,7 +253,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
       // 同じフェーズ内で次へ
       setCurrentPhaseIndex(nextIndex);
       setIsNextButtonBlinking(false);
-      setUserChangedStatus(false);
     } else {
       // フェーズの終わり
       if (currentPhase === 'normal') {
@@ -268,14 +262,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
           setCurrentPhase('postponed');
           setCurrentPhaseIndex(0);
           setIsNextButtonBlinking(false);
-          setUserChangedStatus(false);
         } else if (visitsByPhase.late.length > 0) {
           // 後回しがなく遅参がある場合
           setNotification('遅参アイテムの巡回を開始します');
           setCurrentPhase('late');
           setCurrentPhaseIndex(0);
           setIsNextButtonBlinking(false);
-          setUserChangedStatus(false);
         } else {
           // 全て完了
           setIsCompleted(true);
@@ -287,7 +279,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
           setCurrentPhase('late');
           setCurrentPhaseIndex(0);
           setIsNextButtonBlinking(false);
-          setUserChangedStatus(false);
         } else {
           // 全て完了
           setIsCompleted(true);
@@ -298,6 +289,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
       }
     }
   }, [currentPhaseIndex, currentPhaseVisits.length, currentPhase, visitsByPhase]);
+
+  // moveToNextRefを更新
+  useEffect(() => {
+    moveToNextRef.current = moveToNext;
+  }, [moveToNext]);
 
   // 次の訪問先へ
   const handleNext = useCallback(() => {
@@ -314,14 +310,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
 
     clearAutoAdvanceTimer();
-    setUserChangedStatus(false);
     moveToNext();
   }, [hasUndefinedPricePurchased, currentVisit, clearAutoAdvanceTimer, moveToNext]);
 
   // 前の訪問先へ
   const handlePrev = useCallback(() => {
     clearAutoAdvanceTimer();
-    setUserChangedStatus(false);
     
     // 完了画面から戻る場合
     if (isCompleted) {
@@ -371,21 +365,35 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const handleUpdateItem = useCallback((updatedItem: ShoppingItem) => {
     setLastInteractedItemId(updatedItem.id);
     
+    // まずアイテムを更新
+    onUpdateItem(updatedItem);
+    
     // 購入状態が変更されたかチェック
     const originalItem = currentVisit?.items.find(i => i.id === updatedItem.id);
     if (originalItem && originalItem.purchaseStatus !== updatedItem.purchaseStatus) {
-      // 購入状態が後回しまたは遅参に変更された場合、フラグを立てる
-      if (updatedItem.purchaseStatus === 'Postpone' || updatedItem.purchaseStatus === 'Late') {
-        setUserChangedStatus(true);
-      } else {
-        // 後回し/遅参以外に変更された場合
-        setUserChangedStatus(false);
+      // 後回し/遅参以外に変更された場合、タイマーをクリア
+      if (updatedItem.purchaseStatus !== 'Postpone' && updatedItem.purchaseStatus !== 'Late') {
         clearAutoAdvanceTimer();
+        return;
+      }
+      
+      // 後回しまたは遅参に変更された場合
+      // 更新後の状態で全アイテムが後回し/遅参かチェック
+      if (currentVisit) {
+        const willAllBePostponedOrLate = currentVisit.items.every(item => {
+          if (item.id === updatedItem.id) {
+            return updatedItem.purchaseStatus === 'Postpone' || updatedItem.purchaseStatus === 'Late';
+          }
+          return item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'Late';
+        });
+        
+        if (willAllBePostponedOrLate) {
+          // 3秒後に自動進行を開始
+          startAutoAdvance();
+        }
       }
     }
-    
-    onUpdateItem(updatedItem);
-  }, [onUpdateItem, currentVisit, clearAutoAdvanceTimer]);
+  }, [onUpdateItem, currentVisit, clearAutoAdvanceTimer, startAutoAdvance]);
 
   // モード切り替え
   const handleModeChangeInternal = useCallback((mode: 'edit' | 'execute') => {
