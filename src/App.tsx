@@ -4353,6 +4353,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 onUpdateItem={handleUpdateItem}
                 onModeChange={(mode, lastItemId) => handleSetViewMode(mode, lastItemId)}
                 layoutMode={layoutMode}
+                onLayoutModeChange={setLayoutMode}
               />
             ) : (
               <ShoppingList
