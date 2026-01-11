@@ -24,7 +24,7 @@ export interface ShoppingItem {
   priorityLevel?: 'none' | 'priority' | 'highest';  // 優先度レベル
 }
 
-export type ViewMode = 'edit' | 'execute';
+export type ViewMode = 'edit' | 'execute' | 'focus';
 
 export interface EventMetadata {
   spreadsheetUrl: string;

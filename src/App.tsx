@@ -16,6 +16,7 @@ import SortDescendingIcon from './components/icons/SortDescendingIcon';
 import SearchBar from './components/SearchBar';
 import { MapView, BlockDefinitionPanel, HallDefinitionPanel, isPointInPolygon } from './components/map';
 import VisitListPanel from './components/VisitListPanel';
+import FocusMode from './components/FocusMode';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
 import { parseMapFile } from './utils/xlsxMapParser';
 import { db } from './utils/indexedDB';
@@ -1317,6 +1318,34 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setSelectedItemIds(new Set());
     setCandidateNumberSortDirection(null);
   }, [activeEventName, activeTab, dayModes, eventDates]);
+  
+  // モードを直接設定する関数
+  const handleSetViewMode = useCallback((mode: ViewMode, scrollToItemId?: string) => {
+    if (!activeEventName) return;
+    
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+    
+    setDayModes(prev => ({
+      ...prev,
+      [activeEventName]: {
+        ...(prev[activeEventName] || {}),
+        [currentEventDate]: mode
+      }
+    }));
+    
+    setSelectedItemIds(new Set());
+    setCandidateNumberSortDirection(null);
+    
+    // スクロール先のアイテムIDが指定されている場合
+    if (scrollToItemId) {
+      setTimeout(() => {
+        const element = document.querySelector(`[data-item-id="${scrollToItemId}"]`);
+        if (element) {
+          element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 100);
+    }
+  }, [activeEventName, activeTab, eventDates]);
   
   const handleSelectEvent = useCallback((eventName: string) => {
     setActiveEventName(eventName);
@@ -3892,6 +3921,56 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 )}
               </button>
               
+              {/* モード切替アイコン（日付タブ表示時のみ） */}
+              {activeEventName && mainContentVisible && (
+                <div className="flex items-center gap-1 ml-2 border-l border-slate-300 dark:border-slate-600 pl-2">
+                  {/* 編集モード */}
+                  <button
+                    onClick={() => handleSetViewMode('edit')}
+                    className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                      currentMode === 'edit'
+                        ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400'
+                        : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                    title="編集モード"
+                    style={{ WebkitTapHighlightColor: 'transparent', minWidth: '40px', minHeight: '40px' }}
+                    type="button"
+                  >
+                    <span className="text-lg">📝</span>
+                  </button>
+                  
+                  {/* 実行モード */}
+                  <button
+                    onClick={() => handleSetViewMode('execute')}
+                    className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                      currentMode === 'execute'
+                        ? 'bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400'
+                        : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                    title="実行モード"
+                    style={{ WebkitTapHighlightColor: 'transparent', minWidth: '40px', minHeight: '40px' }}
+                    type="button"
+                  >
+                    <span className="text-lg">🏃</span>
+                  </button>
+                  
+                  {/* 集中モード */}
+                  <button
+                    onClick={() => handleSetViewMode('focus')}
+                    className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                      currentMode === 'focus'
+                        ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400'
+                        : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
+                    }`}
+                    title="集中モード"
+                    style={{ WebkitTapHighlightColor: 'transparent', minWidth: '40px', minHeight: '40px' }}
+                    type="button"
+                  >
+                    <span className="text-lg">🔍</span>
+                  </button>
+                </div>
+              )}
+              
               {/* マップコントロール（マップタブ表示時のみ） */}
               {activeEventName && isMapTab && currentMapData && currentHalls.length > 0 && (
                 <>
@@ -4267,6 +4346,14 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                   />
                 </div>
               </div>
+            ) : currentMode === 'focus' ? (
+              <FocusMode
+                items={items}
+                executeModeItemIds={executeModeItems[activeEventName]?.[eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')] || []}
+                onUpdateItem={handleUpdateItem}
+                onModeChange={(mode, lastItemId) => handleSetViewMode(mode, lastItemId)}
+                layoutMode={layoutMode}
+              />
             ) : (
               <ShoppingList
                 items={visibleItems}
