@@ -59,9 +59,56 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const isDetailedView = zoomLevel >= 80;
   const showNumbers = zoomLevel >= 60;
   const showBorders = zoomLevel >= 40;
+  
+  // 前回のセルサイズを記憶
+  const prevCellSizeRef = useRef<number>(cellSize);
+  const initializedRef = useRef<boolean>(false);
+
+  // ズームレベル変更時に視点を維持するオフセット調整
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    
+    const prevCellSize = prevCellSizeRef.current;
+    
+    // 初回またはセルサイズが変わっていない場合はスキップ
+    if (!initializedRef.current || prevCellSize === cellSize) {
+      prevCellSizeRef.current = cellSize;
+      initializedRef.current = true;
+      return;
+    }
+    
+    // ズーム比率
+    
+    // コンテナの中央座標
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+    const centerX = containerWidth / 2;
+    const centerY = containerHeight / 2;
+    
+    // 現在の中央のマップ座標
+    const mapCenterX = (centerX - offset.x) / prevCellSize;
+    const mapCenterY = (centerY - offset.y) / prevCellSize;
+    
+    // 新しいオフセット（中央の座標を維持）
+    const newOffsetX = centerX - mapCenterX * cellSize;
+    const newOffsetY = centerY - mapCenterY * cellSize;
+    
+    setOffset({ x: newOffsetX, y: newOffsetY });
+    prevCellSizeRef.current = cellSize;
+  }, [cellSize, offset.x, offset.y]);
 
   // ホール選択時にオフセットを自動調整してホールを画面内に配置
+  // selectedHallが変更された時のみ実行（ズーム変更時は実行しない）
+  const prevSelectedHallRef = useRef<HallDefinition | undefined>(undefined);
+  
   useEffect(() => {
+    // selectedHallが変わっていない場合はスキップ
+    if (prevSelectedHallRef.current?.id === selectedHall?.id) {
+      return;
+    }
+    prevSelectedHallRef.current = selectedHall;
+    
     if (selectedHall && selectedHall.vertices.length >= 4) {
       const container = containerRef.current;
       if (!container) return;
@@ -106,8 +153,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
       
       setOffset({ x: newOffsetX, y: newOffsetY });
-    } else {
-      // ホール未選択時はオフセットをリセット
+    } else if (!selectedHall) {
+      // ホール未選択に戻った時はオフセットをリセット
       setOffset({ x: 0, y: 0 });
     }
   }, [selectedHall, cellSize]);

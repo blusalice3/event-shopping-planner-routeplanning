@@ -278,6 +278,67 @@ const App: React.FC = () => {
     return hallRouteSettings[activeEventName]?.[activeTab] || { hallOrder: currentHalls.map(h => h.id), hallVisitLists: [] };
   }, [activeEventName, activeTab, isMapTab, hallRouteSettings, currentHalls]);
 
+  // ホール内の訪問先アイテム数を取得（優先・最優先グループも含む）
+  const getHallExecuteCount = useCallback((hallId: string): number => {
+    if (!activeEventName || !isMapTab || !currentMapData) return 0;
+    
+    const dayMatch = activeTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return 0;
+    const dayName = dayMatch[1];
+    
+    const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
+    
+    return executeIds.filter(itemId => {
+      const item = items.find(i => i.id === itemId);
+      if (!item) return false;
+      
+      // ブロックからホールIDを判定
+      const block = currentMapData.blocks.find(b => b.name === item.block);
+      if (!block) return false;
+      
+      const centerRow = (block.startRow + block.endRow) / 2;
+      const centerCol = (block.startCol + block.endCol) / 2;
+      
+      for (const hall of currentHalls) {
+        if (hall.id === hallId && hall.vertices.length >= 4) {
+          if (isPointInPolygon(centerRow, centerCol, hall.vertices)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }).length;
+  }, [activeEventName, isMapTab, activeTab, currentMapData, currentHalls, items, executeModeItems]);
+
+  // ホール内の全アイテム数を取得
+  const getHallTotalItemCount = useCallback((hallId: string): number => {
+    if (!activeEventName || !isMapTab || !currentMapData) return 0;
+    
+    const dayMatch = activeTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return 0;
+    const dayName = dayMatch[1];
+    
+    const dayItems = items.filter(item => item.eventDate === dayName);
+    
+    return dayItems.filter(item => {
+      // ブロックからホールIDを判定
+      const block = currentMapData.blocks.find(b => b.name === item.block);
+      if (!block) return false;
+      
+      const centerRow = (block.startRow + block.endRow) / 2;
+      const centerCol = (block.startCol + block.endCol) / 2;
+      
+      for (const hall of currentHalls) {
+        if (hall.id === hallId && hall.vertices.length >= 4) {
+          if (isPointInPolygon(centerRow, centerCol, hall.vertices)) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }).length;
+  }, [activeEventName, isMapTab, activeTab, currentMapData, currentHalls, items]);
+
   // 日付タブに対応するマップタブ名を取得（例: "1日目" → "1日目マップ"）
   const getMapTabForDate = useCallback((eventDate: string): string => {
     return `${eventDate}マップ`;
@@ -3865,7 +3926,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                           className="fixed inset-0 z-40"
                           onClick={() => setMapHallSelectorOpen(false)}
                         />
-                        <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 py-1 min-w-[160px]">
+                        <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 py-1 min-w-[200px]">
                           <button
                             onClick={() => {
                               setMapSelectedHallId('all');
@@ -3879,22 +3940,29 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                           >
                             全ホール
                           </button>
-                          {currentHalls.map((hall) => (
-                            <button
-                              key={hall.id}
-                              onClick={() => {
-                                setMapSelectedHallId(hall.id);
-                                setMapHallSelectorOpen(false);
-                              }}
-                              className={`w-full px-4 py-2 text-left text-sm transition-colors ${
-                                mapSelectedHallId === hall.id
-                                  ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
-                                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-                              }`}
-                            >
-                              {hall.name}
-                            </button>
-                          ))}
+                          {currentHalls.map((hall) => {
+                            const executeCount = getHallExecuteCount(hall.id);
+                            const totalCount = getHallTotalItemCount(hall.id);
+                            return (
+                              <button
+                                key={hall.id}
+                                onClick={() => {
+                                  setMapSelectedHallId(hall.id);
+                                  setMapHallSelectorOpen(false);
+                                }}
+                                className={`w-full px-4 py-2 text-left text-sm transition-colors flex justify-between items-center ${
+                                  mapSelectedHallId === hall.id
+                                    ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
+                                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                                }`}
+                              >
+                                <span>{hall.name}</span>
+                                <span className="text-xs text-slate-500 dark:text-slate-400 ml-2">
+                                  ({executeCount}/{totalCount}件)
+                                </span>
+                              </button>
+                            );
+                          })}
                         </div>
                       </>
                     )}
