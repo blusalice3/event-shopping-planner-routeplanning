@@ -624,7 +624,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
     
-    // 4. ルートを描画（優先度で色分け）
+    // 4. ルートを描画（優先度で色分け、重複部分は点線）
     if (isRouteVisible && routeSegments.length > 0) {
       // 優先度ごとの色を定義
       const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
@@ -635,32 +635,139 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       };
       
+      // グループ間接続かどうかを判定
+      const isGroupTransition = (fromPriority: string | undefined, toPriority: string | undefined): boolean => {
+        const from = fromPriority || 'none';
+        const to = toPriority || 'none';
+        return from !== to;
+      };
+      
+      // エッジごとの通過情報を収集（重複検出用）
+      // キー: "row1,col1-row2,col2"（小さい座標を先に）
+      const edgeUsage = new Map<string, Set<'none' | 'priority' | 'highest'>>();
+      
+      const getEdgeKey = (r1: number, c1: number, r2: number, c2: number): string => {
+        // 常に小さい座標を先にして正規化
+        if (r1 < r2 || (r1 === r2 && c1 < c2)) {
+          return `${r1},${c1}-${r2},${c2}`;
+        }
+        return `${r2},${c2}-${r1},${c1}`;
+      };
+      
+      // 全セグメントのエッジを収集
       routeSegments.forEach((segment) => {
         if (segment.path.length < 2) return;
         
-        // セグメントの色は出発点の優先度で決定
-        const segmentColor = getPriorityColor(segment.fromPriority);
+        // グループ間接続はグレーなので重複カウントに含めない
+        if (isGroupTransition(segment.fromPriority, segment.toPriority)) return;
         
-        ctx.beginPath();
-        ctx.strokeStyle = segmentColor;
-        ctx.lineWidth = Math.max(2, cellSize * 0.1);
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
+        const priority = segment.fromPriority || 'none';
         
-        segment.path.forEach((point, i) => {
-          const px = (point.col - 0.5) * cellSize;
-          const py = (point.row - 0.5) * cellSize;
+        for (let i = 0; i < segment.path.length - 1; i++) {
+          const p1 = segment.path[i];
+          const p2 = segment.path[i + 1];
+          const key = getEdgeKey(p1.row, p1.col, p2.row, p2.col);
           
-          if (i === 0) {
-            ctx.moveTo(px, py);
-          } else {
-            ctx.lineTo(px, py);
+          if (!edgeUsage.has(key)) {
+            edgeUsage.set(key, new Set());
           }
-        });
+          edgeUsage.get(key)!.add(priority);
+        }
+      });
+      
+      // セグメントを描画
+      const lineWidth = Math.max(2, cellSize * 0.1);
+      
+      routeSegments.forEach((segment) => {
+        if (segment.path.length < 2) return;
         
-        ctx.stroke();
+        const isTransition = isGroupTransition(segment.fromPriority, segment.toPriority);
+        const segmentPriority = segment.fromPriority || 'none';
         
-        // 矢印
+        // グループ間接続はグレー
+        const baseColor = isTransition ? '#9CA3AF' : getPriorityColor(segment.fromPriority);
+        
+        // パスを一度に描画するのではなく、エッジごとに描画
+        for (let i = 0; i < segment.path.length - 1; i++) {
+          const p1 = segment.path[i];
+          const p2 = segment.path[i + 1];
+          const edgeKey = getEdgeKey(p1.row, p1.col, p2.row, p2.col);
+          
+          const px1 = (p1.col - 0.5) * cellSize;
+          const py1 = (p1.row - 0.5) * cellSize;
+          const px2 = (p2.col - 0.5) * cellSize;
+          const py2 = (p2.row - 0.5) * cellSize;
+          
+          // グループ間接続は重複チェック不要
+          if (isTransition) {
+            ctx.beginPath();
+            ctx.strokeStyle = baseColor;
+            ctx.lineWidth = lineWidth;
+            ctx.lineCap = 'round';
+            ctx.setLineDash([]);
+            ctx.moveTo(px1, py1);
+            ctx.lineTo(px2, py2);
+            ctx.stroke();
+            continue;
+          }
+          
+          // 重複しているエッジかどうかを確認
+          const usedPriorities = edgeUsage.get(edgeKey);
+          const isOverlapping = usedPriorities && usedPriorities.size > 1;
+          
+          if (isOverlapping) {
+            // 重複エッジ：交互点線で描画
+            const priorities = Array.from(usedPriorities!).sort((a, b) => {
+              const order = { 'highest': 0, 'priority': 1, 'none': 2 };
+              return order[a] - order[b];
+            });
+            
+            // このセグメントの優先度がこのエッジを描画すべきかどうか
+            // 最も高い優先度のセグメントだけが全色を描画する
+            if (segmentPriority === priorities[0]) {
+              // 複数色の交互点線を描画
+              const dashLength = Math.max(6, cellSize * 0.3);
+              const totalLength = Math.sqrt(Math.pow(px2 - px1, 2) + Math.pow(py2 - py1, 2));
+              const numDashes = Math.ceil(totalLength / dashLength);
+              
+              const dx = (px2 - px1) / numDashes;
+              const dy = (py2 - py1) / numDashes;
+              
+              for (let d = 0; d < numDashes; d++) {
+                const startX = px1 + dx * d;
+                const startY = py1 + dy * d;
+                const endX = px1 + dx * (d + 1);
+                const endY = py1 + dy * (d + 1);
+                
+                // 色を交互に
+                const colorIndex = d % priorities.length;
+                const dashColor = getPriorityColor(priorities[colorIndex]);
+                
+                ctx.beginPath();
+                ctx.strokeStyle = dashColor;
+                ctx.lineWidth = lineWidth;
+                ctx.lineCap = 'butt';
+                ctx.setLineDash([]);
+                ctx.moveTo(startX, startY);
+                ctx.lineTo(endX, endY);
+                ctx.stroke();
+              }
+            }
+            // 他の優先度のセグメントはこのエッジを描画しない（重複描画防止）
+          } else {
+            // 重複なし：通常の実線
+            ctx.beginPath();
+            ctx.strokeStyle = baseColor;
+            ctx.lineWidth = lineWidth;
+            ctx.lineCap = 'round';
+            ctx.setLineDash([]);
+            ctx.moveTo(px1, py1);
+            ctx.lineTo(px2, py2);
+            ctx.stroke();
+          }
+        }
+        
+        // 矢印（セグメント終点に描画）
         if (segment.path.length >= 2) {
           const last = segment.path[segment.path.length - 1];
           const prev = segment.path[segment.path.length - 2];
@@ -674,7 +781,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           
           const arrowSize = Math.max(6, cellSize * 0.25);
           ctx.beginPath();
-          ctx.fillStyle = segmentColor;
+          ctx.fillStyle = baseColor;
           ctx.moveTo(endX, endY);
           ctx.lineTo(
             endX - arrowSize * Math.cos(angle - Math.PI / 6),
@@ -688,6 +795,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           ctx.fill();
         }
       });
+      
+      // setLineDashをリセット
+      ctx.setLineDash([]);
       
       // 訪問順番号（優先度で色分け）
       if (isDetailedView) {
