@@ -624,7 +624,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
     
-    // 4. ルートを描画（優先度で色分け、重複部分は点線）
+    // 4. ルートを描画（優先度で色分け、重複部分は平行線）
     if (isRouteVisible && routeSegments.length > 0) {
       // 優先度ごとの色を定義
       const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
@@ -676,7 +676,33 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
       
       // セグメントを描画
-      const lineWidth = Math.max(2, cellSize * 0.1);
+      const lineWidth = Math.max(2, cellSize * 0.08);  // 少し細く
+      
+      // 平行線のオフセット量を計算（セルサイズに応じて調整）
+      const parallelOffset = Math.max(3, cellSize * 0.12);
+      
+      // 線をオフセットする関数
+      const getOffsetPoints = (
+        px1: number, py1: number, px2: number, py2: number,
+        offset: number
+      ): { x1: number; y1: number; x2: number; y2: number } => {
+        // 線の方向ベクトル
+        const dx = px2 - px1;
+        const dy = py2 - py1;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (len === 0) return { x1: px1, y1: py1, x2: px2, y2: py2 };
+        
+        // 法線ベクトル（90度回転）
+        const nx = -dy / len;
+        const ny = dx / len;
+        
+        return {
+          x1: px1 + nx * offset,
+          y1: py1 + ny * offset,
+          x2: px2 + nx * offset,
+          y2: py2 + ny * offset,
+        };
+      };
       
       routeSegments.forEach((segment) => {
         if (segment.path.length < 2) return;
@@ -698,7 +724,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const px2 = (p2.col - 0.5) * cellSize;
           const py2 = (p2.row - 0.5) * cellSize;
           
-          // グループ間接続は重複チェック不要
+          // グループ間接続は重複チェック不要（中央に描画）
           if (isTransition) {
             ctx.beginPath();
             ctx.strokeStyle = baseColor;
@@ -716,44 +742,32 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const isOverlapping = usedPriorities && usedPriorities.size > 1;
           
           if (isOverlapping) {
-            // 重複エッジ：交互点線で描画
+            // 重複エッジ：平行線で描画
             const priorities = Array.from(usedPriorities!).sort((a, b) => {
               const order = { 'highest': 0, 'priority': 1, 'none': 2 };
               return order[a] - order[b];
             });
             
-            // このセグメントの優先度がこのエッジを描画すべきかどうか
-            // 最も高い優先度のセグメントだけが全色を描画する
-            if (segmentPriority === priorities[0]) {
-              // 複数色の交互点線を描画
-              const dashLength = Math.max(6, cellSize * 0.3);
-              const totalLength = Math.sqrt(Math.pow(px2 - px1, 2) + Math.pow(py2 - py1, 2));
-              const numDashes = Math.ceil(totalLength / dashLength);
-              
-              const dx = (px2 - px1) / numDashes;
-              const dy = (py2 - py1) / numDashes;
-              
-              for (let d = 0; d < numDashes; d++) {
-                const startX = px1 + dx * d;
-                const startY = py1 + dy * d;
-                const endX = px1 + dx * (d + 1);
-                const endY = py1 + dy * (d + 1);
-                
-                // 色を交互に
-                const colorIndex = d % priorities.length;
-                const dashColor = getPriorityColor(priorities[colorIndex]);
-                
-                ctx.beginPath();
-                ctx.strokeStyle = dashColor;
-                ctx.lineWidth = lineWidth;
-                ctx.lineCap = 'butt';
-                ctx.setLineDash([]);
-                ctx.moveTo(startX, startY);
-                ctx.lineTo(endX, endY);
-                ctx.stroke();
-              }
-            }
-            // 他の優先度のセグメントはこのエッジを描画しない（重複描画防止）
+            // このセグメントの優先度のインデックスを取得
+            const priorityIndex = priorities.indexOf(segmentPriority);
+            if (priorityIndex === -1) continue;
+            
+            // オフセット量を計算（中央を基準に均等に配置）
+            const totalLines = priorities.length;
+            const offsetIndex = priorityIndex - (totalLines - 1) / 2;
+            const offset = offsetIndex * parallelOffset;
+            
+            // オフセットした座標を計算
+            const offsetted = getOffsetPoints(px1, py1, px2, py2, offset);
+            
+            ctx.beginPath();
+            ctx.strokeStyle = baseColor;
+            ctx.lineWidth = lineWidth;
+            ctx.lineCap = 'round';
+            ctx.setLineDash([]);
+            ctx.moveTo(offsetted.x1, offsetted.y1);
+            ctx.lineTo(offsetted.x2, offsetted.y2);
+            ctx.stroke();
           } else {
             // 重複なし：通常の実線
             ctx.beginPath();
