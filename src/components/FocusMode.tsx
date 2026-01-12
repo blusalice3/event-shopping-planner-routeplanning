@@ -58,9 +58,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const [navButtonOffset, setNavButtonOffset] = useState({ left: 0, right: 0 });
   // アイテムリストのref
   const itemListRef = useRef<HTMLDivElement>(null);
-  // ナビゲーションボタンのref
-  const prevButtonRef = useRef<HTMLButtonElement>(null);
-  const nextButtonRef = useRef<HTMLButtonElement>(null);
+
+  // 後回しフェーズで表示するアイテムID（通常フェーズ終了時に確定）
+  const [postponedPhaseItemIds, setPostponedPhaseItemIds] = useState<Set<string>>(new Set());
+  // 遅参フェーズで表示するアイテムID（後回しフェーズ終了時に確定）
+  const [latePhaseItemIds, setLatePhaseItemIds] = useState<Set<string>>(new Set());
 
   // 実行列のアイテムを取得
   const executeItems = useMemo(() => {
@@ -89,6 +91,16 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }));
   }, [executeItems]);
 
+  // 現時点で後回し状態のアイテムIDセット（通常フェーズ中に動的に更新）
+  const currentPostponedItemIds = useMemo(() => {
+    return new Set(executeItems.filter(item => item.purchaseStatus === 'Postpone').map(item => item.id));
+  }, [executeItems]);
+
+  // 現時点で遅参状態のアイテムIDセット（通常・後回しフェーズ中に動的に更新）
+  const currentLateItemIds = useMemo(() => {
+    return new Set(executeItems.filter(item => item.purchaseStatus === 'Late').map(item => item.id));
+  }, [executeItems]);
+
   // フェーズごとの訪問先リストを計算
   const visitsByPhase = useMemo(() => {
     const normal: typeof allVisits = [];
@@ -99,17 +111,31 @@ const FocusMode: React.FC<FocusModeProps> = ({
       // 通常フェーズ: 全ての訪問先を含む（網羅的）
       normal.push(visit);
       
-      // 後回しフェーズ: 後回しアイテムがある訪問先
-      const hasPostponedItems = visit.items.some(item => item.purchaseStatus === 'Postpone');
-      if (hasPostponedItems) postponed.push(visit);
+      // 後回しフェーズ: 記憶されたアイテムIDがある訪問先
+      if (currentPhase === 'normal') {
+        // 通常フェーズ中は現時点の後回しアイテムで判定
+        const hasPostponedItems = visit.items.some(item => currentPostponedItemIds.has(item.id));
+        if (hasPostponedItems) postponed.push(visit);
+      } else {
+        // 後回し/遅参フェーズでは記憶されたIDで判定
+        const hasPostponedItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
+        if (hasPostponedItems) postponed.push(visit);
+      }
       
-      // 遅参フェーズ: 遅参アイテムがある訪問先
-      const hasLateItems = visit.items.some(item => item.purchaseStatus === 'Late');
-      if (hasLateItems) late.push(visit);
+      // 遅参フェーズ: 記憶されたアイテムIDがある訪問先
+      if (currentPhase === 'normal' || currentPhase === 'postponed') {
+        // 通常/後回しフェーズ中は現時点の遅参アイテムで判定
+        const hasLateItems = visit.items.some(item => currentLateItemIds.has(item.id));
+        if (hasLateItems) late.push(visit);
+      } else {
+        // 遅参フェーズでは記憶されたIDで判定
+        const hasLateItems = visit.items.some(item => latePhaseItemIds.has(item.id));
+        if (hasLateItems) late.push(visit);
+      }
     });
     
     return { normal, postponed, late };
-  }, [allVisits]);
+  }, [allVisits, currentPhase, currentPostponedItemIds, currentLateItemIds, postponedPhaseItemIds, latePhaseItemIds]);
 
   // 現在のフェーズの訪問先リスト
   const currentPhaseVisits = useMemo(() => {
@@ -131,13 +157,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
       // 通常フェーズ: 全アイテムを表示
       return currentVisit.items;
     } else if (currentPhase === 'postponed') {
-      // 後回しフェーズ: 後回しアイテムのみ
-      return currentVisit.items.filter(item => item.purchaseStatus === 'Postpone');
+      // 後回しフェーズ: 記憶された後回しアイテムIDに含まれるアイテムを表示
+      return currentVisit.items.filter(item => postponedPhaseItemIds.has(item.id));
     } else {
-      // 遅参フェーズ: 遅参アイテムのみ
-      return currentVisit.items.filter(item => item.purchaseStatus === 'Late');
+      // 遅参フェーズ: 記憶された遅参アイテムIDに含まれるアイテムを表示
+      return currentVisit.items.filter(item => latePhaseItemIds.has(item.id));
     }
-  }, [currentVisit, currentPhase]);
+  }, [currentVisit, currentPhase, postponedPhaseItemIds, latePhaseItemIds]);
 
   // フェーズ名の日本語表示
   const phaseDisplayName = useMemo(() => {
@@ -291,12 +317,24 @@ const FocusMode: React.FC<FocusModeProps> = ({
     } else {
       // フェーズの終わり - 次のフェーズへ
       if (currentPhase === 'normal') {
-        if (visitsByPhase.postponed.length > 0) {
+        // 通常フェーズ終了 → 後回しアイテムIDを記憶
+        const postponedIds = new Set(
+          executeItems.filter(item => item.purchaseStatus === 'Postpone').map(item => item.id)
+        );
+        setPostponedPhaseItemIds(postponedIds);
+        
+        // 遅参アイテムIDも更新（通常フェーズで遅参にしたもの）
+        const lateIds = new Set(
+          executeItems.filter(item => item.purchaseStatus === 'Late').map(item => item.id)
+        );
+        setLatePhaseItemIds(lateIds);
+        
+        if (postponedIds.size > 0) {
           setNotification('後回しアイテムの巡回を開始します');
           setCurrentPhase('postponed');
           setCurrentPhaseIndex(0);
           setIsNextButtonBlinking(false);
-        } else if (visitsByPhase.late.length > 0) {
+        } else if (lateIds.size > 0) {
           setNotification('遅参アイテムの巡回を開始します');
           setCurrentPhase('late');
           setCurrentPhaseIndex(0);
@@ -305,7 +343,16 @@ const FocusMode: React.FC<FocusModeProps> = ({
           setIsCompleted(true);
         }
       } else if (currentPhase === 'postponed') {
-        if (visitsByPhase.late.length > 0) {
+        // 後回しフェーズ終了 → 遅参アイテムIDを更新（後回しフェーズで遅参にしたものを追加）
+        const currentLateIds = new Set(latePhaseItemIds);
+        executeItems.forEach(item => {
+          if (item.purchaseStatus === 'Late') {
+            currentLateIds.add(item.id);
+          }
+        });
+        setLatePhaseItemIds(currentLateIds);
+        
+        if (currentLateIds.size > 0) {
           setNotification('遅参アイテムの巡回を開始します');
           setCurrentPhase('late');
           setCurrentPhaseIndex(0);
@@ -317,7 +364,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         setIsCompleted(true);
       }
     }
-  }, [currentPhaseIndex, currentPhaseVisits.length, currentPhase, visitsByPhase, clearAutoAdvanceTimer]);
+  }, [currentPhaseIndex, currentPhaseVisits.length, currentPhase, executeItems, clearAutoAdvanceTimer, latePhaseItemIds]);
 
   // 自動進行を開始する関数（ユーザー操作からのみ呼び出す）
   const startAutoAdvance = useCallback(() => {
@@ -365,10 +412,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
     if (isCompleted) {
       setIsCompleted(false);
       // 最後のフェーズの最後の訪問先に戻る
-      if (visitsByPhase.late.length > 0) {
+      if (latePhaseItemIds.size > 0) {
         setCurrentPhase('late');
         setCurrentPhaseIndex(visitsByPhase.late.length - 1);
-      } else if (visitsByPhase.postponed.length > 0) {
+      } else if (postponedPhaseItemIds.size > 0) {
         setCurrentPhase('postponed');
         setCurrentPhaseIndex(visitsByPhase.postponed.length - 1);
       } else if (visitsByPhase.normal.length > 0) {
@@ -388,7 +435,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         setCurrentPhaseIndex(visitsByPhase.normal.length - 1);
         setIsNextButtonBlinking(false);
       } else if (currentPhase === 'late') {
-        if (visitsByPhase.postponed.length > 0) {
+        if (postponedPhaseItemIds.size > 0) {
           setCurrentPhase('postponed');
           setCurrentPhaseIndex(visitsByPhase.postponed.length - 1);
           setIsNextButtonBlinking(false);
@@ -403,7 +450,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         setNotification('最初の訪問サークル・スペースです');
       }
     }
-  }, [currentPhaseIndex, currentPhase, visitsByPhase, clearAutoAdvanceTimer, isCompleted]);
+  }, [currentPhaseIndex, currentPhase, visitsByPhase, clearAutoAdvanceTimer, isCompleted, postponedPhaseItemIds, latePhaseItemIds]);
 
   // アイテム更新ハンドラ
   const handleUpdateItem = useCallback((updatedItem: ShoppingItem) => {
@@ -505,16 +552,19 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
 
-  // 現在のフェーズに表示するアイテムがない場合、次のフェーズに進む
+  // 現在のフェーズに表示するアイテムがない場合、次の訪問先を探す
   if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) {
     // 次の訪問先を探す
     for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
       const visit = currentPhaseVisits[i];
-      const hasItems = currentPhase === 'normal' 
-        ? visit.items.length > 0
-        : currentPhase === 'postponed'
-          ? visit.items.some(item => item.purchaseStatus === 'Postpone')
-          : visit.items.some(item => item.purchaseStatus === 'Late');
+      let hasItems = false;
+      if (currentPhase === 'normal') {
+        hasItems = visit.items.length > 0;
+      } else if (currentPhase === 'postponed') {
+        hasItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
+      } else {
+        hasItems = visit.items.some(item => latePhaseItemIds.has(item.id));
+      }
       if (hasItems) {
         setCurrentPhaseIndex(i);
         return null;
@@ -587,7 +637,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
       {/* ナビゲーションボタン */}
       {/* 戻るボタン（左側） */}
       <button
-        ref={prevButtonRef}
         onClick={handlePrev}
         style={{ 
           left: `${16 + navButtonOffset.left}px`,
@@ -601,7 +650,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
       {/* 次へボタン（右側） */}
       <button
-        ref={nextButtonRef}
         onClick={handleNext}
         style={{ 
           right: `${16 + navButtonOffset.right}px`,
