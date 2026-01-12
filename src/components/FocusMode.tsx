@@ -16,7 +16,6 @@ interface FocusModeProps {
 
 // ナンバーからベース部分（アルファベットとその左側の数値）を抽出
 const extractBaseNumber = (number: string): string => {
-  // "10a" -> "10a", "10a1" -> "10a", "10a2" -> "10a", "38a" -> "38a", "38a1" -> "38a"
   const match = number.match(/^(\d+[a-zA-Z])/);
   return match ? match[1].toLowerCase() : number.toLowerCase();
 };
@@ -35,10 +34,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
   layoutMode,
   onLayoutModeChange,
 }) => {
-  // 現在のフェーズ
+  // 現在のフェーズ（ユーザー操作でのみ変更）
   const [currentPhase, setCurrentPhase] = useState<FocusPhase>('normal');
-  // 現在の訪問先インデックス（全訪問先での通算インデックス）
-  const [currentGlobalIndex, setCurrentGlobalIndex] = useState(0);
+  // 現在のフェーズ内での訪問先インデックス
+  const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0);
   // 最後に操作したアイテムID
   const [lastInteractedItemId, setLastInteractedItemId] = useState<string | null>(null);
   // 次へボタンの点滅状態
@@ -51,8 +50,17 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const [isCompleted, setIsCompleted] = useState(false);
   // 自動進行タイマーID
   const autoAdvanceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // カウントダウンインターバルID
+  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
   // 自動進行カウントダウン
   const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null);
+  // ナビゲーションボタンの位置オフセット
+  const [navButtonOffset, setNavButtonOffset] = useState({ left: 0, right: 0 });
+  // アイテムリストのref
+  const itemListRef = useRef<HTMLDivElement>(null);
+  // ナビゲーションボタンのref
+  const prevButtonRef = useRef<HTMLButtonElement>(null);
+  const nextButtonRef = useRef<HTMLButtonElement>(null);
 
   // 実行列のアイテムを取得
   const executeItems = useMemo(() => {
@@ -61,7 +69,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       .filter((item): item is ShoppingItem => item !== undefined);
   }, [items, executeModeItemIds]);
 
-  // 全訪問先リストを実行列順序で生成（フェーズ関係なく全て含む）
+  // 全訪問先リストを実行列順序で生成
   const allVisits = useMemo(() => {
     const visitKeyOrder: string[] = [];
     const visitMap = new Map<string, ShoppingItem[]>();
@@ -81,62 +89,55 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }));
   }, [executeItems]);
 
-  // フェーズごとの訪問先リストを計算（現在のアイテム状態に基づく）
+  // フェーズごとの訪問先リストを計算
   const visitsByPhase = useMemo(() => {
     const normal: typeof allVisits = [];
     const postponed: typeof allVisits = [];
     const late: typeof allVisits = [];
     
     allVisits.forEach(visit => {
-      // 通常フェーズに属するアイテムがあるか
-      const hasNormalItems = visit.items.some(item => 
-        item.purchaseStatus !== 'Postpone' && item.purchaseStatus !== 'Late'
-      );
-      // 後回しフェーズに属するアイテムがあるか
-      const hasPostponedItems = visit.items.some(item => item.purchaseStatus === 'Postpone');
-      // 遅参フェーズに属するアイテムがあるか
-      const hasLateItems = visit.items.some(item => item.purchaseStatus === 'Late');
+      // 通常フェーズ: 全ての訪問先を含む（網羅的）
+      normal.push(visit);
       
-      if (hasNormalItems) normal.push(visit);
+      // 後回しフェーズ: 後回しアイテムがある訪問先
+      const hasPostponedItems = visit.items.some(item => item.purchaseStatus === 'Postpone');
       if (hasPostponedItems) postponed.push(visit);
+      
+      // 遅参フェーズ: 遅参アイテムがある訪問先
+      const hasLateItems = visit.items.some(item => item.purchaseStatus === 'Late');
       if (hasLateItems) late.push(visit);
     });
     
     return { normal, postponed, late };
   }, [allVisits]);
 
-  // 現在表示すべき訪問先とアイテム
+  // 現在のフェーズの訪問先リスト
+  const currentPhaseVisits = useMemo(() => {
+    return visitsByPhase[currentPhase];
+  }, [visitsByPhase, currentPhase]);
+
+  // 現在表示すべき訪問先
   const currentVisit = useMemo(() => {
-    if (allVisits.length === 0 || currentGlobalIndex >= allVisits.length) {
-      return null;
-    }
-    return allVisits[currentGlobalIndex];
-  }, [allVisits, currentGlobalIndex]);
+    if (currentPhaseVisits.length === 0) return null;
+    const safeIndex = Math.min(currentPhaseIndex, currentPhaseVisits.length - 1);
+    return currentPhaseVisits[safeIndex] || null;
+  }, [currentPhaseVisits, currentPhaseIndex]);
 
-  // 現在のフェーズを更新
-  useEffect(() => {
-    if (!currentVisit) return;
+  // 現在のフェーズで表示すべきアイテム
+  const currentVisitDisplayItems = useMemo(() => {
+    if (!currentVisit) return [];
     
-    const hasNormalItems = currentVisit.items.some(item => 
-      item.purchaseStatus !== 'Postpone' && item.purchaseStatus !== 'Late'
-    );
-    const hasPostponedItems = currentVisit.items.some(item => item.purchaseStatus === 'Postpone');
-    const hasLateItems = currentVisit.items.some(item => item.purchaseStatus === 'Late');
-    
-    if (hasNormalItems) {
-      setCurrentPhase('normal');
-    } else if (hasPostponedItems) {
-      setCurrentPhase('postponed');
-    } else if (hasLateItems) {
-      setCurrentPhase('late');
+    if (currentPhase === 'normal') {
+      // 通常フェーズ: 全アイテムを表示
+      return currentVisit.items;
+    } else if (currentPhase === 'postponed') {
+      // 後回しフェーズ: 後回しアイテムのみ
+      return currentVisit.items.filter(item => item.purchaseStatus === 'Postpone');
+    } else {
+      // 遅参フェーズ: 遅参アイテムのみ
+      return currentVisit.items.filter(item => item.purchaseStatus === 'Late');
     }
-  }, [currentVisit]);
-
-  // 総訪問先数
-  const totalVisits = allVisits.length;
-
-  // 現在の訪問先番号
-  const currentVisitNumber = currentGlobalIndex + 1;
+  }, [currentVisit, currentPhase]);
 
   // フェーズ名の日本語表示
   const phaseDisplayName = useMemo(() => {
@@ -147,34 +148,28 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
   }, [currentPhase]);
 
-  // 現在のフェーズの訪問先数
-  const currentPhaseTotal = useMemo(() => {
-    return visitsByPhase[currentPhase].length;
-  }, [visitsByPhase, currentPhase]);
+  // 総訪問先数（全フェーズ合計）
+  const totalVisits = useMemo(() => {
+    return visitsByPhase.normal.length + visitsByPhase.postponed.length + visitsByPhase.late.length;
+  }, [visitsByPhase]);
 
-  // 現在のフェーズ内でのインデックス
-  const currentPhaseIndex = useMemo(() => {
-    if (!currentVisit) return 0;
-    const phaseVisits = visitsByPhase[currentPhase];
-    const idx = phaseVisits.findIndex(v => v.key === currentVisit.key);
-    return idx >= 0 ? idx : 0;
-  }, [currentVisit, visitsByPhase, currentPhase]);
+  // 現在の訪問先番号（全フェーズ通算）
+  const currentVisitNumber = useMemo(() => {
+    let number = currentPhaseIndex + 1;
+    if (currentPhase === 'postponed') {
+      number += visitsByPhase.normal.length;
+    } else if (currentPhase === 'late') {
+      number += visitsByPhase.normal.length + visitsByPhase.postponed.length;
+    }
+    return number;
+  }, [currentPhaseIndex, currentPhase, visitsByPhase]);
 
   // 価格未定かつ購入済みのアイテムをチェック
   const hasUndefinedPricePurchased = useMemo(() => {
-    if (!currentVisit) return false;
-    return currentVisit.items.some(item => 
+    return currentVisitDisplayItems.some(item => 
       item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null)
     );
-  }, [currentVisit]);
-
-  // 全アイテムが後回しまたは遅参かどうか
-  const allPostponedOrLate = useMemo(() => {
-    if (!currentVisit) return false;
-    return currentVisit.items.every(item => 
-      item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'Late'
-    );
-  }, [currentVisit]);
+  }, [currentVisitDisplayItems]);
 
   // 残りの合計金額を計算
   const remainingCost = useMemo(() => {
@@ -191,63 +186,35 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return executeItems.filter(item => item.purchaseStatus === 'Purchased').length;
   }, [executeItems]);
 
+  // タイマーをクリアする関数
+  const clearAutoAdvanceTimer = useCallback(() => {
+    if (autoAdvanceTimerRef.current) {
+      clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+    setAutoAdvanceCountdown(null);
+  }, []);
+
   // 次へボタンの点滅を更新
   useEffect(() => {
-    if (!currentVisit) return;
+    if (currentVisitDisplayItems.length === 0) return;
     
     if (hasUndefinedPricePurchased) {
       setIsNextButtonBlinking(false);
-      // 価格未定のアイテムを点滅
-      const undefinedPriceIds = currentVisit.items
+      const undefinedPriceIds = currentVisitDisplayItems
         .filter(item => item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null))
         .map(item => item.id);
       setBlinkingPriceItemIds(new Set(undefinedPriceIds));
     } else {
       setBlinkingPriceItemIds(new Set());
-      // 全アイテムの購入状態が変更されたら点滅開始
-      const hasUnprocessed = currentVisit.items.some(item => item.purchaseStatus === 'None');
-      setIsNextButtonBlinking(!hasUnprocessed && currentVisit.items.length > 0);
+      const hasUnprocessed = currentVisitDisplayItems.some(item => item.purchaseStatus === 'None');
+      setIsNextButtonBlinking(!hasUnprocessed && currentVisitDisplayItems.length > 0);
     }
-  }, [currentVisit, hasUndefinedPricePurchased]);
-
-  // 全アイテムが後回し/遅参になったら3秒後に自動進行
-  useEffect(() => {
-    if (allPostponedOrLate && currentVisit && currentGlobalIndex < allVisits.length - 1) {
-      // カウントダウン開始
-      setAutoAdvanceCountdown(3);
-      
-      const countdownInterval = setInterval(() => {
-        setAutoAdvanceCountdown(prev => {
-          if (prev === null || prev <= 1) {
-            clearInterval(countdownInterval);
-            return null;
-          }
-          return prev - 1;
-        });
-      }, 1000);
-      
-      autoAdvanceTimerRef.current = setTimeout(() => {
-        setCurrentGlobalIndex(prev => prev + 1);
-        setAutoAdvanceCountdown(null);
-      }, 3000);
-      
-      return () => {
-        if (autoAdvanceTimerRef.current) {
-          clearTimeout(autoAdvanceTimerRef.current);
-          autoAdvanceTimerRef.current = null;
-        }
-        clearInterval(countdownInterval);
-        setAutoAdvanceCountdown(null);
-      };
-    } else {
-      // 後回し/遅参でなくなった場合、タイマーをクリア
-      if (autoAdvanceTimerRef.current) {
-        clearTimeout(autoAdvanceTimerRef.current);
-        autoAdvanceTimerRef.current = null;
-      }
-      setAutoAdvanceCountdown(null);
-    }
-  }, [allPostponedOrLate, currentVisit, currentGlobalIndex, allVisits.length]);
+  }, [currentVisitDisplayItems, hasUndefinedPricePurchased]);
 
   // 通知を自動で消す
   useEffect(() => {
@@ -257,65 +224,220 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
   }, [notification]);
 
-  // 次の訪問先へ
+  // ナビゲーションボタンの位置を調整
+  useEffect(() => {
+    const checkOverlap = () => {
+      if (!itemListRef.current) return;
+      
+      const buttonSize = 56; // w-14 = 56px
+      const buttonMargin = 16; // left-4/right-4 = 16px
+      const viewportHeight = window.innerHeight;
+      const buttonCenterY = viewportHeight / 2;
+      
+      // アイテムカード内の操作部分（ボタンやドロップダウン）の位置を取得
+      const interactiveElements = itemListRef.current.querySelectorAll('button, select, [role="button"]');
+      
+      let leftOffset = 0;
+      let rightOffset = 0;
+      
+      interactiveElements.forEach(element => {
+        const rect = element.getBoundingClientRect();
+        
+        // ボタンの上下範囲
+        const buttonTop = buttonCenterY - buttonSize / 2;
+        const buttonBottom = buttonCenterY + buttonSize / 2;
+        
+        // Y軸で重なっているか
+        const yOverlap = !(rect.bottom < buttonTop || rect.top > buttonBottom);
+        
+        if (yOverlap) {
+          // 左ボタンとの重なりチェック
+          const leftButtonRight = buttonMargin + buttonSize;
+          if (rect.left < leftButtonRight) {
+            leftOffset = Math.max(leftOffset, leftButtonRight - rect.left + 8);
+          }
+          
+          // 右ボタンとの重なりチェック
+          const rightButtonLeft = window.innerWidth - buttonMargin - buttonSize;
+          if (rect.right > rightButtonLeft) {
+            rightOffset = Math.max(rightOffset, rect.right - rightButtonLeft + 8);
+          }
+        }
+      });
+      
+      setNavButtonOffset({ left: leftOffset, right: rightOffset });
+    };
+    
+    // 初回チェックと再チェック
+    const timer = setTimeout(checkOverlap, 100);
+    window.addEventListener('resize', checkOverlap);
+    
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener('resize', checkOverlap);
+    };
+  }, [currentVisitDisplayItems, currentPhaseIndex, currentPhase]);
+
+  // 次のフェーズまたは訪問先へ移動する関数
+  const moveToNext = useCallback(() => {
+    clearAutoAdvanceTimer();
+    
+    const nextIndex = currentPhaseIndex + 1;
+    
+    if (nextIndex < currentPhaseVisits.length) {
+      // 同じフェーズ内で次へ
+      setCurrentPhaseIndex(nextIndex);
+      setIsNextButtonBlinking(false);
+    } else {
+      // フェーズの終わり - 次のフェーズへ
+      if (currentPhase === 'normal') {
+        if (visitsByPhase.postponed.length > 0) {
+          setNotification('後回しアイテムの巡回を開始します');
+          setCurrentPhase('postponed');
+          setCurrentPhaseIndex(0);
+          setIsNextButtonBlinking(false);
+        } else if (visitsByPhase.late.length > 0) {
+          setNotification('遅参アイテムの巡回を開始します');
+          setCurrentPhase('late');
+          setCurrentPhaseIndex(0);
+          setIsNextButtonBlinking(false);
+        } else {
+          setIsCompleted(true);
+        }
+      } else if (currentPhase === 'postponed') {
+        if (visitsByPhase.late.length > 0) {
+          setNotification('遅参アイテムの巡回を開始します');
+          setCurrentPhase('late');
+          setCurrentPhaseIndex(0);
+          setIsNextButtonBlinking(false);
+        } else {
+          setIsCompleted(true);
+        }
+      } else {
+        setIsCompleted(true);
+      }
+    }
+  }, [currentPhaseIndex, currentPhaseVisits.length, currentPhase, visitsByPhase, clearAutoAdvanceTimer]);
+
+  // 自動進行を開始する関数（ユーザー操作からのみ呼び出す）
+  const startAutoAdvance = useCallback(() => {
+    // 既にタイマーが動いている場合は何もしない
+    if (autoAdvanceTimerRef.current) return;
+    
+    // カウントダウン開始
+    setAutoAdvanceCountdown(3);
+    
+    countdownIntervalRef.current = setInterval(() => {
+      setAutoAdvanceCountdown(prev => {
+        if (prev === null || prev <= 1) {
+          return prev;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    
+    autoAdvanceTimerRef.current = setTimeout(() => {
+      moveToNext();
+    }, 3000);
+  }, [moveToNext]);
+
+  // 次の訪問先へ（手動）
   const handleNext = useCallback(() => {
     // 価格未定チェック
     if (hasUndefinedPricePurchased) {
       setNotification('価格未定のアイテムがあります。価格を入力してください。');
-      // 価格未定アイテムを点滅
-      if (currentVisit) {
-        const undefinedPriceIds = currentVisit.items
-          .filter(item => item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null))
-          .map(item => item.id);
-        setBlinkingPriceItemIds(new Set(undefinedPriceIds));
-      }
+      const undefinedPriceIds = currentVisitDisplayItems
+        .filter(item => item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null))
+        .map(item => item.id);
+      setBlinkingPriceItemIds(new Set(undefinedPriceIds));
       return;
     }
 
-    if (currentGlobalIndex < allVisits.length - 1) {
-      // 次の訪問先へ
-      const nextIndex = currentGlobalIndex + 1;
-      setCurrentGlobalIndex(nextIndex);
-      setIsNextButtonBlinking(false);
-      
-      // フェーズ切り替え通知
-      const nextVisit = allVisits[nextIndex];
-      if (nextVisit) {
-        const hasNormalItems = nextVisit.items.some(item => 
-          item.purchaseStatus !== 'Postpone' && item.purchaseStatus !== 'Late'
-        );
-        const hasPostponedItems = nextVisit.items.some(item => item.purchaseStatus === 'Postpone');
-        
-        // 通常→後回しへの切り替え
-        if (currentPhase === 'normal' && !hasNormalItems && hasPostponedItems) {
-          setNotification('後回しアイテムの巡回を開始します');
-        }
-        // 後回し→遅参への切り替え
-        else if (currentPhase === 'postponed' && !hasNormalItems && !hasPostponedItems) {
-          setNotification('遅参アイテムの巡回を開始します');
-        }
-      }
-    } else {
-      // 全て完了
-      setIsCompleted(true);
-    }
-  }, [currentGlobalIndex, allVisits, hasUndefinedPricePurchased, currentVisit, currentPhase]);
+    clearAutoAdvanceTimer();
+    moveToNext();
+  }, [hasUndefinedPricePurchased, currentVisitDisplayItems, clearAutoAdvanceTimer, moveToNext]);
 
   // 前の訪問先へ
   const handlePrev = useCallback(() => {
-    if (currentGlobalIndex > 0) {
-      setCurrentGlobalIndex(currentGlobalIndex - 1);
+    clearAutoAdvanceTimer();
+    
+    // 完了画面から戻る場合
+    if (isCompleted) {
+      setIsCompleted(false);
+      // 最後のフェーズの最後の訪問先に戻る
+      if (visitsByPhase.late.length > 0) {
+        setCurrentPhase('late');
+        setCurrentPhaseIndex(visitsByPhase.late.length - 1);
+      } else if (visitsByPhase.postponed.length > 0) {
+        setCurrentPhase('postponed');
+        setCurrentPhaseIndex(visitsByPhase.postponed.length - 1);
+      } else if (visitsByPhase.normal.length > 0) {
+        setCurrentPhase('normal');
+        setCurrentPhaseIndex(visitsByPhase.normal.length - 1);
+      }
+      return;
+    }
+    
+    if (currentPhaseIndex > 0) {
+      setCurrentPhaseIndex(currentPhaseIndex - 1);
       setIsNextButtonBlinking(false);
     } else {
-      setNotification('最初の訪問サークル・スペースです');
+      // フェーズの最初 - 前のフェーズへ
+      if (currentPhase === 'postponed' && visitsByPhase.normal.length > 0) {
+        setCurrentPhase('normal');
+        setCurrentPhaseIndex(visitsByPhase.normal.length - 1);
+        setIsNextButtonBlinking(false);
+      } else if (currentPhase === 'late') {
+        if (visitsByPhase.postponed.length > 0) {
+          setCurrentPhase('postponed');
+          setCurrentPhaseIndex(visitsByPhase.postponed.length - 1);
+          setIsNextButtonBlinking(false);
+        } else if (visitsByPhase.normal.length > 0) {
+          setCurrentPhase('normal');
+          setCurrentPhaseIndex(visitsByPhase.normal.length - 1);
+          setIsNextButtonBlinking(false);
+        } else {
+          setNotification('最初の訪問サークル・スペースです');
+        }
+      } else {
+        setNotification('最初の訪問サークル・スペースです');
+      }
     }
-  }, [currentGlobalIndex]);
+  }, [currentPhaseIndex, currentPhase, visitsByPhase, clearAutoAdvanceTimer, isCompleted]);
 
   // アイテム更新ハンドラ
   const handleUpdateItem = useCallback((updatedItem: ShoppingItem) => {
     setLastInteractedItemId(updatedItem.id);
+    
+    // まずアイテムを更新
     onUpdateItem(updatedItem);
-  }, [onUpdateItem]);
+    
+    // 購入状態が変更されたかチェック
+    const originalItem = currentVisitDisplayItems.find(i => i.id === updatedItem.id);
+    if (!originalItem) return;
+    
+    // 後回し/遅参以外に変更された場合、タイマーをクリア
+    if (updatedItem.purchaseStatus !== 'Postpone' && updatedItem.purchaseStatus !== 'Late') {
+      clearAutoAdvanceTimer();
+      return;
+    }
+    
+    // 通常フェーズでのみ自動進行をチェック
+    if (currentPhase !== 'normal') return;
+    
+    // 更新後の状態で全アイテムが後回し/遅参かチェック
+    const willAllBePostponedOrLate = currentVisitDisplayItems.every(item => {
+      if (item.id === updatedItem.id) {
+        return updatedItem.purchaseStatus === 'Postpone' || updatedItem.purchaseStatus === 'Late';
+      }
+      return item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'Late';
+    });
+    
+    if (willAllBePostponedOrLate) {
+      // 3秒後に自動進行を開始
+      startAutoAdvance();
+    }
+  }, [onUpdateItem, currentVisitDisplayItems, clearAutoAdvanceTimer, currentPhase, startAutoAdvance]);
 
   // モード切り替え
   const handleModeChangeInternal = useCallback((mode: 'edit' | 'execute') => {
@@ -323,7 +445,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   }, [onModeChange, lastInteractedItemId]);
 
   // 訪問先がない場合
-  if (totalVisits === 0) {
+  if (allVisits.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
         <div className="text-6xl mb-4">📋</div>
@@ -346,7 +468,16 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 完了画面
   if (isCompleted) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
+      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8 relative">
+        {/* 戻るボタン */}
+        <button
+          onClick={handlePrev}
+          className="fixed left-4 top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl transition-all z-40"
+          title="前の訪問先"
+        >
+          ◀
+        </button>
+        
         <div className="text-6xl mb-4">🎉</div>
         <h2 className="text-xl font-bold text-slate-700 dark:text-slate-300 mb-2">
           全ての訪問先を確認しました
@@ -374,6 +505,26 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
 
+  // 現在のフェーズに表示するアイテムがない場合、次のフェーズに進む
+  if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) {
+    // 次の訪問先を探す
+    for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
+      const visit = currentPhaseVisits[i];
+      const hasItems = currentPhase === 'normal' 
+        ? visit.items.length > 0
+        : currentPhase === 'postponed'
+          ? visit.items.some(item => item.purchaseStatus === 'Postpone')
+          : visit.items.some(item => item.purchaseStatus === 'Late');
+      if (hasItems) {
+        setCurrentPhaseIndex(i);
+        return null;
+      }
+    }
+    // 見つからない場合は次のフェーズへ
+    moveToNext();
+    return null;
+  }
+
   // 現在の訪問先情報
   const circleName = currentVisit?.items[0]?.circle || '';
   const spaceInfo = currentVisit?.items[0] 
@@ -397,7 +548,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       )}
 
       {/* ヘッダー情報 */}
-      <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4 rounded-lg mb-4 shadow-lg">
+      <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4 rounded-lg mb-4 shadow-lg mx-16">
         <div className="flex justify-between items-start">
           <div>
             <div className="text-sm opacity-80">訪問先</div>
@@ -412,10 +563,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
       </div>
 
       {/* アイテムリスト */}
-      <div className="space-y-4 pb-24">
-        {currentVisit?.items.map((item, index) => (
+      <div ref={itemListRef} className="space-y-4 pb-24 mx-16">
+        {currentVisitDisplayItems.map((item, index) => (
           <div 
             key={item.id}
+            data-item-id={item.id}
             className={`relative ${blinkingPriceItemIds.has(item.id) ? 'animate-pulse ring-2 ring-red-500 rounded-lg' : ''}`}
           >
             <ShoppingItemCard
@@ -435,8 +587,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
       {/* ナビゲーションボタン */}
       {/* 戻るボタン（左側） */}
       <button
+        ref={prevButtonRef}
         onClick={handlePrev}
-        className="fixed left-4 top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl transition-all z-40"
+        style={{ 
+          left: `${16 + navButtonOffset.left}px`,
+          transition: 'left 0.2s ease-out'
+        }}
+        className="fixed top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-40"
         title="前の訪問先"
       >
         ◀
@@ -444,8 +601,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
       {/* 次へボタン（右側） */}
       <button
+        ref={nextButtonRef}
         onClick={handleNext}
-        className={`fixed right-4 top-1/2 transform -translate-y-1/2 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-2xl transition-all z-40 ${
+        style={{ 
+          right: `${16 + navButtonOffset.right}px`,
+          transition: 'right 0.2s ease-out'
+        }}
+        className={`fixed top-1/2 transform -translate-y-1/2 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-2xl z-40 ${
           hasUndefinedPricePurchased
             ? 'bg-red-500 hover:bg-red-600 text-white'
             : isNextButtonBlinking
@@ -457,13 +619,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
         ▶
       </button>
 
-      {/* フッター（SummaryBarと同じデザイン） */}
+      {/* フッター */}
       <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
           <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
             <div className="text-slate-700 dark:text-slate-300">
               <span className="font-bold text-xl text-indigo-600 dark:text-indigo-400">
-                {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseTotal}
+                {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
               </span>
               <span className="text-sm text-slate-500 dark:text-slate-400 ml-3 opacity-60">
                 ({currentVisitNumber}/{totalVisits})
