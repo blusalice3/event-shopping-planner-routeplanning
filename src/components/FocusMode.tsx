@@ -14,6 +14,9 @@ interface FocusModeProps {
   onLayoutModeChange: (mode: 'pc' | 'smartphone') => void;
 }
 
+// スワイプ判定の閾値
+const SWIPE_THRESHOLD = 50;
+
 // ナンバーからベース部分（アルファベットとその左側の数値）を抽出
 const extractBaseNumber = (number: string): string => {
   const match = number.match(/^(\d+[a-zA-Z])/);
@@ -58,6 +61,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const [navButtonOffset, setNavButtonOffset] = useState({ left: 0, right: 0 });
   // アイテムリストのref
   const itemListRef = useRef<HTMLDivElement>(null);
+  // スワイプ関連のref
+  const touchStartXRef = useRef<number | null>(null);
+  const touchStartYRef = useRef<number | null>(null);
+  const isSwipingRef = useRef(false);
+  // スワイプコンテナのref
+  const swipeContainerRef = useRef<HTMLDivElement>(null);
 
   // 後回しフェーズで表示するアイテムID（通常フェーズ終了時に確定）
   const [postponedPhaseItemIds, setPostponedPhaseItemIds] = useState<Set<string>>(new Set());
@@ -486,6 +495,51 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
   }, [onUpdateItem, currentVisitDisplayItems, clearAutoAdvanceTimer, currentPhase, startAutoAdvance]);
 
+  // スワイプハンドラ（スマートフォンモード用）
+  const handleTouchStart = useCallback((e: React.TouchEvent) => {
+    if (layoutMode !== 'smartphone') return;
+    const touch = e.touches[0];
+    touchStartXRef.current = touch.clientX;
+    touchStartYRef.current = touch.clientY;
+    isSwipingRef.current = false;
+  }, [layoutMode]);
+
+  const handleTouchMove = useCallback((e: React.TouchEvent) => {
+    if (layoutMode !== 'smartphone' || touchStartXRef.current === null || touchStartYRef.current === null) return;
+    
+    const touch = e.touches[0];
+    const deltaX = touch.clientX - touchStartXRef.current;
+    const deltaY = touch.clientY - touchStartYRef.current;
+    
+    // 水平方向の移動が垂直方向より大きい場合のみスワイプとして処理
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
+      isSwipingRef.current = true;
+    }
+  }, [layoutMode]);
+
+  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
+    if (layoutMode !== 'smartphone' || touchStartXRef.current === null) return;
+    
+    const touch = e.changedTouches[0];
+    const deltaX = touch.clientX - touchStartXRef.current;
+    const deltaY = touch.clientY - (touchStartYRef.current || 0);
+    
+    // 水平方向の移動が垂直方向より大きく、閾値を超えた場合のみ処理
+    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > SWIPE_THRESHOLD) {
+      if (deltaX > 0) {
+        // 右スワイプ → 前へ
+        handlePrev();
+      } else {
+        // 左スワイプ → 次へ
+        handleNext();
+      }
+    }
+    
+    touchStartXRef.current = null;
+    touchStartYRef.current = null;
+    isSwipingRef.current = false;
+  }, [layoutMode, handlePrev, handleNext]);
+
   // モード切り替え
   const handleModeChangeInternal = useCallback((mode: 'edit' | 'execute') => {
     onModeChange(mode, lastInteractedItemId || undefined);
@@ -515,15 +569,29 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 完了画面
   if (isCompleted) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8 relative">
-        {/* 戻るボタン */}
-        <button
-          onClick={handlePrev}
-          className="fixed left-4 top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl transition-all z-40"
-          title="前の訪問先"
-        >
-          ◀
-        </button>
+      <div 
+        className="flex flex-col items-center justify-center min-h-[50vh] p-8 relative"
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={handleTouchEnd}
+      >
+        {/* 戻るボタン（PCモードのみ表示） */}
+        {layoutMode === 'pc' && (
+          <button
+            onClick={handlePrev}
+            className="fixed left-4 top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl transition-all z-40"
+            title="前の訪問先"
+          >
+            ◀
+          </button>
+        )}
+        
+        {/* スマートフォンモードのスワイプヒント */}
+        {layoutMode === 'smartphone' && (
+          <div className="absolute top-4 left-0 right-0 text-center text-sm text-slate-500 dark:text-slate-400">
+            ← 右スワイプで前の訪問先へ戻る
+          </div>
+        )}
         
         <div className="text-6xl mb-4">🎉</div>
         <h2 className="text-xl font-bold text-slate-700 dark:text-slate-300 mb-2">
@@ -582,7 +650,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
     : '';
 
   return (
-    <div className="relative min-h-[calc(100vh-200px)] pb-20">
+    <div 
+      ref={swipeContainerRef}
+      className="relative min-h-[calc(100vh-200px)] pb-20"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
       {/* 通知 */}
       {notification && (
         <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
@@ -597,8 +671,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
         </div>
       )}
 
-      {/* ヘッダー情報 */}
-      <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4 rounded-lg mb-4 shadow-lg mx-16">
+      {/* ヘッダー情報 - スマートフォンモードでは横幅フル */}
+      <div className={`bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4 rounded-lg mb-4 shadow-lg ${layoutMode === 'smartphone' ? 'mx-2' : 'mx-16'}`}>
         <div className="flex justify-between items-start">
           <div>
             <div className="text-sm opacity-80">訪問先</div>
@@ -612,8 +686,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
         </div>
       </div>
 
-      {/* アイテムリスト */}
-      <div ref={itemListRef} className="space-y-4 pb-24 mx-16">
+      {/* アイテムリスト - スマートフォンモードでは横幅フル */}
+      <div ref={itemListRef} className={`space-y-4 pb-24 ${layoutMode === 'smartphone' ? 'mx-2' : 'mx-16'}`}>
         {currentVisitDisplayItems.map((item, index) => (
           <div 
             key={item.id}
@@ -634,38 +708,42 @@ const FocusMode: React.FC<FocusModeProps> = ({
         ))}
       </div>
 
-      {/* ナビゲーションボタン */}
-      {/* 戻るボタン（左側） */}
-      <button
-        onClick={handlePrev}
-        style={{ 
-          left: `${16 + navButtonOffset.left}px`,
-          transition: 'left 0.2s ease-out'
-        }}
-        className="fixed top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-40"
-        title="前の訪問先"
-      >
-        ◀
-      </button>
+      {/* ナビゲーションボタン（PCモードのみ表示） */}
+      {layoutMode === 'pc' && (
+        <>
+          {/* 戻るボタン（左側） */}
+          <button
+            onClick={handlePrev}
+            style={{ 
+              left: `${16 + navButtonOffset.left}px`,
+              transition: 'left 0.2s ease-out'
+            }}
+            className="fixed top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-40"
+            title="前の訪問先"
+          >
+            ◀
+          </button>
 
-      {/* 次へボタン（右側） */}
-      <button
-        onClick={handleNext}
-        style={{ 
-          right: `${16 + navButtonOffset.right}px`,
-          transition: 'right 0.2s ease-out'
-        }}
-        className={`fixed top-1/2 transform -translate-y-1/2 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-2xl z-40 ${
-          hasUndefinedPricePurchased
-            ? 'bg-red-500 hover:bg-red-600 text-white'
-            : isNextButtonBlinking
-              ? 'bg-green-500 hover:bg-green-600 text-white animate-pulse'
-              : 'bg-blue-600 hover:bg-blue-700 text-white'
-        }`}
-        title="次の訪問先"
-      >
-        ▶
-      </button>
+          {/* 次へボタン（右側） */}
+          <button
+            onClick={handleNext}
+            style={{ 
+              right: `${16 + navButtonOffset.right}px`,
+              transition: 'right 0.2s ease-out'
+            }}
+            className={`fixed top-1/2 transform -translate-y-1/2 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-2xl z-40 ${
+              hasUndefinedPricePurchased
+                ? 'bg-red-500 hover:bg-red-600 text-white'
+                : isNextButtonBlinking
+                  ? 'bg-green-500 hover:bg-green-600 text-white animate-pulse'
+                  : 'bg-blue-600 hover:bg-blue-700 text-white'
+            }`}
+            title="次の訪問先"
+          >
+            ▶
+          </button>
+        </>
+      )}
 
       {/* フッター */}
       <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
