@@ -96,6 +96,9 @@ const App: React.FC = () => {
   // レイアウトモード状態
   const [layoutMode, setLayoutMode] = useState<'pc' | 'smartphone'>('pc');
   
+  // 集中モード用: スマートフォンでマップ表示時にヘッダーを非表示
+  const [focusModeHideHeader, setFocusModeHideHeader] = useState(false);
+  
   // ダークモード状態 ('system' | 'light' | 'dark')
   const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>(() => {
     if (typeof window !== 'undefined') {
@@ -1335,6 +1338,11 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     
     setSelectedItemIds(new Set());
     setCandidateNumberSortDirection(null);
+    
+    // 集中モード以外に切り替えた場合、ヘッダーを再表示
+    if (mode !== 'focus') {
+      setFocusModeHideHeader(false);
+    }
     
     // スクロール先のアイテムIDが指定されている場合
     if (scrollToItemId) {
@@ -3857,6 +3865,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-200 font-sans">
+      {!focusModeHideHeader && (
       <header className="bg-white dark:bg-slate-800 shadow-sm sticky top-0 z-10">
         <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
           <div>
@@ -4170,6 +4179,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             </div>
         </div>
       </header>
+      )}
 
       <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
         {activeTab === 'eventList' && (
@@ -4354,6 +4364,9 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 onModeChange={(mode, lastItemId) => handleSetViewMode(mode, lastItemId)}
                 layoutMode={layoutMode}
                 onLayoutModeChange={setLayoutMode}
+                mapData={activeEventName ? mapData[activeEventName] : undefined}
+                hallDefinitions={activeEventName && activeTab ? hallDefinitions[activeEventName]?.[`${eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}マップ`] : undefined}
+                onHideHeader={setFocusModeHideHeader}
               />
             ) : (
               <ShoppingList
