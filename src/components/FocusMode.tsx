@@ -292,11 +292,50 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return mapData[currentMapName] || null;
   }, [currentMapName, mapData]);
 
-  // 現在のホール定義（最初のホールを使用）
-  const currentHallDefinition = useMemo(() => {
-    if (!hallDefinitions || hallDefinitions.length === 0) return null;
-    return hallDefinitions[0];
-  }, [hallDefinitions]);
+  // 追随モード用ホール特定
+  const followHall = useMemo(() => {
+    if (!hallDefinitions || hallDefinitions.length === 0 || !currentVisit || !currentMapData) return null;
+    
+    const currentItem = currentVisit.items[0];
+    if (!currentItem) return null;
+    
+    const block = currentMapData.blocks.find(b => b.name === currentItem.block);
+    if (!block) return null;
+    
+    const numStr = currentItem.number.match(/^(\d+)/)?.[1];
+    if (!numStr) return null;
+    const num = parseInt(numStr, 10);
+    const cell = block.numberCells.find(nc => nc.value === num);
+    if (!cell) return null;
+    
+    for (const hall of hallDefinitions) {
+      if (hall.vertices.length < 3) continue;
+      
+      let inside = false;
+      const vertices = hall.vertices;
+      for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+        const xi = vertices[i].col, yi = vertices[i].row;
+        const xj = vertices[j].col, yj = vertices[j].row;
+        
+        if (((yi > cell.row) !== (yj > cell.row)) &&
+            (cell.col < (xj - xi) * (cell.row - yi) / (yj - yi) + xi)) {
+          inside = !inside;
+        }
+      }
+      
+      if (inside) return hall;
+    }
+    
+    return null;
+  }, [hallDefinitions, currentVisit, currentMapData]);
+
+  // 選択されたホール
+  const selectedHall = useMemo(() => {
+    if (selectedHallId === 'follow') {
+      return followHall;
+    }
+    return hallDefinitions?.find(h => h.id === selectedHallId) || null;
+  }, [selectedHallId, followHall, hallDefinitions]);
 
   // タイマーをクリアする関数
   const clearAutoAdvanceTimer = useCallback(() => {
@@ -830,92 +869,139 @@ const FocusMode: React.FC<FocusModeProps> = ({
     </div>
   );
 
+  // マップコントロール
+  const MapControls = () => (
+    <div className="flex items-center gap-2 p-2 bg-white/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700">
+      <select
+        value={selectedHallId}
+        onChange={(e) => setSelectedHallId(e.target.value)}
+        className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+      >
+        <option value="follow">追随モードON</option>
+        {hallDefinitions?.map(hall => (
+          <option key={hall.id} value={hall.id}>{hall.name}</option>
+        ))}
+      </select>
+      
+      <select
+        value={mapZoomLevel}
+        onChange={(e) => setMapZoomLevel(Number(e.target.value) as ZoomLevel)}
+        className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
+      >
+        {ZOOM_LEVELS.map(level => (
+          <option key={level} value={level}>{level}%</option>
+        ))}
+      </select>
+    </div>
+  );
+
+  // フッターの高さ定数
+  const FOOTER_HEIGHT_SP = 56;
+
   // スマートフォン+マップ表示モード
   if (layoutMode === 'smartphone' && isMapVisible && currentMapData && !isCompleted) {
+    const availableHeight = `calc(100vh - ${FOOTER_HEIGHT_SP}px)`;
+    
     return (
       <div 
-        ref={swipeContainerRef}
-        className="relative flex flex-col h-[calc(100vh-80px)]"
+        className="relative flex flex-col"
+        style={{ height: availableHeight }}
       >
         {/* 通知 */}
         {notification && (
-          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
+          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
             {notification}
           </div>
         )}
 
         {/* 自動進行カウントダウン */}
         {autoAdvanceCountdown !== null && (
-          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-orange-500 text-white px-6 py-3 rounded-lg shadow-lg">
+          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-orange-500 text-white px-6 py-3 rounded-lg shadow-lg">
             {autoAdvanceCountdown}秒後に次の訪問先へ移動します...
           </div>
         )}
 
         {/* マップエリア */}
-        <div style={{ height: `${splitRatio}%` }} className="relative overflow-hidden">
-          <FocusModeMapCanvas
-            mapData={currentMapData}
-            mapName={currentMapName || ''}
-            items={executeItems}
-            executeModeItemIds={executeItems.map(item => item.id)}
-            zoomLevel={mapZoomLevel}
-            selectedHall={currentHallDefinition}
-            currentVisitKey={currentVisitKey}
-            nextVisitKey={nextVisitKey}
-            currentPhase={currentPhase}
-            onZoomChange={handleMapZoomChange}
-          />
-          {/* マップ非表示ボタン */}
-          <button
-            onClick={toggleMapVisibility}
-            className="absolute top-2 right-2 bg-white/90 dark:bg-slate-800/90 px-3 py-1 rounded-lg shadow text-sm z-10"
-          >
-            🗺️ 非表示
-          </button>
+        <div style={{ height: `${splitRatio}%` }} className="relative flex flex-col min-h-0">
+          <MapControls />
+          <div className="flex-grow relative overflow-hidden">
+            <FocusModeMapCanvas
+              mapData={currentMapData}
+              mapName={currentMapName || ''}
+              items={items}
+              executeModeItemIds={executeModeItemIds}
+              zoomLevel={mapZoomLevel}
+              selectedHall={selectedHall}
+              currentVisitKey={currentVisit?.key || null}
+              nextVisitKey={nextVisit?.key || null}
+              currentPhase={currentPhase}
+              onZoomChange={handleMapZoomChange}
+            />
+          </div>
         </div>
 
         {/* 分割線（ドラッグ可能） */}
         <div 
-          className="h-2 bg-slate-300 dark:bg-slate-600 cursor-row-resize flex items-center justify-center touch-none"
+          className="h-3 bg-slate-300 dark:bg-slate-600 cursor-row-resize flex items-center justify-center touch-none flex-shrink-0"
+          onTouchStart={handleSplitDragStart}
+          onTouchMove={handleSplitDragMove}
+          onTouchEnd={handleSplitDragEnd}
           onMouseDown={handleSplitDragStart}
           onMouseMove={handleSplitDragMove}
           onMouseUp={handleSplitDragEnd}
           onMouseLeave={handleSplitDragEnd}
-          onTouchStart={handleSplitDragStart}
-          onTouchMove={handleSplitDragMove}
-          onTouchEnd={handleSplitDragEnd}
         >
-          <div className="w-12 h-1 bg-slate-400 dark:bg-slate-500 rounded-full" />
+          <div className="w-12 h-1 bg-slate-500 dark:bg-slate-400 rounded-full" />
         </div>
 
-        {/* アイテムリストエリア */}
+        {/* アイテムリストエリア（スワイプ判定はここのみ） */}
         <div 
           style={{ height: `${100 - splitRatio}%` }} 
-          className="overflow-y-auto"
+          className="overflow-y-auto min-h-0"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          <div className="p-2">
-            <Header />
-          </div>
+          <Header />
           <ItemList />
         </div>
 
         {/* フッター */}
         <div className="fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
           <div className="px-4 py-2">
-            <div className="flex justify-between items-center text-sm">
+            <div className="flex justify-between items-center">
               <div className="text-slate-700 dark:text-slate-300">
-                <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                <span className="font-bold text-lg text-indigo-600 dark:text-indigo-400">
                   {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
                 </span>
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-slate-500 dark:text-slate-400">{purchasedCount}/{executeItems.length}件</span>
-                <span className="font-bold text-blue-600 dark:text-blue-400">
-                  ¥{remainingCost.toLocaleString()}
-                </span>
+                <div className="text-sm text-slate-700 dark:text-slate-300">
+                  <span className="font-semibold">{purchasedCount}</span>/{executeItems.length}
+                </div>
+                <div className="text-sm">
+                  <span className="font-bold text-blue-600 dark:text-blue-400">
+                    ¥{remainingCost.toLocaleString()}
+                  </span>
+                </div>
+                <button
+                  onClick={toggleMapVisibility}
+                  className="p-2 rounded-md bg-blue-600 text-white"
+                  title="マップを非表示"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => onLayoutModeChange('pc')}
+                  className="p-2 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                  title="タブレット/PCモードに切替"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
@@ -924,13 +1010,16 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
 
+  // フッターの高さ定数（PC用）
+  const HEADER_HEIGHT = 64;
+  const FOOTER_HEIGHT_PC = 64;
+
   // PC+マップ表示モード
   if (layoutMode === 'pc' && isMapVisible && currentMapData && !isCompleted) {
+    const availableHeight = `calc(100vh - ${HEADER_HEIGHT + FOOTER_HEIGHT_PC}px)`;
+    
     return (
-      <div 
-        ref={swipeContainerRef}
-        className="relative flex h-[calc(100vh-200px)]"
-      >
+      <div className="relative flex" style={{ height: availableHeight }}>
         {/* 通知 */}
         {notification && (
           <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
@@ -946,51 +1035,48 @@ const FocusMode: React.FC<FocusModeProps> = ({
         )}
 
         {/* 左側: マップ */}
-        <div className="w-1/2 relative overflow-hidden border-r border-slate-200 dark:border-slate-700">
-          <FocusModeMapCanvas
-            mapData={currentMapData}
-            mapName={currentMapName || ''}
-            items={executeItems}
-            executeModeItemIds={executeItems.map(item => item.id)}
-            zoomLevel={mapZoomLevel}
-            selectedHall={currentHallDefinition}
-            currentVisitKey={currentVisitKey}
-            nextVisitKey={nextVisitKey}
-            currentPhase={currentPhase}
-            onZoomChange={handleMapZoomChange}
-          />
-          {/* マップ非表示ボタン */}
-          <button
-            onClick={toggleMapVisibility}
-            className="absolute top-2 right-2 bg-white/90 dark:bg-slate-800/90 px-3 py-1 rounded-lg shadow text-sm z-10"
-          >
-            🗺️ 非表示
-          </button>
+        <div className="w-1/2 flex flex-col border-r border-slate-200 dark:border-slate-700">
+          <MapControls />
+          <div className="flex-grow relative overflow-hidden">
+            <FocusModeMapCanvas
+              mapData={currentMapData}
+              mapName={currentMapName || ''}
+              items={items}
+              executeModeItemIds={executeModeItemIds}
+              zoomLevel={mapZoomLevel}
+              selectedHall={selectedHall}
+              currentVisitKey={currentVisit?.key || null}
+              nextVisitKey={nextVisit?.key || null}
+              currentPhase={currentPhase}
+              onZoomChange={handleMapZoomChange}
+            />
+          </div>
         </div>
 
         {/* 右側: アイテムリスト */}
-        <div className="w-1/2 overflow-y-auto">
-          <div className="p-4">
-            <Header />
-          </div>
+        <div className="w-1/2 flex flex-col overflow-y-auto pb-20">
+          <Header />
           <ItemList />
         </div>
 
         {/* ナビゲーションボタン */}
         <button
           onClick={handlePrev}
-          className="fixed left-4 top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-40"
+          className="fixed right-[calc(50%+16px)] top-1/2 transform -translate-y-1/2 w-12 h-12 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-xl z-40"
           title="前の訪問先"
         >
           ◀
         </button>
+
         <button
           onClick={handleNext}
-          className={`fixed right-4 top-1/2 transform -translate-y-1/2 w-14 h-14 ${
-            isNextButtonBlinking
-              ? 'bg-green-500 hover:bg-green-600 animate-pulse'
-              : 'bg-blue-600 hover:bg-blue-700'
-          } text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-40`}
+          className={`fixed right-4 top-1/2 transform -translate-y-1/2 w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl z-40 ${
+            hasUndefinedPricePurchased
+              ? 'bg-red-500 hover:bg-red-600 text-white'
+              : isNextButtonBlinking
+                ? 'bg-green-500 hover:bg-green-600 text-white animate-pulse'
+                : 'bg-blue-600 hover:bg-blue-700 text-white'
+          }`}
           title="次の訪問先"
         >
           ▶
@@ -1018,6 +1104,24 @@ const FocusMode: React.FC<FocusModeProps> = ({
                     ¥{remainingCost.toLocaleString()}
                   </span>
                 </div>
+                <button
+                  onClick={toggleMapVisibility}
+                  className="p-2 rounded-md bg-blue-600 text-white"
+                  title="マップを非表示"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                  </svg>
+                </button>
+                <button
+                  onClick={() => onLayoutModeChange('smartphone')}
+                  className="p-2 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                  title="スマートフォンモードに切替"
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                  </svg>
+                </button>
               </div>
             </div>
           </div>
