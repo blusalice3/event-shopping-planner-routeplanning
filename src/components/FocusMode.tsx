@@ -738,14 +738,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
 
-  // 次の訪問先探索用のフラグ
-  const needsNavigationRef = useRef(false);
-  const navigationTargetRef = useRef<{ type: 'index', value: number } | { type: 'next' } | null>(null);
-
-  // 表示アイテムがない場合の処理を計算
-  if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0 && !isCompleted) {
-    // 現在のフェーズ内で次の訪問先を探す
-    let foundNextIndex: number | null = null;
+  // 現在のフェーズに表示するアイテムがない場合、次の訪問先を探す
+  if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) {
+    // 次の訪問先を探す
     for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
       const visit = currentPhaseVisits[i];
       let hasItems = false;
@@ -757,43 +752,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
         hasItems = visit.items.some(item => latePhaseItemIds.has(item.id));
       }
       if (hasItems) {
-        foundNextIndex = i;
-        break;
+        setCurrentPhaseIndex(i);
+        return null;
       }
     }
-
-    if (foundNextIndex !== null) {
-      navigationTargetRef.current = { type: 'index', value: foundNextIndex };
-      needsNavigationRef.current = true;
-    } else {
-      navigationTargetRef.current = { type: 'next' };
-      needsNavigationRef.current = true;
-    }
-  }
-
-  // 次の訪問先探索（useEffectで状態更新を実行）
-  useEffect(() => {
-    if (!needsNavigationRef.current || !navigationTargetRef.current) return;
-    
-    const target = navigationTargetRef.current;
-    needsNavigationRef.current = false;
-    navigationTargetRef.current = null;
-
-    if (target.type === 'index') {
-      setCurrentPhaseIndex(target.value);
-    } else {
-      moveToNext();
-    }
-  });
-
-  // 表示アイテムがない場合はローディング表示（useEffectで処理されるまで）
-  if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0 && !isCompleted) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
-        <div className="text-4xl mb-4 animate-spin">⏳</div>
-        <p className="text-slate-500 dark:text-slate-400">次の訪問先を探しています...</p>
-      </div>
-    );
+    // 見つからない場合は次のフェーズへ
+    moveToNext();
+    return null;
   }
 
   // 現在の訪問先情報
