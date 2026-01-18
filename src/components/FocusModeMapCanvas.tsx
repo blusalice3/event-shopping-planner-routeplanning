@@ -21,6 +21,8 @@ interface FocusModeMapCanvasProps {
   currentVisitKey: string | null;  // 現在位置（eventDate-block-baseNumber）
   nextVisitKey: string | null;     // 次の目的地
   currentPhase: 'normal' | 'postponed' | 'late';
+  // 自動ズーム用コールバック
+  onZoomChange?: (newZoom: ZoomLevel) => void;
 }
 
 const BASE_CELL_SIZE = 28;
@@ -48,6 +50,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   currentVisitKey,
   nextVisitKey,
   currentPhase,
+  onZoomChange,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -59,9 +62,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
   const scale = zoomLevel / 100;
   const cellSize = BASE_CELL_SIZE * scale;
-  const isDetailedView = zoomLevel >= 80;
-  const showNumbers = zoomLevel >= 60;
-  const showBorders = zoomLevel >= 40;
+  // 表示倍率に関わらず全ての内容を表示
+  const isDetailedView = true;
+  const showNumbers = true;
+  const showBorders = true;
 
   const prevCellSizeRef = useRef<number>(cellSize);
   const initializedRef = useRef<boolean>(false);
@@ -246,48 +250,120 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return simplifyPath(path);
   }, [currentCellCoords, nextCellCoords, mapData, cellsMap]);
 
-  // ズームレベル変更時の視点維持
+  // ルートの範囲を計算（現在位置と次の目的地を含む矩形）
+  const routeBounds = useMemo(() => {
+    if (!currentCellCoords) return null;
+    
+    let minRow = currentCellCoords.row;
+    let maxRow = currentCellCoords.row;
+    let minCol = currentCellCoords.col;
+    let maxCol = currentCellCoords.col;
+    
+    if (nextCellCoords) {
+      minRow = Math.min(minRow, nextCellCoords.row);
+      maxRow = Math.max(maxRow, nextCellCoords.row);
+      minCol = Math.min(minCol, nextCellCoords.col);
+      maxCol = Math.max(maxCol, nextCellCoords.col);
+    }
+    
+    // マージンを追加
+    const margin = 3;
+    minRow = Math.max(1, minRow - margin);
+    maxRow = maxRow + margin;
+    minCol = Math.max(1, minCol - margin);
+    maxCol = maxCol + margin;
+    
+    return { minRow, maxRow, minCol, maxCol };
+  }, [currentCellCoords, nextCellCoords]);
+
+  // 前回の訪問先キーを記憶（変更検知用）
+  const prevVisitKeyRef = useRef<string | null>(null);
+
+  // ズームレベル変更時の視点維持（ルートの中心を維持）
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const prevCellSize = prevCellSizeRef.current;
 
-    if (!initializedRef.current || prevCellSize === cellSize) {
+    // 初回はスキップ
+    if (!initializedRef.current) {
       prevCellSizeRef.current = cellSize;
       initializedRef.current = true;
       return;
     }
 
-    const containerWidth = container.clientWidth;
-    const containerHeight = container.clientHeight;
-    const centerX = containerWidth / 2;
-    const centerY = containerHeight / 2;
+    // セルサイズが変わっていない場合はスキップ
+    if (prevCellSize === cellSize) {
+      return;
+    }
 
-    const mapCenterX = (centerX - offset.x) / prevCellSize;
-    const mapCenterY = (centerY - offset.y) / prevCellSize;
+    // ルートの中心を維持してズーム
+    if (routeBounds) {
+      const containerWidth = container.clientWidth;
+      const containerHeight = container.clientHeight;
+      
+      const routeCenterCol = (routeBounds.minCol + routeBounds.maxCol) / 2;
+      const routeCenterRow = (routeBounds.minRow + routeBounds.maxRow) / 2;
+      
+      const routeCenterX = (routeCenterCol - 0.5) * cellSize;
+      const routeCenterY = (routeCenterRow - 0.5) * cellSize;
+      
+      const newOffsetX = containerWidth / 2 - routeCenterX;
+      const newOffsetY = containerHeight / 2 - routeCenterY;
+      
+      setOffset({ x: newOffsetX, y: newOffsetY });
+    }
 
-    const newOffsetX = centerX - mapCenterX * cellSize;
-    const newOffsetY = centerY - mapCenterY * cellSize;
-
-    setOffset({ x: newOffsetX, y: newOffsetY });
     prevCellSizeRef.current = cellSize;
-  }, [cellSize, offset.x, offset.y]);
+  }, [cellSize, routeBounds]);
 
-  // ホール選択時のオフセット自動調整
+  // ホール選択時のオフセット自動調整（ルート全体が収まるように）
   useEffect(() => {
     if (prevSelectedHallRef.current?.id === selectedHall?.id) {
       return;
     }
     prevSelectedHallRef.current = selectedHall;
 
+    const container = containerRef.current;
+    if (!container) return;
+
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+
+    // ルートがある場合はルート全体を中心に表示
+    if (routeBounds && currentCellCoords) {
+      const routeWidth = (routeBounds.maxCol - routeBounds.minCol + 1);
+      const routeHeight = (routeBounds.maxRow - routeBounds.minRow + 1);
+      
+      // ルート全体が収まる最適なズームレベルを計算
+      const requiredWidthZoom = (containerWidth / (routeWidth * BASE_CELL_SIZE)) * 100;
+      const requiredHeightZoom = (containerHeight / (routeHeight * BASE_CELL_SIZE)) * 100;
+      const optimalZoom = Math.min(requiredWidthZoom, requiredHeightZoom, 100);
+      
+      // ズームレベルを調整（最小30%、最大100%）
+      const newZoom = Math.max(30, Math.min(100, Math.floor(optimalZoom / 10) * 10)) as ZoomLevel;
+      
+      if (onZoomChange && newZoom !== zoomLevel) {
+        onZoomChange(newZoom);
+      }
+      
+      // ルートの中心を画面中央に配置
+      const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
+      const routeCenterCol = (routeBounds.minCol + routeBounds.maxCol) / 2;
+      const routeCenterRow = (routeBounds.minRow + routeBounds.maxRow) / 2;
+      const routeCenterX = (routeCenterCol - 0.5) * newCellSize;
+      const routeCenterY = (routeCenterRow - 0.5) * newCellSize;
+      
+      const newOffsetX = containerWidth / 2 - routeCenterX;
+      const newOffsetY = containerHeight / 2 - routeCenterY;
+      
+      setOffset({ x: newOffsetX, y: newOffsetY });
+      return;
+    }
+
+    // ルートがない場合でホールが選択されている場合
     if (selectedHall && selectedHall.vertices.length >= 4) {
-      const container = containerRef.current;
-      if (!container) return;
-
-      const containerWidth = container.clientWidth;
-      const containerHeight = container.clientHeight;
-
       const rows = selectedHall.vertices.map(v => v.row);
       const cols = selectedHall.vertices.map(v => v.col);
       const minRow = Math.max(1, Math.min(...rows) - SCROLL_MARGIN);
@@ -319,27 +395,65 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       setOffset({ x: newOffsetX, y: newOffsetY });
     } else if (!selectedHall) {
-      setOffset({ x: 0, y: 0 });
+      // ホールが未選択の場合、ルートがあればルート中心、なければ原点
+      if (routeBounds) {
+        const routeCenterCol = (routeBounds.minCol + routeBounds.maxCol) / 2;
+        const routeCenterRow = (routeBounds.minRow + routeBounds.maxRow) / 2;
+        const routeCenterX = (routeCenterCol - 0.5) * cellSize;
+        const routeCenterY = (routeCenterRow - 0.5) * cellSize;
+        
+        const newOffsetX = containerWidth / 2 - routeCenterX;
+        const newOffsetY = containerHeight / 2 - routeCenterY;
+        
+        setOffset({ x: newOffsetX, y: newOffsetY });
+      } else {
+        setOffset({ x: 0, y: 0 });
+      }
     }
-  }, [selectedHall, cellSize]);
+  }, [selectedHall, cellSize, routeBounds, currentCellCoords, onZoomChange, zoomLevel]);
 
-  // 現在位置を中心に表示
+  // 訪問先が変わった時にルート全体を画面に収める
   useEffect(() => {
-    if (!currentCellCoords) return;
+    // 訪問先キーが変わっていない場合はスキップ
+    if (prevVisitKeyRef.current === currentVisitKey) {
+      return;
+    }
+    prevVisitKeyRef.current = currentVisitKey;
+
+    if (!routeBounds || !currentCellCoords) return;
     const container = containerRef.current;
     if (!container) return;
 
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    const cellX = (currentCellCoords.col - 0.5) * cellSize;
-    const cellY = (currentCellCoords.row - 0.5) * cellSize;
-
-    const newOffsetX = containerWidth / 2 - cellX;
-    const newOffsetY = containerHeight / 2 - cellY;
-
+    // ルート全体が収まる最適なズームレベルを計算
+    const routeWidth = (routeBounds.maxCol - routeBounds.minCol + 1);
+    const routeHeight = (routeBounds.maxRow - routeBounds.minRow + 1);
+    
+    const requiredWidthZoom = (containerWidth / (routeWidth * BASE_CELL_SIZE)) * 100;
+    const requiredHeightZoom = (containerHeight / (routeHeight * BASE_CELL_SIZE)) * 100;
+    const optimalZoom = Math.min(requiredWidthZoom, requiredHeightZoom, 100);
+    
+    // ズームレベルを調整（最小30%、最大100%）
+    const newZoom = Math.max(30, Math.min(100, Math.floor(optimalZoom / 10) * 10)) as ZoomLevel;
+    
+    if (onZoomChange && newZoom !== zoomLevel) {
+      onZoomChange(newZoom);
+    }
+    
+    // ルートの中心を画面中央に配置
+    const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
+    const routeCenterCol = (routeBounds.minCol + routeBounds.maxCol) / 2;
+    const routeCenterRow = (routeBounds.minRow + routeBounds.maxRow) / 2;
+    const routeCenterX = (routeCenterCol - 0.5) * newCellSize;
+    const routeCenterY = (routeCenterRow - 0.5) * newCellSize;
+    
+    const newOffsetX = containerWidth / 2 - routeCenterX;
+    const newOffsetY = containerHeight / 2 - routeCenterY;
+    
     setOffset({ x: newOffsetX, y: newOffsetY });
-  }, [currentVisitKey, cellSize]); // currentCellCoordsの代わりにcurrentVisitKeyを使用
+  }, [currentVisitKey, routeBounds, currentCellCoords, onZoomChange, zoomLevel]);
 
   // 描画
   useEffect(() => {

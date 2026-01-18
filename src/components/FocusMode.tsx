@@ -799,11 +799,25 @@ const FocusMode: React.FC<FocusModeProps> = ({
     </div>
   );
 
+  // フッターの高さ（スマートフォン: 約56px、PC: 約64px）
+  const FOOTER_HEIGHT_SP = 56;
+  const FOOTER_HEIGHT_PC = 64;
+  const HEADER_HEIGHT = 64; // ヘッダーの高さ（非表示時は0）
+
+  // マップズーム変更ハンドラ
+  const handleMapZoomChange = useCallback((newZoom: ZoomLevel) => {
+    setMapZoomLevel(newZoom);
+  }, []);
+
   // スマートフォン+マップ表示
   if (layoutMode === 'smartphone' && isMapVisible && currentMapData) {
+    // ヘッダー非表示時は高さを調整
+    const availableHeight = `calc(100vh - ${FOOTER_HEIGHT_SP}px)`;
+    
     return (
       <div 
-        className="relative flex flex-col h-[calc(100vh-80px)]"
+        className="relative flex flex-col"
+        style={{ height: availableHeight }}
         onTouchStart={!splitDragRef.current ? handleTouchStart : undefined}
         onTouchMove={!splitDragRef.current ? handleTouchMove : undefined}
         onTouchEnd={!splitDragRef.current ? handleTouchEnd : undefined}
@@ -820,9 +834,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
           </div>
         )}
 
-        <div style={{ height: `${splitRatio}%` }} className="relative flex flex-col">
+        <div style={{ height: `${splitRatio}%` }} className="relative flex flex-col min-h-0">
           <MapControls />
-          <div className="flex-grow relative">
+          <div className="flex-grow relative overflow-hidden">
             <FocusModeMapCanvas
               mapData={currentMapData}
               mapName={currentMapName || ''}
@@ -833,14 +847,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
               currentVisitKey={currentVisit?.key || null}
               nextVisitKey={nextVisit?.key || null}
               currentPhase={currentPhase}
-              
-              
+              onZoomChange={handleMapZoomChange}
             />
           </div>
         </div>
 
         <div
-          className="h-3 bg-slate-300 dark:bg-slate-600 cursor-row-resize flex items-center justify-center touch-none"
+          className="h-3 bg-slate-300 dark:bg-slate-600 cursor-row-resize flex items-center justify-center touch-none flex-shrink-0"
           onTouchStart={handleSplitDragStart}
           onTouchMove={handleSplitDragMove}
           onTouchEnd={handleSplitDragEnd}
@@ -852,7 +865,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
           <div className="w-12 h-1 bg-slate-500 dark:bg-slate-400 rounded-full"></div>
         </div>
 
-        <div style={{ height: `${100 - splitRatio}%` }} className="overflow-y-auto">
+        <div style={{ height: `${100 - splitRatio}%` }} className="overflow-y-auto min-h-0">
           <Header />
           <ItemList />
         </div>
@@ -902,8 +915,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // PC+マップ表示
   if (layoutMode === 'pc' && isMapVisible && currentMapData) {
+    // ヘッダー64px + フッター64px = 128px
+    const availableHeight = `calc(100vh - ${HEADER_HEIGHT + FOOTER_HEIGHT_PC}px)`;
+    
     return (
-      <div className="relative flex h-[calc(100vh-200px)]">
+      <div className="relative flex" style={{ height: availableHeight }}>
         {notification && (
           <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
             {notification}
@@ -918,7 +934,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
         <div className="w-1/2 flex flex-col border-r border-slate-200 dark:border-slate-700">
           <MapControls />
-          <div className="flex-grow relative">
+          <div className="flex-grow relative overflow-hidden">
             <FocusModeMapCanvas
               mapData={currentMapData}
               mapName={currentMapName || ''}
@@ -929,8 +945,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               currentVisitKey={currentVisit?.key || null}
               nextVisitKey={nextVisit?.key || null}
               currentPhase={currentPhase}
-              
-              
+              onZoomChange={handleMapZoomChange}
             />
           </div>
         </div>
