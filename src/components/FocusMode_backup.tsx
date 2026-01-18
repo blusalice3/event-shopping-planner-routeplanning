@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { ShoppingItem, DayMapData, HallDefinition, ZoomLevel } from '../types';
+import { ShoppingItem } from '../types';
 import ShoppingItemCard from './ShoppingItemCard';
 
 // フェーズの定義
@@ -12,10 +12,6 @@ interface FocusModeProps {
   onModeChange: (mode: 'edit' | 'execute', lastItemId?: string) => void;
   layoutMode: 'pc' | 'smartphone';
   onLayoutModeChange: (mode: 'pc' | 'smartphone') => void;
-  // マップ関連の追加props
-  mapData?: { [dayMapName: string]: DayMapData };
-  hallDefinitions?: HallDefinition[];
-  onHideHeader?: (hide: boolean) => void;
 }
 
 // スワイプ判定の閾値
@@ -40,9 +36,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
   onModeChange,
   layoutMode,
   onLayoutModeChange,
-  mapData,
-  hallDefinitions,
-  onHideHeader,
 }) => {
   // 現在のフェーズ（ユーザー操作でのみ変更）
   const [currentPhase, setCurrentPhase] = useState<FocusPhase>('normal');
@@ -79,18 +72,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const [postponedPhaseItemIds, setPostponedPhaseItemIds] = useState<Set<string>>(new Set());
   // 遅参フェーズで表示するアイテムID（後回しフェーズ終了時に確定）
   const [latePhaseItemIds, setLatePhaseItemIds] = useState<Set<string>>(new Set());
-
-  // マップ表示関連の状態
-  const [isMapVisible, setIsMapVisible] = useState(false);
-  const [mapZoomLevel, setMapZoomLevel] = useState<ZoomLevel>(100);
-  const [selectedHallId, setSelectedHallId] = useState<string | 'follow'>('follow');
-  const [splitRatio, setSplitRatio] = useState(50);
-  const splitDragRef = useRef<{ startY: number; startRatio: number } | null>(null);
-
-  // マップが利用可能かどうか
-  const hasMapData = useMemo(() => {
-    return mapData && Object.keys(mapData).length > 0;
-  }, [mapData]);
 
   // 実行列のアイテムを取得
   const executeItems = useMemo(() => {
@@ -177,22 +158,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return currentPhaseVisits[safeIndex] || null;
   }, [currentPhaseVisits, currentPhaseIndex]);
 
-  // 次の訪問先
-  const nextVisit = useMemo(() => {
-    if (currentPhaseVisits.length === 0) return null;
-    const nextIndex = currentPhaseIndex + 1;
-    if (nextIndex < currentPhaseVisits.length) {
-      return currentPhaseVisits[nextIndex];
-    }
-    if (currentPhase === 'normal' && visitsByPhase.postponed.length > 0) {
-      return visitsByPhase.postponed[0];
-    }
-    if ((currentPhase === 'normal' || currentPhase === 'postponed') && visitsByPhase.late.length > 0) {
-      return visitsByPhase.late[0];
-    }
-    return null;
-  }, [currentPhaseVisits, currentPhaseIndex, currentPhase, visitsByPhase]);
-
   // 現在のフェーズで表示すべきアイテム
   const currentVisitDisplayItems = useMemo(() => {
     if (!currentVisit) return [];
@@ -256,41 +221,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return executeItems.filter(item => item.purchaseStatus === 'Purchased').length;
   }, [executeItems]);
 
-  // 現在の訪問先のアイテムチェック状況
-  const currentVisitCheckedCount = useMemo(() => {
-    return currentVisitDisplayItems.filter(item => item.purchaseStatus !== 'None').length;
-  }, [currentVisitDisplayItems]);
-
-  // 現在の訪問先のアイテム総数
-  const currentVisitTotalCount = useMemo(() => {
-    return currentVisitDisplayItems.length;
-  }, [currentVisitDisplayItems]);
-
-  // 次の訪問先情報
-  const nextVisitInfo = useMemo(() => {
-    if (!nextVisit) return { spaceInfo: '最終', circleName: '' };
-    const item = nextVisit.items[0];
-    if (!item) return { spaceInfo: '最終', circleName: '' };
-    const baseNumber = extractBaseNumber(item.number);
-    return {
-      spaceInfo: `${item.block}-${baseNumber.toUpperCase()}`,
-      circleName: item.circle || '',
-    };
-  }, [nextVisit]);
-
-  // 現在のマップ名
-  const currentMapName = useMemo(() => {
-    if (!currentVisit || currentVisit.items.length === 0) return null;
-    const eventDate = currentVisit.items[0].eventDate;
-    return `${eventDate}マップ`;
-  }, [currentVisit]);
-
-  // 現在のマップデータ
-  const currentMapData = useMemo(() => {
-    if (!currentMapName || !mapData) return null;
-    return mapData[currentMapName] || null;
-  }, [currentMapName, mapData]);
-
   // タイマーをクリアする関数
   const clearAutoAdvanceTimer = useCallback(() => {
     if (autoAdvanceTimerRef.current) {
@@ -328,13 +258,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return () => clearTimeout(timer);
     }
   }, [notification]);
-
-  // マップ表示時のヘッダー非表示
-  useEffect(() => {
-    if (onHideHeader) {
-      onHideHeader(isMapVisible && layoutMode === 'smartphone');
-    }
-  }, [isMapVisible, layoutMode, onHideHeader]);
 
   // ナビゲーションボタンの位置を調整
   useEffect(() => {
@@ -486,18 +409,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return;
     }
 
-    // チェック漏れの確認
-    const hasUncheckedItems = currentVisitDisplayItems.some(item => item.purchaseStatus === 'None');
-
     clearAutoAdvanceTimer();
     moveToNext();
-
-    // チェック漏れがある場合は通知を表示
-    if (hasUncheckedItems) {
-      setTimeout(() => {
-        setNotification('前のサークルでチェック漏れがあります');
-      }, 100);
-    }
   }, [hasUndefinedPricePurchased, currentVisitDisplayItems, clearAutoAdvanceTimer, moveToNext]);
 
   // 前の訪問先へ
@@ -631,36 +544,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const handleModeChangeInternal = useCallback((mode: 'edit' | 'execute') => {
     onModeChange(mode, lastInteractedItemId || undefined);
   }, [onModeChange, lastInteractedItemId]);
-
-  // マップ表示トグル
-  const toggleMapVisibility = useCallback(() => {
-    setIsMapVisible(!isMapVisible);
-  }, [isMapVisible]);
-
-  // スプリットドラッグ関連
-  const handleSplitDragStart = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    splitDragRef.current = { startY: clientY, startRatio: splitRatio };
-  }, [splitRatio]);
-
-  const handleSplitDragMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    if (!splitDragRef.current) return;
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    const deltaY = clientY - splitDragRef.current.startY;
-    const viewportHeight = window.innerHeight;
-    const deltaRatio = (deltaY / viewportHeight) * 100;
-    const newRatio = Math.max(20, Math.min(80, splitDragRef.current.startRatio + deltaRatio));
-    setSplitRatio(newRatio);
-  }, []);
-
-  const handleSplitDragEnd = useCallback(() => {
-    splitDragRef.current = null;
-  }, []);
-
-  // マップズームレベル変更
-  const handleMapZoomChange = useCallback((newZoom: ZoomLevel) => {
-    setMapZoomLevel(newZoom);
-  }, []);
 
   // 訪問先がない場合
   if (allVisits.length === 0) {

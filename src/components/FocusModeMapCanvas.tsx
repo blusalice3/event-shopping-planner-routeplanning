@@ -344,7 +344,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       // ズームレベルを調整（最小30%、最大100%）
       const newZoom = Math.max(30, Math.min(100, Math.floor(optimalZoom / 10) * 10)) as ZoomLevel;
       
-      if (onZoomChange && newZoom !== zoomLevel) {
+      if (onZoomChange) {
         onZoomChange(newZoom);
       }
       
@@ -410,7 +410,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         setOffset({ x: 0, y: 0 });
       }
     }
-  }, [selectedHall, cellSize, routeBounds, currentCellCoords, onZoomChange, zoomLevel]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedHall, cellSize, routeBounds, currentCellCoords, onZoomChange]);
 
   // 訪問先が変わった時にルート全体を画面に収める
   useEffect(() => {
@@ -438,7 +439,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     // ズームレベルを調整（最小30%、最大100%）
     const newZoom = Math.max(30, Math.min(100, Math.floor(optimalZoom / 10) * 10)) as ZoomLevel;
     
-    if (onZoomChange && newZoom !== zoomLevel) {
+    if (onZoomChange) {
       onZoomChange(newZoom);
     }
     
@@ -453,7 +454,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const newOffsetY = containerHeight / 2 - routeCenterY;
     
     setOffset({ x: newOffsetX, y: newOffsetY });
-  }, [currentVisitKey, routeBounds, currentCellCoords, onZoomChange, zoomLevel]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentVisitKey, routeBounds, currentCellCoords, onZoomChange]);
 
   // 描画
   useEffect(() => {
