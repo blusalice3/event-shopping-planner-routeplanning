@@ -419,62 +419,129 @@ const FocusMode: React.FC<FocusModeProps> = ({
     };
   }, [currentVisitDisplayItems, currentPhaseIndex, currentPhase, isMapVisible]);
 
+  // 指定されたフェーズとインデックスから次の有効な訪問先を探す
+  const findNextValidVisit = useCallback((
+    phase: 'normal' | 'postponed' | 'late',
+    startIndex: number,
+    visits: { key: string; items: ShoppingItem[] }[],
+    postponedIds: Set<string>,
+    lateIds: Set<string>
+  ): number | null => {
+    for (let i = startIndex; i < visits.length; i++) {
+      const visit = visits[i];
+      let hasItems = false;
+      if (phase === 'normal') {
+        hasItems = visit.items.length > 0;
+      } else if (phase === 'postponed') {
+        hasItems = visit.items.some((item: ShoppingItem) => postponedIds.has(item.id));
+      } else {
+        hasItems = visit.items.some((item: ShoppingItem) => lateIds.has(item.id));
+      }
+      if (hasItems) {
+        return i;
+      }
+    }
+    return null;
+  }, []);
+
   // 次へ移動
   const moveToNext = useCallback(() => {
     clearAutoAdvanceTimer();
     
     const nextIndex = currentPhaseIndex + 1;
     
-    if (nextIndex < currentPhaseVisits.length) {
-      setCurrentPhaseIndex(nextIndex);
+    // 現在のフェーズで次の有効な訪問先を探す
+    const nextValidIndex = findNextValidVisit(
+      currentPhase,
+      nextIndex,
+      currentPhaseVisits,
+      postponedPhaseItemIds,
+      latePhaseItemIds
+    );
+    
+    if (nextValidIndex !== null) {
+      setCurrentPhaseIndex(nextValidIndex);
       setIsNextButtonBlinking(false);
-    } else {
-      if (currentPhase === 'normal') {
-        const postponedIds = new Set(
-          executeItems.filter(item => item.purchaseStatus === 'Postpone').map(item => item.id)
+      return;
+    }
+    
+    // 現在のフェーズに有効な訪問先がない場合、次のフェーズへ
+    if (currentPhase === 'normal') {
+      const postponedIds = new Set(
+        executeItems.filter(item => item.purchaseStatus === 'Postpone').map(item => item.id)
+      );
+      setPostponedPhaseItemIds(postponedIds);
+      
+      const lateIds = new Set(
+        executeItems.filter(item => item.purchaseStatus === 'Late').map(item => item.id)
+      );
+      setLatePhaseItemIds(lateIds);
+      
+      // 後回しフェーズで有効な訪問先を探す
+      if (postponedIds.size > 0) {
+        const postponedVisits = allVisits.filter(visit => 
+          visit.items.some(item => postponedIds.has(item.id))
         );
-        setPostponedPhaseItemIds(postponedIds);
-        
-        const lateIds = new Set(
-          executeItems.filter(item => item.purchaseStatus === 'Late').map(item => item.id)
-        );
-        setLatePhaseItemIds(lateIds);
-        
-        if (postponedIds.size > 0) {
+        const validPostponedIndex = findNextValidVisit('postponed', 0, postponedVisits, postponedIds, lateIds);
+        if (validPostponedIndex !== null) {
           setNotification('後回しアイテムの巡回を開始します');
           setCurrentPhase('postponed');
-          setCurrentPhaseIndex(0);
+          setCurrentPhaseIndex(validPostponedIndex);
           setIsNextButtonBlinking(false);
-        } else if (lateIds.size > 0) {
-          setNotification('遅参アイテムの巡回を開始します');
-          setCurrentPhase('late');
-          setCurrentPhaseIndex(0);
-          setIsNextButtonBlinking(false);
-        } else {
-          setIsCompleted(true);
+          return;
         }
-      } else if (currentPhase === 'postponed') {
-        const currentLateIds = new Set(latePhaseItemIds);
-        executeItems.forEach(item => {
-          if (item.purchaseStatus === 'Late') {
-            currentLateIds.add(item.id);
-          }
-        });
-        setLatePhaseItemIds(currentLateIds);
-        
-        if (currentLateIds.size > 0) {
-          setNotification('遅参アイテムの巡回を開始します');
-          setCurrentPhase('late');
-          setCurrentPhaseIndex(0);
-          setIsNextButtonBlinking(false);
-        } else {
-          setIsCompleted(true);
-        }
-      } else {
-        setIsCompleted(true);
       }
+      
+      // 遅参フェーズで有効な訪問先を探す
+      if (lateIds.size > 0) {
+        const lateVisits = allVisits.filter(visit => 
+          visit.items.some(item => lateIds.has(item.id))
+        );
+        const validLateIndex = findNextValidVisit('late', 0, lateVisits, postponedIds, lateIds);
+        if (validLateIndex !== null) {
+          setNotification('遅参アイテムの巡回を開始します');
+          setCurrentPhase('late');
+          setCurrentPhaseIndex(validLateIndex);
+          setIsNextButtonBlinking(false);
+          return;
+        }
+      }
+      
+      // どのフェーズにも有効な訪問先がない
+      setIsCompleted(true);
+      
+    } else if (currentPhase === 'postponed') {
+      const currentLateIds = new Set(latePhaseItemIds);
+      executeItems.forEach(item => {
+        if (item.purchaseStatus === 'Late') {
+          currentLateIds.add(item.id);
+        }
+      });
+      setLatePhaseItemIds(currentLateIds);
+      
+      // 遅参フェーズで有効な訪問先を探す
+      if (currentLateIds.size > 0) {
+        const lateVisits = allVisits.filter(visit => 
+          visit.items.some(item => currentLateIds.has(item.id))
+        );
+        const validLateIndex = findNextValidVisit('late', 0, lateVisits, postponedPhaseItemIds, currentLateIds);
+        if (validLateIndex !== null) {
+          setNotification('遅参アイテムの巡回を開始します');
+          setCurrentPhase('late');
+          setCurrentPhaseIndex(validLateIndex);
+          setIsNextButtonBlinking(false);
+          return;
+        }
+      }
+      
+      // 遅参フェーズに有効な訪問先がない
+      setIsCompleted(true);
+      
+    } else {
+      // 遅参フェーズの終わり
+      setIsCompleted(true);
     }
-  }, [currentPhaseIndex, currentPhaseVisits.length, currentPhase, executeItems, clearAutoAdvanceTimer, latePhaseItemIds]);
+  }, [currentPhaseIndex, currentPhaseVisits, currentPhase, executeItems, clearAutoAdvanceTimer, latePhaseItemIds, postponedPhaseItemIds, allVisits, findNextValidVisit]);
 
   // 自動進行開始
   const startAutoAdvance = useCallback(() => {
@@ -734,54 +801,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
             <span>実行モードへ</span>
           </button>
         </div>
-      </div>
-    );
-  }
-
-  // 自動ナビゲーション: 表示アイテムがない場合に次へ進む
-  // useEffectを使って状態更新を次のレンダリングサイクルに委ねる
-  const shouldNavigate = (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) ||
-                         (currentPhaseVisits.length === 0);
-  
-  useEffect(() => {
-    if (isCompleted) return;
-    if (!shouldNavigate) return;
-    
-    // 現在のフェーズに訪問先がない場合
-    if (currentPhaseVisits.length === 0) {
-      moveToNext();
-      return;
-    }
-    
-    // 現在のフェーズに表示するアイテムがない場合、次の訪問先を探す
-    if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) {
-      // 次の訪問先を探す
-      for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
-        const visit = currentPhaseVisits[i];
-        let hasItems = false;
-        if (currentPhase === 'normal') {
-          hasItems = visit.items.length > 0;
-        } else if (currentPhase === 'postponed') {
-          hasItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
-        } else {
-          hasItems = visit.items.some(item => latePhaseItemIds.has(item.id));
-        }
-        if (hasItems) {
-          setCurrentPhaseIndex(i);
-          return;
-        }
-      }
-      // 見つからない場合は次のフェーズへ
-      moveToNext();
-    }
-  }, [shouldNavigate, isCompleted, currentPhaseVisits, currentVisitDisplayItems.length, currentPhaseIndex, currentPhase, postponedPhaseItemIds, latePhaseItemIds, moveToNext]);
-
-  // ナビゲーション中はローディング表示
-  if (shouldNavigate) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
-        <div className="text-4xl mb-4">⏳</div>
-        <p className="text-slate-500 dark:text-slate-400">次の訪問先を探しています...</p>
       </div>
     );
   }
