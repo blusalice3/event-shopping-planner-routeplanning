@@ -738,8 +738,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
 
-  // 次の訪問先探索
-  if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) {
+  // 次の訪問先探索（useEffectで処理）
+  useEffect(() => {
+    if (isCompleted) return; // 完了状態なら何もしない
+    if (currentVisitDisplayItems.length > 0) return; // 表示アイテムがあれば何もしない
+    if (currentPhaseVisits.length === 0) return; // 訪問先がなければ何もしない
+
+    // 現在のフェーズ内で次の訪問先を探す
     for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
       const visit = currentPhaseVisits[i];
       let hasItems = false;
@@ -752,11 +757,22 @@ const FocusMode: React.FC<FocusModeProps> = ({
       }
       if (hasItems) {
         setCurrentPhaseIndex(i);
-        return null;
+        return;
       }
     }
+
+    // 現在のフェーズに次の訪問先がない場合、次のフェーズへ移動
     moveToNext();
-    return null;
+  }, [currentVisitDisplayItems.length, currentPhaseVisits, currentPhaseIndex, currentPhase, postponedPhaseItemIds, latePhaseItemIds, isCompleted, moveToNext]);
+
+  // 表示アイテムがない場合はローディング表示（useEffectで処理されるまで）
+  if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0 && !isCompleted) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
+        <div className="text-4xl mb-4 animate-spin">⏳</div>
+        <p className="text-slate-500 dark:text-slate-400">次の訪問先を探しています...</p>
+      </div>
+    );
   }
 
   // 現在の訪問先情報
