@@ -247,6 +247,28 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return executeItems.filter(item => item.purchaseStatus === 'Purchased').length;
   }, [executeItems]);
 
+  // 現在の訪問先のアイテムチェック状況（非「未購入」状態のカウント）
+  const currentVisitCheckedCount = useMemo(() => {
+    return currentVisitDisplayItems.filter(item => item.purchaseStatus !== 'None').length;
+  }, [currentVisitDisplayItems]);
+
+  // 現在の訪問先のアイテム総数
+  const currentVisitTotalCount = useMemo(() => {
+    return currentVisitDisplayItems.length;
+  }, [currentVisitDisplayItems]);
+
+  // 次の訪問先情報
+  const nextVisitInfo = useMemo(() => {
+    if (!nextVisit) return { spaceInfo: '最終', circleName: '' };
+    const item = nextVisit.items[0];
+    if (!item) return { spaceInfo: '最終', circleName: '' };
+    const baseNumber = extractBaseNumber(item.number);
+    return {
+      spaceInfo: `${item.block}-${baseNumber.toUpperCase()}`,
+      circleName: item.circle || '',
+    };
+  }, [nextVisit]);
+
   // 現在のマップ名
   const currentMapName = useMemo(() => {
     if (!currentVisit || currentVisit.items.length === 0) return null;
@@ -483,8 +505,19 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return;
     }
 
+    // チェック漏れの確認（未購入状態のアイテムがある場合）
+    const hasUncheckedItems = currentVisitDisplayItems.some(item => item.purchaseStatus === 'None');
+
     clearAutoAdvanceTimer();
     moveToNext();
+
+    // チェック漏れがある場合は通知を表示
+    if (hasUncheckedItems) {
+      // 少し遅延させて画面遷移後に通知を表示
+      setTimeout(() => {
+        setNotification('前のサークルでチェック漏れがあります');
+      }, 100);
+    }
   }, [hasUndefinedPricePurchased, currentVisitDisplayItems, clearAutoAdvanceTimer, moveToNext]);
 
   // 前の訪問先へ
@@ -760,14 +793,23 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const Header = () => (
     <div className={`bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4 rounded-lg mb-4 shadow-lg ${layoutMode === 'smartphone' && isMapVisible ? 'mx-2' : layoutMode === 'smartphone' ? 'mx-2' : 'mx-4'}`}>
       <div className="flex justify-between items-start">
-        <div>
+        <div className="flex-1">
           <div className="text-sm opacity-80">訪問先</div>
           <div className="text-2xl font-bold">{spaceInfo}</div>
-          <div className="text-lg">{circleName}</div>
+          <div className="flex items-center gap-2">
+            <span className="text-lg">{circleName}</span>
+            <span className="text-sm bg-white/20 px-2 py-0.5 rounded">
+              {currentVisitCheckedCount}/{currentVisitTotalCount}
+            </span>
+          </div>
         </div>
-        <div className="text-right">
+        <div className="text-right flex-1">
           <div className="text-sm opacity-80">フェーズ</div>
           <div className="text-xl font-bold">{phaseDisplayName}</div>
+          <div className="text-sm opacity-80 mt-1">
+            次: {nextVisitInfo.spaceInfo}
+            {nextVisitInfo.circleName && <span className="ml-1">{nextVisitInfo.circleName}</span>}
+          </div>
         </div>
       </div>
     </div>
@@ -809,8 +851,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
     setMapZoomLevel(newZoom);
   }, []);
 
-  // スマートフォン+マップ表示
-  if (layoutMode === 'smartphone' && isMapVisible && currentMapData) {
+  // スマートフォン+マップ表示（完了状態でない場合のみ）
+  if (layoutMode === 'smartphone' && isMapVisible && currentMapData && !isCompleted) {
     // ヘッダー非表示時は高さを調整
     const availableHeight = `calc(100vh - ${FOOTER_HEIGHT_SP}px)`;
     
@@ -917,8 +959,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
 
-  // PC+マップ表示
-  if (layoutMode === 'pc' && isMapVisible && currentMapData) {
+  // PC+マップ表示（完了状態でない場合のみ）
+  if (layoutMode === 'pc' && isMapVisible && currentMapData && !isCompleted) {
     // ヘッダー64px + フッター64px = 128px
     const availableHeight = `calc(100vh - ${HEADER_HEIGHT + FOOTER_HEIGHT_PC}px)`;
     
@@ -1051,14 +1093,23 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
       <div className={`bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4 rounded-lg mb-4 shadow-lg ${layoutMode === 'smartphone' ? 'mx-2' : 'mx-16'}`}>
         <div className="flex justify-between items-start">
-          <div>
+          <div className="flex-1">
             <div className="text-sm opacity-80">訪問先</div>
             <div className="text-2xl font-bold">{spaceInfo}</div>
-            <div className="text-lg">{circleName}</div>
+            <div className="flex items-center gap-2">
+              <span className="text-lg">{circleName}</span>
+              <span className="text-sm bg-white/20 px-2 py-0.5 rounded">
+                {currentVisitCheckedCount}/{currentVisitTotalCount}
+              </span>
+            </div>
           </div>
-          <div className="text-right">
+          <div className="text-right flex-1">
             <div className="text-sm opacity-80">フェーズ</div>
             <div className="text-xl font-bold">{phaseDisplayName}</div>
+            <div className="text-sm opacity-80 mt-1">
+              次: {nextVisitInfo.spaceInfo}
+              {nextVisitInfo.circleName && <span className="ml-1">{nextVisitInfo.circleName}</span>}
+            </div>
           </div>
         </div>
       </div>
