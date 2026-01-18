@@ -738,34 +738,52 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
 
-  // 現在のフェーズに表示するアイテムがない場合、次の訪問先を探す
-  if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) {
-    // 次の訪問先を探す
-    for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
-      const visit = currentPhaseVisits[i];
-      let hasItems = false;
-      if (currentPhase === 'normal') {
-        hasItems = visit.items.length > 0;
-      } else if (currentPhase === 'postponed') {
-        hasItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
-      } else {
-        hasItems = visit.items.some(item => latePhaseItemIds.has(item.id));
-      }
-      if (hasItems) {
-        setCurrentPhaseIndex(i);
-        return null;
-      }
+  // 自動ナビゲーション: 表示アイテムがない場合に次へ進む
+  // useEffectを使って状態更新を次のレンダリングサイクルに委ねる
+  const shouldNavigate = (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) ||
+                         (currentPhaseVisits.length === 0);
+  
+  useEffect(() => {
+    if (isCompleted) return;
+    if (!shouldNavigate) return;
+    
+    // 現在のフェーズに訪問先がない場合
+    if (currentPhaseVisits.length === 0) {
+      moveToNext();
+      return;
     }
-    // 見つからない場合は次のフェーズへ
-    moveToNext();
-    return null;
-  }
+    
+    // 現在のフェーズに表示するアイテムがない場合、次の訪問先を探す
+    if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) {
+      // 次の訪問先を探す
+      for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
+        const visit = currentPhaseVisits[i];
+        let hasItems = false;
+        if (currentPhase === 'normal') {
+          hasItems = visit.items.length > 0;
+        } else if (currentPhase === 'postponed') {
+          hasItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
+        } else {
+          hasItems = visit.items.some(item => latePhaseItemIds.has(item.id));
+        }
+        if (hasItems) {
+          setCurrentPhaseIndex(i);
+          return;
+        }
+      }
+      // 見つからない場合は次のフェーズへ
+      moveToNext();
+    }
+  }, [shouldNavigate, isCompleted, currentPhaseVisits, currentVisitDisplayItems.length, currentPhaseIndex, currentPhase, postponedPhaseItemIds, latePhaseItemIds, moveToNext]);
 
-  // 現在のフェーズに訪問先がない場合（後回し/遅参アイテムがない場合など）
-  if (currentPhaseVisits.length === 0 && !isCompleted) {
-    // 次のフェーズへ移動または完了
-    moveToNext();
-    return null;
+  // ナビゲーション中はローディング表示
+  if (shouldNavigate) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
+        <div className="text-4xl mb-4">⏳</div>
+        <p className="text-slate-500 dark:text-slate-400">次の訪問先を探しています...</p>
+      </div>
+    );
   }
 
   // 現在の訪問先情報
