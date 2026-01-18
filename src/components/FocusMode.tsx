@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { ShoppingItem, DayMapData, HallDefinition, ZoomLevel } from '../types';
+import { ShoppingItem, DayMapData, HallDefinition, ZoomLevel, ZOOM_LEVELS } from '../types';
 import ShoppingItemCard from './ShoppingItemCard';
+import FocusModeMapCanvas from './FocusModeMapCanvas';
 
 // フェーズの定義
 type FocusPhase = 'normal' | 'postponed' | 'late';
@@ -290,6 +291,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
     if (!currentMapName || !mapData) return null;
     return mapData[currentMapName] || null;
   }, [currentMapName, mapData]);
+
+  // 現在のホール定義（最初のホールを使用）
+  const currentHallDefinition = useMemo(() => {
+    if (!hallDefinitions || hallDefinitions.length === 0) return null;
+    return hallDefinitions[0];
+  }, [hallDefinitions]);
 
   // タイマーをクリアする関数
   const clearAutoAdvanceTimer = useCallback(() => {
@@ -766,6 +773,259 @@ const FocusMode: React.FC<FocusModeProps> = ({
     ? `${currentVisit.items[0].block}-${extractBaseNumber(currentVisit.items[0].number).toUpperCase()}` 
     : '';
 
+  // 現在の訪問キー（マップ用）
+  const currentVisitKey = currentVisit?.items[0] 
+    ? `${currentVisit.items[0].eventDate}-${currentVisit.items[0].block}-${extractBaseNumber(currentVisit.items[0].number)}`
+    : null;
+  
+  // 次の訪問キー（マップ用）
+  const nextVisitKey = nextVisit?.items[0]
+    ? `${nextVisit.items[0].eventDate}-${nextVisit.items[0].block}-${extractBaseNumber(nextVisit.items[0].number)}`
+    : null;
+
+  // アイテムリストコンポーネント
+  const ItemList = () => (
+    <div ref={itemListRef} className={`space-y-4 pb-24 ${layoutMode === 'smartphone' && isMapVisible ? 'px-2' : layoutMode === 'smartphone' ? 'mx-2' : 'mx-4'}`}>
+      {currentVisitDisplayItems.map((item, index) => (
+        <div 
+          key={item.id}
+          data-item-id={item.id}
+          className={`relative ${blinkingPriceItemIds.has(item.id) ? 'animate-pulse ring-2 ring-red-500 rounded-lg' : ''}`}
+        >
+          <ShoppingItemCard
+            item={item}
+            onUpdate={handleUpdateItem}
+            isStriped={index % 2 === 1}
+            onEditRequest={() => {}}
+            onDeleteRequest={() => {}}
+            isSelected={false}
+            onSelectItem={() => {}}
+            layoutMode={layoutMode}
+          />
+        </div>
+      ))}
+    </div>
+  );
+
+  // ヘッダーコンポーネント
+  const Header = () => (
+    <div className={`bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-3 rounded-lg shadow-lg ${layoutMode === 'smartphone' && isMapVisible ? 'mx-2' : ''}`}>
+      <div className="flex justify-between items-start">
+        <div>
+          <div className="text-xs opacity-80">訪問先</div>
+          <div className="flex items-center gap-2">
+            <span className="text-xl font-bold">{spaceInfo}</span>
+            <span className="bg-white/20 px-2 py-0.5 rounded text-sm">{currentVisitCheckedCount}/{currentVisitTotalCount}</span>
+          </div>
+          <div className="text-sm">{circleName}</div>
+        </div>
+        <div className="text-right">
+          <div className="text-xs opacity-80">フェーズ</div>
+          <div className="text-lg font-bold">{phaseDisplayName}</div>
+          <div className="text-xs opacity-80">
+            次: {nextVisitInfo.spaceInfo} {nextVisitInfo.circleName}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  // スマートフォン+マップ表示モード
+  if (layoutMode === 'smartphone' && isMapVisible && currentMapData && !isCompleted) {
+    return (
+      <div 
+        ref={swipeContainerRef}
+        className="relative flex flex-col h-[calc(100vh-80px)]"
+      >
+        {/* 通知 */}
+        {notification && (
+          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
+            {notification}
+          </div>
+        )}
+
+        {/* 自動進行カウントダウン */}
+        {autoAdvanceCountdown !== null && (
+          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-orange-500 text-white px-6 py-3 rounded-lg shadow-lg">
+            {autoAdvanceCountdown}秒後に次の訪問先へ移動します...
+          </div>
+        )}
+
+        {/* マップエリア */}
+        <div style={{ height: `${splitRatio}%` }} className="relative overflow-hidden">
+          <FocusModeMapCanvas
+            mapData={currentMapData}
+            mapName={currentMapName || ''}
+            items={executeItems}
+            executeModeItemIds={executeItems.map(item => item.id)}
+            zoomLevel={mapZoomLevel}
+            selectedHall={currentHallDefinition}
+            currentVisitKey={currentVisitKey}
+            nextVisitKey={nextVisitKey}
+            currentPhase={currentPhase}
+            onZoomChange={handleMapZoomChange}
+          />
+          {/* マップ非表示ボタン */}
+          <button
+            onClick={toggleMapVisibility}
+            className="absolute top-2 right-2 bg-white/90 dark:bg-slate-800/90 px-3 py-1 rounded-lg shadow text-sm z-10"
+          >
+            🗺️ 非表示
+          </button>
+        </div>
+
+        {/* 分割線（ドラッグ可能） */}
+        <div 
+          className="h-2 bg-slate-300 dark:bg-slate-600 cursor-row-resize flex items-center justify-center touch-none"
+          onMouseDown={handleSplitDragStart}
+          onMouseMove={handleSplitDragMove}
+          onMouseUp={handleSplitDragEnd}
+          onMouseLeave={handleSplitDragEnd}
+          onTouchStart={handleSplitDragStart}
+          onTouchMove={handleSplitDragMove}
+          onTouchEnd={handleSplitDragEnd}
+        >
+          <div className="w-12 h-1 bg-slate-400 dark:bg-slate-500 rounded-full" />
+        </div>
+
+        {/* アイテムリストエリア */}
+        <div 
+          style={{ height: `${100 - splitRatio}%` }} 
+          className="overflow-y-auto"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
+          <div className="p-2">
+            <Header />
+          </div>
+          <ItemList />
+        </div>
+
+        {/* フッター */}
+        <div className="fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
+          <div className="px-4 py-2">
+            <div className="flex justify-between items-center text-sm">
+              <div className="text-slate-700 dark:text-slate-300">
+                <span className="font-bold text-indigo-600 dark:text-indigo-400">
+                  {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-slate-500 dark:text-slate-400">{purchasedCount}/{executeItems.length}件</span>
+                <span className="font-bold text-blue-600 dark:text-blue-400">
+                  ¥{remainingCost.toLocaleString()}
+                </span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // PC+マップ表示モード
+  if (layoutMode === 'pc' && isMapVisible && currentMapData && !isCompleted) {
+    return (
+      <div 
+        ref={swipeContainerRef}
+        className="relative flex h-[calc(100vh-200px)]"
+      >
+        {/* 通知 */}
+        {notification && (
+          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
+            {notification}
+          </div>
+        )}
+
+        {/* 自動進行カウントダウン */}
+        {autoAdvanceCountdown !== null && (
+          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-orange-500 text-white px-6 py-3 rounded-lg shadow-lg">
+            {autoAdvanceCountdown}秒後に次の訪問先へ移動します...
+          </div>
+        )}
+
+        {/* 左側: マップ */}
+        <div className="w-1/2 relative overflow-hidden border-r border-slate-200 dark:border-slate-700">
+          <FocusModeMapCanvas
+            mapData={currentMapData}
+            mapName={currentMapName || ''}
+            items={executeItems}
+            executeModeItemIds={executeItems.map(item => item.id)}
+            zoomLevel={mapZoomLevel}
+            selectedHall={currentHallDefinition}
+            currentVisitKey={currentVisitKey}
+            nextVisitKey={nextVisitKey}
+            currentPhase={currentPhase}
+            onZoomChange={handleMapZoomChange}
+          />
+          {/* マップ非表示ボタン */}
+          <button
+            onClick={toggleMapVisibility}
+            className="absolute top-2 right-2 bg-white/90 dark:bg-slate-800/90 px-3 py-1 rounded-lg shadow text-sm z-10"
+          >
+            🗺️ 非表示
+          </button>
+        </div>
+
+        {/* 右側: アイテムリスト */}
+        <div className="w-1/2 overflow-y-auto">
+          <div className="p-4">
+            <Header />
+          </div>
+          <ItemList />
+        </div>
+
+        {/* ナビゲーションボタン */}
+        <button
+          onClick={handlePrev}
+          className="fixed left-4 top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-40"
+          title="前の訪問先"
+        >
+          ◀
+        </button>
+        <button
+          onClick={handleNext}
+          className={`fixed right-4 top-1/2 transform -translate-y-1/2 w-14 h-14 ${
+            isNextButtonBlinking
+              ? 'bg-green-500 hover:bg-green-600 animate-pulse'
+              : 'bg-blue-600 hover:bg-blue-700'
+          } text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-40`}
+          title="次の訪問先"
+        >
+          ▶
+        </button>
+
+        {/* フッター */}
+        <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+            <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
+              <div className="text-slate-700 dark:text-slate-300">
+                <span className="font-bold text-xl text-indigo-600 dark:text-indigo-400">
+                  {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
+                </span>
+                <span className="text-sm text-slate-500 dark:text-slate-400 ml-3 opacity-60">
+                  ({currentVisitNumber}/{totalVisits})
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="text-slate-700 dark:text-slate-300">
+                  <span className="font-semibold">{purchasedCount}</span> / {executeItems.length} 件購入済み
+                </div>
+                <div>
+                  <span className="text-sm text-slate-500 dark:text-slate-400">残りの合計: </span>
+                  <span className="font-bold text-xl text-blue-600 dark:text-blue-400">
+                    ¥{remainingCost.toLocaleString()}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div 
       ref={swipeContainerRef}
@@ -793,14 +1053,33 @@ const FocusMode: React.FC<FocusModeProps> = ({
         <div className="flex justify-between items-start">
           <div>
             <div className="text-sm opacity-80">訪問先</div>
-            <div className="text-2xl font-bold">{spaceInfo}</div>
+            <div className="flex items-center gap-2">
+              <span className="text-2xl font-bold">{spaceInfo}</span>
+              <span className="bg-white/20 px-2 py-0.5 rounded text-sm">{currentVisitCheckedCount}/{currentVisitTotalCount}</span>
+            </div>
             <div className="text-lg">{circleName}</div>
           </div>
           <div className="text-right">
             <div className="text-sm opacity-80">フェーズ</div>
             <div className="text-xl font-bold">{phaseDisplayName}</div>
+            <div className="text-sm opacity-80 mt-1">
+              次: {nextVisitInfo.spaceInfo} {nextVisitInfo.circleName}
+            </div>
           </div>
         </div>
+        {/* マップ表示トグルボタン */}
+        {currentMapData && (
+          <button
+            onClick={toggleMapVisibility}
+            className={`mt-3 w-full py-2 rounded-lg font-medium transition-colors ${
+              isMapVisible 
+                ? 'bg-white/30 hover:bg-white/40' 
+                : 'bg-white/20 hover:bg-white/30'
+            }`}
+          >
+            {isMapVisible ? '🗺️ マップを非表示' : '🗺️ マップを表示'}
+          </button>
+        )}
       </div>
 
       {/* アイテムリスト - スマートフォンモードでは横幅フル */}
