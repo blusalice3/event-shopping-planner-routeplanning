@@ -761,6 +761,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return null;
   }
 
+  // 現在のフェーズに訪問先がない場合（後回し/遅参アイテムがない場合など）
+  if (currentPhaseVisits.length === 0 && !isCompleted) {
+    // 次のフェーズへ移動または完了
+    moveToNext();
+    return null;
+  }
+
   // 現在の訪問先情報
   const circleName = currentVisit?.items[0]?.circle || '';
   const spaceInfo = currentVisit?.items[0] 
