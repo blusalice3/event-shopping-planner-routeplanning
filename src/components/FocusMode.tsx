@@ -818,9 +818,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
       <div 
         className="relative flex flex-col"
         style={{ height: availableHeight }}
-        onTouchStart={!splitDragRef.current ? handleTouchStart : undefined}
-        onTouchMove={!splitDragRef.current ? handleTouchMove : undefined}
-        onTouchEnd={!splitDragRef.current ? handleTouchEnd : undefined}
       >
         {notification && (
           <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
@@ -865,7 +862,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
           <div className="w-12 h-1 bg-slate-500 dark:bg-slate-400 rounded-full"></div>
         </div>
 
-        <div style={{ height: `${100 - splitRatio}%` }} className="overflow-y-auto min-h-0">
+        {/* スワイプ判定は分割線より下のアイテム表示エリアのみ */}
+        <div 
+          style={{ height: `${100 - splitRatio}%` }} 
+          className="overflow-y-auto min-h-0"
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        >
           <Header />
           <ItemList />
         </div>

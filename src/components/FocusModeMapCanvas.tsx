@@ -100,7 +100,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const states = new Map<string, {
       hasItems: boolean;
       items: ShoppingItem[];
-      visitKey: string | null;
+      visitKeys: Set<string>;  // 複数のvisitKeyを保持
       isCurrentPosition: boolean;
       isNextDestination: boolean;
       // 購入状態の集計
@@ -142,7 +142,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const existing = states.get(key) || {
         hasItems: false,
         items: [],
-        visitKey: null,
+        visitKeys: new Set<string>(),
         isCurrentPosition: false,
         isNextDestination: false,
         allNone: true,
@@ -154,7 +154,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       existing.hasItems = true;
       existing.items.push(item);
-      existing.visitKey = visitKey;
+      existing.visitKeys.add(visitKey);  // 複数のvisitKeyを保持
 
       // 購入状態の更新
       if (item.purchaseStatus === 'None') {
@@ -188,11 +188,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       );
       state.isVisited = !state.allNone && (hasFinalStatus || (!state.allNone && !onlyPostponedOrLate));
 
-      // 現在位置と次の目的地
-      if (state.visitKey === currentVisitKey) {
+      // 現在位置と次の目的地（visitKeysのSetで判定）
+      if (currentVisitKey && state.visitKeys.has(currentVisitKey)) {
         state.isCurrentPosition = true;
       }
-      if (state.visitKey === nextVisitKey) {
+      if (nextVisitKey && state.visitKeys.has(nextVisitKey)) {
         state.isNextDestination = true;
       }
     });
@@ -613,7 +613,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     }
 
     // 4. ルートを描画（点線: 未訪問部分、実線: 訪問済み部分）
-    if (routePath.length >= 2) {
+    // 現在位置と次の目的地が異なる場合のみルートを描画
+    const isSamePosition = currentCellCoords && nextCellCoords && 
+      currentCellCoords.row === nextCellCoords.row && 
+      currentCellCoords.col === nextCellCoords.col;
+    
+    if (routePath.length >= 2 && !isSamePosition) {
       const lineWidth = Math.max(3, cellSize * 0.1);
 
       // 点線で描画（未訪問ルート）
