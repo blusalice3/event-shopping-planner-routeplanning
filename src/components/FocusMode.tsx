@@ -17,6 +17,8 @@ interface FocusModeProps {
   mapData?: { [dayMapName: string]: DayMapData };
   hallDefinitions?: HallDefinition[];
   onHideHeader?: (hide: boolean) => void;
+  // 新規アイテム追加
+  onAddItem?: (item: Omit<ShoppingItem, 'id' | 'purchaseStatus'>) => void;
 }
 
 // スワイプ判定の閾値
@@ -44,6 +46,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   mapData,
   hallDefinitions,
   onHideHeader,
+  onAddItem,
 }) => {
   // 現在のフェーズ（ユーザー操作でのみ変更）
   const [currentPhase, setCurrentPhase] = useState<FocusPhase>('normal');
@@ -102,6 +105,32 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const [selectedHallId, setSelectedHallId] = useState<string | 'follow'>('follow');
   const [splitRatio, setSplitRatio] = useState(50);
   const splitDragRef = useRef<{ startY: number; startRatio: number } | null>(null);
+
+  // セルクリックポップアップの状態
+  const [cellPopupState, setCellPopupState] = useState<{
+    isOpen: boolean;
+    blockName: string;
+    number: number;
+    items: ShoppingItem[];
+  }>({ isOpen: false, blockName: '', number: 0, items: [] });
+
+  // アイテム追加ダイアログの状態
+  const [addItemDialog, setAddItemDialog] = useState<{
+    isOpen: boolean;
+    eventDate: string;
+    block: string;
+    number: string;
+  }>({ isOpen: false, eventDate: '', block: '', number: '' });
+
+  // 新規アイテム追加フォームの状態
+  const [newItemForm, setNewItemForm] = useState({
+    circle: '',
+    title: '',
+    price: '',
+    quantity: '1',
+    remarks: '',
+    url: '',
+  });
 
   // マップが利用可能かどうか
   const hasMapData = useMemo(() => {
@@ -1054,6 +1083,59 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // フッターの高さ定数
   const FOOTER_HEIGHT_SP = 56;
 
+  // マップのセルクリックハンドラ
+  const handleMapCellClick = useCallback((blockName: string, number: number, matchingItems: ShoppingItem[]) => {
+    setCellPopupState({
+      isOpen: true,
+      blockName,
+      number,
+      items: matchingItems,
+    });
+  }, []);
+
+  // セルポップアップを閉じる
+  const closeCellPopup = useCallback(() => {
+    setCellPopupState(prev => ({ ...prev, isOpen: false }));
+  }, []);
+
+  // アイテム追加ダイアログを開く
+  const openAddItemDialog = useCallback(() => {
+    if (!currentVisit) return;
+    const firstItem = currentVisit.items[0];
+    setAddItemDialog({
+      isOpen: true,
+      eventDate: firstItem?.eventDate || '',
+      block: cellPopupState.blockName,
+      number: String(cellPopupState.number),
+    });
+    setNewItemForm({ circle: '', title: '', price: '', quantity: '1', remarks: '', url: '' });
+    closeCellPopup();
+  }, [currentVisit, cellPopupState, closeCellPopup]);
+
+  // アイテム追加ダイアログを閉じる
+  const closeAddItemDialog = useCallback(() => {
+    setAddItemDialog(prev => ({ ...prev, isOpen: false }));
+  }, []);
+
+  // アイテムを追加
+  const handleAddNewItem = useCallback(() => {
+    if (!onAddItem) return;
+    const price = newItemForm.price === '' ? null : parseInt(newItemForm.price, 10) || 0;
+    onAddItem({
+      eventDate: addItemDialog.eventDate,
+      block: addItemDialog.block,
+      number: addItemDialog.number,
+      circle: newItemForm.circle,
+      title: newItemForm.title,
+      price,
+      quantity: parseInt(newItemForm.quantity, 10) || 1,
+      remarks: newItemForm.remarks,
+      url: newItemForm.url || undefined,
+    });
+    setNotification(`${addItemDialog.block}-${addItemDialog.number} にアイテムを追加しました`);
+    closeAddItemDialog();
+  }, [onAddItem, addItemDialog, newItemForm, closeAddItemDialog]);
+
   // フェーズ切り替え確認ダイアログ
   const PhaseChangeDialog = () => {
     if (!phaseChangeDialog.isOpen || !phaseChangeDialog.targetPhase) return null;
@@ -1123,6 +1205,98 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   };
 
+  // セルアイテムポップアップコンポーネント
+  const CellItemPopup = () => {
+    if (!cellPopupState.isOpen) return null;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-sm w-full mx-4 overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+            <h3 className="font-semibold text-slate-900 dark:text-white">
+              {cellPopupState.blockName}-{cellPopupState.number} {cellPopupState.items.length > 0 ? `（${cellPopupState.items.length}件）` : ''}
+            </h3>
+            <button onClick={closeCellPopup} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+          {onAddItem && (
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+              <button onClick={openAddItemDialog} className="w-full py-2 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2">
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+                新規アイテム追加
+              </button>
+            </div>
+          )}
+          <div className="max-h-60 overflow-y-auto">
+            {cellPopupState.items.length === 0 ? (
+              <div className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">このセルにはアイテムがありません</div>
+            ) : (
+              cellPopupState.items.map(item => (
+                <div key={item.id} className="p-3 border-b border-slate-100 dark:border-slate-700 last:border-b-0">
+                  <div className="font-medium text-slate-900 dark:text-white">{item.circle}</div>
+                  <div className="text-sm text-slate-600 dark:text-slate-400">{item.title}</div>
+                  {item.price !== null && <div className="text-sm text-slate-500">¥{item.price.toLocaleString()}</div>}
+                </div>
+              ))
+            )}
+          </div>
+          <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700">
+            <button onClick={closeCellPopup} className="w-full py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors">閉じる</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  // アイテム追加ダイアログコンポーネント
+  const AddItemDialogComponent = () => {
+    if (!addItemDialog.isOpen) return null;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-md w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
+          <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4">
+            <h2 className="text-lg font-bold">新規アイテム追加</h2>
+            <p className="text-sm opacity-80 mt-1">{addItemDialog.eventDate} {addItemDialog.block}-{addItemDialog.number}</p>
+          </div>
+          <div className="p-4 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">サークル名 <span className="text-red-500">*</span></label>
+              <input type="text" value={newItemForm.circle} onChange={(e) => setNewItemForm(prev => ({ ...prev, circle: e.target.value }))} className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none" placeholder="サークル名" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">タイトル</label>
+              <input type="text" value={newItemForm.title} onChange={(e) => setNewItemForm(prev => ({ ...prev, title: e.target.value }))} className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none" placeholder="頒布物タイトル" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">価格</label>
+                <input type="number" value={newItemForm.price} onChange={(e) => setNewItemForm(prev => ({ ...prev, price: e.target.value }))} className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none" placeholder="0" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">数量</label>
+                <input type="number" value={newItemForm.quantity} onChange={(e) => setNewItemForm(prev => ({ ...prev, quantity: e.target.value }))} className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none" min="1" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">備考</label>
+              <input type="text" value={newItemForm.remarks} onChange={(e) => setNewItemForm(prev => ({ ...prev, remarks: e.target.value }))} className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none" placeholder="備考" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">URL</label>
+              <input type="url" value={newItemForm.url} onChange={(e) => setNewItemForm(prev => ({ ...prev, url: e.target.value }))} className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none" placeholder="https://..." />
+            </div>
+          </div>
+          <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
+            <button onClick={closeAddItemDialog} className="flex-1 py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors">キャンセル</button>
+            <button onClick={handleAddNewItem} disabled={!newItemForm.circle.trim()} className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors">追加</button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // スマートフォン+マップ表示モード
   if (layoutMode === 'smartphone' && isMapVisible && currentMapData && !isCompleted) {
     const availableHeight = `calc(100vh - ${FOOTER_HEIGHT_SP}px)`;
@@ -1161,6 +1335,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               nextVisitKey={nextVisit?.key || null}
               currentPhase={currentPhase}
               onZoomChange={handleMapZoomChange}
+              onCellClick={handleMapCellClick}
             />
           </div>
         </div>
@@ -1240,6 +1415,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
         
         {/* フェーズ切り替え確認ダイアログ */}
         <PhaseChangeDialog />
+        
+        {/* セルアイテムポップアップ */}
+        <CellItemPopup />
+        
+        {/* アイテム追加ダイアログ */}
+        <AddItemDialogComponent />
       </div>
     );
   }
@@ -1283,6 +1464,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               nextVisitKey={nextVisit?.key || null}
               currentPhase={currentPhase}
               onZoomChange={handleMapZoomChange}
+              onCellClick={handleMapCellClick}
             />
           </div>
         </div>
@@ -1369,6 +1551,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
         
         {/* フェーズ切り替え確認ダイアログ */}
         <PhaseChangeDialog />
+        
+        {/* セルアイテムポップアップ */}
+        <CellItemPopup />
+        
+        {/* アイテム追加ダイアログ */}
+        <AddItemDialogComponent />
       </div>
     );
   }
@@ -1554,6 +1742,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
       
       {/* フェーズ切り替え確認ダイアログ */}
       <PhaseChangeDialog />
+      
+      {/* セルアイテムポップアップ */}
+      <CellItemPopup />
+      
+      {/* アイテム追加ダイアログ */}
+      <AddItemDialogComponent />
     </div>
   );
 };

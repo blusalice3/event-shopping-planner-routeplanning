@@ -8,9 +8,11 @@ interface ImportScreenProps {
   itemToEdit: ShoppingItem | null;
   onUpdateItem: (item: ShoppingItem) => void;
   onDoneEditing: () => void;
+  newItemDefaults?: { eventDate: string; block: string; number: string } | null;
+  onClearNewItemDefaults?: () => void;
 }
 
-const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName, itemToEdit, onUpdateItem, onDoneEditing }) => {
+const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName, itemToEdit, onUpdateItem, onDoneEditing, newItemDefaults, onClearNewItemDefaults }) => {
   // State for bulk add (creating new list)
   const [eventName, setEventName] = useState('');
   const [circles, setCircles] = useState('');
@@ -55,6 +57,22 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         setIsCustomEventDate(!defaultDates.includes(itemToEdit.eventDate));
     }
   }, [itemToEdit, isEditing]);
+
+  // マップからの新規アイテム追加時に初期値を設定
+  useEffect(() => {
+    if (newItemDefaults && !isEditing) {
+      setSingleEventDate(newItemDefaults.eventDate);
+      setSingleBlock(newItemDefaults.block);
+      setSingleNumber(newItemDefaults.number);
+      // 1日目～4日目に含まれない場合はカスタムモードにする
+      const defaultDates = ['1日目', '2日目', '3日目', '4日目'];
+      setIsCustomEventDate(!defaultDates.includes(newItemDefaults.eventDate));
+      // 初期値を消費したらクリア
+      if (onClearNewItemDefaults) {
+        onClearNewItemDefaults();
+      }
+    }
+  }, [newItemDefaults, isEditing, onClearNewItemDefaults]);
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     e.preventDefault();

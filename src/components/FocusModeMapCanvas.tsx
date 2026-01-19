@@ -23,6 +23,8 @@ interface FocusModeMapCanvasProps {
   currentPhase: 'normal' | 'postponed' | 'late';
   // 自動ズーム用コールバック
   onZoomChange?: (newZoom: ZoomLevel) => void;
+  // セルクリック時のコールバック（新規アイテム追加用）
+  onCellClick?: (blockName: string, number: number, matchingItems: ShoppingItem[]) => void;
 }
 
 const BASE_CELL_SIZE = 28;
@@ -51,6 +53,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   nextVisitKey,
   currentPhase,
   onZoomChange,
+  onCellClick,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -782,11 +785,48 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     });
   }, [dragStart, dragStartOffset]);
 
-  const handlePointerUp = useCallback(() => {
+  const handlePointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    // ドラッグ中でなければクリックとして処理
+    if (!isDragging && onCellClick) {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      
+      const rect = canvas.getBoundingClientRect();
+      const x = (e.clientX - rect.left) * dpr;
+      const y = (e.clientY - rect.top) * dpr;
+      
+      const col = Math.floor(x / cellSize) + 1;
+      const row = Math.floor(y / cellSize) + 1;
+      
+      if (row >= 1 && row <= mapData.maxRow && col >= 1 && col <= mapData.maxCol) {
+        // ブロック定義内の数値セルか確認
+        for (const block of mapData.blocks) {
+          if (block.isWallBlock) continue;
+          
+          if (row >= block.startRow && row <= block.endRow &&
+              col >= block.startCol && col <= block.endCol) {
+            const numberCell = block.numberCells.find(nc => nc.row === row && nc.col === col);
+            if (numberCell) {
+              // このセルに対応するアイテムを取得
+              const matchingItems = items.filter(item => {
+                if (item.block !== block.name) return false;
+                const numStr = extractNumberFromItemNumber(item.number);
+                const numValue = numStr ? parseInt(numStr, 10) : 0;
+                return numValue === numberCell.value;
+              });
+              
+              onCellClick(block.name, numberCell.value, matchingItems);
+              break;
+            }
+          }
+        }
+      }
+    }
+    
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
-  }, []);
+  }, [isDragging, onCellClick, dpr, cellSize, mapData, items]);
 
   return (
     <div

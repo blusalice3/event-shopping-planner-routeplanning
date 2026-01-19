@@ -25,6 +25,7 @@ interface MapViewProps {
   onMoveToLast: (itemId: string) => void;
   onUpdateItem?: (item: ShoppingItem) => void;
   onDeleteItem?: (itemId: string) => void;
+  onAddNewItem?: (eventDate: string, block: string, number: string) => void;  // 新規アイテム追加
   // ホール関連
   halls: HallDefinition[];
   hallRouteSettings: HallRouteSettings;
@@ -57,6 +58,7 @@ const MapView: React.FC<MapViewProps> = ({
   onMoveToLast: _onMoveToLast,
   onUpdateItem,
   onDeleteItem,
+  onAddNewItem,
   halls,
   hallRouteSettings,
   onUpdateHallRouteSettings,
@@ -284,29 +286,59 @@ const MapView: React.FC<MapViewProps> = ({
   // セルクリック時のハンドラ
   const handleCellClick = useCallback(
     (row: number, col: number, matchingItems: ShoppingItem[]) => {
-      if (matchingItems.length === 0) return;
+      // セルがブロック定義内にあるかチェック
+      let foundBlock: { name: string; number: number } | null = null;
       
-      const firstItem = matchingItems[0];
-      const block = mapData.blocks.find((b) => b.name === firstItem.block);
-      if (!block) return;
+      for (const block of mapData.blocks) {
+        if (block.isWallBlock) continue;
+        
+        // ブロック範囲内かチェック
+        if (row >= block.startRow && row <= block.endRow &&
+            col >= block.startCol && col <= block.endCol) {
+          // 数値セルを探す
+          const numberCell = block.numberCells.find(nc => nc.row === row && nc.col === col);
+          if (numberCell) {
+            foundBlock = { name: block.name, number: numberCell.value };
+            break;
+          }
+        }
+      }
       
-      const numStr = extractNumberFromItemNumber(firstItem.number);
-      const numValue = numStr ? parseInt(numStr, 10) : 0;
+      // ブロック定義内でない場合かつアイテムもない場合は何もしない
+      if (!foundBlock && matchingItems.length === 0) return;
       
       const position = {
         x: window.innerWidth / 2 - 160,
         y: window.innerHeight / 3,
       };
       
-      setPopupState({
-        isOpen: true,
-        row,
-        col,
-        blockName: firstItem.block,
-        number: numValue,
-        items: matchingItems,
-        position,
-      });
+      if (foundBlock) {
+        // ブロック定義内のセル
+        setPopupState({
+          isOpen: true,
+          row,
+          col,
+          blockName: foundBlock.name,
+          number: foundBlock.number,
+          items: matchingItems,
+          position,
+        });
+      } else if (matchingItems.length > 0) {
+        // ブロック定義外だがアイテムがある場合（既存動作）
+        const firstItem = matchingItems[0];
+        const numStr = extractNumberFromItemNumber(firstItem.number);
+        const numValue = numStr ? parseInt(numStr, 10) : 0;
+        
+        setPopupState({
+          isOpen: true,
+          row,
+          col,
+          blockName: firstItem.block,
+          number: numValue,
+          items: matchingItems,
+          position,
+        });
+      }
     },
     [mapData.blocks]
   );
@@ -468,6 +500,11 @@ const MapView: React.FC<MapViewProps> = ({
         onRemoveFromVisitList={handleRemoveFromVisitList}
         onUpdateItem={onUpdateItem}
         onDeleteItem={onDeleteItem}
+        onAddNewItem={onAddNewItem ? () => {
+          // マップ名から参加日を抽出（例: "1日目マップ" -> "1日目"）
+          const eventDate = mapName.replace(/マップ$/, '');
+          onAddNewItem(eventDate, popupState.blockName, String(popupState.number));
+        } : undefined}
         position={popupState.position}
       />
       

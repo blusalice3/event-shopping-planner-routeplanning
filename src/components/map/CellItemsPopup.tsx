@@ -12,6 +12,7 @@ interface CellItemsPopupProps {
   onRemoveFromVisitList: (itemId: string) => void;
   onUpdateItem?: (item: ShoppingItem) => void;
   onDeleteItem?: (itemId: string) => void;
+  onAddNewItem?: () => void;  // 新規アイテム追加
   position: { x: number; y: number };  // クリック位置
 }
 
@@ -35,6 +36,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   onRemoveFromVisitList,
   onUpdateItem,
   onDeleteItem,
+  onAddNewItem,
   position,
 }) => {
   const popupRef = useRef<HTMLDivElement>(null);
@@ -202,7 +204,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
         {/* ヘッダー */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
           <h3 className="font-semibold text-slate-900 dark:text-white">
-            {blockName}-{number} のアイテム（{items.length}件）
+            {blockName}-{number} {items.length > 0 ? `（${items.length}件）` : ''}
           </h3>
           <button
             onClick={onClose}
@@ -214,8 +216,31 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
           </button>
         </div>
         
+        {/* 新規追加ボタン */}
+        {onAddNewItem && (
+          <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+            <button
+              onClick={() => {
+                onAddNewItem();
+                onClose();
+              }}
+              className="w-full py-2 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+              </svg>
+              新規アイテム追加
+            </button>
+          </div>
+        )}
+        
         {/* アイテムリスト */}
         <div className="max-h-80 overflow-y-auto">
+          {items.length === 0 && !onAddNewItem && (
+            <div className="px-4 py-8 text-center text-slate-500 dark:text-slate-400">
+              このセルにはアイテムがありません
+            </div>
+          )}
           {items.map((item) => {
             const isInVisitList = executeModeItemIds.has(item.id);
             

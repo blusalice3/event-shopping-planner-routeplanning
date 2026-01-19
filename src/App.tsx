@@ -75,6 +75,9 @@ const App: React.FC = () => {
   const [rangeStart, setRangeStart] = useState<{ itemId: string; columnType: 'execute' | 'candidate' } | null>(null);
   const [rangeEnd, setRangeEnd] = useState<{ itemId: string; columnType: 'execute' | 'candidate' } | null>(null);
 
+  // マップからの新規アイテム追加用の初期値
+  const [newItemDefaults, setNewItemDefaults] = useState<{ eventDate: string; block: string; number: string } | null>(null);
+
   // 更新機能用の状態
   const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
   const [updateData, setUpdateData] = useState<{
@@ -2709,6 +2712,47 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     });
   }, [activeEventName, activeTab, isMapTab]);
 
+  // マップビューからの新規アイテム追加
+  const handleAddNewItemFromMap = useCallback((eventDate: string, block: string, number: string) => {
+    // 初期値を設定してアイテム追加タブに遷移
+    setNewItemDefaults({ eventDate, block, number });
+    setItemToEdit(null);
+    setActiveTab('import');
+  }, []);
+
+  // 集中モードからの直接アイテム追加
+  const handleAddItemFromFocusMode = useCallback((newItem: Omit<ShoppingItem, 'id' | 'purchaseStatus'>) => {
+    if (!activeEventName) return;
+    
+    // 新しいアイテムを作成
+    const item: ShoppingItem = {
+      ...newItem,
+      id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      purchaseStatus: 'None',
+    };
+    
+    // アイテムを追加
+    setEventLists(prev => ({
+      ...prev,
+      [activeEventName]: [...(prev[activeEventName] || []), item],
+    }));
+    
+    // 実行列にも追加（現在の参加日の末尾に）
+    const dayName = newItem.eventDate;
+    setExecuteModeItems(prev => {
+      const eventItems = prev[activeEventName] || {};
+      const dayItems = [...(eventItems[dayName] || []), item.id];
+      
+      return {
+        ...prev,
+        [activeEventName]: {
+          ...eventItems,
+          [dayName]: dayItems,
+        },
+      };
+    });
+  }, [activeEventName]);
+
   // マップビューでの先頭移動
   const handleMoveToFirstFromMap = useCallback((itemId: string) => {
     if (!activeEventName || !isMapTab) return;
@@ -4201,6 +4245,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
              itemToEdit={itemToEdit}
              onUpdateItem={handleUpdateItem}
              onDoneEditing={handleDoneEditing}
+             newItemDefaults={newItemDefaults}
+             onClearNewItemDefaults={() => setNewItemDefaults(null)}
            />
         )}
         {/* マップビュー */}
@@ -4219,6 +4265,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
               const item = items.find(i => i.id === itemId);
               if (item) handleDeleteRequest(item);
             }}
+            onAddNewItem={handleAddNewItemFromMap}
             halls={currentHalls}
             hallRouteSettings={currentHallRouteSettings}
             onUpdateHallRouteSettings={handleUpdateHallRouteSettings}
@@ -4367,6 +4414,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 mapData={activeEventName ? mapData[activeEventName] : undefined}
                 hallDefinitions={activeEventName && activeTab ? hallDefinitions[activeEventName]?.[`${eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}マップ`] : undefined}
                 onHideHeader={setFocusModeHideHeader}
+                onAddItem={handleAddItemFromFocusMode}
               />
             ) : (
               <ShoppingList
