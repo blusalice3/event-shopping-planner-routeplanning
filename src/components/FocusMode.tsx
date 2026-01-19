@@ -81,6 +81,21 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 遅参フェーズで表示するアイテムID（後回しフェーズ終了時に確定）
   const [latePhaseItemIds, setLatePhaseItemIds] = useState<Set<string>>(new Set());
 
+  // フェーズ切り替え確認ダイアログの状態
+  const [phaseChangeDialog, setPhaseChangeDialog] = useState<{
+    isOpen: boolean;
+    targetPhase: FocusPhase | null;
+    hasSavedIndex: boolean;
+    savedIndex: number;
+  }>({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
+
+  // 各フェーズで最後に表示していたインデックスを記憶
+  const [savedPhaseIndices, setSavedPhaseIndices] = useState<Record<FocusPhase, number>>({
+    normal: 0,
+    postponed: 0,
+    late: 0,
+  });
+
   // マップ表示関連の状態
   const [isMapVisible, setIsMapVisible] = useState(false);
   const [mapZoomLevel, setMapZoomLevel] = useState<ZoomLevel>(100);
@@ -337,7 +352,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return hallDefinitions?.find(h => h.id === selectedHallId) || null;
   }, [selectedHallId, followHall, hallDefinitions]);
 
-  // タイマーをクリアする関数
+  // 現在のインデックスを保存
+  useEffect(() => {
+    setSavedPhaseIndices(prev => ({
+      ...prev,
+      [currentPhase]: currentPhaseIndex,
+    }));
+  }, [currentPhase, currentPhaseIndex]);
+
+  // タイマーをクリアする関数（フェーズ切り替えでも使用するので先に定義）
   const clearAutoAdvanceTimer = useCallback(() => {
     if (autoAdvanceTimerRef.current) {
       clearTimeout(autoAdvanceTimerRef.current);
@@ -348,6 +371,124 @@ const FocusMode: React.FC<FocusModeProps> = ({
       countdownIntervalRef.current = null;
     }
     setAutoAdvanceCountdown(null);
+  }, []);
+
+  // フェーズ切り替えダイアログを開く
+  const handlePhaseChangeRequest = useCallback((targetPhase: FocusPhase) => {
+    if (targetPhase === currentPhase) return;
+    
+    // 対象フェーズの訪問先が存在するか確認
+    const targetVisits = visitsByPhase[targetPhase];
+    if (targetVisits.length === 0) {
+      setNotification(`${targetPhase === 'normal' ? '通常' : targetPhase === 'postponed' ? '後回し' : '遅参'}フェーズに該当するアイテムがありません`);
+      return;
+    }
+    
+    // 保存されたインデックスがあるかチェック
+    const savedIndex = savedPhaseIndices[targetPhase];
+    const hasSavedIndex = savedIndex > 0 && savedIndex < targetVisits.length;
+    
+    setPhaseChangeDialog({
+      isOpen: true,
+      targetPhase,
+      hasSavedIndex,
+      savedIndex: hasSavedIndex ? savedIndex : 0,
+    });
+  }, [currentPhase, visitsByPhase, savedPhaseIndices]);
+
+  // フェーズ切り替え実行（最初から開始）
+  const executePhaseChangeFromStart = useCallback(() => {
+    const { targetPhase } = phaseChangeDialog;
+    if (!targetPhase) return;
+    
+    // 現在のフェーズのインデックスを保存
+    setSavedPhaseIndices(prev => ({
+      ...prev,
+      [currentPhase]: currentPhaseIndex,
+    }));
+    
+    // フェーズ切り替え前に必要なデータを準備
+    if (currentPhase === 'normal' && (targetPhase === 'postponed' || targetPhase === 'late')) {
+      // 通常フェーズから後回し/遅参へ：現在の後回し/遅参アイテムを記憶
+      const postponedIds = new Set(
+        executeItems.filter(item => item.purchaseStatus === 'Postpone').map(item => item.id)
+      );
+      setPostponedPhaseItemIds(postponedIds);
+      
+      const lateIds = new Set(
+        executeItems.filter(item => item.purchaseStatus === 'Late').map(item => item.id)
+      );
+      setLatePhaseItemIds(lateIds);
+    } else if (currentPhase === 'postponed' && targetPhase === 'late') {
+      // 後回しフェーズから遅参へ：遅参アイテムを更新
+      const currentLateIds = new Set(latePhaseItemIds);
+      executeItems.forEach(item => {
+        if (item.purchaseStatus === 'Late') {
+          currentLateIds.add(item.id);
+        }
+      });
+      setLatePhaseItemIds(currentLateIds);
+    }
+    
+    setCurrentPhase(targetPhase);
+    setCurrentPhaseIndex(0);
+    setIsNextButtonBlinking(false);
+    setIsCompleted(false);
+    clearAutoAdvanceTimer();
+    
+    const phaseName = targetPhase === 'normal' ? '通常' : targetPhase === 'postponed' ? '後回し' : '遅参';
+    setNotification(`${phaseName}フェーズを最初から開始します`);
+    
+    setPhaseChangeDialog({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
+  }, [phaseChangeDialog, currentPhase, currentPhaseIndex, executeItems, latePhaseItemIds, clearAutoAdvanceTimer]);
+
+  // フェーズ切り替え実行（途中から再開）
+  const executePhaseChangeFromSaved = useCallback(() => {
+    const { targetPhase, savedIndex } = phaseChangeDialog;
+    if (!targetPhase) return;
+    
+    // 現在のフェーズのインデックスを保存
+    setSavedPhaseIndices(prev => ({
+      ...prev,
+      [currentPhase]: currentPhaseIndex,
+    }));
+    
+    // フェーズ切り替え前に必要なデータを準備
+    if (currentPhase === 'normal' && (targetPhase === 'postponed' || targetPhase === 'late')) {
+      const postponedIds = new Set(
+        executeItems.filter(item => item.purchaseStatus === 'Postpone').map(item => item.id)
+      );
+      setPostponedPhaseItemIds(postponedIds);
+      
+      const lateIds = new Set(
+        executeItems.filter(item => item.purchaseStatus === 'Late').map(item => item.id)
+      );
+      setLatePhaseItemIds(lateIds);
+    } else if (currentPhase === 'postponed' && targetPhase === 'late') {
+      const currentLateIds = new Set(latePhaseItemIds);
+      executeItems.forEach(item => {
+        if (item.purchaseStatus === 'Late') {
+          currentLateIds.add(item.id);
+        }
+      });
+      setLatePhaseItemIds(currentLateIds);
+    }
+    
+    setCurrentPhase(targetPhase);
+    setCurrentPhaseIndex(savedIndex);
+    setIsNextButtonBlinking(false);
+    setIsCompleted(false);
+    clearAutoAdvanceTimer();
+    
+    const phaseName = targetPhase === 'normal' ? '通常' : targetPhase === 'postponed' ? '後回し' : '遅参';
+    setNotification(`${phaseName}フェーズを途中から再開します`);
+    
+    setPhaseChangeDialog({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
+  }, [phaseChangeDialog, currentPhase, currentPhaseIndex, executeItems, latePhaseItemIds, clearAutoAdvanceTimer]);
+
+  // フェーズ切り替えダイアログをキャンセル
+  const cancelPhaseChange = useCallback(() => {
+    setPhaseChangeDialog({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
   }, []);
 
   // 次へボタンの点滅を更新
@@ -860,8 +1001,23 @@ const FocusMode: React.FC<FocusModeProps> = ({
         </div>
         <div className="text-right">
           <div className="text-xs opacity-80">フェーズ</div>
-          <div className="text-lg font-bold">{phaseDisplayName}</div>
-          <div className="text-xs opacity-80">
+          <select
+            value={currentPhase}
+            onChange={(e) => handlePhaseChangeRequest(e.target.value as FocusPhase)}
+            className="text-lg font-bold bg-white/20 hover:bg-white/30 rounded-md py-1 px-2 text-white appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/50 transition-colors"
+            style={{ 
+              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+              backgroundRepeat: 'no-repeat',
+              backgroundPosition: 'right 4px center',
+              backgroundSize: '16px',
+              paddingRight: '24px',
+            }}
+          >
+            <option value="normal" className="text-slate-900">通常</option>
+            <option value="postponed" className="text-slate-900">後回し</option>
+            <option value="late" className="text-slate-900">遅参</option>
+          </select>
+          <div className="text-xs opacity-80 mt-1">
             次: {nextVisitInfo.spaceInfo} {nextVisitInfo.circleName}
           </div>
         </div>
@@ -897,6 +1053,75 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // フッターの高さ定数
   const FOOTER_HEIGHT_SP = 56;
+
+  // フェーズ切り替え確認ダイアログ
+  const PhaseChangeDialog = () => {
+    if (!phaseChangeDialog.isOpen || !phaseChangeDialog.targetPhase) return null;
+    
+    const targetPhaseName = phaseChangeDialog.targetPhase === 'normal' ? '通常' 
+      : phaseChangeDialog.targetPhase === 'postponed' ? '後回し' : '遅参';
+    const targetVisits = visitsByPhase[phaseChangeDialog.targetPhase];
+    const targetVisit = targetVisits[phaseChangeDialog.savedIndex];
+    const savedVisitInfo = targetVisit 
+      ? `${targetVisit.items[0]?.block}-${targetVisit.items[0]?.number} ${targetVisit.items[0]?.circle}`
+      : '';
+    
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+          <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4">
+            <h2 className="text-lg font-bold">フェーズを切り替えますか？</h2>
+            <p className="text-sm opacity-80 mt-1">{targetPhaseName}フェーズに移動します</p>
+          </div>
+          
+          <div className="p-4 space-y-4">
+            {targetVisits.length === 0 ? (
+              <p className="text-slate-600 dark:text-slate-300 text-center py-4">
+                {targetPhaseName}フェーズに該当するアイテムがありません
+              </p>
+            ) : (
+              <>
+                <p className="text-slate-600 dark:text-slate-300">
+                  {targetPhaseName}フェーズには {targetVisits.length} 件の訪問先があります。
+                </p>
+                
+                <div className="space-y-2">
+                  <button
+                    onClick={executePhaseChangeFromStart}
+                    className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
+                  >
+                    最初から開始
+                    <span className="block text-xs opacity-80 mt-0.5">
+                      {targetVisits[0]?.items[0]?.block}-{targetVisits[0]?.items[0]?.number} {targetVisits[0]?.items[0]?.circle}
+                    </span>
+                  </button>
+                  
+                  {phaseChangeDialog.hasSavedIndex && (
+                    <button
+                      onClick={executePhaseChangeFromSaved}
+                      className="w-full py-3 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
+                    >
+                      途中から再開
+                      <span className="block text-xs opacity-80 mt-0.5">
+                        {savedVisitInfo} （{phaseChangeDialog.savedIndex + 1}/{targetVisits.length}）
+                      </span>
+                    </button>
+                  )}
+                </div>
+              </>
+            )}
+            
+            <button
+              onClick={cancelPhaseChange}
+              className="w-full py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
+            >
+              キャンセル
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   // スマートフォン+マップ表示モード
   if (layoutMode === 'smartphone' && isMapVisible && currentMapData && !isCompleted) {
@@ -1012,6 +1237,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
             </div>
           </div>
         </div>
+        
+        {/* フェーズ切り替え確認ダイアログ */}
+        <PhaseChangeDialog />
       </div>
     );
   }
@@ -1138,6 +1366,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
             </div>
           </div>
         </div>
+        
+        {/* フェーズ切り替え確認ダイアログ */}
+        <PhaseChangeDialog />
       </div>
     );
   }
@@ -1177,7 +1408,22 @@ const FocusMode: React.FC<FocusModeProps> = ({
           </div>
           <div className="text-right">
             <div className="text-sm opacity-80">フェーズ</div>
-            <div className="text-xl font-bold">{phaseDisplayName}</div>
+            <select
+              value={currentPhase}
+              onChange={(e) => handlePhaseChangeRequest(e.target.value as FocusPhase)}
+              className="text-xl font-bold bg-white/20 hover:bg-white/30 rounded-md py-1 px-2 text-white appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/50 transition-colors"
+              style={{ 
+                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
+                backgroundRepeat: 'no-repeat',
+                backgroundPosition: 'right 4px center',
+                backgroundSize: '16px',
+                paddingRight: '24px',
+              }}
+            >
+              <option value="normal" className="text-slate-900">通常</option>
+              <option value="postponed" className="text-slate-900">後回し</option>
+              <option value="late" className="text-slate-900">遅参</option>
+            </select>
             <div className="text-sm opacity-80 mt-1">
               次: {nextVisitInfo.spaceInfo} {nextVisitInfo.circleName}
             </div>
@@ -1305,6 +1551,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
           </div>
         </div>
       </div>
+      
+      {/* フェーズ切り替え確認ダイアログ */}
+      <PhaseChangeDialog />
     </div>
   );
 };
