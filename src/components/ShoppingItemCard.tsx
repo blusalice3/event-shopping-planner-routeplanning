@@ -10,6 +10,20 @@ import ClockIcon from './icons/ClockIcon';
 import ChevronUpIcon from './icons/ChevronUpIcon';
 import ChevronDownIcon from './icons/ChevronDownIcon';
 
+// 外部リンクアイコン
+const ExternalLinkIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    viewBox="0 0 24 24"
+    strokeWidth={2}
+    stroke="currentColor"
+    {...props}
+  >
+    <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+  </svg>
+);
+
 export interface ShoppingItemCardProps {
   item: ShoppingItem;
   onUpdate: (item: ShoppingItem) => void;
@@ -87,6 +101,13 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     const nextStatus = PurchaseStatuses[nextIndex];
     onUpdate({ ...item, purchaseStatus: nextStatus });
   }, [item, onUpdate]);
+
+  const handleOpenUrl = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (item.url) {
+      window.open(item.url, '_blank');
+    }
+  }, [item.url]);
 
   const handleRemarksChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onUpdate({ ...item, remarks: e.target.value });
@@ -294,6 +315,18 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 <ChevronDownIcon className="w-4 h-4" />
               </button>
             )}
+            {/* 編集モード時：ドラッグハンドルの下にリンクアイコン */}
+            {onMoveUp && item.url && (
+              <button
+                onClick={handleOpenUrl}
+                data-no-long-press
+                className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors"
+                aria-label="URLを開く"
+                title="URLを開く"
+              >
+                <ExternalLinkIcon className="w-5 h-5" />
+              </button>
+            )}
           </div>
           
           {/* メインコンテンツエリア */}
@@ -319,6 +352,22 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             
             {/* 下段: 備考欄 + 購入状態・数量・価格 */}
             <div className="p-2 pt-1 flex flex-col gap-1.5 border-t border-slate-200/50 dark:border-slate-700/50">
+              {/* 集中/実行モード時：備考欄の直上右側にリンクアイコン */}
+              {!onMoveUp && item.url && (
+                <div className="flex justify-end">
+                  <button
+                    onClick={handleOpenUrl}
+                    data-no-long-press
+                    className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center gap-1"
+                    aria-label="URLを開く"
+                    title="URLを開く"
+                  >
+                    <ExternalLinkIcon className="w-4 h-4" />
+                    <span className="text-xs">🔗</span>
+                  </button>
+                </div>
+              )}
+              
               {/* 備考欄（購入状態トグルの上） */}
               <input
                 type="text"
@@ -387,9 +436,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20" onClick={(e) => e.stopPropagation()}>
               <div className="flex flex-col gap-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-lg shadow-2xl border border-slate-300 dark:border-slate-600 p-4">
                   <button onClick={() => { onEditRequest(item); setMenuVisible(false); }} className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors">編集</button>
-                  {item.url && (
-                    <button onClick={() => { window.open(item.url, '_blank'); setMenuVisible(false); }} className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors">URLを開く</button>
-                  )}
                   <button onClick={() => { onDeleteRequest(item); setMenuVisible(false); }} className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-red-600 hover:bg-red-700 transition-colors">削除</button>
               </div>
           </div>
@@ -515,13 +561,43 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                     ))}
                 </div>
             </div>
-            <input
-                type="text"
-                value={item.remarks}
-                onChange={handleRemarksChange}
-                placeholder="備考"
-                className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 w-32 sm:w-40 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
-            />
+            <div className="flex items-start gap-2">
+                {/* 集中/実行モード時：備考欄の左横側にリンクアイコン */}
+                {!onMoveUp && item.url && (
+                  <button
+                    onClick={handleOpenUrl}
+                    data-no-long-press
+                    className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center gap-1"
+                    aria-label="URLを開く"
+                    title="URLを開く"
+                  >
+                    <ExternalLinkIcon className="w-5 h-5" />
+                    <span className="text-xs">🔗</span>
+                  </button>
+                )}
+                <div className="flex flex-col gap-1">
+                    <input
+                        type="text"
+                        value={item.remarks}
+                        onChange={handleRemarksChange}
+                        placeholder="備考"
+                        className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 w-32 sm:w-40 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+                    />
+                    {/* 編集モード時：備考欄の直下にリンクアイコン */}
+                    {onMoveUp && item.url && (
+                      <button
+                        onClick={handleOpenUrl}
+                        data-no-long-press
+                        className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center gap-1 self-end"
+                        aria-label="URLを開く"
+                        title="URLを開く"
+                      >
+                        <ExternalLinkIcon className="w-4 h-4" />
+                        <span className="text-xs">🔗</span>
+                      </button>
+                    )}
+                </div>
+            </div>
         </div>
         <div className={`relative z-10 flex-grow flex flex-col items-center justify-center text-center text-slate-700 dark:text-slate-200 ${currentStatus.dim ? 'line-through' : ''}`}>
           <p className="text-lg font-semibold truncate" title={item.title}>{item.title || '（タイトルなし）'}</p>
@@ -583,17 +659,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20" onClick={(e) => e.stopPropagation()}>
             <div className="flex flex-col gap-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-lg shadow-2xl border border-slate-300 dark:border-slate-600 p-4">
                 <button onClick={() => { onEditRequest(item); setMenuVisible(false); }} className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors">編集</button>
-                {item.url && (
-                  <button 
-                    onClick={() => { 
-                      window.open(item.url, '_blank'); 
-                      setMenuVisible(false); 
-                    }} 
-                    className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-green-600 hover:bg-green-700 transition-colors"
-                  >
-                    URLを開く
-                  </button>
-                )}
                 <button onClick={() => { onDeleteRequest(item); setMenuVisible(false); }} className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-red-600 hover:bg-red-700 transition-colors">削除</button>
             </div>
         </div>
