@@ -852,11 +852,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
       <div className="flex justify-between items-start">
         <div>
           <div className="text-xs opacity-80">訪問先</div>
+          <div className="text-xl font-bold">{spaceInfo}</div>
           <div className="flex items-center gap-2">
-            <span className="text-xl font-bold">{spaceInfo}</span>
+            <span className="text-sm">{circleName}</span>
             <span className="bg-white/20 px-2 py-0.5 rounded text-sm">{currentVisitCheckedCount}/{currentVisitTotalCount}</span>
           </div>
-          <div className="text-sm">{circleName}</div>
         </div>
         <div className="text-right">
           <div className="text-xs opacity-80">フェーズ</div>
@@ -984,15 +984,21 @@ const FocusMode: React.FC<FocusModeProps> = ({
                     ¥{remainingCost.toLocaleString()}
                   </span>
                 </div>
-                <button
-                  onClick={toggleMapVisibility}
-                  className="p-2 rounded-md bg-blue-600 text-white"
-                  title="マップを非表示"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                  </svg>
-                </button>
+                {currentMapData && (
+                  <button
+                    onClick={toggleMapVisibility}
+                    className={`p-2 rounded-md transition-colors ${
+                      isMapVisible 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                    }`}
+                    title={isMapVisible ? 'マップを非表示' : 'マップを表示'}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                    </svg>
+                  </button>
+                )}
                 <button
                   onClick={() => onLayoutModeChange('pc')}
                   className="p-2 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
@@ -1104,15 +1110,21 @@ const FocusMode: React.FC<FocusModeProps> = ({
                     ¥{remainingCost.toLocaleString()}
                   </span>
                 </div>
-                <button
-                  onClick={toggleMapVisibility}
-                  className="p-2 rounded-md bg-blue-600 text-white"
-                  title="マップを非表示"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                  </svg>
-                </button>
+                {currentMapData && (
+                  <button
+                    onClick={toggleMapVisibility}
+                    className={`p-2 rounded-md transition-colors ${
+                      isMapVisible 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                    }`}
+                    title={isMapVisible ? 'マップを非表示' : 'マップを表示'}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                    </svg>
+                  </button>
+                )}
                 <button
                   onClick={() => onLayoutModeChange('smartphone')}
                   className="p-2 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
@@ -1157,11 +1169,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
         <div className="flex justify-between items-start">
           <div>
             <div className="text-sm opacity-80">訪問先</div>
+            <div className="text-2xl font-bold">{spaceInfo}</div>
             <div className="flex items-center gap-2">
-              <span className="text-2xl font-bold">{spaceInfo}</span>
+              <span className="text-lg">{circleName}</span>
               <span className="bg-white/20 px-2 py-0.5 rounded text-sm">{currentVisitCheckedCount}/{currentVisitTotalCount}</span>
             </div>
-            <div className="text-lg">{circleName}</div>
           </div>
           <div className="text-right">
             <div className="text-sm opacity-80">フェーズ</div>
@@ -1171,19 +1183,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
             </div>
           </div>
         </div>
-        {/* マップ表示トグルボタン */}
-        {currentMapData && (
-          <button
-            onClick={toggleMapVisibility}
-            className={`mt-3 w-full py-2 rounded-lg font-medium transition-colors ${
-              isMapVisible 
-                ? 'bg-white/30 hover:bg-white/40' 
-                : 'bg-white/20 hover:bg-white/30'
-            }`}
-          >
-            {isMapVisible ? '🗺️ マップを非表示' : '🗺️ マップを表示'}
-          </button>
-        )}
       </div>
 
       {/* アイテムリスト - スマートフォンモードでは横幅フル */}
@@ -1267,6 +1266,21 @@ const FocusMode: React.FC<FocusModeProps> = ({
                   ¥{remainingCost.toLocaleString()}
                 </span>
               </div>
+              {currentMapData && (
+                <button
+                  onClick={toggleMapVisibility}
+                  className={`p-2 rounded-md transition-colors ${
+                    isMapVisible 
+                      ? 'bg-blue-600 text-white' 
+                      : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                  }`}
+                  title={isMapVisible ? 'マップを非表示' : 'マップを表示'}
+                >
+                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                  </svg>
+                </button>
+              )}
               <button
                 onClick={() => onLayoutModeChange(layoutMode === 'pc' ? 'smartphone' : 'pc')}
                 className={`p-2 rounded-md transition-colors ${
