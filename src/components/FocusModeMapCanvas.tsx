@@ -818,6 +818,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const clickX = e.clientX - canvasRect.left;
       const clickY = e.clientY - canvasRect.top;
       
+      // クリック位置がキャンバス内かチェック（負の値や範囲外は無視）
+      if (clickX < 0 || clickY < 0 || clickX > canvasRect.width || clickY > canvasRect.height) {
+        setIsDragging(false);
+        return;
+      }
+      
       // セル座標を計算（cellSizeはCSSピクセル単位）
       const col = Math.floor(clickX / cellSize) + 1;
       const row = Math.floor(clickY / cellSize) + 1;
@@ -884,6 +890,13 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     }, 100);
   }, [isDragging, onCellClick, cellSize, mapData, items, cellsMap, isCellInBlock]);
 
+  // ポインターがキャンバスから離れた時のハンドラ（ドラッグ状態のリセットのみ）
+  const handlePointerLeave = useCallback(() => {
+    setTimeout(() => {
+      setIsDragging(false);
+    }, 100);
+  }, []);
+
   return (
     <div
       ref={containerRef}
@@ -904,7 +917,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
+          onPointerLeave={handlePointerLeave}
           style={{
             cursor: isDragging ? 'grabbing' : 'grab',
             touchAction: 'none',
