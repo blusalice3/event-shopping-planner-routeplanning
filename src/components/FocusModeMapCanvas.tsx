@@ -503,7 +503,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const state = cellStates.get(`${cell.row}-${cell.col}`);
       if (state && state.hasItems) {
         if (state.isCurrentPosition) {
-          // 現在位置: オレンジ背景
+          // 現在位置: 緑背景
+          ctx.fillStyle = 'rgba(34, 197, 94, 0.6)';
+          ctx.fillRect(x, y, width, height);
+        } else if (state.isNextDestination) {
+          // 次の訪問先: オレンジ背景
           ctx.fillStyle = 'rgba(255, 152, 0, 0.6)';
           ctx.fillRect(x, y, width, height);
         } else if (state.isVisited) {
