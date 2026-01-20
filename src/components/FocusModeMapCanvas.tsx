@@ -825,7 +825,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       if (row >= 1 && row <= mapData.maxRow && col >= 1 && col <= mapData.maxCol) {
         // ブロック定義内の数値セルか確認
         for (const block of mapData.blocks) {
-          if (block.isWallBlock) continue;
+          // 壁ブロックも含めて全てのブロックを処理
           
           // ブロック範囲内かチェック（cellGroups対応）
           if (isCellInBlock(row, col, block)) {

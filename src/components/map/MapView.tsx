@@ -319,7 +319,7 @@ const MapView: React.FC<MapViewProps> = ({
       let foundBlock: { name: string; number: number } | null = null;
       
       for (const block of mapData.blocks) {
-        if (block.isWallBlock) continue;
+        // 壁ブロックも含めて全てのブロックを処理
         
         // ブロック範囲内かチェック（cellGroups対応）
         if (isCellInBlock(row, col, block)) {
