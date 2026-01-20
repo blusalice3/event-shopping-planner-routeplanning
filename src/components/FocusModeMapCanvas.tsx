@@ -717,13 +717,31 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
     });
 
-    // 6. 現在位置マーカー
+    // 6. 次の目的地マーカー（現在位置より先に描画して下に配置）
+    if (nextCellCoords) {
+      const x = (nextCellCoords.col - 1) * cellSize;
+      const y = (nextCellCoords.row - 1) * cellSize;
+
+      // オレンジ枠
+      ctx.strokeStyle = '#FF6D00';
+      ctx.lineWidth = Math.max(3, cellSize * 0.12);
+      ctx.strokeRect(x - 1, y - 1, cellSize + 2, cellSize + 2);
+
+      // 🚩マーカー
+      const markerSize = Math.max(14, cellSize * 0.45);
+      ctx.font = `${markerSize}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('🚩', x + cellSize / 2, y - 2);
+    }
+
+    // 7. 現在位置マーカー（次の目的地より上に描画）
     if (currentCellCoords) {
       const x = (currentCellCoords.col - 1) * cellSize;
       const y = (currentCellCoords.row - 1) * cellSize;
 
-      // オレンジ枠
-      ctx.strokeStyle = '#FF6D00';
+      // 緑枠
+      ctx.strokeStyle = '#22c55e';
       ctx.lineWidth = Math.max(4, cellSize * 0.15);
       ctx.strokeRect(x - 2, y - 2, cellSize + 4, cellSize + 4);
 
@@ -733,19 +751,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
       ctx.fillText('📍', x + cellSize / 2, y - 2);
-    }
-
-    // 7. 次の目的地マーカー
-    if (nextCellCoords && currentPhase !== 'normal') {
-      // 後回し/遅参フェーズでは次の目的地も強調
-      const x = (nextCellCoords.col - 1) * cellSize;
-      const y = (nextCellCoords.row - 1) * cellSize;
-
-      ctx.strokeStyle = '#4CAF50';  // 緑
-      ctx.lineWidth = Math.max(3, cellSize * 0.1);
-      ctx.setLineDash([cellSize * 0.1, cellSize * 0.05]);
-      ctx.strokeRect(x - 1, y - 1, cellSize + 2, cellSize + 2);
-      ctx.setLineDash([]);
     }
 
   }, [
