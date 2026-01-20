@@ -6,6 +6,7 @@ import {
   ZoomLevel,
   MergedCellInfo,
   HallDefinition,
+  BlockDefinition,
 } from '../types';
 import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
 import { findPath, simplifyPath } from '../utils/pathfinding';
@@ -785,6 +786,25 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     });
   }, [dragStart, dragStartOffset]);
 
+  // セルがブロックの範囲内にあるかチェック（cellGroups対応）
+  const isCellInBlock = useCallback((row: number, col: number, block: BlockDefinition): boolean => {
+    // cellGroupsがある場合（複数範囲ブロックや壁ブロック）
+    if (block.cellGroups && block.cellGroups.length > 0) {
+      return block.cellGroups.some(group => {
+        if (group.type === 'range') {
+          return row >= (group.startRow || 0) && row <= (group.endRow || 0) &&
+                 col >= (group.startCol || 0) && col <= (group.endCol || 0);
+        } else if (group.type === 'individual' && group.cells) {
+          return group.cells.some(c => c.row === row && c.col === col);
+        }
+        return false;
+      });
+    }
+    // 通常の矩形ブロック
+    return row >= block.startRow && row <= block.endRow &&
+           col >= block.startCol && col <= block.endCol;
+  }, []);
+
   const handlePointerUp = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     // ドラッグ中でなければクリックとして処理
     if (!isDragging && onCellClick) {
@@ -807,8 +827,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         for (const block of mapData.blocks) {
           if (block.isWallBlock) continue;
           
-          if (row >= block.startRow && row <= block.endRow &&
-              col >= block.startCol && col <= block.endCol) {
+          // ブロック範囲内かチェック（cellGroups対応）
+          if (isCellInBlock(row, col, block)) {
             // numberCells配列から数値セルを探す
             let foundNumber: number | null = null;
             const numberCell = block.numberCells.find(nc => nc.row === row && nc.col === col);
@@ -862,7 +882,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
-  }, [isDragging, onCellClick, cellSize, mapData, items, cellsMap]);
+  }, [isDragging, onCellClick, cellSize, mapData, items, cellsMap, isCellInBlock]);
 
   return (
     <div

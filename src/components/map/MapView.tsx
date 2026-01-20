@@ -6,6 +6,8 @@ import {
   ZOOM_LEVELS,
   HallDefinition,
   HallRouteSettings,
+  BlockDefinition,
+  CellGroup,
 } from '../../types';
 import MapCanvas from './MapCanvas';
 import CellItemsPopup from './CellItemsPopup';
@@ -288,6 +290,25 @@ const MapView: React.FC<MapViewProps> = ({
     });
   }, [executeModeItemIds, items, selectedHallId, halls, getItemHallId]);
 
+  // セルがブロックの範囲内にあるかチェック（cellGroups対応）
+  const isCellInBlock = useCallback((row: number, col: number, block: BlockDefinition): boolean => {
+    // cellGroupsがある場合（複数範囲ブロックや壁ブロック）
+    if (block.cellGroups && block.cellGroups.length > 0) {
+      return block.cellGroups.some(group => {
+        if (group.type === 'range') {
+          return row >= (group.startRow || 0) && row <= (group.endRow || 0) &&
+                 col >= (group.startCol || 0) && col <= (group.endCol || 0);
+        } else if (group.type === 'individual' && group.cells) {
+          return group.cells.some(c => c.row === row && c.col === col);
+        }
+        return false;
+      });
+    }
+    // 通常の矩形ブロック
+    return row >= block.startRow && row <= block.endRow &&
+           col >= block.startCol && col <= block.endCol;
+  }, []);
+
   // セルクリック時のハンドラ
   const handleCellClick = useCallback(
     (row: number, col: number, matchingItems: ShoppingItem[]) => {
@@ -300,9 +321,8 @@ const MapView: React.FC<MapViewProps> = ({
       for (const block of mapData.blocks) {
         if (block.isWallBlock) continue;
         
-        // ブロック範囲内かチェック
-        if (row >= block.startRow && row <= block.endRow &&
-            col >= block.startCol && col <= block.endCol) {
+        // ブロック範囲内かチェック（cellGroups対応）
+        if (isCellInBlock(row, col, block)) {
           // 数値セルを探す（numberCells配列から）
           const numberCell = block.numberCells.find(nc => nc.row === row && nc.col === col);
           if (numberCell) {
@@ -375,7 +395,7 @@ const MapView: React.FC<MapViewProps> = ({
         });
       }
     },
-    [mapData.blocks, mapData.cells, mapData.mergedCells, vertexSelectionMode, cellSelectionMode]
+    [mapData.blocks, mapData.cells, mapData.mergedCells, vertexSelectionMode, cellSelectionMode, isCellInBlock]
   );
   
   const handleClosePopup = useCallback(() => {
