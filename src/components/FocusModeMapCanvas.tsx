@@ -551,7 +551,15 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
           ctx.beginPath();
           ctx.strokeStyle = border.color || '#000000';
-          ctx.lineWidth = border.style === 'thick' ? 2 : border.style === 'medium' ? 1.5 : 1;
+          // MapCanvasと同じ罫線太さ
+          let lineWidth = 1;
+          switch (border.style) {
+            case 'thin': lineWidth = 1; break;
+            case 'medium': lineWidth = 2; break;
+            case 'thick': lineWidth = 3; break;
+            default: lineWidth = 1;
+          }
+          ctx.lineWidth = lineWidth;
           ctx.moveTo(fromX, fromY);
           ctx.lineTo(toX, toY);
           ctx.stroke();
@@ -580,11 +588,28 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
         const text = String(cell.value);
         const isVertical = cell.isVerticalText;
-        const fontSize = isDetailedView
-          ? Math.max(8, Math.min(cellSize * 0.5, 14))
-          : Math.max(6, Math.min(cellSize * 0.4, 10));
+        
+        // MapCanvasと同じフォントサイズ計算
+        let fontSize: number;
+        if (merge) {
+          // 結合セルは大きめ
+          if (isVertical) {
+            // 縦書きの場合は高さに基づいてサイズを調整
+            const charCount = text.replace(/\n/g, '').length;
+            fontSize = Math.min(width * 0.6, height / (charCount + 1) * 0.9, 16);
+          } else {
+            fontSize = Math.min(width, height) * (isDetailedView ? 0.5 : 0.4);
+          }
+        } else if (typeof cell.value === 'number') {
+          // 数値セル
+          fontSize = Math.min(cellSize * 0.45, 14);
+        } else {
+          // テキストセル
+          fontSize = Math.min(cellSize * 0.4, 12);
+        }
+        fontSize = Math.max(fontSize, 8); // 最小サイズ
 
-        ctx.font = `${fontSize}px sans-serif`;
+        ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
