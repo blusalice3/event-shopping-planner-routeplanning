@@ -312,7 +312,21 @@ const MapView: React.FC<MapViewProps> = ({
           
           // numberCellsに見つからない場合、セルの内容が数値かチェック（ユーザー定義ブロック対応）
           if (!foundBlock) {
-            const cell = mapData.cells.find(c => c.row === row && c.col === col);
+            // まずクリック位置のセルを探す
+            let cell = mapData.cells.find(c => c.row === row && c.col === col);
+            
+            // セルが見つからない場合、結合セル内かチェック
+            if (!cell) {
+              // 結合セルの開始位置を探す
+              for (const merge of mapData.mergedCells) {
+                if (row >= merge.startRow && row <= merge.endRow &&
+                    col >= merge.startCol && col <= merge.endCol) {
+                  cell = mapData.cells.find(c => c.row === merge.startRow && c.col === merge.startCol);
+                  break;
+                }
+              }
+            }
+            
             if (cell && cell.value !== null && cell.value !== undefined) {
               const cellValue = String(cell.value).trim();
               const numMatch = cellValue.match(/^(\d+)/);
@@ -361,7 +375,7 @@ const MapView: React.FC<MapViewProps> = ({
         });
       }
     },
-    [mapData.blocks, mapData.cells, vertexSelectionMode, cellSelectionMode]
+    [mapData.blocks, mapData.cells, mapData.mergedCells, vertexSelectionMode, cellSelectionMode]
   );
   
   const handleClosePopup = useCallback(() => {

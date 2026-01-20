@@ -818,7 +818,21 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
             
             // numberCellsに見つからない場合、セルの内容が数値かチェック（ユーザー定義ブロック対応）
             if (foundNumber === null) {
-              const cell = mapData.cells.find(c => c.row === row && c.col === col);
+              // まずクリック位置のセルを探す
+              let cell = cellsMap.get(`${row}-${col}`);
+              
+              // セルが見つからない場合、結合セル内かチェック
+              if (!cell) {
+                // 結合セルの開始位置を探す
+                for (const merge of mapData.mergedCells) {
+                  if (row >= merge.startRow && row <= merge.endRow &&
+                      col >= merge.startCol && col <= merge.endCol) {
+                    cell = cellsMap.get(`${merge.startRow}-${merge.startCol}`);
+                    break;
+                  }
+                }
+              }
+              
               if (cell && cell.value !== null && cell.value !== undefined) {
                 const cellValue = String(cell.value).trim();
                 const numMatch = cellValue.match(/^(\d+)/);
@@ -848,7 +862,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
-  }, [isDragging, onCellClick, cellSize, mapData, items]);
+  }, [isDragging, onCellClick, cellSize, mapData, items, cellsMap]);
 
   return (
     <div
