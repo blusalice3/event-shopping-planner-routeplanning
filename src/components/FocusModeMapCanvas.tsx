@@ -805,17 +805,35 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           
           if (row >= block.startRow && row <= block.endRow &&
               col >= block.startCol && col <= block.endCol) {
+            // numberCells配列から数値セルを探す
+            let foundNumber: number | null = null;
             const numberCell = block.numberCells.find(nc => nc.row === row && nc.col === col);
             if (numberCell) {
+              foundNumber = numberCell.value;
+            }
+            
+            // numberCellsに見つからない場合、セルの内容が数値かチェック（ユーザー定義ブロック対応）
+            if (foundNumber === null) {
+              const cell = mapData.cells.find(c => c.row === row && c.col === col);
+              if (cell && cell.value !== null && cell.value !== undefined) {
+                const cellValue = String(cell.value).trim();
+                const numMatch = cellValue.match(/^(\d+)/);
+                if (numMatch) {
+                  foundNumber = parseInt(numMatch[1], 10);
+                }
+              }
+            }
+            
+            if (foundNumber !== null) {
               // このセルに対応するアイテムを取得
               const matchingItems = items.filter(item => {
                 if (item.block !== block.name) return false;
                 const numStr = extractNumberFromItemNumber(item.number);
                 const numValue = numStr ? parseInt(numStr, 10) : 0;
-                return numValue === numberCell.value;
+                return numValue === foundNumber;
               });
               
-              onCellClick(block.name, numberCell.value, matchingItems);
+              onCellClick(block.name, foundNumber, matchingItems);
               break;
             }
           }

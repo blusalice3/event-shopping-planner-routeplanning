@@ -4271,6 +4271,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             onUpdateHallRouteSettings={handleUpdateHallRouteSettings}
             onReorderExecuteList={handleReorderExecuteListByHallOrder}
             vertexSelectionMode={vertexSelectionMode}
+            cellSelectionMode={cellSelectionMode}
             highlightedCell={visitListPanelOpen ? highlightedMapCell : null}
             externalSelectedHallId={mapSelectedHallId}
             onSelectedHallIdChange={setMapSelectedHallId}

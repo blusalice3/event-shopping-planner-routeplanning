@@ -35,6 +35,10 @@ interface MapViewProps {
   vertexSelectionMode?: {
     clickedVertices: { row: number; col: number }[];
   } | null;
+  // ブロック定義用セル選択モード
+  cellSelectionMode?: {
+    clickedCells: { row: number; col: number }[];
+  } | null;
   // 訪問先リストからのハイライト
   highlightedCell?: { row: number; col: number } | null;
   // 外部制御用props（ヘッダーから制御する場合）
@@ -64,6 +68,7 @@ const MapView: React.FC<MapViewProps> = ({
   onUpdateHallRouteSettings,
   onReorderExecuteList,
   vertexSelectionMode,
+  cellSelectionMode,
   highlightedCell,
   externalSelectedHallId,
   onSelectedHallIdChange,
@@ -286,6 +291,9 @@ const MapView: React.FC<MapViewProps> = ({
   // セルクリック時のハンドラ
   const handleCellClick = useCallback(
     (row: number, col: number, matchingItems: ShoppingItem[]) => {
+      // ブロック定義・ホール定義モード中はアイテムポップアップを表示しない
+      if (vertexSelectionMode || cellSelectionMode) return;
+      
       // セルがブロック定義内にあるかチェック
       let foundBlock: { name: string; number: number } | null = null;
       
@@ -295,11 +303,24 @@ const MapView: React.FC<MapViewProps> = ({
         // ブロック範囲内かチェック
         if (row >= block.startRow && row <= block.endRow &&
             col >= block.startCol && col <= block.endCol) {
-          // 数値セルを探す
+          // 数値セルを探す（numberCells配列から）
           const numberCell = block.numberCells.find(nc => nc.row === row && nc.col === col);
           if (numberCell) {
             foundBlock = { name: block.name, number: numberCell.value };
             break;
+          }
+          
+          // numberCellsに見つからない場合、セルの内容が数値かチェック（ユーザー定義ブロック対応）
+          if (!foundBlock) {
+            const cell = mapData.cells.find(c => c.row === row && c.col === col);
+            if (cell && cell.value !== null && cell.value !== undefined) {
+              const cellValue = String(cell.value).trim();
+              const numMatch = cellValue.match(/^(\d+)/);
+              if (numMatch) {
+                foundBlock = { name: block.name, number: parseInt(numMatch[1], 10) };
+                break;
+              }
+            }
           }
         }
       }
@@ -340,7 +361,7 @@ const MapView: React.FC<MapViewProps> = ({
         });
       }
     },
-    [mapData.blocks]
+    [mapData.blocks, mapData.cells, vertexSelectionMode, cellSelectionMode]
   );
   
   const handleClosePopup = useCallback(() => {
