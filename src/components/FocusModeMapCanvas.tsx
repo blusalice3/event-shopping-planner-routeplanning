@@ -789,16 +789,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     // ドラッグ中でなければクリックとして処理
     if (!isDragging && onCellClick) {
       const canvas = canvasRef.current;
-      const container = containerRef.current;
-      if (!canvas || !container) return;
+      if (!canvas) return;
       
-      // コンテナの位置を取得
-      const containerRect = container.getBoundingClientRect();
+      // キャンバスの位置を取得（offsetによる移動が反映されている）
+      const canvasRect = canvas.getBoundingClientRect();
       
-      // クリック位置をコンテナ内の座標に変換し、offsetを考慮
-      // offset.x, offset.yはCSSピクセル単位での移動量
-      const clickX = e.clientX - containerRect.left - offset.x;
-      const clickY = e.clientY - containerRect.top - offset.y;
+      // クリック位置をキャンバス内の座標に変換
+      const clickX = e.clientX - canvasRect.left;
+      const clickY = e.clientY - canvasRect.top;
       
       // セル座標を計算（cellSizeはCSSピクセル単位）
       const col = Math.floor(clickX / cellSize) + 1;
@@ -850,7 +848,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
-  }, [isDragging, onCellClick, cellSize, mapData, items, offset]);
+  }, [isDragging, onCellClick, cellSize, mapData, items]);
 
   return (
     <div
