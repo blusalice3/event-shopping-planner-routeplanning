@@ -1250,180 +1250,52 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   };
 
-  // 価格のクイック選択オプション
-  const priceOptions = useMemo(() => {
-    const options: number[] = [0];
-    for (let i = 100; i <= 15000; i += 100) {
-      options.push(i);
-    }
-    return options;
-  }, []);
-
-  // フォームスタイル
-  const formInputClass = "w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white";
-  const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
-
-  // 価格入力ハンドラ
-  const handlePriceInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/[^0-9]/g, '');
-    setNewItemForm(prev => ({ ...prev, price: value }));
-  }, []);
-
-  // 価格選択ハンドラ
-  const handlePriceSelectChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    setNewItemForm(prev => ({ ...prev, price: e.target.value }));
-  }, []);
-
-  // アイテム追加ダイアログのJSX（直接レンダリング用）
-  const addItemDialogJSX = addItemDialog.isOpen ? (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
-        <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4">
-          <h2 className="text-lg font-bold">新規アイテム追加</h2>
-          <p className="text-sm opacity-80 mt-1">{addItemDialog.eventDate} {addItemDialog.block}-{addItemDialog.number}</p>
-        </div>
-        <div className="p-4 space-y-4">
-          {/* サークル名・タイトル */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+  // アイテム追加ダイアログコンポーネント
+  const AddItemDialogComponent = () => {
+    if (!addItemDialog.isOpen) return null;
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-md w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
+          <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4">
+            <h2 className="text-lg font-bold">新規アイテム追加</h2>
+            <p className="text-sm opacity-80 mt-1">{addItemDialog.eventDate} {addItemDialog.block}-{addItemDialog.number}</p>
+          </div>
+          <div className="p-4 space-y-4">
             <div>
-              <label className={labelClass}>サークル名 <span className="text-red-500">*</span></label>
-              <input 
-                type="text" 
-                value={newItemForm.circle} 
-                onChange={(e) => setNewItemForm(prev => ({ ...prev, circle: e.target.value }))} 
-                className={formInputClass} 
-                placeholder="サークル名" 
-              />
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">サークル名 <span className="text-red-500">*</span></label>
+              <input type="text" value={newItemForm.circle} onChange={(e) => setNewItemForm(prev => ({ ...prev, circle: e.target.value }))} className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none" placeholder="サークル名" />
             </div>
             <div>
-              <label className={labelClass}>タイトル</label>
-              <input 
-                type="text" 
-                value={newItemForm.title} 
-                onChange={(e) => setNewItemForm(prev => ({ ...prev, title: e.target.value }))} 
-                className={formInputClass} 
-                placeholder="新刊セット" 
-              />
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">タイトル</label>
+              <input type="text" value={newItemForm.title} onChange={(e) => setNewItemForm(prev => ({ ...prev, title: e.target.value }))} className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none" placeholder="頒布物タイトル" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">価格</label>
+                <input type="number" value={newItemForm.price} onChange={(e) => setNewItemForm(prev => ({ ...prev, price: e.target.value }))} className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none" placeholder="0" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">数量</label>
+                <input type="number" value={newItemForm.quantity} onChange={(e) => setNewItemForm(prev => ({ ...prev, quantity: e.target.value }))} className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none" min="1" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">備考</label>
+              <input type="text" value={newItemForm.remarks} onChange={(e) => setNewItemForm(prev => ({ ...prev, remarks: e.target.value }))} className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none" placeholder="備考" />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">URL</label>
+              <input type="url" value={newItemForm.url} onChange={(e) => setNewItemForm(prev => ({ ...prev, url: e.target.value }))} className="w-full px-3 py-2 bg-slate-100 dark:bg-slate-700 rounded-lg focus:ring-2 focus:ring-green-500 focus:outline-none" placeholder="https://..." />
             </div>
           </div>
-          
-          {/* 参加日・ブロック・ナンバー（読み取り専用で表示） */}
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className={labelClass}>参加日</label>
-              <input 
-                type="text" 
-                value={addItemDialog.eventDate} 
-                readOnly
-                className={`${formInputClass} bg-slate-100 dark:bg-slate-700`} 
-              />
-            </div>
-            <div>
-              <label className={labelClass}>ブロック</label>
-              <input 
-                type="text" 
-                value={addItemDialog.block}
-                readOnly
-                className={`${formInputClass} bg-slate-100 dark:bg-slate-700`} 
-              />
-            </div>
-            <div>
-              <label className={labelClass}>ナンバー</label>
-              <input 
-                type="text" 
-                value={addItemDialog.number}
-                onChange={(e) => setAddItemDialog(prev => ({ ...prev, number: e.target.value }))}
-                className={formInputClass}
-                placeholder="01a"
-              />
-            </div>
+          <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
+            <button onClick={closeAddItemDialog} className="flex-1 py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors">キャンセル</button>
+            <button onClick={handleAddNewItem} disabled={!newItemForm.circle.trim()} className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors">追加</button>
           </div>
-          
-          {/* 価格・クイック選択 */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-            <div className="relative">
-              <label className={labelClass}>頒布価格</label>
-              <input
-                type="text"
-                value={newItemForm.price}
-                onChange={handlePriceInputChange}
-                className={`${formInputClass} pr-12`}
-                placeholder="0"
-                inputMode="numeric"
-              />
-              <span className="absolute right-3 top-9 text-slate-500 dark:text-slate-400">円</span>
-            </div>
-            <div>
-              <label className={labelClass}>クイック選択</label>
-              <select 
-                onChange={handlePriceSelectChange}
-                className={formInputClass}
-                value={priceOptions.includes(Number(newItemForm.price)) ? newItemForm.price : ""}
-              >
-                <option value="" disabled>金額を選択...</option>
-                {priceOptions.map(p => <option key={p} value={p}>{p.toLocaleString()}円</option>)}
-              </select>
-            </div>
-          </div>
-          
-          {/* 数量 */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className={labelClass}>数量</label>
-              <select
-                value={newItemForm.quantity}
-                onChange={(e) => setNewItemForm(prev => ({ ...prev, quantity: e.target.value }))}
-                className={formInputClass}
-              >
-                {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
-                  <option key={num} value={num}>{num}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-          
-          {/* 備考・URL */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className={labelClass}>備考</label>
-              <input 
-                type="text" 
-                value={newItemForm.remarks} 
-                onChange={(e) => setNewItemForm(prev => ({ ...prev, remarks: e.target.value }))} 
-                className={formInputClass} 
-                placeholder="スケブお願い" 
-              />
-            </div>
-            <div>
-              <label className={labelClass}>URL</label>
-              <input 
-                type="text" 
-                value={newItemForm.url} 
-                onChange={(e) => setNewItemForm(prev => ({ ...prev, url: e.target.value }))} 
-                className={formInputClass} 
-                placeholder="https://example.com" 
-              />
-            </div>
-          </div>
-        </div>
-        <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
-          <button 
-            onClick={closeAddItemDialog} 
-            className="flex-1 py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
-          >
-            キャンセル
-          </button>
-          <button 
-            onClick={handleAddNewItem} 
-            disabled={!newItemForm.circle.trim()} 
-            className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors"
-          >
-            リストに追加
-          </button>
         </div>
       </div>
-    </div>
-  ) : null;
+    );
+  };
 
   // スマートフォン+マップ表示モード
   if (layoutMode === 'smartphone' && isMapVisible && currentMapData && !isCompleted) {
@@ -1548,7 +1420,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         <CellItemPopup />
         
         {/* アイテム追加ダイアログ */}
-        {addItemDialogJSX}
+        <AddItemDialogComponent />
       </div>
     );
   }
@@ -1684,7 +1556,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         <CellItemPopup />
         
         {/* アイテム追加ダイアログ */}
-        {addItemDialogJSX}
+        <AddItemDialogComponent />
       </div>
     );
   }
@@ -1875,7 +1747,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       <CellItemPopup />
       
       {/* アイテム追加ダイアログ */}
-      {addItemDialogJSX}
+      <AddItemDialogComponent />
     </div>
   );
 };
