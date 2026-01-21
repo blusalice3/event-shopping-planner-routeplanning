@@ -878,41 +878,105 @@ const FocusMode: React.FC<FocusModeProps> = ({
     setMapZoomLevel(newZoom);
   }, []);
 
-  // 現在のフェーズに表示するアイテムがない場合、次の訪問先を探す（useEffectで処理）
-  const needsAutoAdvance = useMemo(() => {
-    if (isCompleted || allVisits.length === 0) return null;
-    if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) {
-      // 次の訪問先を探す
-      for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
-        const visit = currentPhaseVisits[i];
-        let hasItems = false;
-        if (currentPhase === 'normal') {
-          hasItems = visit.items.length > 0;
-        } else if (currentPhase === 'postponed') {
-          hasItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
-        } else {
-          hasItems = visit.items.some(item => latePhaseItemIds.has(item.id));
-        }
-        if (hasItems) {
-          return { type: 'skipToIndex' as const, index: i };
-        }
-      }
-      // 見つからない場合は次のフェーズへ
-      return { type: 'moveToNext' as const };
-    }
-    return null;
-  }, [isCompleted, allVisits.length, currentVisitDisplayItems.length, currentPhaseVisits, currentPhaseIndex, currentPhase, postponedPhaseItemIds, latePhaseItemIds]);
-
-  // アイテムがない訪問先を自動スキップ
+  // 現在のフェーズに表示するアイテムがない場合の自動スキップ処理（useEffectで安全に処理）
+  const autoAdvanceProcessedRef = useRef(false);
+  
   useEffect(() => {
-    if (needsAutoAdvance) {
-      if (needsAutoAdvance.type === 'skipToIndex') {
-        setCurrentPhaseIndex(needsAutoAdvance.index);
-      } else if (needsAutoAdvance.type === 'moveToNext') {
-        moveToNext();
+    // 完了済みまたは訪問先がない場合は何もしない
+    if (isCompleted || allVisits.length === 0) {
+      autoAdvanceProcessedRef.current = false;
+      return;
+    }
+    
+    // 現在の訪問先にアイテムがある場合は何もしない
+    if (currentVisitDisplayItems.length > 0) {
+      autoAdvanceProcessedRef.current = false;
+      return;
+    }
+    
+    // 既に処理中の場合はスキップ（無限ループ防止）
+    if (autoAdvanceProcessedRef.current) {
+      return;
+    }
+    
+    // フェーズに訪問先がない場合も何もしない
+    if (currentPhaseVisits.length === 0) {
+      autoAdvanceProcessedRef.current = false;
+      return;
+    }
+    
+    // 処理開始をマーク
+    autoAdvanceProcessedRef.current = true;
+    
+    // 次の訪問先を探す
+    for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
+      const visit = currentPhaseVisits[i];
+      let hasItems = false;
+      if (currentPhase === 'normal') {
+        hasItems = visit.items.length > 0;
+      } else if (currentPhase === 'postponed') {
+        hasItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
+      } else {
+        hasItems = visit.items.some(item => latePhaseItemIds.has(item.id));
+      }
+      if (hasItems) {
+        setCurrentPhaseIndex(i);
+        return;
       }
     }
-  }, [needsAutoAdvance, moveToNext]);
+    
+    // 同じフェーズ内に次の訪問先がない場合、次のフェーズへ移行
+    clearAutoAdvanceTimer();
+    
+    if (currentPhase === 'normal') {
+      // 通常フェーズ終了 → 後回し/遅参フェーズへ
+      const postponedIds = new Set(
+        executeItems.filter(item => item.purchaseStatus === 'Postpone').map(item => item.id)
+      );
+      const lateIds = new Set(
+        executeItems.filter(item => item.purchaseStatus === 'Late').map(item => item.id)
+      );
+      
+      if (postponedIds.size > 0) {
+        setPostponedPhaseItemIds(postponedIds);
+        setLatePhaseItemIds(lateIds);
+        setNotification('後回しアイテムの巡回を開始します');
+        setCurrentPhase('postponed');
+        setCurrentPhaseIndex(0);
+      } else if (lateIds.size > 0) {
+        setPostponedPhaseItemIds(postponedIds);
+        setLatePhaseItemIds(lateIds);
+        setNotification('遅参アイテムの巡回を開始します');
+        setCurrentPhase('late');
+        setCurrentPhaseIndex(0);
+      } else {
+        setIsCompleted(true);
+      }
+    } else if (currentPhase === 'postponed') {
+      // 後回しフェーズ終了 → 遅参フェーズへ
+      const currentLateIds = new Set(latePhaseItemIds);
+      executeItems.forEach(item => {
+        if (item.purchaseStatus === 'Late') {
+          currentLateIds.add(item.id);
+        }
+      });
+      
+      if (currentLateIds.size > 0) {
+        setLatePhaseItemIds(currentLateIds);
+        setNotification('遅参アイテムの巡回を開始します');
+        setCurrentPhase('late');
+        setCurrentPhaseIndex(0);
+      } else {
+        setIsCompleted(true);
+      }
+    } else {
+      // 遅参フェーズ終了 → 完了
+      setIsCompleted(true);
+    }
+  }, [isCompleted, allVisits.length, currentVisitDisplayItems.length, currentPhaseVisits, currentPhaseIndex, currentPhase, postponedPhaseItemIds, latePhaseItemIds, executeItems, clearAutoAdvanceTimer]);
+  
+  // 自動スキップ処理中かどうか（ローディング表示用）
+  const isAutoAdvancing = !isCompleted && allVisits.length > 0 && currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0;
 
   // 訪問先がない場合
   if (allVisits.length === 0) {
@@ -936,7 +1000,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   }
 
   // 自動スキップ処理中はローディング表示（状態変更を待つ）
-  if (needsAutoAdvance) {
+  if (isAutoAdvancing) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
         <div className="text-4xl mb-4 animate-spin">⏳</div>
