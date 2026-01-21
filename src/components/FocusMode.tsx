@@ -978,6 +978,83 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 自動スキップ処理中かどうか（ローディング表示用）
   const isAutoAdvancing = !isCompleted && allVisits.length > 0 && currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0;
 
+  // ===== 以下のフックを早期returnの前に移動 =====
+  
+  // マップのセルクリックハンドラ
+  const handleMapCellClick = useCallback((blockName: string, number: number, matchingItems: ShoppingItem[]) => {
+    setCellPopupState({
+      isOpen: true,
+      blockName,
+      number,
+      items: matchingItems,
+    });
+  }, []);
+
+  // セルポップアップを閉じる
+  const closeCellPopup = useCallback(() => {
+    setCellPopupState(prev => ({ ...prev, isOpen: false }));
+  }, []);
+
+  // アイテム追加ダイアログを開く
+  const openAddItemDialog = useCallback(() => {
+    if (!currentVisit) return;
+    const firstItem = currentVisit.items[0];
+    setAddItemDialog({
+      isOpen: true,
+      eventDate: firstItem?.eventDate || '',
+      block: cellPopupState.blockName,
+      number: String(cellPopupState.number),
+    });
+    setNewItemForm({ circle: '', title: '', price: '', quantity: '1', remarks: '', url: '' });
+    closeCellPopup();
+  }, [currentVisit, cellPopupState, closeCellPopup]);
+
+  // アイテム追加ダイアログを閉じる
+  const closeAddItemDialog = useCallback(() => {
+    setAddItemDialog(prev => ({ ...prev, isOpen: false }));
+  }, []);
+
+  // アイテムを追加
+  const handleAddNewItem = useCallback(() => {
+    if (!onAddItem) return;
+    const price = newItemForm.price === '' ? null : parseInt(newItemForm.price, 10) || 0;
+    onAddItem({
+      eventDate: addItemDialog.eventDate,
+      block: addItemDialog.block,
+      number: addItemDialog.number,
+      circle: newItemForm.circle,
+      title: newItemForm.title,
+      price,
+      quantity: parseInt(newItemForm.quantity, 10) || 1,
+      remarks: newItemForm.remarks,
+      url: newItemForm.url || undefined,
+    });
+    setNotification(`${addItemDialog.block}-${addItemDialog.number} にアイテムを追加しました`);
+    closeAddItemDialog();
+  }, [onAddItem, addItemDialog, newItemForm, closeAddItemDialog]);
+
+  // 価格のクイック選択オプション
+  const priceOptions = useMemo(() => {
+    const options: number[] = [0];
+    for (let i = 100; i <= 15000; i += 100) {
+      options.push(i);
+    }
+    return options;
+  }, []);
+
+  // 価格入力ハンドラ
+  const handlePriceInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.replace(/[^0-9]/g, '');
+    setNewItemForm(prev => ({ ...prev, price: value }));
+  }, []);
+
+  // 価格選択ハンドラ
+  const handlePriceSelectChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
+    setNewItemForm(prev => ({ ...prev, price: e.target.value }));
+  }, []);
+
+  // ===== フックの移動ここまで =====
+
   // 訪問先がない場合
   if (allVisits.length === 0) {
     return (
@@ -1170,59 +1247,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // フッターの高さ定数
   const FOOTER_HEIGHT_SP = 56;
 
-  // マップのセルクリックハンドラ
-  const handleMapCellClick = useCallback((blockName: string, number: number, matchingItems: ShoppingItem[]) => {
-    setCellPopupState({
-      isOpen: true,
-      blockName,
-      number,
-      items: matchingItems,
-    });
-  }, []);
-
-  // セルポップアップを閉じる
-  const closeCellPopup = useCallback(() => {
-    setCellPopupState(prev => ({ ...prev, isOpen: false }));
-  }, []);
-
-  // アイテム追加ダイアログを開く
-  const openAddItemDialog = useCallback(() => {
-    if (!currentVisit) return;
-    const firstItem = currentVisit.items[0];
-    setAddItemDialog({
-      isOpen: true,
-      eventDate: firstItem?.eventDate || '',
-      block: cellPopupState.blockName,
-      number: String(cellPopupState.number),
-    });
-    setNewItemForm({ circle: '', title: '', price: '', quantity: '1', remarks: '', url: '' });
-    closeCellPopup();
-  }, [currentVisit, cellPopupState, closeCellPopup]);
-
-  // アイテム追加ダイアログを閉じる
-  const closeAddItemDialog = useCallback(() => {
-    setAddItemDialog(prev => ({ ...prev, isOpen: false }));
-  }, []);
-
-  // アイテムを追加
-  const handleAddNewItem = useCallback(() => {
-    if (!onAddItem) return;
-    const price = newItemForm.price === '' ? null : parseInt(newItemForm.price, 10) || 0;
-    onAddItem({
-      eventDate: addItemDialog.eventDate,
-      block: addItemDialog.block,
-      number: addItemDialog.number,
-      circle: newItemForm.circle,
-      title: newItemForm.title,
-      price,
-      quantity: parseInt(newItemForm.quantity, 10) || 1,
-      remarks: newItemForm.remarks,
-      url: newItemForm.url || undefined,
-    });
-    setNotification(`${addItemDialog.block}-${addItemDialog.number} にアイテムを追加しました`);
-    closeAddItemDialog();
-  }, [onAddItem, addItemDialog, newItemForm, closeAddItemDialog]);
-
   // フェーズ切り替え確認ダイアログ
   const PhaseChangeDialog = () => {
     if (!phaseChangeDialog.isOpen || !phaseChangeDialog.targetPhase) return null;
@@ -1337,29 +1361,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   };
 
-  // 価格のクイック選択オプション
-  const priceOptions = useMemo(() => {
-    const options: number[] = [0];
-    for (let i = 100; i <= 15000; i += 100) {
-      options.push(i);
-    }
-    return options;
-  }, []);
-
   // フォームスタイル
   const formInputClass = "w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white";
   const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
-
-  // 価格入力ハンドラ
-  const handlePriceInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/[^0-9]/g, '');
-    setNewItemForm(prev => ({ ...prev, price: value }));
-  }, []);
-
-  // 価格選択ハンドラ
-  const handlePriceSelectChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    setNewItemForm(prev => ({ ...prev, price: e.target.value }));
-  }, []);
 
   // アイテム追加ダイアログのJSX（直接レンダリング用）
   const addItemDialogJSX = addItemDialog.isOpen ? (
