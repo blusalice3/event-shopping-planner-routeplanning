@@ -533,6 +533,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
             quantity: quantity,
             remarks: singleRemarks.trim(),
             url: singleUrl.trim() || undefined,
+            isProtected: true,  // アプリで追加したアイテムは自動的に保護
         };
         onBulkAdd(activeEventName, [newItem]);
         resetSingleForm();

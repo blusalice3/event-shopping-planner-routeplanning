@@ -129,19 +129,19 @@ const EventListScreen: React.FC<EventListScreenProps> = ({ eventNames, onSelect,
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow overflow-hidden">
         <ul className="divide-y divide-slate-200 dark:divide-slate-700">
           {eventNames.map(name => (
-            <li key={name} className="relative" data-menu-owner>
-              <div 
-                className="p-4 flex justify-between items-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors duration-200"
-                onMouseDown={() => handlePointerDown(name)}
-                onMouseUp={handlePointerUp}
-                onTouchStart={() => handlePointerDown(name)}
-                onTouchEnd={handlePointerUp}
-                onClick={() => handleClick(name)}
-                onContextMenu={(e) => e.preventDefault()}
-              >
-                <span className="font-medium text-slate-800 dark:text-slate-200">{name}</span>
-                {menuVisibleFor !== name && <span className="text-xs text-slate-400">クリックで開く / 長押しでメニュー</span>}
-              </div>
+            <li 
+              key={name} 
+              className="relative p-4 flex justify-between items-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors duration-200" 
+              data-menu-owner
+              onMouseDown={() => handlePointerDown(name)}
+              onMouseUp={handlePointerUp}
+              onTouchStart={() => handlePointerDown(name)}
+              onTouchEnd={handlePointerUp}
+              onClick={() => handleClick(name)}
+              onContextMenu={(e) => e.preventDefault()}
+            >
+              <span className="font-medium text-slate-800 dark:text-slate-200">{name}</span>
+              {menuVisibleFor !== name && <span className="text-xs text-slate-400">クリックで開く / 長押しでメニュー</span>}
             </li>
           ))}
         </ul>

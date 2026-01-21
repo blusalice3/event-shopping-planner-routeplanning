@@ -91,6 +91,7 @@ export async function exportToXlsx(
     { header: '備考', key: 'remarks', width: 30 },
     { header: 'URL', key: 'url', width: 50 },
     { header: '優先度', key: 'priorityLevel', width: 10 },
+    { header: '保護', key: 'isProtected', width: 8 },
   ];
 
   // データ
@@ -108,6 +109,7 @@ export async function exportToXlsx(
       remarks: item.remarks,
       url: item.url || '',
       priorityLevel: item.priorityLevel || 'none',
+      isProtected: item.isProtected ? 'true' : 'false',
     });
   });
 
@@ -286,6 +288,10 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         priorityLevel = undefined;  // 'none'は保存しない（デフォルト値）
       }
 
+      // 保護状態の値を取得（列13）
+      const protectedValue = String(row.getCell(13).value || '').toLowerCase();
+      const isProtected = protectedValue === 'true';
+
       const item: ShoppingItem = {
         id: String(row.getCell(1).value || crypto.randomUUID()),
         circle: String(row.getCell(2).value || ''),
@@ -299,6 +305,7 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         remarks: String(row.getCell(10).value || ''),
         url: String(row.getCell(11).value || ''),
         priorityLevel,
+        isProtected: isProtected || undefined,  // falseの場合は保存しない
       };
 
       if (item.circle || item.title) {

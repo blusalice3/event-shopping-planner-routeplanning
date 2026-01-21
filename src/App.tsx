@@ -2388,9 +2388,10 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       const itemsToAdd: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[] = [];
 
       // 削除対象: スプレッドシートにないアイテム（サークル名・参加日・ブロック・ナンバーで照合）
+      // ただし、保護されたアイテムは削除対象から除外
       currentItems.forEach(item => {
         const keyWithoutTitle = getItemKeyWithoutTitle(item);
-        if (!sheetItemsMapWithoutTitle.has(keyWithoutTitle)) {
+        if (!sheetItemsMapWithoutTitle.has(keyWithoutTitle) && !item.isProtected) {
           itemsToDelete.push(item);
         }
       });
@@ -2724,11 +2725,12 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
   const handleAddItemFromFocusMode = useCallback((newItem: Omit<ShoppingItem, 'id' | 'purchaseStatus'>) => {
     if (!activeEventName) return;
     
-    // 新しいアイテムを作成
+    // 新しいアイテムを作成（アプリで追加したアイテムは自動的に保護）
     const item: ShoppingItem = {
       ...newItem,
       id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       purchaseStatus: 'None',
+      isProtected: true,
     };
     
     // アイテムを追加
