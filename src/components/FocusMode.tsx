@@ -899,6 +899,47 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
 
+  // 現在のフェーズに表示するアイテムがない場合、次の訪問先を探すためのフラグ
+  const [needsAutoAdvance, setNeedsAutoAdvance] = useState<{ type: 'index' | 'next'; index?: number } | null>(null);
+
+  // 現在のフェーズに表示するアイテムがない場合の自動進行処理（useEffectで実行）
+  useEffect(() => {
+    if (isCompleted || allVisits.length === 0) return;
+    
+    if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) {
+      // 次の訪問先を探す
+      for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
+        const visit = currentPhaseVisits[i];
+        let hasItems = false;
+        if (currentPhase === 'normal') {
+          hasItems = visit.items.length > 0;
+        } else if (currentPhase === 'postponed') {
+          hasItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
+        } else {
+          hasItems = visit.items.some(item => latePhaseItemIds.has(item.id));
+        }
+        if (hasItems) {
+          setNeedsAutoAdvance({ type: 'index', index: i });
+          return;
+        }
+      }
+      // 見つからない場合は次のフェーズへ
+      setNeedsAutoAdvance({ type: 'next' });
+    }
+  }, [currentVisitDisplayItems, currentPhaseVisits, currentPhaseIndex, currentPhase, postponedPhaseItemIds, latePhaseItemIds, isCompleted, allVisits.length]);
+
+  // 自動進行の実行
+  useEffect(() => {
+    if (needsAutoAdvance) {
+      if (needsAutoAdvance.type === 'index' && needsAutoAdvance.index !== undefined) {
+        setCurrentPhaseIndex(needsAutoAdvance.index);
+      } else if (needsAutoAdvance.type === 'next') {
+        moveToNext();
+      }
+      setNeedsAutoAdvance(null);
+    }
+  }, [needsAutoAdvance, moveToNext]);
+
   // 完了画面
   if (isCompleted) {
     return (
@@ -953,26 +994,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
 
-  // 現在のフェーズに表示するアイテムがない場合、次の訪問先を探す
-  if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) {
-    // 次の訪問先を探す
-    for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
-      const visit = currentPhaseVisits[i];
-      let hasItems = false;
-      if (currentPhase === 'normal') {
-        hasItems = visit.items.length > 0;
-      } else if (currentPhase === 'postponed') {
-        hasItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
-      } else {
-        hasItems = visit.items.some(item => latePhaseItemIds.has(item.id));
-      }
-      if (hasItems) {
-        setCurrentPhaseIndex(i);
-        return null;
-      }
-    }
-    // 見つからない場合は次のフェーズへ
-    moveToNext();
+  // 自動進行処理中は何も表示しない
+  if (needsAutoAdvance || (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0)) {
     return null;
   }
 
