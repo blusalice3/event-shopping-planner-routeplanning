@@ -22,7 +22,6 @@ export interface ShoppingItem {
   remarks: string;
   url?: string;
   priorityLevel?: 'none' | 'priority' | 'highest';  // 優先度レベル
-  isProtected?: boolean;  // 更新時の削除から保護
 }
 
 export type ViewMode = 'edit' | 'execute' | 'focus';

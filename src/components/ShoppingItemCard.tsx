@@ -109,11 +109,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     }
   }, [item.url]);
 
-  const handleToggleProtection = useCallback((e: React.MouseEvent) => {
-    e.stopPropagation();
-    onUpdate({ ...item, isProtected: !item.isProtected });
-  }, [item, onUpdate]);
-
   const handleRemarksChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     onUpdate({ ...item, remarks: e.target.value });
   };
@@ -343,20 +338,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                   <p className="font-bold text-sm text-slate-900 dark:text-slate-100">{`${item.eventDate} ${locationString}`}</p>
                   <div className="flex items-center gap-1 flex-wrap mt-0.5">
                     <p className="text-sm text-slate-600 dark:text-slate-300 truncate" title={item.circle}>{item.circle}</p>
-                    {/* 保護アイコン */}
-                    <button
-                      onClick={handleToggleProtection}
-                      data-no-long-press
-                      className={`p-0.5 rounded transition-colors ${
-                        item.isProtected 
-                          ? 'text-amber-500 dark:text-amber-400' 
-                          : 'text-slate-300 dark:text-slate-600 hover:text-slate-400 dark:hover:text-slate-500'
-                      }`}
-                      aria-label={item.isProtected ? "保護を解除" : "保護する"}
-                      title={item.isProtected ? "保護中（更新時に削除されません）" : "保護なし（クリックで保護）"}
-                    >
-                      <span className="text-sm">{item.isProtected ? '🔒' : '🔓'}</span>
-                    </button>
                     {warningTags.map((tag, index) => (
                       <img key={index} src={`/${tag}.png`} alt={tag} className="h-8 w-auto object-contain" />
                     ))}
@@ -569,20 +550,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 <p className="font-bold text-md text-slate-900 dark:text-slate-100">{`${item.eventDate} ${locationString}`}</p>
                 <div className="mt-1 flex items-center gap-2 flex-wrap">
                     <p className="text-slate-600 dark:text-slate-300 truncate" title={item.circle}>{item.circle}</p>
-                    {/* 保護アイコン */}
-                    <button
-                      onClick={handleToggleProtection}
-                      data-no-long-press
-                      className={`p-0.5 rounded transition-colors ${
-                        item.isProtected 
-                          ? 'text-amber-500 dark:text-amber-400' 
-                          : 'text-slate-300 dark:text-slate-600 hover:text-slate-400 dark:hover:text-slate-500'
-                      }`}
-                      aria-label={item.isProtected ? "保護を解除" : "保護する"}
-                      title={item.isProtected ? "保護中（更新時に削除されません）" : "保護なし（クリックで保護）"}
-                    >
-                      <span className="text-base">{item.isProtected ? '🔒' : '🔓'}</span>
-                    </button>
                     {warningTags.map((tag, index) => (
                         <img
                             key={index}
