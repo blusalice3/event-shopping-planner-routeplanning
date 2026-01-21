@@ -878,6 +878,42 @@ const FocusMode: React.FC<FocusModeProps> = ({
     setMapZoomLevel(newZoom);
   }, []);
 
+  // 現在のフェーズに表示するアイテムがない場合、次の訪問先を探す（useEffectで処理）
+  const needsAutoAdvance = useMemo(() => {
+    if (isCompleted || allVisits.length === 0) return null;
+    if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) {
+      // 次の訪問先を探す
+      for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
+        const visit = currentPhaseVisits[i];
+        let hasItems = false;
+        if (currentPhase === 'normal') {
+          hasItems = visit.items.length > 0;
+        } else if (currentPhase === 'postponed') {
+          hasItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
+        } else {
+          hasItems = visit.items.some(item => latePhaseItemIds.has(item.id));
+        }
+        if (hasItems) {
+          return { type: 'skipToIndex' as const, index: i };
+        }
+      }
+      // 見つからない場合は次のフェーズへ
+      return { type: 'moveToNext' as const };
+    }
+    return null;
+  }, [isCompleted, allVisits.length, currentVisitDisplayItems.length, currentPhaseVisits, currentPhaseIndex, currentPhase, postponedPhaseItemIds, latePhaseItemIds]);
+
+  // アイテムがない訪問先を自動スキップ
+  useEffect(() => {
+    if (needsAutoAdvance) {
+      if (needsAutoAdvance.type === 'skipToIndex') {
+        setCurrentPhaseIndex(needsAutoAdvance.index);
+      } else if (needsAutoAdvance.type === 'moveToNext') {
+        moveToNext();
+      }
+    }
+  }, [needsAutoAdvance, moveToNext]);
+
   // 訪問先がない場合
   if (allVisits.length === 0) {
     return (
@@ -899,46 +935,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
 
-  // 現在のフェーズに表示するアイテムがない場合、次の訪問先を探すためのフラグ
-  const [needsAutoAdvance, setNeedsAutoAdvance] = useState<{ type: 'index' | 'next'; index?: number } | null>(null);
-
-  // 現在のフェーズに表示するアイテムがない場合の自動進行処理（useEffectで実行）
-  useEffect(() => {
-    if (isCompleted || allVisits.length === 0) return;
-    
-    if (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0) {
-      // 次の訪問先を探す
-      for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
-        const visit = currentPhaseVisits[i];
-        let hasItems = false;
-        if (currentPhase === 'normal') {
-          hasItems = visit.items.length > 0;
-        } else if (currentPhase === 'postponed') {
-          hasItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
-        } else {
-          hasItems = visit.items.some(item => latePhaseItemIds.has(item.id));
-        }
-        if (hasItems) {
-          setNeedsAutoAdvance({ type: 'index', index: i });
-          return;
-        }
-      }
-      // 見つからない場合は次のフェーズへ
-      setNeedsAutoAdvance({ type: 'next' });
-    }
-  }, [currentVisitDisplayItems, currentPhaseVisits, currentPhaseIndex, currentPhase, postponedPhaseItemIds, latePhaseItemIds, isCompleted, allVisits.length]);
-
-  // 自動進行の実行
-  useEffect(() => {
-    if (needsAutoAdvance) {
-      if (needsAutoAdvance.type === 'index' && needsAutoAdvance.index !== undefined) {
-        setCurrentPhaseIndex(needsAutoAdvance.index);
-      } else if (needsAutoAdvance.type === 'next') {
-        moveToNext();
-      }
-      setNeedsAutoAdvance(null);
-    }
-  }, [needsAutoAdvance, moveToNext]);
+  // 自動スキップ処理中はローディング表示（状態変更を待つ）
+  if (needsAutoAdvance) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
+        <div className="text-4xl mb-4 animate-spin">⏳</div>
+        <p className="text-slate-500 dark:text-slate-400">次の訪問先を探しています...</p>
+      </div>
+    );
+  }
 
   // 完了画面
   if (isCompleted) {
@@ -992,11 +997,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
         </div>
       </div>
     );
-  }
-
-  // 自動進行処理中は何も表示しない
-  if (needsAutoAdvance || (currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0)) {
-    return null;
   }
 
   // 現在の訪問先情報
