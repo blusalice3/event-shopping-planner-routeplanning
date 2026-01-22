@@ -311,6 +311,27 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return currentVisitDisplayItems.length;
   }, [currentVisitDisplayItems]);
 
+  // 現在の訪問先のアイテム総額情報
+  const currentVisitPriceInfo = useMemo(() => {
+    let totalPrice = 0;
+    let undefinedCount = 0;
+    
+    currentVisitDisplayItems.forEach(item => {
+      // 価格未定の判定（nullまたは-1）
+      if (item.price === null || item.price === -1) {
+        undefinedCount += item.quantity;
+      } else {
+        totalPrice += item.price * item.quantity;
+      }
+    });
+    
+    return {
+      totalPrice,
+      undefinedCount,
+      allUndefined: undefinedCount > 0 && totalPrice === 0 && currentVisitDisplayItems.every(item => item.price === null || item.price === -1),
+    };
+  }, [currentVisitDisplayItems]);
+
   // 次の訪問先情報
   const nextVisitInfo = useMemo(() => {
     if (!nextVisit) return { spaceInfo: '最終', circleName: '' };
@@ -1192,6 +1213,24 @@ const FocusMode: React.FC<FocusModeProps> = ({
             <span className="bg-white/20 px-2 py-0.5 rounded text-sm">{currentVisitCheckedCount}/{currentVisitTotalCount}</span>
           </div>
         </div>
+        {/* 中央：総額表示 */}
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-xs opacity-80">総額</div>
+            <div className="text-lg font-bold">
+              {currentVisitPriceInfo.allUndefined ? (
+                <span className="text-red-400">価格未定</span>
+              ) : currentVisitPriceInfo.undefinedCount > 0 ? (
+                <>
+                  <span>¥{currentVisitPriceInfo.totalPrice.toLocaleString()}</span>
+                  <span className="text-red-400">+未定{currentVisitPriceInfo.undefinedCount}件</span>
+                </>
+              ) : (
+                <span>¥{currentVisitPriceInfo.totalPrice.toLocaleString()}</span>
+              )}
+            </div>
+          </div>
+        </div>
         <div className="text-right">
           <div className="text-xs opacity-80">フェーズ</div>
           <select
@@ -1811,6 +1850,24 @@ const FocusMode: React.FC<FocusModeProps> = ({
             <div className="flex items-center gap-2">
               <span className="text-lg">{circleName}</span>
               <span className="bg-white/20 px-2 py-0.5 rounded text-sm">{currentVisitCheckedCount}/{currentVisitTotalCount}</span>
+            </div>
+          </div>
+          {/* 中央：総額表示 */}
+          <div className="flex-1 flex items-center justify-center">
+            <div className="text-center">
+              <div className="text-sm opacity-80">総額</div>
+              <div className="text-xl font-bold">
+                {currentVisitPriceInfo.allUndefined ? (
+                  <span className="text-red-400">価格未定</span>
+                ) : currentVisitPriceInfo.undefinedCount > 0 ? (
+                  <>
+                    <span>¥{currentVisitPriceInfo.totalPrice.toLocaleString()}</span>
+                    <span className="text-red-400">+未定{currentVisitPriceInfo.undefinedCount}件</span>
+                  </>
+                ) : (
+                  <span>¥{currentVisitPriceInfo.totalPrice.toLocaleString()}</span>
+                )}
+              </div>
             </div>
           </div>
           <div className="text-right">
