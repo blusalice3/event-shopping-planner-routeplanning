@@ -46,14 +46,14 @@ const extractEventDates = (items: ShoppingItem[]): string[] => {
 
 const sortCycle: SortState[] = ['Manual', 'Postpone', 'Late', 'Absent', 'SoldOut', 'None', 'Purchased'];
 const sortLabels: Record<SortState, string> = {
-       Manual: '巡回順',
-       Postpone: '後回し',
-       Late: '遅参',
-       Absent: '欠席',
-       SoldOut: '売切',
-       None: '未購入',
-       Purchased: '購入済',
-   };
+    Manual: '巡回順',
+    Postpone: '後回し',
+    Late: '遅参',
+    Absent: '欠席',
+    SoldOut: '売切',
+    None: '未購入',
+    Purchased: '購入済',
+};
 
 const App: React.FC = () => {
   const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>({});
@@ -85,6 +85,8 @@ const App: React.FC = () => {
     itemsToDelete: ShoppingItem[];
     itemsToUpdate: ShoppingItem[];
     itemsToAdd: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[];
+    protectedFromDelete: number;
+    protectedFromUpdate: number;
   } | null>(null);
   const [updateEventName, setUpdateEventName] = useState<string | null>(null);
   const [showUrlUpdateDialog, setShowUrlUpdateDialog] = useState(false);
@@ -434,12 +436,19 @@ const App: React.FC = () => {
     return 'edit';
   }, [activeEventName, dayModes, activeTab, eventDates, isMapTab]);
 
-  const handleBulkAdd = useCallback((eventName: string, newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string; layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> }) => {
+  const handleBulkAdd = useCallback((eventName: string, newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string; layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }>; source?: 'spreadsheet' | 'app' }) => {
+    // sourceを決定: metadataで指定されていればそれを使用、urlがあればspreadsheet、なければapp
+    const itemSource = metadata?.source ?? (metadata?.url ? 'spreadsheet' : 'app');
+    // デフォルトの保護レベル: appなら完全保護、spreadsheetなら保護なし
+    const defaultProtectionLevel = itemSource === 'app' ? 'full' : 'none';
+    
     const newItems: ShoppingItem[] = newItemsData.map(itemData => ({
         id: crypto.randomUUID(),
         ...itemData,
         quantity: itemData.quantity ?? 1,
         purchaseStatus: 'None' as PurchaseStatus,
+        source: itemSource,
+        protectionLevel: defaultProtectionLevel,
     }));
 
     const isNewEvent = !eventLists[eventName];
@@ -586,18 +595,33 @@ const App: React.FC = () => {
       // 購入状態が変更されたかチェック
       const currentItem = prev[activeEventName]?.find(item => item.id === updatedItem.id);
       const purchaseStatusChanged = currentItem && currentItem.purchaseStatus !== updatedItem.purchaseStatus;
+      const priceChanged = currentItem && currentItem.price !== updatedItem.price;
       
       // 購入状態が変更された場合、最近変更されたアイテムとして記録
       if (purchaseStatusChanged) {
         setRecentlyChangedItemIds(prevIds => new Set(prevIds).add(updatedItem.id));
       }
       
+      // 実行モード・集中モードで購入状態または価格が変更された場合、保護レベルを'deletable'に自動変更
+      // （明示的にprotectionLevelが設定されていない場合のみ）
+      const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
+      const currentMode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+      let finalItem = updatedItem;
+      
+      if ((currentMode === 'execute' || currentMode === 'focus') && (purchaseStatusChanged || priceChanged)) {
+        // 現在の保護レベルがnone（保護なし）の場合のみ、deletable（削除のみ許可）に変更
+        const currentProtection = currentItem?.protectionLevel ?? (currentItem?.source === 'app' ? 'full' : 'none');
+        if (currentProtection === 'none') {
+          finalItem = { ...updatedItem, protectionLevel: 'deletable' as const };
+        }
+      }
+      
       return {
         ...prev,
-        [activeEventName]: prev[activeEventName].map(item => (item.id === updatedItem.id ? updatedItem : item))
+        [activeEventName]: prev[activeEventName].map(item => (item.id === updatedItem.id ? finalItem : item))
       };
     });
-  }, [activeEventName]);
+  }, [activeEventName, activeTab, eventDates, dayModes]);
 
   const handleMoveItem = useCallback((dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate', sourceColumn?: 'execute' | 'candidate') => {
     if (!activeEventName) return;
@@ -2387,12 +2411,28 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       const itemsToDelete: ShoppingItem[] = [];
       const itemsToUpdate: ShoppingItem[] = [];
       const itemsToAdd: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[] = [];
+      let protectedFromDelete = 0;
+      let protectedFromUpdate = 0;
+
+      // 保護レベルを取得するヘルパー関数
+      const getEffectiveProtectionLevel = (item: ShoppingItem): 'full' | 'deletable' | 'none' => {
+        if (item.protectionLevel) return item.protectionLevel;
+        // sourceが'app'の場合はfull（完全保護）、それ以外（spreadsheetまたは未設定）はnone（保護なし）
+        return item.source === 'app' ? 'full' : 'none';
+      };
 
       // 削除対象: スプレッドシートにないアイテム（サークル名・参加日・ブロック・ナンバーで照合）
+      // ただし、保護レベルが'full'（完全保護）のアイテムは削除しない
       currentItems.forEach(item => {
         const keyWithoutTitle = getItemKeyWithoutTitle(item);
         if (!sheetItemsMapWithoutTitle.has(keyWithoutTitle)) {
-          itemsToDelete.push(item);
+          const protectionLevel = getEffectiveProtectionLevel(item);
+          // 完全保護（full）のアイテムは削除しない
+          if (protectionLevel !== 'full') {
+            itemsToDelete.push(item);
+          } else {
+            protectedFromDelete++;
+          }
         }
       });
 
@@ -2404,6 +2444,20 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         // 完全一致（サークル名・参加日・ブロック・ナンバー・タイトル）で既存アイテムを検索
         const existingWithAll = currentItemsMapWithAll.get(keyWithAll);
         if (existingWithAll) {
+          // 保護レベルを確認
+          const protectionLevel = getEffectiveProtectionLevel(existingWithAll);
+          // 完全保護（full）または削除のみ許可（deletable）のアイテムは更新しない
+          if (protectionLevel === 'full' || protectionLevel === 'deletable') {
+            // 変更があるべきなのに保護されている場合のみカウント
+            if (
+              existingWithAll.price !== sheetItem.price ||
+              existingWithAll.remarks !== sheetItem.remarks ||
+              existingWithAll.url !== sheetItem.url
+            ) {
+              protectedFromUpdate++;
+            }
+            return;
+          }
           // 完全一致した場合、価格や備考、URLが変わっていれば更新
           if (
             existingWithAll.price !== sheetItem.price ||
@@ -2423,6 +2477,13 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         // タイトルなしで既存アイテムを検索（タイトルが変更された場合）
         const existingWithoutTitle = currentItemsMapWithoutTitle.get(keyWithoutTitle);
         if (existingWithoutTitle) {
+          // 保護レベルを確認
+          const protectionLevel = getEffectiveProtectionLevel(existingWithoutTitle);
+          // 完全保護（full）または削除のみ許可（deletable）のアイテムは更新しない
+          if (protectionLevel === 'full' || protectionLevel === 'deletable') {
+            protectedFromUpdate++;
+            return;
+          }
           // タイトルや価格、備考、URLが変わっていれば更新
           itemsToUpdate.push({
             ...existingWithoutTitle,
@@ -2438,7 +2499,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         itemsToAdd.push(sheetItem);
       });
 
-      setUpdateData({ itemsToDelete, itemsToUpdate, itemsToAdd });
+      setUpdateData({ itemsToDelete, itemsToUpdate, itemsToAdd, protectedFromDelete, protectedFromUpdate });
       setUpdateEventName(eventName);
       setShowUpdateConfirmation(true);
     } catch (error) {
@@ -2478,6 +2539,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           quantity: itemData.quantity ?? 1,
           remarks: itemData.remarks,
           purchaseStatus: 'None' as PurchaseStatus,
+          source: 'spreadsheet' as const,  // スプレッドシートからの追加
+          protectionLevel: 'none' as const,  // デフォルトは保護なし
           ...(itemData.url ? { url: itemData.url } : {})
         };
         newItems = insertItemSorted(newItems, newItem);
@@ -2733,6 +2796,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       ...newItem,
       id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       purchaseStatus,
+      source: 'app' as const,  // アプリからの追加
+      protectionLevel: 'full' as const,  // 完全保護
     };
     
     // アイテムを追加
@@ -4577,6 +4642,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
           itemsToDelete={updateData.itemsToDelete}
           itemsToUpdate={updateData.itemsToUpdate}
           itemsToAdd={updateData.itemsToAdd}
+          protectedFromDelete={updateData.protectedFromDelete}
+          protectedFromUpdate={updateData.protectedFromUpdate}
           onConfirm={handleConfirmUpdate}
           onCancel={() => {
             setShowUpdateConfirmation(false);
