@@ -3,7 +3,7 @@ import { ShoppingItem } from '../types';
 import { getItemKey } from '../utils/itemComparison';
 
 interface ImportScreenProps {
-  onBulkAdd: (eventName: string, items: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string, layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> }) => void;
+  onBulkAdd: (eventName: string, items: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string, layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }>, source?: 'spreadsheet' | 'app' }) => void;
   activeEventName: string | null;
   itemToEdit: ShoppingItem | null;
   onUpdateItem: (item: ShoppingItem) => void;
@@ -534,7 +534,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
             remarks: singleRemarks.trim(),
             url: singleUrl.trim() || undefined,
         };
-        onBulkAdd(activeEventName, [newItem]);
+        onBulkAdd(activeEventName, [newItem], { source: 'app' });
         resetSingleForm();
     }
   };
@@ -759,4 +759,3 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
 };
 
 export default ImportScreen;
-
