@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { ShoppingItem, DayMapData, HallDefinition, ZoomLevel, ZOOM_LEVELS } from '../types';
+import { ShoppingItem, DayMapData, HallDefinition, ZoomLevel, ZOOM_LEVELS, PurchaseStatus } from '../types';
 import ShoppingItemCard from './ShoppingItemCard';
 import FocusModeMapCanvas from './FocusModeMapCanvas';
 
@@ -17,8 +17,8 @@ interface FocusModeProps {
   mapData?: { [dayMapName: string]: DayMapData };
   hallDefinitions?: HallDefinition[];
   onHideHeader?: (hide: boolean) => void;
-  // 新規アイテム追加
-  onAddItem?: (item: Omit<ShoppingItem, 'id' | 'purchaseStatus'>) => void;
+  // 新規アイテム追加（purchaseStatusを含めることが可能）
+  onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
 }
 
 // スワイプ判定の閾値
@@ -130,6 +130,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     quantity: '1',
     remarks: '',
     url: '',
+    purchaseStatus: 'Purchased' as 'Purchased' | 'Postpone' | 'Late',
   });
 
   // マップが利用可能かどうか
@@ -1026,7 +1027,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       block: cellPopupState.blockName,
       number: String(cellPopupState.number),
     });
-    setNewItemForm({ circle: '', title: '', price: '', quantity: '1', remarks: '', url: '' });
+    setNewItemForm({ circle: '', title: '', price: '', quantity: '1', remarks: '', url: '', purchaseStatus: 'Purchased' });
     closeCellPopup();
   }, [currentVisit, cellPopupState, closeCellPopup]);
 
@@ -1049,8 +1050,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
       quantity: parseInt(newItemForm.quantity, 10) || 1,
       remarks: newItemForm.remarks,
       url: newItemForm.url || undefined,
+      purchaseStatus: newItemForm.purchaseStatus,
     });
-    setNotification(`${addItemDialog.block}-${addItemDialog.number} にアイテムを追加しました`);
+    
+    // 購入状態に応じたメッセージ
+    const statusText = newItemForm.purchaseStatus === 'Purchased' ? '候補リスト' 
+      : newItemForm.purchaseStatus === 'Postpone' ? '後回しフェーズ' 
+      : '遅参フェーズ';
+    setNotification(`${addItemDialog.block}-${addItemDialog.number} を${statusText}に追加しました`);
     closeAddItemDialog();
   }, [onAddItem, addItemDialog, newItemForm, closeAddItemDialog]);
 
@@ -1496,7 +1503,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
             </div>
           </div>
           
-          {/* 数量 */}
+          {/* 数量・購入状態 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>数量</label>
@@ -1508,6 +1515,18 @@ const FocusMode: React.FC<FocusModeProps> = ({
                 {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
                   <option key={num} value={num}>{num}</option>
                 ))}
+              </select>
+            </div>
+            <div>
+              <label className={labelClass}>購入状態</label>
+              <select
+                value={newItemForm.purchaseStatus}
+                onChange={(e) => setNewItemForm(prev => ({ ...prev, purchaseStatus: e.target.value as 'Purchased' | 'Postpone' | 'Late' }))}
+                className={formInputClass}
+              >
+                <option value="Purchased">購入済</option>
+                <option value="Postpone">後回し</option>
+                <option value="Late">遅参</option>
               </select>
             </div>
           </div>
