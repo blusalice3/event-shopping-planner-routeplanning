@@ -26,6 +26,8 @@ interface FocusModeMapCanvasProps {
   onZoomChange?: (newZoom: ZoomLevel) => void;
   // セルクリック時のコールバック（新規アイテム追加用）
   onCellClick?: (blockName: string, number: number, matchingItems: ShoppingItem[]) => void;
+  // アプリ全体の表示倍率（親要素のtransform scaleに対応）
+  appZoomLevel?: number;
 }
 
 const BASE_CELL_SIZE = 28;
@@ -55,6 +57,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   currentPhase,
   onZoomChange,
   onCellClick,
+  appZoomLevel = 100,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -848,19 +851,33 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       // キャンバスの位置を取得（offsetによる移動が反映されている）
       const canvasRect = canvas.getBoundingClientRect();
       
+      // アプリ全体のズームスケール
+      const appScale = appZoomLevel / 100;
+      
       // クリック位置をキャンバス内の座標に変換
+      // getBoundingClientRect()はCSSのtransform: scaleが適用された後の座標を返すため、
+      // クリック位置もスケール適用後の座標になっている
       const clickX = e.clientX - canvasRect.left;
       const clickY = e.clientY - canvasRect.top;
       
-      // クリック位置がキャンバス内かチェック（負の値や範囲外は無視）
-      if (clickX < 0 || clickY < 0 || clickX > canvasRect.width || clickY > canvasRect.height) {
+      // アプリ全体のズームが適用されているため、キャンバス内の論理座標に変換するには
+      // スケールで割る必要がある
+      const adjustedClickX = clickX / appScale;
+      const adjustedClickY = clickY / appScale;
+      
+      // クリック位置がキャンバス内かチェック（スケール補正前の座標で判定）
+      // canvasRect.width/heightはスケール適用後の値なので、これもスケールで割る
+      const logicalCanvasWidth = canvasRect.width / appScale;
+      const logicalCanvasHeight = canvasRect.height / appScale;
+      
+      if (adjustedClickX < 0 || adjustedClickY < 0 || adjustedClickX > logicalCanvasWidth || adjustedClickY > logicalCanvasHeight) {
         setIsDragging(false);
         return;
       }
       
       // セル座標を計算（cellSizeはCSSピクセル単位）
-      const col = Math.floor(clickX / cellSize) + 1;
-      const row = Math.floor(clickY / cellSize) + 1;
+      const col = Math.floor(adjustedClickX / cellSize) + 1;
+      const row = Math.floor(adjustedClickY / cellSize) + 1;
       
       if (row >= 1 && row <= mapData.maxRow && col >= 1 && col <= mapData.maxCol) {
         // ブロック定義内の数値セルか確認
@@ -922,7 +939,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
-  }, [isDragging, onCellClick, cellSize, mapData, items, cellsMap, isCellInBlock]);
+  }, [isDragging, onCellClick, cellSize, mapData, items, cellsMap, isCellInBlock, appZoomLevel]);
 
   // ポインターがキャンバスから離れた時のハンドラ（ドラッグ状態のリセットのみ）
   const handlePointerLeave = useCallback(() => {
