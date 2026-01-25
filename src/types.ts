@@ -9,6 +9,14 @@ export const PurchaseStatuses = [
 
 export type PurchaseStatus = typeof PurchaseStatuses[number];
 
+// 保護レベル
+export const ProtectionLevels = ['full', 'deletable', 'none'] as const;
+export type ProtectionLevel = typeof ProtectionLevels[number];
+
+// アイテムの追加元
+export const ItemSources = ['spreadsheet', 'app'] as const;
+export type ItemSource = typeof ItemSources[number];
+
 export interface ShoppingItem {
   id: string;
   circle: string;
@@ -22,6 +30,8 @@ export interface ShoppingItem {
   remarks: string;
   url?: string;
   priorityLevel?: 'none' | 'priority' | 'highest';  // 優先度レベル
+  protectionLevel?: ProtectionLevel;  // 保護レベル（未設定の場合はsourceに基づくデフォルト）
+  source?: ItemSource;  // アイテムの追加元（未設定の場合は'spreadsheet'として扱う）
 }
 
 export type ViewMode = 'edit' | 'execute' | 'focus';
