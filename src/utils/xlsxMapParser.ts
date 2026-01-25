@@ -60,17 +60,122 @@ function convertExcelJSBorder(border?: Partial<ExcelJS.Border>): BorderStyle | n
   };
 }
 
-// 背景色を取得
+// Excelのテーマカラーインデックスから色を取得
+// テーマカラーは実際のワークブックのテーマXMLから取得するのが理想だが、
+// ExcelJSでは直接アクセスが難しいため、よく使われる標準的な色を返す
+// 注: これらの色は実際のテーマと異なる場合がある
+function getThemeColor(themeIndex: number, tint?: number): string | null {
+  // Excel標準テーマカラー（Office テーマのデフォルト値）
+  // テーマ0-3: 背景/テキスト色、テーマ4-9: アクセントカラー
+  const themeColors: Record<number, string> = {
+    0: '#000000', // dk1 - テキスト/背景（暗）
+    1: '#FFFFFF', // lt1 - テキスト/背景（明）
+    2: '#44546A', // dk2 - テキスト/背景（暗2）
+    3: '#E7E6E6', // lt2 - テキスト/背景（明2）
+    4: '#4472C4', // accent1 - 青
+    5: '#ED7D31', // accent2 - オレンジ
+    6: '#A5A5A5', // accent3 - グレー
+    7: '#FFC000', // accent4 - 黄
+    8: '#5B9BD5', // accent5 - 水色
+    9: '#F79646', // accent6 - オレンジ（多くのテーマでオレンジ系）
+  };
+  
+  let color = themeColors[themeIndex];
+  if (!color) {
+    // 未知のテーマインデックスの場合、デフォルトでグレーを返す
+    // （少なくとも何かの色として認識させる）
+    color = '#808080';
+  }
+  
+  // tint（明度調整）が指定されている場合は色を調整
+  // 簡易実装: tintが正の場合は明るく、負の場合は暗くする
+  if (tint !== undefined && tint !== 0) {
+    // 詳細なtint計算は複雑なので、ここでは元の色をそのまま返す
+    // 必要に応じて実装可能
+  }
+  
+  return color;
+}
+
+// Excelのインデックスカラーから色を取得
+function getIndexedColor(colorIndex: number): string | null {
+  // Excel標準パレット（56色 + システムカラー）
+  const indexedColors: Record<number, string> = {
+    0: '#000000', // 黒
+    1: '#FFFFFF', // 白
+    2: '#FF0000', // 赤
+    3: '#00FF00', // 緑
+    4: '#0000FF', // 青
+    5: '#FFFF00', // 黄
+    6: '#FF00FF', // マゼンタ
+    7: '#00FFFF', // シアン
+    8: '#000000', // 黒
+    9: '#FFFFFF', // 白
+    10: '#FF0000', // 赤
+    11: '#00FF00', // 緑
+    12: '#0000FF', // 青
+    13: '#FFFF00', // 黄
+    14: '#FF00FF', // マゼンタ
+    15: '#00FFFF', // シアン
+    16: '#800000', // 暗い赤
+    17: '#008000', // 暗い緑
+    18: '#000080', // 暗い青
+    19: '#808000', // 暗い黄
+    20: '#800080', // 暗い紫
+    21: '#008080', // 暗いシアン
+    22: '#C0C0C0', // シルバー
+    23: '#808080', // グレー
+    // ... 他の色も必要に応じて追加
+    64: '#000000', // システムテキスト（黒）
+    65: '#FFFFFF', // システム背景（白）
+  };
+  
+  const color = indexedColors[colorIndex];
+  if (color) return color;
+  
+  // 未知のインデックスの場合はグレーを返す
+  return '#808080';
+}
+
+// 背景色を取得（テーマカラー、インデックスカラー、ARGBに対応）
 function getBackgroundColorFromExcelJS(fill?: ExcelJS.Fill): string | null {
   if (!fill) return null;
   
   if (fill.type === 'pattern' && fill.pattern !== 'none') {
     const patternFill = fill as ExcelJS.FillPattern;
-    if (patternFill.fgColor?.argb) {
-      const argb = patternFill.fgColor.argb;
-      // ARGB形式から色を取得（白と黒は除外）
-      if (argb !== 'FFFFFFFF' && argb !== 'FF000000' && argb !== 'FFFFFF' && argb !== '000000') {
+    const fgColor = patternFill.fgColor;
+    
+    if (fgColor) {
+      // ARGB形式の場合
+      if (fgColor.argb) {
+        const argb = fgColor.argb;
+        // 白のみ除外（黒は壁として認識させるため含める）
+        if (argb === 'FFFFFFFF' || argb === 'FFFFFF') {
+          return null;
+        }
         return `#${argb.length === 8 ? argb.substring(2) : argb}`;
+      }
+      
+      // テーマカラーの場合
+      if (fgColor.theme !== undefined) {
+        const tint = (fgColor as { theme: number; tint?: number }).tint;
+        const color = getThemeColor(fgColor.theme, tint);
+        // 白（lt1、テーマ1）のみ除外
+        if (color === '#FFFFFF') {
+          return null;
+        }
+        return color;
+      }
+      
+      // インデックスカラーの場合
+      if ((fgColor as { indexed?: number }).indexed !== undefined) {
+        const indexed = (fgColor as { indexed: number }).indexed;
+        const color = getIndexedColor(indexed);
+        // 白のみ除外
+        if (color === '#FFFFFF') {
+          return null;
+        }
+        return color;
       }
     }
   }
