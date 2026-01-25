@@ -63,15 +63,20 @@ function convertExcelJSBorder(border?: Partial<ExcelJS.Border>): BorderStyle | n
 // Excelのテーマカラーインデックスから色を取得
 // テーマカラーは実際のワークブックのテーマXMLから取得するのが理想だが、
 // ExcelJSでは直接アクセスが難しいため、よく使われる標準的な色を返す
-// 注: これらの色は実際のテーマと異なる場合がある
+// 
+// 重要: Excelのテーマインデックスの標準的なマッピング
+// - theme 0: lt1 (Light 1) - 通常は白（背景色）
+// - theme 1: dk1 (Dark 1) - 通常は黒（テキスト色）
+// - theme 2: lt2 (Light 2) - 薄い背景色
+// - theme 3: dk2 (Dark 2) - 濃いテキスト色
+// - theme 4-9: accent1-6 - アクセントカラー
 function getThemeColor(themeIndex: number, tint?: number): string | null {
   // Excel標準テーマカラー（Office テーマのデフォルト値）
-  // テーマ0-3: 背景/テキスト色、テーマ4-9: アクセントカラー
   const themeColors: Record<number, string> = {
-    0: '#000000', // dk1 - テキスト/背景（暗）
-    1: '#FFFFFF', // lt1 - テキスト/背景（明）
-    2: '#44546A', // dk2 - テキスト/背景（暗2）
-    3: '#E7E6E6', // lt2 - テキスト/背景（明2）
+    0: '#FFFFFF', // lt1 - Light 1（背景色、通常は白）
+    1: '#000000', // dk1 - Dark 1（テキスト色、通常は黒）
+    2: '#E7E6E6', // lt2 - Light 2（薄い背景色）
+    3: '#44546A', // dk2 - Dark 2（濃いテキスト色）
     4: '#4472C4', // accent1 - 青
     5: '#ED7D31', // accent2 - オレンジ
     6: '#A5A5A5', // accent3 - グレー
@@ -82,9 +87,8 @@ function getThemeColor(themeIndex: number, tint?: number): string | null {
   
   let color = themeColors[themeIndex];
   if (!color) {
-    // 未知のテーマインデックスの場合、デフォルトでグレーを返す
-    // （少なくとも何かの色として認識させる）
-    color = '#808080';
+    // 未知のテーマインデックスの場合、nullを返す（背景色なしとして扱う）
+    return null;
   }
   
   // tint（明度調整）が指定されている場合は色を調整
@@ -133,8 +137,8 @@ function getIndexedColor(colorIndex: number): string | null {
   const color = indexedColors[colorIndex];
   if (color) return color;
   
-  // 未知のインデックスの場合はグレーを返す
-  return '#808080';
+  // 未知のインデックスの場合はnullを返す（背景色なしとして扱う）
+  return null;
 }
 
 // 背景色を取得（テーマカラー、インデックスカラー、ARGBに対応）
@@ -160,8 +164,8 @@ function getBackgroundColorFromExcelJS(fill?: ExcelJS.Fill): string | null {
       if (fgColor.theme !== undefined) {
         const tint = (fgColor as { theme: number; tint?: number }).tint;
         const color = getThemeColor(fgColor.theme, tint);
-        // 白（lt1、テーマ1）のみ除外
-        if (color === '#FFFFFF') {
+        // 白（lt1、テーマ0）のみ除外
+        if (color === '#FFFFFF' || color === null) {
           return null;
         }
         return color;
