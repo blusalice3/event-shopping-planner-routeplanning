@@ -91,6 +91,8 @@ export async function exportToXlsx(
     { header: '備考', key: 'remarks', width: 30 },
     { header: 'URL', key: 'url', width: 50 },
     { header: '優先度', key: 'priorityLevel', width: 10 },
+    { header: '保護レベル', key: 'protectionLevel', width: 12 },
+    { header: '追加元', key: 'source', width: 12 },
   ];
 
   // データ
@@ -108,6 +110,8 @@ export async function exportToXlsx(
       remarks: item.remarks,
       url: item.url || '',
       priorityLevel: item.priorityLevel || 'none',
+      protectionLevel: item.protectionLevel || '',
+      source: item.source || '',
     });
   });
 
@@ -286,6 +290,30 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         priorityLevel = undefined;  // 'none'は保存しない（デフォルト値）
       }
 
+      // 保護レベルの値を取得（列13）
+      const protectionValue = String(row.getCell(13).value || '');
+      let protectionLevel: 'full' | 'deletable' | 'none' | undefined;
+      if (protectionValue === 'full') {
+        protectionLevel = 'full';
+      } else if (protectionValue === 'deletable') {
+        protectionLevel = 'deletable';
+      } else if (protectionValue === 'none') {
+        protectionLevel = 'none';
+      } else {
+        protectionLevel = undefined;  // 未設定
+      }
+
+      // 追加元の値を取得（列14）
+      const sourceValue = String(row.getCell(14).value || '');
+      let source: 'spreadsheet' | 'app' | undefined;
+      if (sourceValue === 'app') {
+        source = 'app';
+      } else if (sourceValue === 'spreadsheet') {
+        source = 'spreadsheet';
+      } else {
+        source = undefined;  // 未設定
+      }
+
       const item: ShoppingItem = {
         id: String(row.getCell(1).value || crypto.randomUUID()),
         circle: String(row.getCell(2).value || ''),
@@ -299,6 +327,8 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         remarks: String(row.getCell(10).value || ''),
         url: String(row.getCell(11).value || ''),
         priorityLevel,
+        protectionLevel,
+        source,
       };
 
       if (item.circle || item.title) {
