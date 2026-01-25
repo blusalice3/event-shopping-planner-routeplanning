@@ -23,7 +23,7 @@ import { db } from './utils/indexedDB';
 import { exportToXlsx, importFromXlsx, downloadBlob } from './utils/exportImport';
 
 type ActiveTab = 'eventList' | 'import' | string; // string部分は動的な参加日（例: '1日目', '2日目', '3日目'など）
-type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'Purchased';
+type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'None' | 'Purchased';
 export type BulkSortDirection = 'asc' | 'desc';
 type BlockSortDirection = 'asc' | 'desc';
 
@@ -44,15 +44,16 @@ const extractEventDates = (items: ShoppingItem[]): string[] => {
   });
 };
 
-const sortCycle: SortState[] = ['Postpone', 'Late', 'Absent', 'SoldOut', 'Purchased', 'Manual'];
+const sortCycle: SortState[] = ['Manual', 'Postpone', 'Late', 'Absent', 'SoldOut', 'None', 'Purchased'];
 const sortLabels: Record<SortState, string> = {
-    Manual: '巡回順',
-    Postpone: '後回し',
-    Late: '遅参',
-    Absent: '欠席',
-    SoldOut: '売切',
-    Purchased: '購入済',
-};
+       Manual: '巡回順',
+       Postpone: '後回し',
+       Late: '遅参',
+       Absent: '欠席',
+       SoldOut: '売切',
+       None: '未購入',
+       Purchased: '購入済',
+   };
 
 const App: React.FC = () => {
   const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>({});
