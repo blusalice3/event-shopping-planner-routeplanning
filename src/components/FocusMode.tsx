@@ -19,6 +19,8 @@ interface FocusModeProps {
   onHideHeader?: (hide: boolean) => void;
   // 新規アイテム追加（purchaseStatusを含めることが可能）
   onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
+  // アプリ全体の表示倍率
+  appZoomLevel?: number;
 }
 
 // スワイプ判定の閾値
@@ -47,6 +49,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   hallDefinitions,
   onHideHeader,
   onAddItem,
+  appZoomLevel = 100,
 }) => {
   // 現在のフェーズ（ユーザー操作でのみ変更）
   const [currentPhase, setCurrentPhase] = useState<FocusPhase>('normal');
@@ -1613,6 +1616,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               currentPhase={currentPhase}
               onZoomChange={handleMapZoomChange}
               onCellClick={handleMapCellClick}
+              appZoomLevel={appZoomLevel}
             />
           </div>
         </div>
@@ -1742,6 +1746,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               currentPhase={currentPhase}
               onZoomChange={handleMapZoomChange}
               onCellClick={handleMapCellClick}
+              appZoomLevel={appZoomLevel}
             />
           </div>
         </div>
