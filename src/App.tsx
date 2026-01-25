@@ -2721,14 +2721,17 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
   }, []);
 
   // 集中モードからの直接アイテム追加
-  const handleAddItemFromFocusMode = useCallback((newItem: Omit<ShoppingItem, 'id' | 'purchaseStatus'>) => {
+  const handleAddItemFromFocusMode = useCallback((newItem: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => {
     if (!activeEventName) return;
+    
+    // 購入状態を決定（指定がなければ'None'）
+    const purchaseStatus = newItem.purchaseStatus || 'None';
     
     // 新しいアイテムを作成
     const item: ShoppingItem = {
       ...newItem,
       id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-      purchaseStatus: 'None',
+      purchaseStatus,
     };
     
     // アイテムを追加
@@ -2737,11 +2740,129 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       [activeEventName]: [...(prev[activeEventName] || []), item],
     }));
     
-    // 実行列にも追加（現在の参加日の末尾に）
+    // 購入済の場合は候補リストのみに追加（実行列には追加しない）
+    if (purchaseStatus === 'Purchased') {
+      return;
+    }
+    
+    // 後回し・遅参の場合は実行列の適切なフェーズに最短経路位置で追加
     const dayName = newItem.eventDate;
+    const mapTab = `${dayName}マップ`;
+    
     setExecuteModeItems(prev => {
       const eventItems = prev[activeEventName] || {};
-      const dayItems = [...(eventItems[dayName] || []), item.id];
+      const dayItems = [...(eventItems[dayName] || [])];
+      const allItems = eventLists[activeEventName] || [];
+      const itemsMap = new Map(allItems.map(i => [i.id, i]));
+      itemsMap.set(item.id, item); // 新アイテムも追加
+      
+      // マップデータとホール情報を取得
+      const currentMapData = mapData[activeEventName]?.[mapTab];
+      const halls = hallDefinitions[activeEventName]?.[mapTab] || [];
+      const hallSettings = hallRouteSettings[activeEventName]?.[mapTab];
+      
+      // ホール順序を取得
+      const hallOrder = hallSettings?.hallOrder || halls.map(h => h.id);
+      
+      // アイテムの座標を取得するヘルパー
+      const getItemPosition = (id: string): { row: number; col: number } | null => {
+        const targetItem = itemsMap.get(id);
+        if (!targetItem || !currentMapData) return null;
+        
+        const blockName = targetItem.block?.trim() || '';
+        const targetBlock = currentMapData.blocks.find(b => b.name === blockName);
+        if (!targetBlock) return null;
+        
+        // ナンバーセルの座標を探す
+        const numberCells = targetBlock.numberCells || [];
+        const normalizedNumber = targetItem.number.toLowerCase();
+        
+        for (const nc of numberCells) {
+          if (String(nc.value).toLowerCase() === normalizedNumber) {
+            return { row: nc.row, col: nc.col };
+          }
+        }
+        
+        // 見つからない場合はブロックの中心を返す
+        return {
+          row: (targetBlock.startRow + targetBlock.endRow) / 2,
+          col: (targetBlock.startCol + targetBlock.endCol) / 2,
+        };
+      };
+      
+      // 2点間の距離を計算
+      const calcDistance = (pos1: { row: number; col: number }, pos2: { row: number; col: number }): number => {
+        return Math.abs(pos1.row - pos2.row) + Math.abs(pos1.col - pos2.col);
+      };
+      
+      // 同じフェーズのアイテムのインデックスを収集
+      const phaseStatus = purchaseStatus; // 'Postpone' or 'Late'
+      const samePhaseIndices: number[] = [];
+      
+      for (let i = 0; i < dayItems.length; i++) {
+        const existingItem = itemsMap.get(dayItems[i]);
+        if (existingItem && existingItem.purchaseStatus === phaseStatus) {
+          samePhaseIndices.push(i);
+        }
+      }
+      
+      // 新アイテムの座標を取得
+      const newItemPos = getItemPosition(item.id);
+      
+      if (samePhaseIndices.length === 0 || !newItemPos) {
+        // 同じフェーズのアイテムがない場合は末尾に追加
+        dayItems.push(item.id);
+      } else {
+        // 同じフェーズのアイテム間で最短経路になる位置を探す
+        let bestInsertIndex = samePhaseIndices[samePhaseIndices.length - 1] + 1;
+        let minTotalDistance = Infinity;
+        
+        // 各挿入位置での総距離を計算
+        for (let insertIdx = 0; insertIdx <= samePhaseIndices.length; insertIdx++) {
+          let totalDistance = 0;
+          
+          // 挿入位置の前のアイテム
+          if (insertIdx > 0) {
+            const prevItemId = dayItems[samePhaseIndices[insertIdx - 1]];
+            const prevPos = getItemPosition(prevItemId);
+            if (prevPos) {
+              totalDistance += calcDistance(prevPos, newItemPos);
+            }
+          }
+          
+          // 挿入位置の後のアイテム
+          if (insertIdx < samePhaseIndices.length) {
+            const nextItemId = dayItems[samePhaseIndices[insertIdx]];
+            const nextPos = getItemPosition(nextItemId);
+            if (nextPos) {
+              totalDistance += calcDistance(newItemPos, nextPos);
+            }
+            
+            // 元々の前後の距離を引く（新アイテムを挿入することで不要になる距離）
+            if (insertIdx > 0) {
+              const prevItemId = dayItems[samePhaseIndices[insertIdx - 1]];
+              const prevPos = getItemPosition(prevItemId);
+              if (prevPos && nextPos) {
+                totalDistance -= calcDistance(prevPos, nextPos);
+              }
+            }
+          }
+          
+          if (totalDistance < minTotalDistance) {
+            minTotalDistance = totalDistance;
+            // 実際の挿入位置を計算
+            if (insertIdx === 0) {
+              bestInsertIndex = samePhaseIndices[0];
+            } else if (insertIdx === samePhaseIndices.length) {
+              bestInsertIndex = samePhaseIndices[samePhaseIndices.length - 1] + 1;
+            } else {
+              bestInsertIndex = samePhaseIndices[insertIdx];
+            }
+          }
+        }
+        
+        dayItems.splice(bestInsertIndex, 0, item.id);
+      }
       
       return {
         ...prev,
@@ -2751,7 +2872,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         },
       };
     });
-  }, [activeEventName]);
+  }, [activeEventName, eventLists, mapData, hallDefinitions, hallRouteSettings]);
 
   // マップビューでの先頭移動
   const handleMoveToFirstFromMap = useCallback((itemId: string) => {
