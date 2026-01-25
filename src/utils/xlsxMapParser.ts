@@ -78,24 +78,30 @@ function getBackgroundColorFromExcelJS(fill?: ExcelJS.Fill): string | null {
   return null;
 }
 
-// ブロック名かどうかを判定（1〜3文字のカタカナ、ひらがな、アルファベット、漢字、またはそれらの組み合わせ）
+// ブロック名かどうかを判定（1〜4文字のカタカナ、ひらがな、アルファベット、漢字、数字、またはそれらの組み合わせ）
+// ただし、数字のみの場合はブロック名ではなく数値セルとして扱うため除外
 function isBlockName(value: ExcelJS.CellValue): boolean {
   if (value === null || value === undefined) return false;
   const str = String(value).trim();
-  if (str.length === 0 || str.length > 3) return false;
+  if (str.length === 0 || str.length > 4) return false;
   
   // 各文字種の正規表現
   const katakana = /[ア-ンァ-ヴー]/;
   const hiragana = /[あ-んぁ-ゔー]/;
   const alphabet = /[A-Za-z]/;
   const kanji = /[\u4E00-\u9FFF\u3400-\u4DBF]/;  // CJK統合漢字 + CJK統合漢字拡張A
+  const digit = /[0-9０-９]/;  // 半角・全角数字
   
-  // 全ての文字が許可された文字種であることを確認
-  const allowedChars = /^[ア-ンァ-ヴーあ-んぁ-ゔーA-Za-z\u4E00-\u9FFF\u3400-\u4DBF]+$/;
+  // 全ての文字が許可された文字種であることを確認（数字も許可）
+  const allowedChars = /^[ア-ンァ-ヴーあ-んぁ-ゔーA-Za-z\u4E00-\u9FFF\u3400-\u4DBF0-9０-９]+$/;
   if (!allowedChars.test(str)) return false;
   
+  // 数字のみの場合は除外（数値セルとして扱うため）
+  const digitsOnly = /^[0-9０-９]+$/;
+  if (digitsOnly.test(str)) return false;
+  
   // 少なくとも1つの文字種に該当する文字が含まれていればOK
-  return katakana.test(str) || hiragana.test(str) || alphabet.test(str) || kanji.test(str);
+  return katakana.test(str) || hiragana.test(str) || alphabet.test(str) || kanji.test(str) || digit.test(str);
 }
 
 // 数値セルかどうかを判定（1〜100の整数）
