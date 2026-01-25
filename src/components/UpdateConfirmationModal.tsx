@@ -5,6 +5,8 @@ interface UpdateConfirmationModalProps {
   itemsToDelete: ShoppingItem[];
   itemsToUpdate: ShoppingItem[];
   itemsToAdd: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[];
+  protectedFromDelete?: number;  // 保護により削除されなかったアイテム数
+  protectedFromUpdate?: number;  // 保護により更新されなかったアイテム数
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -13,9 +15,13 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
   itemsToDelete,
   itemsToUpdate,
   itemsToAdd,
+  protectedFromDelete = 0,
+  protectedFromUpdate = 0,
   onConfirm,
   onCancel,
 }) => {
+  const hasProtectedItems = protectedFromDelete > 0 || protectedFromUpdate > 0;
+  
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-2xl w-full mx-4 max-h-[80vh] overflow-y-auto">
@@ -64,6 +70,23 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
                 </ul>
               </div>
             )}
+            
+            {hasProtectedItems && (
+              <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-md border border-amber-200 dark:border-amber-700">
+                <h3 className="text-sm font-semibold text-amber-700 dark:text-amber-400 mb-1 flex items-center gap-1">
+                  <span>🔐</span> 保護されたアイテム
+                </h3>
+                <p className="text-sm text-amber-600 dark:text-amber-300">
+                  {protectedFromDelete > 0 && (
+                    <span>削除から保護: {protectedFromDelete}件</span>
+                  )}
+                  {protectedFromDelete > 0 && protectedFromUpdate > 0 && <span>、</span>}
+                  {protectedFromUpdate > 0 && (
+                    <span>更新から保護: {protectedFromUpdate}件</span>
+                  )}
+                </p>
+              </div>
+            )}
           </div>
           
           <div className="flex justify-end space-x-3">
@@ -87,4 +110,3 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
 };
 
 export default UpdateConfirmationModal;
-
