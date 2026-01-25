@@ -78,11 +78,47 @@ function getBackgroundColorFromExcelJS(fill?: ExcelJS.Fill): string | null {
   return null;
 }
 
+// セルの値を抽出（richText形式にも対応）
+function extractCellValue(cellValue: ExcelJS.CellValue): string | number | null {
+  if (cellValue === null || cellValue === undefined) return null;
+  
+  if (typeof cellValue === 'string' || typeof cellValue === 'number') {
+    return cellValue;
+  }
+  
+  if (typeof cellValue === 'object') {
+    // richText形式の処理
+    if ('richText' in cellValue && Array.isArray((cellValue as { richText: unknown[] }).richText)) {
+      const richText = (cellValue as { richText: Array<{ text: string }> }).richText;
+      const text = richText.map(rt => rt.text || '').join('');
+      return text || null;
+    }
+    
+    // 数式の結果
+    if ('result' in cellValue) {
+      const result = (cellValue as { result?: unknown }).result;
+      if (typeof result === 'string' || typeof result === 'number') {
+        return result;
+      }
+      // resultがrichText形式の場合
+      if (typeof result === 'object' && result !== null && 'richText' in (result as object)) {
+        const richText = ((result as { richText: Array<{ text: string }> }).richText);
+        const text = richText.map(rt => rt.text || '').join('');
+        return text || null;
+      }
+    }
+  }
+  
+  return null;
+}
+
 // ブロック名かどうかを判定（1〜4文字のカタカナ、ひらがな、アルファベット、漢字、数字、またはそれらの組み合わせ）
 // ただし、数字のみの場合はブロック名ではなく数値セルとして扱うため除外
 function isBlockName(value: ExcelJS.CellValue): boolean {
-  if (value === null || value === undefined) return false;
-  const str = String(value).trim();
+  // まずrichText等から実際の文字列を抽出
+  const extracted = extractCellValue(value);
+  if (extracted === null) return false;
+  const str = String(extracted).trim();
   if (str.length === 0 || str.length > 4) return false;
   
   // 各文字種の正規表現
@@ -408,20 +444,9 @@ async function parseMapSheetWithExcelJS(
     const endCol = columnLetterToNumber(match[3]);
     const endRow = parseInt(match[4], 10);
     
-    // 結合セルの値を取得
+    // 結合セルの値を取得（richText形式にも対応）
     const cell = worksheet.getCell(startRow, startCol);
-    let value: string | number | null = null;
-    if (cell.value !== null && cell.value !== undefined) {
-      if (typeof cell.value === 'string' || typeof cell.value === 'number') {
-        value = cell.value;
-      } else if (typeof cell.value === 'object' && 'result' in cell.value) {
-        // 数式の結果
-        const result = (cell.value as { result?: unknown }).result;
-        if (typeof result === 'string' || typeof result === 'number') {
-          value = result;
-        }
-      }
-    }
+    const value = extractCellValue(cell.value);
     
     mergedCells.push({
       startRow,
@@ -463,17 +488,8 @@ async function parseMapSheetWithExcelJS(
       const mergeParent = mergeMap.get(`${row}-${col}`);
       const isMerged = !!mergeParent && (mergeParent.row !== row || mergeParent.col !== col);
       
-      let value: string | number | null = null;
-      if (cell.value !== null && cell.value !== undefined) {
-        if (typeof cell.value === 'string' || typeof cell.value === 'number') {
-          value = cell.value;
-        } else if (typeof cell.value === 'object' && 'result' in cell.value) {
-          const result = (cell.value as { result?: unknown }).result;
-          if (typeof result === 'string' || typeof result === 'number') {
-            value = result;
-          }
-        }
-      }
+      // セルの値を取得（richText形式にも対応）
+      const value = extractCellValue(cell.value);
       
       const backgroundColor = getBackgroundColorFromExcelJS(cell.fill);
       
