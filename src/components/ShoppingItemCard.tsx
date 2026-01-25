@@ -1,5 +1,5 @@
 import React, { useCallback, useMemo, useState, useRef, useEffect } from 'react';
-import { ShoppingItem, PurchaseStatus, PurchaseStatuses } from '../types';
+import { ShoppingItem, PurchaseStatus, PurchaseStatuses, ProtectionLevel, ProtectionLevels } from '../types';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 import CheckCircleIcon from './icons/CheckCircleIcon';
 import CircleIcon from './icons/CircleIcon';
@@ -53,6 +53,16 @@ const statusConfig: Record<PurchaseStatus, { label: string; icon: React.FC<any>;
   Late: { label: '遅参', icon: ClockIcon, color: 'text-blue-600 dark:text-blue-400', dim: false, bg: 'bg-blue-500/20 dark:bg-blue-500/30' },
 };
 
+// 保護レベルの設定
+const protectionConfig: Record<ProtectionLevel, { label: string; icon: string; color: string; title: string }> = {
+  full: { label: '完全保護', icon: '🔐', color: 'text-amber-600 dark:text-amber-400', title: '完全保護: 削除も更新もされません' },
+  deletable: { label: '削除のみ許可', icon: '🔒', color: 'text-blue-600 dark:text-blue-400', title: '削除のみ許可: 削除されますが更新されません' },
+  none: { label: '保護なし', icon: '🔓', color: 'text-slate-500 dark:text-slate-400', title: '保護なし: 削除も更新もされます' },
+};
+
+// 保護レベルのサイクル順序
+const protectionCycle: ProtectionLevel[] = ['full', 'deletable', 'none'];
+
 
 const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   item,
@@ -101,6 +111,21 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     const nextStatus = PurchaseStatuses[nextIndex];
     onUpdate({ ...item, purchaseStatus: nextStatus });
   }, [item, onUpdate]);
+
+  // 保護レベルを取得（未設定の場合はsourceに基づいてデフォルト値を決定）
+  const getEffectiveProtectionLevel = useCallback((): ProtectionLevel => {
+    if (item.protectionLevel) return item.protectionLevel;
+    // sourceが'app'の場合はfull（完全保護）、それ以外（spreadsheetまたは未設定）はnone（保護なし）
+    return item.source === 'app' ? 'full' : 'none';
+  }, [item.protectionLevel, item.source]);
+
+  const toggleProtectionLevel = useCallback(() => {
+    const currentLevel = getEffectiveProtectionLevel();
+    const currentIndex = protectionCycle.indexOf(currentLevel);
+    const nextIndex = (currentIndex + 1) % protectionCycle.length;
+    const nextLevel = protectionCycle[nextIndex];
+    onUpdate({ ...item, protectionLevel: nextLevel });
+  }, [item, onUpdate, getEffectiveProtectionLevel]);
 
   const handleOpenUrl = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -522,6 +547,19 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             <ChevronDownIcon className="w-4 h-4" />
           </button>
         )}
+        {/* 保護レベルトグルボタン */}
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            toggleProtectionLevel();
+          }}
+          data-no-long-press
+          className={`p-1 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 ${protectionConfig[getEffectiveProtectionLevel()].color}`}
+          aria-label={protectionConfig[getEffectiveProtectionLevel()].label}
+          title={protectionConfig[getEffectiveProtectionLevel()].title}
+        >
+          <span className="text-base">{protectionConfig[getEffectiveProtectionLevel()].icon}</span>
+        </button>
       </div>
 
       <div 
