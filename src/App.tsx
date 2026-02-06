@@ -2753,6 +2753,41 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     });
   }, [activeEventName, activeTab, isMapTab, items, hallDefinitions, hallRouteSettings, mapData]);
 
+  // マップビューでの訪問先追加（位置指定あり）
+  const handleAddToExecuteListFromMapAtPosition = useCallback((itemId: string, referenceItemId: string, position: 'before' | 'after') => {
+    if (!activeEventName || !isMapTab) return;
+    
+    const dayMatch = activeTab.match(/^(.+)マップ$/);
+    if (!dayMatch) return;
+    const dayName = dayMatch[1];
+    
+    setExecuteModeItems(prev => {
+      const eventItems = prev[activeEventName] || {};
+      const dayItems = [...(eventItems[dayName] || [])];
+      
+      // 既に追加されている場合は何もしない
+      if (dayItems.includes(itemId)) return prev;
+      
+      // 参照アイテムの位置を探す
+      const refIndex = dayItems.indexOf(referenceItemId);
+      if (refIndex < 0) {
+        // 参照アイテムが見つからない場合は末尾に追加
+        dayItems.push(itemId);
+      } else {
+        const insertIndex = position === 'before' ? refIndex : refIndex + 1;
+        dayItems.splice(insertIndex, 0, itemId);
+      }
+      
+      return {
+        ...prev,
+        [activeEventName]: {
+          ...eventItems,
+          [dayName]: dayItems,
+        },
+      };
+    });
+  }, [activeEventName, activeTab, isMapTab]);
+
   // マップビューでの訪問先削除
   const handleRemoveFromExecuteListFromMap = useCallback((itemId: string) => {
     if (!activeEventName || !isMapTab) return;
@@ -4444,6 +4479,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             items={items}
             executeModeItemIds={currentMapExecuteItemIds}
             onAddToExecuteList={handleAddToExecuteListFromMap}
+            onAddToExecuteListAtPosition={handleAddToExecuteListFromMapAtPosition}
             onRemoveFromExecuteList={handleRemoveFromExecuteListFromMap}
             onMoveToFirst={handleMoveToFirstFromMap}
             onMoveToLast={handleMoveToLastFromMap}
