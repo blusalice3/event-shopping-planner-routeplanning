@@ -1642,6 +1642,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               onZoomChange={handleMapZoomChange}
               onCellClick={handleMapCellClick}
               appZoomLevel={appZoomLevel}
+              hallDefinitions={hallDefinitions}
             />
           </div>
         </div>
@@ -1776,6 +1777,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               onZoomChange={handleMapZoomChange}
               onCellClick={handleMapCellClick}
               appZoomLevel={appZoomLevel}
+              hallDefinitions={hallDefinitions}
             />
           </div>
         </div>
