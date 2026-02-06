@@ -20,6 +20,9 @@ interface FocusModeProps {
   onHideHeader?: (hide: boolean) => void;
   // 新規アイテム追加（purchaseStatusを含めることが可能）
   onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
+  // アイテム編集・削除
+  onEditRequest?: (item: ShoppingItem) => void;
+  onDeleteRequest?: (item: ShoppingItem) => void;
   // アプリ全体の表示倍率
   appZoomLevel?: number;
 }
@@ -50,6 +53,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
   hallDefinitions,
   onHideHeader,
   onAddItem,
+  onEditRequest,
+  onDeleteRequest,
   appZoomLevel = 100,
 }) => {
   // 現在のフェーズ（ユーザー操作でのみ変更）
@@ -1224,8 +1229,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
             item={item}
             onUpdate={handleUpdateItem}
             isStriped={index % 2 === 1}
-            onEditRequest={() => {}}
-            onDeleteRequest={() => {}}
+            onEditRequest={onEditRequest || (() => {})}
+            onDeleteRequest={onDeleteRequest || (() => {})}
             isSelected={false}
             onSelectItem={() => {}}
             layoutMode={layoutMode}
@@ -1965,8 +1970,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
               item={item}
               onUpdate={handleUpdateItem}
               isStriped={index % 2 === 1}
-              onEditRequest={() => {}}
-              onDeleteRequest={() => {}}
+              onEditRequest={onEditRequest || (() => {})}
+              onDeleteRequest={onDeleteRequest || (() => {})}
               isSelected={false}
               onSelectItem={() => {}}
               layoutMode={layoutMode}
