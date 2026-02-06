@@ -13,7 +13,7 @@ import MapCanvas from './MapCanvas';
 import CellItemsPopup from './CellItemsPopup';
 import VisitListPanel from './VisitListPanel';
 import HallOrderPanel from './HallOrderPanel';
-import InsertPositionDialog, { InsertPosition } from './InsertPositionDialog';
+import InsertPositionDialog, { InsertPosition, SmartInsertMode } from './InsertPositionDialog';
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { isPointInPolygon } from './HallDefinitionPanel';
 
@@ -55,6 +55,7 @@ interface MapViewProps {
   onHallOrderOpenChange?: (open: boolean) => void;
   hideInternalControls?: boolean;
   smartInsertEnabled?: boolean;
+  smartInsertMode?: SmartInsertMode;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -85,6 +86,7 @@ const MapView: React.FC<MapViewProps> = ({
   onHallOrderOpenChange,
   hideInternalControls = false,
   smartInsertEnabled = true,
+  smartInsertMode = 'card',
 }) => {
   void _onMoveToFirst;
   void _onMoveToLast;
@@ -557,6 +559,17 @@ const MapView: React.FC<MapViewProps> = ({
     if (!item) return false;
     return getItemHallId(item) !== null;
   }, [insertDialogState.item, getItemHallId]);
+
+  // ダイアログ用の訪問先リスト全体（preview モード用）
+  const insertDialogAllVisitItems = useMemo(() => {
+    if (smartInsertMode !== 'preview') return [];
+    return executeModeItemIds
+      .map((eid, idx) => {
+        const item = items.find(i => i.id === eid);
+        return item ? { item, visitIndex: idx } : null;
+      })
+      .filter((v): v is { item: ShoppingItem; visitIndex: number } => v !== null);
+  }, [smartInsertMode, executeModeItemIds, items]);
   
   // 訪問先から除外
   const handleRemoveFromVisitList = useCallback(
@@ -712,7 +725,9 @@ const MapView: React.FC<MapViewProps> = ({
           isOpen={insertDialogState.isOpen}
           addingItem={insertDialogState.item}
           nearbyVisitItems={insertDialogNearbyItems}
+          allVisitItems={insertDialogAllVisitItems}
           hasHallDefinition={insertDialogHasHall}
+          mode={smartInsertMode}
           onSelect={handleInsertPositionSelect}
           onCancel={() => setInsertDialogState({ isOpen: false, item: null })}
         />
