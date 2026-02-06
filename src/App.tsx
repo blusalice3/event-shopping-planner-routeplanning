@@ -3059,11 +3059,32 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       return saved !== null ? saved === 'true' : true; // デフォルトON
     } catch { return true; }
   });
+  const [mapSmartInsertMode, setMapSmartInsertMode] = useState<'card' | 'preview'>(() => {
+    try {
+      const saved = localStorage.getItem('mapSmartInsertMode');
+      return (saved === 'card' || saved === 'preview') ? saved : 'card';
+    } catch { return 'card'; }
+  });
+  const [smartInsertToast, setSmartInsertToast] = useState<string | null>(null);
+  const smartInsertLongPressRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const smartInsertLongPressTriggeredRef = React.useRef(false);
 
   // スマート位置選択の設定を永続化
   React.useEffect(() => {
     try { localStorage.setItem('mapSmartInsertEnabled', String(mapSmartInsertEnabled)); } catch {}
   }, [mapSmartInsertEnabled]);
+
+  React.useEffect(() => {
+    try { localStorage.setItem('mapSmartInsertMode', mapSmartInsertMode); } catch {}
+  }, [mapSmartInsertMode]);
+
+  // トースト自動非表示
+  React.useEffect(() => {
+    if (smartInsertToast) {
+      const timer = setTimeout(() => setSmartInsertToast(null), 2000);
+      return () => clearTimeout(timer);
+    }
+  }, [smartInsertToast]);
   
   // セル選択モードの状態（ブロック定義用）
   const [cellSelectionMode, setCellSelectionMode] = useState<{
@@ -4385,15 +4406,42 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                     </svg>
                   </button>
                   
-                  {/* スマート位置選択ON/OFF */}
+                  {/* スマート位置選択ON/OFF (長押しでモード切替) */}
                   <button
-                    onClick={() => setMapSmartInsertEnabled(!mapSmartInsertEnabled)}
-                    className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                    onPointerDown={() => {
+                      smartInsertLongPressTriggeredRef.current = false;
+                      smartInsertLongPressRef.current = setTimeout(() => {
+                        smartInsertLongPressTriggeredRef.current = true;
+                        const newMode = mapSmartInsertMode === 'card' ? 'preview' : 'card';
+                        setMapSmartInsertMode(newMode);
+                        setSmartInsertToast(newMode === 'preview' ? 'プレビューモードに切替' : 'カードモードに切替');
+                      }, 500);
+                    }}
+                    onPointerUp={() => {
+                      if (smartInsertLongPressRef.current) {
+                        clearTimeout(smartInsertLongPressRef.current);
+                        smartInsertLongPressRef.current = null;
+                      }
+                    }}
+                    onPointerLeave={() => {
+                      if (smartInsertLongPressRef.current) {
+                        clearTimeout(smartInsertLongPressRef.current);
+                        smartInsertLongPressRef.current = null;
+                      }
+                    }}
+                    onClick={() => {
+                      if (smartInsertLongPressTriggeredRef.current) {
+                        smartInsertLongPressTriggeredRef.current = false;
+                        return;
+                      }
+                      setMapSmartInsertEnabled(!mapSmartInsertEnabled);
+                    }}
+                    className={`relative p-2 rounded-md transition-colors touch-manipulation select-none ${
                       mapSmartInsertEnabled 
                         ? 'bg-green-100 dark:bg-green-900/50 hover:bg-green-200 dark:hover:bg-green-800' 
                         : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
                     }`}
-                    title={mapSmartInsertEnabled ? 'スマート追加ON' : 'スマート追加OFF'}
+                    title={`スマート追加${mapSmartInsertEnabled ? 'ON' : 'OFF'} (${mapSmartInsertMode === 'card' ? 'カード' : 'プレビュー'}) 長押しでモード切替`}
                     style={{ WebkitTapHighlightColor: 'transparent', minWidth: '44px', minHeight: '44px' }}
                     type="button"
                   >
@@ -4401,6 +4449,12 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m0-8l-4-4m4 4l4-4" />
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14" />
                     </svg>
+                    {/* モードインジケーター */}
+                    {mapSmartInsertEnabled && (
+                      <div className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 text-[8px] font-bold leading-none text-green-600 dark:text-green-400">
+                        {mapSmartInsertMode === 'preview' ? 'P' : 'C'}
+                      </div>
+                    )}
                   </button>
                 </>
               )}
@@ -4552,6 +4606,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             onHallOrderOpenChange={setMapIsHallOrderOpen}
             hideInternalControls={true}
             smartInsertEnabled={mapSmartInsertEnabled}
+            smartInsertMode={mapSmartInsertMode}
           />
         )}
         {activeEventName && mainContentVisible && (
@@ -4954,6 +5009,13 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       )}
       {activeEventName && items.length > 0 && mainContentVisible && (
         <ZoomControl zoomLevel={zoomLevel} onZoomChange={handleZoomChange} />
+      )}
+
+      {/* スマート追加モード切替トースト */}
+      {smartInsertToast && (
+        <div className="fixed top-16 left-1/2 transform -translate-x-1/2 z-[10000] bg-green-600 text-white px-5 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-pulse">
+          {smartInsertToast}
+        </div>
       )}
     </div>
   );
