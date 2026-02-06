@@ -243,6 +243,29 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return null;
   }, [currentPhaseVisits, currentPhaseIndex, currentPhase, visitsByPhase]);
 
+  // 前の訪問先
+  const prevVisit = useMemo(() => {
+    if (currentPhaseVisits.length === 0) return null;
+    const prevIndex = currentPhaseIndex - 1;
+    if (prevIndex >= 0) {
+      return currentPhaseVisits[prevIndex];
+    }
+    // 後回しフェーズの最初 → 通常フェーズの最後
+    if (currentPhase === 'postponed' && visitsByPhase.normal.length > 0) {
+      return visitsByPhase.normal[visitsByPhase.normal.length - 1];
+    }
+    // 遅参フェーズの最初 → 後回しフェーズの最後 or 通常フェーズの最後
+    if (currentPhase === 'late') {
+      if (visitsByPhase.postponed.length > 0) {
+        return visitsByPhase.postponed[visitsByPhase.postponed.length - 1];
+      }
+      if (visitsByPhase.normal.length > 0) {
+        return visitsByPhase.normal[visitsByPhase.normal.length - 1];
+      }
+    }
+    return null;
+  }, [currentPhaseVisits, currentPhaseIndex, currentPhase, visitsByPhase]);
+
   // 現在のフェーズで表示すべきアイテム
   const currentVisitDisplayItems = useMemo(() => {
     if (!currentVisit) return [];
@@ -1614,6 +1637,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               selectedHall={selectedHall}
               currentVisitKey={currentVisit?.key || null}
               nextVisitKey={nextVisit?.key || null}
+              prevVisitKey={prevVisit?.key || null}
               currentPhase={currentPhase}
               onZoomChange={handleMapZoomChange}
               onCellClick={handleMapCellClick}
@@ -1747,6 +1771,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               selectedHall={selectedHall}
               currentVisitKey={currentVisit?.key || null}
               nextVisitKey={nextVisit?.key || null}
+              prevVisitKey={prevVisit?.key || null}
               currentPhase={currentPhase}
               onZoomChange={handleMapZoomChange}
               onCellClick={handleMapCellClick}
