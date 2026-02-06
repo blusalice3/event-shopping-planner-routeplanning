@@ -1,4 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
+import ReactDOM from 'react-dom';
 import { ShoppingItem, DayMapData, HallDefinition, ZoomLevel, ZOOM_LEVELS, PurchaseStatus } from '../types';
 import ShoppingItemCard from './ShoppingItemCard';
 import FocusModeMapCanvas from './FocusModeMapCanvas';
@@ -1647,7 +1648,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
           <ItemList />
         </div>
 
-        {/* フッター */}
+        {/* フッター（createPortalでtransform文脈の外に描画） */}
+        {ReactDOM.createPortal(
         <div className="fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
           <div className="px-4 py-2">
             <div className="flex justify-between items-center">
@@ -1692,7 +1694,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
+        )}
         
         {/* フェーズ切り替え確認ダイアログ */}
         <PhaseChangeDialog />
@@ -1780,7 +1784,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
           ▶
         </button>
 
-        {/* フッター */}
+        {/* フッター（createPortalでtransform文脈の外に描画） */}
+        {ReactDOM.createPortal(
         <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
           <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
             <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
@@ -1829,7 +1834,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
               </div>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
+        )}
         
         {/* フェーズ切り替え確認ダイアログ */}
         <PhaseChangeDialog />
@@ -1978,7 +1985,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
         </>
       )}
 
-      {/* フッター */}
+      {/* フッター（createPortalでtransform文脈の外に描画） */}
+      {ReactDOM.createPortal(
       <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
           <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
@@ -2038,7 +2046,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
             </div>
           </div>
         </div>
-      </div>
+      </div>,
+      document.body
+      )}
       
       {/* フェーズ切り替え確認ダイアログ */}
       <PhaseChangeDialog />
