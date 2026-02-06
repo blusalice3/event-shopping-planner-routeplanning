@@ -21,6 +21,7 @@ interface FocusModeMapCanvasProps {
   // 集中モード固有のプロパティ
   currentVisitKey: string | null;  // 現在位置（eventDate-block-baseNumber）
   nextVisitKey: string | null;     // 次の目的地
+  prevVisitKey: string | null;     // 前の訪問先
   currentPhase: 'normal' | 'postponed' | 'late';
   // 自動ズーム用コールバック
   onZoomChange?: (newZoom: ZoomLevel) => void;
@@ -54,6 +55,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   selectedHall,
   currentVisitKey,
   nextVisitKey,
+  prevVisitKey,
   currentPhase,
   onZoomChange,
   onCellClick,
@@ -110,6 +112,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       visitKeys: Set<string>;  // 複数のvisitKeyを保持
       isCurrentPosition: boolean;
       isNextDestination: boolean;
+      isPreviousPosition: boolean;
       // 購入状態の集計
       allNone: boolean;  // 全て未購入
       allProcessed: boolean;  // 全て処理済み（未購入以外）
@@ -152,6 +155,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         visitKeys: new Set<string>(),
         isCurrentPosition: false,
         isNextDestination: false,
+        isPreviousPosition: false,
         allNone: true,
         allProcessed: true,
         hasPostponed: false,
@@ -202,10 +206,13 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       if (nextVisitKey && state.visitKeys.has(nextVisitKey)) {
         state.isNextDestination = true;
       }
+      if (prevVisitKey && state.visitKeys.has(prevVisitKey)) {
+        state.isPreviousPosition = true;
+      }
     });
 
     return states;
-  }, [mapData.blocks, items, dayName, currentVisitKey, nextVisitKey]);
+  }, [mapData.blocks, items, dayName, currentVisitKey, nextVisitKey, prevVisitKey]);
 
   // 現在位置と次の目的地のセル座標を取得
   const currentCellCoords = useMemo(() => {
@@ -221,6 +228,16 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const nextCellCoords = useMemo(() => {
     for (const [key, state] of cellStates.entries()) {
       if (state.isNextDestination) {
+        const [row, col] = key.split('-').map(Number);
+        return { row, col };
+      }
+    }
+    return null;
+  }, [cellStates]);
+
+  const prevCellCoords = useMemo(() => {
+    for (const [key, state] of cellStates.entries()) {
+      if (state.isPreviousPosition) {
         const [row, col] = key.split('-').map(Number);
         return { row, col };
       }
@@ -257,7 +274,38 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return simplifyPath(path);
   }, [currentCellCoords, nextCellCoords, mapData, cellsMap]);
 
-  // ルートの範囲を計算（現在位置と次の目的地を含む矩形）
+  // ルート計算（前の訪問先→現在位置）
+  const prevRoutePath = useMemo(() => {
+    if (!prevCellCoords || !currentCellCoords) return [];
+
+    // 前の訪問先と現在位置が同じ場合はスキップ
+    if (prevCellCoords.row === currentCellCoords.row && prevCellCoords.col === currentCellCoords.col) return [];
+
+    const blockNameCells = new Set<string>();
+    mapData.blocks.forEach((block) => {
+      for (let r = block.startRow; r <= block.endRow; r++) {
+        for (let c = block.startCol; c <= block.endCol; c++) {
+          const cell = cellsMap.get(`${r}-${c}`);
+          if (cell && cell.value !== null && typeof cell.value === 'string') {
+            blockNameCells.add(`${r}-${c}`);
+          }
+        }
+      }
+    });
+
+    const path = findPath(
+      mapData,
+      prevCellCoords.row,
+      prevCellCoords.col,
+      currentCellCoords.row,
+      currentCellCoords.col,
+      blockNameCells
+    );
+
+    return simplifyPath(path);
+  }, [prevCellCoords, currentCellCoords, mapData, cellsMap]);
+
+  // ルートの範囲を計算（前の訪問先・現在位置・次の目的地を含む矩形）
   const routeBounds = useMemo(() => {
     if (!currentCellCoords) return null;
     
@@ -272,6 +320,13 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       minCol = Math.min(minCol, nextCellCoords.col);
       maxCol = Math.max(maxCol, nextCellCoords.col);
     }
+
+    if (prevCellCoords) {
+      minRow = Math.min(minRow, prevCellCoords.row);
+      maxRow = Math.max(maxRow, prevCellCoords.row);
+      minCol = Math.min(minCol, prevCellCoords.col);
+      maxCol = Math.max(maxCol, prevCellCoords.col);
+    }
     
     // マージンを追加
     const margin = 3;
@@ -281,7 +336,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     maxCol = maxCol + margin;
     
     return { minRow, maxRow, minCol, maxCol };
-  }, [currentCellCoords, nextCellCoords]);
+  }, [currentCellCoords, nextCellCoords, prevCellCoords]);
 
   // 前回の訪問先キーを記憶（変更検知用）
   const prevVisitKeyRef = useRef<string | null>(null);
@@ -513,6 +568,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           // 次の訪問先: オレンジ背景
           ctx.fillStyle = 'rgba(255, 152, 0, 0.6)';
           ctx.fillRect(x, y, width, height);
+        } else if (state.isPreviousPosition) {
+          // 前の訪問先: 薄い青紫背景
+          ctx.fillStyle = 'rgba(139, 148, 191, 0.45)';
+          ctx.fillRect(x, y, width, height);
         } else if (state.isVisited) {
           // 訪問済み（全て処理済み、後回し/遅参のみでない）: グレー
           ctx.fillStyle = 'rgba(158, 158, 158, 0.5)';
@@ -650,7 +709,75 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
     }
 
-    // 4. ルートを描画（点線: 未訪問部分、実線: 訪問済み部分）
+    // 4a. 前の訪問先→現在位置のルートを描画（薄い実線）
+    const isPrevSameAsCurrent = prevCellCoords && currentCellCoords &&
+      prevCellCoords.row === currentCellCoords.row &&
+      prevCellCoords.col === currentCellCoords.col;
+
+    if (prevRoutePath.length >= 2 && !isPrevSameAsCurrent) {
+      const lineWidth = Math.max(2, cellSize * 0.08);
+
+      // 薄い実線で描画（訪問済みルート）
+      ctx.beginPath();
+      ctx.strokeStyle = 'rgba(156, 163, 175, 0.6)';  // グレー半透明
+      ctx.lineWidth = lineWidth;
+      ctx.lineCap = 'round';
+      ctx.setLineDash([]);
+
+      prevRoutePath.forEach((point, i) => {
+        const px = (point.col - 0.5) * cellSize;
+        const py = (point.row - 0.5) * cellSize;
+
+        if (i === 0) {
+          ctx.moveTo(px, py);
+        } else {
+          ctx.lineTo(px, py);
+        }
+      });
+      ctx.stroke();
+
+      // 始点（前の訪問先）に小さい丸マーカー
+      if (prevRoutePath.length >= 1) {
+        const first = prevRoutePath[0];
+        const startX = (first.col - 0.5) * cellSize;
+        const startY = (first.row - 0.5) * cellSize;
+        const dotRadius = Math.max(3, cellSize * 0.1);
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(156, 163, 175, 0.7)';
+        ctx.arc(startX, startY, dotRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // 終点（現在位置方向）に矢印
+      if (prevRoutePath.length >= 2) {
+        const last = prevRoutePath[prevRoutePath.length - 1];
+        const prev = prevRoutePath[prevRoutePath.length - 2];
+
+        const endX = (last.col - 0.5) * cellSize;
+        const endY = (last.row - 0.5) * cellSize;
+        const angle = Math.atan2(
+          (last.row - prev.row) * cellSize,
+          (last.col - prev.col) * cellSize
+        );
+
+        const arrowSize = Math.max(6, cellSize * 0.2);
+        ctx.beginPath();
+        ctx.fillStyle = 'rgba(156, 163, 175, 0.7)';
+        ctx.moveTo(endX, endY);
+        ctx.lineTo(
+          endX - arrowSize * Math.cos(angle - Math.PI / 6),
+          endY - arrowSize * Math.sin(angle - Math.PI / 6)
+        );
+        ctx.lineTo(
+          endX - arrowSize * Math.cos(angle + Math.PI / 6),
+          endY - arrowSize * Math.sin(angle + Math.PI / 6)
+        );
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+
+    // 4b. ルートを描画（点線: 未訪問部分、実線: 訪問済み部分）
     // 現在位置と次の目的地が異なる場合のみルートを描画
     const isSamePosition = currentCellCoords && nextCellCoords && 
       currentCellCoords.row === nextCellCoords.row && 
@@ -749,7 +876,27 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
     });
 
-    // 6. 次の目的地マーカー（現在位置より先に描画して下に配置）
+    // 6. 前の訪問先マーカー（最も下のレイヤー）
+    if (prevCellCoords && !isPrevSameAsCurrent) {
+      const x = (prevCellCoords.col - 1) * cellSize;
+      const y = (prevCellCoords.row - 1) * cellSize;
+
+      // グレー枠（控えめ）
+      ctx.strokeStyle = 'rgba(107, 114, 128, 0.6)';
+      ctx.lineWidth = Math.max(2, cellSize * 0.08);
+      ctx.setLineDash([cellSize * 0.15, cellSize * 0.1]);
+      ctx.strokeRect(x - 1, y - 1, cellSize + 2, cellSize + 2);
+      ctx.setLineDash([]);
+
+      // 🔙マーカー
+      const markerSize = Math.max(12, cellSize * 0.38);
+      ctx.font = `${markerSize}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'bottom';
+      ctx.fillText('🔙', x + cellSize / 2, y - 1);
+    }
+
+    // 7. 次の目的地マーカー（現在位置より先に描画して下に配置）
     if (nextCellCoords) {
       const x = (nextCellCoords.col - 1) * cellSize;
       const y = (nextCellCoords.row - 1) * cellSize;
@@ -767,7 +914,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.fillText('🚩', x + cellSize / 2, y - 2);
     }
 
-    // 7. 現在位置マーカー（次の目的地より上に描画）
+    // 8. 現在位置マーカー（次の目的地より上に描画）
     if (currentCellCoords) {
       const x = (currentCellCoords.col - 1) * cellSize;
       const y = (currentCellCoords.row - 1) * cellSize;
@@ -791,12 +938,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     cellStates,
     mergedCellsMap,
     routePath,
+    prevRoutePath,
     dpr,
     isDetailedView,
     showNumbers,
     showBorders,
     currentCellCoords,
     nextCellCoords,
+    prevCellCoords,
     currentPhase,
   ]);
 
