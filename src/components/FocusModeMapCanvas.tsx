@@ -29,6 +29,8 @@ interface FocusModeMapCanvasProps {
   onCellClick?: (blockName: string, number: number, matchingItems: ShoppingItem[]) => void;
   // アプリ全体の表示倍率（親要素のtransform scaleに対応）
   appZoomLevel?: number;
+  // ホール定義（前の訪問先と現在位置のホール比較用）
+  hallDefinitions?: HallDefinition[];
 }
 
 const BASE_CELL_SIZE = 28;
@@ -60,6 +62,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   onZoomChange,
   onCellClick,
   appZoomLevel = 100,
+  hallDefinitions,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -305,8 +308,52 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return simplifyPath(path);
   }, [prevCellCoords, currentCellCoords, mapData, cellsMap]);
 
-  // ルートの範囲を計算（前の訪問先・現在位置・次の目的地を含む矩形）
-  const routeBounds = useMemo(() => {
+  // セルがホール内にあるかをpoint-in-polygonで判定するヘルパー
+  const findHallForCell = useCallback((row: number, col: number): HallDefinition | null => {
+    if (!hallDefinitions || hallDefinitions.length === 0) return null;
+    for (const hall of hallDefinitions) {
+      if (hall.vertices.length < 3) continue;
+      let inside = false;
+      const vertices = hall.vertices;
+      for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+        const xi = vertices[i].col, yi = vertices[i].row;
+        const xj = vertices[j].col, yj = vertices[j].row;
+        if (((yi > row) !== (yj > row)) &&
+            (col < (xj - xi) * (row - yi) / (yj - yi) + xi)) {
+          inside = !inside;
+        }
+      }
+      if (inside) return hall;
+    }
+    return null;
+  }, [hallDefinitions]);
+
+  // 前の訪問先と現在位置が同じホールにあるかどうか
+  const prevInSameHall = useMemo(() => {
+    if (!prevCellCoords || !currentCellCoords) return false;
+    // ホール定義がない場合は同じホールとみなす（ルートを表示）
+    if (!hallDefinitions || hallDefinitions.length === 0) return true;
+    const prevHall = findHallForCell(prevCellCoords.row, prevCellCoords.col);
+    const currentHall = findHallForCell(currentCellCoords.row, currentCellCoords.col);
+    // どちらかがホール外の場合は異なるホール扱い
+    if (!prevHall || !currentHall) return false;
+    return prevHall.id === currentHall.id;
+  }, [prevCellCoords, currentCellCoords, hallDefinitions, findHallForCell]);
+
+  // 前の訪問先ルートを表示するか判定（ホール差異 + 距離ベース）
+  // ホールが異なる場合は表示しない。同じホールでも3点が遠すぎる場合は2点にフォールバック
+  const showPrevRoute = useMemo(() => {
+    // 前の訪問先がない場合は表示しない
+    if (!prevCellCoords || !currentCellCoords) return false;
+    // 同一セルの場合は表示しない
+    if (prevCellCoords.row === currentCellCoords.row && prevCellCoords.col === currentCellCoords.col) return false;
+    // ホールが異なる場合は表示しない
+    if (!prevInSameHall) return false;
+    return true;
+  }, [prevCellCoords, currentCellCoords, prevInSameHall]);
+
+  // 3点ルートの範囲（前の訪問先が同じホールの場合のみprevを含む）
+  const routeBoundsAll = useMemo(() => {
     if (!currentCellCoords) return null;
     
     let minRow = currentCellCoords.row;
@@ -321,14 +368,13 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       maxCol = Math.max(maxCol, nextCellCoords.col);
     }
 
-    if (prevCellCoords) {
+    if (prevCellCoords && showPrevRoute) {
       minRow = Math.min(minRow, prevCellCoords.row);
       maxRow = Math.max(maxRow, prevCellCoords.row);
       minCol = Math.min(minCol, prevCellCoords.col);
       maxCol = Math.max(maxCol, prevCellCoords.col);
     }
     
-    // マージンを追加
     const margin = 3;
     minRow = Math.max(1, minRow - margin);
     maxRow = maxRow + margin;
@@ -336,7 +382,47 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     maxCol = maxCol + margin;
     
     return { minRow, maxRow, minCol, maxCol };
-  }, [currentCellCoords, nextCellCoords, prevCellCoords]);
+  }, [currentCellCoords, nextCellCoords, prevCellCoords, showPrevRoute]);
+
+  // 2点ルートの範囲（現在位置と次の目的地のみ）
+  const routeBoundsCurrentNext = useMemo(() => {
+    if (!currentCellCoords) return null;
+    
+    let minRow = currentCellCoords.row;
+    let maxRow = currentCellCoords.row;
+    let minCol = currentCellCoords.col;
+    let maxCol = currentCellCoords.col;
+    
+    if (nextCellCoords) {
+      minRow = Math.min(minRow, nextCellCoords.row);
+      maxRow = Math.max(maxRow, nextCellCoords.row);
+      minCol = Math.min(minCol, nextCellCoords.col);
+      maxCol = Math.max(maxCol, nextCellCoords.col);
+    }
+    
+    const margin = 3;
+    minRow = Math.max(1, minRow - margin);
+    maxRow = maxRow + margin;
+    minCol = Math.max(1, minCol - margin);
+    maxCol = maxCol + margin;
+    
+    return { minRow, maxRow, minCol, maxCol };
+  }, [currentCellCoords, nextCellCoords]);
+
+  // 実際に使用するルート範囲を決定するための最適ズーム計算ヘルパー
+  const calcOptimalZoom = useCallback((bounds: { minRow: number; maxRow: number; minCol: number; maxCol: number }, containerWidth: number, containerHeight: number): number => {
+    const bWidth = bounds.maxCol - bounds.minCol + 1;
+    const bHeight = bounds.maxRow - bounds.minRow + 1;
+    const requiredWidthZoom = (containerWidth / (bWidth * BASE_CELL_SIZE)) * 100;
+    const requiredHeightZoom = (containerHeight / (bHeight * BASE_CELL_SIZE)) * 100;
+    return Math.min(requiredWidthZoom, requiredHeightZoom, 100);
+  }, []);
+
+  // 3点が遠すぎるかどうかの判定用ref（描画やauto-zoomで共有）
+  const effectiveShowPrevRef = useRef<boolean>(true);
+
+  // 基本のルート範囲（現在位置+次の目的地ベース、ズーム維持等で使用）
+  const routeBounds = routeBoundsCurrentNext;
 
   // 前回の訪問先キーを記憶（変更検知用）
   const prevVisitKeyRef = useRef<string | null>(null);
@@ -393,27 +479,34 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    // ルートがある場合はルート全体を中心に表示
-    if (routeBounds && currentCellCoords) {
-      const routeWidth = (routeBounds.maxCol - routeBounds.minCol + 1);
-      const routeHeight = (routeBounds.maxRow - routeBounds.minRow + 1);
-      
-      // ルート全体が収まる最適なズームレベルを計算
-      const requiredWidthZoom = (containerWidth / (routeWidth * BASE_CELL_SIZE)) * 100;
-      const requiredHeightZoom = (containerHeight / (routeHeight * BASE_CELL_SIZE)) * 100;
-      const optimalZoom = Math.min(requiredWidthZoom, requiredHeightZoom, 100);
-      
-      // ズームレベルを調整（最小30%、最大100%）
-      const newZoom = Math.max(30, Math.min(100, Math.floor(optimalZoom / 10) * 10)) as ZoomLevel;
+    const MIN_ZOOM = 30;
+
+    // ルートがある場合はルート全体を中心に表示（3→2フォールバック付き）
+    if (routeBoundsCurrentNext && currentCellCoords) {
+      let useBounds = routeBoundsCurrentNext;
+
+      if (showPrevRoute && routeBoundsAll) {
+        const allZoom = calcOptimalZoom(routeBoundsAll, containerWidth, containerHeight);
+        if (allZoom >= MIN_ZOOM) {
+          useBounds = routeBoundsAll;
+          effectiveShowPrevRef.current = true;
+        } else {
+          effectiveShowPrevRef.current = false;
+        }
+      } else {
+        effectiveShowPrevRef.current = false;
+      }
+
+      const optimalZoom = calcOptimalZoom(useBounds, containerWidth, containerHeight);
+      const newZoom = Math.max(MIN_ZOOM, Math.min(100, Math.floor(optimalZoom / 10) * 10)) as ZoomLevel;
       
       if (onZoomChange) {
         onZoomChange(newZoom);
       }
       
-      // ルートの中心を画面中央に配置
       const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
-      const routeCenterCol = (routeBounds.minCol + routeBounds.maxCol) / 2;
-      const routeCenterRow = (routeBounds.minRow + routeBounds.maxRow) / 2;
+      const routeCenterCol = (useBounds.minCol + useBounds.maxCol) / 2;
+      const routeCenterRow = (useBounds.minRow + useBounds.maxRow) / 2;
       const routeCenterX = (routeCenterCol - 0.5) * newCellSize;
       const routeCenterY = (routeCenterRow - 0.5) * newCellSize;
       
@@ -473,9 +566,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedHall, cellSize, routeBounds, currentCellCoords, onZoomChange]);
+  }, [selectedHall, cellSize, routeBoundsCurrentNext, routeBoundsAll, currentCellCoords, onZoomChange, showPrevRoute, calcOptimalZoom]);
 
-  // 訪問先が変わった時にルート全体を画面に収める
+  // 訪問先が変わった時にルート全体を画面に収める（3点→2点フォールバック付き）
   useEffect(() => {
     // 訪問先キーが変わっていない場合はスキップ
     if (prevVisitKeyRef.current === currentVisitKey) {
@@ -483,23 +576,34 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     }
     prevVisitKeyRef.current = currentVisitKey;
 
-    if (!routeBounds || !currentCellCoords) return;
+    if (!routeBoundsCurrentNext || !currentCellCoords) return;
     const container = containerRef.current;
     if (!container) return;
 
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    // ルート全体が収まる最適なズームレベルを計算
-    const routeWidth = (routeBounds.maxCol - routeBounds.minCol + 1);
-    const routeHeight = (routeBounds.maxRow - routeBounds.minRow + 1);
-    
-    const requiredWidthZoom = (containerWidth / (routeWidth * BASE_CELL_SIZE)) * 100;
-    const requiredHeightZoom = (containerHeight / (routeHeight * BASE_CELL_SIZE)) * 100;
-    const optimalZoom = Math.min(requiredWidthZoom, requiredHeightZoom, 100);
-    
-    // ズームレベルを調整（最小30%、最大100%）
-    const newZoom = Math.max(30, Math.min(100, Math.floor(optimalZoom / 10) * 10)) as ZoomLevel;
+    const MIN_ZOOM = 30;
+
+    // 3点表示を試行（前の訪問先が同じホールにある場合のみ）
+    let useBounds = routeBoundsCurrentNext;
+    let useShowPrev = false;
+
+    if (showPrevRoute && routeBoundsAll) {
+      const allZoom = calcOptimalZoom(routeBoundsAll, containerWidth, containerHeight);
+      if (allZoom >= MIN_ZOOM) {
+        // 3点がmin zoom以上で収まる → 3点表示
+        useBounds = routeBoundsAll;
+        useShowPrev = true;
+      }
+      // 3点だとmin zoom未満 → 2点にフォールバック（useBoundsはそのまま）
+    }
+
+    effectiveShowPrevRef.current = useShowPrev;
+
+    // 選択したboundsで最適なズームを計算
+    const optimalZoom = calcOptimalZoom(useBounds, containerWidth, containerHeight);
+    const newZoom = Math.max(MIN_ZOOM, Math.min(100, Math.floor(optimalZoom / 10) * 10)) as ZoomLevel;
     
     if (onZoomChange) {
       onZoomChange(newZoom);
@@ -507,8 +611,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     
     // ルートの中心を画面中央に配置
     const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
-    const routeCenterCol = (routeBounds.minCol + routeBounds.maxCol) / 2;
-    const routeCenterRow = (routeBounds.minRow + routeBounds.maxRow) / 2;
+    const routeCenterCol = (useBounds.minCol + useBounds.maxCol) / 2;
+    const routeCenterRow = (useBounds.minRow + useBounds.maxRow) / 2;
     const routeCenterX = (routeCenterCol - 0.5) * newCellSize;
     const routeCenterY = (routeCenterRow - 0.5) * newCellSize;
     
@@ -517,7 +621,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     
     setOffset({ x: newOffsetX, y: newOffsetY });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentVisitKey, routeBounds, currentCellCoords, onZoomChange]);
+  }, [currentVisitKey, routeBoundsCurrentNext, routeBoundsAll, currentCellCoords, onZoomChange, showPrevRoute, calcOptimalZoom]);
 
   // 描画
   useEffect(() => {
@@ -568,8 +672,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           // 次の訪問先: オレンジ背景
           ctx.fillStyle = 'rgba(255, 152, 0, 0.6)';
           ctx.fillRect(x, y, width, height);
-        } else if (state.isPreviousPosition) {
-          // 前の訪問先: 薄い青紫背景
+        } else if (effectiveShowPrevRef.current && state.isPreviousPosition) {
+          // 前の訪問先: 薄い青紫背景（前ルート表示時のみ）
           ctx.fillStyle = 'rgba(139, 148, 191, 0.45)';
           ctx.fillRect(x, y, width, height);
         } else if (state.isVisited) {
@@ -710,11 +814,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     }
 
     // 4a. 前の訪問先→現在位置のルートを描画（薄い実線）
+    // effectiveShowPrevRef: ホールが異なる or 3点が遠すぎる場合は非表示
     const isPrevSameAsCurrent = prevCellCoords && currentCellCoords &&
       prevCellCoords.row === currentCellCoords.row &&
       prevCellCoords.col === currentCellCoords.col;
 
-    if (prevRoutePath.length >= 2 && !isPrevSameAsCurrent) {
+    if (effectiveShowPrevRef.current && prevRoutePath.length >= 2 && !isPrevSameAsCurrent) {
       const lineWidth = Math.max(2, cellSize * 0.08);
 
       // 薄い実線で描画（訪問済みルート）
@@ -876,8 +981,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
     });
 
-    // 6. 前の訪問先マーカー（最も下のレイヤー）
-    if (prevCellCoords && !isPrevSameAsCurrent) {
+    // 6. 前の訪問先マーカー（最も下のレイヤー、前ルート非表示時はスキップ）
+    if (effectiveShowPrevRef.current && prevCellCoords && !isPrevSameAsCurrent) {
       const x = (prevCellCoords.col - 1) * cellSize;
       const y = (prevCellCoords.row - 1) * cellSize;
 
