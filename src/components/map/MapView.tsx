@@ -54,6 +54,7 @@ interface MapViewProps {
   externalIsHallOrderOpen?: boolean;
   onHallOrderOpenChange?: (open: boolean) => void;
   hideInternalControls?: boolean;
+  smartInsertEnabled?: boolean;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -83,6 +84,7 @@ const MapView: React.FC<MapViewProps> = ({
   externalIsHallOrderOpen,
   onHallOrderOpenChange,
   hideInternalControls = false,
+  smartInsertEnabled = true,
 }) => {
   void _onMoveToFirst;
   void _onMoveToLast;
@@ -475,8 +477,8 @@ const MapView: React.FC<MapViewProps> = ({
         }
       });
 
-      if (nearbyVisitItems.length === 0 || !onAddToExecuteListAtPosition) {
-        // 近接アイテムなし or 位置指定コールバック未提供 → デフォルト動作
+      if (nearbyVisitItems.length === 0 || !onAddToExecuteListAtPosition || !smartInsertEnabled) {
+        // 近接アイテムなし or 位置指定コールバック未提供 or スマート挿入OFF → デフォルト動作
         onAddToExecuteList(itemId);
         addToHallVisitList(itemId);
         return;
@@ -485,7 +487,7 @@ const MapView: React.FC<MapViewProps> = ({
       // ダイアログを表示
       setInsertDialogState({ isOpen: true, item });
     },
-    [onAddToExecuteList, onAddToExecuteListAtPosition, items, executeModeItemIds, addToHallVisitList]
+    [onAddToExecuteList, onAddToExecuteListAtPosition, items, executeModeItemIds, addToHallVisitList, smartInsertEnabled]
   );
 
   // ダイアログからの位置選択を処理
