@@ -13,6 +13,7 @@ import MapCanvas from './MapCanvas';
 import CellItemsPopup from './CellItemsPopup';
 import VisitListPanel from './VisitListPanel';
 import HallOrderPanel from './HallOrderPanel';
+import InsertPositionDialog, { InsertPosition } from './InsertPositionDialog';
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { isPointInPolygon } from './HallDefinitionPanel';
 
@@ -28,6 +29,8 @@ interface MapViewProps {
   onUpdateItem?: (item: ShoppingItem) => void;
   onDeleteItem?: (itemId: string) => void;
   onAddNewItem?: (eventDate: string, block: string, number: string) => void;  // 新規アイテム追加
+  // 訪問先リストへの位置指定追加
+  onAddToExecuteListAtPosition?: (itemId: string, referenceItemId: string, position: 'before' | 'after') => void;
   // ホール関連
   halls: HallDefinition[];
   hallRouteSettings: HallRouteSettings;
@@ -65,6 +68,7 @@ const MapView: React.FC<MapViewProps> = ({
   onUpdateItem,
   onDeleteItem,
   onAddNewItem,
+  onAddToExecuteListAtPosition,
   halls,
   hallRouteSettings,
   onUpdateHallRouteSettings,
@@ -88,6 +92,12 @@ const MapView: React.FC<MapViewProps> = ({
   const [isVisitListOpen, setIsVisitListOpen] = useState(false);
   const [internalIsHallOrderOpen, setInternalIsHallOrderOpen] = useState(false);
   const [internalSelectedHallId, setInternalSelectedHallId] = useState<string>('all');
+  
+  // 追加位置選択ダイアログの状態
+  const [insertDialogState, setInsertDialogState] = useState<{
+    isOpen: boolean;
+    item: ShoppingItem | null;
+  }>({ isOpen: false, item: null });
   
   // 外部制御か内部制御かを判定
   const selectedHallId = externalSelectedHallId !== undefined ? externalSelectedHallId : internalSelectedHallId;
@@ -402,39 +412,149 @@ const MapView: React.FC<MapViewProps> = ({
     setPopupState((prev) => ({ ...prev, isOpen: false }));
   }, []);
   
-  // 訪問先に追加（ホールの訪問先リストにも追加）
+  // ホールの訪問先リストにアイテムを追加するヘルパー
+  const addToHallVisitList = useCallback(
+    (itemId: string) => {
+      const item = items.find(i => i.id === itemId);
+      if (!item) return;
+
+      const hallId = getItemHallId(item);
+      if (!hallId) return;
+
+      const updatedHallVisitLists = [...hallRouteSettings.hallVisitLists];
+      const hallListIndex = updatedHallVisitLists.findIndex(l => l.hallId === hallId);
+
+      if (hallListIndex >= 0) {
+        if (!updatedHallVisitLists[hallListIndex].itemIds.includes(itemId)) {
+          updatedHallVisitLists[hallListIndex] = {
+            ...updatedHallVisitLists[hallListIndex],
+            itemIds: [...updatedHallVisitLists[hallListIndex].itemIds, itemId],
+          };
+        }
+      } else {
+        updatedHallVisitLists.push({ hallId, itemIds: [itemId] });
+      }
+
+      onUpdateHallRouteSettings({
+        ...hallRouteSettings,
+        hallVisitLists: updatedHallVisitLists,
+      });
+    },
+    [items, getItemHallId, hallRouteSettings, onUpdateHallRouteSettings]
+  );
+
+  // 訪問先に追加（近接アイテムがある場合はダイアログ表示）
   const handleAddToVisitList = useCallback(
     (itemId: string) => {
-      onAddToExecuteList(itemId);
-      
-      // ホールの訪問先リストにも追加
       const item = items.find(i => i.id === itemId);
-      if (item) {
-        const hallId = getItemHallId(item);
-        if (hallId) {
-          const updatedHallVisitLists = [...hallRouteSettings.hallVisitLists];
-          const hallListIndex = updatedHallVisitLists.findIndex(l => l.hallId === hallId);
-          
-          if (hallListIndex >= 0) {
-            if (!updatedHallVisitLists[hallListIndex].itemIds.includes(itemId)) {
-              updatedHallVisitLists[hallListIndex] = {
-                ...updatedHallVisitLists[hallListIndex],
-                itemIds: [...updatedHallVisitLists[hallListIndex].itemIds, itemId],
-              };
-            }
+      if (!item) return;
+
+      // 同ブロック±3以内で訪問先リストに存在するアイテムを検索
+      const itemNum = extractNumberFromItemNumber(item.number);
+      if (!itemNum) {
+        // ナンバー解析できない場合はデフォルト動作
+        onAddToExecuteList(itemId);
+        addToHallVisitList(itemId);
+        return;
+      }
+
+      const numValue = parseInt(itemNum, 10);
+      const itemBlock = item.block?.trim().toLowerCase() || '';
+
+      const nearbyVisitItems: { item: ShoppingItem; visitIndex: number }[] = [];
+      executeModeItemIds.forEach((eid, idx) => {
+        const existingItem = items.find(i => i.id === eid);
+        if (!existingItem) return;
+        const existingBlock = existingItem.block?.trim().toLowerCase() || '';
+        if (existingBlock !== itemBlock) return;
+        const existingNum = extractNumberFromItemNumber(existingItem.number);
+        if (!existingNum) return;
+        const existingNumValue = parseInt(existingNum, 10);
+        if (Math.abs(existingNumValue - numValue) <= 3) {
+          nearbyVisitItems.push({ item: existingItem, visitIndex: idx });
+        }
+      });
+
+      if (nearbyVisitItems.length === 0 || !onAddToExecuteListAtPosition) {
+        // 近接アイテムなし or 位置指定コールバック未提供 → デフォルト動作
+        onAddToExecuteList(itemId);
+        addToHallVisitList(itemId);
+        return;
+      }
+
+      // ダイアログを表示
+      setInsertDialogState({ isOpen: true, item });
+    },
+    [onAddToExecuteList, onAddToExecuteListAtPosition, items, executeModeItemIds, addToHallVisitList]
+  );
+
+  // ダイアログからの位置選択を処理
+  const handleInsertPositionSelect = useCallback(
+    (position: InsertPosition) => {
+      const item = insertDialogState.item;
+      if (!item) return;
+
+      if (position.type === 'before' || position.type === 'after') {
+        if (onAddToExecuteListAtPosition) {
+          onAddToExecuteListAtPosition(item.id, position.referenceItemId, position.type);
+          addToHallVisitList(item.id);
+        }
+      } else {
+        // hallEnd / listEnd → デフォルト動作（App.tsx側のホール位置計算に任せる）
+        // listEnd の場合は末尾追加のための特別処理が必要
+        if (position.type === 'listEnd' && onAddToExecuteListAtPosition) {
+          // 末尾に追加: 最後のアイテムの after として追加
+          if (executeModeItemIds.length > 0) {
+            onAddToExecuteListAtPosition(item.id, executeModeItemIds[executeModeItemIds.length - 1], 'after');
           } else {
-            updatedHallVisitLists.push({ hallId, itemIds: [itemId] });
+            onAddToExecuteList(item.id);
           }
-          
-          onUpdateHallRouteSettings({
-            ...hallRouteSettings,
-            hallVisitLists: updatedHallVisitLists,
-          });
+          addToHallVisitList(item.id);
+        } else {
+          onAddToExecuteList(item.id);
+          addToHallVisitList(item.id);
         }
       }
+
+      setInsertDialogState({ isOpen: false, item: null });
     },
-    [onAddToExecuteList, items, getItemHallId, hallRouteSettings, onUpdateHallRouteSettings]
+    [insertDialogState.item, onAddToExecuteList, onAddToExecuteListAtPosition, executeModeItemIds, addToHallVisitList]
   );
+
+  // ダイアログ用の近接アイテムデータを計算
+  const insertDialogNearbyItems = useMemo(() => {
+    const item = insertDialogState.item;
+    if (!item) return [];
+
+    const itemNum = extractNumberFromItemNumber(item.number);
+    if (!itemNum) return [];
+
+    const numValue = parseInt(itemNum, 10);
+    const itemBlock = item.block?.trim().toLowerCase() || '';
+
+    const result: { item: ShoppingItem; visitIndex: number }[] = [];
+    executeModeItemIds.forEach((eid, idx) => {
+      const existingItem = items.find(i => i.id === eid);
+      if (!existingItem) return;
+      const existingBlock = existingItem.block?.trim().toLowerCase() || '';
+      if (existingBlock !== itemBlock) return;
+      const existingNum = extractNumberFromItemNumber(existingItem.number);
+      if (!existingNum) return;
+      const existingNumValue = parseInt(existingNum, 10);
+      if (Math.abs(existingNumValue - numValue) <= 3) {
+        result.push({ item: existingItem, visitIndex: idx });
+      }
+    });
+
+    return result;
+  }, [insertDialogState.item, items, executeModeItemIds]);
+
+  // ダイアログ用のホール定義有無
+  const insertDialogHasHall = useMemo(() => {
+    const item = insertDialogState.item;
+    if (!item) return false;
+    return getItemHallId(item) !== null;
+  }, [insertDialogState.item, getItemHallId]);
   
   // 訪問先から除外
   const handleRemoveFromVisitList = useCallback(
@@ -583,6 +703,18 @@ const MapView: React.FC<MapViewProps> = ({
         getItemCountInHall={getItemCountInHall}
         onReorderExecuteList={onReorderExecuteList}
       />
+
+      {/* 追加位置選択ダイアログ */}
+      {insertDialogState.item && (
+        <InsertPositionDialog
+          isOpen={insertDialogState.isOpen}
+          addingItem={insertDialogState.item}
+          nearbyVisitItems={insertDialogNearbyItems}
+          hasHallDefinition={insertDialogHasHall}
+          onSelect={handleInsertPositionSelect}
+          onCancel={() => setInsertDialogState({ isOpen: false, item: null })}
+        />
+      )}
     </div>
   );
 };
