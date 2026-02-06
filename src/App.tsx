@@ -3053,6 +3053,17 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
   const [mapIsRouteVisible, setMapIsRouteVisible] = useState(true);
   const [mapIsHallOrderOpen, setMapIsHallOrderOpen] = useState(false);
   const [mapHallSelectorOpen, setMapHallSelectorOpen] = useState(false);
+  const [mapSmartInsertEnabled, setMapSmartInsertEnabled] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('mapSmartInsertEnabled');
+      return saved !== null ? saved === 'true' : true; // デフォルトON
+    } catch { return true; }
+  });
+
+  // スマート位置選択の設定を永続化
+  React.useEffect(() => {
+    try { localStorage.setItem('mapSmartInsertEnabled', String(mapSmartInsertEnabled)); } catch {}
+  }, [mapSmartInsertEnabled]);
   
   // セル選択モードの状態（ブロック定義用）
   const [cellSelectionMode, setCellSelectionMode] = useState<{
@@ -3086,6 +3097,25 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setVisitListHasUnsavedChanges(false);
     setVisitListPanelOpen(true);
   }, [activeEventName, executeModeItems]);
+
+  // 訪問先リスト表示中にマップタブを切り替えた場合、新しいマップの訪問先リストに切り替え
+  React.useEffect(() => {
+    if (!visitListPanelOpen || !isMapTab || !activeEventName) return;
+    // 現在のパネルが別のマップタブを指していたら切り替え
+    if (visitListPanelMapTab !== activeTab) {
+      // 未保存の変更がある場合は自動確定
+      if (visitListHasUnsavedChanges) {
+        setVisitListHasUnsavedChanges(false);
+      }
+      const dayMatch = activeTab.match(/^(.+)マップ$/);
+      if (!dayMatch) return;
+      const dayName = dayMatch[1];
+      const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
+      setVisitListOriginalOrder([...executeIds]);
+      setVisitListPanelMapTab(activeTab);
+      setVisitListHasUnsavedChanges(false);
+    }
+  }, [activeTab, isMapTab, activeEventName, visitListPanelOpen, visitListPanelMapTab, visitListHasUnsavedChanges, executeModeItems]);
 
   // 訪問先リストの順序を更新
   const handleVisitListOrderUpdate = useCallback((newOrderItems: ShoppingItem[]) => {
@@ -4354,6 +4384,24 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 8v4a4 4 0 004 4h4M14 12l4 4m0 0l-4 4" />
                     </svg>
                   </button>
+                  
+                  {/* スマート位置選択ON/OFF */}
+                  <button
+                    onClick={() => setMapSmartInsertEnabled(!mapSmartInsertEnabled)}
+                    className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                      mapSmartInsertEnabled 
+                        ? 'bg-green-100 dark:bg-green-900/50 hover:bg-green-200 dark:hover:bg-green-800' 
+                        : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
+                    }`}
+                    title={mapSmartInsertEnabled ? 'スマート追加ON' : 'スマート追加OFF'}
+                    style={{ WebkitTapHighlightColor: 'transparent', minWidth: '44px', minHeight: '44px' }}
+                    type="button"
+                  >
+                    <svg className={`w-5 h-5 pointer-events-none ${mapSmartInsertEnabled ? 'text-green-600 dark:text-green-400' : 'text-slate-600 dark:text-slate-400'}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m0-8l-4-4m4 4l4-4" />
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 12h14" />
+                    </svg>
+                  </button>
                 </>
               )}
             </div>
@@ -4503,6 +4551,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
             externalIsHallOrderOpen={mapIsHallOrderOpen}
             onHallOrderOpenChange={setMapIsHallOrderOpen}
             hideInternalControls={true}
+            smartInsertEnabled={mapSmartInsertEnabled}
           />
         )}
         {activeEventName && mainContentVisible && (
