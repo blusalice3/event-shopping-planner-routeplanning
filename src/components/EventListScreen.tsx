@@ -46,14 +46,17 @@ interface EventListScreenProps {
 
 const EventListScreen: React.FC<EventListScreenProps> = ({ eventNames, onSelect, onDelete, onExport, onUpdate, onRename, onImportMap, onImportExportFile }) => {
   const longPressTimeout = useRef<number | null>(null);
+  const longPressTriggeredRef = useRef<boolean>(false);
   const [menuVisibleFor, setMenuVisibleFor] = useState<string | null>(null);
 
   const handlePointerDown = (eventName: string) => {
+    longPressTriggeredRef.current = false;
     // Clear any existing menu
     if (menuVisibleFor !== eventName) {
         setMenuVisibleFor(null);
     }
     longPressTimeout.current = window.setTimeout(() => {
+      longPressTriggeredRef.current = true;
       setMenuVisibleFor(eventName);
     }, 500); // 500ms for long press
   };
@@ -65,7 +68,20 @@ const EventListScreen: React.FC<EventListScreenProps> = ({ eventNames, onSelect,
     }
   };
 
+  const handlePointerLeave = () => {
+    // マウスが要素外に出た場合もタイマーをクリア
+    if (longPressTimeout.current) {
+      clearTimeout(longPressTimeout.current);
+      longPressTimeout.current = null;
+    }
+  };
+
   const handleClick = (eventName: string) => {
+    // 長押しでメニューが表示された直後のclickイベントを無視
+    if (longPressTriggeredRef.current) {
+      longPressTriggeredRef.current = false;
+      return;
+    }
     if (menuVisibleFor === eventName) {
         setMenuVisibleFor(null);
     } else if (menuVisibleFor === null) {
@@ -134,6 +150,7 @@ const EventListScreen: React.FC<EventListScreenProps> = ({ eventNames, onSelect,
                 className="p-4 flex justify-between items-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors duration-200"
                 onMouseDown={() => handlePointerDown(name)}
                 onMouseUp={handlePointerUp}
+                onMouseLeave={handlePointerLeave}
                 onTouchStart={() => handlePointerDown(name)}
                 onTouchEnd={handlePointerUp}
                 onClick={() => handleClick(name)}
@@ -221,4 +238,3 @@ const EventListScreen: React.FC<EventListScreenProps> = ({ eventNames, onSelect,
 };
 
 export default EventListScreen;
-
