@@ -57,7 +57,7 @@ const InsertPositionDialog: React.FC<InsertPositionDialogProps> = ({
           <div className="text-sm font-bold">追加位置を選択</div>
           <div className="text-xs opacity-90 mt-1">
             {addingItem.block}-{addingItem.number}
-            {addingItem.circleName ? ` (${addingItem.circleName})` : ''}
+            {addingItem.circle ? ` (${addingItem.circle})` : ''}
           </div>
         </div>
 
@@ -66,7 +66,7 @@ const InsertPositionDialog: React.FC<InsertPositionDialogProps> = ({
           {sorted.map((nearby) => {
             const nearbyNum = extractNumeric(nearby.item.number);
             const label = `${nearby.item.block}-${nearby.item.number}`;
-            const circle = nearby.item.circleName ? ` ${nearby.item.circleName}` : '';
+            const circle = nearby.item.circle ? ` ${nearby.item.circle}` : '';
             // 訪問先リスト内での順番を1始まりで表示
             const orderLabel = `#${nearby.visitIndex + 1}`;
 
