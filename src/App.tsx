@@ -4603,6 +4603,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 hallDefinitions={activeEventName && activeTab ? hallDefinitions[activeEventName]?.[`${eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}マップ`] : undefined}
                 onHideHeader={setFocusModeHideHeader}
                 onAddItem={handleAddItemFromFocusMode}
+                onEditRequest={handleEditRequest}
+                onDeleteRequest={handleDeleteRequest}
                 appZoomLevel={zoomLevel}
               />
             ) : (
