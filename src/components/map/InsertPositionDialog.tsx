@@ -150,11 +150,9 @@ const PreviewMode: React.FC<{
     return new Set(nearbyVisitItems.map(n => n.visitIndex));
   }, [nearbyVisitItems]);
 
-  // 表示範囲と挿入ポイントを計算
-  const { displayItems, insertionSlots } = useMemo(() => {
-    if (nearbyVisitItems.length === 0) {
-      return { displayItems: [] as VisitListEntry[], insertionSlots: [] as { letter: string; position: InsertPosition; slotAfterVisitIndex: number }[] };
-    }
+  // 表示範囲を計算
+  const displayItems = useMemo(() => {
+    if (nearbyVisitItems.length === 0) return [] as VisitListEntry[];
 
     const sorted = [...nearbyVisitItems].sort((a, b) => a.visitIndex - b.visitIndex);
     const minIdx = sorted[0].visitIndex;
@@ -163,42 +161,8 @@ const PreviewMode: React.FC<{
     const rangeStart = Math.max(0, minIdx - CONTEXT_COUNT);
     const rangeEnd = Math.min(allVisitItems.length - 1, maxIdx + CONTEXT_COUNT);
 
-    const display = allVisitItems.filter(v => v.visitIndex >= rangeStart && v.visitIndex <= rangeEnd);
-
-    // 挿入候補スロットを生成
-    // 各近接アイテムの直前(=1個前のvisitIndexの後)と、最後の近接アイテムの直後に配置
-    const slots: { letter: string; position: InsertPosition; slotAfterVisitIndex: number }[] = [];
-    let letterIdx = 0;
-
-    // 最初の近接アイテムの前
-    slots.push({
-      letter: indexToLetter(letterIdx++),
-      position: { type: 'before', referenceItemId: sorted[0].item.id },
-      slotAfterVisitIndex: sorted[0].visitIndex - 1,
-    });
-
-    // 各近接アイテムの後
-    for (let i = 0; i < sorted.length; i++) {
-      slots.push({
-        letter: indexToLetter(letterIdx++),
-        position: { type: 'after', referenceItemId: sorted[i].item.id },
-        slotAfterVisitIndex: sorted[i].visitIndex,
-      });
-    }
-
-    return { displayItems: display, insertionSlots: slots };
+    return allVisitItems.filter(v => v.visitIndex >= rangeStart && v.visitIndex <= rangeEnd);
   }, [nearbyVisitItems, allVisitItems]);
-
-  // slotAfterVisitIndex でグループ化したマップ
-  const slotsMap = useMemo(() => {
-    const map = new Map<number, typeof insertionSlots>();
-    for (const slot of insertionSlots) {
-      const existing = map.get(slot.slotAfterVisitIndex) || [];
-      existing.push(slot);
-      map.set(slot.slotAfterVisitIndex, existing);
-    }
-    return map;
-  }, [insertionSlots]);
 
   return (
     <div className="flex-1 overflow-y-auto p-2">
@@ -209,24 +173,23 @@ const PreviewMode: React.FC<{
           const nearbyNum = extractNumeric(entry.item.number);
           const label = `${entry.item.block}-${entry.item.number}`;
           const circle = entry.item.circle || '';
+          const letter = indexToLetter(idx);
 
-          // この行の前に表示する挿入候補（= visitIndex - 1 のスロット）
-          const slotsBefore = idx === 0 || isNearby
-            ? slotsMap.get(entry.visitIndex - 1) || []
-            : [];
-
-          // 最後の行の後に表示する挿入候補
+          // 最後の行の後の挿入候補
           const isLast = idx === displayItems.length - 1;
-          const slotsAfterLast = isLast
-            ? slotsMap.get(entry.visitIndex) || []
-            : [];
+          const lastLetter = indexToLetter(displayItems.length);
 
           return (
             <React.Fragment key={entry.item.id}>
               {/* この行の前の挿入候補 */}
-              {slotsBefore.map(slot => (
-                <InsertMarker key={slot.letter} letter={slot.letter} onSelect={() => onSelect(slot.position)} />
-              ))}
+              <InsertMarker
+                letter={letter}
+                onSelect={() => onSelect(
+                  idx === 0
+                    ? { type: 'before', referenceItemId: entry.item.id }
+                    : { type: 'after', referenceItemId: displayItems[idx - 1].item.id }
+                )}
+              />
 
               {/* アイテム行 */}
               <div
@@ -251,9 +214,12 @@ const PreviewMode: React.FC<{
               </div>
 
               {/* 最後の行の後の挿入候補 */}
-              {slotsAfterLast.map(slot => (
-                <InsertMarker key={slot.letter} letter={slot.letter} onSelect={() => onSelect(slot.position)} />
-              ))}
+              {isLast && (
+                <InsertMarker
+                  letter={lastLetter}
+                  onSelect={() => onSelect({ type: 'after', referenceItemId: entry.item.id })}
+                />
+              )}
             </React.Fragment>
           );
         })}
