@@ -3,11 +3,12 @@ import {
   DayMapData,
   ShoppingItem,
   ZoomLevel,
-  ZOOM_LEVELS,
   HallDefinition,
   HallRouteSettings,
   BlockDefinition,
   CellGroup,
+  MIN_ZOOM,
+  MAX_ZOOM,
 } from '../../types';
 import MapCanvas from './MapCanvas';
 import CellItemsPopup from './CellItemsPopup';
@@ -91,7 +92,7 @@ const MapView: React.FC<MapViewProps> = ({
   void _onMoveToFirst;
   void _onMoveToLast;
   
-  const [zoomLevel, setZoomLevel] = useState<ZoomLevel>(100);
+  const [zoomLevel, setZoomLevel] = useState<number>(100);
   const [internalIsRouteVisible, setInternalIsRouteVisible] = useState(true);
   const [isVisitListOpen, setIsVisitListOpen] = useState(false);
   const [internalIsHallOrderOpen, setInternalIsHallOrderOpen] = useState(false);
@@ -649,19 +650,11 @@ const MapView: React.FC<MapViewProps> = ({
         </div>
       )}
       
-      {/* ズームコントロール - MapView内左下に固定 */}
+      {/* ズーム率表示ラベル - MapView内左下に固定 */}
       <div className="absolute bottom-4 left-4 z-10">
-        <select
-          value={zoomLevel}
-          onChange={(e) => setZoomLevel(Number(e.target.value) as ZoomLevel)}
-          className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm shadow-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-        >
-          {ZOOM_LEVELS.map((level) => (
-            <option key={level} value={level}>
-              {level}%
-            </option>
-          ))}
-        </select>
+        <div className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm shadow-md text-slate-700 dark:text-slate-300 select-none">
+          {zoomLevel}%
+        </div>
       </div>
       
       {/* マップキャンバス */}
@@ -676,6 +669,7 @@ const MapView: React.FC<MapViewProps> = ({
         selectedHall={selectedHallId !== 'all' ? halls.find(h => h.id === selectedHallId) : undefined}
         vertexSelectionMode={vertexSelectionMode}
         highlightedCell={highlightedCell}
+        onZoomChange={setZoomLevel}
       />
       
       {/* セルアイテムポップアップ */}

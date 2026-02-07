@@ -69,6 +69,7 @@ export interface CellData {
   col: number;
   value: string | number | null;
   backgroundColor: string | null;
+  fontColor?: string | null;  // フォント色（Excelから抽出）
   borders: CellBorders;
   isMerged?: boolean;
   mergeParent?: { row: number; col: number };
@@ -243,9 +244,12 @@ export interface RouteSegment {
 }
 
 // ズームレベル
-export type ZoomLevel = 30 | 50 | 75 | 100 | 125 | 150;
+export type ZoomLevel = number;
 
-export const ZOOM_LEVELS: ZoomLevel[] = [30, 50, 75, 100, 125, 150];
+export const ZOOM_LEVELS: number[] = [30, 50, 75, 100, 125, 150];
+
+export const MIN_ZOOM = 30;
+export const MAX_ZOOM = 200;
 
 // ===== ホール（表示エリア）定義用の型 =====
 

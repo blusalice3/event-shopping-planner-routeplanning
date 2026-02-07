@@ -187,6 +187,36 @@ function getBackgroundColorFromExcelJS(fill?: ExcelJS.Fill): string | null {
   return null;
 }
 
+// フォント色を取得（テーマカラー、インデックスカラー、ARGBに対応）
+function getFontColorFromExcelJS(font?: Partial<ExcelJS.Font>): string | null {
+  if (!font || !font.color) return null;
+  
+  const fontColor = font.color;
+  
+  // ARGB形式の場合
+  if (fontColor.argb) {
+    const argb = fontColor.argb;
+    const hex = `#${argb.length === 8 ? argb.substring(2) : argb}`;
+    return hex;
+  }
+  
+  // テーマカラーの場合
+  if (fontColor.theme !== undefined) {
+    const tint = (fontColor as { theme: number; tint?: number }).tint;
+    const color = getThemeColor(fontColor.theme, tint);
+    return color;
+  }
+  
+  // インデックスカラーの場合
+  if ((fontColor as { indexed?: number }).indexed !== undefined) {
+    const indexed = (fontColor as { indexed: number }).indexed;
+    const color = getIndexedColor(indexed);
+    return color;
+  }
+  
+  return null;
+}
+
 // セルの値を抽出（richText形式にも対応）
 function extractCellValue(cellValue: ExcelJS.CellValue): string | number | null {
   if (cellValue === null || cellValue === undefined) return null;
@@ -602,6 +632,9 @@ async function parseMapSheetWithExcelJS(
       
       const backgroundColor = getBackgroundColorFromExcelJS(cell.fill);
       
+      // フォント色を取得
+      const fontColor = getFontColorFromExcelJS(cell.font);
+      
       const borders: CellBorders = {
         top: convertExcelJSBorder(cell.border?.top),
         right: convertExcelJSBorder(cell.border?.right),
@@ -619,6 +652,7 @@ async function parseMapSheetWithExcelJS(
         col,
         value,
         backgroundColor,
+        fontColor,
         borders,
         isMerged,
         mergeParent,

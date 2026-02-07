@@ -7,6 +7,8 @@ import {
   MergedCellInfo,
   MapCellStateDetail,
   HallDefinition,
+  MIN_ZOOM,
+  MAX_ZOOM,
 } from '../../types';
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { generateRouteSegments, simplifyPath } from '../../utils/pathfinding';
@@ -24,6 +26,7 @@ interface MapCanvasProps {
     clickedVertices: { row: number; col: number }[];
   } | null;
   highlightedCell?: { row: number; col: number } | null;
+  onZoomChange?: (newZoom: number) => void;
 }
 
 const BASE_CELL_SIZE = 28; // 基本セルサイズ
@@ -40,6 +43,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   selectedHall,
   vertexSelectionMode,
   highlightedCell,
+  onZoomChange,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -55,16 +59,22 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const scale = zoomLevel / 100;
   const cellSize = BASE_CELL_SIZE * scale;
   
-  // 詳細表示かどうか（拡大時は詳細、縮小時はシンプル）
-  const isDetailedView = zoomLevel >= 80;
-  const showNumbers = zoomLevel >= 60;
-  const showBorders = zoomLevel >= 40;
+  // 常に100%時と同等の情報量を表示（ズームレベルに関係なく全情報を描画）
+  const isDetailedView = true;
+  const showNumbers = true;
+  const showBorders = true;
   
   // 前回のセルサイズを記憶
   const prevCellSizeRef = useRef<number>(cellSize);
   const initializedRef = useRef<boolean>(false);
+  
+  // ピンチズーム用の状態
+  const pinchStartDistRef = useRef<number>(0);
+  const pinchStartZoomRef = useRef<number>(zoomLevel);
+  const pinchCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
 
-  // ズームレベル変更時に視点を維持するオフセット調整
+  // ズームレベル変更時に視点を維持するオフセット調整（外部からのズーム変更に対応）
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -78,25 +88,154 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       return;
     }
     
-    // ズーム比率
-    
-    // コンテナの中央座標
+    // コンテナの中央座標を基準にズーム（外部変更の場合のフォールバック）
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
     const centerX = containerWidth / 2;
     const centerY = containerHeight / 2;
     
-    // 現在の中央のマップ座標
     const mapCenterX = (centerX - offset.x) / prevCellSize;
     const mapCenterY = (centerY - offset.y) / prevCellSize;
     
-    // 新しいオフセット（中央の座標を維持）
     const newOffsetX = centerX - mapCenterX * cellSize;
     const newOffsetY = centerY - mapCenterY * cellSize;
     
     setOffset({ x: newOffsetX, y: newOffsetY });
     prevCellSizeRef.current = cellSize;
   }, [cellSize, offset.x, offset.y]);
+
+  // ホイールズーム処理（PCブラウザ: マウスカーソル位置を中心にズーム）
+  const handleWheel = useCallback((e: WheelEvent) => {
+    e.preventDefault();
+    if (!onZoomChange) return;
+    
+    const container = containerRef.current;
+    if (!container) return;
+    
+    const rect = container.getBoundingClientRect();
+    // マウス位置（コンテナ内座標）
+    const mouseX = e.clientX - rect.left;
+    const mouseY = e.clientY - rect.top;
+    
+    // 現在のズームレベル
+    const currentZoom = zoomLevel;
+    // ズーム量（スクロール量に応じて）
+    const zoomDelta = -e.deltaY * 0.1;
+    const newZoom = Math.round(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentZoom + zoomDelta)));
+    
+    if (newZoom === currentZoom) return;
+    
+    // マウス位置のマップ座標を計算
+    const currentCellSize = BASE_CELL_SIZE * (currentZoom / 100);
+    const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
+    
+    const mapX = (mouseX - offset.x) / currentCellSize;
+    const mapY = (mouseY - offset.y) / currentCellSize;
+    
+    // 新しいオフセット（マウス位置を固定）
+    const newOffsetX = mouseX - mapX * newCellSize;
+    const newOffsetY = mouseY - mapY * newCellSize;
+    
+    setOffset({ x: newOffsetX, y: newOffsetY });
+    prevCellSizeRef.current = newCellSize;
+    onZoomChange(newZoom);
+  }, [zoomLevel, offset, onZoomChange]);
+
+  // ピンチズーム処理（スマートフォン/タブレット: ピンチ中心を基準にズーム）
+  const handleTouchStart = useCallback((e: TouchEvent) => {
+    // タッチポイントを記録
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      activeTouchesRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    
+    if (activeTouchesRef.current.size === 2) {
+      e.preventDefault();
+      const touches = Array.from(activeTouchesRef.current.values());
+      const dx = touches[1].x - touches[0].x;
+      const dy = touches[1].y - touches[0].y;
+      pinchStartDistRef.current = Math.sqrt(dx * dx + dy * dy);
+      pinchStartZoomRef.current = zoomLevel;
+      
+      // ピンチ中心（コンテナ内座標）
+      const container = containerRef.current;
+      if (container) {
+        const rect = container.getBoundingClientRect();
+        pinchCenterRef.current = {
+          x: (touches[0].x + touches[1].x) / 2 - rect.left,
+          y: (touches[0].y + touches[1].y) / 2 - rect.top,
+        };
+      }
+    }
+  }, [zoomLevel]);
+
+  const handleTouchMove = useCallback((e: TouchEvent) => {
+    // タッチポイントを更新
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      const touch = e.changedTouches[i];
+      activeTouchesRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+    }
+    
+    if (activeTouchesRef.current.size === 2 && onZoomChange) {
+      e.preventDefault();
+      const touches = Array.from(activeTouchesRef.current.values());
+      const dx = touches[1].x - touches[0].x;
+      const dy = touches[1].y - touches[0].y;
+      const currentDist = Math.sqrt(dx * dx + dy * dy);
+      
+      if (pinchStartDistRef.current === 0) return;
+      
+      const scaleRatio = currentDist / pinchStartDistRef.current;
+      const newZoom = Math.round(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, pinchStartZoomRef.current * scaleRatio)));
+      
+      if (newZoom === zoomLevel) return;
+      
+      // ピンチ中心のマップ座標を計算
+      const currentCellSize = BASE_CELL_SIZE * (zoomLevel / 100);
+      const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
+      const cx = pinchCenterRef.current.x;
+      const cy = pinchCenterRef.current.y;
+      
+      const mapX = (cx - offset.x) / currentCellSize;
+      const mapY = (cy - offset.y) / currentCellSize;
+      
+      const newOffsetX = cx - mapX * newCellSize;
+      const newOffsetY = cy - mapY * newCellSize;
+      
+      setOffset({ x: newOffsetX, y: newOffsetY });
+      prevCellSizeRef.current = newCellSize;
+      onZoomChange(newZoom);
+    }
+  }, [zoomLevel, offset, onZoomChange]);
+
+  const handleTouchEnd = useCallback((e: TouchEvent) => {
+    for (let i = 0; i < e.changedTouches.length; i++) {
+      activeTouchesRef.current.delete(e.changedTouches[i].identifier);
+    }
+    if (activeTouchesRef.current.size < 2) {
+      pinchStartDistRef.current = 0;
+    }
+  }, []);
+
+  // ホイール・タッチイベントの登録
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    container.addEventListener('touchstart', handleTouchStart, { passive: false });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd);
+    container.addEventListener('touchcancel', handleTouchEnd);
+    
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+      container.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [handleWheel, handleTouchStart, handleTouchMove, handleTouchEnd]);
 
   // ホール選択時にオフセットを自動調整してホールを画面内に配置
   // selectedHallが変更された時のみ実行（ズーム変更時は実行しない）
@@ -557,7 +696,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         } else if (state?.hasItems) {
           ctx.fillStyle = '#1565C0';  // 青：通常の未訪問アイテムあり
         } else {
-          ctx.fillStyle = '#333333';
+          ctx.fillStyle = cell.fontColor || '#333333';
         }
         
         // 縦書きの場合
@@ -1082,6 +1221,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   
   // ドラッグ処理
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    // ピンチズーム中はドラッグを無視
+    if (activeTouchesRef.current.size >= 2) return;
     setIsDragging(false);
     setDragStart({ x: e.clientX, y: e.clientY });
     setDragStartOffset({ ...offset });
@@ -1089,6 +1230,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.buttons !== 1) return;
+    // ピンチズーム中はドラッグを無視
+    if (activeTouchesRef.current.size >= 2) return;
     
     const dx = e.clientX - dragStart.x;
     const dy = e.clientY - dragStart.y;
