@@ -4795,24 +4795,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         </button>
       )}
 
-      {/* フローティング購入状態フィルタ（実行モード・ヘッダー非表示時にフッター中央） */}
-      {activeEventName && currentMode === 'execute' && (
-        <div className="fixed bottom-16 left-1/2 -translate-x-1/2 z-50 bg-black/80 text-white text-[10px] px-2 py-1 rounded font-mono pointer-events-none">
-          H:{showHeaderBar?'T':'F'} T:{showTabBar?'T':'F'} M:{currentMode} MCV:{mainContentVisible?'T':'F'} I:{items.length} OR:{uiVisibilityOverride?'T':'F'}
-        </div>
-      )}
-      {!showHeaderBar && activeEventName && currentMode === 'execute' && mainContentVisible && items.length > 0 && (
-        <button
-          onClick={handleSortToggle}
-          className="fixed bottom-4 left-1/2 -translate-x-1/2 z-20 px-4 py-2 rounded-full shadow-lg text-sm font-medium transition-all touch-manipulation select-none bg-white/90 dark:bg-slate-700/90 backdrop-blur-sm border border-slate-200 dark:border-slate-600 text-blue-600 dark:text-blue-300 hover:bg-blue-50 dark:hover:bg-slate-600 active:bg-blue-100 dark:active:bg-slate-500"
-          title="購入状態フィルタ切替"
-          style={{ WebkitTapHighlightColor: 'transparent' }}
-          type="button"
-        >
-          {sortLabels[sortState]}
-        </button>
-      )}
-
       <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
         {activeTab === 'eventList' && (
             <EventListScreen 
@@ -5270,6 +5252,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
               items={visibleItems} 
               layoutMode={layoutMode}
               onLayoutModeChange={setLayoutMode}
+              filterLabel={!showHeaderBar ? sortLabels[sortState] : undefined}
+              onFilterToggle={!showHeaderBar ? handleSortToggle : undefined}
             />
           )}
         </>

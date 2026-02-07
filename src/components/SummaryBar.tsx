@@ -5,9 +5,11 @@ interface SummaryBarProps {
   items: ShoppingItem[];
   layoutMode: 'pc' | 'smartphone';
   onLayoutModeChange: (mode: 'pc' | 'smartphone') => void;
+  filterLabel?: string;
+  onFilterToggle?: () => void;
 }
 
-const SummaryBar: React.FC<SummaryBarProps> = ({ items, layoutMode, onLayoutModeChange }) => {
+const SummaryBar: React.FC<SummaryBarProps> = ({ items, layoutMode, onLayoutModeChange, filterLabel, onFilterToggle }) => {
   const summary = useMemo(() => {
     const totalItems = items.length;
     const purchasedItems = items.filter(item => item.purchaseStatus === 'Purchased').length;
@@ -29,6 +31,17 @@ const SummaryBar: React.FC<SummaryBarProps> = ({ items, layoutMode, onLayoutMode
           <div className="text-slate-700 dark:text-slate-300">
             <span className="font-semibold">{summary.purchasedItems}</span> / {summary.totalItems} 件購入済み
           </div>
+          {filterLabel && onFilterToggle && (
+            <button
+              onClick={onFilterToggle}
+              className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 touch-manipulation select-none"
+              title="購入状態フィルタ切替"
+              style={{ WebkitTapHighlightColor: 'transparent' }}
+              type="button"
+            >
+              {filterLabel}
+            </button>
+          )}
           <div className="flex items-center gap-3">
             <div>
               <span className="text-sm text-slate-500 dark:text-slate-400">残りの合計: </span>
