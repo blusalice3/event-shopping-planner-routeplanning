@@ -17,7 +17,7 @@ interface FocusModeProps {
   // マップ関連の追加props
   mapData?: { [dayMapName: string]: DayMapData };
   hallDefinitions?: HallDefinition[];
-  onHideHeader?: (hide: boolean) => void;
+  onMapVisibilityChange?: (isMapVisible: boolean) => void;
   // 新規アイテム追加（purchaseStatusを含めることが可能）
   onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
   // アイテム編集・削除
@@ -51,7 +51,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   onLayoutModeChange,
   mapData,
   hallDefinitions,
-  onHideHeader,
+  onMapVisibilityChange,
   onAddItem,
   onEditRequest,
   onDeleteRequest,
@@ -599,12 +599,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
   }, [notification]);
 
-  // マップ表示時のヘッダー非表示
+  // マップ表示状態の通知
   useEffect(() => {
-    if (onHideHeader) {
-      onHideHeader(isMapVisible && layoutMode === 'smartphone');
+    if (onMapVisibilityChange) {
+      onMapVisibilityChange(isMapVisible);
     }
-  }, [isMapVisible, layoutMode, onHideHeader]);
+  }, [isMapVisible, onMapVisibilityChange]);
 
   // ナビゲーションボタンの位置を調整
   useEffect(() => {

@@ -99,11 +99,42 @@ const App: React.FC = () => {
   const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
-  // レイアウトモード状態
-  const [layoutMode, setLayoutMode] = useState<'pc' | 'smartphone'>('pc');
+  // レイアウトモード状態（ビューポート幅で初期化）
+  const [layoutMode, setLayoutMode] = useState<'pc' | 'smartphone'>(() =>
+    typeof window !== 'undefined' && window.innerWidth < 768 ? 'smartphone' : 'pc'
+  );
   
-  // 集中モード用: スマートフォンでマップ表示時にヘッダーを非表示
-  const [focusModeHideHeader, setFocusModeHideHeader] = useState(false);
+  // UI表示設定（ヘッダー/タブバーの表示制御）
+  type UIVisibilityConfig = { header: boolean; tabBar: boolean };
+  type UIVisibilitySettings = {
+    focus_sp_mapOn: UIVisibilityConfig;
+    focus_sp_mapOff: UIVisibilityConfig;
+    focus_pc_mapOn: UIVisibilityConfig;
+    focus_pc_mapOff: UIVisibilityConfig;
+    execute_sp: UIVisibilityConfig;
+    execute_pc: UIVisibilityConfig;
+  };
+  const DEFAULT_UI_VISIBILITY: UIVisibilitySettings = {
+    focus_sp_mapOn: { header: false, tabBar: false },
+    focus_sp_mapOff: { header: true, tabBar: true },
+    focus_pc_mapOn: { header: true, tabBar: true },
+    focus_pc_mapOff: { header: true, tabBar: true },
+    execute_sp: { header: true, tabBar: true },
+    execute_pc: { header: true, tabBar: true },
+  };
+  
+  const [uiVisibilitySettings, setUiVisibilitySettings] = useState<UIVisibilitySettings>(() => {
+    try {
+      const saved = localStorage.getItem('uiVisibilitySettings');
+      if (saved) {
+        return { ...DEFAULT_UI_VISIBILITY, ...JSON.parse(saved) };
+      }
+    } catch { /* ignore */ }
+    return DEFAULT_UI_VISIBILITY;
+  });
+  const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
+  const [uiSettingsPanelOpen, setUiSettingsPanelOpen] = useState(false);
+  const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
   
   // ダークモード状態 ('system' | 'light' | 'dark')
   const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>(() => {
@@ -160,6 +191,11 @@ const App: React.FC = () => {
       return () => mediaQuery.removeEventListener('change', handler);
     }
   }, [themeMode]);
+
+  // UI表示設定の永続化
+  useEffect(() => {
+    localStorage.setItem('uiVisibilitySettings', JSON.stringify(uiVisibilitySettings));
+  }, [uiVisibilitySettings]);
 
   // IndexedDBからデータを読み込み
   useEffect(() => {
@@ -435,6 +471,33 @@ const App: React.FC = () => {
     }
     return 'edit';
   }, [activeEventName, dayModes, activeTab, eventDates, isMapTab]);
+
+  // 現在の条件に基づくヘッダー/タブバー表示状態
+  const { showHeaderBar, showTabBar, rawHideSomething } = useMemo(() => {
+    if (!activeEventName) {
+      return { showHeaderBar: true, showTabBar: true, rawHideSomething: false };
+    }
+    const layout = layoutMode === 'smartphone' ? 'sp' : 'pc';
+    let rawHeader = true, rawTabBar = true;
+    
+    if (currentMode === 'focus') {
+      const key = `focus_${layout}_${focusModeMapVisible ? 'mapOn' : 'mapOff'}` as keyof UIVisibilitySettings;
+      const config = uiVisibilitySettings[key];
+      rawHeader = config.header;
+      rawTabBar = config.tabBar;
+    } else if (currentMode === 'execute') {
+      const key = `execute_${layout}` as keyof UIVisibilitySettings;
+      const config = uiVisibilitySettings[key];
+      rawHeader = config.header;
+      rawTabBar = config.tabBar;
+    }
+    
+    const hideSomething = !rawHeader || !rawTabBar;
+    if (uiVisibilityOverride) {
+      return { showHeaderBar: true, showTabBar: true, rawHideSomething: hideSomething };
+    }
+    return { showHeaderBar: rawHeader, showTabBar: rawTabBar, rawHideSomething: hideSomething };
+  }, [uiVisibilityOverride, activeEventName, currentMode, layoutMode, focusModeMapVisible, uiVisibilitySettings]);
 
   const handleBulkAdd = useCallback((eventName: string, newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string; layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }>; source?: 'spreadsheet' | 'app' }) => {
     // sourceを決定: metadataで指定されていればそれを使用、urlがあればspreadsheet、なければapp
@@ -1367,10 +1430,13 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setSelectedItemIds(new Set());
     setCandidateNumberSortDirection(null);
     
-    // 集中モード以外に切り替えた場合、ヘッダーを再表示
+    // 集中モード以外に切り替えた場合、マップ表示状態をリセット
     if (mode !== 'focus') {
-      setFocusModeHideHeader(false);
+      setFocusModeMapVisible(false);
     }
+    // モード切替時にオーバーライドをリセット
+    setUiVisibilityOverride(false);
+    setUiSettingsPanelOpen(false);
     
     // スクロール先のアイテムIDが指定されている場合
     if (scrollToItemId) {
@@ -4200,8 +4266,9 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-200 font-sans">
-      {!focusModeHideHeader && (
+      {(showHeaderBar || showTabBar) && (
       <header className="bg-white dark:bg-slate-800 shadow-sm sticky top-0 z-10">
+        {showHeaderBar && (
         <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
           <div>
             <div className="flex items-center gap-3">
@@ -4264,6 +4331,135 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                   </svg>
                 )}
               </button>
+              
+              {/* UI表示設定（歯車アイコン） */}
+              <div className="relative">
+                <button
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    setUiSettingsPanelOpen(!uiSettingsPanelOpen);
+                  }}
+                  className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                    uiSettingsPanelOpen
+                      ? 'bg-slate-200 dark:bg-slate-700'
+                      : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
+                  }`}
+                  title="表示設定"
+                  style={{ WebkitTapHighlightColor: 'transparent', minWidth: '44px', minHeight: '44px' }}
+                  type="button"
+                >
+                  <svg className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                </button>
+                
+                {/* UI表示設定パネル */}
+                {uiSettingsPanelOpen && (
+                  <>
+                    <div 
+                      className="fixed inset-0 z-40"
+                      onClick={() => setUiSettingsPanelOpen(false)}
+                    />
+                    <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-4 min-w-[320px] max-h-[70vh] overflow-y-auto">
+                      <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3">ヘッダー/タブバー表示設定</h3>
+                      
+                      {/* 集中モード設定 */}
+                      <div className="mb-3">
+                        <h4 className="text-xs font-semibold text-purple-600 dark:text-purple-400 mb-2">🔍 集中モード</h4>
+                        <div className="space-y-2">
+                          {([
+                            ['focus_sp_mapOn', 'SP・マップON'],
+                            ['focus_sp_mapOff', 'SP・マップOFF'],
+                            ['focus_pc_mapOn', 'PC・マップON'],
+                            ['focus_pc_mapOff', 'PC・マップOFF'],
+                          ] as [keyof typeof uiVisibilitySettings, string][]).map(([key, label]) => (
+                            <div key={key} className="flex items-center justify-between text-xs">
+                              <span className="text-slate-600 dark:text-slate-400 min-w-[110px]">{label}</span>
+                              <div className="flex items-center gap-3">
+                                <label className="flex items-center gap-1 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={uiVisibilitySettings[key].header}
+                                    onChange={(e) => setUiVisibilitySettings(prev => ({
+                                      ...prev,
+                                      [key]: { ...prev[key], header: e.target.checked }
+                                    }))}
+                                    className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                                  />
+                                  <span className="text-slate-500 dark:text-slate-400">ヘッダー</span>
+                                </label>
+                                <label className="flex items-center gap-1 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={uiVisibilitySettings[key].tabBar}
+                                    onChange={(e) => setUiVisibilitySettings(prev => ({
+                                      ...prev,
+                                      [key]: { ...prev[key], tabBar: e.target.checked }
+                                    }))}
+                                    className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                                  />
+                                  <span className="text-slate-500 dark:text-slate-400">タブバー</span>
+                                </label>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      {/* 実行モード設定 */}
+                      <div className="mb-3">
+                        <h4 className="text-xs font-semibold text-green-600 dark:text-green-400 mb-2">🏃 実行モード</h4>
+                        <div className="space-y-2">
+                          {([
+                            ['execute_sp', 'スマートフォン'],
+                            ['execute_pc', 'PC / タブレット'],
+                          ] as [keyof typeof uiVisibilitySettings, string][]).map(([key, label]) => (
+                            <div key={key} className="flex items-center justify-between text-xs">
+                              <span className="text-slate-600 dark:text-slate-400 min-w-[110px]">{label}</span>
+                              <div className="flex items-center gap-3">
+                                <label className="flex items-center gap-1 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={uiVisibilitySettings[key].header}
+                                    onChange={(e) => setUiVisibilitySettings(prev => ({
+                                      ...prev,
+                                      [key]: { ...prev[key], header: e.target.checked }
+                                    }))}
+                                    className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                                  />
+                                  <span className="text-slate-500 dark:text-slate-400">ヘッダー</span>
+                                </label>
+                                <label className="flex items-center gap-1 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={uiVisibilitySettings[key].tabBar}
+                                    onChange={(e) => setUiVisibilitySettings(prev => ({
+                                      ...prev,
+                                      [key]: { ...prev[key], tabBar: e.target.checked }
+                                    }))}
+                                    className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                                  />
+                                  <span className="text-slate-500 dark:text-slate-400">タブバー</span>
+                                </label>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                      
+                      {/* リセットボタン */}
+                      <button
+                        onClick={() => setUiVisibilitySettings(DEFAULT_UI_VISIBILITY)}
+                        className="w-full mt-1 px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
+                      >
+                        デフォルトに戻す
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
               
               {/* モード切替アイコン（日付タブ表示時のみ） */}
               {activeEventName && mainContentVisible && (
@@ -4513,6 +4709,8 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
               )}
           </div>
         </div>
+        )}
+        {showTabBar && (
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-200 dark:border-slate-700">
              <div className="flex space-x-2 pt-2 pb-2 overflow-x-auto">
                 <TabButton tab="eventList" label="即売会リスト" onClick={() => { setActiveEventName(null); setItemToEdit(null); setSelectedItemIds(new Set()); setSelectedBlockFilters(new Set()); setActiveTab('eventList'); }}/>
@@ -4564,7 +4762,37 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 )}
             </div>
         </div>
+        )}
       </header>
+      )}
+
+      {/* フローティング全表示ボタン（設定上何かが非表示の場合） */}
+      {rawHideSomething && activeEventName && (currentMode === 'focus' || currentMode === 'execute') && (
+        <button
+          onClick={() => {
+            setUiVisibilityOverride(prev => !prev);
+            setUiSettingsPanelOpen(false);
+          }}
+          className={`fixed left-3 top-3 z-20 w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all touch-manipulation select-none ${
+            uiVisibilityOverride
+              ? 'bg-blue-600 text-white hover:bg-blue-700'
+              : 'bg-white/80 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-600 backdrop-blur-sm border border-slate-200 dark:border-slate-600'
+          }`}
+          title={uiVisibilityOverride ? '設定通りに戻す' : '全表示'}
+          style={{ WebkitTapHighlightColor: 'transparent' }}
+          type="button"
+        >
+          {uiVisibilityOverride ? (
+            <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.878 9.878L3 3m6.878 6.878L21 21" />
+            </svg>
+          ) : (
+            <svg className="w-5 h-5 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
+            </svg>
+          )}
+        </button>
       )}
 
       <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
@@ -4759,7 +4987,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 onLayoutModeChange={setLayoutMode}
                 mapData={activeEventName ? mapData[activeEventName] : undefined}
                 hallDefinitions={activeEventName && activeTab ? hallDefinitions[activeEventName]?.[`${eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '')}マップ`] : undefined}
-                onHideHeader={setFocusModeHideHeader}
+                onMapVisibilityChange={setFocusModeMapVisible}
                 onAddItem={handleAddItemFromFocusMode}
                 onEditRequest={handleEditRequest}
                 onDeleteRequest={handleDeleteRequest}
