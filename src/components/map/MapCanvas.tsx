@@ -485,25 +485,42 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   // 描画
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
     
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
     
-    // キャンバスサイズを設定（高解像度対応）
-    const displayWidth = mapData.maxCol * cellSize;
-    const displayHeight = mapData.maxRow * cellSize;
+    // キャンバスサイズをコンテナ（ビューポート）サイズに設定（高解像度対応）
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
     
-    canvas.style.width = `${displayWidth}px`;
-    canvas.style.height = `${displayHeight}px`;
-    canvas.width = displayWidth * dpr;
-    canvas.height = displayHeight * dpr;
+    canvas.style.width = `${containerWidth}px`;
+    canvas.style.height = `${containerHeight}px`;
+    canvas.width = containerWidth * dpr;
+    canvas.height = containerHeight * dpr;
     
     // スケール調整
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     
     // クリア
-    ctx.clearRect(0, 0, displayWidth, displayHeight);
+    ctx.clearRect(0, 0, containerWidth, containerHeight);
+    
+    // オフセットを適用（以降の描画はマップ座標系で行う）
+    ctx.save();
+    ctx.translate(offset.x, offset.y);
+    
+    // 可視セル範囲を計算（描画最適化）
+    const visMinCol = Math.max(1, Math.floor(-offset.x / cellSize));
+    const visMaxCol = Math.min(mapData.maxCol, Math.ceil((-offset.x + containerWidth) / cellSize) + 1);
+    const visMinRow = Math.max(1, Math.floor(-offset.y / cellSize));
+    const visMaxRow = Math.min(mapData.maxRow, Math.ceil((-offset.y + containerHeight) / cellSize) + 1);
+    
+    // セルが可視範囲内かチェックするヘルパー
+    const isCellVisible = (row: number, col: number, spanRows = 1, spanCols = 1): boolean => {
+      return col + spanCols - 1 >= visMinCol && col <= visMaxCol &&
+             row + spanRows - 1 >= visMinRow && row <= visMaxRow;
+    };
     
     // アンチエイリアス設定
     ctx.imageSmoothingEnabled = true;
@@ -544,12 +561,16 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
       
+      const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+      const spanCols = merge ? (merge.endCol - merge.startCol + 1) : 1;
+      const spanRows = merge ? (merge.endRow - merge.startRow + 1) : 1;
+      if (!isCellVisible(cell.row, cell.col, spanRows, spanCols)) return;
+      
       const x = (cell.col - 1) * cellSize;
       const y = (cell.row - 1) * cellSize;
       
-      const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-      const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
-      const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
+      const width = spanCols * cellSize;
+      const height = spanRows * cellSize;
       
       // 背景色
       if (cell.backgroundColor) {
@@ -582,12 +603,16 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       mapData.cells.forEach((cell) => {
         if (cell.isMerged) return;
         
+        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+        const spanCols = merge ? (merge.endCol - merge.startCol + 1) : 1;
+        const spanRows = merge ? (merge.endRow - merge.startRow + 1) : 1;
+        if (!isCellVisible(cell.row, cell.col, spanRows, spanCols)) return;
+        
         const x = (cell.col - 1) * cellSize;
         const y = (cell.row - 1) * cellSize;
         
-        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-        const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
-        const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
+        const width = spanCols * cellSize;
+        const height = spanRows * cellSize;
         
         const { borders } = cell;
         
@@ -630,12 +655,16 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       mapData.cells.forEach((cell) => {
         if (cell.isMerged || cell.value === null) return;
         
+        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+        const spanCols = merge ? (merge.endCol - merge.startCol + 1) : 1;
+        const spanRows = merge ? (merge.endRow - merge.startRow + 1) : 1;
+        if (!isCellVisible(cell.row, cell.col, spanRows, spanCols)) return;
+        
         const x = (cell.col - 1) * cellSize;
         const y = (cell.row - 1) * cellSize;
         
-        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-        const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
-        const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
+        const width = spanCols * cellSize;
+        const height = spanRows * cellSize;
         
         const text = String(cell.value);
         const isVertical = cell.isVerticalText;
@@ -1085,6 +1114,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fillText(String(i + 1), px, py);
       });
     }
+    
+    // ctx.translate を解除
+    ctx.restore();
   }, [
     mapData,
     cellSize,
@@ -1099,6 +1131,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     showBorders,
     vertexSelectionMode,
     highlightedCell,
+    offset,
   ]);
 
   // クリック処理
@@ -1114,8 +1147,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const scaleX = canvas.width / dpr / rect.width;
       const scaleY = canvas.height / dpr / rect.height;
       
-      const x = (e.clientX - rect.left) * scaleX;
-      const y = (e.clientY - rect.top) * scaleY;
+      // ビューポート座標 → マップ座標（オフセットを引く）
+      const viewX = (e.clientX - rect.left) * scaleX;
+      const viewY = (e.clientY - rect.top) * scaleY;
+      const x = viewX - offset.x;
+      const y = viewY - offset.y;
       
       // 頂点選択モード中は、まず頂点マーカーのクリックをチェック
       if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
@@ -1154,7 +1190,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       
       onCellClick(row, col, matchingItems);
     },
-    [cellSize, mapData.maxRow, mapData.maxCol, cellStates, onCellClick, isDragging, dpr, vertexSelectionMode]
+    [cellSize, mapData.maxRow, mapData.maxCol, cellStates, onCellClick, isDragging, dpr, vertexSelectionMode, offset]
   );
 
   // ホールのスクロール範囲を計算
@@ -1272,25 +1308,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         height: '100%',
       }}
     >
-      <div
+      <canvas
+        ref={canvasRef}
+        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
         style={{
-          transform: `translate(${offset.x}px, ${offset.y}px)`,
-          transformOrigin: '0 0',
+          cursor: isDragging ? 'grabbing' : 'grab',
+          touchAction: 'none',
         }}
-      >
-        <canvas
-          ref={canvasRef}
-          onClick={handleClick}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
-          style={{
-            cursor: isDragging ? 'grabbing' : 'grab',
-            touchAction: 'none',
-          }}
-        />
-      </div>
+      />
     </div>
   );
 };
