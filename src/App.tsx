@@ -3653,11 +3653,31 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     setHallDefinitionMode(false);
   }, []);
 
+  // 頂点を重心からの角度でソートし、辺が交差しない単純多角形を作る
+  const sortVerticesNonCrossing = useCallback((vertices: { row: number; col: number }[]): { row: number; col: number }[] => {
+    if (vertices.length <= 2) return vertices;
+    
+    // 重心を計算
+    const centroidRow = vertices.reduce((sum, v) => sum + v.row, 0) / vertices.length;
+    const centroidCol = vertices.reduce((sum, v) => sum + v.col, 0) / vertices.length;
+    
+    // 重心からの角度でソート（反時計回り）
+    const sorted = [...vertices].sort((a, b) => {
+      const angleA = Math.atan2(a.row - centroidRow, a.col - centroidCol);
+      const angleB = Math.atan2(b.row - centroidRow, b.col - centroidCol);
+      return angleA - angleB;
+    });
+    
+    return sorted;
+  }, []);
+
   // ホール頂点選択を確定
   const handleConfirmVertexSelection = useCallback(() => {
     if (vertexSelectionMode) {
+      // 頂点を自動並べ替え（辺が交差しない単純多角形にする）
+      const sorted = sortVerticesNonCrossing(vertexSelectionMode.clickedVertices);
       setPendingVertexSelection({
-        vertices: vertexSelectionMode.clickedVertices,
+        vertices: sorted,
         editingData: vertexSelectionMode.editingData,
       });
     }
@@ -3761,15 +3781,13 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
       setCellSelectionMode(prev => {
         if (!prev) return prev;
         
-        // 既に選択されている場合は削除（個別モードのみ）
-        if (prev.type === 'individual') {
-          const existingIndex = prev.clickedCells.findIndex(c => c.row === row && c.col === col);
-          if (existingIndex >= 0) {
-            return {
-              ...prev,
-              clickedCells: prev.clickedCells.filter((_, i) => i !== existingIndex),
-            };
-          }
+        // 既に選択されている場合は削除（全モード共通）
+        const existingIndex = prev.clickedCells.findIndex(c => c.row === row && c.col === col);
+        if (existingIndex >= 0) {
+          return {
+            ...prev,
+            clickedCells: prev.clickedCells.filter((_, i) => i !== existingIndex),
+          };
         }
         
         // 選択を追加
@@ -4859,6 +4877,9 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 選択: {cellSelectionMode.clickedCells.map(c => `(${c.row},${c.col})`).join(', ')}
               </div>
             )}
+            <div className="text-xs text-blue-500 dark:text-blue-400 mt-1">
+              💡 マーカーをクリックで選択解除
+            </div>
           </div>
           <div className="flex gap-2 justify-center">
             <button

@@ -43,6 +43,7 @@ interface MapViewProps {
   } | null;
   // ブロック定義用セル選択モード
   cellSelectionMode?: {
+    type: string;
     clickedCells: { row: number; col: number }[];
   } | null;
   // 訪問先リストからのハイライト
@@ -668,6 +669,7 @@ const MapView: React.FC<MapViewProps> = ({
         onCellClick={handleCellClick}
         selectedHall={selectedHallId !== 'all' ? halls.find(h => h.id === selectedHallId) : undefined}
         vertexSelectionMode={vertexSelectionMode}
+        cellSelectionMode={cellSelectionMode}
         highlightedCell={highlightedCell}
         onZoomChange={setZoomLevel}
       />

@@ -25,6 +25,10 @@ interface MapCanvasProps {
   vertexSelectionMode?: {
     clickedVertices: { row: number; col: number }[];
   } | null;
+  cellSelectionMode?: {
+    type: string;
+    clickedCells: { row: number; col: number }[];
+  } | null;
   highlightedCell?: { row: number; col: number } | null;
   onZoomChange?: (newZoom: number) => void;
 }
@@ -42,6 +46,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   onCellClick,
   selectedHall,
   vertexSelectionMode,
+  cellSelectionMode,
   highlightedCell,
   onZoomChange,
 }) => {
@@ -1029,10 +1034,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length >= 3) {
       const vertices = vertexSelectionMode.clickedVertices;
       
+      // プレビュー用に重心角度ソートして辺交差を防止
+      const centroidRow = vertices.reduce((s, v) => s + v.row, 0) / vertices.length;
+      const centroidCol = vertices.reduce((s, v) => s + v.col, 0) / vertices.length;
+      const sortedVertices = [...vertices].sort((a, b) => {
+        return Math.atan2(a.row - centroidRow, a.col - centroidCol)
+             - Math.atan2(b.row - centroidRow, b.col - centroidCol);
+      });
+      
       ctx.beginPath();
       ctx.fillStyle = 'rgba(255, 0, 0, 0.4)'; // 不透明度40%の赤
       
-      vertices.forEach((vertex, i) => {
+      sortedVertices.forEach((vertex, i) => {
         // セルの中心座標
         const px = (vertex.col - 0.5) * cellSize;
         const py = (vertex.row - 0.5) * cellSize;
@@ -1047,7 +1060,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.closePath();
       ctx.fill();
       
-      // 頂点マーカーと番号を描画
+      // 頂点マーカーと番号を描画（クリック順で表示）
       vertices.forEach((vertex, i) => {
         const px = (vertex.col - 0.5) * cellSize;
         const py = (vertex.row - 0.5) * cellSize;
@@ -1115,6 +1128,92 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
     
+    // 7. ブロック定義セル選択マーカー + 範囲プレビュー
+    if (cellSelectionMode && cellSelectionMode.clickedCells.length > 0) {
+      const clickedCells = cellSelectionMode.clickedCells;
+      const selType = cellSelectionMode.type;
+      
+      // Phase 3: 薄緑色の範囲プレビュー（2点以上）
+      if (clickedCells.length >= 2) {
+        if (selType === 'individual') {
+          // 個別モード: 各セルを個別に薄緑でハイライト
+          clickedCells.forEach(cell => {
+            // 結合セル対応
+            const mergeInfo = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+            const cx = mergeInfo ? (mergeInfo.startCol - 1) * cellSize : (cell.col - 1) * cellSize;
+            const cy = mergeInfo ? (mergeInfo.startRow - 1) * cellSize : (cell.row - 1) * cellSize;
+            const cw = mergeInfo ? (mergeInfo.endCol - mergeInfo.startCol + 1) * cellSize : cellSize;
+            const ch = mergeInfo ? (mergeInfo.endRow - mergeInfo.startRow + 1) * cellSize : cellSize;
+            ctx.fillStyle = 'rgba(144, 238, 144, 0.35)';
+            ctx.fillRect(cx, cy, cw, ch);
+          });
+        } else {
+          // corner/multiCorner/rangeStart: バウンディングボックスを薄緑でハイライト
+          const rows = clickedCells.map(c => c.row);
+          const cols = clickedCells.map(c => c.col);
+          const minRow = Math.min(...rows);
+          const maxRow = Math.max(...rows);
+          const minCol = Math.min(...cols);
+          const maxCol = Math.max(...cols);
+          
+          // 結合セルを考慮して実際の表示範囲を拡張
+          let displayMaxRow = maxRow;
+          let displayMaxCol = maxCol;
+          clickedCells.forEach(cell => {
+            const mergeInfo = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+            if (mergeInfo) {
+              displayMaxRow = Math.max(displayMaxRow, mergeInfo.endRow);
+              displayMaxCol = Math.max(displayMaxCol, mergeInfo.endCol);
+            }
+          });
+          
+          const rx = (minCol - 1) * cellSize;
+          const ry = (minRow - 1) * cellSize;
+          const rw = (displayMaxCol - minCol + 1) * cellSize;
+          const rh = (displayMaxRow - minRow + 1) * cellSize;
+          ctx.fillStyle = 'rgba(144, 238, 144, 0.35)';
+          ctx.fillRect(rx, ry, rw, rh);
+          // 枠線
+          ctx.strokeStyle = 'rgba(76, 175, 80, 0.7)';
+          ctx.lineWidth = 2;
+          ctx.setLineDash([6, 3]);
+          ctx.strokeRect(rx, ry, rw, rh);
+          ctx.setLineDash([]);
+        }
+      }
+      
+      // Phase 2: 青色マーカーを描画
+      clickedCells.forEach((cell, i) => {
+        // 結合セルの場合は結合範囲の中心にマーカーを表示
+        const mergeInfo = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+        let px: number, py: number;
+        if (mergeInfo) {
+          px = ((mergeInfo.startCol - 1) + (mergeInfo.endCol - mergeInfo.startCol + 1) / 2) * cellSize;
+          py = ((mergeInfo.startRow - 1) + (mergeInfo.endRow - mergeInfo.startRow + 1) / 2) * cellSize;
+        } else {
+          px = (cell.col - 0.5) * cellSize;
+          py = (cell.row - 0.5) * cellSize;
+        }
+        
+        // マーカー（白い円＋青枠）
+        ctx.beginPath();
+        ctx.fillStyle = '#FFFFFF';
+        ctx.strokeStyle = '#2196F3';
+        ctx.lineWidth = 2;
+        const markerSize = Math.max(10, cellSize * 0.4);
+        ctx.arc(px, py, markerSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        
+        // 番号
+        ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#2196F3';
+        ctx.fillText(String(i + 1), px, py);
+      });
+    }
+    
     // ctx.translate を解除
     ctx.restore();
   }, [
@@ -1130,6 +1229,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     showNumbers,
     showBorders,
     vertexSelectionMode,
+    cellSelectionMode,
     highlightedCell,
     offset,
   ]);
@@ -1180,9 +1280,49 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         return;
       }
       
+      // セル選択モード中：青マーカーのクリック検出
+      if (cellSelectionMode && cellSelectionMode.clickedCells.length > 0) {
+        const markerSize = Math.max(10, cellSize * 0.4);
+        const clickRadius = markerSize;
+        
+        for (const cell of cellSelectionMode.clickedCells) {
+          const mi = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+          let mx: number, my: number;
+          if (mi) {
+            mx = ((mi.startCol - 1) + (mi.endCol - mi.startCol + 1) / 2) * cellSize;
+            my = ((mi.startRow - 1) + (mi.endRow - mi.startRow + 1) / 2) * cellSize;
+          } else {
+            mx = (cell.col - 0.5) * cellSize;
+            my = (cell.row - 0.5) * cellSize;
+          }
+          const distance = Math.sqrt(Math.pow(x - mx, 2) + Math.pow(y - my, 2));
+          if (distance <= clickRadius) {
+            // マーカークリック → そのセル座標でイベント発火（解除される）
+            window.dispatchEvent(new CustomEvent('mapCellClick', {
+              detail: { row: cell.row, col: cell.col }
+            }));
+            return;
+          }
+        }
+      }
+      
+      // セル選択モード中：結合セルを開始セルに解決
+      let resolvedRow = row;
+      let resolvedCol = col;
+      if (cellSelectionMode) {
+        for (const merge of mapData.mergedCells) {
+          if (row >= merge.startRow && row <= merge.endRow &&
+              col >= merge.startCol && col <= merge.endCol) {
+            resolvedRow = merge.startRow;
+            resolvedCol = merge.startCol;
+            break;
+          }
+        }
+      }
+      
       // ブロック定義パネル用のカスタムイベントを発火
       window.dispatchEvent(new CustomEvent('mapCellClick', {
-        detail: { row, col }
+        detail: { row: resolvedRow, col: resolvedCol }
       }));
       
       const state = cellStates.get(`${row}-${col}`);
@@ -1190,7 +1330,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       
       onCellClick(row, col, matchingItems);
     },
-    [cellSize, mapData.maxRow, mapData.maxCol, cellStates, onCellClick, isDragging, dpr, vertexSelectionMode, offset]
+    [cellSize, mapData.maxRow, mapData.maxCol, mapData.mergedCells, cellStates, onCellClick, isDragging, dpr, vertexSelectionMode, cellSelectionMode, mergedCellsMap, offset]
   );
 
   // ホールのスクロール範囲を計算
