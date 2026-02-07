@@ -653,16 +653,30 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
+    // ビューポートベースのセル可視範囲カリング
+    const visMinCol = Math.max(1, Math.floor(-offset.x / cellSize));
+    const visMaxCol = Math.min(mapData.maxCol, Math.ceil((-offset.x + containerWidth) / cellSize) + 1);
+    const visMinRow = Math.max(1, Math.floor(-offset.y / cellSize));
+    const visMaxRow = Math.min(mapData.maxRow, Math.ceil((-offset.y + containerHeight) / cellSize) + 1);
+
+    const isCellVisible = (row: number, col: number, spanRows: number, spanCols: number): boolean => {
+      return col + spanCols - 1 >= visMinCol && col <= visMaxCol &&
+             row + spanRows - 1 >= visMinRow && row <= visMaxRow;
+    };
+
     // 1. 背景を描画
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
 
+      const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+      const spanCols = merge ? (merge.endCol - merge.startCol + 1) : 1;
+      const spanRows = merge ? (merge.endRow - merge.startRow + 1) : 1;
+      if (!isCellVisible(cell.row, cell.col, spanRows, spanCols)) return;
+
       const x = (cell.col - 1) * cellSize;
       const y = (cell.row - 1) * cellSize;
-
-      const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-      const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
-      const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
+      const width = spanCols * cellSize;
+      const height = spanRows * cellSize;
 
       // 背景色
       if (cell.backgroundColor) {
@@ -710,12 +724,15 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       mapData.cells.forEach((cell) => {
         if (cell.isMerged) return;
 
+        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+        const spanCols = merge ? (merge.endCol - merge.startCol + 1) : 1;
+        const spanRows = merge ? (merge.endRow - merge.startRow + 1) : 1;
+        if (!isCellVisible(cell.row, cell.col, spanRows, spanCols)) return;
+
         const x = (cell.col - 1) * cellSize;
         const y = (cell.row - 1) * cellSize;
-
-        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-        const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
-        const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
+        const width = spanCols * cellSize;
+        const height = spanRows * cellSize;
 
         const drawBorder = (
           fromX: number, fromY: number,
@@ -754,12 +771,15 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       mapData.cells.forEach((cell) => {
         if (cell.isMerged || cell.value === null) return;
 
+        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+        const spanCols = merge ? (merge.endCol - merge.startCol + 1) : 1;
+        const spanRows = merge ? (merge.endRow - merge.startRow + 1) : 1;
+        if (!isCellVisible(cell.row, cell.col, spanRows, spanCols)) return;
+
         const x = (cell.col - 1) * cellSize;
         const y = (cell.row - 1) * cellSize;
-
-        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-        const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
-        const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
+        const width = spanCols * cellSize;
+        const height = spanRows * cellSize;
 
         const text = String(cell.value);
         const isVertical = cell.isVerticalText;

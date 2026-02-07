@@ -1148,6 +1148,31 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // 完了画面
   if (isCompleted) {
+    // 購入結果サマリーを計算
+    const summary = (() => {
+      const purchased = executeItems.filter(i => i.purchaseStatus === 'Purchased');
+      const soldOut = executeItems.filter(i => i.purchaseStatus === 'SoldOut');
+      const absent = executeItems.filter(i => i.purchaseStatus === 'Absent');
+      const postponed = executeItems.filter(i => i.purchaseStatus === 'Postpone');
+      const late = executeItems.filter(i => i.purchaseStatus === 'Late');
+      const unprocessed = executeItems.filter(i => i.purchaseStatus === 'None');
+      
+      const purchasedAmount = purchased.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0);
+      const totalPlanned = executeItems.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0);
+      
+      return {
+        total: executeItems.length,
+        purchased: purchased.length,
+        soldOut: soldOut.length,
+        absent: absent.length,
+        postponed: postponed.length,
+        late: late.length,
+        unprocessed: unprocessed.length,
+        purchasedAmount,
+        totalPlanned,
+      };
+    })();
+    
     return (
       <div 
         className="flex flex-col items-center justify-center min-h-[50vh] p-8 relative"
@@ -1177,9 +1202,63 @@ const FocusMode: React.FC<FocusModeProps> = ({
         <h2 className="text-xl font-bold text-slate-700 dark:text-slate-300 mb-2">
           全ての訪問先を確認しました
         </h2>
-        <p className="text-slate-500 dark:text-slate-400 mb-6 text-center">
+        <p className="text-slate-500 dark:text-slate-400 mb-4 text-center">
           お疲れ様でした！
         </p>
+        
+        {/* 購入結果サマリー */}
+        <div className="w-full max-w-sm mb-6 bg-slate-50 dark:bg-slate-800/80 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
+          <h3 className="text-sm font-semibold text-slate-600 dark:text-slate-400 mb-3 text-center">購入結果</h3>
+          
+          <div className="space-y-1.5 text-sm">
+            <div className="flex justify-between items-center">
+              <span className="text-green-600 dark:text-green-400">✅ 購入済み</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.purchased} 件</span>
+            </div>
+            {summary.soldOut > 0 && (
+              <div className="flex justify-between items-center">
+                <span className="text-red-600 dark:text-red-400">❌ 売切</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.soldOut} 件</span>
+              </div>
+            )}
+            {summary.absent > 0 && (
+              <div className="flex justify-between items-center">
+                <span className="text-yellow-600 dark:text-yellow-400">⚠️ 欠席</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.absent} 件</span>
+              </div>
+            )}
+            {summary.postponed > 0 && (
+              <div className="flex justify-between items-center">
+                <span className="text-purple-600 dark:text-purple-400">⏸️ 後回し</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.postponed} 件</span>
+              </div>
+            )}
+            {summary.late > 0 && (
+              <div className="flex justify-between items-center">
+                <span className="text-blue-600 dark:text-blue-400">🕐 遅参</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.late} 件</span>
+              </div>
+            )}
+            {summary.unprocessed > 0 && (
+              <div className="flex justify-between items-center">
+                <span className="text-slate-500 dark:text-slate-400">⬚ 未処理</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.unprocessed} 件</span>
+              </div>
+            )}
+          </div>
+          
+          <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600 space-y-1.5 text-sm">
+            <div className="flex justify-between items-center">
+              <span className="text-slate-600 dark:text-slate-400">購入合計</span>
+              <span className="font-bold text-green-600 dark:text-green-400">¥{summary.purchasedAmount.toLocaleString()}</span>
+            </div>
+            <div className="flex justify-between items-center">
+              <span className="text-slate-600 dark:text-slate-400">予定合計</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-300">¥{summary.totalPlanned.toLocaleString()}</span>
+            </div>
+          </div>
+        </div>
+        
         <div className="flex gap-4">
           <button
             onClick={() => handleModeChangeInternal('edit')}
