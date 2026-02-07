@@ -3,10 +3,11 @@ import {
   DayMapData,
   CellData,
   ShoppingItem,
-  ZoomLevel,
   MergedCellInfo,
   HallDefinition,
   BlockDefinition,
+  MIN_ZOOM,
+  MAX_ZOOM,
 } from '../types';
 import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
 import { findPath, simplifyPath } from '../utils/pathfinding';
@@ -16,7 +17,7 @@ interface FocusModeMapCanvasProps {
   mapName: string;
   items: ShoppingItem[];
   executeModeItemIds: string[];
-  zoomLevel: ZoomLevel;
+  zoomLevel: number;
   selectedHall: HallDefinition | null;
   // 集中モード固有のプロパティ
   currentVisitKey: string | null;  // 現在位置（eventDate-block-baseNumber）
@@ -24,7 +25,7 @@ interface FocusModeMapCanvasProps {
   prevVisitKey: string | null;     // 前の訪問先
   currentPhase: 'normal' | 'postponed' | 'late';
   // 自動ズーム用コールバック
-  onZoomChange?: (newZoom: ZoomLevel) => void;
+  onZoomChange?: (newZoom: number) => void;
   // セルクリック時のコールバック（新規アイテム追加用）
   onCellClick?: (blockName: string, number: number, matchingItems: ShoppingItem[]) => void;
   // アプリ全体の表示倍率（親要素のtransform scaleに対応）
@@ -70,6 +71,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
+
+  // ピンチズーム用refs
+  const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const pinchStartDistRef = useRef<number>(0);
+  const pinchStartZoomRef = useRef<number>(zoomLevel);
 
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
   const scale = zoomLevel / 100;
@@ -479,8 +485,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    const MIN_ZOOM = 30;
-
     // ルートがある場合はルート全体を中心に表示（3→2フォールバック付き）
     if (routeBoundsCurrentNext && currentCellCoords) {
       let useBounds = routeBoundsCurrentNext;
@@ -498,7 +502,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
 
       const optimalZoom = calcOptimalZoom(useBounds, containerWidth, containerHeight);
-      const newZoom = Math.max(MIN_ZOOM, Math.min(100, Math.floor(optimalZoom / 10) * 10)) as ZoomLevel;
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(optimalZoom)));
       
       if (onZoomChange) {
         onZoomChange(newZoom);
@@ -583,8 +587,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    const MIN_ZOOM = 30;
-
     // 3点表示を試行（前の訪問先が同じホールにある場合のみ）
     let useBounds = routeBoundsCurrentNext;
     let useShowPrev = false;
@@ -603,7 +605,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
     // 選択したboundsで最適なズームを計算
     const optimalZoom = calcOptimalZoom(useBounds, containerWidth, containerHeight);
-    const newZoom = Math.max(MIN_ZOOM, Math.min(100, Math.floor(optimalZoom / 10) * 10)) as ZoomLevel;
+    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(optimalZoom)));
     
     if (onZoomChange) {
       onZoomChange(newZoom);
@@ -626,21 +628,28 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   // 描画
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    const container = containerRef.current;
+    if (!canvas || !container) return;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const displayWidth = mapData.maxCol * cellSize;
-    const displayHeight = mapData.maxRow * cellSize;
+    // キャンバスサイズをコンテナ（ビューポート）サイズに設定
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
 
-    canvas.style.width = `${displayWidth}px`;
-    canvas.style.height = `${displayHeight}px`;
-    canvas.width = displayWidth * dpr;
-    canvas.height = displayHeight * dpr;
+    canvas.style.width = `${containerWidth}px`;
+    canvas.style.height = `${containerHeight}px`;
+    canvas.width = containerWidth * dpr;
+    canvas.height = containerHeight * dpr;
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    ctx.clearRect(0, 0, displayWidth, displayHeight);
+    ctx.clearRect(0, 0, containerWidth, containerHeight);
+    
+    // オフセットを適用
+    ctx.save();
+    ctx.translate(offset.x, offset.y);
+    
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
@@ -1037,6 +1046,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.fillText('📍', x + cellSize / 2, y - 2);
     }
 
+    // ctx.translate を解除
+    ctx.restore();
+
   }, [
     mapData,
     cellSize,
@@ -1052,10 +1064,107 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     nextCellCoords,
     prevCellCoords,
     currentPhase,
+    offset,
   ]);
+
+  // ホイール/ピンチズーム処理
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+
+    // ホイールズーム
+    const handleWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (!onZoomChange) return;
+
+      const rect = container.getBoundingClientRect();
+      const zoomCenter = {
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      };
+
+      const oldCellSize = BASE_CELL_SIZE * (zoomLevel / 100);
+      const delta = -e.deltaY * 0.1;
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(zoomLevel + delta)));
+      if (newZoom === zoomLevel) return;
+
+      const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
+      const mapCoordX = (zoomCenter.x - offset.x) / oldCellSize;
+      const mapCoordY = (zoomCenter.y - offset.y) / oldCellSize;
+      const newOffsetX = zoomCenter.x - mapCoordX * newCellSize;
+      const newOffsetY = zoomCenter.y - mapCoordY * newCellSize;
+
+      setOffset({ x: newOffsetX, y: newOffsetY });
+      onZoomChange(newZoom);
+    };
+
+    // ピンチズーム
+    const handleTouchStart = (e: TouchEvent) => {
+      Array.from(e.changedTouches).forEach(t => {
+        activeTouchesRef.current.set(t.identifier, { x: t.clientX, y: t.clientY });
+      });
+      if (activeTouchesRef.current.size === 2) {
+        const touches = Array.from(activeTouchesRef.current.values());
+        pinchStartDistRef.current = Math.sqrt(
+          Math.pow(touches[1].x - touches[0].x, 2) + Math.pow(touches[1].y - touches[0].y, 2)
+        );
+        pinchStartZoomRef.current = zoomLevel;
+      }
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      Array.from(e.changedTouches).forEach(t => {
+        activeTouchesRef.current.set(t.identifier, { x: t.clientX, y: t.clientY });
+      });
+      if (activeTouchesRef.current.size === 2 && onZoomChange) {
+        e.preventDefault();
+        const touches = Array.from(activeTouchesRef.current.values());
+        const currentDist = Math.sqrt(
+          Math.pow(touches[1].x - touches[0].x, 2) + Math.pow(touches[1].y - touches[0].y, 2)
+        );
+        if (pinchStartDistRef.current === 0) return;
+
+        const rect = container.getBoundingClientRect();
+        const midX = (touches[0].x + touches[1].x) / 2 - rect.left;
+        const midY = (touches[0].y + touches[1].y) / 2 - rect.top;
+
+        const scaleRatio = currentDist / pinchStartDistRef.current;
+        const oldCellSize = BASE_CELL_SIZE * (zoomLevel / 100);
+        const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(pinchStartZoomRef.current * scaleRatio)));
+        if (newZoom === zoomLevel) return;
+
+        const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
+        const mapCoordX = (midX - offset.x) / oldCellSize;
+        const mapCoordY = (midY - offset.y) / oldCellSize;
+        setOffset({ x: midX - mapCoordX * newCellSize, y: midY - mapCoordY * newCellSize });
+        onZoomChange(newZoom);
+      }
+    };
+
+    const handleTouchEnd = (e: TouchEvent) => {
+      Array.from(e.changedTouches).forEach(t => {
+        activeTouchesRef.current.delete(t.identifier);
+      });
+    };
+
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    container.addEventListener('touchstart', handleTouchStart, { passive: true });
+    container.addEventListener('touchmove', handleTouchMove, { passive: false });
+    container.addEventListener('touchend', handleTouchEnd);
+    container.addEventListener('touchcancel', handleTouchEnd);
+
+    return () => {
+      container.removeEventListener('wheel', handleWheel);
+      container.removeEventListener('touchstart', handleTouchStart);
+      container.removeEventListener('touchmove', handleTouchMove);
+      container.removeEventListener('touchend', handleTouchEnd);
+      container.removeEventListener('touchcancel', handleTouchEnd);
+    };
+  }, [zoomLevel, offset, onZoomChange]);
 
   // ドラッグ処理
   const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (activeTouchesRef.current.size >= 2) return;
     setIsDragging(false);
     setDragStart({ x: e.clientX, y: e.clientY });
     setDragStartOffset({ ...offset });
@@ -1063,6 +1172,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
   const handlePointerMove = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
     if (e.buttons !== 1) return;
+    if (activeTouchesRef.current.size >= 2) return;
 
     const dx = e.clientX - dragStart.x;
     const dy = e.clientY - dragStart.y;
@@ -1102,36 +1212,20 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const canvas = canvasRef.current;
       if (!canvas) return;
       
-      // キャンバスの位置を取得（offsetによる移動が反映されている）
       const canvasRect = canvas.getBoundingClientRect();
       
       // アプリ全体のズームスケール
       const appScale = appZoomLevel / 100;
       
-      // クリック位置をキャンバス内の座標に変換
-      // getBoundingClientRect()はCSSのtransform: scaleが適用された後の座標を返すため、
-      // クリック位置もスケール適用後の座標になっている
-      const clickX = e.clientX - canvasRect.left;
-      const clickY = e.clientY - canvasRect.top;
+      // ビューポート座標（appScale補正）→ マップ座標（オフセットを引く）
+      const viewX = (e.clientX - canvasRect.left) / appScale;
+      const viewY = (e.clientY - canvasRect.top) / appScale;
+      const mapX = viewX - offset.x;
+      const mapY = viewY - offset.y;
       
-      // アプリ全体のズームが適用されているため、キャンバス内の論理座標に変換するには
-      // スケールで割る必要がある
-      const adjustedClickX = clickX / appScale;
-      const adjustedClickY = clickY / appScale;
-      
-      // クリック位置がキャンバス内かチェック（スケール補正前の座標で判定）
-      // canvasRect.width/heightはスケール適用後の値なので、これもスケールで割る
-      const logicalCanvasWidth = canvasRect.width / appScale;
-      const logicalCanvasHeight = canvasRect.height / appScale;
-      
-      if (adjustedClickX < 0 || adjustedClickY < 0 || adjustedClickX > logicalCanvasWidth || adjustedClickY > logicalCanvasHeight) {
-        setIsDragging(false);
-        return;
-      }
-      
-      // セル座標を計算（cellSizeはCSSピクセル単位）
-      const col = Math.floor(adjustedClickX / cellSize) + 1;
-      const row = Math.floor(adjustedClickY / cellSize) + 1;
+      // セル座標を計算
+      const col = Math.floor(mapX / cellSize) + 1;
+      const row = Math.floor(mapY / cellSize) + 1;
       
       if (row >= 1 && row <= mapData.maxRow && col >= 1 && col <= mapData.maxCol) {
         // ブロック定義内の数値セルか確認
@@ -1193,7 +1287,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
-  }, [isDragging, onCellClick, cellSize, mapData, items, cellsMap, isCellInBlock, appZoomLevel]);
+  }, [isDragging, onCellClick, cellSize, mapData, items, cellsMap, isCellInBlock, appZoomLevel, offset]);
 
   // ポインターがキャンバスから離れた時のハンドラ（ドラッグ状態のリセットのみ）
   const handlePointerLeave = useCallback(() => {
@@ -1211,24 +1305,17 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         height: '100%',
       }}
     >
-      <div
+      <canvas
+        ref={canvasRef}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerLeave}
         style={{
-          transform: `translate(${offset.x}px, ${offset.y}px)`,
-          transformOrigin: '0 0',
+          cursor: isDragging ? 'grabbing' : 'grab',
+          touchAction: 'none',
         }}
-      >
-        <canvas
-          ref={canvasRef}
-          onPointerDown={handlePointerDown}
-          onPointerMove={handlePointerMove}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerLeave}
-          style={{
-            cursor: isDragging ? 'grabbing' : 'grab',
-            touchAction: 'none',
-          }}
-        />
-      </div>
+      />
     </div>
   );
 };

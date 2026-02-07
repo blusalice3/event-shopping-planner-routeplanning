@@ -1,6 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
-import { ShoppingItem, DayMapData, HallDefinition, ZoomLevel, ZOOM_LEVELS, PurchaseStatus } from '../types';
+import { ShoppingItem, DayMapData, HallDefinition, PurchaseStatus } from '../types';
 import ShoppingItemCard from './ShoppingItemCard';
 import FocusModeMapCanvas from './FocusModeMapCanvas';
 
@@ -110,7 +110,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // マップ表示関連の状態
   const [isMapVisible, setIsMapVisible] = useState(false);
-  const [mapZoomLevel, setMapZoomLevel] = useState<ZoomLevel>(100);
+  const [mapZoomLevel, setMapZoomLevel] = useState<number>(100);
   const [selectedHallId, setSelectedHallId] = useState<string | 'follow'>('follow');
   const [splitRatio, setSplitRatio] = useState(50);
   const splitDragRef = useRef<{ startY: number; startRatio: number } | null>(null);
@@ -928,7 +928,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   }, []);
 
   // マップズームレベル変更
-  const handleMapZoomChange = useCallback((newZoom: ZoomLevel) => {
+  const handleMapZoomChange = useCallback((newZoom: number) => {
     setMapZoomLevel(newZoom);
   }, []);
 
@@ -1310,15 +1310,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
         ))}
       </select>
       
-      <select
-        value={mapZoomLevel}
-        onChange={(e) => setMapZoomLevel(Number(e.target.value) as ZoomLevel)}
-        className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-      >
-        {ZOOM_LEVELS.map(level => (
-          <option key={level} value={level}>{level}%</option>
-        ))}
-      </select>
+      <div className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-3 text-slate-700 dark:text-slate-300">
+        {Math.round(mapZoomLevel)}%
+      </div>
     </div>
   );
 
