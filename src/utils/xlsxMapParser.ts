@@ -13,6 +13,8 @@ import {
   DayMapData,
   ShoppingItem,
   NumberCellInfo,
+  BlockDetectionSettings,
+  DEFAULT_BLOCK_DETECTION_SETTINGS,
 } from '../types';
 
 // 罫線スタイルの太さ判定
@@ -251,39 +253,60 @@ function extractCellValue(cellValue: ExcelJS.CellValue): string | number | null 
   return null;
 }
 
-// ブロック名かどうかを判定（1〜4文字のカタカナ、ひらがな、アルファベット、漢字、数字、またはそれらの組み合わせ）
+// ブロック名かどうかを判定（設定に基づく文字数・文字種チェック）
 // ただし、数字のみの場合はブロック名ではなく数値セルとして扱うため除外
-function isBlockName(value: ExcelJS.CellValue): boolean {
+function isBlockName(value: ExcelJS.CellValue, settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS): boolean {
   // まずrichText等から実際の文字列を抽出
   const extracted = extractCellValue(value);
   if (extracted === null) return false;
   const str = String(extracted).trim();
-  if (str.length === 0 || str.length > 4) return false;
+  if (str.length === 0 || str.length > settings.maxBlockNameLength) return false;
   
-  // 各文字種の正規表現
-  const katakana = /[ア-ンァ-ヴー]/;
-  const hiragana = /[あ-んぁ-ゔー]/;
-  const alphabet = /[A-Za-z]/;
-  const kanji = /[\u4E00-\u9FFF\u3400-\u4DBF]/;  // CJK統合漢字 + CJK統合漢字拡張A
-  const digit = /[0-9０-９]/;  // 半角・全角数字
+  // 許可文字種に基づいて正規表現を構築
+  const charTypes = settings.allowedCharTypes;
+  let allowedPattern = '';
+  let testPatterns: RegExp[] = [];
   
-  // 全ての文字が許可された文字種であることを確認（数字も許可）
-  const allowedChars = /^[ア-ンァ-ヴーあ-んぁ-ゔーA-Za-z\u4E00-\u9FFF\u3400-\u4DBF0-9０-９]+$/;
+  if (charTypes.katakana) {
+    allowedPattern += 'ア-ンァ-ヴー';
+    testPatterns.push(/[ア-ンァ-ヴー]/);
+  }
+  if (charTypes.hiragana) {
+    allowedPattern += 'あ-んぁ-ゔー';
+    testPatterns.push(/[あ-んぁ-ゔー]/);
+  }
+  if (charTypes.alphabet) {
+    allowedPattern += 'A-Za-z';
+    testPatterns.push(/[A-Za-z]/);
+  }
+  if (charTypes.kanji) {
+    allowedPattern += '\\u4E00-\\u9FFF\\u3400-\\u4DBF';
+    testPatterns.push(/[\u4E00-\u9FFF\u3400-\u4DBF]/);
+  }
+  if (charTypes.digit) {
+    allowedPattern += '0-9０-９';
+    testPatterns.push(/[0-9０-９]/);
+  }
+  
+  if (allowedPattern.length === 0) return false;
+  
+  // 全ての文字が許可された文字種であることを確認
+  const allowedChars = new RegExp(`^[${allowedPattern}]+$`);
   if (!allowedChars.test(str)) return false;
   
   // 数字のみの場合は除外（数値セルとして扱うため）
   const digitsOnly = /^[0-9０-９]+$/;
   if (digitsOnly.test(str)) return false;
   
-  // 少なくとも1つの文字種に該当する文字が含まれていればOK
-  return katakana.test(str) || hiragana.test(str) || alphabet.test(str) || kanji.test(str) || digit.test(str);
+  // 少なくとも1つの許可文字種に該当する文字が含まれていればOK
+  return testPatterns.some(pattern => pattern.test(str));
 }
 
-// 数値セルかどうかを判定（1〜100の整数）
-function isNumberCell(value: ExcelJS.CellValue): boolean {
+// 数値セルかどうかを判定（設定に基づく範囲チェック）
+function isNumberCell(value: ExcelJS.CellValue, settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS): boolean {
   if (value === null || value === undefined) return false;
   const num = typeof value === 'number' ? value : parseFloat(String(value));
-  return !isNaN(num) && Number.isInteger(num) && num >= 1 && num <= 100;
+  return !isNaN(num) && Number.isInteger(num) && num >= settings.numberCellMin && num <= settings.numberCellMax;
 }
 
 // ブロック用の色を生成
@@ -307,13 +330,13 @@ function findBorderedRegion(
   worksheet: ExcelJS.Worksheet,
   maxRow: number,
   maxCol: number,
-  visited: Set<string>
+  visited: Set<string>,
+  maxRegionSize: number = 2000
 ): Set<string> {
   const region = new Set<string>();
   const queue: Array<{ row: number; col: number }> = [{ row: startRow, col: startCol }];
-  const MAX_REGION_SIZE = 2000; // 1つの領域の最大セル数（大きな多角形ブロック対応）
   
-  while (queue.length > 0 && region.size < MAX_REGION_SIZE) {
+  while (queue.length > 0 && region.size < maxRegionSize) {
     const { row, col } = queue.shift()!;
     const key = `${row}-${col}`;
     
@@ -375,7 +398,8 @@ function findBorderedRegion(
 function extractNumberCellsFromRegion(
   region: Set<string>,
   worksheet: ExcelJS.Worksheet,
-  mergeMap: Map<string, { row: number; col: number }>
+  mergeMap: Map<string, { row: number; col: number }>,
+  settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS
 ): NumberCellInfo[] {
   const numberCells: NumberCellInfo[] = [];
   
@@ -393,7 +417,7 @@ function extractNumberCellsFromRegion(
     const cell = worksheet.getCell(row, col);
     const value = cell.value;
     
-    if (isNumberCell(value)) {
+    if (isNumberCell(value, settings)) {
       const numValue = typeof value === 'number' ? value : parseInt(String(value), 10);
       numberCells.push({ row, col, value: numValue });
     }
@@ -442,17 +466,18 @@ function detectBlocksWithExcelJS(
   mergedCells: MergedCellInfo[],
   mergeMap: Map<string, { row: number; col: number }>,
   maxRow: number,
-  maxCol: number
+  maxCol: number,
+  settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS
 ): BlockDefinition[] {
   const blocks: BlockDefinition[] = [];
   const globalProcessedCells = new Set<string>(); // グローバルな処理済みセル
   
-  // 4セル以上の結合セルでブロック名を持つものを探す
+  // 設定に基づく最小結合セル数以上の結合セルでブロック名を持つものを探す
   const blockNameMerges = mergedCells.filter((merge) => {
     const rows = merge.endRow - merge.startRow + 1;
     const cols = merge.endCol - merge.startCol + 1;
     const cellCount = rows * cols;
-    return cellCount >= 4 && isBlockName(merge.value);
+    return cellCount >= settings.minMergedCellCount && isBlockName(merge.value, settings);
   });
   
   // ブロック名でグループ化（同じ名前のブロックは統合）
@@ -476,14 +501,15 @@ function detectBlocksWithExcelJS(
       worksheet,
       maxRow,
       maxCol,
-      new Set() // 各検出は独立
+      new Set(), // 各検出は独立
+      settings.maxRegionSize
     );
     
     // この領域内のセルをグローバルに処理済みとしてマーク
     region.forEach((key) => globalProcessedCells.add(key));
     
     // 領域内の数値セルを抽出
-    const numberCells = extractNumberCellsFromRegion(region, worksheet, mergeMap);
+    const numberCells = extractNumberCellsFromRegion(region, worksheet, mergeMap, settings);
     
     // 同じブロック名のグループに追加
     if (blockGroups.has(blockName)) {
@@ -520,7 +546,7 @@ function detectBlocksWithExcelJS(
     // 領域が矩形かどうかを判定（多角形の場合はcellGroupsを作成）
     const boxArea = (boundingBox.endRow - boundingBox.startRow + 1) * 
                     (boundingBox.endCol - boundingBox.startCol + 1);
-    const isPolygon = allCells.size < boxArea * 0.95; // 5%以上の差があれば多角形とみなす
+    const isPolygon = allCells.size < boxArea * (settings.polygonThreshold / 100);
     
     const blockDef: BlockDefinition = {
       name: blockName,
@@ -556,7 +582,8 @@ function detectBlocksWithExcelJS(
  */
 async function parseMapSheetWithExcelJS(
   workbook: ExcelJS.Workbook,
-  sheetName: string
+  sheetName: string,
+  settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS
 ): Promise<DayMapData | null> {
   const worksheet = workbook.getWorksheet(sheetName);
   if (!worksheet) return null;
@@ -667,7 +694,8 @@ async function parseMapSheetWithExcelJS(
     mergedCells,
     mergeMap,
     actualMaxRow,
-    actualMaxCol
+    actualMaxCol,
+    settings
   );
   
   return {
@@ -693,7 +721,8 @@ function columnLetterToNumber(letters: string): number {
  * マップファイル（xlsx）を解析（ExcelJS版）
  */
 export async function parseMapFile(
-  file: File
+  file: File,
+  settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS
 ): Promise<Record<string, DayMapData> | null> {
   try {
     const arrayBuffer = await file.arrayBuffer();
@@ -709,7 +738,7 @@ export async function parseMapFile(
       const sheetName = worksheet.name;
       const match = sheetName.match(dayPattern);
       if (match) {
-        const mapData = await parseMapSheetWithExcelJS(workbook, sheetName);
+        const mapData = await parseMapSheetWithExcelJS(workbook, sheetName, settings);
         if (mapData) {
           // シート名を "○日目マップ" に変換
           const mapName = `${match[1]}マップ`;
@@ -780,7 +809,8 @@ export function createBlockDefinition(
   startCol: number,
   endRow: number,
   endCol: number,
-  cellsMap: Map<string, CellData>
+  cellsMap: Map<string, CellData>,
+  settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS
 ): BlockDefinition {
   const numberCells: NumberCellInfo[] = [];
   
@@ -789,7 +819,7 @@ export function createBlockDefinition(
       const cell = cellsMap.get(`${r}-${c}`);
       if (cell && !cell.isMerged && cell.value !== null) {
         const num = typeof cell.value === 'number' ? cell.value : parseFloat(String(cell.value));
-        if (!isNaN(num) && Number.isInteger(num) && num >= 1 && num <= 100) {
+        if (!isNaN(num) && Number.isInteger(num) && num >= settings.numberCellMin && num <= settings.numberCellMax) {
           numberCells.push({ row: r, col: c, value: num });
         }
       }

@@ -161,6 +161,51 @@ export interface RouteSettingsStore {
   };
 }
 
+// ===== ブロック自動検出設定 =====
+
+export interface BlockDetectionSettings {
+  /** ブロック名の最大文字数 (default: 4) */
+  maxBlockNameLength: number;
+  /** ブロック名の許可文字種 */
+  allowedCharTypes: {
+    katakana: boolean;
+    hiragana: boolean;
+    alphabet: boolean;
+    kanji: boolean;
+    digit: boolean;
+  };
+  /** ブロック名セルの最小結合セル数 (default: 4) */
+  minMergedCellCount: number;
+  /** 数値セル（ブース番号）の最小値 (default: 1) */
+  numberCellMin: number;
+  /** 数値セル（ブース番号）の最大値 (default: 100) */
+  numberCellMax: number;
+  /** 1領域の最大セル数 (default: 2000) */
+  maxRegionSize: number;
+  /** 多角形判定の閾値パーセント (default: 95) */
+  polygonThreshold: number;
+}
+
+export const DEFAULT_BLOCK_DETECTION_SETTINGS: BlockDetectionSettings = {
+  maxBlockNameLength: 4,
+  allowedCharTypes: {
+    katakana: true,
+    hiragana: true,
+    alphabet: true,
+    kanji: true,
+    digit: true,
+  },
+  minMergedCellCount: 4,
+  numberCellMin: 1,
+  numberCellMax: 100,
+  maxRegionSize: 2000,
+  polygonThreshold: 95,
+};
+
+export interface BlockDetectionSettingsStore {
+  [eventName: string]: BlockDetectionSettings;
+}
+
 // ===== エクスポート機能用の型定義 =====
 
 export interface ExportOptions {

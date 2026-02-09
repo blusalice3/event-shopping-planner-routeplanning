@@ -6,3 +6,5 @@ export { default as BlockDefinitionPanel } from './BlockDefinitionPanel';
 export { default as HallDefinitionPanel } from './HallDefinitionPanel';
 export { default as HallOrderPanel } from './HallOrderPanel';
 export { isPointInPolygon } from './HallDefinitionPanel';
+export { default as MapImportDialog } from './MapImportDialog';
+export { loadBlockDetectionSettings, saveBlockDetectionSettings } from './MapImportDialog';

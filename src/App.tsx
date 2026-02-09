@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapDataStore, RouteSettingsStore, ExportOptions, BlockDefinition, HallDefinition, HallRouteSettings, HallDefinitionsStore, HallRouteSettingsStore } from './types';
+import { ShoppingItem, PurchaseStatus, EventMetadata, ViewMode, DayModeState, ExecuteModeItems, MapDataStore, RouteSettingsStore, ExportOptions, BlockDefinition, HallDefinition, HallRouteSettings, HallDefinitionsStore, HallRouteSettingsStore, DayMapData, BlockDetectionSettings } from './types';
 import ImportScreen from './components/ImportScreen';
 import ShoppingList from './components/ShoppingList';
 import SummaryBar from './components/SummaryBar';
@@ -14,11 +14,10 @@ import ExportOptionsDialog from './components/ExportOptionsDialog';
 import SortAscendingIcon from './components/icons/SortAscendingIcon';
 import SortDescendingIcon from './components/icons/SortDescendingIcon';
 import SearchBar from './components/SearchBar';
-import { MapView, BlockDefinitionPanel, HallDefinitionPanel, isPointInPolygon } from './components/map';
+import { MapView, BlockDefinitionPanel, HallDefinitionPanel, isPointInPolygon, MapImportDialog, loadBlockDetectionSettings, saveBlockDetectionSettings } from './components/map';
 import VisitListPanel from './components/VisitListPanel';
 import FocusMode from './components/FocusMode';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
-import { parseMapFile } from './utils/xlsxMapParser';
 import { db } from './utils/indexedDB';
 import { exportToXlsx, importFromXlsx, downloadBlob } from './utils/exportImport';
 
@@ -153,6 +152,11 @@ const App: React.FC = () => {
   const [exportEventName, setExportEventName] = useState<string | null>(null);
   const mapFileInputRef = useRef<HTMLInputElement>(null);
   const exportFileInputRef = useRef<HTMLInputElement>(null);
+  
+  // マップ取り込みダイアログ用の状態
+  const [mapImportDialogOpen, setMapImportDialogOpen] = useState(false);
+  const [mapImportPendingFile, setMapImportPendingFile] = useState<File | null>(null);
+  const [mapImportPendingEventName, setMapImportPendingEventName] = useState<string>('');
   
   // 保存フラグ（データ変更時のみ保存）
   const isSavingRef = useRef(false);
@@ -2662,36 +2666,53 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     
     if (!file || !eventName) return;
     
-    try {
-      const parsedMapData = await parseMapFile(file);
-      if (!parsedMapData) {
-        alert('マップデータの解析に失敗しました。');
-        return;
-      }
-      
-      setMapData(prev => ({
-        ...prev,
-        [eventName]: {
-          ...(prev[eventName] || {}),
-          ...parsedMapData,
-        },
-      }));
-      
-      const mapCount = Object.keys(parsedMapData).length;
-      alert(`${mapCount}件のマップデータを取り込みました。`);
-      
-      // 最初のマップタブに切り替え
-      const firstMapName = Object.keys(parsedMapData)[0];
-      if (firstMapName) {
-        setActiveTab(firstMapName);
-      }
-    } catch (error) {
-      console.error('Map import error:', error);
-      alert(`マップデータの取り込みに失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`);
-    }
+    // ダイアログを開く
+    setMapImportPendingFile(file);
+    setMapImportPendingEventName(eventName);
+    setMapImportDialogOpen(true);
     
     // ファイル入力をリセット
     e.target.value = '';
+  }, []);
+
+  // マップ取り込みダイアログからの取り込み確定
+  const handleMapImportConfirm = useCallback((parsedData: Record<string, DayMapData>, settings: BlockDetectionSettings) => {
+    const eventName = mapImportPendingEventName;
+    if (!eventName) return;
+    
+    // 設定をlocalStorageに保存
+    saveBlockDetectionSettings(eventName, settings);
+    
+    // マップデータを保存
+    setMapData(prev => ({
+      ...prev,
+      [eventName]: {
+        ...(prev[eventName] || {}),
+        ...parsedData,
+      },
+    }));
+    
+    const mapCount = Object.keys(parsedData).length;
+    
+    // 最初のマップタブに切り替え
+    const firstMapName = Object.keys(parsedData)[0];
+    if (firstMapName) {
+      setActiveTab(firstMapName);
+    }
+    
+    // ダイアログを閉じる
+    setMapImportDialogOpen(false);
+    setMapImportPendingFile(null);
+    setMapImportPendingEventName('');
+    
+    alert(`${mapCount}件のマップデータを取り込みました。`);
+  }, [mapImportPendingEventName]);
+
+  // マップ取り込みダイアログのキャンセル
+  const handleMapImportClose = useCallback(() => {
+    setMapImportDialogOpen(false);
+    setMapImportPendingFile(null);
+    setMapImportPendingEventName('');
   }, []);
 
   // マップビューでの訪問先追加
@@ -5234,6 +5255,16 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
         accept=".xlsx"
         onChange={handleMapFileChange}
         style={{ display: 'none' }}
+      />
+
+      {/* マップ取り込みダイアログ */}
+      <MapImportDialog
+        isOpen={mapImportDialogOpen}
+        file={mapImportPendingFile}
+        eventName={mapImportPendingEventName}
+        savedSettings={mapImportPendingEventName ? loadBlockDetectionSettings(mapImportPendingEventName) : null}
+        onImport={handleMapImportConfirm}
+        onClose={handleMapImportClose}
       />
 
       {/* エクスポートファイルインポート用入力（非表示） */}
