@@ -177,6 +177,8 @@ export interface BlockDetectionSettings {
   };
   /** 数字+記号のみのブロック名を許可する (default: false) */
   allowDigitSymbolOnly: boolean;
+  /** 1ブロックあたりの最小ブース番号数 (default: 1) */
+  minNumberCellsPerBlock: number;
   /** ブロック名セルの最小結合セル数 (default: 4) */
   minMergedCellCount: number;
   /** 数値セル（ブース番号）の最小値 (default: 1) */
@@ -200,6 +202,7 @@ export const DEFAULT_BLOCK_DETECTION_SETTINGS: BlockDetectionSettings = {
     symbol: false,
   },
   allowDigitSymbolOnly: false,
+  minNumberCellsPerBlock: 1,
   minMergedCellCount: 4,
   numberCellMin: 1,
   numberCellMax: 100,

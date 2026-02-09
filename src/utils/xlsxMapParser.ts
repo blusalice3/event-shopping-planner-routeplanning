@@ -478,6 +478,7 @@ function calculateBoundingBox(region: Set<string>): {
 /**
  * ブロックを自動検出（ExcelJS版）
  * 太い罫線で囲まれた領域内のブロック名セルと数値セルを検出
+ * minMergedCellCount が 1 の場合、非結合（単一）セルも走査対象にする
  */
 function detectBlocksWithExcelJS(
   worksheet: ExcelJS.Worksheet,
@@ -488,34 +489,25 @@ function detectBlocksWithExcelJS(
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS
 ): BlockDefinition[] {
   const blocks: BlockDefinition[] = [];
-  const globalProcessedCells = new Set<string>(); // グローバルな処理済みセル
-  
-  // 設定に基づく最小結合セル数以上の結合セルでブロック名を持つものを探す
-  const blockNameMerges = mergedCells.filter((merge) => {
-    const rows = merge.endRow - merge.startRow + 1;
-    const cols = merge.endCol - merge.startCol + 1;
-    const cellCount = rows * cols;
-    return cellCount >= settings.minMergedCellCount && isBlockName(merge.value, settings);
-  });
+  const globalProcessedCells = new Set<string>(); // グローバルな処理済みセル（D対策）
   
   // ブロック名でグループ化（同じ名前のブロックは統合）
   const blockGroups = new Map<string, {
     regions: Set<string>[];
     numberCells: NumberCellInfo[];
   }>();
-  
-  blockNameMerges.forEach((merge) => {
-    const blockName = String(merge.value).trim();
+
+  // --- ブロック名候補を処理する共通ヘルパー ---
+  const processBlockNameCandidate = (blockName: string, startRow: number, startCol: number) => {
+    const cellKey = `${startRow}-${startCol}`;
     
-    // このブロック名セルが既に処理済みかチェック
-    const mergeKey = `${merge.startRow}-${merge.startCol}`;
-    if (globalProcessedCells.has(mergeKey)) return;
+    // D対策: 既に処理済みの領域内ならスキップ
+    if (globalProcessedCells.has(cellKey)) return;
     
     // ブロック名セルから太い罫線で囲まれた領域を検出
-    // 各ブロック名から独立して検出するため、visited は空で開始
     const region = findBorderedRegion(
-      merge.startRow,
-      merge.startCol,
+      startRow,
+      startCol,
       worksheet,
       maxRow,
       maxCol,
@@ -523,7 +515,7 @@ function detectBlocksWithExcelJS(
       settings.maxRegionSize
     );
     
-    // この領域内のセルをグローバルに処理済みとしてマーク
+    // D対策: この領域内のセルをグローバルに処理済みとしてマーク
     region.forEach((key) => globalProcessedCells.add(key));
     
     // 領域内の数値セルを抽出
@@ -540,12 +532,53 @@ function detectBlocksWithExcelJS(
         numberCells: [...numberCells],
       });
     }
+  };
+
+  // --- フェーズ1: 結合セルからブロック名を検出 ---
+  const blockNameMerges = mergedCells.filter((merge) => {
+    const rows = merge.endRow - merge.startRow + 1;
+    const cols = merge.endCol - merge.startCol + 1;
+    const cellCount = rows * cols;
+    return cellCount >= settings.minMergedCellCount && isBlockName(merge.value, settings);
   });
   
-  // ブロック定義を作成
+  blockNameMerges.forEach((merge) => {
+    const blockName = String(merge.value).trim();
+    processBlockNameCandidate(blockName, merge.startRow, merge.startCol);
+  });
+
+  // --- フェーズ2: 非結合セルからブロック名を検出（A対策: minMergedCellCount <= 1 の場合のみ） ---
+  if (settings.minMergedCellCount <= 1) {
+    for (let row = 1; row <= maxRow; row++) {
+      for (let col = 1; col <= maxCol; col++) {
+        const key = `${row}-${col}`;
+        
+        // D対策: 既に処理済みの領域内ならスキップ
+        if (globalProcessedCells.has(key)) continue;
+        
+        // 結合セルの子セルはスキップ
+        const mergeParent = mergeMap.get(key);
+        if (mergeParent) continue;
+        
+        const cell = worksheet.getCell(row, col);
+        if (!isBlockName(cell.value, settings)) continue;
+        
+        const blockName = String(extractCellValue(cell.value)).trim();
+        processBlockNameCandidate(blockName, row, col);
+      }
+    }
+  }
+  
+  // --- ブロック定義を作成（B対策: minNumberCellsPerBlock によるフィルタ） ---
   let colorIndex = 0;
   blockGroups.forEach((group, blockName) => {
-    if (group.numberCells.length === 0) return;
+    // B対策: 最小ブース番号数でフィルタ
+    const uniqueNumberCells = group.numberCells.filter(
+      (cell, index, self) =>
+        index === self.findIndex((c) => c.row === cell.row && c.col === cell.col)
+    ).sort((a, b) => a.value - b.value);
+    
+    if (uniqueNumberCells.length < settings.minNumberCellsPerBlock) return;
     
     // 全領域を統合した境界ボックスを計算
     const allCells = new Set<string>();
@@ -554,12 +587,6 @@ function detectBlocksWithExcelJS(
     });
     
     const boundingBox = calculateBoundingBox(allCells);
-    
-    // 重複を除去してソート
-    const uniqueNumberCells = group.numberCells.filter(
-      (cell, index, self) =>
-        index === self.findIndex((c) => c.row === cell.row && c.col === cell.col)
-    ).sort((a, b) => a.value - b.value);
     
     // 領域が矩形かどうかを判定（多角形の場合はcellGroupsを作成）
     const boxArea = (boundingBox.endRow - boundingBox.startRow + 1) * 
@@ -579,7 +606,6 @@ function detectBlocksWithExcelJS(
     
     // 多角形ブロックの場合、実際のセル群を保存
     if (isPolygon) {
-      // 各領域をcellGroupとして保存（individualタイプ）
       blockDef.cellGroups = group.regions.map(region => ({
         type: 'individual' as const,
         cells: Array.from(region).map(key => {

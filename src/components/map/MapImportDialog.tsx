@@ -424,6 +424,11 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       {settings.minMergedCellCount}
                     </span>
                   </div>
+                  {settings.minMergedCellCount <= 1 && (
+                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+                      ⚠ 非結合（単一）セルも走査します。候補が増えるため処理に時間がかかる場合があります。
+                    </p>
+                  )}
                 </div>
 
                 {/* 数値セルの範囲 */}
@@ -450,6 +455,29 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       className="w-20 px-2 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-center"
                     />
                   </div>
+                </div>
+
+                {/* 1ブロックあたりの最小ブース番号数 */}
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
+                    1ブロックあたりの最小ブース番号数
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="range"
+                      min={1}
+                      max={20}
+                      value={settings.minNumberCellsPerBlock}
+                      onChange={(e) => updateSetting('minNumberCellsPerBlock', parseInt(e.target.value, 10))}
+                      className="flex-1"
+                    />
+                    <span className="text-sm font-mono w-8 text-center text-slate-700 dark:text-slate-300">
+                      {settings.minNumberCellsPerBlock}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    ブース番号がこの数未満の領域はブロックとして認識しません
+                  </p>
                 </div>
 
                 {/* 1領域の最大セル数 */}
