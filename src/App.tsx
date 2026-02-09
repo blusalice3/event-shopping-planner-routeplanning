@@ -4858,6 +4858,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
               if (item) handleDeleteRequest(item);
             }}
             onAddNewItem={handleAddNewItemFromMap}
+            onAddItem={handleAddItemFromFocusMode}
             halls={currentHalls}
             hallRouteSettings={currentHallRouteSettings}
             onUpdateHallRouteSettings={handleUpdateHallRouteSettings}

@@ -29,7 +29,8 @@ interface MapViewProps {
   onMoveToLast: (itemId: string) => void;
   onUpdateItem?: (item: ShoppingItem) => void;
   onDeleteItem?: (itemId: string) => void;
-  onAddNewItem?: (eventDate: string, block: string, number: string) => void;  // 新規アイテム追加
+  onAddNewItem?: (eventDate: string, block: string, number: string) => void;  // 新規アイテム追加（タブ遷移方式、互換用）
+  onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: import('../../types').PurchaseStatus }) => void;  // 新規アイテム直接追加（ポップアップ方式）
   // 訪問先リストへの位置指定追加
   onAddToExecuteListAtPosition?: (itemId: string, referenceItemId: string, position: 'before' | 'after') => void;
   // ホール関連
@@ -72,6 +73,7 @@ const MapView: React.FC<MapViewProps> = ({
   onUpdateItem,
   onDeleteItem,
   onAddNewItem,
+  onAddItem,
   onAddToExecuteListAtPosition,
   halls,
   hallRouteSettings,
@@ -691,11 +693,8 @@ const MapView: React.FC<MapViewProps> = ({
         onRemoveFromVisitList={handleRemoveFromVisitList}
         onUpdateItem={onUpdateItem}
         onDeleteItem={onDeleteItem}
-        onAddNewItem={onAddNewItem ? () => {
-          // マップ名から参加日を抽出（例: "1日目マップ" -> "1日目"）
-          const eventDate = mapName.replace(/マップ$/, '');
-          onAddNewItem(eventDate, popupState.blockName, String(popupState.number));
-        } : undefined}
+        onAddItem={onAddItem}
+        eventDate={mapName.replace(/マップ$/, '')}
         position={popupState.position}
       />
       
