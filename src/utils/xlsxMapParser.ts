@@ -495,10 +495,16 @@ function detectBlocksWithExcelJS(
   const blockGroups = new Map<string, {
     regions: Set<string>[];
     numberCells: NumberCellInfo[];
+    nameCells: { row: number; col: number }[];
   }>();
 
   // --- ブロック名候補を処理する共通ヘルパー ---
-  const processBlockNameCandidate = (blockName: string, startRow: number, startCol: number) => {
+  const processBlockNameCandidate = (
+    blockName: string,
+    startRow: number,
+    startCol: number,
+    nameCellCoords: { row: number; col: number }[]
+  ) => {
     const cellKey = `${startRow}-${startCol}`;
     
     // D対策: 既に処理済みの領域内ならスキップ
@@ -526,10 +532,12 @@ function detectBlocksWithExcelJS(
       const group = blockGroups.get(blockName)!;
       group.regions.push(region);
       group.numberCells.push(...numberCells);
+      group.nameCells.push(...nameCellCoords);
     } else {
       blockGroups.set(blockName, {
         regions: [region],
         numberCells: [...numberCells],
+        nameCells: [...nameCellCoords],
       });
     }
   };
@@ -544,7 +552,14 @@ function detectBlocksWithExcelJS(
   
   blockNameMerges.forEach((merge) => {
     const blockName = String(merge.value).trim();
-    processBlockNameCandidate(blockName, merge.startRow, merge.startCol);
+    // 結合セルが占めるすべてのセル座標をブロック名セルとして記録
+    const nameCellCoords: { row: number; col: number }[] = [];
+    for (let r = merge.startRow; r <= merge.endRow; r++) {
+      for (let c = merge.startCol; c <= merge.endCol; c++) {
+        nameCellCoords.push({ row: r, col: c });
+      }
+    }
+    processBlockNameCandidate(blockName, merge.startRow, merge.startCol, nameCellCoords);
   });
 
   // --- フェーズ2: 非結合セルからブロック名を検出（A対策: minMergedCellCount <= 1 の場合のみ） ---
@@ -564,7 +579,7 @@ function detectBlocksWithExcelJS(
         if (!isBlockName(cell.value, settings)) continue;
         
         const blockName = String(extractCellValue(cell.value)).trim();
-        processBlockNameCandidate(blockName, row, col);
+        processBlockNameCandidate(blockName, row, col, [{ row, col }]);
       }
     }
   }
@@ -600,6 +615,10 @@ function detectBlocksWithExcelJS(
       endRow: boundingBox.endRow,
       endCol: boundingBox.endCol,
       numberCells: uniqueNumberCells,
+      nameCells: group.nameCells.filter(
+        (cell, index, self) =>
+          index === self.findIndex((c) => c.row === cell.row && c.col === cell.col)
+      ),
       color: generateBlockColor(colorIndex++),
       isAutoDetected: true,
     };

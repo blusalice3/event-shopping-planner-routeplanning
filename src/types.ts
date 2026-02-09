@@ -110,6 +110,8 @@ export interface BlockDefinition {
   endRow: number;
   endCol: number;
   numberCells: NumberCellInfo[];
+  /** ブロック名が記載されているセルの座標一覧 */
+  nameCells?: { row: number; col: number }[];
   color?: string;
   id?: string;
   isAutoDetected?: boolean;

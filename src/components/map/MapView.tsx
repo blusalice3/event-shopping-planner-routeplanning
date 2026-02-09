@@ -339,6 +339,11 @@ const MapView: React.FC<MapViewProps> = ({
         
         // ブロック範囲内かチェック（cellGroups対応）
         if (isCellInBlock(row, col, block)) {
+          // ブロック名セルならスキップ（クリックしてもポップアップを出さない）
+          if (block.nameCells && block.nameCells.some(nc => nc.row === row && nc.col === col)) {
+            continue;
+          }
+          
           // 数値セルを探す（numberCells配列から）
           const numberCell = block.numberCells.find(nc => nc.row === row && nc.col === col);
           if (numberCell) {

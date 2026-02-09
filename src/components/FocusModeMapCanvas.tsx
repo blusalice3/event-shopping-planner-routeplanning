@@ -1254,6 +1254,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           
           // ブロック範囲内かチェック（cellGroups対応）
           if (isCellInBlock(row, col, block)) {
+            // ブロック名セルならスキップ
+            if (block.nameCells && block.nameCells.some(nc => nc.row === row && nc.col === col)) {
+              continue;
+            }
+            
             // numberCells配列から数値セルを探す
             let foundNumber: number | null = null;
             const numberCell = block.numberCells.find(nc => nc.row === row && nc.col === col);
