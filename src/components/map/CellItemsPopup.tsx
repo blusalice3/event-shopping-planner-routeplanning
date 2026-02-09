@@ -57,6 +57,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     quantity: '1',
     remarks: '',
     url: '',
+    numberOverride: '',
     purchaseStatus: 'None' as 'None' | 'Purchased' | 'Postpone' | 'Late',
   });
 
@@ -78,7 +79,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   }, []);
 
   const openAddDialog = useCallback(() => {
-    setNewItemForm({ circle: '', title: '', price: '', quantity: '1', remarks: '', url: '', purchaseStatus: 'None' });
+    setNewItemForm({ circle: '', title: '', price: '', quantity: '1', remarks: '', url: '', numberOverride: String(number), purchaseStatus: 'None' });
     setAddDialogOpen(true);
   }, []);
 
@@ -92,7 +93,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     onAddItem({
       eventDate: eventDate || '',
       block: blockName,
-      number: String(number),
+      number: newItemForm.numberOverride || String(number),
       circle: newItemForm.circle,
       title: newItemForm.title,
       price,
@@ -504,7 +505,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                 </div>
                 <div>
                   <label className={labelClass}>ナンバー</label>
-                  <input type="text" value={String(number)} readOnly className={`${formInputClass} bg-slate-100 dark:bg-slate-700`} />
+                  <input type="text" value={newItemForm.numberOverride} onChange={(e) => setNewItemForm(prev => ({ ...prev, numberOverride: e.target.value }))} className={formInputClass} placeholder="01a" />
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
