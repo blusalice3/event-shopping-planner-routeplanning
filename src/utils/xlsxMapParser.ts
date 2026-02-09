@@ -265,27 +265,33 @@ function isBlockName(value: ExcelJS.CellValue, settings: BlockDetectionSettings 
   // 許可文字種に基づいて正規表現を構築
   const charTypes = settings.allowedCharTypes;
   let allowedPattern = '';
-  let testPatterns: RegExp[] = [];
+  // コンテンツ文字種（カタカナ・ひらがな・英字・漢字）のパターン
+  const contentPatterns: RegExp[] = [];
   
   if (charTypes.katakana) {
     allowedPattern += 'ア-ンァ-ヴー';
-    testPatterns.push(/[ア-ンァ-ヴー]/);
+    contentPatterns.push(/[ア-ンァ-ヴー]/);
   }
   if (charTypes.hiragana) {
     allowedPattern += 'あ-んぁ-ゔー';
-    testPatterns.push(/[あ-んぁ-ゔー]/);
+    contentPatterns.push(/[あ-んぁ-ゔー]/);
   }
   if (charTypes.alphabet) {
     allowedPattern += 'A-Za-z';
-    testPatterns.push(/[A-Za-z]/);
+    contentPatterns.push(/[A-Za-z]/);
   }
   if (charTypes.kanji) {
     allowedPattern += '\\u4E00-\\u9FFF\\u3400-\\u4DBF';
-    testPatterns.push(/[\u4E00-\u9FFF\u3400-\u4DBF]/);
+    contentPatterns.push(/[\u4E00-\u9FFF\u3400-\u4DBF]/);
   }
+  // 数字と記号は補助文字種（これだけではブロック名にならない）
   if (charTypes.digit) {
     allowedPattern += '0-9０-９';
-    testPatterns.push(/[0-9０-９]/);
+  }
+  if (charTypes.symbol) {
+    // 半角記号: - . / _ + & # * !
+    // 全角記号: − ． ／ ＿ ＋ ＆ ＃ ＊ ！ ・ ： ～ 〜
+    allowedPattern += '\\-\\.\\/\\_\\+\\&\\#\\*\\!−．／＿＋＆＃＊！・：～〜';
   }
   
   if (allowedPattern.length === 0) return false;
@@ -298,8 +304,9 @@ function isBlockName(value: ExcelJS.CellValue, settings: BlockDetectionSettings 
   const digitsOnly = /^[0-9０-９]+$/;
   if (digitsOnly.test(str)) return false;
   
-  // 少なくとも1つの許可文字種に該当する文字が含まれていればOK
-  return testPatterns.some(pattern => pattern.test(str));
+  // コンテンツ文字種（カタカナ・ひらがな・英字・漢字）が少なくとも1文字含まれている必要がある
+  // 数字＋記号だけではブロック名とみなさない
+  return contentPatterns.some(pattern => pattern.test(str));
 }
 
 // 数値セルかどうかを判定（設定に基づく範囲チェック）

@@ -378,6 +378,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       ['alphabet', '英字'],
                       ['kanji', '漢字'],
                       ['digit', '数字'],
+                      ['symbol', '記号'],
                     ] as const).map(([key, label]) => (
                       <label key={key} className="flex items-center gap-1.5 text-sm text-slate-700 dark:text-slate-300">
                         <input

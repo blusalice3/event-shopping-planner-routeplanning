@@ -173,6 +173,7 @@ export interface BlockDetectionSettings {
     alphabet: boolean;
     kanji: boolean;
     digit: boolean;
+    symbol: boolean;
   };
   /** ブロック名セルの最小結合セル数 (default: 4) */
   minMergedCellCount: number;
@@ -194,6 +195,7 @@ export const DEFAULT_BLOCK_DETECTION_SETTINGS: BlockDetectionSettings = {
     alphabet: true,
     kanji: true,
     digit: true,
+    symbol: false,
   },
   minMergedCellCount: 4,
   numberCellMin: 1,
