@@ -368,6 +368,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
             <div className="p-4 border-b border-slate-200 dark:border-slate-700">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">アイテム編集</h3>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{editingItem.block}-{editingItem.number}</p>
             </div>
             <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
               <div>
@@ -378,27 +379,91 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">タイトル</label>
                 <input type="text" value={editingItem.title} onChange={(e) => setEditingItem({ ...editingItem, title: e.target.value })} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white" />
               </div>
+              {/* 頒布価格: ドロップダウン + 直接入力 */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">頒布価格</label>
+                <div className="grid grid-cols-2 gap-2">
+                  <select
+                    value={editingItem.price === null ? 'undecided' : (editingItem.price !== null && editingItem.price % 100 === 0 && editingItem.price >= 0 && editingItem.price <= 10000) ? String(editingItem.price) : 'custom'}
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === 'undecided') {
+                        setEditingItem({ ...editingItem, price: null });
+                      } else if (v === 'custom') {
+                        // カスタム選択時は現在値を維持
+                      } else {
+                        setEditingItem({ ...editingItem, price: parseInt(v, 10) });
+                      }
+                    }}
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm"
+                  >
+                    <option value="undecided">価格未定</option>
+                    {Array.from({ length: 101 }, (_, i) => i * 100).map(p => (
+                      <option key={p} value={p}>{p.toLocaleString()}円</option>
+                    ))}
+                    {editingItem.price !== null && (editingItem.price % 100 !== 0 || editingItem.price > 10000) && (
+                      <option value="custom">{editingItem.price.toLocaleString()}円（手入力）</option>
+                    )}
+                  </select>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      inputMode="numeric"
+                      value={editingItem.price ?? ''}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/[^0-9]/g, '');
+                        setEditingItem({ ...editingItem, price: raw === '' ? null : parseInt(raw, 10) });
+                      }}
+                      placeholder="直接入力"
+                      className="w-full px-3 py-2 pr-8 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm"
+                    />
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">円</span>
+                  </div>
+                </div>
+                {editingItem.price === null && (
+                  <p className="text-xs text-amber-500 mt-1">※ 価格未定</p>
+                )}
+              </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">価格</label>
-                  <input type="number" value={editingItem.price ?? ''} onChange={(e) => setEditingItem({ ...editingItem, price: e.target.value ? parseInt(e.target.value) : null })} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white" />
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">数量</label>
+                  <select
+                    value={editingItem.quantity}
+                    onChange={(e) => setEditingItem({ ...editingItem, quantity: parseInt(e.target.value) || 1 })}
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                  >
+                    {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
+                      <option key={num} value={num}>{num}</option>
+                    ))}
+                  </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">数量</label>
-                  <input type="number" value={editingItem.quantity} onChange={(e) => setEditingItem({ ...editingItem, quantity: parseInt(e.target.value) || 1 })} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white" />
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">購入状態</label>
+                  <select value={editingItem.purchaseStatus} onChange={(e) => setEditingItem({ ...editingItem, purchaseStatus: e.target.value as PurchaseStatus })} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white">
+                    {PurchaseStatuses.map((status) => (
+                      <option key={status} value={status}>{statusLabels[status]}</option>
+                    ))}
+                  </select>
                 </div>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">購入状態</label>
-                <select value={editingItem.purchaseStatus} onChange={(e) => setEditingItem({ ...editingItem, purchaseStatus: e.target.value as PurchaseStatus })} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white">
-                  {PurchaseStatuses.map((status) => (
-                    <option key={status} value={status}>{statusLabels[status]}</option>
-                  ))}
-                </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">備考</label>
                 <textarea value={editingItem.remarks} onChange={(e) => setEditingItem({ ...editingItem, remarks: e.target.value })} rows={2} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">URL</label>
+                <input
+                  type="url"
+                  value={editingItem.url || ''}
+                  onChange={(e) => setEditingItem({ ...editingItem, url: e.target.value || undefined })}
+                  placeholder="https://example.com"
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                />
+                {editingItem.url && (
+                  <a href={editingItem.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 mt-1">
+                    🔗 開く
+                  </a>
+                )}
               </div>
             </div>
             <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2 justify-end">
