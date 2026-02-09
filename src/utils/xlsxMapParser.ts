@@ -301,12 +301,23 @@ function isBlockName(value: ExcelJS.CellValue, settings: BlockDetectionSettings 
   if (!allowedChars.test(str)) return false;
   
   // 数字のみの場合は除外（数値セルとして扱うため）
+  // ただし記号が含まれていれば数値セルではないので除外しない
   const digitsOnly = /^[0-9０-９]+$/;
   if (digitsOnly.test(str)) return false;
   
-  // コンテンツ文字種（カタカナ・ひらがな・英字・漢字）が少なくとも1文字含まれている必要がある
-  // 数字＋記号だけではブロック名とみなさない
-  return contentPatterns.some(pattern => pattern.test(str));
+  // コンテンツ文字種（カタカナ・ひらがな・英字・漢字）が含まれていればOK
+  if (contentPatterns.some(pattern => pattern.test(str))) return true;
+  
+  // コンテンツ文字種が含まれない場合（数字+記号のみ）
+  // allowDigitSymbolOnly が有効かつ記号が有効なら許可
+  if (settings.allowDigitSymbolOnly && charTypes.symbol && charTypes.digit) {
+    // 数字と記号が両方含まれている場合のみ許可（記号だけ・数字だけは除外済み）
+    const hasDigit = /[0-9０-９]/.test(str);
+    const hasSymbol = /[-.\/_+&#*!−．／＿＋＆＃＊！・：～〜]/.test(str);
+    return hasDigit && hasSymbol;
+  }
+  
+  return false;
 }
 
 // 数値セルかどうかを判定（設定に基づく範囲チェック）

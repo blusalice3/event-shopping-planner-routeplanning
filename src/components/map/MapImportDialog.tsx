@@ -391,6 +391,19 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       </label>
                     ))}
                   </div>
+                  {/* 数字+記号のみ許可サブオプション */}
+                  {settings.allowedCharTypes.digit && settings.allowedCharTypes.symbol && (
+                    <label className="flex items-center gap-1.5 mt-2 ml-1 text-sm text-slate-600 dark:text-slate-400">
+                      <input
+                        type="checkbox"
+                        checked={settings.allowDigitSymbolOnly}
+                        onChange={(e) => updateSetting('allowDigitSymbolOnly', e.target.checked)}
+                        className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                      />
+                      <span>数字+記号のみのブロック名を許可</span>
+                      <span className="text-xs text-slate-400">（例: 3-01）</span>
+                    </label>
+                  )}
                 </div>
 
                 {/* 最小結合セル数 */}
