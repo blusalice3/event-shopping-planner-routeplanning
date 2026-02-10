@@ -457,56 +457,7 @@ UI非表示時は画面左上にフローティングの「全表示」ボタン
 | データ永続化 | IndexedDB |
 | デプロイ | Vercel（設定済み） |
 
-### プロジェクト構成
 
-```
-src/
-├── App.tsx                  # アプリケーションルート（オーケストレーション）
-├── types.ts                 # 型定義
-├── index.tsx                # エントリーポイント
-├── components/              # UIコンポーネント
-│   ├── HeaderBar.tsx        # ヘッダー全体（ツールバー・タブ・設定パネル）
-│   ├── EditModeContent.tsx  # 編集モード2カラムUI
-│   ├── ModalLayer.tsx       # 全モーダル・ダイアログ統合
-│   ├── TabButton.tsx        # タブボタン（ロングプレスメニュー付）
-│   ├── FocusMode.tsx        # フォーカスモード
-│   ├── ShoppingList.tsx     # アイテムリスト表示
-│   ├── ShoppingItemCard.tsx # アイテムカード
-│   ├── ImportScreen.tsx     # データ取込画面
-│   ├── EventListScreen.tsx  # イベント一覧画面
-│   ├── SearchBar.tsx        # 検索バー
-│   ├── SummaryBar.tsx       # サマリーバー
-│   ├── VisitListPanel.tsx   # 訪問先リストパネル
-│   ├── ZoomControl.tsx      # ズームコントロール
-│   └── map/                 # マップ関連コンポーネント
-│       ├── MapView.tsx      # マップ表示メイン
-│       ├── MapCanvas.tsx    # マップ描画キャンバス
-│       ├── BlockDefinitionPanel.tsx  # ブロック定義パネル
-│       ├── HallDefinitionPanel.tsx   # ホール定義パネル
-│       ├── HallOrderPanel.tsx        # ホール巡回順設定
-│       └── MapImportDialog.tsx       # マップインポートダイアログ
-├── hooks/                   # カスタムフック（18個）
-│   ├── useEventManagement.ts  # イベントCRUD
-│   ├── useItemCrud.ts         # アイテム変更操作
-│   ├── useMapControls.ts      # マップUI制御
-│   ├── useMapItemOps.ts       # マップ↔アイテム連携
-│   ├── useItemMovement.ts     # アイテム移動・並替
-│   ├── useItemSelection.ts    # アイテム選択管理
-│   ├── useSorting.ts          # ソート管理
-│   ├── useColumnItems.ts      # カラム表示アイテム計算
-│   ├── useViewMode.ts         # 表示モード管理
-│   ├── useVisitList.ts        # 訪問先リスト管理
-│   ├── useExportImport.ts     # エクスポート/インポート
-│   ├── useUpdateWorkflow.ts   # スプレッドシート更新
-│   ├── usePersistence.ts      # IndexedDB永続化
-│   ├── useHallUtils.ts        # ホール関連ユーティリティ
-│   ├── useSearch.ts           # 検索機能
-│   ├── useUIVisibility.ts     # UI表示設定
-│   └── useTheme.ts            # テーマ管理
-└── utils/                   # ユーティリティ
-    ├── indexedDB.ts          # IndexedDBラッパー
-    └── itemComparison.ts     # アイテム比較ロジック
-```
 
 ### ライセンス
 
