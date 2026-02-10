@@ -81,7 +81,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   const openAddDialog = useCallback(() => {
     setNewItemForm({ circle: '', title: '', price: '', quantity: '1', remarks: '', url: '', numberOverride: String(number), purchaseStatus: 'None' });
     setAddDialogOpen(true);
-  }, []);
+  }, [number]);
 
   const closeAddDialog = useCallback(() => {
     setAddDialogOpen(false);
