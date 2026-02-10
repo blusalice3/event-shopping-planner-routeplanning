@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { BulkSortDirection } from '../App';
+import { BulkSortDirection } from './HeaderBar';
 import SortAscendingIcon from './icons/SortAscendingIcon';
 import SortDescendingIcon from './icons/SortDescendingIcon';
 import XIcon from './icons/XIcon';
@@ -16,7 +16,7 @@ const BulkActionControls: React.FC<BulkActionControlsProps> = ({ onSort, onClear
   const handleSortClick = () => {
     onSort(sortDirection);
     // Toggle direction for the next click
-    setSortDirection(prev => (prev === 'asc' ? 'desc' : 'asc'));
+    setSortDirection((prev: BulkSortDirection) => (prev === 'asc' ? 'desc' : 'asc'));
   };
 
   return (

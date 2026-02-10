@@ -31,3 +31,7 @@ export { useColumnItems } from './useColumnItems';
 export { useUpdateWorkflow } from './useUpdateWorkflow';
 
 export { useMapItemOps } from './useMapItemOps';
+
+export { useEventManagement, extractEventDates } from './useEventManagement';
+
+export { useItemCrud } from './useItemCrud';

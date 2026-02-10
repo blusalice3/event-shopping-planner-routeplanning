@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react';
 import { ShoppingItem, ExecuteModeItems, DayModeState, ViewMode } from '../types';
-import { BulkSortDirection } from '../App';
+import { BulkSortDirection } from '../components/HeaderBar';
 
 type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'None' | 'Purchased';
 
