@@ -18,8 +18,13 @@ import { MapView, BlockDefinitionPanel, HallDefinitionPanel, isPointInPolygon, M
 import VisitListPanel from './components/VisitListPanel';
 import FocusMode from './components/FocusMode';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './utils/itemComparison';
-import { db } from './utils/indexedDB';
 import { exportToXlsx, importFromXlsx, downloadBlob } from './utils/exportImport';
+import { useTheme } from './hooks/useTheme';
+import { useUIVisibility, DEFAULT_UI_VISIBILITY } from './hooks/useUIVisibility';
+import { usePersistence } from './hooks/usePersistence';
+import { useSearch } from './hooks/useSearch';
+import { useVisitList } from './hooks/useVisitList';
+import { useMapControls } from './hooks/useMapControls';
 
 type ActiveTab = 'eventList' | 'import' | string; // string部分は動的な参加日（例: '1日目', '2日目', '3日目'など）
 type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'None' | 'Purchased';
@@ -61,7 +66,6 @@ const App: React.FC = () => {
   const [dayModes, setDayModes] = useState<Record<string, DayModeState>>({});
   
   const [activeEventName, setActiveEventName] = useState<string | null>(null);
-  const [isInitialized, setIsInitialized] = useState(false);
   const [activeTab, setActiveTab] = useState<ActiveTab>('eventList');
   const [sortState, setSortState] = useState<SortState>('Manual');
   const [blockSortDirection, setBlockSortDirection] = useState<BlockSortDirection | null>(null);
@@ -93,55 +97,19 @@ const App: React.FC = () => {
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [eventToRename, setEventToRename] = useState<string | null>(null);
   
-  // 検索機能の状態
-  const [searchKeyword, setSearchKeyword] = useState('');
-  const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
-  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
+  // 検索機能の状態 - will be initialized via useSearch hook (see below)
 
   // レイアウトモード状態（ビューポート幅で初期化）
   const [layoutMode, setLayoutMode] = useState<'pc' | 'smartphone'>(() =>
     typeof window !== 'undefined' && window.innerWidth < 768 ? 'smartphone' : 'pc'
   );
   
-  // UI表示設定（ヘッダー/タブバーの表示制御）
-  type UIVisibilityConfig = { header: boolean; tabBar: boolean };
-  type UIVisibilitySettings = {
-    focus_sp_mapOn: UIVisibilityConfig;
-    focus_sp_mapOff: UIVisibilityConfig;
-    focus_pc_mapOn: UIVisibilityConfig;
-    focus_pc_mapOff: UIVisibilityConfig;
-    execute_sp: UIVisibilityConfig;
-    execute_pc: UIVisibilityConfig;
-  };
-  const DEFAULT_UI_VISIBILITY: UIVisibilitySettings = {
-    focus_sp_mapOn: { header: false, tabBar: false },
-    focus_sp_mapOff: { header: true, tabBar: true },
-    focus_pc_mapOn: { header: true, tabBar: true },
-    focus_pc_mapOff: { header: true, tabBar: true },
-    execute_sp: { header: true, tabBar: true },
-    execute_pc: { header: true, tabBar: true },
-  };
-  
-  const [uiVisibilitySettings, setUiVisibilitySettings] = useState<UIVisibilitySettings>(() => {
-    try {
-      const saved = localStorage.getItem('uiVisibilitySettings');
-      if (saved) {
-        return { ...DEFAULT_UI_VISIBILITY, ...JSON.parse(saved) };
-      }
-    } catch { /* ignore */ }
-    return DEFAULT_UI_VISIBILITY;
-  });
-  const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
-  const [uiSettingsPanelOpen, setUiSettingsPanelOpen] = useState(false);
+  // UI表示設定 - will be initialized after currentMode is computed
+  // (see useUIVisibility hook call below)
   const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
   
-  // ダークモード状態 ('system' | 'light' | 'dark')
-  const [themeMode, setThemeMode] = useState<'system' | 'light' | 'dark'>(() => {
-    if (typeof window !== 'undefined') {
-      return (localStorage.getItem('themeMode') as 'system' | 'light' | 'dark') || 'system';
-    }
-    return 'system';
-  });
+  // ダークモード状態 - extracted to useTheme hook
+  const { themeMode, setThemeMode, cycleTheme } = useTheme();
 
   // マップ機能の状態
   const [mapData, setMapData] = useState<MapDataStore>({});
@@ -158,135 +126,19 @@ const App: React.FC = () => {
   const [mapImportPendingFile, setMapImportPendingFile] = useState<File | null>(null);
   const [mapImportPendingEventName, setMapImportPendingEventName] = useState<string>('');
   
-  // 保存フラグ（データ変更時のみ保存）
-  const isSavingRef = useRef(false);
+  // 保存フラグ - handled by usePersistence hook
 
-  // テーマモードの適用
-  useEffect(() => {
-    const applyTheme = () => {
-      const html = document.documentElement;
-      
-      // data-theme属性を設定（CSS変数用）
-      html.setAttribute('data-theme', themeMode);
-      
-      // Tailwindのdarkクラスも同期
-      html.classList.remove('dark');
-      
-      if (themeMode === 'dark') {
-        html.classList.add('dark');
-      } else if (themeMode === 'light') {
-        // lightの場合はdarkクラスを付けない
-      } else {
-        // システム設定に従う
-        if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-          html.classList.add('dark');
-        }
-      }
-    };
-    
-    applyTheme();
-    localStorage.setItem('themeMode', themeMode);
-    
-    // システム設定の変更を監視（systemモードの場合のみ）
-    if (themeMode === 'system') {
-      const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      const handler = () => applyTheme();
-      mediaQuery.addEventListener('change', handler);
-      return () => mediaQuery.removeEventListener('change', handler);
-    }
-  }, [themeMode]);
+  // テーマモードの適用 - handled by useTheme hook
 
-  // UI表示設定の永続化
-  useEffect(() => {
-    localStorage.setItem('uiVisibilitySettings', JSON.stringify(uiVisibilitySettings));
-  }, [uiVisibilitySettings]);
+  // UI表示設定の永続化 - handled by useUIVisibility hook
 
-  // IndexedDBからデータを読み込み
-  useEffect(() => {
-    const loadData = async () => {
-      try {
-        // localStorageからの移行を試みる
-        await db.migrateFromLocalStorage();
-        
-        // IndexedDBからデータを読み込み
-        const [
-          loadedEventLists,
-          loadedMetadata,
-          loadedExecuteItems,
-          loadedDayModes,
-          loadedMapData,
-          loadedRouteSettings,
-          loadedHallDefinitions,
-          loadedHallRouteSettings,
-        ] = await Promise.all([
-          db.loadEventLists(),
-          db.loadEventMetadata(),
-          db.loadExecuteModeItems(),
-          db.loadDayModes(),
-          db.loadMapData(),
-          db.loadRouteSettings(),
-          db.loadHallDefinitions(),
-          db.loadHallRouteSettings(),
-        ]);
-        
-        // 既存データの互換性: quantityフィールドがない場合は1を設定
-        const migratedLists: Record<string, ShoppingItem[]> = {};
-        Object.keys(loadedEventLists).forEach(eventName => {
-          migratedLists[eventName] = (loadedEventLists[eventName] as ShoppingItem[]).map((item: ShoppingItem) => ({
-            ...item,
-            quantity: item.quantity ?? 1,
-          }));
-        });
-        
-        setEventLists(migratedLists);
-        setEventMetadata(loadedMetadata as Record<string, EventMetadata>);
-        setExecuteModeItems(loadedExecuteItems);
-        setDayModes(loadedDayModes as Record<string, DayModeState>);
-        setMapData(loadedMapData as MapDataStore);
-        setRouteSettings(loadedRouteSettings as RouteSettingsStore);
-        setHallDefinitions(loadedHallDefinitions as HallDefinitionsStore);
-        setHallRouteSettings(loadedHallRouteSettings as HallRouteSettingsStore);
-        
-        console.log('Data loaded from IndexedDB');
-      } catch (error) {
-        console.error('Failed to load data from IndexedDB:', error);
-      }
-      setIsInitialized(true);
-    };
-    
-    loadData();
-  }, []);
+  // データ永続化 - extracted to usePersistence hook
+  const isInitialized = usePersistence(
+    { eventLists, eventMetadata, executeModeItems, dayModes, mapData, routeSettings, hallDefinitions, hallRouteSettings },
+    { setEventLists, setEventMetadata, setExecuteModeItems, setDayModes, setMapData, setRouteSettings, setHallDefinitions, setHallRouteSettings },
+  );
 
-  // IndexedDBへデータを保存（デバウンス付き）
-  useEffect(() => {
-    if (!isInitialized || isSavingRef.current) return;
-    
-    const saveData = async () => {
-      isSavingRef.current = true;
-      try {
-        await Promise.all([
-          db.saveEventLists(eventLists),
-          db.saveEventMetadata(eventMetadata),
-          db.saveExecuteModeItems(executeModeItems),
-          db.saveDayModes(dayModes),
-          db.saveMapData(mapData),
-          db.saveRouteSettings(routeSettings),
-          db.saveHallDefinitions(hallDefinitions),
-          db.saveHallRouteSettings(hallRouteSettings),
-        ]);
-        console.log('Data saved to IndexedDB');
-      } catch (error) {
-        console.error('Failed to save data to IndexedDB:', error);
-        alert('データの保存に失敗しました。ストレージ容量を確認してください。');
-      } finally {
-        isSavingRef.current = false;
-      }
-    };
-    
-    // デバウンス: 500ms後に保存
-    const timeoutId = setTimeout(saveData, 500);
-    return () => clearTimeout(timeoutId);
-  }, [eventLists, eventMetadata, executeModeItems, dayModes, mapData, routeSettings, hallDefinitions, hallRouteSettings, isInitialized]);
+  // IndexedDBへデータを保存 - handled by usePersistence hook
 
   const items = useMemo(() => activeEventName ? eventLists[activeEventName] || [] : [], [activeEventName, eventLists]);
   
@@ -476,32 +328,13 @@ const App: React.FC = () => {
     return 'edit';
   }, [activeEventName, dayModes, activeTab, eventDates, isMapTab]);
 
-  // 現在の条件に基づくヘッダー/タブバー表示状態
-  const { showHeaderBar, showTabBar, rawHideSomething } = useMemo(() => {
-    if (!activeEventName) {
-      return { showHeaderBar: true, showTabBar: true, rawHideSomething: false };
-    }
-    const layout = layoutMode === 'smartphone' ? 'sp' : 'pc';
-    let rawHeader = true, rawTabBar = true;
-    
-    if (currentMode === 'focus') {
-      const key = `focus_${layout}_${focusModeMapVisible ? 'mapOn' : 'mapOff'}` as keyof UIVisibilitySettings;
-      const config = uiVisibilitySettings[key];
-      rawHeader = config.header;
-      rawTabBar = config.tabBar;
-    } else if (currentMode === 'execute') {
-      const key = `execute_${layout}` as keyof UIVisibilitySettings;
-      const config = uiVisibilitySettings[key];
-      rawHeader = config.header;
-      rawTabBar = config.tabBar;
-    }
-    
-    const hideSomething = !rawHeader || !rawTabBar;
-    if (uiVisibilityOverride) {
-      return { showHeaderBar: true, showTabBar: true, rawHideSomething: hideSomething };
-    }
-    return { showHeaderBar: rawHeader, showTabBar: rawTabBar, rawHideSomething: hideSomething };
-  }, [uiVisibilityOverride, activeEventName, currentMode, layoutMode, focusModeMapVisible, uiVisibilitySettings]);
+  // 現在の条件に基づくヘッダー/タブバー表示状態 - extracted to useUIVisibility hook
+  const {
+    uiVisibilitySettings, setUiVisibilitySettings,
+    uiVisibilityOverride, setUiVisibilityOverride,
+    uiSettingsPanelOpen, setUiSettingsPanelOpen,
+    showHeaderBar, showTabBar, rawHideSomething,
+  } = useUIVisibility(activeEventName, currentMode, layoutMode, focusModeMapVisible);
 
   const handleBulkAdd = useCallback((eventName: string, newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string; layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }>; source?: 'spreadsheet' | 'app' }) => {
     // sourceを決定: metadataで指定されていればそれを使用、urlがあればspreadsheet、なければapp
@@ -3123,205 +2956,70 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     return items.filter(item => item.eventDate === activeTab);
   }, [items, activeTab, activeEventName, eventDates]);
 
-  // マップタブメニューの状態
-  const [mapTabMenuOpen, setMapTabMenuOpen] = useState<string | null>(null);
-  const [mapTabMenuPosition, setMapTabMenuPosition] = useState<{ left: number; top: number }>({ left: 0, top: 0 });
-  const [visitListPanelOpen, setVisitListPanelOpen] = useState(false);
-  const [visitListPanelMapTab, setVisitListPanelMapTab] = useState<string | null>(null);  // 訪問先リストを開いた時のマップタブ
-  const [visitListHasUnsavedChanges, setVisitListHasUnsavedChanges] = useState(false);
-  const [visitListOriginalOrder, setVisitListOriginalOrder] = useState<string[]>([]);  // 元の順序（アイテムID）
-  const [highlightedMapCell, setHighlightedMapCell] = useState<{ row: number; col: number } | null>(null);
-  const [showVisitListConfirmDialog, setShowVisitListConfirmDialog] = useState(false);
-  const [pendingTabChange, setPendingTabChange] = useState<string | null>(null);
-  const [blockDefinitionMode, setBlockDefinitionMode] = useState(false);
-  
-  // マップビューのコントロール用状態（ヘッダーから制御）
-  const [mapSelectedHallId, setMapSelectedHallId] = useState<string>('all');
-  const [mapIsRouteVisible, setMapIsRouteVisible] = useState(true);
-  const [mapIsHallOrderOpen, setMapIsHallOrderOpen] = useState(false);
-  const [mapHallSelectorOpen, setMapHallSelectorOpen] = useState(false);
-  const [mapSmartInsertEnabled, setMapSmartInsertEnabled] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('mapSmartInsertEnabled');
-      return saved !== null ? saved === 'true' : true; // デフォルトON
-    } catch { return true; }
-  });
-  const [mapSmartInsertMode, setMapSmartInsertMode] = useState<'card' | 'preview'>(() => {
-    try {
-      const saved = localStorage.getItem('mapSmartInsertMode');
-      return (saved === 'card' || saved === 'preview') ? saved : 'card';
-    } catch { return 'card'; }
-  });
-  const [smartInsertToast, setSmartInsertToast] = useState<string | null>(null);
-  const smartInsertLongPressRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const smartInsertLongPressTriggeredRef = React.useRef(false);
+  // マップコントロール - extracted to useMapControls hook
+  const mapControls = useMapControls();
+  const {
+    mapTabMenuOpen, setMapTabMenuOpen,
+    mapTabMenuPosition, setMapTabMenuPosition,
+    blockDefinitionMode, setBlockDefinitionMode,
+    hallDefinitionMode, setHallDefinitionMode,
+    mapSelectedHallId, setMapSelectedHallId,
+    mapIsRouteVisible, setMapIsRouteVisible,
+    mapIsHallOrderOpen, setMapIsHallOrderOpen,
+    mapHallSelectorOpen, setMapHallSelectorOpen,
+    mapSmartInsertEnabled, setMapSmartInsertEnabled,
+    mapSmartInsertMode, setMapSmartInsertMode,
+    smartInsertToast, setSmartInsertToast,
+    smartInsertLongPressRef, smartInsertLongPressTriggeredRef,
+    cellSelectionMode, setCellSelectionMode,
+    pendingCellSelection, setPendingCellSelection,
+    handleStartCellSelection,
+    handleConfirmCellSelection,
+    handleCancelCellSelection,
+    vertexSelectionMode, setVertexSelectionMode,
+    pendingVertexSelection, setPendingVertexSelection,
+    handleStartVertexSelection,
+    handleConfirmVertexSelection,
+    handleCancelVertexSelection,
+  } = mapControls;
 
-  // スマート位置選択の設定を永続化
-  React.useEffect(() => {
-    try { localStorage.setItem('mapSmartInsertEnabled', String(mapSmartInsertEnabled)); } catch {}
-  }, [mapSmartInsertEnabled]);
+  // 訪問先リスト - extracted to useVisitList hook
+  const visitList = useVisitList(
+    activeEventName, activeTab, isMapTab, items, executeModeItems, setExecuteModeItems,
+    hallDefinitions, hallRouteSettings,
+  );
+  const {
+    visitListPanelOpen, setVisitListPanelOpen,
+    visitListPanelMapTab,
+    visitListHasUnsavedChanges,
+    highlightedMapCell,
+    showVisitListConfirmDialog, setShowVisitListConfirmDialog,
+    pendingTabChange, setPendingTabChange,
+    visitListItems,
+    visitListHallOrder,
+    openVisitListPanel,
+    handleVisitListOrderUpdate,
+    handleVisitListConfirm,
+    handleVisitListCancel,
+    handleVisitListClose,
+    handleHighlightMapCell,
+    handleClearMapCellHighlight,
+    handleVisitListDialogConfirm: visitListDialogConfirmRaw,
+    handleVisitListDialogCancel: visitListDialogCancelRaw,
+  } = visitList;
 
-  React.useEffect(() => {
-    try { localStorage.setItem('mapSmartInsertMode', mapSmartInsertMode); } catch {}
-  }, [mapSmartInsertMode]);
+  // 訪問先リストパネルロジック - extracted to useVisitList hook
 
-  // トースト自動非表示
-  React.useEffect(() => {
-    if (smartInsertToast) {
-      const timer = setTimeout(() => setSmartInsertToast(null), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [smartInsertToast]);
-  
-  // セル選択モードの状態（ブロック定義用）
-  const [cellSelectionMode, setCellSelectionMode] = useState<{
-    type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual';
-    clickedCells: { row: number; col: number }[];
-    editingBlockData?: unknown;
-  } | null>(null);
-  
-  // セル選択完了時にBlockDefinitionPanelに渡すデータ
-  const [pendingCellSelection, setPendingCellSelection] = useState<{
-    type: string;
-    cells: { row: number; col: number }[];
-    editingData?: unknown;
-  } | null>(null);
+  // Wrap dialog handlers to perform tab change
+  const handleVisitListDialogConfirm = useCallback(() => {
+    const newTab = visitListDialogConfirmRaw();
+    if (newTab) setActiveTab(newTab as ActiveTab);
+  }, [visitListDialogConfirmRaw]);
 
-  // 訪問先リストパネルを開く
-  const openVisitListPanel = useCallback((mapTab: string) => {
-    if (!activeEventName) return;
-    
-    // 対応する日付を取得（例：「1日目マップ」→「1日目」）
-    const dayMatch = mapTab.match(/^(.+)マップ$/);
-    if (!dayMatch) return;
-    const dayName = dayMatch[1];
-    
-    // 実行列のアイテムIDを取得
-    const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
-    
-    // 元の順序を保存
-    setVisitListOriginalOrder([...executeIds]);
-    setVisitListPanelMapTab(mapTab);
-    setVisitListHasUnsavedChanges(false);
-    setVisitListPanelOpen(true);
-  }, [activeEventName, executeModeItems]);
-
-  // 訪問先リスト表示中にマップタブを切り替えた場合、新しいマップの訪問先リストに切り替え
-  React.useEffect(() => {
-    if (!visitListPanelOpen || !isMapTab || !activeEventName) return;
-    // 現在のパネルが別のマップタブを指していたら切り替え
-    if (visitListPanelMapTab !== activeTab) {
-      // 未保存の変更がある場合は自動確定
-      if (visitListHasUnsavedChanges) {
-        setVisitListHasUnsavedChanges(false);
-      }
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
-      const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
-      setVisitListOriginalOrder([...executeIds]);
-      setVisitListPanelMapTab(activeTab);
-      setVisitListHasUnsavedChanges(false);
-    }
-  }, [activeTab, isMapTab, activeEventName, visitListPanelOpen, visitListPanelMapTab, visitListHasUnsavedChanges, executeModeItems]);
-
-  // 訪問先リストの順序を更新
-  const handleVisitListOrderUpdate = useCallback((newOrderItems: ShoppingItem[]) => {
-    if (!visitListPanelMapTab || !activeEventName) return;
-    
-    const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
-    if (!dayMatch) return;
-    const dayName = dayMatch[1];
-    
-    // 新しい順序のID配列
-    const newIds = newOrderItems.map(item => item.id);
-    
-    // executeModeItemsを更新
-    setExecuteModeItems(prev => ({
-      ...prev,
-      [activeEventName]: {
-        ...prev[activeEventName],
-        [dayName]: newIds,
-      },
-    }));
-    setVisitListHasUnsavedChanges(true);
-  }, [visitListPanelMapTab, activeEventName]);
-
-  // 訪問先リストの確定
-  const handleVisitListConfirm = useCallback(() => {
-    setVisitListHasUnsavedChanges(false);
-    setVisitListOriginalOrder([]);
-  }, []);
-
-  // 訪問先リストのキャンセル
-  const handleVisitListCancel = useCallback(() => {
-    if (!visitListPanelMapTab || !activeEventName) return;
-    
-    const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
-    if (!dayMatch) return;
-    const dayName = dayMatch[1];
-    
-    // 元の順序に戻す
-    if (visitListOriginalOrder.length > 0) {
-      setExecuteModeItems(prev => ({
-        ...prev,
-        [activeEventName]: {
-          ...prev[activeEventName],
-          [dayName]: [...visitListOriginalOrder],
-        },
-      }));
-    }
-    setVisitListHasUnsavedChanges(false);
-    setVisitListOriginalOrder([]);
-  }, [visitListOriginalOrder, visitListPanelMapTab, activeEventName]);
-
-  // 訪問先リストパネルを閉じる（変更を保持）
-  const handleVisitListClose = useCallback(() => {
-    setVisitListPanelOpen(false);
-    // 履歴と状態は保持（閉じただけでは破棄しない）
-  }, []);
-
-  // マップセルのハイライト
-  const handleHighlightMapCell = useCallback((row: number, col: number) => {
-    setHighlightedMapCell({ row, col });
-  }, []);
-
-  const handleClearMapCellHighlight = useCallback(() => {
-    setHighlightedMapCell(null);
-  }, []);
-
-  // 訪問先リスト用の実行列アイテム
-  const visitListItems = useMemo(() => {
-    if (!visitListPanelMapTab || !activeEventName) return [];
-    
-    const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
-    if (!dayMatch) return [];
-    const dayName = dayMatch[1];
-    
-    const dayItems = items.filter(item => item.eventDate === dayName);
-    const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
-    
-    // executeIdsの順序で返す
-    return executeIds
-      .filter((id: string) => dayItems.some(item => item.id === id))
-      .map((id: string) => dayItems.find(item => item.id === id)!)
-      .filter(Boolean);
-  }, [visitListPanelMapTab, activeEventName, items, executeModeItems]);
-
-  // 訪問先リスト用のホール順序
-  const visitListHallOrder = useMemo(() => {
-    if (!visitListPanelMapTab || !activeEventName) return [];
-    
-    const halls = hallDefinitions[activeEventName]?.[visitListPanelMapTab] || [];
-    const routeSettings = hallRouteSettings[activeEventName]?.[visitListPanelMapTab];
-    
-    if (routeSettings?.hallOrder && routeSettings.hallOrder.length > 0) {
-      return routeSettings.hallOrder;
-    }
-    
-    // デフォルトはホール定義順
-    return halls.map(h => h.id);
-  }, [visitListPanelMapTab, activeEventName, hallDefinitions, hallRouteSettings]);
+  const handleVisitListDialogCancel = useCallback(() => {
+    const newTab = visitListDialogCancelRaw();
+    if (newTab) setActiveTab(newTab as ActiveTab);
+  }, [visitListDialogCancelRaw]);
 
   // アイテムの優先度を変更するハンドラ
   const handleUpdateItemPriority = useCallback((itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
@@ -3510,38 +3208,6 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     });
   }, [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData]);
 
-  // タブ変更時の確認ダイアログ処理（将来的にTabButtonで使用）
-  void function handleTabChangeWithVisitListCheck(newTab: string) {
-    if (visitListPanelOpen && visitListHasUnsavedChanges) {
-      setPendingTabChange(newTab);
-      setShowVisitListConfirmDialog(true);
-      return false;
-    }
-    return true;
-  };
-
-  // 確認ダイアログで確定を選択
-  const handleVisitListDialogConfirm = useCallback(() => {
-    handleVisitListConfirm();
-    setShowVisitListConfirmDialog(false);
-    setVisitListPanelOpen(false);
-    if (pendingTabChange) {
-      setActiveTab(pendingTabChange as ActiveTab);
-      setPendingTabChange(null);
-    }
-  }, [handleVisitListConfirm, pendingTabChange]);
-
-  // 確認ダイアログでキャンセルを選択
-  const handleVisitListDialogCancel = useCallback(() => {
-    handleVisitListCancel();
-    setShowVisitListConfirmDialog(false);
-    setVisitListPanelOpen(false);
-    if (pendingTabChange) {
-      setActiveTab(pendingTabChange as ActiveTab);
-      setPendingTabChange(null);
-    }
-  }, [handleVisitListCancel, pendingTabChange]);
-  
   // ブロック定義を更新
   const handleUpdateBlocks = useCallback((blocks: BlockDefinition[]) => {
     if (!activeEventName || !isMapTab || !currentMapData) return;
@@ -3719,175 +3385,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     });
   }, [activeEventName, isMapTab, activeTab, mapData, hallDefinitions, hallRouteSettings, items]);
 
-  // ホール定義モードの状態
-  const [hallDefinitionMode, setHallDefinitionMode] = useState(false);
-
-  // ホール頂点選択モードの状態
-  const [vertexSelectionMode, setVertexSelectionMode] = useState<{
-    clickedVertices: { row: number; col: number }[];
-    editingData?: unknown;
-  } | null>(null);
-
-  // ホール頂点選択完了時にHallDefinitionPanelに渡すデータ
-  const [pendingVertexSelection, setPendingVertexSelection] = useState<{
-    vertices: { row: number; col: number }[];
-    editingData?: unknown;
-  } | null>(null);
-
-  // ホール頂点選択モードを開始
-  const handleStartVertexSelection = useCallback((editingData?: unknown) => {
-    setVertexSelectionMode({ clickedVertices: [], editingData });
-    setHallDefinitionMode(false);
-  }, []);
-
-  // 頂点を重心からの角度でソートし、辺が交差しない単純多角形を作る
-  const sortVerticesNonCrossing = useCallback((vertices: { row: number; col: number }[]): { row: number; col: number }[] => {
-    if (vertices.length <= 2) return vertices;
-    
-    // 重心を計算
-    const centroidRow = vertices.reduce((sum, v) => sum + v.row, 0) / vertices.length;
-    const centroidCol = vertices.reduce((sum, v) => sum + v.col, 0) / vertices.length;
-    
-    // 重心からの角度でソート（反時計回り）
-    const sorted = [...vertices].sort((a, b) => {
-      const angleA = Math.atan2(a.row - centroidRow, a.col - centroidCol);
-      const angleB = Math.atan2(b.row - centroidRow, b.col - centroidCol);
-      return angleA - angleB;
-    });
-    
-    return sorted;
-  }, []);
-
-  // ホール頂点選択を確定
-  const handleConfirmVertexSelection = useCallback(() => {
-    if (vertexSelectionMode) {
-      // 頂点を自動並べ替え（辺が交差しない単純多角形にする）
-      const sorted = sortVerticesNonCrossing(vertexSelectionMode.clickedVertices);
-      setPendingVertexSelection({
-        vertices: sorted,
-        editingData: vertexSelectionMode.editingData,
-      });
-    }
-    setVertexSelectionMode(null);
-    setHallDefinitionMode(true);
-  }, [vertexSelectionMode]);
-
-  // ホール頂点選択をキャンセル
-  const handleCancelVertexSelection = useCallback(() => {
-    if (vertexSelectionMode?.editingData) {
-      setPendingVertexSelection({
-        vertices: [],
-        editingData: vertexSelectionMode.editingData,
-      });
-    }
-    setVertexSelectionMode(null);
-    setHallDefinitionMode(true);
-  }, [vertexSelectionMode]);
-
-  // マップセルクリック時にホール頂点選択に追加/削除
-  useEffect(() => {
-    const handleMapCellClickForVertex = (e: CustomEvent<{ row: number; col: number }>) => {
-      if (!vertexSelectionMode) return;
-      
-      const { row, col } = e.detail;
-      
-      setVertexSelectionMode(prev => {
-        if (!prev) return prev;
-        
-        // 既存の頂点をクリックした場合は削除
-        const existingIndex = prev.clickedVertices.findIndex(v => v.row === row && v.col === col);
-        if (existingIndex !== -1) {
-          return {
-            ...prev,
-            clickedVertices: prev.clickedVertices.filter((_, i) => i !== existingIndex),
-          };
-        }
-        
-        // 最大6頂点まで
-        if (prev.clickedVertices.length >= 6) {
-          return prev;
-        }
-        
-        return {
-          ...prev,
-          clickedVertices: [...prev.clickedVertices, { row, col }],
-        };
-      });
-    };
-    
-    window.addEventListener('mapCellClick', handleMapCellClickForVertex as EventListener);
-    return () => {
-      window.removeEventListener('mapCellClick', handleMapCellClickForVertex as EventListener);
-    };
-  }, [vertexSelectionMode]);
-  
-  // セル選択モードを開始（BlockDefinitionPanelから呼ばれる）
-  const handleStartCellSelection = useCallback((
-    type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual',
-    editingData?: unknown
-  ) => {
-    setCellSelectionMode({ type, clickedCells: [], editingBlockData: editingData });
-    setBlockDefinitionMode(false); // パネルを一時的に非表示
-  }, []);
-  
-  // 範囲を反映してパネルを再表示
-  const handleConfirmCellSelection = useCallback(() => {
-    if (cellSelectionMode) {
-      // pendingCellSelectionをセットしてBlockDefinitionPanelに渡す
-      setPendingCellSelection({
-        type: cellSelectionMode.type,
-        cells: cellSelectionMode.clickedCells,
-        editingData: cellSelectionMode.editingBlockData,
-      });
-    }
-    setCellSelectionMode(null);
-    setBlockDefinitionMode(true); // パネルを再表示
-  }, [cellSelectionMode]);
-  
-  // セル選択をキャンセル（編集画面に戻る）
-  const handleCancelCellSelection = useCallback(() => {
-    // 編集データを保持したままパネルを再表示
-    if (cellSelectionMode?.editingBlockData) {
-      setPendingCellSelection({
-        type: 'cancelled', // キャンセル用の特殊タイプ
-        cells: [],
-        editingData: cellSelectionMode.editingBlockData,
-      });
-    }
-    setCellSelectionMode(null);
-    setBlockDefinitionMode(true); // パネルを再表示
-  }, [cellSelectionMode]);
-  
-  // マップセルクリックをリッスンしてセル選択に追加
-  useEffect(() => {
-    const handleMapCellClick = (e: CustomEvent<{ row: number; col: number }>) => {
-      if (!cellSelectionMode) return;
-      
-      const { row, col } = e.detail;
-      
-      setCellSelectionMode(prev => {
-        if (!prev) return prev;
-        
-        // 既に選択されている場合は削除（全モード共通）
-        const existingIndex = prev.clickedCells.findIndex(c => c.row === row && c.col === col);
-        if (existingIndex >= 0) {
-          return {
-            ...prev,
-            clickedCells: prev.clickedCells.filter((_, i) => i !== existingIndex),
-          };
-        }
-        
-        // 選択を追加
-        return {
-          ...prev,
-          clickedCells: [...prev.clickedCells, { row, col }],
-        };
-      });
-    };
-    
-    window.addEventListener('mapCellClick', handleMapCellClick as EventListener);
-    return () => window.removeEventListener('mapCellClick', handleMapCellClick as EventListener);
-  }, [cellSelectionMode]);
+  // ホール/頂点/セル選択ロジック - extracted to useMapControls hook
 
   const TabButton: React.FC<{tab: ActiveTab, label: string, count?: number, onClick?: () => void, isMapTab?: boolean}> = ({ tab, label, count, onClick, isMapTab: isMapTabProp }) => {
     const longPressTimeout = React.useRef<number | null>(null);
@@ -4079,48 +3577,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
   }, [activeTab, currentTabItems, sortState, activeEventName, dayModes, executeColumnItems, eventDates, recentlyChangedItemIds]);
 
   // 検索機能: 現在のタブのアイテムを検索
-  const searchMatches = useMemo(() => {
-    if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
-      return [];
-    }
-    
-    const keyword = searchKeyword.trim().toLowerCase();
-    const matches: string[] = [];
-    
-    // 現在のタブのアイテムを検索
-    currentTabItems.forEach(item => {
-      const circleMatch = item.circle.toLowerCase().includes(keyword);
-      const titleMatch = item.title.toLowerCase().includes(keyword);
-      const remarksMatch = item.remarks.toLowerCase().includes(keyword);
-      
-      if (circleMatch || titleMatch || remarksMatch) {
-        matches.push(item.id);
-      }
-    });
-    
-    return matches;
-  }, [searchKeyword, activeEventName, activeTab, currentTabItems, eventDates]);
-
-  // 検索キーワードが変更されたときに検索結果をリセット
-  useEffect(() => {
-    if (searchKeyword.trim()) {
-      if (searchMatches.length > 0) {
-        setCurrentSearchIndex(0);
-      } else {
-        setCurrentSearchIndex(-1);
-        setHighlightedItemId(null);
-      }
-    } else {
-      setCurrentSearchIndex(-1);
-      setHighlightedItemId(null);
-    }
-  }, [searchKeyword, searchMatches]);
-
-  // タブが切り替わったときに検索結果をリセット
-  useEffect(() => {
-    setCurrentSearchIndex(-1);
-    setHighlightedItemId(null);
-  }, [activeTab]);
+  // 検索機能 - useSearch hook is called after candidateColumnItems is defined (see below)
 
   // 各参加日タブ中のアイテムでサークル名が重複するアイテムのIDセットを計算
   const duplicateCircleItemIds = useMemo(() => {
@@ -4186,56 +3643,17 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
     return filtered;
   }, [activeEventName, activeTab, executeModeItems, currentTabItems, selectedBlockFilters, eventDates]);
 
-  // 表示されているアイテムのみを検索対象とする
-  const visibleSearchMatches = useMemo(() => {
-    if (searchMatches.length === 0) return [];
-    
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : (eventDates[0] || '');
-    const mode = dayModes[activeEventName || '']?.[currentEventDate] || 'edit';
-    
-    let visibleItemIds: Set<string>;
-    
-    if (mode === 'execute') {
-      // 実行モード: executeColumnItemsまたはvisibleItems
-      visibleItemIds = new Set(visibleItems.map(item => item.id));
-    } else {
-      // 編集モード: executeColumnItems + candidateColumnItems
-      const allVisibleIds = new Set([
-        ...executeColumnItems.map(item => item.id),
-        ...candidateColumnItems.map(item => item.id)
-      ]);
-      visibleItemIds = allVisibleIds;
-    }
-    
-    return searchMatches.filter(id => visibleItemIds.has(id));
-  }, [searchMatches, activeEventName, activeTab, eventDates, dayModes, visibleItems, executeColumnItems, candidateColumnItems]);
-
-  // 「次を検索」ボタンのハンドラ
-  const handleSearchNext = useCallback(() => {
-    if (!searchKeyword.trim() || visibleSearchMatches.length === 0) {
-      if (searchMatches.length > 0 && visibleSearchMatches.length === 0) {
-        alert('フィルタされています');
-      }
-      return;
-    }
-    
-    // 次のインデックスを計算（ループ）
-    // currentSearchIndexが-1の場合は0から始める
-    const startIndex = currentSearchIndex === -1 ? -1 : currentSearchIndex;
-    const nextIndex = (startIndex + 1) % visibleSearchMatches.length;
-    setCurrentSearchIndex(nextIndex);
-    
-    const nextItemId = visibleSearchMatches[nextIndex];
-    setHighlightedItemId(nextItemId);
-    
-    // スクロール処理
-    setTimeout(() => {
-      const element = document.querySelector(`[data-item-id="${nextItemId}"]`);
-      if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }
-    }, 100);
-  }, [searchKeyword, visibleSearchMatches, currentSearchIndex, searchMatches]);
+  // 検索機能 - extracted to useSearch hook
+  const {
+    searchKeyword, setSearchKeyword,
+    currentSearchIndex,
+    highlightedItemId,
+    visibleSearchMatches,
+    handleSearchNext,
+  } = useSearch(
+    activeEventName, activeTab, eventDates, currentTabItems,
+    visibleItems, executeColumnItems, candidateColumnItems, dayModes,
+  );
 
   // 各ブロックの候補リスト内のアイテムの備考欄に「優先」または「委託無」が含まれているかをチェック
   const blocksWithPriorityRemarks = useMemo(() => {
@@ -4328,10 +3746,7 @@ const handleMoveItemDown = useCallback((itemId: string, targetColumn?: 'execute'
                 onClick={(e) => {
                   e.preventDefault();
                   e.stopPropagation();
-                  setThemeMode(prev => {
-                    const next = prev === 'system' ? 'light' : prev === 'light' ? 'dark' : 'system';
-                    return next;
-                  });
+                  cycleTheme();
                 }}
                 className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
                 title={themeMode === 'system' ? 'システム設定 → ライトモードへ' : themeMode === 'light' ? 'ライトモード → ダークモードへ' : 'ダークモード → システム設定へ'}
