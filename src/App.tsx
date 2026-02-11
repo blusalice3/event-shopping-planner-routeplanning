@@ -4076,19 +4076,19 @@ const App: React.FC = () => {
                 onClick={() => handleMenuItemClick('visitList')}
                 className="w-full px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-t-lg flex items-center gap-2"
               >
-                <span>V</span> 訪問リスト
+                <span>📍</span> 訪問リスト
               </button>
               <button
                 onClick={() => handleMenuItemClick('blockDefinition')}
                 className="w-full px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
               >
-                <span>B</span> ブロック定義
+                <span>🔲</span> ブロック定義
               </button>
               <button
                 onClick={() => handleMenuItemClick('hallDefinition')}
                 className="w-full px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-b-lg flex items-center gap-2"
               >
-                <span>H</span> ホール定義
+                <span>🏛️</span> ホール定義
               </button>
             </div>
           </div>
@@ -4334,7 +4334,7 @@ const App: React.FC = () => {
 
     const blocksWithPriority = new Set<string>();
     candidateItems.forEach((item) => {
-      if (item.remarks && (item.remarks.includes('優先') || item.remarks.includes('最優先'))) {
+      if (item.remarks && (item.remarks.includes('優先') || item.remarks.includes('委託無'))) {
         blocksWithPriority.add(item.block);
       }
     });
@@ -4740,7 +4740,7 @@ const App: React.FC = () => {
                         }}
                         type="button"
                       >
-                        <span className="text-lg">編</span>
+                        <span className="text-lg">📝</span>
                       </button>
 
                       {/* 螳溯｡後Δ繝ｼ繝・*/}
@@ -4759,7 +4759,7 @@ const App: React.FC = () => {
                         }}
                         type="button"
                       >
-                        <span className="text-lg">実</span>
+                        <span className="text-lg">🏃‍♂️</span>
                       </button>
 
                       {/* 髮・ｸｭ繝｢繝ｼ繝・*/}
@@ -4778,7 +4778,7 @@ const App: React.FC = () => {
                         }}
                         type="button"
                       >
-                        <span className="text-lg">集</span>
+                        <span className="text-lg">🏃‍♂️</span>
                       </button>
                     </div>
                   )}
