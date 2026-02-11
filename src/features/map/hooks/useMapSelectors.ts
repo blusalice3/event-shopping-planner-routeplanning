@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+﻿import { useCallback, useMemo } from 'react';
 import type {
   DayMapData,
   HallDefinition,
@@ -15,6 +15,14 @@ type UseMapSelectorsParams = {
   hallDefinitions: HallDefinitionsStore;
   hallRouteSettings: HallRouteSettingsStore;
 };
+
+const toHalfWidthDigits = (value: string): string =>
+  value.replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0));
+
+const normalizeMapDayToken = (value: string): string =>
+  toHalfWidthDigits(value)
+    .replace(/[ \u3000]/g, '')
+    .replace(/マップ$/, '');
 
 type UseMapSelectorsResult = {
   mapTabs: string[];
@@ -38,13 +46,13 @@ export function useMapSelectors({
   const mapTabs = useMemo(() => {
     if (!activeEventName || !mapData[activeEventName]) return [];
     return Object.keys(mapData[activeEventName]).sort((a, b) => {
-      const numA = parseInt(a.match(/\d+/)?.[0] || '0', 10);
-      const numB = parseInt(b.match(/\d+/)?.[0] || '0', 10);
+      const numA = parseInt(toHalfWidthDigits(a).match(/\d+/)?.[0] || '0', 10);
+      const numB = parseInt(toHalfWidthDigits(b).match(/\d+/)?.[0] || '0', 10);
       return numA - numB;
     });
   }, [activeEventName, mapData]);
 
-  const isMapTab = useMemo(() => activeTab.endsWith('Map'), [activeTab]);
+  const isMapTab = useMemo(() => activeTab.endsWith('マップ'), [activeTab]);
 
   const currentMapData = useMemo(() => {
     if (!activeEventName || !isMapTab) return null;
@@ -68,7 +76,16 @@ export function useMapSelectors({
     );
   }, [activeEventName, activeTab, isMapTab, hallRouteSettings, currentHalls]);
 
-  const getMapTabForDate = useCallback((eventDate: string): string => `${eventDate}Map`, []);
+  const getMapTabForDate = useCallback(
+    (eventDate: string): string => {
+      const normalizedEventDate = normalizeMapDayToken(eventDate);
+      const matchedMapTab = mapTabs.find(
+        (tab) => normalizeMapDayToken(tab) === normalizedEventDate,
+      );
+      return matchedMapTab ?? `${eventDate}マップ`;
+    },
+    [mapTabs],
+  );
 
   const getHallsForDate = useCallback(
     (eventDate: string): HallDefinition[] => {

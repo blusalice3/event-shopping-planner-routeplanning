@@ -1,4 +1,4 @@
-import type { ShoppingItem } from '../../types';
+﻿import type { ShoppingItem } from '../../types';
 import { extractEventDates } from '../../utils/eventDates';
 
 export function resolveEventListTab(items: ShoppingItem[]): string {
@@ -28,10 +28,10 @@ type ImportMessageParams = {
 
 export function buildImportCompletionMessage(params: ImportMessageParams): string {
   if (params.errors.length > 0) {
-    return `Import completed with warnings:\n${params.errors.join('\n')}`;
+    return `取り込みが警告付きで完了しました:\n${params.errors.join('\n')}`;
   }
   if (params.isUpdate) {
-    return `${params.eventName} updated.\n${params.itemCount} items.`;
+    return `${params.eventName}を更新しました。\n${params.itemCount}件`;
   }
-  return `${params.eventName} created.\n${params.itemCount} items.`;
+  return `${params.eventName}を作成しました。\n${params.itemCount}件`;
 }

@@ -94,13 +94,13 @@ const sortCycle: SortState[] = [
   'Purchased',
 ];
 const sortLabels: Record<SortState, string> = {
-  Manual: 'Manual',
-  Postpone: 'Postpone',
-  Late: '驕・盾',
-  Absent: '谺蟶ｭ',
-  SoldOut: 'SoldOut',
-  None: '譛ｪ雉ｼ蜈･',
-  Purchased: 'Purchased',
+  Manual: '手動',
+  Postpone: '後回し',
+  Late: '遅参',
+  Absent: '欠席',
+  SoldOut: '売切',
+  None: '未購入',
+  Purchased: '購入済',
 };
 
 const App: React.FC = () => {
@@ -237,7 +237,7 @@ const App: React.FC = () => {
     (hallId: string): number => {
       if (!activeEventName || !isMapTab || !currentMapData) return 0;
 
-      const dayMatch = activeTab.match(/^(.+)繝槭ャ繝・/);
+      const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return 0;
       const dayName = dayMatch[1];
 
@@ -274,7 +274,7 @@ const App: React.FC = () => {
     (hallId: string): number => {
       if (!activeEventName || !isMapTab || !currentMapData) return 0;
 
-      const dayMatch = activeTab.match(/^(.+)繝槭ャ繝・/);
+      const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return 0;
       const dayName = dayMatch[1];
 
@@ -1487,7 +1487,7 @@ const App: React.FC = () => {
       }
 
       if (eventLists[newName]) {
-        alert('An event with the same name already exists. Please choose another name.');
+        alert('同名のイベントが既に存在します。別の名前を指定してください。');
         return;
       }
 
@@ -2238,7 +2238,7 @@ const App: React.FC = () => {
     (eventName: string) => {
       const itemsToExport = eventLists[eventName];
       if (!hasExportableItems(itemsToExport)) {
-        alert('No items available to export.');
+        alert('出力できるアイテムがありません。');
         return;
       }
       setExportEventName(eventName);
@@ -2277,7 +2277,7 @@ const App: React.FC = () => {
         downloadBlob(blob, filename);
       } catch (error) {
         console.error('Export error:', error);
-        alert('Failed to export items.');
+        alert('アイテムの出力に失敗しました。');
       }
 
       setExportEventName(null);
@@ -2309,12 +2309,12 @@ const App: React.FC = () => {
         const result = await importFromXlsx(file);
 
         if (!result.success) {
-          alert(`繧､繝ｳ繝昴・繝医↓螟ｱ謨励＠縺ｾ縺励◆:\n${result.errors.join('\n')}`);
+          alert(`インポートに失敗しました:\n${result.errors.join('\n')}`);
           return;
         }
 
         if (result.items.length === 0) {
-          alert('No items found in the imported file.');
+          alert('取り込んだファイルにアイテムが見つかりませんでした。');
           return;
         }
 
@@ -2392,7 +2392,7 @@ const App: React.FC = () => {
         setActiveTab(resolveEventListTab(importedData.items));
       } catch (error) {
         console.error('Import error:', error);
-        alert('Failed to import items. Please check the file format.');
+        alert('アイテムの取り込みに失敗しました。ファイル形式を確認してください。');
       }
     },
     [eventLists],
@@ -2406,7 +2406,7 @@ const App: React.FC = () => {
       const source = resolveSpreadsheetSource(metadata, urlOverride);
 
       if (!source) {
-        alert('Please set a spreadsheet URL first.');
+        alert('先にスプレッドシートURLを設定してください。');
         return;
       }
 
@@ -2458,7 +2458,7 @@ const App: React.FC = () => {
     setShowUpdateConfirmation(false);
     setUpdateData(null);
     setUpdateEventName(null);
-    alert('Items updated.');
+    alert('アイテムを更新しました。');
   };
 
   const handleUrlUpdate = useCallback(
@@ -2532,7 +2532,7 @@ const App: React.FC = () => {
       setMapImportPendingFile(null);
       setMapImportPendingEventName('');
 
-      alert(`${mapCount} map tabs imported.`);
+      alert(`${mapCount}件のマップタブを取り込みました。`);
     },
     [mapImportPendingEventName],
   );
@@ -2553,7 +2553,7 @@ const App: React.FC = () => {
 
       // 繝槭ャ繝怜錐縺九ｉ蜿ょ刈譌･繧貞叙蠕・
 
-      const dayMatch = activeTab.match(/^(.+)繝槭ャ繝・/);
+      const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
@@ -2696,7 +2696,7 @@ const App: React.FC = () => {
     (itemId: string, referenceItemId: string, position: 'before' | 'after') => {
       if (!activeEventName || !isMapTab) return;
 
-      const dayMatch = activeTab.match(/^(.+)繝槭ャ繝・/);
+      const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
@@ -2739,7 +2739,7 @@ const App: React.FC = () => {
 
       // 繝槭ャ繝怜錐縺九ｉ蜿ょ刈譌･繧貞叙蠕・
 
-      const dayMatch = activeTab.match(/^(.+)繝槭ャ繝・/);
+      const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
@@ -2807,7 +2807,7 @@ const App: React.FC = () => {
       // 蠕悟屓縺励・驕・盾縺ｮ蝣ｴ蜷医・螳溯｡悟・縺ｮ驕ｩ蛻・↑繝輔ぉ繝ｼ繧ｺ縺ｫ譛遏ｭ邨瑚ｷｯ菴咲ｽｮ縺ｧ霑ｽ蜉
 
       const dayName = newItem.eventDate;
-      const mapTab = `${dayName}Map`;
+      const mapTab = getMapTabForDate(dayName);
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -2948,7 +2948,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, eventLists, mapData, hallDefinitions, hallRouteSettings],
+    [activeEventName, eventLists, mapData, hallDefinitions, hallRouteSettings, getMapTabForDate],
   );
 
   // 繝槭ャ繝励ン繝･繝ｼ縺ｧ縺ｮ蜈磯ｭ遘ｻ蜍・
@@ -2957,7 +2957,7 @@ const App: React.FC = () => {
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
 
-      const dayMatch = activeTab.match(/^(.+)繝槭ャ繝・/);
+      const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
@@ -2983,7 +2983,7 @@ const App: React.FC = () => {
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
 
-      const dayMatch = activeTab.match(/^(.+)繝槭ャ繝・/);
+      const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
@@ -3008,7 +3008,7 @@ const App: React.FC = () => {
   const currentMapExecuteItemIds = useMemo(() => {
     if (!activeEventName || !isMapTab) return [];
 
-    const dayMatch = activeTab.match(/^(.+)繝槭ャ繝・/);
+    const dayMatch = activeTab.match(/^(.+)マップ$/);
     if (!dayMatch) return [];
     const dayName = dayMatch[1];
 
@@ -3113,7 +3113,7 @@ const App: React.FC = () => {
 
       // 蟇ｾ蠢懊☆繧区律莉倥ｒ蜿門ｾ暦ｼ井ｾ具ｼ壹・譌･逶ｮ繝槭ャ繝励坂・縲・譌･逶ｮ縲搾ｼ・
 
-      const dayMatch = mapTab.match(/^(.+)繝槭ャ繝・/);
+      const dayMatch = mapTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
@@ -3141,7 +3141,7 @@ const App: React.FC = () => {
       if (visitListHasUnsavedChanges) {
         setVisitListHasUnsavedChanges(false);
       }
-      const dayMatch = activeTab.match(/^(.+)繝槭ャ繝・/);
+      const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
       const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
@@ -3165,7 +3165,7 @@ const App: React.FC = () => {
     (newOrderItems: ShoppingItem[]) => {
       if (!visitListPanelMapTab || !activeEventName) return;
 
-      const dayMatch = visitListPanelMapTab.match(/^(.+)繝槭ャ繝・/);
+      const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
@@ -3199,7 +3199,7 @@ const App: React.FC = () => {
   const handleVisitListCancel = useCallback(() => {
     if (!visitListPanelMapTab || !activeEventName) return;
 
-    const dayMatch = visitListPanelMapTab.match(/^(.+)繝槭ャ繝・/);
+    const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
     if (!dayMatch) return;
     const dayName = dayMatch[1];
 
@@ -3240,7 +3240,7 @@ const App: React.FC = () => {
   const visitListItems = useMemo(() => {
     if (!visitListPanelMapTab || !activeEventName) return [];
 
-    const dayMatch = visitListPanelMapTab.match(/^(.+)繝槭ャ繝・/);
+    const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
     if (!dayMatch) return [];
     const dayName = dayMatch[1];
 
@@ -3603,7 +3603,7 @@ const App: React.FC = () => {
     (hallOrder: string[]) => {
       if (!activeEventName || !isMapTab) return;
 
-      const dayMatch = activeTab.match(/^(.+)繝槭ャ繝・/);
+      const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
@@ -4076,19 +4076,19 @@ const App: React.FC = () => {
                 onClick={() => handleMenuItemClick('visitList')}
                 className="w-full px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-t-lg flex items-center gap-2"
               >
-                <span>桃</span> 險ｪ蝠丞・繝ｪ繧ｹ繝・{' '}
+                <span>V</span> 訪問リスト
               </button>
               <button
                 onClick={() => handleMenuItemClick('blockDefinition')}
                 className="w-full px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
               >
-                <span>抜</span> 繝悶Ο繝・け螳夂ｾｩ
+                <span>B</span> ブロック定義
               </button>
               <button
                 onClick={() => handleMenuItemClick('hallDefinition')}
                 className="w-full px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-b-lg flex items-center gap-2"
               >
-                <span>H</span> Hall Definition
+                <span>H</span> ホール定義
               </button>
             </div>
           </div>
@@ -4405,7 +4405,7 @@ const App: React.FC = () => {
               <div>
                 <div className="flex items-center gap-3">
                   <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-                    蜊ｳ螢ｲ莨・雉ｼ蜈･蟾｡蝗櫁｡ｨ
+                    即売会購入巡回表アプリ
                   </h1>
                   {activeEventName &&
                     mainContentVisible &&
@@ -4420,10 +4420,10 @@ const App: React.FC = () => {
                         }`}
                         title={
                           blockSortDirection === 'desc'
-                            ? 'Sort blocks desc'
+                            ? 'ブロックを降順で並べ替え'
                             : blockSortDirection === 'asc'
-                              ? 'Sort blocks asc'
-                              : 'Sort blocks by number'
+                              ? 'ブロックを昇順で並べ替え'
+                              : 'ブロック番号で並べ替え'
                         }
                       >
                         {blockSortDirection === 'desc' ? (
@@ -4446,10 +4446,10 @@ const App: React.FC = () => {
                         }`}
                         title={
                           blockSortDirection === 'desc'
-                            ? 'Sort candidate blocks desc'
+                            ? '候補ブロックを降順で並べ替え'
                             : blockSortDirection === 'asc'
-                              ? 'Sort candidate blocks asc'
-                              : 'Sort candidate blocks by number'
+                              ? '候補ブロックを昇順で並べ替え'
+                              : '候補ブロックを番号で並べ替え'
                         }
                       >
                         {blockSortDirection === 'desc' ? (
@@ -4480,10 +4480,10 @@ const App: React.FC = () => {
                     className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
                     title={
                       themeMode === 'system'
-                        ? '繧ｷ繧ｹ繝・Β險ｭ螳・竊・繝ｩ繧､繝医Δ繝ｼ繝峨∈'
+                        ? 'システム設定 → ライトモードへ'
                         : themeMode === 'light'
-                          ? '繝ｩ繧､繝医Δ繝ｼ繝・竊・繝繝ｼ繧ｯ繝｢繝ｼ繝峨∈'
-                          : '繝繝ｼ繧ｯ繝｢繝ｼ繝・竊・繧ｷ繧ｹ繝・Β險ｭ螳壹∈'
+                          ? 'ライトモード → ダークモードへ'
+                          : 'ダークモード → システム設定へ'
                     }
                     style={{
                       WebkitTapHighlightColor: 'transparent',
@@ -4588,21 +4588,21 @@ const App: React.FC = () => {
                         />
                         <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-4 min-w-[320px] max-h-[70vh] overflow-y-auto">
                           <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3">
-                            Header/Tab Visibility Settings
+                            ヘッダー/タブバー表示設定
                           </h3>
 
                           {/* 髮・ｸｭ繝｢繝ｼ繝芽ｨｭ螳・*/}
                           <div className="mb-3">
                             <h4 className="text-xs font-semibold text-purple-600 dark:text-purple-400 mb-2">
-                              Focus Mode
+                              集中モード
                             </h4>
                             <div className="space-y-2">
                               {(
                                 [
-                                  ['focus_sp_mapOn', 'SP繝ｻ繝槭ャ繝涌N'],
-                                  ['focus_sp_mapOff', 'SP繝ｻ繝槭ャ繝涌FF'],
-                                  ['focus_pc_mapOn', 'PC繝ｻ繝槭ャ繝涌N'],
-                                  ['focus_pc_mapOff', 'PC繝ｻ繝槭ャ繝涌FF'],
+                                  ['focus_sp_mapOn', 'SP・マップON'],
+                                  ['focus_sp_mapOff', 'SP・マップOFF'],
+                                  ['focus_pc_mapOn', 'PC・マップON'],
+                                  ['focus_pc_mapOff', 'PC・マップOFF'],
                                 ] as [keyof typeof uiVisibilitySettings, string][]
                               ).map(([key, label]) => (
                                 <div
@@ -4626,7 +4626,7 @@ const App: React.FC = () => {
                                         className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
                                       />
                                       <span className="text-slate-500 dark:text-slate-400">
-                                        繝倥ャ繝繝ｼ
+                                        ヘッダー
                                       </span>
                                     </label>
                                     <label className="flex items-center gap-1 cursor-pointer">
@@ -4642,7 +4642,7 @@ const App: React.FC = () => {
                                         className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
                                       />
                                       <span className="text-slate-500 dark:text-slate-400">
-                                        繧ｿ繝悶ヰ繝ｼ
+                                        タブバー
                                       </span>
                                     </label>
                                   </div>
@@ -4654,13 +4654,13 @@ const App: React.FC = () => {
                           {/* 螳溯｡後Δ繝ｼ繝芽ｨｭ螳・*/}
                           <div className="mb-3">
                             <h4 className="text-xs font-semibold text-green-600 dark:text-green-400 mb-2">
-                              Execute Mode
+                              実行モード
                             </h4>
                             <div className="space-y-2">
                               {(
                                 [
-                                  ['execute_sp', '繧ｹ繝槭・繝医ヵ繧ｩ繝ｳ'],
-                                  ['execute_pc', 'PC / 繧ｿ繝悶Ξ繝・ヨ'],
+                                  ['execute_sp', 'スマートフォン'],
+                                  ['execute_pc', 'PC / タブレット'],
                                 ] as [keyof typeof uiVisibilitySettings, string][]
                               ).map(([key, label]) => (
                                 <div
@@ -4684,7 +4684,7 @@ const App: React.FC = () => {
                                         className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
                                       />
                                       <span className="text-slate-500 dark:text-slate-400">
-                                        繝倥ャ繝繝ｼ
+                                        ヘッダー
                                       </span>
                                     </label>
                                     <label className="flex items-center gap-1 cursor-pointer">
@@ -4700,7 +4700,7 @@ const App: React.FC = () => {
                                         className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
                                       />
                                       <span className="text-slate-500 dark:text-slate-400">
-                                        繧ｿ繝悶ヰ繝ｼ
+                                        タブバー
                                       </span>
                                     </label>
                                   </div>
@@ -4714,7 +4714,7 @@ const App: React.FC = () => {
                             onClick={() => setUiVisibilitySettings(DEFAULT_UI_VISIBILITY)}
                             className="w-full mt-1 px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                           >
-                            繝・ヵ繧ｩ繝ｫ繝医↓謌ｻ縺・{' '}
+                            デフォルトに戻す
                           </button>
                         </div>
                       </>
@@ -4732,7 +4732,7 @@ const App: React.FC = () => {
                             ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400'
                             : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
                         }`}
-                        title="Edit mode"
+                        title="編集モード"
                         style={{
                           WebkitTapHighlightColor: 'transparent',
                           minWidth: '40px',
@@ -4740,7 +4740,7 @@ const App: React.FC = () => {
                         }}
                         type="button"
                       >
-                        <span className="text-lg">統</span>
+                        <span className="text-lg">編</span>
                       </button>
 
                       {/* 螳溯｡後Δ繝ｼ繝・*/}
@@ -4751,7 +4751,7 @@ const App: React.FC = () => {
                             ? 'bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400'
                             : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
                         }`}
-                        title="Execute mode"
+                        title="実行モード"
                         style={{
                           WebkitTapHighlightColor: 'transparent',
                           minWidth: '40px',
@@ -4759,7 +4759,7 @@ const App: React.FC = () => {
                         }}
                         type="button"
                       >
-                        <span className="text-lg">純</span>
+                        <span className="text-lg">実</span>
                       </button>
 
                       {/* 髮・ｸｭ繝｢繝ｼ繝・*/}
@@ -4770,7 +4770,7 @@ const App: React.FC = () => {
                             ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400'
                             : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
                         }`}
-                        title="Focus mode"
+                        title="集中モード"
                         style={{
                           WebkitTapHighlightColor: 'transparent',
                           minWidth: '40px',
@@ -4778,7 +4778,7 @@ const App: React.FC = () => {
                         }}
                         type="button"
                       >
-                        <span className="text-lg">剥</span>
+                        <span className="text-lg">集</span>
                       </button>
                     </div>
                   )}
@@ -4795,7 +4795,7 @@ const App: React.FC = () => {
                               ? 'bg-slate-200 dark:bg-slate-700'
                               : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
                           }`}
-                          title={`陦ｨ遉ｺ繝帙・繝ｫ: ${mapSelectedHallId === 'all' ? '蜈ｨ繝帙・繝ｫ' : currentHalls.find((h) => h.id === mapSelectedHallId)?.name || ''}`}
+                          title={`表示ホール: ${mapSelectedHallId === 'all' ? '全ホール' : currentHalls.find((h) => h.id === mapSelectedHallId)?.name || ''}`}
                           style={{
                             WebkitTapHighlightColor: 'transparent',
                             minWidth: '44px',
@@ -4837,7 +4837,7 @@ const App: React.FC = () => {
                                     : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
                                 }`}
                               >
-                                蜈ｨ繝帙・繝ｫ
+                                全ホール
                               </button>
                               {currentHalls.map((hall) => {
                                 const executeCount = getHallExecuteCount(hall.id);
@@ -4857,7 +4857,7 @@ const App: React.FC = () => {
                                   >
                                     <span>{hall.name}</span>
                                     <span className="text-xs text-slate-500 dark:text-slate-400 ml-2">
-                                      ({executeCount}/{totalCount}莉ｶ)
+                                      ({executeCount}/{totalCount}件)
                                     </span>
                                   </button>
                                 );
@@ -4871,7 +4871,7 @@ const App: React.FC = () => {
                       <button
                         onClick={() => setMapIsHallOrderOpen(true)}
                         className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
-                        title="Edit hall order"
+                        title="ホール順を編集"
                         style={{
                           WebkitTapHighlightColor: 'transparent',
                           minWidth: '44px',
@@ -4902,7 +4902,7 @@ const App: React.FC = () => {
                             ? 'bg-blue-100 dark:bg-blue-900/50 hover:bg-blue-200 dark:hover:bg-blue-800'
                             : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
                         }`}
-                        title={mapIsRouteVisible ? '繝ｫ繝ｼ繝郁｡ｨ遉ｺON' : '繝ｫ繝ｼ繝郁｡ｨ遉ｺOFF'}
+                        title={mapIsRouteVisible ? 'ルート表示ON' : 'ルート表示OFF'}
                         style={{
                           WebkitTapHighlightColor: 'transparent',
                           minWidth: '44px',
@@ -4938,8 +4938,8 @@ const App: React.FC = () => {
                             setMapSmartInsertMode(newMode);
                             setSmartInsertToast(
                               newMode === 'preview'
-                                ? '繝励Ξ繝薙Η繝ｼ繝｢繝ｼ繝峨↓蛻・崛'
-                                : '繧ｫ繝ｼ繝峨Δ繝ｼ繝峨↓蛻・崛',
+                                ? 'プレビューモードに切り替え'
+                                : 'カードモードに切り替え',
                             );
                           }, 500);
                         }}
@@ -5017,7 +5017,7 @@ const App: React.FC = () => {
                           onClick={() => handleMoveToExecuteColumn(Array.from(selectedItemIds))}
                           className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
                         >
-                          驕ｸ謚槭＠縺溘い繧､繝・Β繧貞ｷｦ蛻励↓遘ｻ蜍・({selectedItemIds.size}莉ｶ)
+                          選択したアイテムを実行列に移動 ({selectedItemIds.size}件)
                         </button>
                       )}
                       {showMoveButtons && hasExecuteSelection && (
@@ -5025,7 +5025,7 @@ const App: React.FC = () => {
                           onClick={() => handleRemoveFromExecuteColumn(Array.from(selectedItemIds))}
                           className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
                         >
-                          驕ｸ謚槭＠縺溘い繧､繝・Β繧貞承蛻励↓遘ｻ蜍・({selectedItemIds.size}莉ｶ)
+                          選択したアイテムを実行列から戻す ({selectedItemIds.size}件)
                         </button>
                       )}
                     </>
@@ -5049,7 +5049,7 @@ const App: React.FC = () => {
               <div className="flex space-x-2 pt-2 pb-2 overflow-x-auto">
                 <TabButton
                   tab="eventList"
-                  label="Event List"
+                  label="イベント一覧"
                   onClick={() => {
                     setActiveEventName(null);
                     setItemToEdit(null);
@@ -5062,18 +5062,21 @@ const App: React.FC = () => {
                   <>
                     {eventDates.map((eventDate) => {
                       const count = items.filter((item) => item.eventDate === eventDate).length;
-                      const mapTabName = `${eventDate}Map`;
+                      const mapTabName = getMapTabForDate(eventDate);
                       const hasMapData = mapTabs.includes(mapTabName);
                       return (
                         <React.Fragment key={eventDate}>
                           <TabButton tab={eventDate} label={eventDate} count={count} />
                           {hasMapData && (
-                            <TabButton tab={mapTabName} label={`${eventDate}Map`} isMapTab={true} />
+                            <TabButton tab={mapTabName} label={mapTabName} isMapTab={true} />
                           )}
                         </React.Fragment>
                       );
                     })}
-                    <TabButton tab="import" label={itemToEdit ? 'Edit Item' : 'Import Items'} />
+                    <TabButton
+                      tab="import"
+                      label={itemToEdit ? 'アイテム編集' : 'アイテム取り込み'}
+                    />
                     {activeEventName && (mainContentVisible || isMapTab) && (
                       <SearchBar
                         searchKeyword={searchKeyword}
@@ -5096,7 +5099,7 @@ const App: React.FC = () => {
                         : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
                     }`}
                   >
-                    譁ｰ隕上Μ繧ｹ繝井ｽ懈・
+                    新規リスト作成
                   </button>
                 )}
               </div>
@@ -5236,10 +5239,10 @@ const App: React.FC = () => {
                 <div className="space-y-2">
                   <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg p-3">
                     <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2">
-                      Execute Items
+                      実行リストアイテム
                     </h3>
                     <p className="text-xs text-blue-700 dark:text-blue-300 mb-3">
-                      Manage items currently selected for execution.
+                      実行対象として選択中のアイテムを管理します。
                     </p>
                   </div>
                   <ShoppingList
@@ -5284,16 +5287,16 @@ const App: React.FC = () => {
                 <div className="space-y-2">
                   <div className="bg-slate-100 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg p-3">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
-                      Candidate Items
+                      候補アイテム
                     </h3>
                     <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
-                      Move selected items from this list into execute items.
+                      このリストから選択したアイテムを実行リストへ移動します。
                     </p>
                     {availableBlocks.length > 0 && (
                       <div className="mt-3">
                         <div className="flex items-center justify-between mb-2">
                           <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                            繝悶Ο繝・け縺ｧ繝輔ぅ繝ｫ繧ｿ:
+                            ブロックでフィルタ:
                           </span>
                           <div className="flex items-center gap-2">
                             {selectedBlockFilters.size > 0 && (
@@ -5307,10 +5310,10 @@ const App: React.FC = () => {
                                   }`}
                                   title={
                                     candidateNumberSortDirection === 'desc'
-                                      ? 'Sort numbers desc'
+                                      ? '番号を降順で並べ替え'
                                       : candidateNumberSortDirection === 'asc'
-                                        ? 'Sort numbers asc'
-                                        : 'Sort numbers'
+                                        ? '番号を昇順で並べ替え'
+                                        : '番号で並べ替え'
                                   }
                                 >
                                   {candidateNumberSortDirection === 'desc' ? (
@@ -5323,7 +5326,7 @@ const App: React.FC = () => {
                                   onClick={handleClearBlockFilters}
                                   className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline"
                                 >
-                                  縺吶∋縺ｦ隗｣髯､
+                                  すべて解除
                                 </button>
                               </>
                             )}
@@ -5348,7 +5351,7 @@ const App: React.FC = () => {
                         </div>
                         {selectedBlockFilters.size > 0 && (
                           <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
-                            驕ｸ謚樔ｸｭ: {selectedBlockFilters.size}莉ｶ縺ｮ繝悶Ο繝・け
+                            選択中: {selectedBlockFilters.size}件のブロック
                           </p>
                         )}
                       </div>
@@ -5521,22 +5524,21 @@ const App: React.FC = () => {
           <div className="text-center mb-3">
             <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
               {cellSelectionMode.type === 'corner' &&
-                `桃 繧ｻ繝ｫ繧偵け繝ｪ繝・け縺励※隗偵ｒ驕ｸ謚・(${cellSelectionMode.clickedCells.length}/4)`}
+                `セルをクリックして角を選択 (${cellSelectionMode.clickedCells.length}/4)`}
               {cellSelectionMode.type === 'multiCorner' &&
-                `桃 繧ｻ繝ｫ繧偵け繝ｪ繝・け縺励※隗偵ｒ驕ｸ謚・(${cellSelectionMode.clickedCells.length}/4)`}
+                `セルをクリックして角を選択 (${cellSelectionMode.clickedCells.length}/4)`}
               {cellSelectionMode.type === 'rangeStart' &&
-                `桃 遽・峇縺ｮ2縺､縺ｮ繧ｻ繝ｫ繧偵け繝ｪ繝・け (${cellSelectionMode.clickedCells.length}/2)`}
+                `対角の2セルをクリック (${cellSelectionMode.clickedCells.length}/2)`}
               {cellSelectionMode.type === 'individual' &&
-                `桃 蛟句挨繧ｻ繝ｫ繧偵け繝ｪ繝・け (${cellSelectionMode.clickedCells.length}蛟矩∈謚樔ｸｭ)`}
+                `対象セルをクリック (${cellSelectionMode.clickedCells.length}セル選択中)`}
             </div>
             {cellSelectionMode.clickedCells.length > 0 && (
               <div className="text-xs text-slate-500 dark:text-slate-400">
-                驕ｸ謚・{' '}
-                {cellSelectionMode.clickedCells.map((c) => `(${c.row},${c.col})`).join(', ')}
+                選択: {cellSelectionMode.clickedCells.map((c) => `(${c.row},${c.col})`).join(', ')}
               </div>
             )}
             <div className="text-xs text-blue-500 dark:text-blue-400 mt-1">
-              庁 繝槭・繧ｫ繝ｼ繧偵け繝ｪ繝・け縺ｧ驕ｸ謚櫁ｧ｣髯､
+              マーカーをクリックで選択解除
             </div>
           </div>
           <div className="flex gap-2 justify-center">
@@ -5553,13 +5555,13 @@ const App: React.FC = () => {
               }
               className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              遽・峇繧貞渚譏
+              選択を確定
             </button>
             <button
               onClick={handleCancelCellSelection}
               className="px-4 py-2 text-sm font-medium rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
             >
-              繧ｭ繝｣繝ｳ繧ｻ繝ｫ
+              キャンセル
             </button>
           </div>
         </div>
@@ -5607,23 +5609,23 @@ const App: React.FC = () => {
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
             <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-3">
-              螟画峩繧剃ｿ晏ｭ倥＠縺ｾ縺吶°・・{' '}
+              変更を保存しますか？
             </h3>
             <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
-              險ｪ蝠丞・繝ｪ繧ｹ繝医↓譛ｪ菫晏ｭ倥・螟画峩縺後≠繧翫∪縺吶ら｢ｺ螳壹＠縺ｦ菫晏ｭ倥☆繧九°縲√く繝｣繝ｳ繧ｻ繝ｫ縺励※遐ｴ譽・＠縺ｦ縺上□縺輔＞縲・{' '}
+              訪問リストに未保存の変更があります。保存して確定するか、キャンセルして破棄してください。
             </p>
             <div className="flex justify-end gap-3">
               <button
                 onClick={handleVisitListDialogCancel}
                 className="px-4 py-2 text-sm font-semibold rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
               >
-                繧ｭ繝｣繝ｳ繧ｻ繝ｫ・育ｴ譽・ｼ・{' '}
+                キャンセル（破棄）
               </button>
               <button
                 onClick={handleVisitListDialogConfirm}
                 className="px-4 py-2 text-sm font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700"
               >
-                遒ｺ螳夲ｼ井ｿ晏ｭ假ｼ・{' '}
+                保存して確定
               </button>
             </div>
           </div>
@@ -5635,18 +5637,16 @@ const App: React.FC = () => {
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-4 min-w-80">
           <div className="text-center mb-3">
             <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
-              桃 繝帙・繝ｫ縺ｮ鬆らせ繧偵け繝ｪ繝・け ({vertexSelectionMode.clickedVertices.length}
+              ホールの頂点をクリック ({vertexSelectionMode.clickedVertices.length}
               /4縲・)
             </div>
             <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-              繧ｯ繝ｪ繝・け鬆・↓螟夊ｧ貞ｽ｢繧剃ｽ懈・縺励∪縺・{' '}
+              クリック順に多角形を作成します。
             </div>
             {vertexSelectionMode.clickedVertices.length > 0 && (
               <div className="text-xs text-slate-500 dark:text-slate-400">
-                驕ｸ謚・{' '}
-                {vertexSelectionMode.clickedVertices
-                  .map((v) => `(${v.row},${v.col})`)
-                  .join(' 竊・')}
+                選択:{' '}
+                {vertexSelectionMode.clickedVertices.map((v) => `(${v.row},${v.col})`).join(' → ')}
               </div>
             )}
           </div>
@@ -5656,13 +5656,13 @@ const App: React.FC = () => {
               disabled={vertexSelectionMode.clickedVertices.length < 4}
               className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              遒ｺ螳・{' '}
+              確定
             </button>
             <button
               onClick={handleCancelVertexSelection}
               className="px-4 py-2 text-sm font-medium rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
             >
-              繧ｭ繝｣繝ｳ繧ｻ繝ｫ
+              キャンセル
             </button>
           </div>
         </div>

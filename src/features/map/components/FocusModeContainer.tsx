@@ -56,7 +56,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   const executeModeItemIds = executeModeItems[activeEventName]?.[currentDay] || [];
   const eventMapData = mapData[activeEventName];
   const focusHallDefinitions: HallDefinition[] | undefined =
-    hallDefinitions[activeEventName]?.[`${currentDay}Map`];
+    hallDefinitions[activeEventName]?.[`${currentDay}マップ`];
 
   return (
     <FocusMode

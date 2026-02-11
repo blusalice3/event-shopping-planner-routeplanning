@@ -822,11 +822,11 @@ export async function parseMapFile(
 
     const result: Record<string, DayMapData> = {};
 
-    // "○日目" パターンのシートを探す
-    const dayPattern = /^(\d+日目)$/;
+    // "○日目" パターンのシートを探す（半角/全角数字の両方に対応）
+    const dayPattern = /^([0-9０-９]+日目)$/;
 
     for (const worksheet of workbook.worksheets) {
-      const sheetName = worksheet.name;
+      const sheetName = worksheet.name.trim();
       const match = sheetName.match(dayPattern);
       if (match) {
         const mapData = await parseMapSheetWithExcelJS(workbook, sheetName, settings);
