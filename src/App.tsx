@@ -5075,7 +5075,7 @@ const App: React.FC = () => {
                     })}
                     <TabButton
                       tab="import"
-                      label={itemToEdit ? 'アイテム編集' : 'アイテム取り込み'}
+                      label={itemToEdit ? 'アイテム編集' : 'アイテム追加'}
                     />
                     {activeEventName && (mainContentVisible || isMapTab) && (
                       <SearchBar
