@@ -4405,7 +4405,7 @@ const App: React.FC = () => {
               <div>
                 <div className="flex items-center gap-3">
                   <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-                    即売会購入巡回表アプリ
+                    即売会購入巡回表
                   </h1>
                   {activeEventName &&
                     mainContentVisible &&
