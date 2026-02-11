@@ -94,7 +94,7 @@ const sortCycle: SortState[] = [
   'Purchased',
 ];
 const sortLabels: Record<SortState, string> = {
-  Manual: '手動',
+  Manual: '巡回順',
   Postpone: '後回し',
   Late: '遅参',
   Absent: '欠席',
