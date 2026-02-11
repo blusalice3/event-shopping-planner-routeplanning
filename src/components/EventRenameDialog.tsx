@@ -31,10 +31,13 @@ const EventRenameDialog: React.FC<EventRenameDialogProps> = ({
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-md w-full mx-4">
         <div className="p-6">
           <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">即売会名を変更</h2>
-          
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="newName" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+              <label
+                htmlFor="newName"
+                className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+              >
                 新しい即売会名
               </label>
               <input
@@ -48,7 +51,7 @@ const EventRenameDialog: React.FC<EventRenameDialogProps> = ({
                 autoFocus
               />
             </div>
-            
+
             <div className="flex justify-end space-x-3 pt-4">
               <button
                 type="button"
@@ -72,4 +75,3 @@ const EventRenameDialog: React.FC<EventRenameDialogProps> = ({
 };
 
 export default EventRenameDialog;
-

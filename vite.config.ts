@@ -17,7 +17,7 @@ export default defineConfig({
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
-        icons: []
+        icons: [],
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
@@ -32,13 +32,13 @@ export default defineConfig({
               cacheName: 'tailwind-cache',
               expiration: {
                 maxEntries: 10,
-                maxAgeSeconds: 60 * 60 * 24 * 30 // 30 days
-              }
-            }
-          }
-        ]
-      }
-    })
+                maxAgeSeconds: 60 * 60 * 24 * 30, // 30 days
+              },
+            },
+          },
+        ],
+      },
+    }),
   ],
   build: {
     outDir: 'dist',
@@ -47,6 +47,6 @@ export default defineConfig({
   },
   server: {
     port: 3000,
-    open: true
-  }
+    open: true,
+  },
 });

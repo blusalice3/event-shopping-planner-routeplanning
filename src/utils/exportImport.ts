@@ -4,10 +4,10 @@
  */
 
 import ExcelJS from 'exceljs';
-import { 
-  ShoppingItem, 
-  EventMetadata, 
-  DayModeState, 
+import {
+  ShoppingItem,
+  EventMetadata,
+  DayModeState,
   ExecuteModeItems,
   MapDataStore,
   RouteSettingsStore,
@@ -68,7 +68,7 @@ export async function exportToXlsx(
     routeSettings?: RouteSettingsStore;
     hallDefinitions?: HallDefinitionsStore;
     hallRouteSettings?: HallRouteSettingsStore;
-  }
+  },
 ): Promise<Blob> {
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Event Shopping Planner';
@@ -76,7 +76,7 @@ export async function exportToXlsx(
 
   // 1. アイテムデータシート（必須）
   const itemsSheet = workbook.addWorksheet('アイテムデータ');
-  
+
   // ヘッダー
   itemsSheet.columns = [
     { header: 'ID', key: 'id', width: 40 },
@@ -96,7 +96,7 @@ export async function exportToXlsx(
   ];
 
   // データ
-  items.forEach(item => {
+  items.forEach((item) => {
     itemsSheet.addRow({
       id: item.id,
       circle: item.circle,
@@ -136,9 +136,18 @@ export async function exportToXlsx(
     metaSheet.addRow({ key: 'eventName', value: eventName });
 
     if (additionalData.metadata) {
-      metaSheet.addRow({ key: 'spreadsheetUrl', value: additionalData.metadata.spreadsheetUrl || '' });
-      metaSheet.addRow({ key: 'spreadsheetSheetName', value: additionalData.metadata.spreadsheetSheetName || '' });
-      metaSheet.addRow({ key: 'lastImportDate', value: additionalData.metadata.lastImportDate || '' });
+      metaSheet.addRow({
+        key: 'spreadsheetUrl',
+        value: additionalData.metadata.spreadsheetUrl || '',
+      });
+      metaSheet.addRow({
+        key: 'spreadsheetSheetName',
+        value: additionalData.metadata.spreadsheetSheetName || '',
+      });
+      metaSheet.addRow({
+        key: 'lastImportDate',
+        value: additionalData.metadata.lastImportDate || '',
+      });
     }
 
     metaSheet.getRow(1).font = { bold: true };
@@ -247,8 +256,8 @@ export async function exportToXlsx(
 
   // Blobとして出力
   const buffer = await workbook.xlsx.writeBuffer();
-  return new Blob([buffer], { 
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
+  return new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
   });
 }
 
@@ -287,7 +296,7 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
       } else if (priorityValue === 'priority') {
         priorityLevel = 'priority';
       } else if (priorityValue === 'none' || priorityValue === '') {
-        priorityLevel = undefined;  // 'none'は保存しない（デフォルト値）
+        priorityLevel = undefined; // 'none'は保存しない（デフォルト値）
       }
 
       // 保護レベルの値を取得（列13）
@@ -300,7 +309,7 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
       } else if (protectionValue === 'none') {
         protectionLevel = 'none';
       } else {
-        protectionLevel = undefined;  // 未設定
+        protectionLevel = undefined; // 未設定
       }
 
       // 追加元の値を取得（列14）
@@ -311,7 +320,7 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
       } else if (sourceValue === 'spreadsheet') {
         source = 'spreadsheet';
       } else {
-        source = undefined;  // 未設定
+        source = undefined; // 未設定
       }
 
       const item: ShoppingItem = {
@@ -323,7 +332,7 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         title: String(row.getCell(6).value || ''),
         price: row.getCell(7).value ? Number(row.getCell(7).value) : null,
         quantity: Number(row.getCell(8).value) || 1,
-        purchaseStatus: (String(row.getCell(9).value || 'None') as ShoppingItem['purchaseStatus']),
+        purchaseStatus: String(row.getCell(9).value || 'None') as ShoppingItem['purchaseStatus'],
         remarks: String(row.getCell(10).value || ''),
         url: String(row.getCell(11).value || ''),
         priorityLevel,
@@ -350,7 +359,7 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
       });
 
       result.eventName = metaMap.get('eventName') || '';
-      
+
       if (metaMap.has('spreadsheetUrl')) {
         result.metadata = {
           spreadsheetUrl: metaMap.get('spreadsheetUrl') || '',
@@ -457,7 +466,9 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
     result.success = true;
   } catch (error) {
     console.error('Import error:', error);
-    result.errors.push(`インポートエラー: ${error instanceof Error ? error.message : '不明なエラー'}`);
+    result.errors.push(
+      `インポートエラー: ${error instanceof Error ? error.message : '不明なエラー'}`,
+    );
   }
 
   return result;

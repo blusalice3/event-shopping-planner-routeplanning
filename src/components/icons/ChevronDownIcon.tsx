@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 const ChevronDownIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
@@ -10,11 +9,7 @@ const ChevronDownIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
     stroke="currentColor"
     {...props}
   >
-    <path
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      d="m19.5 8.25-7.5 7.5-7.5-7.5"
-    />
+    <path strokeLinecap="round" strokeLinejoin="round" d="m19.5 8.25-7.5 7.5-7.5-7.5" />
   </svg>
 );
 

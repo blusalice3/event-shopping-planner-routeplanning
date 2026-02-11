@@ -17,7 +17,12 @@ interface HallGroup {
 interface ShoppingListProps {
   items: ShoppingItem[];
   onUpdateItem: (item: ShoppingItem) => void;
-  onMoveItem: (dragId: string, hoverId: string, targetColumn?: 'execute' | 'candidate', sourceColumn?: 'execute' | 'candidate') => void;
+  onMoveItem: (
+    dragId: string,
+    hoverId: string,
+    targetColumn?: 'execute' | 'candidate',
+    sourceColumn?: 'execute' | 'candidate',
+  ) => void;
   onEditRequest: (item: ShoppingItem) => void;
   onDeleteRequest: (item: ShoppingItem) => void;
   selectedItemIds: Set<string>;
@@ -42,7 +47,9 @@ interface ShoppingListProps {
 }
 
 // グループIDからホールIDと優先度を分離するヘルパー
-const parseGroupId = (groupId: string | null): { hallId: string | null; priority: PriorityLevel } => {
+const parseGroupId = (
+  groupId: string | null,
+): { hallId: string | null; priority: PriorityLevel } => {
   if (groupId === null) return { hallId: null, priority: 'none' };
   if (groupId === 'undefined:highest') return { hallId: null, priority: 'highest' };
   if (groupId === 'undefined:priority') return { hallId: null, priority: 'priority' };
@@ -72,22 +79,25 @@ const getGroupDisplayName = (groupId: string | null, hallDefinitions: HallDefini
   if (groupId === null) return 'ホール未定義';
   if (groupId === 'undefined:highest') return '未定義最優先';
   if (groupId === 'undefined:priority') return '未定義優先';
-  
+
   const { hallId, priority } = parseGroupId(groupId);
-  const hall = hallDefinitions.find(h => h.id === hallId);
+  const hall = hallDefinitions.find((h) => h.id === hallId);
   const hallName = hall?.name || 'ホール未定義';
-  
+
   if (priority === 'highest') return `${hallName}最優先`;
   if (priority === 'priority') return `${hallName}優先`;
   return hallName;
 };
 
 // グループのヘッダースタイルを取得
-const getGroupHeaderStyle = (groupId: string | null, hallDefinitions: HallDefinition[]): { bgClass: string; borderColor: string } => {
+const getGroupHeaderStyle = (
+  groupId: string | null,
+  hallDefinitions: HallDefinition[],
+): { bgClass: string; borderColor: string } => {
   const { hallId, priority } = parseGroupId(groupId);
-  const hall = hallDefinitions.find(h => h.id === hallId);
+  const hall = hallDefinitions.find((h) => h.id === hallId);
   const baseColor = hall?.color || '#9CA3AF';
-  
+
   if (priority === 'highest') {
     return { bgClass: 'bg-red-100 dark:bg-red-900/40', borderColor: '#EF4444' };
   }
@@ -140,22 +150,39 @@ const colorPalette: Array<{ light: string; dark: string }> = [
 const calculateBlockColors = (items: ShoppingItem[]): Map<string, string> => {
   const colorMap = new Map<string, string>();
   const uniqueBlocks = new Set<string>();
-  items.forEach(item => { if (item.purchaseStatus === 'None') { uniqueBlocks.add(item.block); } });
+  items.forEach((item) => {
+    if (item.purchaseStatus === 'None') {
+      uniqueBlocks.add(item.block);
+    }
+  });
   const sortedBlocks = Array.from(uniqueBlocks).sort((a, b) => {
-    const numA = Number(a); const numB = Number(b);
-    if (!isNaN(numA) && !isNaN(numB)) { return numA - numB; }
+    const numA = Number(a);
+    const numB = Number(b);
+    if (!isNaN(numA) && !isNaN(numB)) {
+      return numA - numB;
+    }
     return a.localeCompare(b);
   });
   const blockColorMap = new Map<string, { light: string; dark: string }>();
-  sortedBlocks.forEach((block, index) => { const colorIndex = index % colorPalette.length; blockColorMap.set(block, colorPalette[colorIndex]); });
+  sortedBlocks.forEach((block, index) => {
+    const colorIndex = index % colorPalette.length;
+    blockColorMap.set(block, colorPalette[colorIndex]);
+  });
   items.forEach((item, index) => {
     if (item.purchaseStatus === 'None') {
-      const block = item.block; const blockColor = blockColorMap.get(block);
+      const block = item.block;
+      const blockColor = blockColorMap.get(block);
       if (blockColor) {
         const prevItem = index > 0 ? items[index - 1] : null;
-        const isSameBlockAsPrev = prevItem && prevItem.block === block && prevItem.purchaseStatus === 'None';
-        if (isSameBlockAsPrev) { const prevColor = colorMap.get(items[index - 1].id) || ''; const shouldUseDark = prevColor === blockColor.light; colorMap.set(item.id, shouldUseDark ? blockColor.dark : blockColor.light); }
-        else { colorMap.set(item.id, blockColor.light); }
+        const isSameBlockAsPrev =
+          prevItem && prevItem.block === block && prevItem.purchaseStatus === 'None';
+        if (isSameBlockAsPrev) {
+          const prevColor = colorMap.get(items[index - 1].id) || '';
+          const shouldUseDark = prevColor === blockColor.light;
+          colorMap.set(item.id, shouldUseDark ? blockColor.dark : blockColor.light);
+        } else {
+          colorMap.set(item.id, blockColor.light);
+        }
       }
     }
   });
@@ -190,8 +217,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  
-  const [activeDropTarget, setActiveDropTarget] = useState<{ id: string; position: 'top' | 'bottom' } | null>(null);
+
+  const [activeDropTarget, setActiveDropTarget] = useState<{
+    id: string;
+    position: 'top' | 'bottom';
+  } | null>(null);
 
   // ホールごとにアイテムをグループ化（優先度対応版）
   const hallGroups = useMemo((): HallGroup[] => {
@@ -202,31 +232,39 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     // アイテムのホールIDを取得するヘルパー（useMemo内で定義）
     const getHallIdForItem = (item: ShoppingItem): string | null => {
       if (!mapData) return null;
-      
+
       const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
       if (!block) return null;
-      
+
       const numMatch = item.number?.match(/\d+/);
       if (!numMatch) return null;
       const num = parseInt(numMatch[0], 10);
-      
-      const cell = block.numberCells.find((nc: { row: number; col: number; value: number }) => nc.value === num);
+
+      const cell = block.numberCells.find(
+        (nc: { row: number; col: number; value: number }) => nc.value === num,
+      );
       if (!cell) return null;
-      
+
       // 多角形内判定（レイキャスティング法）
-      const isPointInPoly = (row: number, col: number, vertices: { row: number; col: number }[]): boolean => {
+      const isPointInPoly = (
+        row: number,
+        col: number,
+        vertices: { row: number; col: number }[],
+      ): boolean => {
         if (vertices.length < 3) return false;
         let inside = false;
         for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-          const xi = vertices[i].col, yi = vertices[i].row;
-          const xj = vertices[j].col, yj = vertices[j].row;
-          if (((yi > row) !== (yj > row)) && (col < (xj - xi) * (row - yi) / (yj - yi) + xi)) {
+          const xi = vertices[i].col,
+            yi = vertices[i].row;
+          const xj = vertices[j].col,
+            yj = vertices[j].row;
+          if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
             inside = !inside;
           }
         }
         return inside;
       };
-      
+
       for (const hall of hallDefinitions) {
         for (const vertex of hall.vertices) {
           if (vertex.row === cell.row && vertex.col === cell.col) {
@@ -248,11 +286,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     };
 
     const hallMap = new Map<string, HallDefinition>();
-    hallDefinitions.forEach(hall => hallMap.set(hall.id, hall));
+    hallDefinitions.forEach((hall) => hallMap.set(hall.id, hall));
 
     // グループ化（グループIDをキーに）
     const groups = new Map<string | null, ShoppingItem[]>();
-    
+
     items.forEach((item) => {
       const groupId = getItemGroupId(item);
       if (!groups.has(groupId)) {
@@ -262,9 +300,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     });
 
     const result: HallGroup[] = [];
-    
+
     // まずhallOrderに従ってグループを追加
-    hallOrder.forEach(groupId => {
+    hallOrder.forEach((groupId) => {
       if (groups.has(groupId)) {
         const { hallId, priority } = parseGroupId(groupId);
         const hall = hallMap.get(hallId || '');
@@ -279,9 +317,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         groups.delete(groupId);
       }
     });
-    
+
     // hallOrderに含まれないがhallDefinitionsに含まれるホール（通常グループ）を追加
-    hallDefinitions.forEach(hall => {
+    hallDefinitions.forEach((hall) => {
       const groupId = hall.id;
       if (groups.has(groupId)) {
         result.push({
@@ -295,7 +333,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         groups.delete(groupId);
       }
     });
-    
+
     // 優先度付きグループで残っているものを追加
     const remainingGroups = Array.from(groups.entries()).filter(([gId]) => gId !== null);
     remainingGroups.forEach(([groupId, groupItems]) => {
@@ -310,7 +348,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         items: groupItems,
       });
     });
-    
+
     // ホール未定義のアイテム（null）を最後に追加
     if (groups.has(null)) {
       result.push({
@@ -329,8 +367,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   // グループ化表示時の範囲選択情報を計算（同一グループ内のみ）
   const groupRangeInfo = useMemo(() => {
-    if (!showHallGroups || !rangeStart || !rangeEnd || !columnType || 
-        rangeStart.columnType !== columnType || rangeEnd.columnType !== columnType) {
+    if (
+      !showHallGroups ||
+      !rangeStart ||
+      !rangeEnd ||
+      !columnType ||
+      rangeStart.columnType !== columnType ||
+      rangeEnd.columnType !== columnType
+    ) {
       return null;
     }
 
@@ -341,12 +385,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     let endHallIndex = -1;
 
     for (const group of hallGroups) {
-      const startIdx = group.items.findIndex(item => item.id === rangeStart.itemId);
+      const startIdx = group.items.findIndex((item) => item.id === rangeStart.itemId);
       if (startIdx !== -1) {
         startGroupId = group.groupId;
         startHallIndex = startIdx;
       }
-      const endIdx = group.items.findIndex(item => item.id === rangeEnd.itemId);
+      const endIdx = group.items.findIndex((item) => item.id === rangeEnd.itemId);
       if (endIdx !== -1) {
         endGroupId = group.groupId;
         endHallIndex = endIdx;
@@ -358,18 +402,19 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       return null;
     }
 
-    const group = hallGroups.find(g => g.groupId === startGroupId);
+    const group = hallGroups.find((g) => g.groupId === startGroupId);
     if (!group) return null;
 
     const minIndex = Math.min(startHallIndex, endHallIndex);
     const maxIndex = Math.max(startHallIndex, endHallIndex);
     const rangeItems = group.items.slice(minIndex, maxIndex + 1);
-    const allSelected = rangeItems.every(item => selectedItemIds.has(item.id));
-    
-    const onlyStartEndSelected = rangeItems.length > 2 && 
-      selectedItemIds.has(rangeItems[0].id) && 
+    const allSelected = rangeItems.every((item) => selectedItemIds.has(item.id));
+
+    const onlyStartEndSelected =
+      rangeItems.length > 2 &&
+      selectedItemIds.has(rangeItems[0].id) &&
       selectedItemIds.has(rangeItems[rangeItems.length - 1].id) &&
-      rangeItems.slice(1, -1).every(item => !selectedItemIds.has(item.id));
+      rangeItems.slice(1, -1).every((item) => !selectedItemIds.has(item.id));
 
     return {
       groupId: startGroupId,
@@ -383,24 +428,31 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   // 通常表示時の範囲選択の状態を計算
   const rangeInfo = useMemo(() => {
-    if (!rangeStart || !rangeEnd || !columnType || rangeStart.columnType !== columnType || rangeEnd.columnType !== columnType) {
+    if (
+      !rangeStart ||
+      !rangeEnd ||
+      !columnType ||
+      rangeStart.columnType !== columnType ||
+      rangeEnd.columnType !== columnType
+    ) {
       return null;
     }
 
-    const startIndex = items.findIndex(item => item.id === rangeStart.itemId);
-    const endIndex = items.findIndex(item => item.id === rangeEnd.itemId);
+    const startIndex = items.findIndex((item) => item.id === rangeStart.itemId);
+    const endIndex = items.findIndex((item) => item.id === rangeEnd.itemId);
 
     if (startIndex === -1 || endIndex === -1) return null;
 
     const minIndex = Math.min(startIndex, endIndex);
     const maxIndex = Math.max(startIndex, endIndex);
     const rangeItems = items.slice(minIndex, maxIndex + 1);
-    const allSelected = rangeItems.every(item => selectedItemIds.has(item.id));
-    
-    const onlyStartEndSelected = rangeItems.length > 2 && 
-      selectedItemIds.has(rangeItems[0].id) && 
+    const allSelected = rangeItems.every((item) => selectedItemIds.has(item.id));
+
+    const onlyStartEndSelected =
+      rangeItems.length > 2 &&
+      selectedItemIds.has(rangeItems[0].id) &&
       selectedItemIds.has(rangeItems[rangeItems.length - 1].id) &&
-      rangeItems.slice(1, -1).every(item => !selectedItemIds.has(item.id));
+      rangeItems.slice(1, -1).every((item) => !selectedItemIds.has(item.id));
 
     return {
       startIndex: minIndex,
@@ -423,7 +475,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         target.classList.add('opacity-40');
       }
       if (selectedItemIds.has(item.id)) {
-        document.querySelectorAll('[data-is-selected="true"]').forEach(el => {
+        document.querySelectorAll('[data-is-selected="true"]').forEach((el) => {
           el.classList.add('opacity-40');
         });
       }
@@ -442,8 +494,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       window.scrollBy(0, SCROLL_SPEED);
     }
 
-    const isCrossColumn = dragSourceColumn.current !== null && dragSourceColumn.current !== columnType;
-    
+    const isCrossColumn =
+      dragSourceColumn.current !== null && dragSourceColumn.current !== columnType;
+
     if (!isCrossColumn) {
       if (dragItem.current === item.id && selectedItemIds.size === 0) {
         setActiveDropTarget(null);
@@ -470,9 +523,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    const sourceColumn = e.dataTransfer.getData('sourceColumn') as 'execute' | 'candidate' | undefined;
-    
+
+    const sourceColumn = e.dataTransfer.getData('sourceColumn') as
+      | 'execute'
+      | 'candidate'
+      | undefined;
+
     if (!columnType || !dragItem.current) {
       cleanUp();
       return;
@@ -503,215 +559,301 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     const { id: targetId, position } = activeDropTarget;
 
     if (dragItem.current === targetId && sourceColumn === columnType) {
-        cleanUp();
-        return;
+      cleanUp();
+      return;
     }
 
     if (position === 'top') {
-        onMoveItem(dragItem.current, targetId, columnType, sourceColumn);
+      onMoveItem(dragItem.current, targetId, columnType, sourceColumn);
     } else {
-        const targetIndex = items.findIndex(i => i.id === targetId);
-        if (targetIndex === -1) {
-            cleanUp();
-            return;
-        }
-        
-        if (targetIndex === items.length - 1) {
-            onMoveItem(dragItem.current, '__END_OF_LIST__', columnType, sourceColumn);
-        } else {
-            const nextItem = items[targetIndex + 1];
-            onMoveItem(dragItem.current, nextItem.id, columnType, sourceColumn);
-        }
+      const targetIndex = items.findIndex((i) => i.id === targetId);
+      if (targetIndex === -1) {
+        cleanUp();
+        return;
+      }
+
+      if (targetIndex === items.length - 1) {
+        onMoveItem(dragItem.current, '__END_OF_LIST__', columnType, sourceColumn);
+      } else {
+        const nextItem = items[targetIndex + 1];
+        onMoveItem(dragItem.current, nextItem.id, columnType, sourceColumn);
+      }
     }
-    
+
     cleanUp();
   };
 
   const cleanUp = () => {
-    document.querySelectorAll('.opacity-40').forEach(el => el.classList.remove('opacity-40'));
+    document.querySelectorAll('.opacity-40').forEach((el) => el.classList.remove('opacity-40'));
     dragItem.current = null;
     dragSourceColumn.current = null;
     setActiveDropTarget(null);
   };
 
   if (items.length === 0) {
-      return (
-        <div 
-          className="text-center text-slate-500 dark:text-slate-400 py-12 min-h-[200px] border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg relative"
-          onDragOver={handleContainerDragOver}
-          onDrop={handleDrop}
-        >
-          この日のアイテムはありません。
-        </div>
-      );
+    return (
+      <div
+        className="text-center text-slate-500 dark:text-slate-400 py-12 min-h-[200px] border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg relative"
+        onDragOver={handleContainerDragOver}
+        onDrop={handleDrop}
+      >
+        この日のアイテムはありません。
+      </div>
+    );
   }
 
   // ホールグループ化表示
   if (showHallGroups && hallDefinitions.length > 0) {
     return (
-      <div 
+      <div
         ref={containerRef}
         className="space-y-2 pb-24 relative"
-        onDragLeave={() => setActiveDropTarget(null)} 
+        onDragLeave={() => setActiveDropTarget(null)}
       >
         {hallGroups.map((group, groupIndex) => {
           const headerStyle = getGroupHeaderStyle(group.groupId, hallDefinitions);
           const displayName = getGroupDisplayName(group.groupId, hallDefinitions);
-          
+
           // このグループ内での範囲選択情報
           const isThisGroupInRange = groupRangeInfo && groupRangeInfo.groupId === group.groupId;
-          
+
           return (
-          <div key={group.groupId ?? `no-hall-${groupIndex}`} className="mb-4">
-            {/* グループヘッダー */}
-            <div
-              className={`sticky top-0 z-20 flex items-center justify-between px-4 py-2 rounded-t-lg ${headerStyle.bgClass}`}
-              style={{ borderLeft: `4px solid ${headerStyle.borderColor}` }}
-            >
-              <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
-                {displayName}
-              </span>
-              <span className="text-xs text-slate-500 dark:text-slate-400">
-                {group.items.length}件
-              </span>
-            </div>
-            
-            {/* グループ内アイテム */}
-            <div className="space-y-4 mt-2">
-              {group.items.map((item, hallIndex) => {
-                const globalIndex = items.findIndex(i => i.id === item.id);
-                
-                // グループ内での範囲選択状態
-                const isInRange = isThisGroupInRange && 
-                  hallIndex >= groupRangeInfo!.startIndex && 
-                  hallIndex <= groupRangeInfo!.endIndex;
-                const isStart = isThisGroupInRange && hallIndex === groupRangeInfo!.startIndex;
-                const isEnd = isThisGroupInRange && hallIndex === groupRangeInfo!.endIndex;
-                const isMiddle = isThisGroupInRange && 
-                  hallIndex > groupRangeInfo!.startIndex && 
-                  hallIndex < groupRangeInfo!.endIndex;
+            <div key={group.groupId ?? `no-hall-${groupIndex}`} className="mb-4">
+              {/* グループヘッダー */}
+              <div
+                className={`sticky top-0 z-20 flex items-center justify-between px-4 py-2 rounded-t-lg ${headerStyle.bgClass}`}
+                style={{ borderLeft: `4px solid ${headerStyle.borderColor}` }}
+              >
+                <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
+                  {displayName}
+                </span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {group.items.length}件
+                </span>
+              </div>
 
-                return (
-                  <div
-                    key={item.id}
-                    data-item-id={item.id}
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, item)}
-                    onDragOver={(e) => handleDragOver(e, item)}
-                    onDrop={handleDrop}
-                    onDragEnd={cleanUp}
-                    className={`transition-opacity duration-200 relative ${
-                      group.priority === 'highest' ? 'bg-red-50/30 dark:bg-red-950/20' : 
-                      group.priority === 'priority' ? 'bg-orange-50/30 dark:bg-orange-950/20' : ''
-                    }`}
-                    data-is-selected={selectedItemIds.has(item.id)}
-                  >
-                    {activeDropTarget?.id === item.id && activeDropTarget.position === 'top' && (
-                      <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                        <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                        <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                        <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                      </div>
-                    )}
+              {/* グループ内アイテム */}
+              <div className="space-y-4 mt-2">
+                {group.items.map((item, hallIndex) => {
+                  const globalIndex = items.findIndex((i) => i.id === item.id);
 
-                    <ShoppingItemCard
-                      item={item}
-                      onUpdate={onUpdateItem}
-                      isStriped={globalIndex % 2 !== 0}
-                      onEditRequest={onEditRequest}
-                      onDeleteRequest={onDeleteRequest}
-                      isSelected={selectedItemIds.has(item.id)}
-                      onSelectItem={(itemId) => onSelectItem(itemId, columnType)}
-                      blockBackgroundColor={blockColorMap.get(item.id)}
-                      onMoveUp={onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined}
-                      onMoveDown={onMoveItemDown ? () => onMoveItemDown(item.id, columnType) : undefined}
-                      canMoveUp={globalIndex > 0}
-                      canMoveDown={globalIndex < items.length - 1}
-                      isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
-                      isSearchMatch={highlightedItemId === item.id}
-                      layoutMode={layoutMode}
-                      hallIndex={hallIndex}
-                      priorityLevel={group.priority}
-                    />
+                  // グループ内での範囲選択状態
+                  const isInRange =
+                    isThisGroupInRange &&
+                    hallIndex >= groupRangeInfo!.startIndex &&
+                    hallIndex <= groupRangeInfo!.endIndex;
+                  const isStart = isThisGroupInRange && hallIndex === groupRangeInfo!.startIndex;
+                  const isEnd = isThisGroupInRange && hallIndex === groupRangeInfo!.endIndex;
+                  const isMiddle =
+                    isThisGroupInRange &&
+                    hallIndex > groupRangeInfo!.startIndex &&
+                    hallIndex < groupRangeInfo!.endIndex;
 
-                    {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (
-                      <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                        <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                        <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                        <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                      </div>
-                    )}
+                  return (
+                    <div
+                      key={item.id}
+                      data-item-id={item.id}
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, item)}
+                      onDragOver={(e) => handleDragOver(e, item)}
+                      onDrop={handleDrop}
+                      onDragEnd={cleanUp}
+                      className={`transition-opacity duration-200 relative ${
+                        group.priority === 'highest'
+                          ? 'bg-red-50/30 dark:bg-red-950/20'
+                          : group.priority === 'priority'
+                            ? 'bg-orange-50/30 dark:bg-orange-950/20'
+                            : ''
+                      }`}
+                      data-is-selected={selectedItemIds.has(item.id)}
+                    >
+                      {activeDropTarget?.id === item.id && activeDropTarget.position === 'top' && (
+                        <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                          <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                          <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                          <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+                        </div>
+                      )}
 
-                    {/* 範囲選択表示とチェーン選択UI（グループ内のみ） */}
-                    {isInRange && onToggleRangeSelection && (
-                      <div 
-                        className={`absolute top-0 bottom-0 z-40 ${
-                          columnType === 'candidate' ? 'left-0' : 'right-0'
-                        } cursor-pointer ${
-                          groupRangeInfo!.onlyStartEndSelected ? 'opacity-50 hover:opacity-100' : 'opacity-100'
-                        }`}
-                        style={{ width: '40px' }}
-                        onClick={() => onToggleRangeSelection(columnType!)}
-                      >
-                        <svg
-                          className="absolute w-full h-full"
-                          style={{
-                            [columnType === 'candidate' ? 'left' : 'right']: '-42px',
-                          }}
-                          preserveAspectRatio="none"
+                      <ShoppingItemCard
+                        item={item}
+                        onUpdate={onUpdateItem}
+                        isStriped={globalIndex % 2 !== 0}
+                        onEditRequest={onEditRequest}
+                        onDeleteRequest={onDeleteRequest}
+                        isSelected={selectedItemIds.has(item.id)}
+                        onSelectItem={(itemId) => onSelectItem(itemId, columnType)}
+                        blockBackgroundColor={blockColorMap.get(item.id)}
+                        onMoveUp={
+                          onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined
+                        }
+                        onMoveDown={
+                          onMoveItemDown ? () => onMoveItemDown(item.id, columnType) : undefined
+                        }
+                        canMoveUp={globalIndex > 0}
+                        canMoveDown={globalIndex < items.length - 1}
+                        isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
+                        isSearchMatch={highlightedItemId === item.id}
+                        layoutMode={layoutMode}
+                        hallIndex={hallIndex}
+                        priorityLevel={group.priority}
+                      />
+
+                      {activeDropTarget?.id === item.id &&
+                        activeDropTarget.position === 'bottom' && (
+                          <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                            <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                            <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                            <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+                          </div>
+                        )}
+
+                      {/* 範囲選択表示とチェーン選択UI（グループ内のみ） */}
+                      {isInRange && onToggleRangeSelection && (
+                        <div
+                          className={`absolute top-0 bottom-0 z-40 ${
+                            columnType === 'candidate' ? 'left-0' : 'right-0'
+                          } cursor-pointer ${
+                            groupRangeInfo!.onlyStartEndSelected
+                              ? 'opacity-50 hover:opacity-100'
+                              : 'opacity-100'
+                          }`}
+                          style={{ width: '40px' }}
+                          onClick={() => onToggleRangeSelection(columnType!)}
                         >
-                          <defs>
-                            <linearGradient id={`chainMetal-group-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
-                              <stop offset="0%" stopColor="#9CA3AF" />
-                              <stop offset="50%" stopColor="#D1D5DB" />
-                              <stop offset="100%" stopColor="#9CA3AF" />
-                            </linearGradient>
-                            <pattern id={`chainPattern-group-${item.id}`} x="0" y="0" width="40" height="20" patternUnits="userSpaceOnUse">
-                               <rect x="14" y="-2" width="12" height="18" rx="6" fill="none" stroke={`url(#chainMetal-group-${item.id})`} strokeWidth="3" />
-                               <rect x="17" y="13" width="6" height="8" rx="2" fill={`url(#chainMetal-group-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
-                            </pattern>
-                          </defs>
-                          
-                          {isStart && (
-                            <rect x="0" y="50%" width="40" height="50%" fill={`url(#chainPattern-group-${item.id})`} />
-                          )}
-                          {isEnd && (
-                            <rect x="0" y="0" width="40" height="50%" fill={`url(#chainPattern-group-${item.id})`} />
-                          )}
-                          {isMiddle && (
-                            <rect x="0" y="0" width="40" height="100%" fill={`url(#chainPattern-group-${item.id})`} />
-                          )}
-                          
-                          {/* 端点のリング */}
-                          {isStart && (
-                            <ellipse 
-                              cx="20" cy="100%" rx="10" ry="5"
-                              fill="none"
-                              stroke={`url(#chainMetal-group-${item.id})`} 
-                              strokeWidth="3"
-                            />
-                          )}
-                          {isEnd && (
-                            <ellipse 
-                              cx="20" cy="0" rx="10" ry="5"
-                              fill="none"
-                              stroke={`url(#chainMetal-group-${item.id})`} 
-                              strokeWidth="3"
-                            />
-                          )}
-                          
-                          {/* 中心の丸 */}
-                          {isStart && <circle cx="20" cy="100%" r="4" fill={`url(#chainMetal-group-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />}
-                          {isEnd && <circle cx="20" cy="0" r="4" fill={`url(#chainMetal-group-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />}
-                        </svg>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                          <svg
+                            className="absolute w-full h-full"
+                            style={{
+                              [columnType === 'candidate' ? 'left' : 'right']: '-42px',
+                            }}
+                            preserveAspectRatio="none"
+                          >
+                            <defs>
+                              <linearGradient
+                                id={`chainMetal-group-${item.id}`}
+                                x1="0%"
+                                y1="0%"
+                                x2="100%"
+                                y2="0%"
+                              >
+                                <stop offset="0%" stopColor="#9CA3AF" />
+                                <stop offset="50%" stopColor="#D1D5DB" />
+                                <stop offset="100%" stopColor="#9CA3AF" />
+                              </linearGradient>
+                              <pattern
+                                id={`chainPattern-group-${item.id}`}
+                                x="0"
+                                y="0"
+                                width="40"
+                                height="20"
+                                patternUnits="userSpaceOnUse"
+                              >
+                                <rect
+                                  x="14"
+                                  y="-2"
+                                  width="12"
+                                  height="18"
+                                  rx="6"
+                                  fill="none"
+                                  stroke={`url(#chainMetal-group-${item.id})`}
+                                  strokeWidth="3"
+                                />
+                                <rect
+                                  x="17"
+                                  y="13"
+                                  width="6"
+                                  height="8"
+                                  rx="2"
+                                  fill={`url(#chainMetal-group-${item.id})`}
+                                  stroke="#4B5563"
+                                  strokeWidth="0.5"
+                                />
+                              </pattern>
+                            </defs>
+
+                            {isStart && (
+                              <rect
+                                x="0"
+                                y="50%"
+                                width="40"
+                                height="50%"
+                                fill={`url(#chainPattern-group-${item.id})`}
+                              />
+                            )}
+                            {isEnd && (
+                              <rect
+                                x="0"
+                                y="0"
+                                width="40"
+                                height="50%"
+                                fill={`url(#chainPattern-group-${item.id})`}
+                              />
+                            )}
+                            {isMiddle && (
+                              <rect
+                                x="0"
+                                y="0"
+                                width="40"
+                                height="100%"
+                                fill={`url(#chainPattern-group-${item.id})`}
+                              />
+                            )}
+
+                            {/* 端点のリング */}
+                            {isStart && (
+                              <ellipse
+                                cx="20"
+                                cy="100%"
+                                rx="10"
+                                ry="5"
+                                fill="none"
+                                stroke={`url(#chainMetal-group-${item.id})`}
+                                strokeWidth="3"
+                              />
+                            )}
+                            {isEnd && (
+                              <ellipse
+                                cx="20"
+                                cy="0"
+                                rx="10"
+                                ry="5"
+                                fill="none"
+                                stroke={`url(#chainMetal-group-${item.id})`}
+                                strokeWidth="3"
+                              />
+                            )}
+
+                            {/* 中心の丸 */}
+                            {isStart && (
+                              <circle
+                                cx="20"
+                                cy="100%"
+                                r="4"
+                                fill={`url(#chainMetal-group-${item.id})`}
+                                stroke="#4B5563"
+                                strokeWidth="0.5"
+                              />
+                            )}
+                            {isEnd && (
+                              <circle
+                                cx="20"
+                                cy="0"
+                                r="4"
+                                fill={`url(#chainMetal-group-${item.id})`}
+                                stroke="#4B5563"
+                                strokeWidth="0.5"
+                              />
+                            )}
+                          </svg>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        );})}
+          );
+        })}
       </div>
     );
   }
@@ -719,10 +861,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   // 通常表示（既存のコード）
 
   return (
-    <div 
+    <div
       ref={containerRef}
       className="space-y-4 pb-24 relative"
-      onDragLeave={() => setActiveDropTarget(null)} 
+      onDragLeave={() => setActiveDropTarget(null)}
     >
       {items.map((item, index) => {
         // 範囲選択内かどうか判定
@@ -732,7 +874,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         const isMiddle = rangeInfo && index > rangeInfo.startIndex && index < rangeInfo.endIndex;
 
         return (
-        <div
+          <div
             key={item.id}
             data-item-id={item.id}
             draggable
@@ -742,13 +884,13 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             onDragEnd={cleanUp}
             className="transition-opacity duration-200 relative"
             data-is-selected={selectedItemIds.has(item.id)}
-        >
+          >
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'top' && (
-                <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                    <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                    <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                    <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                </div>
+              <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+              </div>
             )}
 
             <ShoppingItemCard
@@ -770,20 +912,18 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             />
 
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (
-                <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                    <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                    <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                    <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                </div>
+              <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+              </div>
             )}
 
             {/* チェーンをアイテムの右側（左列: execute）または左側（右列: candidate）に表示 */}
             {isInRange && onToggleRangeSelection && (
-              <div 
+              <div
                 className={`absolute top-0 bottom-0 z-40 pointer-events-none ${
-                  columnType === 'candidate' 
-                    ? 'left-0' 
-                    : 'right-0'
+                  columnType === 'candidate' ? 'left-0' : 'right-0'
                 }`}
                 style={{ width: '40px' }}
               >
@@ -798,7 +938,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   style={{
                     [columnType === 'candidate' ? 'left' : 'right']: '-42px',
                   }}
-                  title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
+                  title={
+                    rangeInfo.allSelected ? '範囲内のチェックを外す' : '範囲内のチェックを入れる'
+                  }
                   data-no-long-press
                 >
                   <svg
@@ -809,72 +951,128 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     className="w-full h-full"
                   >
                     <defs>
-                      <linearGradient id={`chainMetal-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                      <linearGradient
+                        id={`chainMetal-${item.id}`}
+                        x1="0%"
+                        y1="0%"
+                        x2="100%"
+                        y2="0%"
+                      >
                         <stop offset="0%" stopColor="#9CA3AF" />
                         <stop offset="30%" stopColor="#F3F4F6" />
                         <stop offset="50%" stopColor="#D1D5DB" />
                         <stop offset="70%" stopColor="#9CA3AF" />
                         <stop offset="100%" stopColor="#6B7280" />
                       </linearGradient>
-                      <pattern id={`chainPattern-${item.id}`} x="0" y="0" width="40" height="20" patternUnits="userSpaceOnUse">
-                         <rect x="14" y="-2" width="12" height="18" rx="6" fill="none" stroke={`url(#chainMetal-${item.id})`} strokeWidth="3" />
-                         <rect x="17" y="13" width="6" height="8" rx="2" fill={`url(#chainMetal-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
+                      <pattern
+                        id={`chainPattern-${item.id}`}
+                        x="0"
+                        y="0"
+                        width="40"
+                        height="20"
+                        patternUnits="userSpaceOnUse"
+                      >
+                        <rect
+                          x="14"
+                          y="-2"
+                          width="12"
+                          height="18"
+                          rx="6"
+                          fill="none"
+                          stroke={`url(#chainMetal-${item.id})`}
+                          strokeWidth="3"
+                        />
+                        <rect
+                          x="17"
+                          y="13"
+                          width="6"
+                          height="8"
+                          rx="2"
+                          fill={`url(#chainMetal-${item.id})`}
+                          stroke="#4B5563"
+                          strokeWidth="0.5"
+                        />
                       </pattern>
                     </defs>
 
                     {/* チェーンの描画範囲を制御 */}
                     {isStart && (
-                        // 起点: 中央から下まで
-                        <rect x="0" y="50%" width="40" height="50%" fill={`url(#chainPattern-${item.id})`} />
+                      // 起点: 中央から下まで
+                      <rect
+                        x="0"
+                        y="50%"
+                        width="40"
+                        height="50%"
+                        fill={`url(#chainPattern-${item.id})`}
+                      />
                     )}
                     {isEnd && (
-                        // 終点: 上から中央まで
-                        <rect x="0" y="0" width="40" height="50%" fill={`url(#chainPattern-${item.id})`} />
+                      // 終点: 上から中央まで
+                      <rect
+                        x="0"
+                        y="0"
+                        width="40"
+                        height="50%"
+                        fill={`url(#chainPattern-${item.id})`}
+                      />
                     )}
                     {isMiddle && (
-                        // 間: 全体
-                        <rect x="0" y="0" width="40" height="100%" fill={`url(#chainPattern-${item.id})`} />
+                      // 間: 全体
+                      <rect
+                        x="0"
+                        y="0"
+                        width="40"
+                        height="100%"
+                        fill={`url(#chainPattern-${item.id})`}
+                      />
                     )}
 
                     {/* フック（アイテムと鎖を繋ぐ金具） - 全ての範囲内アイテムに表示 */}
-                    <g transform="translate(0, 50)"> 
-                        {columnType === 'candidate' ? (
-                            <path 
-                                d="M 40 0 L 20 0" 
-                                stroke={`url(#chainMetal-${item.id})`} 
-                                strokeWidth="4" 
-                                strokeLinecap="round"
-                                fill="none"
-                            />
-                        ) : (
-                            <path 
-                                d="M 0 0 L 20 0" 
-                                stroke={`url(#chainMetal-${item.id})`} 
-                                strokeWidth="4" 
-                                strokeLinecap="round"
-                                fill="none"
-                            />
-                        )}
-                        <circle cx="20" cy="0" r="4" fill={`url(#chainMetal-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
-                        <circle 
-                            cx={columnType === 'candidate' ? 38 : 2} 
-                            cy="0" 
-                            r="3" 
-                            fill="#9CA3AF" 
+                    <g transform="translate(0, 50)">
+                      {columnType === 'candidate' ? (
+                        <path
+                          d="M 40 0 L 20 0"
+                          stroke={`url(#chainMetal-${item.id})`}
+                          strokeWidth="4"
+                          strokeLinecap="round"
+                          fill="none"
                         />
+                      ) : (
+                        <path
+                          d="M 0 0 L 20 0"
+                          stroke={`url(#chainMetal-${item.id})`}
+                          strokeWidth="4"
+                          strokeLinecap="round"
+                          fill="none"
+                        />
+                      )}
+                      <circle
+                        cx="20"
+                        cy="0"
+                        r="4"
+                        fill={`url(#chainMetal-${item.id})`}
+                        stroke="#4B5563"
+                        strokeWidth="0.5"
+                      />
+                      <circle
+                        cx={columnType === 'candidate' ? 38 : 2}
+                        cy="0"
+                        r="3"
+                        fill="#9CA3AF"
+                      />
                     </g>
                   </svg>
                 </button>
               </div>
             )}
-            
+
             {/* アイテム間の隙間を埋めるチェーン */}
             {rangeInfo && (isStart || isMiddle) && onToggleRangeSelection && (
-              <div 
+              <div
                 className={`absolute bottom-0 z-50 pointer-events-none ${
                   columnType === 'candidate' ? 'left-0' : 'right-0'
                 }`}
-                style={{ 
+                style={{
                   width: '40px',
                   height: '16px',
                   [columnType === 'candidate' ? 'left' : 'right']: '-42px',
@@ -888,31 +1086,76 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   className={`pointer-events-auto absolute w-full h-full transition-opacity ${
                     rangeInfo.onlyStartEndSelected ? 'opacity-50 hover:opacity-100' : 'opacity-100'
                   }`}
-                  title={rangeInfo.allSelected ? "範囲内のチェックを外す" : "範囲内のチェックを入れる"}
+                  title={
+                    rangeInfo.allSelected ? '範囲内のチェックを外す' : '範囲内のチェックを入れる'
+                  }
                   data-no-long-press
                 >
-                  <svg width="40" height="16" xmlns="http://www.w3.org/2000/svg" className="w-full h-full">
-                     {/* パターン定義を再利用するためにdefsを定義（本当はuseタグを使いたいが、IDスコープが面倒なので再定義） */}
-                     <defs>
-                      <linearGradient id={`chainMetal-gap-${item.id}`} x1="0%" y1="0%" x2="100%" y2="0%">
+                  <svg
+                    width="40"
+                    height="16"
+                    xmlns="http://www.w3.org/2000/svg"
+                    className="w-full h-full"
+                  >
+                    {/* パターン定義を再利用するためにdefsを定義（本当はuseタグを使いたいが、IDスコープが面倒なので再定義） */}
+                    <defs>
+                      <linearGradient
+                        id={`chainMetal-gap-${item.id}`}
+                        x1="0%"
+                        y1="0%"
+                        x2="100%"
+                        y2="0%"
+                      >
                         <stop offset="0%" stopColor="#9CA3AF" />
                         <stop offset="30%" stopColor="#F3F4F6" />
                         <stop offset="50%" stopColor="#D1D5DB" />
                         <stop offset="70%" stopColor="#9CA3AF" />
                         <stop offset="100%" stopColor="#6B7280" />
                       </linearGradient>
-                      <pattern id={`chainPattern-gap-${item.id}`} x="0" y="0" width="40" height="20" patternUnits="userSpaceOnUse">
-                         <rect x="14" y="-2" width="12" height="18" rx="6" fill="none" stroke={`url(#chainMetal-gap-${item.id})`} strokeWidth="3" />
-                         <rect x="17" y="13" width="6" height="8" rx="2" fill={`url(#chainMetal-gap-${item.id})`} stroke="#4B5563" strokeWidth="0.5" />
+                      <pattern
+                        id={`chainPattern-gap-${item.id}`}
+                        x="0"
+                        y="0"
+                        width="40"
+                        height="20"
+                        patternUnits="userSpaceOnUse"
+                      >
+                        <rect
+                          x="14"
+                          y="-2"
+                          width="12"
+                          height="18"
+                          rx="6"
+                          fill="none"
+                          stroke={`url(#chainMetal-gap-${item.id})`}
+                          strokeWidth="3"
+                        />
+                        <rect
+                          x="17"
+                          y="13"
+                          width="6"
+                          height="8"
+                          rx="2"
+                          fill={`url(#chainMetal-gap-${item.id})`}
+                          stroke="#4B5563"
+                          strokeWidth="0.5"
+                        />
                       </pattern>
                     </defs>
-                     <rect x="0" y="0" width="40" height="100%" fill={`url(#chainPattern-gap-${item.id})`} />
+                    <rect
+                      x="0"
+                      y="0"
+                      width="40"
+                      height="100%"
+                      fill={`url(#chainPattern-gap-${item.id})`}
+                    />
                   </svg>
                 </button>
               </div>
             )}
-        </div>
-      )})}
+          </div>
+        );
+      })}
     </div>
   );
 };

@@ -1,8 +1,8 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
 import { ShoppingItem, DayMapData, HallDefinition, PurchaseStatus } from '../types';
-import ShoppingItemCard from './ShoppingItemCard';
 import FocusModeMapCanvas from './FocusModeMapCanvas';
+import { FocusModeHeader, FocusModeItemList, FocusModeMapControls } from './focus/FocusModePanels';
 
 // フェーズの定義
 type FocusPhase = 'normal' | 'postponed' | 'late';
@@ -150,7 +150,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 実行列のアイテムを取得
   const executeItems = useMemo(() => {
     return executeModeItemIds
-      .map(id => items.find(item => item.id === id))
+      .map((id) => items.find((item) => item.id === id))
       .filter((item): item is ShoppingItem => item !== undefined);
   }, [items, executeModeItemIds]);
 
@@ -158,8 +158,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const allVisits = useMemo(() => {
     const visitKeyOrder: string[] = [];
     const visitMap = new Map<string, ShoppingItem[]>();
-    
-    executeItems.forEach(item => {
+
+    executeItems.forEach((item) => {
       const key = getVisitKey(item);
       if (!visitMap.has(key)) {
         visitMap.set(key, []);
@@ -167,8 +167,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
       }
       visitMap.get(key)!.push(item);
     });
-    
-    return visitKeyOrder.map(key => ({
+
+    return visitKeyOrder.map((key) => ({
       key,
       items: visitMap.get(key)!,
     }));
@@ -176,12 +176,16 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // 現時点で後回し状態のアイテムIDセット（通常フェーズ中に動的に更新）
   const currentPostponedItemIds = useMemo(() => {
-    return new Set(executeItems.filter(item => item.purchaseStatus === 'Postpone').map(item => item.id));
+    return new Set(
+      executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
+    );
   }, [executeItems]);
 
   // 現時点で遅参状態のアイテムIDセット（通常・後回しフェーズ中に動的に更新）
   const currentLateItemIds = useMemo(() => {
-    return new Set(executeItems.filter(item => item.purchaseStatus === 'Late').map(item => item.id));
+    return new Set(
+      executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+    );
   }, [executeItems]);
 
   // フェーズごとの訪問先リストを計算
@@ -189,36 +193,43 @@ const FocusMode: React.FC<FocusModeProps> = ({
     const normal: typeof allVisits = [];
     const postponed: typeof allVisits = [];
     const late: typeof allVisits = [];
-    
-    allVisits.forEach(visit => {
+
+    allVisits.forEach((visit) => {
       // 通常フェーズ: 全ての訪問先を含む（網羅的）
       normal.push(visit);
-      
+
       // 後回しフェーズ: 記憶されたアイテムIDがある訪問先
       if (currentPhase === 'normal') {
         // 通常フェーズ中は現時点の後回しアイテムで判定
-        const hasPostponedItems = visit.items.some(item => currentPostponedItemIds.has(item.id));
+        const hasPostponedItems = visit.items.some((item) => currentPostponedItemIds.has(item.id));
         if (hasPostponedItems) postponed.push(visit);
       } else {
         // 後回し/遅参フェーズでは記憶されたIDで判定
-        const hasPostponedItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
+        const hasPostponedItems = visit.items.some((item) => postponedPhaseItemIds.has(item.id));
         if (hasPostponedItems) postponed.push(visit);
       }
-      
+
       // 遅参フェーズ: 記憶されたアイテムIDがある訪問先
       if (currentPhase === 'normal' || currentPhase === 'postponed') {
         // 通常/後回しフェーズ中は現時点の遅参アイテムで判定
-        const hasLateItems = visit.items.some(item => currentLateItemIds.has(item.id));
+        const hasLateItems = visit.items.some((item) => currentLateItemIds.has(item.id));
         if (hasLateItems) late.push(visit);
       } else {
         // 遅参フェーズでは記憶されたIDで判定
-        const hasLateItems = visit.items.some(item => latePhaseItemIds.has(item.id));
+        const hasLateItems = visit.items.some((item) => latePhaseItemIds.has(item.id));
         if (hasLateItems) late.push(visit);
       }
     });
-    
+
     return { normal, postponed, late };
-  }, [allVisits, currentPhase, currentPostponedItemIds, currentLateItemIds, postponedPhaseItemIds, latePhaseItemIds]);
+  }, [
+    allVisits,
+    currentPhase,
+    currentPostponedItemIds,
+    currentLateItemIds,
+    postponedPhaseItemIds,
+    latePhaseItemIds,
+  ]);
 
   // 現在のフェーズの訪問先リスト
   const currentPhaseVisits = useMemo(() => {
@@ -242,7 +253,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
     if (currentPhase === 'normal' && visitsByPhase.postponed.length > 0) {
       return visitsByPhase.postponed[0];
     }
-    if ((currentPhase === 'normal' || currentPhase === 'postponed') && visitsByPhase.late.length > 0) {
+    if (
+      (currentPhase === 'normal' || currentPhase === 'postponed') &&
+      visitsByPhase.late.length > 0
+    ) {
       return visitsByPhase.late[0];
     }
     return null;
@@ -274,25 +288,28 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 現在のフェーズで表示すべきアイテム
   const currentVisitDisplayItems = useMemo(() => {
     if (!currentVisit) return [];
-    
+
     if (currentPhase === 'normal') {
       // 通常フェーズ: 全アイテムを表示
       return currentVisit.items;
     } else if (currentPhase === 'postponed') {
       // 後回しフェーズ: 記憶された後回しアイテムIDに含まれるアイテムを表示
-      return currentVisit.items.filter(item => postponedPhaseItemIds.has(item.id));
+      return currentVisit.items.filter((item) => postponedPhaseItemIds.has(item.id));
     } else {
       // 遅参フェーズ: 記憶された遅参アイテムIDに含まれるアイテムを表示
-      return currentVisit.items.filter(item => latePhaseItemIds.has(item.id));
+      return currentVisit.items.filter((item) => latePhaseItemIds.has(item.id));
     }
   }, [currentVisit, currentPhase, postponedPhaseItemIds, latePhaseItemIds]);
 
   // フェーズ名の日本語表示
   const phaseDisplayName = useMemo(() => {
     switch (currentPhase) {
-      case 'normal': return '通常';
-      case 'postponed': return '後回し';
-      case 'late': return '遅参';
+      case 'normal':
+        return '通常';
+      case 'postponed':
+        return '後回し';
+      case 'late':
+        return '遅参';
     }
   }, [currentPhase]);
 
@@ -314,29 +331,32 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // 価格未定かつ購入済みのアイテムをチェック
   const hasUndefinedPricePurchased = useMemo(() => {
-    return currentVisitDisplayItems.some(item => 
-      item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null)
+    return currentVisitDisplayItems.some(
+      (item) => item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null),
     );
   }, [currentVisitDisplayItems]);
 
   // 残りの合計金額を計算
   const remainingCost = useMemo(() => {
     return executeItems.reduce((sum, item) => {
-      const isPurchasable = item.purchaseStatus === 'None' || item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'Late';
+      const isPurchasable =
+        item.purchaseStatus === 'None' ||
+        item.purchaseStatus === 'Postpone' ||
+        item.purchaseStatus === 'Late';
       if (!isPurchasable) return sum;
       const price = item.price && item.price > 0 ? item.price : 0;
-      return sum + (price * item.quantity);
+      return sum + price * item.quantity;
     }, 0);
   }, [executeItems]);
 
   // 購入済み件数
   const purchasedCount = useMemo(() => {
-    return executeItems.filter(item => item.purchaseStatus === 'Purchased').length;
+    return executeItems.filter((item) => item.purchaseStatus === 'Purchased').length;
   }, [executeItems]);
 
   // 現在の訪問先のアイテムチェック状況
   const currentVisitCheckedCount = useMemo(() => {
-    return currentVisitDisplayItems.filter(item => item.purchaseStatus !== 'None').length;
+    return currentVisitDisplayItems.filter((item) => item.purchaseStatus !== 'None').length;
   }, [currentVisitDisplayItems]);
 
   // 現在の訪問先のアイテム総数
@@ -348,8 +368,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const currentVisitPriceInfo = useMemo(() => {
     let totalPrice = 0;
     let undefinedCount = 0;
-    
-    currentVisitDisplayItems.forEach(item => {
+
+    currentVisitDisplayItems.forEach((item) => {
       // 価格未定の判定（nullまたは-1）
       if (item.price === null || item.price === -1) {
         undefinedCount += item.quantity;
@@ -357,11 +377,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
         totalPrice += item.price * item.quantity;
       }
     });
-    
+
     return {
       totalPrice,
       undefinedCount,
-      allUndefined: undefinedCount > 0 && totalPrice === 0 && currentVisitDisplayItems.every(item => item.price === null || item.price === -1),
+      allUndefined:
+        undefinedCount > 0 &&
+        totalPrice === 0 &&
+        currentVisitDisplayItems.every((item) => item.price === null || item.price === -1),
     };
   }, [currentVisitDisplayItems]);
 
@@ -392,38 +415,43 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // 追随モード用ホール特定
   const followHall = useMemo(() => {
-    if (!hallDefinitions || hallDefinitions.length === 0 || !currentVisit || !currentMapData) return null;
-    
+    if (!hallDefinitions || hallDefinitions.length === 0 || !currentVisit || !currentMapData)
+      return null;
+
     const currentItem = currentVisit.items[0];
     if (!currentItem) return null;
-    
-    const block = currentMapData.blocks.find(b => b.name === currentItem.block);
+
+    const block = currentMapData.blocks.find((b) => b.name === currentItem.block);
     if (!block) return null;
-    
+
     const numStr = currentItem.number.match(/^(\d+)/)?.[1];
     if (!numStr) return null;
     const num = parseInt(numStr, 10);
-    const cell = block.numberCells.find(nc => nc.value === num);
+    const cell = block.numberCells.find((nc) => nc.value === num);
     if (!cell) return null;
-    
+
     for (const hall of hallDefinitions) {
       if (hall.vertices.length < 3) continue;
-      
+
       let inside = false;
       const vertices = hall.vertices;
       for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-        const xi = vertices[i].col, yi = vertices[i].row;
-        const xj = vertices[j].col, yj = vertices[j].row;
-        
-        if (((yi > cell.row) !== (yj > cell.row)) &&
-            (cell.col < (xj - xi) * (cell.row - yi) / (yj - yi) + xi)) {
+        const xi = vertices[i].col,
+          yi = vertices[i].row;
+        const xj = vertices[j].col,
+          yj = vertices[j].row;
+
+        if (
+          yi > cell.row !== yj > cell.row &&
+          cell.col < ((xj - xi) * (cell.row - yi)) / (yj - yi) + xi
+        ) {
           inside = !inside;
         }
       }
-      
+
       if (inside) return hall;
     }
-    
+
     return null;
   }, [hallDefinitions, currentVisit, currentMapData]);
 
@@ -432,12 +460,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
     if (selectedHallId === 'follow') {
       return followHall;
     }
-    return hallDefinitions?.find(h => h.id === selectedHallId) || null;
+    return hallDefinitions?.find((h) => h.id === selectedHallId) || null;
   }, [selectedHallId, followHall, hallDefinitions]);
 
   // 現在のインデックスを保存
   useEffect(() => {
-    setSavedPhaseIndices(prev => ({
+    setSavedPhaseIndices((prev) => ({
       ...prev,
       [currentPhase]: currentPhaseIndex,
     }));
@@ -457,117 +485,138 @@ const FocusMode: React.FC<FocusModeProps> = ({
   }, []);
 
   // フェーズ切り替えダイアログを開く
-  const handlePhaseChangeRequest = useCallback((targetPhase: FocusPhase) => {
-    if (targetPhase === currentPhase) return;
-    
-    // 対象フェーズの訪問先が存在するか確認
-    const targetVisits = visitsByPhase[targetPhase];
-    if (targetVisits.length === 0) {
-      setNotification(`${targetPhase === 'normal' ? '通常' : targetPhase === 'postponed' ? '後回し' : '遅参'}フェーズに該当するアイテムがありません`);
-      return;
-    }
-    
-    // 保存されたインデックスがあるかチェック
-    const savedIndex = savedPhaseIndices[targetPhase];
-    const hasSavedIndex = savedIndex > 0 && savedIndex < targetVisits.length;
-    
-    setPhaseChangeDialog({
-      isOpen: true,
-      targetPhase,
-      hasSavedIndex,
-      savedIndex: hasSavedIndex ? savedIndex : 0,
-    });
-  }, [currentPhase, visitsByPhase, savedPhaseIndices]);
+  const handlePhaseChangeRequest = useCallback(
+    (targetPhase: FocusPhase) => {
+      if (targetPhase === currentPhase) return;
+
+      // 対象フェーズの訪問先が存在するか確認
+      const targetVisits = visitsByPhase[targetPhase];
+      if (targetVisits.length === 0) {
+        setNotification(
+          `${targetPhase === 'normal' ? '通常' : targetPhase === 'postponed' ? '後回し' : '遅参'}フェーズに該当するアイテムがありません`,
+        );
+        return;
+      }
+
+      // 保存されたインデックスがあるかチェック
+      const savedIndex = savedPhaseIndices[targetPhase];
+      const hasSavedIndex = savedIndex > 0 && savedIndex < targetVisits.length;
+
+      setPhaseChangeDialog({
+        isOpen: true,
+        targetPhase,
+        hasSavedIndex,
+        savedIndex: hasSavedIndex ? savedIndex : 0,
+      });
+    },
+    [currentPhase, visitsByPhase, savedPhaseIndices],
+  );
 
   // フェーズ切り替え実行（最初から開始）
   const executePhaseChangeFromStart = useCallback(() => {
     const { targetPhase } = phaseChangeDialog;
     if (!targetPhase) return;
-    
+
     // 現在のフェーズのインデックスを保存
-    setSavedPhaseIndices(prev => ({
+    setSavedPhaseIndices((prev) => ({
       ...prev,
       [currentPhase]: currentPhaseIndex,
     }));
-    
+
     // フェーズ切り替え前に必要なデータを準備
     if (currentPhase === 'normal' && (targetPhase === 'postponed' || targetPhase === 'late')) {
       // 通常フェーズから後回し/遅参へ：現在の後回し/遅参アイテムを記憶
       const postponedIds = new Set(
-        executeItems.filter(item => item.purchaseStatus === 'Postpone').map(item => item.id)
+        executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
       );
       setPostponedPhaseItemIds(postponedIds);
-      
+
       const lateIds = new Set(
-        executeItems.filter(item => item.purchaseStatus === 'Late').map(item => item.id)
+        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
       );
       setLatePhaseItemIds(lateIds);
     } else if (currentPhase === 'postponed' && targetPhase === 'late') {
       // 後回しフェーズから遅参へ：遅参アイテムを更新
       const currentLateIds = new Set(latePhaseItemIds);
-      executeItems.forEach(item => {
+      executeItems.forEach((item) => {
         if (item.purchaseStatus === 'Late') {
           currentLateIds.add(item.id);
         }
       });
       setLatePhaseItemIds(currentLateIds);
     }
-    
+
     setCurrentPhase(targetPhase);
     setCurrentPhaseIndex(0);
     setIsNextButtonBlinking(false);
     setIsCompleted(false);
     clearAutoAdvanceTimer();
-    
-    const phaseName = targetPhase === 'normal' ? '通常' : targetPhase === 'postponed' ? '後回し' : '遅参';
+
+    const phaseName =
+      targetPhase === 'normal' ? '通常' : targetPhase === 'postponed' ? '後回し' : '遅参';
     setNotification(`${phaseName}フェーズを最初から開始します`);
-    
+
     setPhaseChangeDialog({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
-  }, [phaseChangeDialog, currentPhase, currentPhaseIndex, executeItems, latePhaseItemIds, clearAutoAdvanceTimer]);
+  }, [
+    phaseChangeDialog,
+    currentPhase,
+    currentPhaseIndex,
+    executeItems,
+    latePhaseItemIds,
+    clearAutoAdvanceTimer,
+  ]);
 
   // フェーズ切り替え実行（途中から再開）
   const executePhaseChangeFromSaved = useCallback(() => {
     const { targetPhase, savedIndex } = phaseChangeDialog;
     if (!targetPhase) return;
-    
+
     // 現在のフェーズのインデックスを保存
-    setSavedPhaseIndices(prev => ({
+    setSavedPhaseIndices((prev) => ({
       ...prev,
       [currentPhase]: currentPhaseIndex,
     }));
-    
+
     // フェーズ切り替え前に必要なデータを準備
     if (currentPhase === 'normal' && (targetPhase === 'postponed' || targetPhase === 'late')) {
       const postponedIds = new Set(
-        executeItems.filter(item => item.purchaseStatus === 'Postpone').map(item => item.id)
+        executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
       );
       setPostponedPhaseItemIds(postponedIds);
-      
+
       const lateIds = new Set(
-        executeItems.filter(item => item.purchaseStatus === 'Late').map(item => item.id)
+        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
       );
       setLatePhaseItemIds(lateIds);
     } else if (currentPhase === 'postponed' && targetPhase === 'late') {
       const currentLateIds = new Set(latePhaseItemIds);
-      executeItems.forEach(item => {
+      executeItems.forEach((item) => {
         if (item.purchaseStatus === 'Late') {
           currentLateIds.add(item.id);
         }
       });
       setLatePhaseItemIds(currentLateIds);
     }
-    
+
     setCurrentPhase(targetPhase);
     setCurrentPhaseIndex(savedIndex);
     setIsNextButtonBlinking(false);
     setIsCompleted(false);
     clearAutoAdvanceTimer();
-    
-    const phaseName = targetPhase === 'normal' ? '通常' : targetPhase === 'postponed' ? '後回し' : '遅参';
+
+    const phaseName =
+      targetPhase === 'normal' ? '通常' : targetPhase === 'postponed' ? '後回し' : '遅参';
     setNotification(`${phaseName}フェーズを途中から再開します`);
-    
+
     setPhaseChangeDialog({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
-  }, [phaseChangeDialog, currentPhase, currentPhaseIndex, executeItems, latePhaseItemIds, clearAutoAdvanceTimer]);
+  }, [
+    phaseChangeDialog,
+    currentPhase,
+    currentPhaseIndex,
+    executeItems,
+    latePhaseItemIds,
+    clearAutoAdvanceTimer,
+  ]);
 
   // フェーズ切り替えダイアログをキャンセル
   const cancelPhaseChange = useCallback(() => {
@@ -577,16 +626,21 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 次へボタンの点滅を更新
   useEffect(() => {
     if (currentVisitDisplayItems.length === 0) return;
-    
+
     if (hasUndefinedPricePurchased) {
       setIsNextButtonBlinking(false);
       const undefinedPriceIds = currentVisitDisplayItems
-        .filter(item => item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null))
-        .map(item => item.id);
+        .filter(
+          (item) =>
+            item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null),
+        )
+        .map((item) => item.id);
       setBlinkingPriceItemIds(new Set(undefinedPriceIds));
     } else {
       setBlinkingPriceItemIds(new Set());
-      const hasUnprocessed = currentVisitDisplayItems.some(item => item.purchaseStatus === 'None');
+      const hasUnprocessed = currentVisitDisplayItems.some(
+        (item) => item.purchaseStatus === 'None',
+      );
       setIsNextButtonBlinking(!hasUnprocessed && currentVisitDisplayItems.length > 0);
     }
   }, [currentVisitDisplayItems, hasUndefinedPricePurchased]);
@@ -610,35 +664,37 @@ const FocusMode: React.FC<FocusModeProps> = ({
   useEffect(() => {
     const checkOverlap = () => {
       if (!itemListRef.current) return;
-      
+
       const buttonSize = 56; // w-14 = 56px
       const buttonMargin = 16; // left-4/right-4 = 16px
       const viewportHeight = window.innerHeight;
       const buttonCenterY = viewportHeight / 2;
-      
+
       // アイテムカード内の操作部分（ボタンやドロップダウン）の位置を取得
-      const interactiveElements = itemListRef.current.querySelectorAll('button, select, [role="button"]');
-      
+      const interactiveElements = itemListRef.current.querySelectorAll(
+        'button, select, [role="button"]',
+      );
+
       let leftOffset = 0;
       let rightOffset = 0;
-      
-      interactiveElements.forEach(element => {
+
+      interactiveElements.forEach((element) => {
         const rect = element.getBoundingClientRect();
-        
+
         // ボタンの上下範囲
         const buttonTop = buttonCenterY - buttonSize / 2;
         const buttonBottom = buttonCenterY + buttonSize / 2;
-        
+
         // Y軸で重なっているか
         const yOverlap = !(rect.bottom < buttonTop || rect.top > buttonBottom);
-        
+
         if (yOverlap) {
           // 左ボタンとの重なりチェック
           const leftButtonRight = buttonMargin + buttonSize;
           if (rect.left < leftButtonRight) {
             leftOffset = Math.max(leftOffset, leftButtonRight - rect.left + 8);
           }
-          
+
           // 右ボタンとの重なりチェック
           const rightButtonLeft = window.innerWidth - buttonMargin - buttonSize;
           if (rect.right > rightButtonLeft) {
@@ -646,14 +702,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
           }
         }
       });
-      
+
       setNavButtonOffset({ left: leftOffset, right: rightOffset });
     };
-    
+
     // 初回チェックと再チェック
     const timer = setTimeout(checkOverlap, 100);
     window.addEventListener('resize', checkOverlap);
-    
+
     return () => {
       clearTimeout(timer);
       window.removeEventListener('resize', checkOverlap);
@@ -663,9 +719,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 次のフェーズまたは訪問先へ移動する関数
   const moveToNext = useCallback(() => {
     clearAutoAdvanceTimer();
-    
+
     const nextIndex = currentPhaseIndex + 1;
-    
+
     if (nextIndex < currentPhaseVisits.length) {
       // 同じフェーズ内で次へ
       setCurrentPhaseIndex(nextIndex);
@@ -675,16 +731,16 @@ const FocusMode: React.FC<FocusModeProps> = ({
       if (currentPhase === 'normal') {
         // 通常フェーズ終了 → 後回しアイテムIDを記憶
         const postponedIds = new Set(
-          executeItems.filter(item => item.purchaseStatus === 'Postpone').map(item => item.id)
+          executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
         );
         setPostponedPhaseItemIds(postponedIds);
-        
+
         // 遅参アイテムIDも更新（通常フェーズで遅参にしたもの）
         const lateIds = new Set(
-          executeItems.filter(item => item.purchaseStatus === 'Late').map(item => item.id)
+          executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
         );
         setLatePhaseItemIds(lateIds);
-        
+
         if (postponedIds.size > 0) {
           setNotification('後回しアイテムの巡回を開始します');
           setCurrentPhase('postponed');
@@ -701,13 +757,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
       } else if (currentPhase === 'postponed') {
         // 後回しフェーズ終了 → 遅参アイテムIDを更新（後回しフェーズで遅参にしたものを追加）
         const currentLateIds = new Set(latePhaseItemIds);
-        executeItems.forEach(item => {
+        executeItems.forEach((item) => {
           if (item.purchaseStatus === 'Late') {
             currentLateIds.add(item.id);
           }
         });
         setLatePhaseItemIds(currentLateIds);
-        
+
         if (currentLateIds.size > 0) {
           setNotification('遅参アイテムの巡回を開始します');
           setCurrentPhase('late');
@@ -720,25 +776,32 @@ const FocusMode: React.FC<FocusModeProps> = ({
         setIsCompleted(true);
       }
     }
-  }, [currentPhaseIndex, currentPhaseVisits.length, currentPhase, executeItems, clearAutoAdvanceTimer, latePhaseItemIds]);
+  }, [
+    currentPhaseIndex,
+    currentPhaseVisits.length,
+    currentPhase,
+    executeItems,
+    clearAutoAdvanceTimer,
+    latePhaseItemIds,
+  ]);
 
   // 自動進行を開始する関数（ユーザー操作からのみ呼び出す）
   const startAutoAdvance = useCallback(() => {
     // 既にタイマーが動いている場合は何もしない
     if (autoAdvanceTimerRef.current) return;
-    
+
     // カウントダウン開始
     setAutoAdvanceCountdown(3);
-    
+
     countdownIntervalRef.current = setInterval(() => {
-      setAutoAdvanceCountdown(prev => {
+      setAutoAdvanceCountdown((prev) => {
         if (prev === null || prev <= 1) {
           return prev;
         }
         return prev - 1;
       });
     }, 1000);
-    
+
     autoAdvanceTimerRef.current = setTimeout(() => {
       moveToNext();
     }, 3000);
@@ -750,14 +813,19 @@ const FocusMode: React.FC<FocusModeProps> = ({
     if (hasUndefinedPricePurchased) {
       setNotification('価格未定のアイテムがあります。価格を入力してください。');
       const undefinedPriceIds = currentVisitDisplayItems
-        .filter(item => item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null))
-        .map(item => item.id);
+        .filter(
+          (item) =>
+            item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null),
+        )
+        .map((item) => item.id);
       setBlinkingPriceItemIds(new Set(undefinedPriceIds));
       return;
     }
 
     // チェック漏れの確認
-    const hasUncheckedItems = currentVisitDisplayItems.some(item => item.purchaseStatus === 'None');
+    const hasUncheckedItems = currentVisitDisplayItems.some(
+      (item) => item.purchaseStatus === 'None',
+    );
 
     clearAutoAdvanceTimer();
     moveToNext();
@@ -773,7 +841,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 前の訪問先へ
   const handlePrev = useCallback(() => {
     clearAutoAdvanceTimer();
-    
+
     // 完了画面から戻る場合
     if (isCompleted) {
       setIsCompleted(false);
@@ -790,7 +858,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       }
       return;
     }
-    
+
     if (currentPhaseIndex > 0) {
       setCurrentPhaseIndex(currentPhaseIndex - 1);
       setIsNextButtonBlinking(false);
@@ -816,91 +884,119 @@ const FocusMode: React.FC<FocusModeProps> = ({
         setNotification('最初の訪問サークル・スペースです');
       }
     }
-  }, [currentPhaseIndex, currentPhase, visitsByPhase, clearAutoAdvanceTimer, isCompleted, postponedPhaseItemIds, latePhaseItemIds]);
+  }, [
+    currentPhaseIndex,
+    currentPhase,
+    visitsByPhase,
+    clearAutoAdvanceTimer,
+    isCompleted,
+    postponedPhaseItemIds,
+    latePhaseItemIds,
+  ]);
 
   // アイテム更新ハンドラ
-  const handleUpdateItem = useCallback((updatedItem: ShoppingItem) => {
-    setLastInteractedItemId(updatedItem.id);
-    
-    // まずアイテムを更新
-    onUpdateItem(updatedItem);
-    
-    // 購入状態が変更されたかチェック
-    const originalItem = currentVisitDisplayItems.find(i => i.id === updatedItem.id);
-    if (!originalItem) return;
-    
-    // 後回し/遅参以外に変更された場合、タイマーをクリア
-    if (updatedItem.purchaseStatus !== 'Postpone' && updatedItem.purchaseStatus !== 'Late') {
-      clearAutoAdvanceTimer();
-      return;
-    }
-    
-    // 通常フェーズでのみ自動進行をチェック
-    if (currentPhase !== 'normal') return;
-    
-    // 更新後の状態で全アイテムが後回し/遅参かチェック
-    const willAllBePostponedOrLate = currentVisitDisplayItems.every(item => {
-      if (item.id === updatedItem.id) {
-        return updatedItem.purchaseStatus === 'Postpone' || updatedItem.purchaseStatus === 'Late';
+  const handleUpdateItem = useCallback(
+    (updatedItem: ShoppingItem) => {
+      setLastInteractedItemId(updatedItem.id);
+
+      // まずアイテムを更新
+      onUpdateItem(updatedItem);
+
+      // 購入状態が変更されたかチェック
+      const originalItem = currentVisitDisplayItems.find((i) => i.id === updatedItem.id);
+      if (!originalItem) return;
+
+      // 後回し/遅参以外に変更された場合、タイマーをクリア
+      if (updatedItem.purchaseStatus !== 'Postpone' && updatedItem.purchaseStatus !== 'Late') {
+        clearAutoAdvanceTimer();
+        return;
       }
-      return item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'Late';
-    });
-    
-    if (willAllBePostponedOrLate) {
-      // 3秒後に自動進行を開始
-      startAutoAdvance();
-    }
-  }, [onUpdateItem, currentVisitDisplayItems, clearAutoAdvanceTimer, currentPhase, startAutoAdvance]);
+
+      // 通常フェーズでのみ自動進行をチェック
+      if (currentPhase !== 'normal') return;
+
+      // 更新後の状態で全アイテムが後回し/遅参かチェック
+      const willAllBePostponedOrLate = currentVisitDisplayItems.every((item) => {
+        if (item.id === updatedItem.id) {
+          return updatedItem.purchaseStatus === 'Postpone' || updatedItem.purchaseStatus === 'Late';
+        }
+        return item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'Late';
+      });
+
+      if (willAllBePostponedOrLate) {
+        // 3秒後に自動進行を開始
+        startAutoAdvance();
+      }
+    },
+    [onUpdateItem, currentVisitDisplayItems, clearAutoAdvanceTimer, currentPhase, startAutoAdvance],
+  );
 
   // スワイプハンドラ（スマートフォンモード用）
-  const handleTouchStart = useCallback((e: React.TouchEvent) => {
-    if (layoutMode !== 'smartphone') return;
-    const touch = e.touches[0];
-    touchStartXRef.current = touch.clientX;
-    touchStartYRef.current = touch.clientY;
-    isSwipingRef.current = false;
-  }, [layoutMode]);
+  const handleTouchStart = useCallback(
+    (e: React.TouchEvent) => {
+      if (layoutMode !== 'smartphone') return;
+      const touch = e.touches[0];
+      touchStartXRef.current = touch.clientX;
+      touchStartYRef.current = touch.clientY;
+      isSwipingRef.current = false;
+    },
+    [layoutMode],
+  );
 
-  const handleTouchMove = useCallback((e: React.TouchEvent) => {
-    if (layoutMode !== 'smartphone' || touchStartXRef.current === null || touchStartYRef.current === null) return;
-    
-    const touch = e.touches[0];
-    const deltaX = touch.clientX - touchStartXRef.current;
-    const deltaY = touch.clientY - touchStartYRef.current;
-    
-    // 水平方向の移動が垂直方向より大きい場合のみスワイプとして処理
-    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
-      isSwipingRef.current = true;
-    }
-  }, [layoutMode]);
+  const handleTouchMove = useCallback(
+    (e: React.TouchEvent) => {
+      if (
+        layoutMode !== 'smartphone' ||
+        touchStartXRef.current === null ||
+        touchStartYRef.current === null
+      )
+        return;
 
-  const handleTouchEnd = useCallback((e: React.TouchEvent) => {
-    if (layoutMode !== 'smartphone' || touchStartXRef.current === null) return;
-    
-    const touch = e.changedTouches[0];
-    const deltaX = touch.clientX - touchStartXRef.current;
-    const deltaY = touch.clientY - (touchStartYRef.current || 0);
-    
-    // 水平方向の移動が垂直方向より大きく、閾値を超えた場合のみ処理
-    if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > SWIPE_THRESHOLD) {
-      if (deltaX > 0) {
-        // 右スワイプ → 前へ
-        handlePrev();
-      } else {
-        // 左スワイプ → 次へ
-        handleNext();
+      const touch = e.touches[0];
+      const deltaX = touch.clientX - touchStartXRef.current;
+      const deltaY = touch.clientY - touchStartYRef.current;
+
+      // 水平方向の移動が垂直方向より大きい場合のみスワイプとして処理
+      if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
+        isSwipingRef.current = true;
       }
-    }
-    
-    touchStartXRef.current = null;
-    touchStartYRef.current = null;
-    isSwipingRef.current = false;
-  }, [layoutMode, handlePrev, handleNext]);
+    },
+    [layoutMode],
+  );
+
+  const handleTouchEnd = useCallback(
+    (e: React.TouchEvent) => {
+      if (layoutMode !== 'smartphone' || touchStartXRef.current === null) return;
+
+      const touch = e.changedTouches[0];
+      const deltaX = touch.clientX - touchStartXRef.current;
+      const deltaY = touch.clientY - (touchStartYRef.current || 0);
+
+      // 水平方向の移動が垂直方向より大きく、閾値を超えた場合のみ処理
+      if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > SWIPE_THRESHOLD) {
+        if (deltaX > 0) {
+          // 右スワイプ → 前へ
+          handlePrev();
+        } else {
+          // 左スワイプ → 次へ
+          handleNext();
+        }
+      }
+
+      touchStartXRef.current = null;
+      touchStartYRef.current = null;
+      isSwipingRef.current = false;
+    },
+    [layoutMode, handlePrev, handleNext],
+  );
 
   // モード切り替え
-  const handleModeChangeInternal = useCallback((mode: 'edit' | 'execute') => {
-    onModeChange(mode, lastInteractedItemId || undefined);
-  }, [onModeChange, lastInteractedItemId]);
+  const handleModeChangeInternal = useCallback(
+    (mode: 'edit' | 'execute') => {
+      onModeChange(mode, lastInteractedItemId || undefined);
+    },
+    [onModeChange, lastInteractedItemId],
+  );
 
   // マップ表示トグル
   const toggleMapVisibility = useCallback(() => {
@@ -908,10 +1004,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
   }, [isMapVisible]);
 
   // スプリットドラッグ関連
-  const handleSplitDragStart = useCallback((e: React.TouchEvent | React.MouseEvent) => {
-    const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
-    splitDragRef.current = { startY: clientY, startRatio: splitRatio };
-  }, [splitRatio]);
+  const handleSplitDragStart = useCallback(
+    (e: React.TouchEvent | React.MouseEvent) => {
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+      splitDragRef.current = { startY: clientY, startRatio: splitRatio };
+    },
+    [splitRatio],
+  );
 
   const handleSplitDragMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
     if (!splitDragRef.current) return;
@@ -934,34 +1033,34 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // 現在のフェーズに表示するアイテムがない場合の自動スキップ処理（useEffectで安全に処理）
   const autoAdvanceProcessedRef = useRef(false);
-  
+
   useEffect(() => {
     // 完了済みまたは訪問先がない場合は何もしない
     if (isCompleted || allVisits.length === 0) {
       autoAdvanceProcessedRef.current = false;
       return;
     }
-    
+
     // 現在の訪問先にアイテムがある場合は何もしない
     if (currentVisitDisplayItems.length > 0) {
       autoAdvanceProcessedRef.current = false;
       return;
     }
-    
+
     // 既に処理中の場合はスキップ（無限ループ防止）
     if (autoAdvanceProcessedRef.current) {
       return;
     }
-    
+
     // フェーズに訪問先がない場合も何もしない
     if (currentPhaseVisits.length === 0) {
       autoAdvanceProcessedRef.current = false;
       return;
     }
-    
+
     // 処理開始をマーク
     autoAdvanceProcessedRef.current = true;
-    
+
     // 次の訪問先を探す
     for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
       const visit = currentPhaseVisits[i];
@@ -969,28 +1068,28 @@ const FocusMode: React.FC<FocusModeProps> = ({
       if (currentPhase === 'normal') {
         hasItems = visit.items.length > 0;
       } else if (currentPhase === 'postponed') {
-        hasItems = visit.items.some(item => postponedPhaseItemIds.has(item.id));
+        hasItems = visit.items.some((item) => postponedPhaseItemIds.has(item.id));
       } else {
-        hasItems = visit.items.some(item => latePhaseItemIds.has(item.id));
+        hasItems = visit.items.some((item) => latePhaseItemIds.has(item.id));
       }
       if (hasItems) {
         setCurrentPhaseIndex(i);
         return;
       }
     }
-    
+
     // 同じフェーズ内に次の訪問先がない場合、次のフェーズへ移行
     clearAutoAdvanceTimer();
-    
+
     if (currentPhase === 'normal') {
       // 通常フェーズ終了 → 後回し/遅参フェーズへ
       const postponedIds = new Set(
-        executeItems.filter(item => item.purchaseStatus === 'Postpone').map(item => item.id)
+        executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
       );
       const lateIds = new Set(
-        executeItems.filter(item => item.purchaseStatus === 'Late').map(item => item.id)
+        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
       );
-      
+
       if (postponedIds.size > 0) {
         setPostponedPhaseItemIds(postponedIds);
         setLatePhaseItemIds(lateIds);
@@ -1009,12 +1108,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
     } else if (currentPhase === 'postponed') {
       // 後回しフェーズ終了 → 遅参フェーズへ
       const currentLateIds = new Set(latePhaseItemIds);
-      executeItems.forEach(item => {
+      executeItems.forEach((item) => {
         if (item.purchaseStatus === 'Late') {
           currentLateIds.add(item.id);
         }
       });
-      
+
       if (currentLateIds.size > 0) {
         setLatePhaseItemIds(currentLateIds);
         setNotification('遅参アイテムの巡回を開始します');
@@ -1027,26 +1126,44 @@ const FocusMode: React.FC<FocusModeProps> = ({
       // 遅参フェーズ終了 → 完了
       setIsCompleted(true);
     }
-  }, [isCompleted, allVisits.length, currentVisitDisplayItems.length, currentPhaseVisits, currentPhaseIndex, currentPhase, postponedPhaseItemIds, latePhaseItemIds, executeItems, clearAutoAdvanceTimer]);
-  
+  }, [
+    isCompleted,
+    allVisits.length,
+    currentVisitDisplayItems.length,
+    currentPhaseVisits,
+    currentPhaseIndex,
+    currentPhase,
+    postponedPhaseItemIds,
+    latePhaseItemIds,
+    executeItems,
+    clearAutoAdvanceTimer,
+  ]);
+
   // 自動スキップ処理中かどうか（ローディング表示用）
-  const isAutoAdvancing = !isCompleted && allVisits.length > 0 && currentVisitDisplayItems.length === 0 && currentPhaseVisits.length > 0;
+  const isAutoAdvancing =
+    !isCompleted &&
+    allVisits.length > 0 &&
+    currentVisitDisplayItems.length === 0 &&
+    currentPhaseVisits.length > 0;
 
   // ===== 以下のフックを早期returnの前に移動 =====
-  
+
   // マップのセルクリックハンドラ
-  const handleMapCellClick = useCallback((blockName: string, number: number, matchingItems: ShoppingItem[]) => {
-    setCellPopupState({
-      isOpen: true,
-      blockName,
-      number,
-      items: matchingItems,
-    });
-  }, []);
+  const handleMapCellClick = useCallback(
+    (blockName: string, number: number, matchingItems: ShoppingItem[]) => {
+      setCellPopupState({
+        isOpen: true,
+        blockName,
+        number,
+        items: matchingItems,
+      });
+    },
+    [],
+  );
 
   // セルポップアップを閉じる
   const closeCellPopup = useCallback(() => {
-    setCellPopupState(prev => ({ ...prev, isOpen: false }));
+    setCellPopupState((prev) => ({ ...prev, isOpen: false }));
   }, []);
 
   // アイテム追加ダイアログを開く
@@ -1059,13 +1176,21 @@ const FocusMode: React.FC<FocusModeProps> = ({
       block: cellPopupState.blockName,
       number: String(cellPopupState.number),
     });
-    setNewItemForm({ circle: '', title: '', price: '', quantity: '1', remarks: '', url: '', purchaseStatus: 'Purchased' });
+    setNewItemForm({
+      circle: '',
+      title: '',
+      price: '',
+      quantity: '1',
+      remarks: '',
+      url: '',
+      purchaseStatus: 'Purchased',
+    });
     closeCellPopup();
   }, [currentVisit, cellPopupState, closeCellPopup]);
 
   // アイテム追加ダイアログを閉じる
   const closeAddItemDialog = useCallback(() => {
-    setAddItemDialog(prev => ({ ...prev, isOpen: false }));
+    setAddItemDialog((prev) => ({ ...prev, isOpen: false }));
   }, []);
 
   // アイテムを追加
@@ -1084,11 +1209,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
       url: newItemForm.url || undefined,
       purchaseStatus: newItemForm.purchaseStatus,
     });
-    
+
     // 購入状態に応じたメッセージ
-    const statusText = newItemForm.purchaseStatus === 'Purchased' ? '候補リスト' 
-      : newItemForm.purchaseStatus === 'Postpone' ? '後回しフェーズ' 
-      : '遅参フェーズ';
+    const statusText =
+      newItemForm.purchaseStatus === 'Purchased'
+        ? '候補リスト'
+        : newItemForm.purchaseStatus === 'Postpone'
+          ? '後回しフェーズ'
+          : '遅参フェーズ';
     setNotification(`${addItemDialog.block}-${addItemDialog.number} を${statusText}に追加しました`);
     closeAddItemDialog();
   }, [onAddItem, addItemDialog, newItemForm, closeAddItemDialog]);
@@ -1105,12 +1233,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 価格入力ハンドラ
   const handlePriceInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/[^0-9]/g, '');
-    setNewItemForm(prev => ({ ...prev, price: value }));
+    setNewItemForm((prev) => ({ ...prev, price: value }));
   }, []);
 
   // 価格選択ハンドラ
   const handlePriceSelectChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    setNewItemForm(prev => ({ ...prev, price: e.target.value }));
+    setNewItemForm((prev) => ({ ...prev, price: e.target.value }));
   }, []);
 
   // ===== フックの移動ここまで =====
@@ -1150,16 +1278,16 @@ const FocusMode: React.FC<FocusModeProps> = ({
   if (isCompleted) {
     // 購入結果サマリーを計算
     const summary = (() => {
-      const purchased = executeItems.filter(i => i.purchaseStatus === 'Purchased');
-      const soldOut = executeItems.filter(i => i.purchaseStatus === 'SoldOut');
-      const absent = executeItems.filter(i => i.purchaseStatus === 'Absent');
-      const postponed = executeItems.filter(i => i.purchaseStatus === 'Postpone');
-      const late = executeItems.filter(i => i.purchaseStatus === 'Late');
-      const unprocessed = executeItems.filter(i => i.purchaseStatus === 'None');
-      
+      const purchased = executeItems.filter((i) => i.purchaseStatus === 'Purchased');
+      const soldOut = executeItems.filter((i) => i.purchaseStatus === 'SoldOut');
+      const absent = executeItems.filter((i) => i.purchaseStatus === 'Absent');
+      const postponed = executeItems.filter((i) => i.purchaseStatus === 'Postpone');
+      const late = executeItems.filter((i) => i.purchaseStatus === 'Late');
+      const unprocessed = executeItems.filter((i) => i.purchaseStatus === 'None');
+
       const purchasedAmount = purchased.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0);
       const totalPlanned = executeItems.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0);
-      
+
       return {
         total: executeItems.length,
         purchased: purchased.length,
@@ -1172,9 +1300,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
         totalPlanned,
       };
     })();
-    
+
     return (
-      <div 
+      <div
         className="flex flex-col items-center justify-center min-h-[50vh] p-8 relative"
         onTouchStart={handleTouchStart}
         onTouchMove={handleTouchMove}
@@ -1190,75 +1318,91 @@ const FocusMode: React.FC<FocusModeProps> = ({
             ◀
           </button>
         )}
-        
+
         {/* スマートフォンモードのスワイプヒント */}
         {layoutMode === 'smartphone' && (
           <div className="absolute top-4 left-0 right-0 text-center text-sm text-slate-500 dark:text-slate-400">
             ← 右スワイプで前の訪問先へ戻る
           </div>
         )}
-        
+
         <div className="text-6xl mb-4">🎉</div>
         <h2 className="text-xl font-bold text-slate-700 dark:text-slate-300 mb-2">
           全ての訪問先を確認しました
         </h2>
-        <p className="text-slate-500 dark:text-slate-400 mb-4 text-center">
-          お疲れ様でした！
-        </p>
-        
+        <p className="text-slate-500 dark:text-slate-400 mb-4 text-center">お疲れ様でした！</p>
+
         {/* 購入結果サマリー */}
         <div className="w-full max-w-sm mb-6 bg-slate-50 dark:bg-slate-800/80 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-          <h3 className="text-sm font-semibold text-slate-600 dark:text-slate-400 mb-3 text-center">購入結果</h3>
-          
+          <h3 className="text-sm font-semibold text-slate-600 dark:text-slate-400 mb-3 text-center">
+            購入結果
+          </h3>
+
           <div className="space-y-1.5 text-sm">
             <div className="flex justify-between items-center">
               <span className="text-green-600 dark:text-green-400">✅ 購入済み</span>
-              <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.purchased} 件</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-300">
+                {summary.purchased} 件
+              </span>
             </div>
             {summary.soldOut > 0 && (
               <div className="flex justify-between items-center">
                 <span className="text-red-600 dark:text-red-400">❌ 売切</span>
-                <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.soldOut} 件</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  {summary.soldOut} 件
+                </span>
               </div>
             )}
             {summary.absent > 0 && (
               <div className="flex justify-between items-center">
                 <span className="text-yellow-600 dark:text-yellow-400">⚠️ 欠席</span>
-                <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.absent} 件</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  {summary.absent} 件
+                </span>
               </div>
             )}
             {summary.postponed > 0 && (
               <div className="flex justify-between items-center">
                 <span className="text-purple-600 dark:text-purple-400">⏸️ 後回し</span>
-                <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.postponed} 件</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  {summary.postponed} 件
+                </span>
               </div>
             )}
             {summary.late > 0 && (
               <div className="flex justify-between items-center">
                 <span className="text-blue-600 dark:text-blue-400">🕐 遅参</span>
-                <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.late} 件</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  {summary.late} 件
+                </span>
               </div>
             )}
             {summary.unprocessed > 0 && (
               <div className="flex justify-between items-center">
                 <span className="text-slate-500 dark:text-slate-400">⬚ 未処理</span>
-                <span className="font-semibold text-slate-700 dark:text-slate-300">{summary.unprocessed} 件</span>
+                <span className="font-semibold text-slate-700 dark:text-slate-300">
+                  {summary.unprocessed} 件
+                </span>
               </div>
             )}
           </div>
-          
+
           <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600 space-y-1.5 text-sm">
             <div className="flex justify-between items-center">
               <span className="text-slate-600 dark:text-slate-400">購入合計</span>
-              <span className="font-bold text-green-600 dark:text-green-400">¥{summary.purchasedAmount.toLocaleString()}</span>
+              <span className="font-bold text-green-600 dark:text-green-400">
+                ¥{summary.purchasedAmount.toLocaleString()}
+              </span>
             </div>
             <div className="flex justify-between items-center">
               <span className="text-slate-600 dark:text-slate-400">予定合計</span>
-              <span className="font-semibold text-slate-700 dark:text-slate-300">¥{summary.totalPlanned.toLocaleString()}</span>
+              <span className="font-semibold text-slate-700 dark:text-slate-300">
+                ¥{summary.totalPlanned.toLocaleString()}
+              </span>
             </div>
           </div>
         </div>
-        
+
         <div className="flex gap-4">
           <button
             onClick={() => handleModeChangeInternal('edit')}
@@ -1281,119 +1425,19 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // 現在の訪問先情報
   const circleName = currentVisit?.items[0]?.circle || '';
-  const spaceInfo = currentVisit?.items[0] 
-    ? `${currentVisit.items[0].block}-${extractBaseNumber(currentVisit.items[0].number).toUpperCase()}` 
+  const spaceInfo = currentVisit?.items[0]
+    ? `${currentVisit.items[0].block}-${extractBaseNumber(currentVisit.items[0].number).toUpperCase()}`
     : '';
 
   // 現在の訪問キー（マップ用）
-  const currentVisitKey = currentVisit?.items[0] 
+  const currentVisitKey = currentVisit?.items[0]
     ? `${currentVisit.items[0].eventDate}-${currentVisit.items[0].block}-${extractBaseNumber(currentVisit.items[0].number)}`
     : null;
-  
+
   // 次の訪問キー（マップ用）
   const nextVisitKey = nextVisit?.items[0]
     ? `${nextVisit.items[0].eventDate}-${nextVisit.items[0].block}-${extractBaseNumber(nextVisit.items[0].number)}`
     : null;
-
-  // アイテムリストコンポーネント
-  const ItemList = () => (
-    <div ref={itemListRef} className={`space-y-4 pb-24 ${layoutMode === 'smartphone' && isMapVisible ? 'px-2' : layoutMode === 'smartphone' ? 'mx-2' : 'mx-4'}`}>
-      {currentVisitDisplayItems.map((item, index) => (
-        <div 
-          key={item.id}
-          data-item-id={item.id}
-          className={`relative ${blinkingPriceItemIds.has(item.id) ? 'animate-pulse ring-2 ring-red-500 rounded-lg' : ''}`}
-        >
-          <ShoppingItemCard
-            item={item}
-            onUpdate={handleUpdateItem}
-            isStriped={index % 2 === 1}
-            onEditRequest={onEditRequest || (() => {})}
-            onDeleteRequest={onDeleteRequest || (() => {})}
-            isSelected={false}
-            onSelectItem={() => {}}
-            layoutMode={layoutMode}
-          />
-        </div>
-      ))}
-    </div>
-  );
-
-  // ヘッダーコンポーネント
-  const Header = () => (
-    <div className={`bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-3 rounded-lg shadow-lg ${layoutMode === 'smartphone' && isMapVisible ? 'mx-2' : ''}`}>
-      <div className="flex justify-between items-start">
-        <div>
-          <div className="text-xs opacity-80">訪問先</div>
-          <div className="text-xl font-bold">{spaceInfo}</div>
-          <div className="flex items-center gap-2">
-            <span className="text-sm">{circleName}</span>
-            <span className="bg-white/20 px-2 py-0.5 rounded text-sm">{currentVisitCheckedCount}/{currentVisitTotalCount}</span>
-          </div>
-        </div>
-        {/* 中央：総額表示 */}
-        <div className="flex-1 flex items-center justify-center">
-          <div className="text-center">
-            <div className="text-xs opacity-80">総額</div>
-            <div className="text-lg font-bold">
-              {currentVisitPriceInfo.allUndefined ? (
-                <span className="text-red-400">価格未定</span>
-              ) : currentVisitPriceInfo.undefinedCount > 0 ? (
-                <>
-                  <span>¥{currentVisitPriceInfo.totalPrice.toLocaleString()}</span>
-                  <span className="text-red-400">+未定{currentVisitPriceInfo.undefinedCount}件</span>
-                </>
-              ) : (
-                <span>¥{currentVisitPriceInfo.totalPrice.toLocaleString()}</span>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="text-right">
-          <div className="text-xs opacity-80">フェーズ</div>
-          <select
-            value={currentPhase}
-            onChange={(e) => handlePhaseChangeRequest(e.target.value as FocusPhase)}
-            className="text-lg font-bold bg-white/20 hover:bg-white/30 rounded-md py-1 px-2 text-white appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/50 transition-colors"
-            style={{ 
-              backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-              backgroundRepeat: 'no-repeat',
-              backgroundPosition: 'right 4px center',
-              backgroundSize: '16px',
-              paddingRight: '24px',
-            }}
-          >
-            <option value="normal" className="text-slate-900">通常</option>
-            <option value="postponed" className="text-slate-900">後回し</option>
-            <option value="late" className="text-slate-900">遅参</option>
-          </select>
-          <div className="text-xs opacity-80 mt-1">
-            次: {nextVisitInfo.spaceInfo} {nextVisitInfo.circleName}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  // マップコントロール
-  const MapControls = () => (
-    <div className="flex items-center gap-2 p-2 bg-white/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700">
-      <select
-        value={selectedHallId}
-        onChange={(e) => setSelectedHallId(e.target.value)}
-        className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-      >
-        <option value="follow">追随モードON</option>
-        {hallDefinitions?.map(hall => (
-          <option key={hall.id} value={hall.id}>{hall.name}</option>
-        ))}
-      </select>
-      
-      <div className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-3 text-slate-700 dark:text-slate-300">
-        {Math.round(mapZoomLevel)}%
-      </div>
-    </div>
-  );
 
   // フッターの高さ定数
   const FOOTER_HEIGHT_SP = 56;
@@ -1401,15 +1445,19 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // フェーズ切り替え確認ダイアログ
   const PhaseChangeDialog = () => {
     if (!phaseChangeDialog.isOpen || !phaseChangeDialog.targetPhase) return null;
-    
-    const targetPhaseName = phaseChangeDialog.targetPhase === 'normal' ? '通常' 
-      : phaseChangeDialog.targetPhase === 'postponed' ? '後回し' : '遅参';
+
+    const targetPhaseName =
+      phaseChangeDialog.targetPhase === 'normal'
+        ? '通常'
+        : phaseChangeDialog.targetPhase === 'postponed'
+          ? '後回し'
+          : '遅参';
     const targetVisits = visitsByPhase[phaseChangeDialog.targetPhase];
     const targetVisit = targetVisits[phaseChangeDialog.savedIndex];
-    const savedVisitInfo = targetVisit 
+    const savedVisitInfo = targetVisit
       ? `${targetVisit.items[0]?.block}-${targetVisit.items[0]?.number} ${targetVisit.items[0]?.circle}`
       : '';
-    
+
     return (
       <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
         <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-md w-full mx-4 overflow-hidden">
@@ -1417,7 +1465,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
             <h2 className="text-lg font-bold">フェーズを切り替えますか？</h2>
             <p className="text-sm opacity-80 mt-1">{targetPhaseName}フェーズに移動します</p>
           </div>
-          
+
           <div className="p-4 space-y-4">
             {targetVisits.length === 0 ? (
               <p className="text-slate-600 dark:text-slate-300 text-center py-4">
@@ -1428,7 +1476,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
                 <p className="text-slate-600 dark:text-slate-300">
                   {targetPhaseName}フェーズには {targetVisits.length} 件の訪問先があります。
                 </p>
-                
+
                 <div className="space-y-2">
                   <button
                     onClick={executePhaseChangeFromStart}
@@ -1436,10 +1484,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
                   >
                     最初から開始
                     <span className="block text-xs opacity-80 mt-0.5">
-                      {targetVisits[0]?.items[0]?.block}-{targetVisits[0]?.items[0]?.number} {targetVisits[0]?.items[0]?.circle}
+                      {targetVisits[0]?.items[0]?.block}-{targetVisits[0]?.items[0]?.number}{' '}
+                      {targetVisits[0]?.items[0]?.circle}
                     </span>
                   </button>
-                  
+
                   {phaseChangeDialog.hasSavedIndex && (
                     <button
                       onClick={executePhaseChangeFromSaved}
@@ -1447,14 +1496,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
                     >
                       途中から再開
                       <span className="block text-xs opacity-80 mt-0.5">
-                        {savedVisitInfo} （{phaseChangeDialog.savedIndex + 1}/{targetVisits.length}）
+                        {savedVisitInfo} （{phaseChangeDialog.savedIndex + 1}/{targetVisits.length}
+                        ）
                       </span>
                     </button>
                   )}
                 </div>
               </>
             )}
-            
+
             <button
               onClick={cancelPhaseChange}
               className="w-full py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
@@ -1475,37 +1525,68 @@ const FocusMode: React.FC<FocusModeProps> = ({
         <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-sm w-full mx-4 overflow-hidden">
           <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
             <h3 className="font-semibold text-slate-900 dark:text-white">
-              {cellPopupState.blockName}-{cellPopupState.number} {cellPopupState.items.length > 0 ? `（${cellPopupState.items.length}件）` : ''}
+              {cellPopupState.blockName}-{cellPopupState.number}{' '}
+              {cellPopupState.items.length > 0 ? `（${cellPopupState.items.length}件）` : ''}
             </h3>
-            <button onClick={closeCellPopup} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+            <button
+              onClick={closeCellPopup}
+              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M6 18L18 6M6 6l12 12"
+                />
               </svg>
             </button>
           </div>
           {onAddItem && (
             <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-              <button onClick={openAddItemDialog} className="w-full py-2 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2">
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
+              <button
+                onClick={openAddItemDialog}
+                className="w-full py-2 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={2}
+                    d="M12 4v16m8-8H4"
+                  />
+                </svg>
                 新規アイテム追加
               </button>
             </div>
           )}
           <div className="max-h-60 overflow-y-auto">
             {cellPopupState.items.length === 0 ? (
-              <div className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">このセルにはアイテムがありません</div>
+              <div className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
+                このセルにはアイテムがありません
+              </div>
             ) : (
-              cellPopupState.items.map(item => (
-                <div key={item.id} className="p-3 border-b border-slate-100 dark:border-slate-700 last:border-b-0">
+              cellPopupState.items.map((item) => (
+                <div
+                  key={item.id}
+                  className="p-3 border-b border-slate-100 dark:border-slate-700 last:border-b-0"
+                >
                   <div className="font-medium text-slate-900 dark:text-white">{item.circle}</div>
                   <div className="text-sm text-slate-600 dark:text-slate-400">{item.title}</div>
-                  {item.price !== null && <div className="text-sm text-slate-500">¥{item.price.toLocaleString()}</div>}
+                  {item.price !== null && (
+                    <div className="text-sm text-slate-500">¥{item.price.toLocaleString()}</div>
+                  )}
                 </div>
               ))
             )}
           </div>
           <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700">
-            <button onClick={closeCellPopup} className="w-full py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors">閉じる</button>
+            <button
+              onClick={closeCellPopup}
+              className="w-full py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
+            >
+              閉じる
+            </button>
           </div>
         </div>
       </div>
@@ -1513,8 +1594,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
   };
 
   // フォームスタイル
-  const formInputClass = "w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white";
-  const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
+  const formInputClass =
+    'w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white';
+  const labelClass = 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1';
 
   // アイテム追加ダイアログのJSX（直接レンダリング用）
   const addItemDialogJSX = addItemDialog.isOpen ? (
@@ -1522,65 +1604,69 @@ const FocusMode: React.FC<FocusModeProps> = ({
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
         <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4">
           <h2 className="text-lg font-bold">新規アイテム追加</h2>
-          <p className="text-sm opacity-80 mt-1">{addItemDialog.eventDate} {addItemDialog.block}-{addItemDialog.number}</p>
+          <p className="text-sm opacity-80 mt-1">
+            {addItemDialog.eventDate} {addItemDialog.block}-{addItemDialog.number}
+          </p>
         </div>
         <div className="p-4 space-y-4">
           {/* サークル名・タイトル */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className={labelClass}>サークル名 <span className="text-red-500">*</span></label>
-              <input 
-                type="text" 
-                value={newItemForm.circle} 
-                onChange={(e) => setNewItemForm(prev => ({ ...prev, circle: e.target.value }))} 
-                className={formInputClass} 
-                placeholder="サークル名" 
+              <label className={labelClass}>
+                サークル名 <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                value={newItemForm.circle}
+                onChange={(e) => setNewItemForm((prev) => ({ ...prev, circle: e.target.value }))}
+                className={formInputClass}
+                placeholder="サークル名"
               />
             </div>
             <div>
               <label className={labelClass}>タイトル</label>
-              <input 
-                type="text" 
-                value={newItemForm.title} 
-                onChange={(e) => setNewItemForm(prev => ({ ...prev, title: e.target.value }))} 
-                className={formInputClass} 
-                placeholder="新刊セット" 
+              <input
+                type="text"
+                value={newItemForm.title}
+                onChange={(e) => setNewItemForm((prev) => ({ ...prev, title: e.target.value }))}
+                className={formInputClass}
+                placeholder="新刊セット"
               />
             </div>
           </div>
-          
+
           {/* 参加日・ブロック・ナンバー（読み取り専用で表示） */}
           <div className="grid grid-cols-3 gap-4">
             <div>
               <label className={labelClass}>参加日</label>
-              <input 
-                type="text" 
-                value={addItemDialog.eventDate} 
+              <input
+                type="text"
+                value={addItemDialog.eventDate}
                 readOnly
-                className={`${formInputClass} bg-slate-100 dark:bg-slate-700`} 
+                className={`${formInputClass} bg-slate-100 dark:bg-slate-700`}
               />
             </div>
             <div>
               <label className={labelClass}>ブロック</label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={addItemDialog.block}
                 readOnly
-                className={`${formInputClass} bg-slate-100 dark:bg-slate-700`} 
+                className={`${formInputClass} bg-slate-100 dark:bg-slate-700`}
               />
             </div>
             <div>
               <label className={labelClass}>ナンバー</label>
-              <input 
-                type="text" 
+              <input
+                type="text"
                 value={addItemDialog.number}
-                onChange={(e) => setAddItemDialog(prev => ({ ...prev, number: e.target.value }))}
+                onChange={(e) => setAddItemDialog((prev) => ({ ...prev, number: e.target.value }))}
                 className={formInputClass}
                 placeholder="01a"
               />
             </div>
           </div>
-          
+
           {/* 価格・クイック選択 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
             <div className="relative">
@@ -1597,28 +1683,36 @@ const FocusMode: React.FC<FocusModeProps> = ({
             </div>
             <div>
               <label className={labelClass}>クイック選択</label>
-              <select 
+              <select
                 onChange={handlePriceSelectChange}
                 className={formInputClass}
-                value={priceOptions.includes(Number(newItemForm.price)) ? newItemForm.price : ""}
+                value={priceOptions.includes(Number(newItemForm.price)) ? newItemForm.price : ''}
               >
-                <option value="" disabled>金額を選択...</option>
-                {priceOptions.map(p => <option key={p} value={p}>{p.toLocaleString()}円</option>)}
+                <option value="" disabled>
+                  金額を選択...
+                </option>
+                {priceOptions.map((p) => (
+                  <option key={p} value={p}>
+                    {p.toLocaleString()}円
+                  </option>
+                ))}
               </select>
             </div>
           </div>
-          
+
           {/* 数量・購入状態 */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>数量</label>
               <select
                 value={newItemForm.quantity}
-                onChange={(e) => setNewItemForm(prev => ({ ...prev, quantity: e.target.value }))}
+                onChange={(e) => setNewItemForm((prev) => ({ ...prev, quantity: e.target.value }))}
                 className={formInputClass}
               >
-                {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
-                  <option key={num} value={num}>{num}</option>
+                {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                  <option key={num} value={num}>
+                    {num}
+                  </option>
                 ))}
               </select>
             </div>
@@ -1626,7 +1720,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
               <label className={labelClass}>購入状態</label>
               <select
                 value={newItemForm.purchaseStatus}
-                onChange={(e) => setNewItemForm(prev => ({ ...prev, purchaseStatus: e.target.value as 'Purchased' | 'Postpone' | 'Late' }))}
+                onChange={(e) =>
+                  setNewItemForm((prev) => ({
+                    ...prev,
+                    purchaseStatus: e.target.value as 'Purchased' | 'Postpone' | 'Late',
+                  }))
+                }
                 className={formInputClass}
               >
                 <option value="Purchased">購入済</option>
@@ -1635,41 +1734,41 @@ const FocusMode: React.FC<FocusModeProps> = ({
               </select>
             </div>
           </div>
-          
+
           {/* 備考・URL */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>備考</label>
-              <input 
-                type="text" 
-                value={newItemForm.remarks} 
-                onChange={(e) => setNewItemForm(prev => ({ ...prev, remarks: e.target.value }))} 
-                className={formInputClass} 
-                placeholder="スケブお願い" 
+              <input
+                type="text"
+                value={newItemForm.remarks}
+                onChange={(e) => setNewItemForm((prev) => ({ ...prev, remarks: e.target.value }))}
+                className={formInputClass}
+                placeholder="スケブお願い"
               />
             </div>
             <div>
               <label className={labelClass}>URL</label>
-              <input 
-                type="text" 
-                value={newItemForm.url} 
-                onChange={(e) => setNewItemForm(prev => ({ ...prev, url: e.target.value }))} 
-                className={formInputClass} 
-                placeholder="https://example.com" 
+              <input
+                type="text"
+                value={newItemForm.url}
+                onChange={(e) => setNewItemForm((prev) => ({ ...prev, url: e.target.value }))}
+                className={formInputClass}
+                placeholder="https://example.com"
               />
             </div>
           </div>
         </div>
         <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
-          <button 
-            onClick={closeAddItemDialog} 
+          <button
+            onClick={closeAddItemDialog}
             className="flex-1 py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
           >
             キャンセル
           </button>
-          <button 
-            onClick={handleAddNewItem} 
-            disabled={!newItemForm.circle.trim()} 
+          <button
+            onClick={handleAddNewItem}
+            disabled={!newItemForm.circle.trim()}
             className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors"
           >
             リストに追加
@@ -1682,12 +1781,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // スマートフォン+マップ表示モード
   if (layoutMode === 'smartphone' && isMapVisible && currentMapData && !isCompleted) {
     const availableHeight = `calc(100vh - ${FOOTER_HEIGHT_SP}px)`;
-    
+
     return (
-      <div 
-        className="relative flex flex-col"
-        style={{ height: availableHeight }}
-      >
+      <div className="relative flex flex-col" style={{ height: availableHeight }}>
         {/* 通知 */}
         {notification && (
           <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
@@ -1704,7 +1800,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
         {/* マップエリア */}
         <div style={{ height: `${splitRatio}%` }} className="relative flex flex-col min-h-0">
-          <MapControls />
+          <FocusModeMapControls
+            selectedHallId={selectedHallId}
+            onSelectedHallIdChange={setSelectedHallId}
+            hallDefinitions={hallDefinitions}
+            mapZoomLevel={mapZoomLevel}
+          />
           <div className="flex-grow relative overflow-hidden">
             <FocusModeMapCanvas
               mapData={currentMapData}
@@ -1726,7 +1827,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         </div>
 
         {/* 分割線（ドラッグ可能） */}
-        <div 
+        <div
           className="h-3 bg-slate-300 dark:bg-slate-600 cursor-row-resize flex items-center justify-center touch-none flex-shrink-0"
           onTouchStart={handleSplitDragStart}
           onTouchMove={handleSplitDragMove}
@@ -1740,73 +1841,108 @@ const FocusMode: React.FC<FocusModeProps> = ({
         </div>
 
         {/* アイテムリストエリア（スワイプ判定はここのみ） */}
-        <div 
-          style={{ height: `${100 - splitRatio}%` }} 
+        <div
+          style={{ height: `${100 - splitRatio}%` }}
           className="overflow-y-auto min-h-0"
           onTouchStart={handleTouchStart}
           onTouchMove={handleTouchMove}
           onTouchEnd={handleTouchEnd}
         >
-          <Header />
-          <ItemList />
+          <FocusModeHeader
+            layoutMode={layoutMode}
+            isMapVisible={isMapVisible}
+            spaceInfo={spaceInfo}
+            circleName={circleName}
+            currentVisitCheckedCount={currentVisitCheckedCount}
+            currentVisitTotalCount={currentVisitTotalCount}
+            currentVisitPriceInfo={currentVisitPriceInfo}
+            currentPhase={currentPhase}
+            onPhaseChangeRequest={handlePhaseChangeRequest}
+            nextVisitInfo={nextVisitInfo}
+          />
+          <FocusModeItemList
+            itemListRef={itemListRef}
+            layoutMode={layoutMode}
+            isMapVisible={isMapVisible}
+            currentVisitDisplayItems={currentVisitDisplayItems}
+            blinkingPriceItemIds={blinkingPriceItemIds}
+            onUpdateItem={handleUpdateItem}
+            onEditRequest={onEditRequest}
+            onDeleteRequest={onDeleteRequest}
+          />
         </div>
 
         {/* フッター（createPortalでtransform文脈の外に描画） */}
         {ReactDOM.createPortal(
-        <div className="fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
-          <div className="px-4 py-2">
-            <div className="flex justify-between items-center">
-              <div className="text-slate-700 dark:text-slate-300">
-                <span className="font-bold text-lg text-indigo-600 dark:text-indigo-400">
-                  {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
-                </span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="text-sm text-slate-700 dark:text-slate-300">
-                  <span className="font-semibold">{purchasedCount}</span>/{executeItems.length}
-                </div>
-                <div className="text-sm">
-                  <span className="font-bold text-blue-600 dark:text-blue-400">
-                    ¥{remainingCost.toLocaleString()}
+          <div className="fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
+            <div className="px-4 py-2">
+              <div className="flex justify-between items-center">
+                <div className="text-slate-700 dark:text-slate-300">
+                  <span className="font-bold text-lg text-indigo-600 dark:text-indigo-400">
+                    {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
                   </span>
                 </div>
-                {currentMapData && (
+                <div className="flex items-center gap-2">
+                  <div className="text-sm text-slate-700 dark:text-slate-300">
+                    <span className="font-semibold">{purchasedCount}</span>/{executeItems.length}
+                  </div>
+                  <div className="text-sm">
+                    <span className="font-bold text-blue-600 dark:text-blue-400">
+                      ¥{remainingCost.toLocaleString()}
+                    </span>
+                  </div>
+                  {currentMapData && (
+                    <button
+                      onClick={toggleMapVisibility}
+                      className={`p-2 rounded-md transition-colors ${
+                        isMapVisible
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                      }`}
+                      title={isMapVisible ? 'マップを非表示' : 'マップを表示'}
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
+                        />
+                      </svg>
+                    </button>
+                  )}
                   <button
-                    onClick={toggleMapVisibility}
-                    className={`p-2 rounded-md transition-colors ${
-                      isMapVisible 
-                        ? 'bg-blue-600 text-white' 
-                        : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                    }`}
-                    title={isMapVisible ? 'マップを非表示' : 'マップを表示'}
+                    onClick={() => onLayoutModeChange('pc')}
+                    className="p-2 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                    title="タブレット/PCモードに切替"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                      />
                     </svg>
                   </button>
-                )}
-                <button
-                  onClick={() => onLayoutModeChange('pc')}
-                  className="p-2 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
-                  title="タブレット/PCモードに切替"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
-                </button>
+                </div>
               </div>
             </div>
-          </div>
-        </div>,
-        document.body
+          </div>,
+          document.body,
         )}
-        
+
         {/* フェーズ切り替え確認ダイアログ */}
         <PhaseChangeDialog />
-        
+
         {/* セルアイテムポップアップ */}
         <CellItemPopup />
-        
+
         {/* アイテム追加ダイアログ */}
         {addItemDialogJSX}
       </div>
@@ -1820,7 +1956,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // PC+マップ表示モード
   if (layoutMode === 'pc' && isMapVisible && currentMapData && !isCompleted) {
     const availableHeight = `calc(100vh - ${HEADER_HEIGHT + FOOTER_HEIGHT_PC}px)`;
-    
+
     return (
       <div className="relative flex" style={{ height: availableHeight }}>
         {/* 通知 */}
@@ -1839,7 +1975,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
         {/* 左側: マップ */}
         <div className="w-1/2 flex flex-col border-r border-slate-200 dark:border-slate-700">
-          <MapControls />
+          <FocusModeMapControls
+            selectedHallId={selectedHallId}
+            onSelectedHallIdChange={setSelectedHallId}
+            hallDefinitions={hallDefinitions}
+            mapZoomLevel={mapZoomLevel}
+          />
           <div className="flex-grow relative overflow-hidden">
             <FocusModeMapCanvas
               mapData={currentMapData}
@@ -1862,8 +2003,28 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
         {/* 右側: アイテムリスト */}
         <div className="w-1/2 flex flex-col overflow-y-auto pb-20">
-          <Header />
-          <ItemList />
+          <FocusModeHeader
+            layoutMode={layoutMode}
+            isMapVisible={isMapVisible}
+            spaceInfo={spaceInfo}
+            circleName={circleName}
+            currentVisitCheckedCount={currentVisitCheckedCount}
+            currentVisitTotalCount={currentVisitTotalCount}
+            currentVisitPriceInfo={currentVisitPriceInfo}
+            currentPhase={currentPhase}
+            onPhaseChangeRequest={handlePhaseChangeRequest}
+            nextVisitInfo={nextVisitInfo}
+          />
+          <FocusModeItemList
+            itemListRef={itemListRef}
+            layoutMode={layoutMode}
+            isMapVisible={isMapVisible}
+            currentVisitDisplayItems={currentVisitDisplayItems}
+            blinkingPriceItemIds={blinkingPriceItemIds}
+            onUpdateItem={handleUpdateItem}
+            onEditRequest={onEditRequest}
+            onDeleteRequest={onDeleteRequest}
+          />
         </div>
 
         {/* ナビゲーションボタン */}
@@ -1891,64 +2052,80 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
         {/* フッター（createPortalでtransform文脈の外に描画） */}
         {ReactDOM.createPortal(
-        <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-            <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
-              <div className="text-slate-700 dark:text-slate-300">
-                <span className="font-bold text-xl text-indigo-600 dark:text-indigo-400">
-                  {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
-                </span>
-                <span className="text-sm text-slate-500 dark:text-slate-400 ml-3 opacity-60">
-                  ({currentVisitNumber}/{totalVisits})
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
+          <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
+            <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+              <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
                 <div className="text-slate-700 dark:text-slate-300">
-                  <span className="font-semibold">{purchasedCount}</span> / {executeItems.length} 件購入済み
-                </div>
-                <div>
-                  <span className="text-sm text-slate-500 dark:text-slate-400">残りの合計: </span>
-                  <span className="font-bold text-xl text-blue-600 dark:text-blue-400">
-                    ¥{remainingCost.toLocaleString()}
+                  <span className="font-bold text-xl text-indigo-600 dark:text-indigo-400">
+                    {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
+                  </span>
+                  <span className="text-sm text-slate-500 dark:text-slate-400 ml-3 opacity-60">
+                    ({currentVisitNumber}/{totalVisits})
                   </span>
                 </div>
-                {currentMapData && (
+                <div className="flex items-center gap-3">
+                  <div className="text-slate-700 dark:text-slate-300">
+                    <span className="font-semibold">{purchasedCount}</span> / {executeItems.length}{' '}
+                    件購入済み
+                  </div>
+                  <div>
+                    <span className="text-sm text-slate-500 dark:text-slate-400">残りの合計: </span>
+                    <span className="font-bold text-xl text-blue-600 dark:text-blue-400">
+                      ¥{remainingCost.toLocaleString()}
+                    </span>
+                  </div>
+                  {currentMapData && (
+                    <button
+                      onClick={toggleMapVisibility}
+                      className={`p-2 rounded-md transition-colors ${
+                        isMapVisible
+                          ? 'bg-blue-600 text-white'
+                          : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                      }`}
+                      title={isMapVisible ? 'マップを非表示' : 'マップを表示'}
+                    >
+                      <svg
+                        className="w-5 h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          strokeWidth={2}
+                          d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
+                        />
+                      </svg>
+                    </button>
+                  )}
                   <button
-                    onClick={toggleMapVisibility}
-                    className={`p-2 rounded-md transition-colors ${
-                      isMapVisible 
-                        ? 'bg-blue-600 text-white' 
-                        : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                    }`}
-                    title={isMapVisible ? 'マップを非表示' : 'マップを表示'}
+                    onClick={() => onLayoutModeChange('smartphone')}
+                    className="p-2 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
+                    title="スマートフォンモードに切替"
                   >
                     <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"
+                      />
                     </svg>
                   </button>
-                )}
-                <button
-                  onClick={() => onLayoutModeChange('smartphone')}
-                  className="p-2 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
-                  title="スマートフォンモードに切替"
-                >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                  </svg>
-                </button>
+                </div>
               </div>
             </div>
-          </div>
-        </div>,
-        document.body
+          </div>,
+          document.body,
         )}
-        
+
         {/* フェーズ切り替え確認ダイアログ */}
         <PhaseChangeDialog />
-        
+
         {/* セルアイテムポップアップ */}
         <CellItemPopup />
-        
+
         {/* アイテム追加ダイアログ */}
         {addItemDialogJSX}
       </div>
@@ -1956,7 +2133,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   }
 
   return (
-    <div 
+    <div
       ref={swipeContainerRef}
       className="relative min-h-[calc(100vh-200px)] pb-20"
       onTouchStart={handleTouchStart}
@@ -1977,81 +2154,32 @@ const FocusMode: React.FC<FocusModeProps> = ({
         </div>
       )}
 
-      {/* ヘッダー情報 - スマートフォンモードでは横幅フル */}
-      <div className={`bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4 rounded-lg mb-4 shadow-lg ${layoutMode === 'smartphone' ? 'mx-2' : 'mx-16'}`}>
-        <div className="flex justify-between items-start">
-          <div>
-            <div className="text-sm opacity-80">訪問先</div>
-            <div className="text-2xl font-bold">{spaceInfo}</div>
-            <div className="flex items-center gap-2">
-              <span className="text-lg">{circleName}</span>
-              <span className="bg-white/20 px-2 py-0.5 rounded text-sm">{currentVisitCheckedCount}/{currentVisitTotalCount}</span>
-            </div>
-          </div>
-          {/* 中央：総額表示 */}
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-sm opacity-80">総額</div>
-              <div className="text-xl font-bold">
-                {currentVisitPriceInfo.allUndefined ? (
-                  <span className="text-red-400">価格未定</span>
-                ) : currentVisitPriceInfo.undefinedCount > 0 ? (
-                  <>
-                    <span>¥{currentVisitPriceInfo.totalPrice.toLocaleString()}</span>
-                    <span className="text-red-400">+未定{currentVisitPriceInfo.undefinedCount}件</span>
-                  </>
-                ) : (
-                  <span>¥{currentVisitPriceInfo.totalPrice.toLocaleString()}</span>
-                )}
-              </div>
-            </div>
-          </div>
-          <div className="text-right">
-            <div className="text-sm opacity-80">フェーズ</div>
-            <select
-              value={currentPhase}
-              onChange={(e) => handlePhaseChangeRequest(e.target.value as FocusPhase)}
-              className="text-xl font-bold bg-white/20 hover:bg-white/30 rounded-md py-1 px-2 text-white appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/50 transition-colors"
-              style={{ 
-                backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E")`,
-                backgroundRepeat: 'no-repeat',
-                backgroundPosition: 'right 4px center',
-                backgroundSize: '16px',
-                paddingRight: '24px',
-              }}
-            >
-              <option value="normal" className="text-slate-900">通常</option>
-              <option value="postponed" className="text-slate-900">後回し</option>
-              <option value="late" className="text-slate-900">遅参</option>
-            </select>
-            <div className="text-sm opacity-80 mt-1">
-              次: {nextVisitInfo.spaceInfo} {nextVisitInfo.circleName}
-            </div>
-          </div>
-        </div>
-      </div>
+      <FocusModeHeader
+        layoutMode={layoutMode}
+        isMapVisible={isMapVisible}
+        containerClassName={layoutMode === 'smartphone' ? 'p-4 mb-4 mx-2' : 'p-4 mb-4 mx-16'}
+        size="expanded"
+        spaceInfo={spaceInfo}
+        circleName={circleName}
+        currentVisitCheckedCount={currentVisitCheckedCount}
+        currentVisitTotalCount={currentVisitTotalCount}
+        currentVisitPriceInfo={currentVisitPriceInfo}
+        currentPhase={currentPhase}
+        onPhaseChangeRequest={handlePhaseChangeRequest}
+        nextVisitInfo={nextVisitInfo}
+      />
 
-      {/* アイテムリスト - スマートフォンモードでは横幅フル */}
-      <div ref={itemListRef} className={`space-y-4 pb-24 ${layoutMode === 'smartphone' ? 'mx-2' : 'mx-16'}`}>
-        {currentVisitDisplayItems.map((item, index) => (
-          <div 
-            key={item.id}
-            data-item-id={item.id}
-            className={`relative ${blinkingPriceItemIds.has(item.id) ? 'animate-pulse ring-2 ring-red-500 rounded-lg' : ''}`}
-          >
-            <ShoppingItemCard
-              item={item}
-              onUpdate={handleUpdateItem}
-              isStriped={index % 2 === 1}
-              onEditRequest={onEditRequest || (() => {})}
-              onDeleteRequest={onDeleteRequest || (() => {})}
-              isSelected={false}
-              onSelectItem={() => {}}
-              layoutMode={layoutMode}
-            />
-          </div>
-        ))}
-      </div>
+      <FocusModeItemList
+        itemListRef={itemListRef}
+        layoutMode={layoutMode}
+        isMapVisible={isMapVisible}
+        containerClassName={`space-y-4 pb-24 ${layoutMode === 'smartphone' ? 'mx-2' : 'mx-16'}`}
+        currentVisitDisplayItems={currentVisitDisplayItems}
+        blinkingPriceItemIds={blinkingPriceItemIds}
+        onUpdateItem={handleUpdateItem}
+        onEditRequest={onEditRequest}
+        onDeleteRequest={onDeleteRequest}
+      />
 
       {/* ナビゲーションボタン（PCモードのみ表示） */}
       {layoutMode === 'pc' && (
@@ -2059,9 +2187,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
           {/* 戻るボタン（左側） */}
           <button
             onClick={handlePrev}
-            style={{ 
+            style={{
               left: `${16 + navButtonOffset.left}px`,
-              transition: 'left 0.2s ease-out'
+              transition: 'left 0.2s ease-out',
             }}
             className="fixed top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-40"
             title="前の訪問先"
@@ -2072,9 +2200,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
           {/* 次へボタン（右側） */}
           <button
             onClick={handleNext}
-            style={{ 
+            style={{
               right: `${16 + navButtonOffset.right}px`,
-              transition: 'right 0.2s ease-out'
+              transition: 'right 0.2s ease-out',
             }}
             className={`fixed top-1/2 transform -translate-y-1/2 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-2xl z-40 ${
               hasUndefinedPricePurchased
@@ -2092,75 +2220,95 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
       {/* フッター（createPortalでtransform文脈の外に描画） */}
       {ReactDOM.createPortal(
-      <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-          <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
-            <div className="text-slate-700 dark:text-slate-300">
-              <span className="font-bold text-xl text-indigo-600 dark:text-indigo-400">
-                {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
-              </span>
-              <span className="text-sm text-slate-500 dark:text-slate-400 ml-3 opacity-60">
-                ({currentVisitNumber}/{totalVisits})
-              </span>
-            </div>
-            <div className="flex items-center gap-3">
+        <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
+            <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
               <div className="text-slate-700 dark:text-slate-300">
-                <span className="font-semibold">{purchasedCount}</span> / {executeItems.length} 件購入済み
-              </div>
-              <div>
-                <span className="text-sm text-slate-500 dark:text-slate-400">残りの合計: </span>
-                <span className="font-bold text-xl text-blue-600 dark:text-blue-400">
-                  ¥{remainingCost.toLocaleString()}
+                <span className="font-bold text-xl text-indigo-600 dark:text-indigo-400">
+                  {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
+                </span>
+                <span className="text-sm text-slate-500 dark:text-slate-400 ml-3 opacity-60">
+                  ({currentVisitNumber}/{totalVisits})
                 </span>
               </div>
-              {currentMapData && (
+              <div className="flex items-center gap-3">
+                <div className="text-slate-700 dark:text-slate-300">
+                  <span className="font-semibold">{purchasedCount}</span> / {executeItems.length}{' '}
+                  件購入済み
+                </div>
+                <div>
+                  <span className="text-sm text-slate-500 dark:text-slate-400">残りの合計: </span>
+                  <span className="font-bold text-xl text-blue-600 dark:text-blue-400">
+                    ¥{remainingCost.toLocaleString()}
+                  </span>
+                </div>
+                {currentMapData && (
+                  <button
+                    onClick={toggleMapVisibility}
+                    className={`p-2 rounded-md transition-colors ${
+                      isMapVisible
+                        ? 'bg-blue-600 text-white'
+                        : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                    }`}
+                    title={isMapVisible ? 'マップを非表示' : 'マップを表示'}
+                  >
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
+                      />
+                    </svg>
+                  </button>
+                )}
                 <button
-                  onClick={toggleMapVisibility}
+                  onClick={() => onLayoutModeChange(layoutMode === 'pc' ? 'smartphone' : 'pc')}
                   className={`p-2 rounded-md transition-colors ${
-                    isMapVisible 
-                      ? 'bg-blue-600 text-white' 
+                    layoutMode === 'smartphone'
+                      ? 'bg-blue-600 text-white'
                       : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
                   }`}
-                  title={isMapVisible ? 'マップを非表示' : 'マップを表示'}
+                  title={
+                    layoutMode === 'pc' ? 'スマートフォンモードに切替' : 'タブレット/PCモードに切替'
+                  }
+                  aria-label={
+                    layoutMode === 'pc' ? 'スマートフォンモードに切替' : 'タブレット/PCモードに切替'
+                  }
                 >
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                  </svg>
+                  {layoutMode === 'smartphone' ? (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"
+                      />
+                    </svg>
+                  ) : (
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        strokeWidth={2}
+                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                      />
+                    </svg>
+                  )}
                 </button>
-              )}
-              <button
-                onClick={() => onLayoutModeChange(layoutMode === 'pc' ? 'smartphone' : 'pc')}
-                className={`p-2 rounded-md transition-colors ${
-                  layoutMode === 'smartphone'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                }`}
-                title={layoutMode === 'pc' ? 'スマートフォンモードに切替' : 'タブレット/PCモードに切替'}
-                aria-label={layoutMode === 'pc' ? 'スマートフォンモードに切替' : 'タブレット/PCモードに切替'}
-              >
-                {layoutMode === 'smartphone' ? (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                  </svg>
-                ) : (
-                  <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                  </svg>
-                )}
-              </button>
+              </div>
             </div>
           </div>
-        </div>
-      </div>,
-      document.body
+        </div>,
+        document.body,
       )}
-      
+
       {/* フェーズ切り替え確認ダイアログ */}
       <PhaseChangeDialog />
-      
+
       {/* セルアイテムポップアップ */}
       <CellItemPopup />
-      
+
       {/* アイテム追加ダイアログ */}
       {addItemDialogJSX}
     </div>

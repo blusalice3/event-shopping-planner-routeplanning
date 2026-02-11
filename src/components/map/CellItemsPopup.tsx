@@ -71,15 +71,24 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
 
   const handlePriceInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/[^0-9]/g, '');
-    setNewItemForm(prev => ({ ...prev, price: value }));
+    setNewItemForm((prev) => ({ ...prev, price: value }));
   }, []);
 
   const handlePriceSelectChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    setNewItemForm(prev => ({ ...prev, price: e.target.value }));
+    setNewItemForm((prev) => ({ ...prev, price: e.target.value }));
   }, []);
 
   const openAddDialog = useCallback(() => {
-    setNewItemForm({ circle: '', title: '', price: '', quantity: '1', remarks: '', url: '', numberOverride: String(number), purchaseStatus: 'None' });
+    setNewItemForm({
+      circle: '',
+      title: '',
+      price: '',
+      quantity: '1',
+      remarks: '',
+      url: '',
+      numberOverride: String(number),
+      purchaseStatus: 'None',
+    });
     setAddDialogOpen(true);
   }, [number]);
 
@@ -133,10 +142,10 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     let x: number;
     let y: number;
     if (isMobileOrTablet) {
-      x = Math.max(padding, Math.min(
-        position.x - popupSize.width / 2,
-        screenWidth - popupSize.width - padding
-      ));
+      x = Math.max(
+        padding,
+        Math.min(position.x - popupSize.width / 2, screenWidth - popupSize.width - padding),
+      );
       const isLeftSide = position.x < screenWidth / 2;
       x = isLeftSide
         ? Math.max(padding, padding)
@@ -235,8 +244,9 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
 
   if (!isOpen) return null;
 
-  const formInputClass = "w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white";
-  const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
+  const formInputClass =
+    'w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white';
+  const labelClass = 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1';
 
   return (
     <>
@@ -250,9 +260,17 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
           <h3 className="font-semibold text-slate-900 dark:text-white">
             {blockName}-{number} {items.length > 0 ? `（${items.length}件）` : ''}
           </h3>
-          <button onClick={onClose} className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300">
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+          >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M6 18L18 6M6 6l12 12"
+              />
             </svg>
           </button>
         </div>
@@ -265,7 +283,12 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               className="w-full py-2 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
             >
               <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 4v16m8-8H4"
+                />
               </svg>
               新規アイテム追加
             </button>
@@ -286,7 +309,9 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               <div
                 key={item.id}
                 className={`relative p-4 border-b border-slate-100 dark:border-slate-700 last:border-b-0 cursor-pointer select-none ${
-                  isInVisitList ? 'bg-blue-50 dark:bg-blue-900/20' : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
+                  isInVisitList
+                    ? 'bg-blue-50 dark:bg-blue-900/20'
+                    : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
                 }`}
                 onPointerDown={() => handleItemPointerDown(item)}
                 onPointerUp={() => handleItemPointerUp(item)}
@@ -296,33 +321,49 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   <div className="flex-1">
                     <div className="flex items-center gap-2">
                       {isInVisitList && <span className="text-blue-500">📍</span>}
-                      <span className="font-medium text-slate-900 dark:text-white">{item.circle}</span>
+                      <span className="font-medium text-slate-900 dark:text-white">
+                        {item.circle}
+                      </span>
                       {numberSuffix && (
-                        <span className="text-sm font-medium text-slate-500 dark:text-slate-400">[{numberSuffix}]</span>
+                        <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
+                          [{numberSuffix}]
+                        </span>
                       )}
                     </div>
                     <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">{item.title}</p>
                     {item.price !== null && (
-                      <p className="text-sm text-slate-500 dark:text-slate-500 mt-1">頒布価格: ¥{item.price.toLocaleString()}</p>
+                      <p className="text-sm text-slate-500 dark:text-slate-500 mt-1">
+                        頒布価格: ¥{item.price.toLocaleString()}
+                      </p>
                     )}
                     {item.remarks && (
-                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">備考: {item.remarks}</p>
+                      <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                        備考: {item.remarks}
+                      </p>
                     )}
                     {item.purchaseStatus !== 'None' && (
-                      <span className={`inline-block mt-2 px-2 py-0.5 text-xs rounded-full ${
-                        item.purchaseStatus === 'Purchased' ? 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300' :
-                        item.purchaseStatus === 'SoldOut' ? 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300' :
-                        'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300'
-                      }`}>
+                      <span
+                        className={`inline-block mt-2 px-2 py-0.5 text-xs rounded-full ${
+                          item.purchaseStatus === 'Purchased'
+                            ? 'bg-green-100 text-green-800 dark:bg-green-900/50 dark:text-green-300'
+                            : item.purchaseStatus === 'SoldOut'
+                              ? 'bg-red-100 text-red-800 dark:bg-red-900/50 dark:text-red-300'
+                              : 'bg-slate-100 text-slate-800 dark:bg-slate-700 dark:text-slate-300'
+                        }`}
+                      >
                         {statusLabels[item.purchaseStatus]}
                       </span>
                     )}
                   </div>
-                  <div className={`text-xs px-2 py-1 rounded ${isInVisitList ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}`}>
+                  <div
+                    className={`text-xs px-2 py-1 rounded ${isInVisitList ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/50 dark:text-blue-300' : 'bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-400'}`}
+                  >
                     {isInVisitList ? '訪問先' : 'タップで追加'}
                   </div>
                 </div>
-                <p className="text-xs text-slate-400 dark:text-slate-500 mt-2 text-right">長押しで編集・削除</p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-2 text-right">
+                  長押しで編集・削除
+                </p>
               </div>
             );
           })}
@@ -331,31 +372,53 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
 
       {/* 長押しメニュー */}
       {longPressItem && (
-        <div className="fixed inset-0 bg-black/30 z-[60] flex items-center justify-center" onClick={() => setLongPressItem(null)}>
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-64" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black/30 z-[60] flex items-center justify-center"
+          onClick={() => setLongPressItem(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-64"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-3 border-b border-slate-200 dark:border-slate-700">
-              <div className="font-medium text-slate-900 dark:text-white truncate">{longPressItem.circle}</div>
+              <div className="font-medium text-slate-900 dark:text-white truncate">
+                {longPressItem.circle}
+              </div>
               {longPressItem.title && (
-                <div className="text-sm text-slate-500 dark:text-slate-400 truncate">{longPressItem.title}</div>
+                <div className="text-sm text-slate-500 dark:text-slate-400 truncate">
+                  {longPressItem.title}
+                </div>
               )}
             </div>
             <div className="py-1">
-              <button onClick={handleEdit} className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">
+              <button
+                onClick={handleEdit}
+                className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
+              >
                 ✏️ 編集
               </button>
               {longPressItem.url && (
-                <button onClick={handleOpenUrl} className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700">
+                <button
+                  onClick={handleOpenUrl}
+                  className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
+                >
                   🔗 URLを開く
                 </button>
               )}
               {onDeleteItem && (
-                <button onClick={handleDelete} className="w-full px-4 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20">
+                <button
+                  onClick={handleDelete}
+                  className="w-full px-4 py-2 text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20"
+                >
                   🗑️ 削除
                 </button>
               )}
             </div>
             <div className="p-2 border-t border-slate-200 dark:border-slate-700">
-              <button onClick={() => setLongPressItem(null)} className="w-full px-4 py-2 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded">
+              <button
+                onClick={() => setLongPressItem(null)}
+                className="w-full px-4 py-2 text-sm text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
+              >
                 キャンセル
               </button>
             </div>
@@ -365,27 +428,60 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
 
       {/* 編集ダイアログ */}
       {editingItem && (
-        <div className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4" onClick={() => setEditingItem(null)}>
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black/50 z-[70] flex items-center justify-center p-4"
+          onClick={() => setEditingItem(null)}
+        >
+          <div
+            className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="p-4 border-b border-slate-200 dark:border-slate-700">
               <h3 className="text-lg font-bold text-slate-900 dark:text-white">アイテム編集</h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">{editingItem.block}-{editingItem.number}</p>
+              <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+                {editingItem.block}-{editingItem.number}
+              </p>
             </div>
             <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">サークル名</label>
-                <input type="text" value={editingItem.circle} onChange={(e) => setEditingItem({ ...editingItem, circle: e.target.value })} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white" />
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  サークル名
+                </label>
+                <input
+                  type="text"
+                  value={editingItem.circle}
+                  onChange={(e) => setEditingItem({ ...editingItem, circle: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">タイトル</label>
-                <input type="text" value={editingItem.title} onChange={(e) => setEditingItem({ ...editingItem, title: e.target.value })} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white" />
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  タイトル
+                </label>
+                <input
+                  type="text"
+                  value={editingItem.title}
+                  onChange={(e) => setEditingItem({ ...editingItem, title: e.target.value })}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                />
               </div>
               {/* 頒布価格: ドロップダウン + 直接入力 */}
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">頒布価格</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  頒布価格
+                </label>
                 <div className="grid grid-cols-2 gap-2">
                   <select
-                    value={editingItem.price === null ? 'undecided' : (editingItem.price !== null && editingItem.price % 100 === 0 && editingItem.price >= 0 && editingItem.price <= 10000) ? String(editingItem.price) : 'custom'}
+                    value={
+                      editingItem.price === null
+                        ? 'undecided'
+                        : editingItem.price !== null &&
+                            editingItem.price % 100 === 0 &&
+                            editingItem.price >= 0 &&
+                            editingItem.price <= 10000
+                          ? String(editingItem.price)
+                          : 'custom'
+                    }
                     onChange={(e) => {
                       const v = e.target.value;
                       if (v === 'undecided') {
@@ -399,12 +495,17 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm"
                   >
                     <option value="undecided">価格未定</option>
-                    {Array.from({ length: 101 }, (_, i) => i * 100).map(p => (
-                      <option key={p} value={p}>{p.toLocaleString()}円</option>
+                    {Array.from({ length: 101 }, (_, i) => i * 100).map((p) => (
+                      <option key={p} value={p}>
+                        {p.toLocaleString()}円
+                      </option>
                     ))}
-                    {editingItem.price !== null && (editingItem.price % 100 !== 0 || editingItem.price > 10000) && (
-                      <option value="custom">{editingItem.price.toLocaleString()}円（手入力）</option>
-                    )}
+                    {editingItem.price !== null &&
+                      (editingItem.price % 100 !== 0 || editingItem.price > 10000) && (
+                        <option value="custom">
+                          {editingItem.price.toLocaleString()}円（手入力）
+                        </option>
+                      )}
                   </select>
                   <div className="relative">
                     <input
@@ -413,12 +514,17 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                       value={editingItem.price ?? ''}
                       onChange={(e) => {
                         const raw = e.target.value.replace(/[^0-9]/g, '');
-                        setEditingItem({ ...editingItem, price: raw === '' ? null : parseInt(raw, 10) });
+                        setEditingItem({
+                          ...editingItem,
+                          price: raw === '' ? null : parseInt(raw, 10),
+                        });
                       }}
                       placeholder="直接入力"
                       className="w-full px-3 py-2 pr-8 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm"
                     />
-                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">円</span>
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">
+                      円
+                    </span>
                   </div>
                 </div>
                 {editingItem.price === null && (
@@ -427,49 +533,94 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               </div>
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">数量</label>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    数量
+                  </label>
                   <select
                     value={editingItem.quantity}
-                    onChange={(e) => setEditingItem({ ...editingItem, quantity: parseInt(e.target.value) || 1 })}
+                    onChange={(e) =>
+                      setEditingItem({ ...editingItem, quantity: parseInt(e.target.value) || 1 })
+                    }
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
                   >
-                    {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
-                      <option key={num} value={num}>{num}</option>
+                    {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                      <option key={num} value={num}>
+                        {num}
+                      </option>
                     ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">購入状態</label>
-                  <select value={editingItem.purchaseStatus} onChange={(e) => setEditingItem({ ...editingItem, purchaseStatus: e.target.value as PurchaseStatus })} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white">
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    購入状態
+                  </label>
+                  <select
+                    value={editingItem.purchaseStatus}
+                    onChange={(e) =>
+                      setEditingItem({
+                        ...editingItem,
+                        purchaseStatus: e.target.value as PurchaseStatus,
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                  >
                     {PurchaseStatuses.map((status) => (
-                      <option key={status} value={status}>{statusLabels[status]}</option>
+                      <option key={status} value={status}>
+                        {statusLabels[status]}
+                      </option>
                     ))}
                   </select>
                 </div>
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">備考</label>
-                <textarea value={editingItem.remarks} onChange={(e) => setEditingItem({ ...editingItem, remarks: e.target.value })} rows={2} className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white" />
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  備考
+                </label>
+                <textarea
+                  value={editingItem.remarks}
+                  onChange={(e) => setEditingItem({ ...editingItem, remarks: e.target.value })}
+                  rows={2}
+                  className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">URL</label>
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  URL
+                </label>
                 <input
                   type="url"
                   value={editingItem.url || ''}
-                  onChange={(e) => setEditingItem({ ...editingItem, url: e.target.value || undefined })}
+                  onChange={(e) =>
+                    setEditingItem({ ...editingItem, url: e.target.value || undefined })
+                  }
                   placeholder="https://example.com"
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
                 />
                 {editingItem.url && (
-                  <a href={editingItem.url} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 mt-1">
+                  <a
+                    href={editingItem.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-xs text-blue-500 hover:text-blue-600 mt-1"
+                  >
                     🔗 開く
                   </a>
                 )}
               </div>
             </div>
             <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2 justify-end">
-              <button onClick={() => setEditingItem(null)} className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded">キャンセル</button>
-              <button onClick={handleSaveEdit} className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700">保存</button>
+              <button
+                onClick={() => setEditingItem(null)}
+                className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleSaveEdit}
+                className="px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
+              >
+                保存
+              </button>
             </div>
           </div>
         </div>
@@ -477,63 +628,144 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
 
       {/* 新規アイテム追加ダイアログ */}
       {addDialogOpen && (
-        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm" onClick={closeAddDialog}>
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+          onClick={closeAddDialog}
+        >
+          <div
+            className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4">
               <h2 className="text-lg font-bold">新規アイテム追加</h2>
-              <p className="text-sm opacity-80 mt-1">{eventDate} {blockName}-{number}</p>
+              <p className="text-sm opacity-80 mt-1">
+                {eventDate} {blockName}-{number}
+              </p>
             </div>
             <div className="p-4 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>サークル名 <span className="text-red-500">*</span></label>
-                  <input type="text" value={newItemForm.circle} onChange={(e) => setNewItemForm(prev => ({ ...prev, circle: e.target.value }))} className={formInputClass} placeholder="サークル名" autoFocus />
+                  <label className={labelClass}>
+                    サークル名 <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={newItemForm.circle}
+                    onChange={(e) =>
+                      setNewItemForm((prev) => ({ ...prev, circle: e.target.value }))
+                    }
+                    className={formInputClass}
+                    placeholder="サークル名"
+                    autoFocus
+                  />
                 </div>
                 <div>
                   <label className={labelClass}>タイトル</label>
-                  <input type="text" value={newItemForm.title} onChange={(e) => setNewItemForm(prev => ({ ...prev, title: e.target.value }))} className={formInputClass} placeholder="新刊セット" />
+                  <input
+                    type="text"
+                    value={newItemForm.title}
+                    onChange={(e) => setNewItemForm((prev) => ({ ...prev, title: e.target.value }))}
+                    className={formInputClass}
+                    placeholder="新刊セット"
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div>
                   <label className={labelClass}>参加日</label>
-                  <input type="text" value={eventDate || ''} readOnly className={`${formInputClass} bg-slate-100 dark:bg-slate-700`} />
+                  <input
+                    type="text"
+                    value={eventDate || ''}
+                    readOnly
+                    className={`${formInputClass} bg-slate-100 dark:bg-slate-700`}
+                  />
                 </div>
                 <div>
                   <label className={labelClass}>ブロック</label>
-                  <input type="text" value={blockName} readOnly className={`${formInputClass} bg-slate-100 dark:bg-slate-700`} />
+                  <input
+                    type="text"
+                    value={blockName}
+                    readOnly
+                    className={`${formInputClass} bg-slate-100 dark:bg-slate-700`}
+                  />
                 </div>
                 <div>
                   <label className={labelClass}>ナンバー</label>
-                  <input type="text" value={newItemForm.numberOverride} onChange={(e) => setNewItemForm(prev => ({ ...prev, numberOverride: e.target.value }))} className={formInputClass} placeholder="01a" />
+                  <input
+                    type="text"
+                    value={newItemForm.numberOverride}
+                    onChange={(e) =>
+                      setNewItemForm((prev) => ({ ...prev, numberOverride: e.target.value }))
+                    }
+                    className={formInputClass}
+                    placeholder="01a"
+                  />
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                 <div className="relative">
                   <label className={labelClass}>頒布価格</label>
-                  <input type="text" value={newItemForm.price} onChange={handlePriceInputChange} className={`${formInputClass} pr-12`} placeholder="0" inputMode="numeric" />
-                  <span className="absolute right-3 top-9 text-slate-500 dark:text-slate-400">円</span>
+                  <input
+                    type="text"
+                    value={newItemForm.price}
+                    onChange={handlePriceInputChange}
+                    className={`${formInputClass} pr-12`}
+                    placeholder="0"
+                    inputMode="numeric"
+                  />
+                  <span className="absolute right-3 top-9 text-slate-500 dark:text-slate-400">
+                    円
+                  </span>
                 </div>
                 <div>
                   <label className={labelClass}>クイック選択</label>
-                  <select onChange={handlePriceSelectChange} className={formInputClass} value={priceOptions.includes(Number(newItemForm.price)) ? newItemForm.price : ""}>
-                    <option value="" disabled>金額を選択...</option>
-                    {priceOptions.map(p => <option key={p} value={p}>{p.toLocaleString()}円</option>)}
+                  <select
+                    onChange={handlePriceSelectChange}
+                    className={formInputClass}
+                    value={
+                      priceOptions.includes(Number(newItemForm.price)) ? newItemForm.price : ''
+                    }
+                  >
+                    <option value="" disabled>
+                      金額を選択...
+                    </option>
+                    {priceOptions.map((p) => (
+                      <option key={p} value={p}>
+                        {p.toLocaleString()}円
+                      </option>
+                    ))}
                   </select>
                 </div>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>数量</label>
-                  <select value={newItemForm.quantity} onChange={(e) => setNewItemForm(prev => ({ ...prev, quantity: e.target.value }))} className={formInputClass}>
-                    {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
-                      <option key={num} value={num}>{num}</option>
+                  <select
+                    value={newItemForm.quantity}
+                    onChange={(e) =>
+                      setNewItemForm((prev) => ({ ...prev, quantity: e.target.value }))
+                    }
+                    className={formInputClass}
+                  >
+                    {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                      <option key={num} value={num}>
+                        {num}
+                      </option>
                     ))}
                   </select>
                 </div>
                 <div>
                   <label className={labelClass}>購入状態</label>
-                  <select value={newItemForm.purchaseStatus} onChange={(e) => setNewItemForm(prev => ({ ...prev, purchaseStatus: e.target.value as typeof newItemForm.purchaseStatus }))} className={formInputClass}>
+                  <select
+                    value={newItemForm.purchaseStatus}
+                    onChange={(e) =>
+                      setNewItemForm((prev) => ({
+                        ...prev,
+                        purchaseStatus: e.target.value as typeof newItemForm.purchaseStatus,
+                      }))
+                    }
+                    className={formInputClass}
+                  >
                     <option value="None">未購入</option>
                     <option value="Purchased">購入済</option>
                     <option value="Postpone">後回し</option>
@@ -544,17 +776,42 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className={labelClass}>備考</label>
-                  <input type="text" value={newItemForm.remarks} onChange={(e) => setNewItemForm(prev => ({ ...prev, remarks: e.target.value }))} className={formInputClass} placeholder="スケブお願い" />
+                  <input
+                    type="text"
+                    value={newItemForm.remarks}
+                    onChange={(e) =>
+                      setNewItemForm((prev) => ({ ...prev, remarks: e.target.value }))
+                    }
+                    className={formInputClass}
+                    placeholder="スケブお願い"
+                  />
                 </div>
                 <div>
                   <label className={labelClass}>URL</label>
-                  <input type="text" value={newItemForm.url} onChange={(e) => setNewItemForm(prev => ({ ...prev, url: e.target.value }))} className={formInputClass} placeholder="https://example.com" />
+                  <input
+                    type="text"
+                    value={newItemForm.url}
+                    onChange={(e) => setNewItemForm((prev) => ({ ...prev, url: e.target.value }))}
+                    className={formInputClass}
+                    placeholder="https://example.com"
+                  />
                 </div>
               </div>
             </div>
             <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
-              <button onClick={closeAddDialog} className="flex-1 py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors">キャンセル</button>
-              <button onClick={handleAddItem} disabled={!newItemForm.circle.trim()} className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors">リストに追加</button>
+              <button
+                onClick={closeAddDialog}
+                className="flex-1 py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
+              >
+                キャンセル
+              </button>
+              <button
+                onClick={handleAddItem}
+                disabled={!newItemForm.circle.trim()}
+                className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors"
+              >
+                リストに追加
+              </button>
             </div>
           </div>
         </div>

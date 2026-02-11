@@ -18,7 +18,7 @@ const STORES = {
   HALL_ROUTE_SETTINGS: 'hallRouteSettings',
 } as const;
 
-type StoreName = typeof STORES[keyof typeof STORES];
+type StoreName = (typeof STORES)[keyof typeof STORES];
 
 let dbInstance: IDBDatabase | null = null;
 
@@ -46,9 +46,9 @@ function openDB(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = (event) => {
       const db = (event.target as IDBOpenDBRequest).result;
-      
+
       // 各ストアを作成
-      Object.values(STORES).forEach(storeName => {
+      Object.values(STORES).forEach((storeName) => {
         if (!db.objectStoreNames.contains(storeName)) {
           db.createObjectStore(storeName);
         }
@@ -62,7 +62,7 @@ function openDB(): Promise<IDBDatabase> {
  */
 async function saveData<T>(storeName: StoreName, key: string, data: T): Promise<void> {
   const db = await openDB();
-  
+
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(storeName, 'readwrite');
     const store = transaction.objectStore(storeName);
@@ -84,7 +84,7 @@ async function saveData<T>(storeName: StoreName, key: string, data: T): Promise<
  */
 async function loadData<T>(storeName: StoreName, key: string): Promise<T | null> {
   const db = await openDB();
-  
+
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(storeName, 'readonly');
     const store = transaction.objectStore(storeName);
@@ -106,7 +106,7 @@ async function loadData<T>(storeName: StoreName, key: string): Promise<T | null>
  */
 async function deleteData(storeName: StoreName, key: string): Promise<void> {
   const db = await openDB();
-  
+
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(storeName, 'readwrite');
     const store = transaction.objectStore(storeName);
@@ -131,7 +131,7 @@ void deleteData;
  */
 async function getAllKeys(storeName: StoreName): Promise<string[]> {
   const db = await openDB();
-  
+
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(storeName, 'readonly');
     const store = transaction.objectStore(storeName);
@@ -153,14 +153,14 @@ async function getAllKeys(storeName: StoreName): Promise<string[]> {
  */
 async function getAllData<T>(storeName: StoreName): Promise<Record<string, T>> {
   const db = await openDB();
-  
+
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(storeName, 'readonly');
     const store = transaction.objectStore(storeName);
     const result: Record<string, T> = {};
-    
+
     const cursorRequest = store.openCursor();
-    
+
     cursorRequest.onerror = () => {
       console.error(`Failed to get all data from ${storeName}:`, cursorRequest.error);
       reject(cursorRequest.error);
@@ -244,7 +244,7 @@ export interface AppData {
 // 公開API
 export const db = {
   STORES,
-  
+
   // イベントリスト
   async saveEventLists(data: Record<string, unknown[]>): Promise<void> {
     await saveData(STORES.EVENT_LISTS, 'data', data);
@@ -252,7 +252,7 @@ export const db = {
   async loadEventLists(): Promise<Record<string, unknown[]>> {
     return (await loadData(STORES.EVENT_LISTS, 'data')) || {};
   },
-  
+
   // イベントメタデータ
   async saveEventMetadata(data: Record<string, unknown>): Promise<void> {
     await saveData(STORES.EVENT_METADATA, 'data', data);
@@ -260,7 +260,7 @@ export const db = {
   async loadEventMetadata(): Promise<Record<string, unknown>> {
     return (await loadData(STORES.EVENT_METADATA, 'data')) || {};
   },
-  
+
   // 実行モードアイテム
   async saveExecuteModeItems(data: Record<string, Record<string, string[]>>): Promise<void> {
     await saveData(STORES.EXECUTE_MODE_ITEMS, 'data', data);
@@ -268,7 +268,7 @@ export const db = {
   async loadExecuteModeItems(): Promise<Record<string, Record<string, string[]>>> {
     return (await loadData(STORES.EXECUTE_MODE_ITEMS, 'data')) || {};
   },
-  
+
   // 日モード
   async saveDayModes(data: Record<string, Record<string, string>>): Promise<void> {
     await saveData(STORES.DAY_MODES, 'data', data);
@@ -276,7 +276,7 @@ export const db = {
   async loadDayModes(): Promise<Record<string, Record<string, string>>> {
     return (await loadData(STORES.DAY_MODES, 'data')) || {};
   },
-  
+
   // マップデータ
   async saveMapData(data: Record<string, Record<string, unknown>>): Promise<void> {
     await saveData(STORES.MAP_DATA, 'data', data);
@@ -284,7 +284,7 @@ export const db = {
   async loadMapData(): Promise<Record<string, Record<string, unknown>>> {
     return (await loadData(STORES.MAP_DATA, 'data')) || {};
   },
-  
+
   // ルート設定
   async saveRouteSettings(data: Record<string, Record<string, unknown>>): Promise<void> {
     await saveData(STORES.ROUTE_SETTINGS, 'data', data);
@@ -292,7 +292,7 @@ export const db = {
   async loadRouteSettings(): Promise<Record<string, Record<string, unknown>>> {
     return (await loadData(STORES.ROUTE_SETTINGS, 'data')) || {};
   },
-  
+
   // ホール定義
   async saveHallDefinitions(data: Record<string, Record<string, unknown[]>>): Promise<void> {
     await saveData(STORES.HALL_DEFINITIONS, 'data', data);
@@ -300,7 +300,7 @@ export const db = {
   async loadHallDefinitions(): Promise<Record<string, Record<string, unknown[]>>> {
     return (await loadData(STORES.HALL_DEFINITIONS, 'data')) || {};
   },
-  
+
   // ホールルート設定
   async saveHallRouteSettings(data: Record<string, Record<string, unknown>>): Promise<void> {
     await saveData(STORES.HALL_ROUTE_SETTINGS, 'data', data);
@@ -314,12 +314,24 @@ export const db = {
     const stores = [
       { store: STORES.EVENT_LISTS, loader: db.loadEventLists, saver: db.saveEventLists },
       { store: STORES.EVENT_METADATA, loader: db.loadEventMetadata, saver: db.saveEventMetadata },
-      { store: STORES.EXECUTE_MODE_ITEMS, loader: db.loadExecuteModeItems, saver: db.saveExecuteModeItems },
+      {
+        store: STORES.EXECUTE_MODE_ITEMS,
+        loader: db.loadExecuteModeItems,
+        saver: db.saveExecuteModeItems,
+      },
       { store: STORES.DAY_MODES, loader: db.loadDayModes, saver: db.saveDayModes },
       { store: STORES.MAP_DATA, loader: db.loadMapData, saver: db.saveMapData },
       { store: STORES.ROUTE_SETTINGS, loader: db.loadRouteSettings, saver: db.saveRouteSettings },
-      { store: STORES.HALL_DEFINITIONS, loader: db.loadHallDefinitions, saver: db.saveHallDefinitions },
-      { store: STORES.HALL_ROUTE_SETTINGS, loader: db.loadHallRouteSettings, saver: db.saveHallRouteSettings },
+      {
+        store: STORES.HALL_DEFINITIONS,
+        loader: db.loadHallDefinitions,
+        saver: db.saveHallDefinitions,
+      },
+      {
+        store: STORES.HALL_ROUTE_SETTINGS,
+        loader: db.loadHallRouteSettings,
+        saver: db.saveHallRouteSettings,
+      },
     ];
 
     for (const { loader, saver } of stores) {
@@ -334,7 +346,7 @@ export const db = {
       }
     }
   },
-  
+
   // 全データを取得（エクスポート用）
   async getAllAppData(): Promise<AppData> {
     return {
@@ -348,10 +360,10 @@ export const db = {
       hallRouteSettings: await db.loadHallRouteSettings(),
     };
   },
-  
+
   // localStorageからの移行
   migrateFromLocalStorage,
-  
+
   // ユーティリティ
   getAllKeys,
   getAllData,
