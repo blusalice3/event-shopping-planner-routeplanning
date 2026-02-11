@@ -4778,7 +4778,7 @@ const App: React.FC = () => {
                         }}
                         type="button"
                       >
-                        <span className="text-lg">🏃‍♂️</span>
+                        <span className="text-lg">🔍</span>
                       </button>
                     </div>
                   )}
