@@ -1485,6 +1485,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // フッターの高さ定数
   const FOOTER_HEIGHT_SP = 56;
+  // App.tsx側で scale されるため、高さは逆補正して実表示高さを安定させる
+  const safeAppScale = Math.max(0.01, appZoomLevel / 100);
 
   // フェーズ切り替え確認ダイアログ
   const PhaseChangeDialog = () => {
@@ -1824,7 +1826,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // スマートフォン+マップ表示モード
   if (layoutMode === 'smartphone' && isMapVisible && currentMapData && !isCompleted) {
-    const availableHeight = `calc(100vh - ${FOOTER_HEIGHT_SP}px)`;
+    const availableHeight = `calc((100vh - ${FOOTER_HEIGHT_SP}px) / ${safeAppScale})`;
 
     return (
       <div className="relative flex flex-col" style={{ height: availableHeight }}>
@@ -1999,7 +2001,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // PC+マップ表示モード
   if (layoutMode === 'pc' && isMapVisible && currentMapData && !isCompleted) {
-    const availableHeight = `calc(100vh - ${HEADER_HEIGHT + FOOTER_HEIGHT_PC}px)`;
+    const availableHeight = `calc((100vh - ${HEADER_HEIGHT + FOOTER_HEIGHT_PC}px) / ${safeAppScale})`;
 
     return (
       <div className="relative flex" style={{ height: availableHeight }}>
