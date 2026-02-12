@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ShoppingItem,
   PurchaseStatus,
@@ -104,9 +104,11 @@ const sortLabels: Record<SortState, string> = {
   Purchased: '購入済',
 };
 
+// 集中モードのセッションキーは「イベント名::日付」で統一する。
 const buildFocusSessionKey = (eventName: string, eventDate: string): string =>
   `${eventName}::${eventDate}`;
 
+// イベント削除時に、対象イベントに紐づく集中モードセッションをまとめて除外する。
 const removeFocusModeSessionByEvent = (
   sessions: Record<string, FocusModeSessionState>,
   eventName: string,
@@ -125,6 +127,7 @@ const removeFocusModeSessionByEvent = (
   return changed ? next : sessions;
 };
 
+// イベント名変更時に、セッションキーの先頭だけを新しい名前へ差し替える。
 const renameFocusModeSessionKeys = (
   sessions: Record<string, FocusModeSessionState>,
   oldEventName: string,
@@ -151,6 +154,7 @@ const areStringArraysEqual = (a: string[], b: string[]): boolean => {
   return a.every((value, index) => value === b[index]);
 };
 
+// 集中モード再開可否の判定に使う比較関数。
 const isFocusModeSessionStateEqual = (
   a: FocusModeSessionState | undefined,
   b: FocusModeSessionState,
@@ -169,11 +173,13 @@ const isFocusModeSessionStateEqual = (
 };
 
 const App: React.FC = () => {
+  // イベント単位で保持する主要データ。
   const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>({});
   const [eventMetadata, setEventMetadata] = useState<Record<string, EventMetadata>>({});
   const [executeModeItems, setExecuteModeItems] = useState<Record<string, ExecuteModeItems>>({});
   const [dayModes, setDayModes] = useState<Record<string, DayModeState>>({});
 
+  // 画面表示と選択状態。
   const [activeEventName, setActiveEventName] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>('eventList');
   const [sortState, setSortState] = useState<SortState>('Manual');
@@ -184,7 +190,6 @@ const App: React.FC = () => {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [selectedBlockFilters, setSelectedBlockFilters] = useState<Set<string>>(new Set());
   const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
-  // 処理の補足です。
   const [rangeStart, setRangeStart] = useState<{
     itemId: string;
     columnType: 'execute' | 'candidate';
@@ -194,16 +199,14 @@ const App: React.FC = () => {
     columnType: 'execute' | 'candidate';
   } | null>(null);
 
-  // 処理の補足です。
-
+  // 新規追加フォームに引き継ぐ既定値。
   const [newItemDefaults, setNewItemDefaults] = useState<{
     eventDate: string;
     block: string;
     number: string;
   } | null>(null);
 
-  // 処理の補足です。
-
+  // 更新・名称変更まわりのダイアログ状態。
   const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
   const [updateData, setUpdateData] = useState<EventUpdateDiff | null>(null);
   const [updateEventName, setUpdateEventName] = useState<string | null>(null);
@@ -212,14 +215,12 @@ const App: React.FC = () => {
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [eventToRename, setEventToRename] = useState<string | null>(null);
 
-  // 処理の補足です。
-
+  // 検索 UI の状態。
   const [searchKeyword, setSearchKeyword] = useState('');
   const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
-  // 処理の補足です。
-
+  // レイアウト・表示設定・集中モード表示状態。
   const [layoutMode, setLayoutMode] = useState<'pc' | 'smartphone'>(() =>
     typeof window !== 'undefined' && window.innerWidth < 768 ? 'smartphone' : 'pc',
   );
@@ -233,8 +234,7 @@ const App: React.FC = () => {
 
   const { themeMode, setThemeMode } = useThemeMode();
 
-  // 処理の補足です。
-
+  // マップ・ホール関連の永続データ。
   const [mapData, setMapData] = useState<MapDataStore>({});
   const [routeSettings, setRouteSettings] = useState<RouteSettingsStore>({});
   const [hallDefinitions, setHallDefinitions] = useState<HallDefinitionsStore>({});
@@ -244,8 +244,7 @@ const App: React.FC = () => {
   const mapFileInputRef = useRef<HTMLInputElement>(null);
   const exportFileInputRef = useRef<HTMLInputElement>(null);
 
-  // 処理の補足です。
-
+  // マップ取り込みダイアログの一時データ。
   const [mapImportDialogOpen, setMapImportDialogOpen] = useState(false);
   const [mapImportPendingFile, setMapImportPendingFile] = useState<File | null>(null);
   const [mapImportPendingEventName, setMapImportPendingEventName] = useState<string>('');
@@ -277,7 +276,6 @@ const App: React.FC = () => {
     [activeEventName, eventLists],
   );
 
-  // 処理の補足です。
 
   const eventDates = useMemo(() => extractEventDates(items), [items]);
 
@@ -299,7 +297,6 @@ const App: React.FC = () => {
     hallRouteSettings,
   });
 
-  // 処理の補足です。
 
   const getHallExecuteCount = useCallback(
     (hallId: string): number => {
@@ -315,7 +312,6 @@ const App: React.FC = () => {
         const item = items.find((i) => i.id === itemId);
         if (!item) return false;
 
-        // 処理の補足です。
 
         const block = currentMapData.blocks.find((b) => b.name === item.block);
         if (!block) return false;
@@ -336,7 +332,6 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, activeTab, currentMapData, currentHalls, items, executeModeItems],
   );
 
-  // 処理の補足です。
 
   const getHallTotalItemCount = useCallback(
     (hallId: string): number => {
@@ -349,7 +344,6 @@ const App: React.FC = () => {
       const dayItems = items.filter((item) => item.eventDate === dayName);
 
       return dayItems.filter((item) => {
-        // 処理の補足です。
         const block = currentMapData.blocks.find((b) => b.name === item.block);
         if (!block) return false;
 
@@ -369,7 +363,6 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, activeTab, currentMapData, currentHalls, items],
   );
 
-  // 処理の補足です。
 
   const getItemHallId = useCallback(
     (item: ShoppingItem, eventDate: string): string | null => {
@@ -377,7 +370,6 @@ const App: React.FC = () => {
       const mapDataForDate = getMapDataForDate(eventDate);
       if (!halls.length || !mapDataForDate) return null;
 
-      // 処理の補足です。
 
       const block = mapDataForDate.blocks.find((b) => b.name === item.block);
       if (!block) return null;
@@ -385,7 +377,6 @@ const App: React.FC = () => {
       const centerRow = (block.startRow + block.endRow) / 2;
       const centerCol = (block.startCol + block.endCol) / 2;
 
-      // 処理の補足です。
 
       for (const hall of halls) {
         if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
@@ -397,19 +388,17 @@ const App: React.FC = () => {
     [getHallsForDate, getMapDataForDate],
   );
 
-  // 処理の補足です。
 
   const areItemsInSameHall = useCallback(
     (itemId1: string, itemId2: string, eventDate: string): boolean => {
       const item1 = items.find((i) => i.id === itemId1);
       const item2 = items.find((i) => i.id === itemId2);
-      if (!item1 || !item2) return true; // 判定に必要な情報が不足するため true を返します。
+      if (!item1 || !item2) return true; // 判定材料が不足する場合は並び替えを妨げない。
       const halls = getHallsForDate(eventDate);
-      if (!halls.length) return true; // 判定に必要な情報が不足するため true を返します。
+      if (!halls.length) return true; // 判定材料が不足する場合は並び替えを妨げない。
       const hallId1 = getItemHallId(item1, eventDate);
       const hallId2 = getItemHallId(item2, eventDate);
 
-      // 処理の補足です。
 
       if (hallId1 === null || hallId2 === null) return true;
 
@@ -420,18 +409,15 @@ const App: React.FC = () => {
 
   const currentMode = useMemo(() => {
     if (!activeEventName) return 'execute';
-    // 処理の補足です。
     if (isMapTab) return 'edit';
     const modes = dayModes[activeEventName];
     if (!modes) return 'edit';
-    // 処理の補足です。
     if (eventDates.includes(activeTab)) {
       return modes[activeTab] || 'edit';
     }
     return 'edit';
   }, [activeEventName, dayModes, activeTab, eventDates, isMapTab]);
 
-  // 処理の補足です。
 
   const currentFocusSessionKey = useMemo(() => {
     if (!activeEventName) return null;
@@ -505,7 +491,7 @@ const App: React.FC = () => {
           [field]: value,
         },
       }));
-      // 設定変更時は強制表示モードを解除して即時反映する
+      // 設定変更を即時反映するため、強制表示モードを解除する。
       setUiVisibilityOverride(false);
     },
     [setUiVisibilitySettings],
@@ -590,20 +576,16 @@ const App: React.FC = () => {
       if (!activeEventName) return;
 
       setEventLists((prev) => {
-        // 処理の補足です。
         const currentItem = prev[activeEventName]?.find((item) => item.id === updatedItem.id);
         const purchaseStatusChanged =
           currentItem && currentItem.purchaseStatus !== updatedItem.purchaseStatus;
         const priceChanged = currentItem && currentItem.price !== updatedItem.price;
 
-        // 処理の補足です。
 
         if (purchaseStatusChanged) {
           setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
         }
 
-        // 処理の補足です。
-        // 処理の補足です。
         const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
         const currentMode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
         let finalItem = updatedItem;
@@ -612,7 +594,6 @@ const App: React.FC = () => {
           (currentMode === 'execute' || currentMode === 'focus') &&
           (purchaseStatusChanged || priceChanged)
         ) {
-          // 処理の補足です。
           const currentProtection =
             currentItem?.protectionLevel ?? (currentItem?.source === 'app' ? 'full' : 'none');
           if (currentProtection === 'none') {
@@ -645,31 +626,25 @@ const App: React.FC = () => {
       const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
       const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
 
-      // 処理の補足です。
 
       const isAppendToEnd = hoverId === '__END_OF_LIST__';
 
-      // 処理の補足です。
 
       if (mode === 'edit' && sourceColumn && targetColumn && sourceColumn !== targetColumn) {
         const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
 
         if (sourceColumn === 'candidate' && targetColumn === 'execute') {
-          // 処理の補足です。
           const currentTabItemsForMove = items.filter((item) => item.eventDate === activeTab);
           let candidateItems = currentTabItemsForMove.filter((item) => !executeIdsSet.has(item.id));
 
-          // 処理の補足です。
 
           if (selectedBlockFilters.size > 0) {
             candidateItems = candidateItems.filter((item) => selectedBlockFilters.has(item.block));
           }
 
-          // 処理の補足です。
 
           let itemsToMove: ShoppingItem[] = [];
           if (selectedItemIds.has(dragId)) {
-            // 処理の補足です。
             itemsToMove = candidateItems.filter((item) => selectedItemIds.has(item.id));
           } else {
             const item = candidateItems.find((item) => item.id === dragId);
@@ -680,7 +655,6 @@ const App: React.FC = () => {
 
           const itemIdsToMove = itemsToMove.map((item) => item.id);
 
-          // 処理の補足です。
 
           setExecuteModeItems((prevExecute) => {
             const eventItems = prevExecute[activeEventName] || {};
@@ -714,7 +688,6 @@ const App: React.FC = () => {
           });
           return;
         } else if (sourceColumn === 'execute' && targetColumn === 'candidate') {
-          // 処理の補足です。
           setEventLists((prev) => {
             const allItems = [...(prev[activeEventName] || [])];
             const executeItems = allItems.filter(
@@ -724,7 +697,6 @@ const App: React.FC = () => {
               (item) => item.eventDate.includes(currentEventDate) && !executeIdsSet.has(item.id),
             );
 
-            // 処理の補足です。
 
             let itemsToMove: ShoppingItem[] = [];
             if (selectedItemIds.has(dragId)) {
@@ -738,7 +710,6 @@ const App: React.FC = () => {
 
             const itemIdsToMove = itemsToMove.map((item) => item.id);
 
-            // 処理の補足です。
 
             setExecuteModeItems((prevExecute) => {
               const eventItems = prevExecute[activeEventName] || {};
@@ -751,7 +722,6 @@ const App: React.FC = () => {
               };
             });
 
-            // 処理の補足です。
 
             let newCandidateList: ShoppingItem[] = [];
             if (isAppendToEnd) {
@@ -769,7 +739,6 @@ const App: React.FC = () => {
               }
             }
 
-            // 処理の補足です。
 
             const remainingExecuteItems = executeItems.filter(
               (item) => !itemIdsToMove.includes(item.id),
@@ -794,13 +763,11 @@ const App: React.FC = () => {
       }
 
       if (mode === 'edit' && targetColumn === 'execute') {
-        // 処理の補足です。
         setExecuteModeItems((prev) => {
           const eventItems = prev[activeEventName] || {};
           const dayItems = [...(eventItems[currentEventDate] || [])];
 
           if (selectedItemIds.has(dragId)) {
-            // 処理の補足です。
             const selectedBlock = dayItems.filter((id) => selectedItemIds.has(id));
             const listWithoutSelection = dayItems.filter((id) => !selectedItemIds.has(id));
 
@@ -823,9 +790,8 @@ const App: React.FC = () => {
               [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection },
             };
           } else {
-            // 処理の補足です。
             const dragIndex = dayItems.findIndex((id) => id === dragId);
-            if (dragIndex === -1) return prev; // 条件に合わないため状態は変更しません。
+            if (dragIndex === -1) return prev; // 移動できない条件では現在の状態をそのまま返す。
             const [draggedItem] = dayItems.splice(dragIndex, 1);
 
             if (isAppendToEnd) {
@@ -843,7 +809,6 @@ const App: React.FC = () => {
           }
         });
       } else if (mode === 'edit' && targetColumn === 'candidate') {
-        // 処理の補足です。
         setEventLists((prev) => {
           const allItems = [...(prev[activeEventName] || [])];
           const currentTabKey = currentEventDate;
@@ -856,7 +821,6 @@ const App: React.FC = () => {
           );
 
           if (selectedItemIds.has(dragId)) {
-            // 処理の補足です。
             const selectedBlock = candidateItems.filter((item) => selectedItemIds.has(item.id));
             const listWithoutSelection = candidateItems.filter(
               (item) => !selectedItemIds.has(item.id),
@@ -873,7 +837,6 @@ const App: React.FC = () => {
               newCandidateList = listWithoutSelection;
             }
 
-            // 処理の補足です。
 
             const executeItems = allItems.filter(
               (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
@@ -892,7 +855,6 @@ const App: React.FC = () => {
 
             return { ...prev, [activeEventName]: newItems };
           } else {
-            // 処理の補足です。
             const dragIndex = candidateItems.findIndex((item) => item.id === dragId);
             if (dragIndex === -1) return prev;
 
@@ -906,7 +868,6 @@ const App: React.FC = () => {
               candidateItems.splice(hoverIndex, 0, draggedItem);
             }
 
-            // 蜀咲ｵ仙粋
 
             const executeItems = allItems.filter(
               (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
@@ -927,7 +888,6 @@ const App: React.FC = () => {
           }
         });
       } else if (mode === 'execute') {
-        // 処理の補足です。
         setEventLists((prev) => {
           const newItems = [...(prev[activeEventName] || [])];
 
@@ -983,33 +943,28 @@ const App: React.FC = () => {
       const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
 
       if (mode === 'edit' && targetColumn === 'execute') {
-        // 処理の補足です。
         setExecuteModeItems((prev) => {
           const eventItems = prev[activeEventName] || {};
           const dayItems = [...(eventItems[currentEventDate] || [])];
           const currentIndex = dayItems.findIndex((id) => id === itemId);
 
-          if (currentIndex <= 0) return prev; // 条件に合わないため状態は変更しません。
-          // 処理の補足です。
+          if (currentIndex <= 0) return prev; // 移動できない条件では現在の状態をそのまま返す。
           const targetId = dayItems[currentIndex - 1];
           if (!areItemsInSameHall(itemId, targetId, currentEventDate)) {
-            return prev; // 条件に合わないため状態は変更しません。
+            return prev; // 移動できない条件では現在の状態をそのまま返す。
           }
 
-          // 処理の補足です。
 
           if (selectedItemIds.has(itemId)) {
             const selectedIds = dayItems.filter((id) => selectedItemIds.has(id));
             const listWithoutSelection = dayItems.filter((id) => !selectedItemIds.has(id));
 
-            // 処理の補足です。
 
             const firstSelectedIndex = dayItems.findIndex((id) => selectedItemIds.has(id));
             if (firstSelectedIndex > 0) {
-              // 処理の補足です。
               const targetIdForGroup = dayItems[firstSelectedIndex - 1];
               if (!areItemsInSameHall(selectedIds[0], targetIdForGroup, currentEventDate)) {
-                return prev; // 条件に合わないため状態は変更しません。
+                return prev; // 移動できない条件では現在の状態をそのまま返す。
               }
               const newTargetIndex = firstSelectedIndex - 1;
               listWithoutSelection.splice(newTargetIndex, 0, ...selectedIds);
@@ -1020,7 +975,6 @@ const App: React.FC = () => {
             }
             return prev;
           } else {
-            // 処理の補足です。
             [dayItems[currentIndex - 1], dayItems[currentIndex]] = [
               dayItems[currentIndex],
               dayItems[currentIndex - 1],
@@ -1032,7 +986,6 @@ const App: React.FC = () => {
           }
         });
       } else if (mode === 'edit' && targetColumn === 'candidate') {
-        // 処理の補足です。
         setEventLists((prev) => {
           const allItems = [...(prev[activeEventName] || [])];
           const currentTabKey = currentEventDate;
@@ -1040,16 +993,14 @@ const App: React.FC = () => {
             executeModeItems[activeEventName]?.[currentEventDate] || [],
           );
 
-          // 処理の補足です。
 
           const candidateItems = allItems.filter(
             (item) => item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id),
           );
 
           const currentIndex = candidateItems.findIndex((item) => item.id === itemId);
-          if (currentIndex <= 0) return prev; // 条件に合わないため状態は変更しません。
+          if (currentIndex <= 0) return prev; // 移動できない条件では現在の状態をそのまま返す。
           if (selectedItemIds.has(itemId)) {
-            // 処理の補足です。
             const selectedBlock = candidateItems.filter((item) => selectedItemIds.has(item.id));
             const listWithoutSelection = candidateItems.filter(
               (item) => !selectedItemIds.has(item.id),
@@ -1062,7 +1013,6 @@ const App: React.FC = () => {
               const newTargetIndex = firstSelectedIndex - 1;
               listWithoutSelection.splice(newTargetIndex, 0, ...selectedBlock);
 
-              // 処理の補足です。
 
               const executeItems = allItems.filter(
                 (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
@@ -1083,13 +1033,11 @@ const App: React.FC = () => {
             }
             return prev;
           } else {
-            // 処理の補足です。
             [candidateItems[currentIndex - 1], candidateItems[currentIndex]] = [
               candidateItems[currentIndex],
               candidateItems[currentIndex - 1],
             ];
 
-            // 処理の補足です。
 
             const executeItems = allItems.filter(
               (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
@@ -1110,12 +1058,11 @@ const App: React.FC = () => {
           }
         });
       } else if (mode === 'execute') {
-        // 処理の補足です。
         setEventLists((prev) => {
           const newItems = [...(prev[activeEventName] || [])];
           const currentIndex = newItems.findIndex((item) => item.id === itemId);
 
-          if (currentIndex <= 0) return prev; // 条件に合わないため状態は変更しません。
+          if (currentIndex <= 0) return prev; // 移動できない条件では現在の状態をそのまま返す。
           if (selectedItemIds.has(itemId)) {
             const selectedBlock = newItems.filter((item) => selectedItemIds.has(item.id));
             const listWithoutSelection = newItems.filter((item) => !selectedItemIds.has(item.id));
@@ -1158,39 +1105,32 @@ const App: React.FC = () => {
       const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
 
       if (mode === 'edit' && targetColumn === 'execute') {
-        // 処理の補足です。
         setExecuteModeItems((prev) => {
           const eventItems = prev[activeEventName] || {};
           const dayItems = [...(eventItems[currentEventDate] || [])];
           const currentIndex = dayItems.findIndex((id) => id === itemId);
 
-          if (currentIndex < 0 || currentIndex >= dayItems.length - 1) return prev; // 条件に合わないため状態は変更しません。
-          // 処理の補足です。
+          if (currentIndex < 0 || currentIndex >= dayItems.length - 1) return prev; // 移動できない条件では現在の状態をそのまま返す。
           const targetId = dayItems[currentIndex + 1];
           if (!areItemsInSameHall(itemId, targetId, currentEventDate)) {
-            return prev; // 条件に合わないため状態は変更しません。
+            return prev; // 移動できない条件では現在の状態をそのまま返す。
           }
 
-          // 処理の補足です。
 
           if (selectedItemIds.has(itemId)) {
             const selectedIds = dayItems.filter((id) => selectedItemIds.has(id));
             const listWithoutSelection = dayItems.filter((id) => !selectedItemIds.has(id));
 
-            // 処理の補足です。
 
             let lastSelectedIndex = -1;
             dayItems.forEach((id, index) => {
               if (selectedItemIds.has(id)) lastSelectedIndex = index;
             });
 
-            // 処理の補足です。
 
             if (lastSelectedIndex >= 0 && lastSelectedIndex < dayItems.length - 1) {
-              // 処理の補足です。
               const jumpOverItemId = dayItems[lastSelectedIndex + 1];
 
-              // 処理の補足です。
 
               if (
                 !areItemsInSameHall(
@@ -1199,17 +1139,15 @@ const App: React.FC = () => {
                   currentEventDate,
                 )
               ) {
-                return prev; // 条件に合わないため状態は変更しません。
+                return prev; // 移動できない条件では現在の状態をそのまま返す。
               }
 
-              // 処理の補足です。
 
               const targetIndexInListWithout = listWithoutSelection.findIndex(
                 (id) => id === jumpOverItemId,
               );
 
               if (targetIndexInListWithout !== -1) {
-                // 処理の補足です。
                 listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedIds);
                 return {
                   ...prev,
@@ -1219,7 +1157,6 @@ const App: React.FC = () => {
             }
             return prev;
           } else {
-            // 処理の補足です。
             [dayItems[currentIndex], dayItems[currentIndex + 1]] = [
               dayItems[currentIndex + 1],
               dayItems[currentIndex],
@@ -1231,7 +1168,6 @@ const App: React.FC = () => {
           }
         });
       } else if (mode === 'edit' && targetColumn === 'candidate') {
-        // 処理の補足です。
         setEventLists((prev) => {
           const allItems = [...(prev[activeEventName] || [])];
           const currentTabKey = currentEventDate;
@@ -1239,29 +1175,25 @@ const App: React.FC = () => {
             executeModeItems[activeEventName]?.[currentEventDate] || [],
           );
 
-          // 処理の補足です。
 
           const candidateItems = allItems.filter(
             (item) => item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id),
           );
 
           const currentIndex = candidateItems.findIndex((item) => item.id === itemId);
-          if (currentIndex < 0 || currentIndex >= candidateItems.length - 1) return prev; // 条件に合わないため状態は変更しません。
+          if (currentIndex < 0 || currentIndex >= candidateItems.length - 1) return prev; // 移動できない条件では現在の状態をそのまま返す。
           if (selectedItemIds.has(itemId)) {
-            // 処理の補足です。
             const selectedBlock = candidateItems.filter((item) => selectedItemIds.has(item.id));
             const listWithoutSelection = candidateItems.filter(
               (item) => !selectedItemIds.has(item.id),
             );
 
-            // 処理の補足です。
 
             let lastSelectedIndex = -1;
             candidateItems.forEach((item, index) => {
               if (selectedItemIds.has(item.id)) lastSelectedIndex = index;
             });
 
-            // 処理の補足です。
 
             if (lastSelectedIndex >= 0 && lastSelectedIndex < candidateItems.length - 1) {
               const jumpOverItemId = candidateItems[lastSelectedIndex + 1].id;
@@ -1272,7 +1204,6 @@ const App: React.FC = () => {
               if (targetIndexInListWithout !== -1) {
                 listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedBlock);
 
-                // 処理の補足です。
 
                 const executeItems = allItems.filter(
                   (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
@@ -1294,13 +1225,11 @@ const App: React.FC = () => {
             }
             return prev;
           } else {
-            // 処理の補足です。
             [candidateItems[currentIndex], candidateItems[currentIndex + 1]] = [
               candidateItems[currentIndex + 1],
               candidateItems[currentIndex],
             ];
 
-            // 処理の補足です。
 
             const executeItems = allItems.filter(
               (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
@@ -1321,24 +1250,21 @@ const App: React.FC = () => {
           }
         });
       } else if (mode === 'execute') {
-        // 処理の補足です。
         setEventLists((prev) => {
           const newItems = [...(prev[activeEventName] || [])];
           const currentIndex = newItems.findIndex((item) => item.id === itemId);
 
-          if (currentIndex < 0 || currentIndex >= newItems.length - 1) return prev; // 条件に合わないため状態は変更しません。
+          if (currentIndex < 0 || currentIndex >= newItems.length - 1) return prev; // 移動できない条件では現在の状態をそのまま返す。
           if (selectedItemIds.has(itemId)) {
             const selectedBlock = newItems.filter((item) => selectedItemIds.has(item.id));
             const listWithoutSelection = newItems.filter((item) => !selectedItemIds.has(item.id));
 
-            // 処理の補足です。
 
             let lastSelectedIndex = -1;
             newItems.forEach((item, index) => {
               if (selectedItemIds.has(item.id)) lastSelectedIndex = index;
             });
 
-            // 処理の補足です。
 
             if (lastSelectedIndex >= 0 && lastSelectedIndex < newItems.length - 1) {
               const jumpOverItemId = newItems[lastSelectedIndex + 1].id;
@@ -1377,15 +1303,12 @@ const App: React.FC = () => {
     (itemIds: string[]) => {
       if (!activeEventName) return;
 
-      // 処理の補足です。
 
       const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
 
-      // 処理の補足です。
 
       const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
 
-      // 処理の補足です。
 
       if (
         rangeStart &&
@@ -1402,21 +1325,17 @@ const App: React.FC = () => {
         setRangeEnd(null);
       }
 
-      // 処理の補足です。
 
       const currentTabItemsForMove = items.filter((item) => item.eventDate === currentEventDate);
 
-      // 処理の補足です。
 
       let candidateItems = currentTabItemsForMove.filter((item) => !executeIdsSet.has(item.id));
 
-      // 処理の補足です。
 
       if (selectedBlockFilters.size > 0) {
         candidateItems = candidateItems.filter((item) => selectedBlockFilters.has(item.block));
       }
 
-      // 処理の補足です。
 
       const itemIdsSet = new Set(itemIds);
       const itemsToMove = candidateItems.filter((item) => itemIdsSet.has(item.id));
@@ -1426,7 +1345,6 @@ const App: React.FC = () => {
         const eventItems = prev[activeEventName] || {};
         const currentDayItems = [...(eventItems[currentEventDate] || [])];
 
-        // 処理の補足です。
 
         const existingIdsSet = new Set(currentDayItems);
         const newItemIds = orderedItemIds.filter((id) => !existingIdsSet.has(id));
@@ -1459,7 +1377,6 @@ const App: React.FC = () => {
 
       const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
 
-      // 処理の補足です。
 
       if (
         rangeStart &&
@@ -1515,7 +1432,6 @@ const App: React.FC = () => {
     setCandidateNumberSortDirection(null);
   }, [activeEventName, activeTab, dayModes, eventDates]);
 
-  // 処理の補足です。
 
   const handleSetViewMode = useCallback(
     (mode: ViewMode, scrollToItemId?: string) => {
@@ -1534,7 +1450,6 @@ const App: React.FC = () => {
       setSelectedItemIds(new Set());
       setCandidateNumberSortDirection(null);
 
-      // 処理の補足です。
 
       if (mode !== 'focus') {
         setFocusModeMapVisible(false);
@@ -1548,11 +1463,9 @@ const App: React.FC = () => {
           });
         }
       }
-      // 処理の補足です。
       setUiVisibilityOverride(false);
       setUiSettingsPanelOpen(false);
 
-      // 処理の補足です。
 
       if (scrollToItemId) {
         setTimeout(() => {
@@ -1620,19 +1533,15 @@ const App: React.FC = () => {
 
       setExecuteModeItems((prev) => renameRecordKey(prev, eventToRename, newName));
 
-      // 処理の補足です。
 
       setMapData((prev) => renameRecordKey(prev, eventToRename, newName));
 
-      // 処理の補足です。
 
       setRouteSettings((prev) => renameRecordKey(prev, eventToRename, newName));
 
-      // 処理の補足です。
 
       setHallDefinitions((prev) => renameRecordKey(prev, eventToRename, newName));
 
-      // 処理の補足です。
 
       setHallRouteSettings((prev) => renameRecordKey(prev, eventToRename, newName));
       setFocusModeSessions((prev) => renameFocusModeSessionKeys(prev, eventToRename, newName));
@@ -1650,7 +1559,6 @@ const App: React.FC = () => {
   const handleSortToggle = () => {
     setSelectedItemIds(new Set());
     setBlockSortDirection(null);
-    // 処理の補足です。
     setRecentlyChangedItemIds(new Set());
     const currentIndex = sortCycle.indexOf(sortState);
     const nextIndex = (currentIndex + 1) % sortCycle.length;
@@ -1708,7 +1616,6 @@ const App: React.FC = () => {
       const currentTabKey = currentEventDate;
       const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
 
-      // 処理の補足です。
 
       const candidateItems = allItems.filter(
         (item) => item.eventDate === currentTabKey && !executeIds.has(item.id),
@@ -1727,13 +1634,11 @@ const App: React.FC = () => {
         return nextDirection === 'asc' ? comparison : -comparison;
       });
 
-      // 処理の補足です。
 
       const executeItems = allItems.filter(
         (item) => item.eventDate === currentTabKey && executeIds.has(item.id),
       );
 
-      // 処理の補足です。
 
       const newItems = allItems.map((item) => {
         if (item.eventDate !== currentTabKey) {
@@ -1772,7 +1677,6 @@ const App: React.FC = () => {
       [activeEventName]: prev[activeEventName].filter((item) => item.id !== deletedId),
     }));
 
-    // 処理の補足です。
 
     setExecuteModeItems((prev) => {
       const eventItems = prev[activeEventName];
@@ -1818,7 +1722,6 @@ const App: React.FC = () => {
             : 'candidate'
           : 'execute');
 
-      // 処理の補足です。
 
       let currentItems: ShoppingItem[] = [];
       if (activeEventName) {
@@ -1831,7 +1734,6 @@ const App: React.FC = () => {
           let filtered = items.filter(
             (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
           );
-          // 処理の補足です。
           if (selectedBlockFilters.size > 0) {
             filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
           }
@@ -1845,7 +1747,6 @@ const App: React.FC = () => {
 
         if (wasSelected) {
           newSet.delete(itemId);
-          // 処理の補足です。
           if (rangeStart?.itemId === itemId && rangeStart.columnType === currentColumnType) {
             setRangeStart(null);
             setRangeEnd(null);
@@ -1855,24 +1756,20 @@ const App: React.FC = () => {
         } else {
           newSet.add(itemId);
 
-          // 処理の補足です。
 
           if (!rangeStart || rangeStart.columnType !== currentColumnType) {
             setRangeStart({ itemId, columnType: currentColumnType });
             setRangeEnd(null);
           } else {
-            // 処理の補足です。
             const startIndex = currentItems.findIndex((item) => item.id === rangeStart.itemId);
             const currentIndex = currentItems.findIndex((item) => item.id === itemId);
 
-            // 処理の補足です。
 
             if (startIndex !== -1 && currentIndex !== -1) {
               const isAdjacent = Math.abs(startIndex - currentIndex) === 1;
               if (!isAdjacent) {
                 setRangeEnd({ itemId, columnType: currentColumnType });
               } else {
-                // 処理の補足です。
                 setRangeEnd(null);
               }
             }
@@ -1925,13 +1822,11 @@ const App: React.FC = () => {
       const currentTabKey = currentEventDate;
       const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
 
-      // 処理の補足です。
 
       const candidateItems = allItems.filter(
         (item) => item.eventDate === currentTabKey && !executeIds.has(item.id),
       );
 
-      // 処理の補足です。
 
       let filteredCandidateItems = candidateItems;
       if (selectedBlockFilters.size > 0) {
@@ -1942,7 +1837,6 @@ const App: React.FC = () => {
 
       if (filteredCandidateItems.length === 0) return prev;
 
-      // 処理の補足です。
 
       const sortedCandidateItems = [...filteredCandidateItems].sort((a, b) => {
         const comparison = a.number.localeCompare(b.number, undefined, {
@@ -1952,13 +1846,11 @@ const App: React.FC = () => {
         return nextDirection === 'asc' ? comparison : -comparison;
       });
 
-      // 処理の補足です。
 
       const sortedCandidateMap = new Map(
         sortedCandidateItems.map((item, index) => [item.id, { item, sortIndex: index }]),
       );
 
-      // 処理の補足です。
 
       const otherItems: ShoppingItem[] = [];
       const candidateItemsToSort: {
@@ -1980,10 +1872,8 @@ const App: React.FC = () => {
         }
       });
 
-      // 処理の補足です。
       candidateItemsToSort.sort((a, b) => a.sortIndex - b.sortIndex);
 
-      // 処理の補足です。
 
       const resultItems: ShoppingItem[] = [];
       let candidateIndex = 0;
@@ -2023,7 +1913,6 @@ const App: React.FC = () => {
     setRangeEnd(null);
   }, []);
 
-  // 処理の補足です。
 
   const handleToggleRangeSelection = useCallback(
     (columnType: 'execute' | 'candidate') => {
@@ -2040,7 +1929,6 @@ const App: React.FC = () => {
 
       const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
 
-      // 処理の補足です。
 
       let currentItems: ShoppingItem[] = [];
       if (columnType === 'execute') {
@@ -2052,22 +1940,18 @@ const App: React.FC = () => {
         let filtered = items.filter(
           (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
         );
-        // 処理の補足です。
         if (selectedBlockFilters.size > 0) {
           filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
         }
         currentItems = filtered;
       }
 
-      // 処理の補足です。
 
       const halls = getHallsForDate(currentEventDate);
       const currentMapData = getMapDataForDate(currentEventDate);
 
-      // 処理の補足です。
 
       if (halls.length > 0 && currentMapData) {
-        // 処理の補足です。
         const getHallIdForItem = (item: ShoppingItem): string | null => {
           const block = currentMapData.blocks.find((b) => b.name === item.block);
           if (!block) return null;
@@ -2081,7 +1965,6 @@ const App: React.FC = () => {
           );
           if (!cell) return null;
 
-          // 処理の補足です。
 
           const isPointInPoly = (
             row: number,
@@ -2115,7 +1998,6 @@ const App: React.FC = () => {
           return null;
         };
 
-        // 処理の補足です。
 
         const buildGroupId = (
           hallId: string | null,
@@ -2137,7 +2019,6 @@ const App: React.FC = () => {
           return buildGroupId(hallId, priority);
         };
 
-        // 処理の補足です。
 
         const startItem = currentItems.find((item) => item.id === rangeStart.itemId);
         const endItem = currentItems.find((item) => item.id === rangeEnd.itemId);
@@ -2147,13 +2028,11 @@ const App: React.FC = () => {
         const startGroupId = getItemGroupId(startItem);
         const endGroupId = getItemGroupId(endItem);
 
-        // 処理の補足です。
 
         if (startGroupId !== endGroupId) {
           return;
         }
 
-        // 処理の補足です。
 
         const groupItems = currentItems.filter((item) => getItemGroupId(item) === startGroupId);
 
@@ -2166,7 +2045,6 @@ const App: React.FC = () => {
         const maxIndex = Math.max(startIndex, endIndex);
         const rangeItems = groupItems.slice(minIndex, maxIndex + 1);
 
-        // 処理の補足です。
 
         setSelectedItemIds((prev) => {
           const allSelected = rangeItems.every((item) => prev.has(item.id));
@@ -2183,7 +2061,6 @@ const App: React.FC = () => {
         return;
       }
 
-      // 処理の補足です。
 
       const startIndex = currentItems.findIndex((item) => item.id === rangeStart.itemId);
       const endIndex = currentItems.findIndex((item) => item.id === rangeEnd.itemId);
@@ -2194,19 +2071,15 @@ const App: React.FC = () => {
       const maxIndex = Math.max(startIndex, endIndex);
       const rangeItems = currentItems.slice(minIndex, maxIndex + 1);
 
-      // 処理の補足です。
 
       setSelectedItemIds((prev) => {
         const allSelected = rangeItems.every((item) => prev.has(item.id));
         const newSet = new Set(prev);
         if (allSelected) {
-          // 処理の補足です。
-          // 処理の補足です。
           rangeItems.forEach((item) => newSet.delete(item.id));
           setRangeStart(null);
           setRangeEnd(null);
         } else {
-          // 処理の補足です。
           rangeItems.forEach((item) => newSet.add(item.id));
         }
         return newSet;
@@ -2235,14 +2108,12 @@ const App: React.FC = () => {
       const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
 
       if (mode === 'edit') {
-        // 処理の補足です。
         const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
         const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
         const isInExecuteColumn = selectedItems.some((item) => executeIds.has(item.id));
         const isInCandidateColumn = selectedItems.some((item) => !executeIds.has(item.id));
 
         if (isInExecuteColumn && !isInCandidateColumn) {
-          // 処理の補足です。
           setExecuteModeItems((prev) => {
             const eventItems = prev[activeEventName] || {};
             const dayItems = [...(eventItems[currentEventDate] || [])];
@@ -2272,7 +2143,6 @@ const App: React.FC = () => {
             };
           });
         } else if (isInCandidateColumn && !isInExecuteColumn) {
-          // 処理の補足です。
           setEventLists((prev) => {
             const allItems = [...(prev[activeEventName] || [])];
             const currentTabKey = currentEventDate;
@@ -2306,7 +2176,6 @@ const App: React.FC = () => {
             const sortedCandidateItems = [...otherCandidateItems];
             sortedCandidateItems.splice(firstSelectedIndex, 0, ...selectedCandidateItems);
 
-            // 処理の補足です。
 
             const executeItems = allItems.filter(
               (item) => item.eventDate === currentTabKey && executeIdsSet.has(item.id),
@@ -2327,7 +2196,6 @@ const App: React.FC = () => {
           });
         }
       } else {
-        // 処理の補足です。
         setEventLists((prev) => {
           const currentItems = [...(prev[activeEventName] || [])];
           const selectedItems = currentItems.filter((item) => selectedItemIds.has(item.id));
@@ -2354,7 +2222,6 @@ const App: React.FC = () => {
     [activeEventName, selectedItemIds, items, activeTab, dayModes, executeModeItems, eventDates],
   );
 
-  // 処理の補足です。
 
   const handleExportEvent = useCallback(
     (eventName: string) => {
@@ -2369,7 +2236,6 @@ const App: React.FC = () => {
     [eventLists],
   );
 
-  // 処理の補足です。
 
   const handleConfirmExport = useCallback(
     async (options: ExportOptions) => {
@@ -2417,14 +2283,12 @@ const App: React.FC = () => {
     ],
   );
 
-  // 処理の補足です。
 
   const handleExportFileImport = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      // 処理の補足です。
       e.target.value = '';
 
       try {
@@ -2440,23 +2304,19 @@ const App: React.FC = () => {
           return;
         }
 
-        // 処理の補足です。
         const importedData = toImportedEventData(result);
         const eventName = importedData.eventName;
         const isUpdate = !!eventLists[eventName];
 
-        // 処理の補足です。
 
         setEventLists((prev) => upsertRecordKey(prev, eventName, importedData.items));
 
-        // 処理の補足です。
 
         if (importedData.metadata) {
           const metadata = importedData.metadata;
           setEventMetadata((prev) => upsertRecordKey(prev, eventName, metadata));
         }
 
-        // 処理の補足です。
 
         if (importedData.executeModeItems) {
           const executeItems = importedData.executeModeItems;
@@ -2467,28 +2327,24 @@ const App: React.FC = () => {
           setDayModes((prev) => upsertRecordKey(prev, eventName, importedDayModes));
         }
 
-        // 処理の補足です。
 
         if (importedData.mapData) {
           const importedMapData = importedData.mapData;
           setMapData((prev) => upsertRecordKey(prev, eventName, importedMapData));
         }
 
-        // 処理の補足です。
 
         if (importedData.routeSettings) {
           const importedRouteSettings = importedData.routeSettings;
           setRouteSettings((prev) => upsertRecordKey(prev, eventName, importedRouteSettings));
         }
 
-        // 処理の補足です。
 
         if (importedData.hallDefinitions) {
           const importedHallDefinitions = importedData.hallDefinitions;
           setHallDefinitions((prev) => upsertRecordKey(prev, eventName, importedHallDefinitions));
         }
 
-        // 処理の補足です。
 
         if (importedData.hallRouteSettings) {
           const importedHallRouteSettings = importedData.hallRouteSettings;
@@ -2497,7 +2353,6 @@ const App: React.FC = () => {
           );
         }
 
-        // 処理の補足です。
 
         alert(
           buildImportCompletionMessage({
@@ -2508,7 +2363,6 @@ const App: React.FC = () => {
           }),
         );
 
-        // 処理の補足です。
 
         setActiveEventName(eventName);
         setActiveTab(resolveEventListTab(importedData.items));
@@ -2520,7 +2374,6 @@ const App: React.FC = () => {
     [eventLists],
   );
 
-  // 処理の補足です。
 
   const handleUpdateEvent = useCallback(
     async (eventName: string, urlOverride?: { url: string; sheetName: string }) => {
@@ -2562,7 +2415,6 @@ const App: React.FC = () => {
       return { ...prev, [eventName]: newItems };
     });
 
-    // 処理の補足です。
 
     setExecuteModeItems((prev) => {
       const eventItems = prev[eventName];
@@ -2594,7 +2446,6 @@ const App: React.FC = () => {
     [pendingUpdateEventName, handleUpdateEvent],
   );
 
-  // 処理の補足です。
 
   const handleImportMapData = useCallback(async (eventName: string) => {
     if (mapFileInputRef.current) {
@@ -2609,27 +2460,22 @@ const App: React.FC = () => {
 
     if (!file || !eventName) return;
 
-    // 処理の補足です。
 
     setMapImportPendingFile(file);
     setMapImportPendingEventName(eventName);
     setMapImportDialogOpen(true);
 
-    // 処理の補足です。
     e.target.value = '';
   }, []);
 
-  // 処理の補足です。
 
   const handleMapImportConfirm = useCallback(
     (parsedData: Record<string, DayMapData>, settings: BlockDetectionSettings) => {
       const eventName = mapImportPendingEventName;
       if (!eventName) return;
 
-      // 処理の補足です。
       saveBlockDetectionSettings(eventName, settings);
 
-      // 処理の補足です。
 
       setMapData((prev) => ({
         ...prev,
@@ -2641,14 +2487,12 @@ const App: React.FC = () => {
 
       const mapCount = Object.keys(parsedData).length;
 
-      // 処理の補足です。
 
       const firstMapName = Object.keys(parsedData)[0];
       if (firstMapName) {
         setActiveTab(firstMapName);
       }
 
-      // 処理の補足です。
 
       setMapImportDialogOpen(false);
       setMapImportPendingFile(null);
@@ -2659,7 +2503,6 @@ const App: React.FC = () => {
     [mapImportPendingEventName],
   );
 
-  // 処理の補足です。
 
   const handleMapImportClose = useCallback(() => {
     setMapImportDialogOpen(false);
@@ -2667,24 +2510,20 @@ const App: React.FC = () => {
     setMapImportPendingEventName('');
   }, []);
 
-  // 処理の補足です。
 
   const handleAddToExecuteListFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
 
-      // 処理の補足です。
 
       const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
-      // 処理の補足です。
 
       const item = items.find((i) => i.id === itemId);
       if (!item) return;
 
-      // 処理の補足です。
 
       const halls = hallDefinitions[activeEventName]?.[activeTab] || [];
       const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[activeTab] || {
@@ -2692,7 +2531,6 @@ const App: React.FC = () => {
         hallVisitLists: [],
       };
 
-      // 処理の補足です。
 
       const currentMapData = mapData[activeEventName]?.[activeTab];
       let itemHallId: string | null = null;
@@ -2721,11 +2559,9 @@ const App: React.FC = () => {
         const eventItems = prev[activeEventName] || {};
         const dayItems = [...(eventItems[dayName] || [])];
 
-        // 処理の補足です。
 
         if (dayItems.includes(itemId)) return prev;
 
-        // 処理の補足です。
 
         if (!itemHallId || halls.length === 0) {
           dayItems.push(itemId);
@@ -2738,14 +2574,12 @@ const App: React.FC = () => {
           };
         }
 
-        // 処理の補足です。
 
         const hallOrder =
           hallRouteSettingsForMap.hallOrder.length > 0
             ? hallRouteSettingsForMap.hallOrder
             : halls.map((h) => h.id);
 
-        // 処理の補足です。
 
         const itemsMap = new Map(items.map((i) => [i.id, i]));
         const getHallIdForItem = (id: string): string | null => {
@@ -2767,13 +2601,12 @@ const App: React.FC = () => {
           return null;
         };
 
-        // 処理の補足です。
+        // 初期の挿入位置を当日アイテム配列の末尾に設定する。
 
-        let insertIndex = dayItems.length; // 処理の補足です。
+        let insertIndex = dayItems.length;
         const itemHallIndex = hallOrder.indexOf(itemHallId);
 
         if (itemHallIndex >= 0) {
-          // 処理の補足です。
           let lastSameHallIndex = -1;
           let firstLaterHallIndex = -1;
 
@@ -2790,10 +2623,8 @@ const App: React.FC = () => {
           }
 
           if (lastSameHallIndex >= 0) {
-            // 処理の補足です。
             insertIndex = lastSameHallIndex + 1;
           } else if (firstLaterHallIndex >= 0) {
-            // 処理の補足です。
             insertIndex = firstLaterHallIndex;
           }
         }
@@ -2812,7 +2643,6 @@ const App: React.FC = () => {
     [activeEventName, activeTab, isMapTab, items, hallDefinitions, hallRouteSettings, mapData],
   );
 
-  // 処理の補足です。
 
   const handleAddToExecuteListFromMapAtPosition = useCallback(
     (itemId: string, referenceItemId: string, position: 'before' | 'after') => {
@@ -2826,15 +2656,12 @@ const App: React.FC = () => {
         const eventItems = prev[activeEventName] || {};
         const dayItems = [...(eventItems[dayName] || [])];
 
-        // 処理の補足です。
 
         if (dayItems.includes(itemId)) return prev;
 
-        // 処理の補足です。
 
         const refIndex = dayItems.indexOf(referenceItemId);
         if (refIndex < 0) {
-          // 処理の補足です。
           dayItems.push(itemId);
         } else {
           const insertIndex = position === 'before' ? refIndex : refIndex + 1;
@@ -2853,13 +2680,11 @@ const App: React.FC = () => {
     [activeEventName, activeTab, isMapTab],
   );
 
-  // 処理の補足です。
 
   const handleRemoveFromExecuteListFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
 
-      // 処理の補足です。
 
       const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
@@ -2881,11 +2706,9 @@ const App: React.FC = () => {
     [activeEventName, activeTab, isMapTab],
   );
 
-  // 処理の補足です。
 
   const handleAddNewItemFromMap = useCallback(
     (eventDate: string, block: string, number: string) => {
-      // 処理の補足です。
       setNewItemDefaults({ eventDate, block, number });
       setItemToEdit(null);
       setActiveTab('import');
@@ -2893,40 +2716,34 @@ const App: React.FC = () => {
     [],
   );
 
-  // 処理の補足です。
 
   const handleAddItemFromFocusMode = useCallback(
     (newItem: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => {
       if (!activeEventName) return;
 
-      // 処理の補足です。
 
       const purchaseStatus = newItem.purchaseStatus || 'None';
 
-      // 処理の補足です。
 
       const item: ShoppingItem = {
         ...newItem,
         id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         purchaseStatus,
-        source: 'app' as const, // アプリ側で生成したデータとして扱います。
-        protectionLevel: 'full' as const, // 完全保護レベルで設定します。
+        source: 'app' as const, // 手入力で追加したアイテムとして扱う。
+        protectionLevel: 'full' as const, // 追加直後の編集保護は full を適用する。
       };
 
-      // 処理の補足です。
 
       setEventLists((prev) => ({
         ...prev,
         [activeEventName]: [...(prev[activeEventName] || []), item],
       }));
 
-      // 処理の補足です。
 
       if (purchaseStatus === 'Purchased') {
         return;
       }
 
-      // 処理の補足です。
 
       const dayName = newItem.eventDate;
       const mapTab = getMapTabForDate(dayName);
@@ -2936,19 +2753,16 @@ const App: React.FC = () => {
         const dayItems = [...(eventItems[dayName] || [])];
         const allItems = eventLists[activeEventName] || [];
         const itemsMap = new Map(allItems.map((i) => [i.id, i]));
-        itemsMap.set(item.id, item); // 新しいアイテムをマップに登録します。
+        itemsMap.set(item.id, item); // 新規追加したアイテムも座標計算の対象に含める。
 
-        // 処理の補足です。
 
         const currentMapData = mapData[activeEventName]?.[mapTab];
         const halls = hallDefinitions[activeEventName]?.[mapTab] || [];
         const hallSettings = hallRouteSettings[activeEventName]?.[mapTab];
 
-        // 処理の補足です。
 
         const hallOrder = hallSettings?.hallOrder || halls.map((h) => h.id);
 
-        // 処理の補足です。
 
         const getItemPosition = (id: string): { row: number; col: number } | null => {
           const targetItem = itemsMap.get(id);
@@ -2958,7 +2772,6 @@ const App: React.FC = () => {
           const targetBlock = currentMapData.blocks.find((b) => b.name === blockName);
           if (!targetBlock) return null;
 
-          // 処理の補足です。
 
           const numberCells = targetBlock.numberCells || [];
           const normalizedNumber = targetItem.number.toLowerCase();
@@ -2969,7 +2782,6 @@ const App: React.FC = () => {
             }
           }
 
-          // 処理の補足です。
 
           return {
             row: (targetBlock.startRow + targetBlock.endRow) / 2,
@@ -2977,7 +2789,6 @@ const App: React.FC = () => {
           };
         };
 
-        // 処理の補足です。
 
         const calcDistance = (
           pos1: { row: number; col: number },
@@ -2986,9 +2797,8 @@ const App: React.FC = () => {
           return Math.abs(pos1.row - pos2.row) + Math.abs(pos1.col - pos2.col);
         };
 
-        // 処理の補足です。
 
-        const phaseStatus = purchaseStatus; // 'Postpone' or 'Late'
+        const phaseStatus = purchaseStatus; // この分岐では purchaseStatus は Postpone または Late。
         const samePhaseIndices: number[] = [];
 
         for (let i = 0; i < dayItems.length; i++) {
@@ -2998,24 +2808,19 @@ const App: React.FC = () => {
           }
         }
 
-        // 処理の補足です。
 
         const newItemPos = getItemPosition(item.id);
 
         if (samePhaseIndices.length === 0 || !newItemPos) {
-          // 処理の補足です。
           dayItems.push(item.id);
         } else {
-          // 処理の補足です。
           let bestInsertIndex = samePhaseIndices[samePhaseIndices.length - 1] + 1;
           let minTotalDistance = Infinity;
 
-          // 処理の補足です。
 
           for (let insertIdx = 0; insertIdx <= samePhaseIndices.length; insertIdx++) {
             let totalDistance = 0;
 
-            // 処理の補足です。
 
             if (insertIdx > 0) {
               const prevItemId = dayItems[samePhaseIndices[insertIdx - 1]];
@@ -3025,7 +2830,6 @@ const App: React.FC = () => {
               }
             }
 
-            // 処理の補足です。
 
             if (insertIdx < samePhaseIndices.length) {
               const nextItemId = dayItems[samePhaseIndices[insertIdx]];
@@ -3034,7 +2838,6 @@ const App: React.FC = () => {
                 totalDistance += calcDistance(newItemPos, nextPos);
               }
 
-              // 処理の補足です。
 
               if (insertIdx > 0) {
                 const prevItemId = dayItems[samePhaseIndices[insertIdx - 1]];
@@ -3047,7 +2850,6 @@ const App: React.FC = () => {
 
             if (totalDistance < minTotalDistance) {
               minTotalDistance = totalDistance;
-              // 処理の補足です。
               if (insertIdx === 0) {
                 bestInsertIndex = samePhaseIndices[0];
               } else if (insertIdx === samePhaseIndices.length) {
@@ -3073,7 +2875,6 @@ const App: React.FC = () => {
     [activeEventName, eventLists, mapData, hallDefinitions, hallRouteSettings, getMapTabForDate],
   );
 
-  // 処理の補足です。
 
   const handleMoveToFirstFromMap = useCallback(
     (itemId: string) => {
@@ -3099,7 +2900,6 @@ const App: React.FC = () => {
     [activeEventName, activeTab, isMapTab],
   );
 
-  // 処理の補足です。
 
   const handleMoveToLastFromMap = useCallback(
     (itemId: string) => {
@@ -3125,7 +2925,6 @@ const App: React.FC = () => {
     [activeEventName, activeTab, isMapTab],
   );
 
-  // 処理の補足です。
 
   const currentMapExecuteItemIds = useMemo(() => {
     if (!activeEventName || !isMapTab) return [];
@@ -3137,14 +2936,12 @@ const App: React.FC = () => {
     return executeModeItems[activeEventName]?.[dayName] || [];
   }, [activeEventName, activeTab, isMapTab, executeModeItems]);
 
-  // 処理の補足です。
 
   const currentTabItems = useMemo(() => {
     if (!activeEventName || !eventDates.includes(activeTab)) return [];
     return items.filter((item) => item.eventDate === activeTab);
   }, [items, activeTab, activeEventName, eventDates]);
 
-  // 処理の補足です。
 
   const [mapTabMenuOpen, setMapTabMenuOpen] = useState<string | null>(null);
   const [mapTabMenuPosition, setMapTabMenuPosition] = useState<{ left: number; top: number }>({
@@ -3162,7 +2959,6 @@ const App: React.FC = () => {
   const [pendingTabChange, setPendingTabChange] = useState<string | null>(null);
   const [blockDefinitionMode, setBlockDefinitionMode] = useState(false);
 
-  // 処理の補足です。
 
   const [mapSelectedHallId, setMapSelectedHallId] = useState<string>('all');
   const [mapIsRouteVisible, setMapIsRouteVisible] = useState(true);
@@ -3171,7 +2967,7 @@ const App: React.FC = () => {
   const [mapSmartInsertEnabled, setMapSmartInsertEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('mapSmartInsertEnabled');
-      return saved !== null ? saved === 'true' : true; // 処理の補足です。
+      return saved !== null ? saved === 'true' : true; // 保存値が存在しない場合は有効を既定値として扱う。
     } catch {
       return true;
     }
@@ -3188,7 +2984,6 @@ const App: React.FC = () => {
   const smartInsertLongPressRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const smartInsertLongPressTriggeredRef = React.useRef(false);
 
-  // 処理の補足です。
 
   React.useEffect(() => {
     try {
@@ -3202,7 +2997,6 @@ const App: React.FC = () => {
     } catch {}
   }, [mapSmartInsertMode]);
 
-  // 処理の補足です。
 
   React.useEffect(() => {
     if (smartInsertToast) {
@@ -3211,7 +3005,6 @@ const App: React.FC = () => {
     }
   }, [smartInsertToast]);
 
-  // 処理の補足です。
 
   const [cellSelectionMode, setCellSelectionMode] = useState<{
     type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual';
@@ -3219,7 +3012,6 @@ const App: React.FC = () => {
     editingBlockData?: unknown;
   } | null>(null);
 
-  // 処理の補足です。
 
   const [pendingCellSelection, setPendingCellSelection] = useState<{
     type: string;
@@ -3227,23 +3019,19 @@ const App: React.FC = () => {
     editingData?: unknown;
   } | null>(null);
 
-  // 処理の補足です。
 
   const openVisitListPanel = useCallback(
     (mapTab: string) => {
       if (!activeEventName) return;
 
-      // 処理の補足です。
 
       const dayMatch = mapTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
-      // 処理の補足です。
 
       const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
 
-      // 処理の補足です。
 
       setVisitListOriginalOrder([...executeIds]);
       setVisitListPanelMapTab(mapTab);
@@ -3253,13 +3041,10 @@ const App: React.FC = () => {
     [activeEventName, executeModeItems],
   );
 
-  // 処理の補足です。
 
   React.useEffect(() => {
     if (!visitListPanelOpen || !isMapTab || !activeEventName) return;
-    // 処理の補足です。
     if (visitListPanelMapTab !== activeTab) {
-      // 処理の補足です。
       if (visitListHasUnsavedChanges) {
         setVisitListHasUnsavedChanges(false);
       }
@@ -3281,7 +3066,6 @@ const App: React.FC = () => {
     executeModeItems,
   ]);
 
-  // 処理の補足です。
 
   const handleVisitListOrderUpdate = useCallback(
     (newOrderItems: ShoppingItem[]) => {
@@ -3291,11 +3075,9 @@ const App: React.FC = () => {
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
-      // 処理の補足です。
 
       const newIds = newOrderItems.map((item) => item.id);
 
-      // executeModeItems繧呈峩譁ｰ
 
       setExecuteModeItems((prev) => ({
         ...prev,
@@ -3309,14 +3091,12 @@ const App: React.FC = () => {
     [visitListPanelMapTab, activeEventName],
   );
 
-  // 処理の補足です。
 
   const handleVisitListConfirm = useCallback(() => {
     setVisitListHasUnsavedChanges(false);
     setVisitListOriginalOrder([]);
   }, []);
 
-  // 処理の補足です。
 
   const handleVisitListCancel = useCallback(() => {
     if (!visitListPanelMapTab || !activeEventName) return;
@@ -3325,7 +3105,6 @@ const App: React.FC = () => {
     if (!dayMatch) return;
     const dayName = dayMatch[1];
 
-    // 処理の補足です。
 
     if (visitListOriginalOrder.length > 0) {
       setExecuteModeItems((prev) => ({
@@ -3340,14 +3119,11 @@ const App: React.FC = () => {
     setVisitListOriginalOrder([]);
   }, [visitListOriginalOrder, visitListPanelMapTab, activeEventName]);
 
-  // 処理の補足です。
 
   const handleVisitListClose = useCallback(() => {
     setVisitListPanelOpen(false);
-    // 処理の補足です。
   }, []);
 
-  // 処理の補足です。
 
   const handleHighlightMapCell = useCallback((row: number, col: number) => {
     setHighlightedMapCell({ row, col });
@@ -3357,7 +3133,6 @@ const App: React.FC = () => {
     setHighlightedMapCell(null);
   }, []);
 
-  // 処理の補足です。
 
   const visitListItems = useMemo(() => {
     if (!visitListPanelMapTab || !activeEventName) return [];
@@ -3369,7 +3144,6 @@ const App: React.FC = () => {
     const dayItems = items.filter((item) => item.eventDate === dayName);
     const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
 
-    // 処理の補足です。
 
     return executeIds
       .filter((id: string) => dayItems.some((item) => item.id === id))
@@ -3377,7 +3151,6 @@ const App: React.FC = () => {
       .filter(Boolean);
   }, [visitListPanelMapTab, activeEventName, items, executeModeItems]);
 
-  // 処理の補足です。
 
   const visitListHallOrder = useMemo(() => {
     if (!visitListPanelMapTab || !activeEventName) return [];
@@ -3389,18 +3162,15 @@ const App: React.FC = () => {
       return routeSettings.hallOrder;
     }
 
-    // 処理の補足です。
 
     return halls.map((h) => h.id);
   }, [visitListPanelMapTab, activeEventName, hallDefinitions, hallRouteSettings]);
 
-  // 処理の補足です。
 
   const handleUpdateItemPriority = useCallback(
     (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
       if (!activeEventName || !visitListPanelMapTab) return;
 
-      // 処理の補足です。
 
       setEventLists((prev) => ({
         ...prev,
@@ -3409,7 +3179,6 @@ const App: React.FC = () => {
         ),
       }));
 
-      // 処理の補足です。
 
       const item = items.find((i) => i.id === itemId);
       if (!item) return;
@@ -3417,7 +3186,6 @@ const App: React.FC = () => {
       const halls = hallDefinitions[activeEventName]?.[visitListPanelMapTab] || [];
       const mapDataForTab = mapData[activeEventName]?.[visitListPanelMapTab];
 
-      // 処理の補足です。
 
       let itemHallId: string | null = null;
       if (mapDataForTab) {
@@ -3429,7 +3197,6 @@ const App: React.FC = () => {
             const cell = block.numberCells.find((nc) => nc.value === num);
             if (cell) {
               for (const hall of halls) {
-                // 処理の補足です。
                 const isPointInPolygon = (
                   row: number,
                   col: number,
@@ -3453,7 +3220,6 @@ const App: React.FC = () => {
                   itemHallId = hall.id;
                   break;
                 }
-                // 処理の補足です。
                 for (const vertex of hall.vertices) {
                   if (vertex.row === cell.row && vertex.col === cell.col) {
                     itemHallId = hall.id;
@@ -3467,7 +3233,6 @@ const App: React.FC = () => {
         }
       }
 
-      // 処理の補足です。
 
       const buildGroupId = (
         hallId: string | null,
@@ -3488,7 +3253,6 @@ const App: React.FC = () => {
       const oldGroupId = buildGroupId(itemHallId, oldPriority);
       const baseGroupId = buildGroupId(itemHallId, 'none');
 
-      // hallOrder繧呈峩譁ｰ
 
       setHallRouteSettings((prev) => {
         const currentSettings = prev[activeEventName]?.[visitListPanelMapTab] || {
@@ -3497,24 +3261,19 @@ const App: React.FC = () => {
         };
         let newHallOrder = [...currentSettings.hallOrder];
 
-        // 処理の補足です。
 
         if (!newHallOrder.includes(baseGroupId)) {
           newHallOrder.push(baseGroupId);
         }
 
-        // 処理の補足です。
 
         if (priorityLevel !== 'none' && !newHallOrder.includes(newGroupId)) {
-          // 処理の補足です。
           const priorityGroupId = buildGroupId(itemHallId, 'priority');
 
-          // 処理の補足です。
 
           let insertIndex = newHallOrder.length;
 
           if (priorityLevel === 'highest') {
-            // 処理の補足です。
             const priorityIndex = newHallOrder.indexOf(priorityGroupId);
             const baseIndex = newHallOrder.indexOf(baseGroupId);
 
@@ -3524,7 +3283,6 @@ const App: React.FC = () => {
               insertIndex = baseIndex;
             }
           } else if (priorityLevel === 'priority') {
-            // 処理の補足です。
             const baseIndex = newHallOrder.indexOf(baseGroupId);
             if (baseIndex !== -1) {
               insertIndex = baseIndex;
@@ -3534,15 +3292,11 @@ const App: React.FC = () => {
           newHallOrder.splice(insertIndex, 0, newGroupId);
         }
 
-        // 処理の補足です。
-        // 処理の補足です。
         if (oldPriority !== 'none' && oldGroupId !== newGroupId) {
-          // 処理の補足です。
           const otherItemsInOldGroup = items.filter((i) => {
             if (i.id === itemId) return false;
             if ((i.priorityLevel || 'none') !== oldPriority) return false;
 
-            // 処理の補足です。
 
             if (!mapDataForTab) return false;
             const iBlock = mapDataForTab.blocks.find((b) => b.name === i.block);
@@ -3553,7 +3307,6 @@ const App: React.FC = () => {
             const iCell = iBlock.numberCells.find((nc) => nc.value === iNum);
             if (!iCell) return false;
 
-            // 処理の補足です。
 
             let iHallId: string | null = null;
             for (const h of halls) {
@@ -3611,7 +3364,6 @@ const App: React.FC = () => {
     [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData],
   );
 
-  // 処理の補足です。
   const handleTabChangeWithVisitListCheck = (newTab: string): boolean => {
     if (visitListPanelOpen && visitListHasUnsavedChanges) {
       setPendingTabChange(newTab);
@@ -3621,7 +3373,6 @@ const App: React.FC = () => {
     return true;
   };
 
-  // 処理の補足です。
 
   const handleVisitListDialogConfirm = useCallback(() => {
     handleVisitListConfirm();
@@ -3633,7 +3384,6 @@ const App: React.FC = () => {
     }
   }, [handleVisitListConfirm, pendingTabChange]);
 
-  // 処理の補足です。
 
   const handleVisitListDialogCancel = useCallback(() => {
     handleVisitListCancel();
@@ -3645,7 +3395,6 @@ const App: React.FC = () => {
     }
   }, [handleVisitListCancel, pendingTabChange]);
 
-  // 処理の補足です。
 
   const handleUpdateBlocks = useCallback(
     (blocks: BlockDefinition[]) => {
@@ -3665,7 +3414,6 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, activeTab, currentMapData],
   );
 
-  // 処理の補足です。
 
   const handleUpdateHalls = useCallback(
     (halls: HallDefinition[]) => {
@@ -3679,7 +3427,6 @@ const App: React.FC = () => {
         },
       }));
 
-      // 処理の補足です。
 
       const existingOrder = currentHallRouteSettings.hallOrder;
       const newHallIds = halls.map((h) => h.id);
@@ -3702,7 +3449,6 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, activeTab, currentHallRouteSettings],
   );
 
-  // 処理の補足です。
 
   const handleUpdateHallRouteSettings = useCallback(
     (settings: HallRouteSettings) => {
@@ -3719,7 +3465,6 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, activeTab],
   );
 
-  // 処理の補足です。
 
   const handleReorderExecuteListByHallOrder = useCallback(
     (hallOrder: string[]) => {
@@ -3744,7 +3489,6 @@ const App: React.FC = () => {
 
         if (dayItems.length === 0) return prev;
 
-        // 処理の補足です。
 
         const itemsMap = new Map(items.map((i) => [i.id, i]));
         const getHallIdForItem = (itemId: string): string | null => {
@@ -3752,7 +3496,6 @@ const App: React.FC = () => {
           if (!item || !currentMapData) return null;
 
           const blockName = item.block?.trim() || '';
-          // 処理の補足です。
           let block = currentMapData.blocks.find((b) => b.name === blockName);
           if (!block) {
             const candidates = currentMapData.blocks.filter(
@@ -3778,7 +3521,6 @@ const App: React.FC = () => {
           return null;
         };
 
-        // 処理の補足です。
 
         const itemsByHall = new Map<string | null, Set<string>>();
         dayItems.forEach((itemId) => {
@@ -3789,7 +3531,6 @@ const App: React.FC = () => {
           itemsByHall.get(hallId)!.add(itemId);
         });
 
-        // 処理の補足です。
 
         const visitOrderMap = new Map<string, number>();
         currentHallRouteSettings.hallVisitLists.forEach((list) => {
@@ -3798,7 +3539,6 @@ const App: React.FC = () => {
           });
         });
 
-        // 処理の補足です。
 
         const sortItemsInHall = (itemIds: Set<string>): string[] => {
           const itemsArray = Array.from(itemIds);
@@ -3806,24 +3546,19 @@ const App: React.FC = () => {
             const orderA = visitOrderMap.get(a);
             const orderB = visitOrderMap.get(b);
 
-            // 処理の補足です。
 
             if (orderA !== undefined && orderB !== undefined) {
               return orderA - orderB;
             }
-            // 処理の補足です。
             if (orderA !== undefined) return -1;
             if (orderB !== undefined) return 1;
-            // 処理の補足です。
             return dayItems.indexOf(a) - dayItems.indexOf(b);
           });
         };
 
-        // 処理の補足です。
 
         const reorderedItems: string[] = [];
 
-        // 処理の補足です。
         hallOrder.forEach((hallId) => {
           const hallItems = itemsByHall.get(hallId);
           if (hallItems && hallItems.size > 0) {
@@ -3832,7 +3567,6 @@ const App: React.FC = () => {
           }
         });
 
-        // 処理の補足です。
         itemsByHall.forEach((hallItems) => {
           if (hallItems.size > 0) {
             reorderedItems.push(...sortItemsInHall(hallItems));
@@ -3851,43 +3585,36 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, activeTab, mapData, hallDefinitions, hallRouteSettings, items],
   );
 
-  // 処理の補足です。
 
   const [hallDefinitionMode, setHallDefinitionMode] = useState(false);
 
-  // 処理の補足です。
 
   const [vertexSelectionMode, setVertexSelectionMode] = useState<{
     clickedVertices: { row: number; col: number }[];
     editingData?: unknown;
   } | null>(null);
 
-  // 処理の補足です。
 
   const [pendingVertexSelection, setPendingVertexSelection] = useState<{
     vertices: { row: number; col: number }[];
     editingData?: unknown;
   } | null>(null);
 
-  // 処理の補足です。
 
   const handleStartVertexSelection = useCallback((editingData?: unknown) => {
     setVertexSelectionMode({ clickedVertices: [], editingData });
     setHallDefinitionMode(false);
   }, []);
 
-  // 処理の補足です。
 
   const sortVerticesNonCrossing = useCallback(
     (vertices: { row: number; col: number }[]): { row: number; col: number }[] => {
       if (vertices.length <= 2) return vertices;
 
-      // 処理の補足です。
 
       const centroidRow = vertices.reduce((sum, v) => sum + v.row, 0) / vertices.length;
       const centroidCol = vertices.reduce((sum, v) => sum + v.col, 0) / vertices.length;
 
-      // 処理の補足です。
 
       const sorted = [...vertices].sort((a, b) => {
         const angleA = Math.atan2(a.row - centroidRow, a.col - centroidCol);
@@ -3900,11 +3627,9 @@ const App: React.FC = () => {
     [],
   );
 
-  // 処理の補足です。
 
   const handleConfirmVertexSelection = useCallback(() => {
     if (vertexSelectionMode) {
-      // 処理の補足です。
       const sorted = sortVerticesNonCrossing(vertexSelectionMode.clickedVertices);
       setPendingVertexSelection({
         vertices: sorted,
@@ -3915,7 +3640,6 @@ const App: React.FC = () => {
     setHallDefinitionMode(true);
   }, [sortVerticesNonCrossing, vertexSelectionMode]);
 
-  // 処理の補足です。
 
   const handleCancelVertexSelection = useCallback(() => {
     if (vertexSelectionMode?.editingData) {
@@ -3928,7 +3652,6 @@ const App: React.FC = () => {
     setHallDefinitionMode(true);
   }, [vertexSelectionMode]);
 
-  // 処理の補足です。
 
   useEffect(() => {
     const handleMapCellClickForVertex = (e: CustomEvent<{ row: number; col: number }>) => {
@@ -3939,7 +3662,6 @@ const App: React.FC = () => {
       setVertexSelectionMode((prev) => {
         if (!prev) return prev;
 
-        // 処理の補足です。
 
         const existingIndex = prev.clickedVertices.findIndex((v) => v.row === row && v.col === col);
         if (existingIndex !== -1) {
@@ -3949,7 +3671,6 @@ const App: React.FC = () => {
           };
         }
 
-        // 処理の補足です。
 
         if (prev.clickedVertices.length >= 6) {
           return prev;
@@ -3968,21 +3689,18 @@ const App: React.FC = () => {
     };
   }, [vertexSelectionMode]);
 
-  // 処理の補足です。
 
   const handleStartCellSelection = useCallback(
     (type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual', editingData?: unknown) => {
       setCellSelectionMode({ type, clickedCells: [], editingBlockData: editingData });
-      setBlockDefinitionMode(false); // ブロック定義パネルの表示状態を更新します。
+      setBlockDefinitionMode(false); // セル選択モード中はブロック定義パネルを閉じる。
     },
     [],
   );
 
-  // 処理の補足です。
 
   const handleConfirmCellSelection = useCallback(() => {
     if (cellSelectionMode) {
-      // 処理の補足です。
       setPendingCellSelection({
         type: cellSelectionMode.type,
         cells: cellSelectionMode.clickedCells,
@@ -3990,25 +3708,22 @@ const App: React.FC = () => {
       });
     }
     setCellSelectionMode(null);
-    setBlockDefinitionMode(true); // ブロック定義パネルの表示状態を更新します。
+    setBlockDefinitionMode(true); // セル選択を確定したらブロック定義パネルを再表示する。
   }, [cellSelectionMode]);
 
-  // 処理の補足です。
 
   const handleCancelCellSelection = useCallback(() => {
-    // 処理の補足です。
     if (cellSelectionMode?.editingBlockData) {
       setPendingCellSelection({
-        type: 'cancelled', // 処理の補足です。
+        type: 'cancelled', // 編集キャンセルとして確認ダイアログへ引き渡す。
         cells: [],
         editingData: cellSelectionMode.editingBlockData,
       });
     }
     setCellSelectionMode(null);
-    setBlockDefinitionMode(true); // ブロック定義パネルの表示状態を更新します。
+    setBlockDefinitionMode(true); // セル選択を終了したらブロック定義パネルを再表示する。
   }, [cellSelectionMode]);
 
-  // 処理の補足です。
 
   useEffect(() => {
     const handleMapCellClick = (e: CustomEvent<{ row: number; col: number }>) => {
@@ -4019,7 +3734,6 @@ const App: React.FC = () => {
       setCellSelectionMode((prev) => {
         if (!prev) return prev;
 
-        // 処理の補足です。
 
         const existingIndex = prev.clickedCells.findIndex((c) => c.row === row && c.col === col);
         if (existingIndex >= 0) {
@@ -4029,7 +3743,6 @@ const App: React.FC = () => {
           };
         }
 
-        // 驕ｸ謚槭ｒ霑ｽ蜉
 
         return {
           ...prev,
@@ -4056,7 +3769,6 @@ const App: React.FC = () => {
     const handlePointerDown = (e: React.PointerEvent) => {
       if (!activeEventName) return;
 
-      // 処理の補足です。
 
       const target = e.currentTarget as HTMLButtonElement;
       const rect = target.getBoundingClientRect();
@@ -4065,11 +3777,9 @@ const App: React.FC = () => {
 
       longPressTimeout.current = window.setTimeout(() => {
         if (isMapTabProp) {
-          // 処理の補足です。
           setMapTabMenuPosition({ left: menuLeft, top: menuTop });
           setMapTabMenuOpen(tab);
         } else if (eventDates.includes(tab)) {
-          // 処理の補足です。
           handleToggleMode();
         }
         longPressTimeout.current = null;
@@ -4084,14 +3794,11 @@ const App: React.FC = () => {
     };
 
     const handleClick = () => {
-      // 処理の補足です。
       if (mapTabMenuOpen) {
-        // 処理の補足です。
         if (mapTabMenuOpen === tab) {
           setMapTabMenuOpen(null);
           return;
         }
-        // 処理の補足です。
         setMapTabMenuOpen(null);
       }
       if (onClick) {
@@ -4105,7 +3812,6 @@ const App: React.FC = () => {
       }
     };
 
-    // 処理の補足です。
 
     React.useEffect(() => {
       const handleClickOutside = (e: MouseEvent) => {
@@ -4124,13 +3830,10 @@ const App: React.FC = () => {
       }
     }, [tab]);
 
-    // 処理の補足です。
 
     const handleMenuItemClick = (action: 'visitList' | 'blockDefinition' | 'hallDefinition') => {
-      // 処理の補足です。
       setMapTabMenuOpen(null);
 
-      // 処理の補足です。
 
       setItemToEdit(null);
       setSelectedItemIds(new Set());
@@ -4138,7 +3841,6 @@ const App: React.FC = () => {
       setCandidateNumberSortDirection(null);
       setActiveTab(tab);
 
-      // 処理の補足です。
 
       setTimeout(() => {
         switch (action) {
@@ -4236,18 +3938,15 @@ const App: React.FC = () => {
     const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
 
     if (mode === 'execute') {
-      // 処理の補足です。
       if (sortState === 'Manual') {
         return executeColumnItems;
       }
-      // 処理の補足です。
       const filterStatus = sortState as Exclude<SortState, 'Manual'>;
       return executeColumnItems.filter(
         (item) => item.purchaseStatus === filterStatus || recentlyChangedItemIds.has(item.id),
       );
     }
 
-    // 処理の補足です。
 
     return itemsForTab;
   }, [
@@ -4261,7 +3960,6 @@ const App: React.FC = () => {
     recentlyChangedItemIds,
   ]);
 
-  // 処理の補足です。
 
   const searchMatches = useMemo(() => {
     if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
@@ -4271,7 +3969,6 @@ const App: React.FC = () => {
     const keyword = searchKeyword.trim().toLowerCase();
     const matches: string[] = [];
 
-    // 処理の補足です。
     currentTabItems.forEach((item) => {
       const circleMatch = item.circle.toLowerCase().includes(keyword);
       const titleMatch = item.title.toLowerCase().includes(keyword);
@@ -4285,7 +3982,6 @@ const App: React.FC = () => {
     return matches;
   }, [searchKeyword, activeEventName, activeTab, currentTabItems, eventDates]);
 
-  // 処理の補足です。
 
   useEffect(() => {
     if (searchKeyword.trim()) {
@@ -4301,14 +3997,12 @@ const App: React.FC = () => {
     }
   }, [searchKeyword, searchMatches]);
 
-  // 処理の補足です。
 
   useEffect(() => {
     setCurrentSearchIndex(-1);
     setHighlightedItemId(null);
   }, [activeTab]);
 
-  // 処理の補足です。
 
   const duplicateCircleItemIds = useMemo(() => {
     if (!activeEventName || !eventDates.includes(activeTab)) return new Set<string>();
@@ -4316,7 +4010,6 @@ const App: React.FC = () => {
     const circleCountMap = new Map<string, number>();
     const circleItemIdsMap = new Map<string, string[]>();
 
-    // 処理の補足です。
     itemsForTab.forEach((item) => {
       const circle = item.circle.trim();
       if (circle) {
@@ -4330,7 +4023,6 @@ const App: React.FC = () => {
       }
     });
 
-    // 処理の補足です。
 
     const duplicateIds = new Set<string>();
     circleCountMap.forEach((count, circle) => {
@@ -4343,7 +4035,6 @@ const App: React.FC = () => {
     return duplicateIds;
   }, [activeEventName, activeTab, currentTabItems, eventDates]);
 
-  // 処理の補足です。
 
   const availableBlocks = useMemo(() => {
     if (!activeEventName) return [];
@@ -4367,7 +4058,6 @@ const App: React.FC = () => {
     const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
     let filtered = currentTabItems.filter((item) => !executeIds.has(item.id));
 
-    // 処理の補足です。
 
     if (selectedBlockFilters.size > 0) {
       filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
@@ -4383,7 +4073,6 @@ const App: React.FC = () => {
     eventDates,
   ]);
 
-  // 処理の補足です。
 
   const visibleSearchMatches = useMemo(() => {
     if (searchMatches.length === 0) return [];
@@ -4394,10 +4083,8 @@ const App: React.FC = () => {
     let visibleItemIds: Set<string>;
 
     if (mode === 'execute') {
-      // 処理の補足です。
       visibleItemIds = new Set(visibleItems.map((item) => item.id));
     } else {
-      // 処理の補足です。
       const allVisibleIds = new Set([
         ...executeColumnItems.map((item) => item.id),
         ...candidateColumnItems.map((item) => item.id),
@@ -4417,7 +4104,6 @@ const App: React.FC = () => {
     candidateColumnItems,
   ]);
 
-  // 処理の補足です。
 
   const handleSearchNext = useCallback(() => {
     if (!searchKeyword.trim() || visibleSearchMatches.length === 0) {
@@ -4427,7 +4113,6 @@ const App: React.FC = () => {
       return;
     }
 
-    // 処理の補足です。
 
     const startIndex = currentSearchIndex === -1 ? -1 : currentSearchIndex;
     const nextIndex = (startIndex + 1) % visibleSearchMatches.length;
@@ -4436,7 +4121,6 @@ const App: React.FC = () => {
     const nextItemId = visibleSearchMatches[nextIndex];
     setHighlightedItemId(nextItemId);
 
-    // 処理の補足です。
 
     setTimeout(() => {
       const element = document.querySelector(`[data-item-id="${nextItemId}"]`);
@@ -4446,7 +4130,6 @@ const App: React.FC = () => {
     }, 100);
   }, [searchKeyword, visibleSearchMatches, currentSearchIndex, searchMatches]);
 
-  // 処理の補足です。
 
   const blocksWithPriorityRemarks = useMemo(() => {
     if (!activeEventName) return new Set<string>();
@@ -4464,7 +4147,6 @@ const App: React.FC = () => {
     return blocksWithPriority;
   }, [activeEventName, activeTab, executeModeItems, currentTabItems, eventDates]);
 
-  // 処理の補足です。
 
   const hasCandidateSelection = useMemo(() => {
     if (!activeEventName || currentMode !== 'edit' || selectedItemIds.size === 0) return false;
@@ -4483,7 +4165,6 @@ const App: React.FC = () => {
     eventDates,
   ]);
 
-  // 処理の補足です。
 
   const hasExecuteSelection = useMemo(() => {
     if (!activeEventName || currentMode !== 'edit' || selectedItemIds.size === 0) return false;
@@ -4502,7 +4183,6 @@ const App: React.FC = () => {
     eventDates,
   ]);
 
-  // 処理の補足です。
 
   const showMoveButtons =
     (hasCandidateSelection && !hasExecuteSelection) ||
@@ -5842,3 +5522,4 @@ const App: React.FC = () => {
 };
 
 export default App;
+
