@@ -42,6 +42,67 @@ const getVisitKey = (item: ShoppingItem): string => {
   return `${item.eventDate}-${item.block}-${baseNumber}`;
 };
 
+type RgbColor = { r: number; g: number; b: number };
+
+const parseCssColorToRgb = (color: string): RgbColor | null => {
+  const normalized = color.trim().toLowerCase();
+  if (normalized === 'white') return { r: 255, g: 255, b: 255 };
+  if (normalized === 'black') return { r: 0, g: 0, b: 0 };
+
+  const hexMatch = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (hexMatch) {
+    const hex = hexMatch[1];
+    if (hex.length === 3) {
+      return {
+        r: parseInt(hex[0] + hex[0], 16),
+        g: parseInt(hex[1] + hex[1], 16),
+        b: parseInt(hex[2] + hex[2], 16),
+      };
+    }
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+    };
+  }
+
+  const rgbMatch = normalized.match(
+    /^rgba?\((\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*[\d.]+)?\)$/,
+  );
+  if (!rgbMatch) return null;
+
+  return {
+    r: Math.min(255, Math.max(0, parseInt(rgbMatch[1], 10))),
+    g: Math.min(255, Math.max(0, parseInt(rgbMatch[2], 10))),
+    b: Math.min(255, Math.max(0, parseInt(rgbMatch[3], 10))),
+  };
+};
+
+const isWhiteLikeColor = (color: string | null | undefined): boolean => {
+  if (!color) return false;
+  const rgb = parseCssColorToRgb(color);
+  if (!rgb) return false;
+  return rgb.r >= 245 && rgb.g >= 245 && rgb.b >= 245;
+};
+
+const isDarkLikeColor = (color: string): boolean => {
+  const rgb = parseCssColorToRgb(color);
+  if (!rgb) return false;
+  const luminance = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
+  return luminance <= 64;
+};
+
+const resolveMapTextColorForTheme = (
+  color: string | null | undefined,
+  isDarkMode: boolean,
+  fallback = '#333333',
+): string => {
+  const baseColor = color?.trim() || fallback;
+  if (!isDarkMode) return baseColor;
+  if (isWhiteLikeColor(baseColor)) return baseColor;
+  return isDarkLikeColor(baseColor) ? '#FFFFFF' : baseColor;
+};
+
 const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   mapData,
   mapName,
@@ -74,6 +135,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const scale = zoomLevel / 100;
   const appScale = Math.max(0.01, appZoomLevel / 100);
   const cellSize = BASE_CELL_SIZE * scale;
+  const isDarkMode =
+    typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
   const isDetailedView = true;
   const showNumbers = true;
   const showBorders = true;
@@ -763,15 +826,15 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         const state = cellStates.get(`${cell.row}-${cell.col}`);
         const explicitFontColor = cell.fontColor?.trim();
         if (explicitFontColor) {
-          ctx.fillStyle = explicitFontColor;
+          ctx.fillStyle = resolveMapTextColorForTheme(explicitFontColor, isDarkMode);
         } else if (state?.isCurrentPosition) {
           ctx.fillStyle = '#E65100';
         } else if (state?.isVisited) {
-          ctx.fillStyle = '#616161';
+          ctx.fillStyle = resolveMapTextColorForTheme('#616161', isDarkMode);
         } else if (state?.hasItems) {
           ctx.fillStyle = '#1565C0';
         } else {
-          ctx.fillStyle = cell.fontColor || '#333333';
+          ctx.fillStyle = resolveMapTextColorForTheme(cell.fontColor, isDarkMode);
         }
 
         if (isVertical) {
@@ -1018,6 +1081,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     nextCellCoords,
     prevCellCoords,
     currentPhase,
+    isDarkMode,
     offset,
   ]);
 

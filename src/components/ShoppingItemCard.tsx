@@ -294,33 +294,21 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const isUnpurchased = item.purchaseStatus === 'None';
   const useBlockColor = isUnpurchased && blockBackgroundColor;
 
-  // 文字表示エリアの背景色を計算（警告表示を隠すため）
-  const textAreaBgColor = useMemo(() => {
+  // 文字情報エリアの背景は class ベースで切り替え、ダーク時の過度なハイライトを抑える。
+  const textAreaOverlayClassName = useMemo(() => {
     if (isSelected) {
-      return 'rgba(219, 234, 254, 0.8)'; // bg-blue-100相当
+      return 'bg-blue-100/80 dark:bg-blue-900/30';
     }
     if (useBlockColor) {
-      return 'transparent';
+      return 'bg-transparent dark:bg-slate-900/45';
     }
     if (isStriped) {
-      return 'rgba(239, 246, 255, 0.4)'; // bg-blue-50/50相当
+      return 'bg-blue-50/40 dark:bg-slate-900/25';
     }
-    return 'rgba(255, 255, 255, 0.8)'; // bg-white相当
+    return 'bg-white/80 dark:bg-slate-800/35';
   }, [isSelected, useBlockColor, isStriped]);
 
-  // ダークモード用の文字表示エリアの背景色を計算
-  const textAreaBgColorDark = useMemo(() => {
-    if (isSelected) {
-      return 'rgba(30, 58, 138, 0.5)'; // dark:bg-blue-900/50相当
-    }
-    if (useBlockColor) {
-      return 'transparent';
-    }
-    if (isStriped) {
-      return 'rgba(15, 23, 42, 0.5)'; // dark:bg-slate-900/50相当
-    }
-    return 'rgba(30, 41, 59, 0.8)'; // dark:bg-slate-800相当
-  }, [isSelected, useBlockColor, isStriped]);
+  const focusInfoAreaClassName = !onMoveUp ? 'dark:bg-slate-900/35 dark:rounded-md dark:px-2' : '';
 
   const baseBg = isSelected
     ? 'bg-blue-100 dark:bg-blue-900/50'
@@ -445,7 +433,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           {/* メインコンテンツエリア */}
           <div className="flex-grow flex flex-col min-w-0 relative z-10">
             {/* 上段: 日付・ブロック・サークル名・警告タグ + 備考欄 */}
-            <div className="p-2 pb-1">
+            <div className={`p-2 pb-1 ${focusInfoAreaClassName}`}>
               <div className="flex justify-between items-start gap-2">
                 <div className="flex-grow min-w-0">
                   <p className="font-bold text-sm text-slate-900 dark:text-slate-100">{`${item.eventDate} ${locationString}`}</p>
@@ -699,21 +687,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       <div className="relative flex-grow p-4 min-w-0 flex flex-col h-full z-20">
         {/* 警告表示を隠すための背景レイヤー */}
         <div
-          className="absolute inset-0 rounded-lg pointer-events-none"
-          style={{
-            backgroundColor: textAreaBgColor,
-          }}
-        ></div>
-        {/* ダークモード用の背景レイヤー */}
-        <style>{`
-          @media (prefers-color-scheme: dark) {
-            .text-area-bg-dark-${item.id.replace(/[^a-zA-Z0-9]/g, '-')} {
-              background-color: ${textAreaBgColorDark} !important;
-            }
-          }
-        `}</style>
-        <div
-          className={`absolute inset-0 rounded-lg pointer-events-none text-area-bg-dark-${item.id.replace(/[^a-zA-Z0-9]/g, '-')}`}
+          className={`absolute inset-0 rounded-lg pointer-events-none ${textAreaOverlayClassName}`}
         ></div>
         <div className="relative z-10 flex justify-between items-start gap-4">
           <div>

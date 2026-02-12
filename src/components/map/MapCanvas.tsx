@@ -44,6 +44,73 @@ const hasCellInputValue = (value: string | number | null): boolean => {
   return true;
 };
 
+type RgbColor = { r: number; g: number; b: number };
+
+const parseCssColorToRgb = (color: string): RgbColor | null => {
+  const normalized = color.trim().toLowerCase();
+  if (normalized === 'white') return { r: 255, g: 255, b: 255 };
+  if (normalized === 'black') return { r: 0, g: 0, b: 0 };
+
+  const hexMatch = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+  if (hexMatch) {
+    const hex = hexMatch[1];
+    if (hex.length === 3) {
+      return {
+        r: parseInt(hex[0] + hex[0], 16),
+        g: parseInt(hex[1] + hex[1], 16),
+        b: parseInt(hex[2] + hex[2], 16),
+      };
+    }
+    return {
+      r: parseInt(hex.slice(0, 2), 16),
+      g: parseInt(hex.slice(2, 4), 16),
+      b: parseInt(hex.slice(4, 6), 16),
+    };
+  }
+
+  const rgbMatch = normalized.match(
+    /^rgba?\((\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})(?:\s*,\s*[\d.]+)?\)$/,
+  );
+  if (!rgbMatch) return null;
+
+  return {
+    r: Math.min(255, Math.max(0, parseInt(rgbMatch[1], 10))),
+    g: Math.min(255, Math.max(0, parseInt(rgbMatch[2], 10))),
+    b: Math.min(255, Math.max(0, parseInt(rgbMatch[3], 10))),
+  };
+};
+
+const isWhiteLikeColor = (color: string | null | undefined): boolean => {
+  if (!color) return false;
+  const rgb = parseCssColorToRgb(color);
+  if (!rgb) return false;
+  return rgb.r >= 245 && rgb.g >= 245 && rgb.b >= 245;
+};
+
+const isDarkLikeColor = (color: string): boolean => {
+  const rgb = parseCssColorToRgb(color);
+  if (!rgb) return false;
+  const luminance = 0.2126 * rgb.r + 0.7152 * rgb.g + 0.0722 * rgb.b;
+  return luminance <= 64;
+};
+
+const resolveMapTextColorForTheme = (
+  color: string | null | undefined,
+  isDarkMode: boolean,
+  fallback = '#333333',
+): string => {
+  const baseColor = color?.trim() || fallback;
+  if (!isDarkMode) return baseColor;
+  if (isWhiteLikeColor(baseColor)) return baseColor;
+  return isDarkLikeColor(baseColor) ? '#FFFFFF' : baseColor;
+};
+
+const isNumberLikeCellValue = (value: string | number | null): boolean => {
+  if (typeof value === 'number') return true;
+  if (typeof value !== 'string') return false;
+  return /^\d+$/.test(value.trim());
+};
+
 const MapCanvas: React.FC<MapCanvasProps> = ({
   mapData,
   mapName,
@@ -71,6 +138,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   // スケール計算
   const scale = zoomLevel / 100;
   const cellSize = BASE_CELL_SIZE * scale;
+  const isDarkMode =
+    typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
 
   // 常に100%時と同等の情報量を表示（ズームレベルに関係なく全情報を描画）
   const isDetailedView = true;
@@ -744,6 +813,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
         // テキスト色とスタイル
         const state = cellStates.get(`${cell.row}-${cell.col}`);
+        const explicitFontColor = cell.fontColor?.trim();
+        const enforceBlackNumberTextInDarkMode =
+          isDarkMode && Boolean(state?.hasItems) && isNumberLikeCellValue(cell.value);
 
         // 優先アイテム（黄黒ストライプ背景）の場合は白背景を描画
         if (state?.hasPriorityUnvisited && typeof cell.value === 'number') {
@@ -764,8 +836,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           ctx.roundRect(bgX, bgY, bgWidth, bgHeight, radius);
           ctx.fill();
 
-          // テキスト色は黒で目立たせる
-          ctx.fillStyle = '#212121';
+          if (enforceBlackNumberTextInDarkMode && !isWhiteLikeColor(explicitFontColor)) {
+            ctx.fillStyle = '#111111';
+          } else if (explicitFontColor) {
+            ctx.fillStyle = resolveMapTextColorForTheme(explicitFontColor, isDarkMode, '#212121');
+          } else {
+            // テキスト色は黒で目立たせる
+            ctx.fillStyle = '#212121';
+          }
+        } else if (enforceBlackNumberTextInDarkMode && !isWhiteLikeColor(explicitFontColor)) {
+          ctx.fillStyle = '#111111';
+        } else if (explicitFontColor) {
+          ctx.fillStyle = resolveMapTextColorForTheme(explicitFontColor, isDarkMode);
         } else if (state?.isFullyVisited) {
           ctx.fillStyle = '#B71C1C'; // 濃い赤：全訪問済み
         } else if (state?.isVisited) {
@@ -773,7 +855,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         } else if (state?.hasItems) {
           ctx.fillStyle = '#1565C0'; // 青：通常の未訪問アイテムあり
         } else {
-          ctx.fillStyle = cell.fontColor || '#333333';
+          ctx.fillStyle = resolveMapTextColorForTheme(cell.fontColor, isDarkMode);
         }
 
         // 縦書きの場合
@@ -1291,6 +1373,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     vertexSelectionMode,
     cellSelectionMode,
     highlightedCell,
+    isDarkMode,
     offset,
   ]);
 
