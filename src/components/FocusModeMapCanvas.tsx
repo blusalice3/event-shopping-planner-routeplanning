@@ -19,12 +19,10 @@ interface FocusModeMapCanvasProps {
   executeModeItemIds: string[];
   zoomLevel: number;
   selectedHall: HallDefinition | null;
-  // 髮・ｸｭ繝｢繝ｼ繝牙崋譛峨・繝励Ο繝代ユ繧｣
   currentVisitKey: string | null;
-  nextVisitKey: string | null; // 谺｡縺ｮ逶ｮ逧・慍
-  prevVisitKey: string | null; // 蜑阪・險ｪ蝠丞・
+  nextVisitKey: string | null;
+  prevVisitKey: string | null;
   currentPhase: 'normal' | 'postponed' | 'late';
-  // 閾ｪ蜍輔ぜ繝ｼ繝逕ｨ繧ｳ繝ｼ繝ｫ繝舌ャ繧ｯ
   onZoomChange?: (newZoom: number) => void;
   onCellClick?: (blockName: string, number: number, matchingItems: ShoppingItem[]) => void;
   appZoomLevel?: number;
@@ -34,7 +32,6 @@ interface FocusModeMapCanvasProps {
 const BASE_CELL_SIZE = 28;
 const SCROLL_MARGIN = 5;
 
-// 繝翫Φ繝舌・縺九ｉ繝吶・繧ｹ驛ｨ蛻・ｼ域焚蟄・繧｢繝ｫ繝輔ぃ繝吶ャ繝茨ｼ峨ｒ謚ｽ蜃ｺ
 const extractBaseNumber = (number: string): string => {
   const match = number.match(/^(\d+[a-zA-Z])/);
   return match ? match[1].toLowerCase() : number.toLowerCase();
@@ -68,7 +65,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
 
-  // 繝斐Φ繝√ぜ繝ｼ繝逕ｨrefs
+  // ピンチ操作中のタッチ座標を識別子ごとに保持する。
   const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchStartDistRef = useRef<number>(0);
   const pinchStartZoomRef = useRef<number>(zoomLevel);
@@ -77,14 +74,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const scale = zoomLevel / 100;
   const appScale = Math.max(0.01, appZoomLevel / 100);
   const cellSize = BASE_CELL_SIZE * scale;
-  // 陦ｨ遉ｺ蛟咲紫縺ｫ髢｢繧上ｉ縺壼・縺ｦ縺ｮ蜀・ｮｹ繧定｡ｨ遉ｺ
   const isDetailedView = true;
   const showNumbers = true;
   const showBorders = true;
 
   const prevSelectedHallRef = useRef<HallDefinition | null>(null);
 
-  // 繧ｻ繝ｫ繝槭ャ繝励ｒ菴懈・
   const cellsMap = useMemo(() => {
     const map = new Map<string, CellData>();
     mapData.cells.forEach((cell) => {
@@ -93,7 +88,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return map;
   }, [mapData.cells]);
 
-  // 邨仙粋繧ｻ繝ｫ縺ｮ繝槭ャ繝励ｒ菴懈・
   const mergedCellsMap = useMemo(() => {
     const map = new Map<string, MergedCellInfo>();
     mapData.mergedCells.forEach((merge) => {
@@ -113,14 +107,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       {
         hasItems: boolean;
         items: ShoppingItem[];
-        visitKeys: Set<string>; // 隍・焚縺ｮvisitKey繧剃ｿ晄戟
+        visitKeys: Set<string>;
         isCurrentPosition: boolean;
         isNextDestination: boolean;
         isPreviousPosition: boolean;
-        allNone: boolean; // 蜈ｨ縺ｦ譛ｪ雉ｼ蜈･
-        allProcessed: boolean; // 蜈ｨ縺ｦ蜃ｦ逅・ｸ医∩・域悴雉ｼ蜈･莉･螟厄ｼ・
-        hasPostponed: boolean; // 蠕悟屓縺励い繧､繝・Β縺ゅｊ
-        hasLate: boolean; // 驕・盾繧｢繧､繝・Β縺ゅｊ
+        allNone: boolean;
+        allProcessed: boolean;
+        hasPostponed: boolean;
+        hasLate: boolean;
         isVisited: boolean;
       }
     >();
@@ -168,9 +162,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       existing.hasItems = true;
       existing.items.push(item);
-      existing.visitKeys.add(visitKey); // 隍・焚縺ｮvisitKey繧剃ｿ晄戟
+      existing.visitKeys.add(visitKey);
 
-      // 雉ｼ蜈･迥ｶ諷九・譖ｴ譁ｰ
       if (item.purchaseStatus === 'None') {
         existing.allProcessed = false;
       } else {
@@ -186,9 +179,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       states.set(key, existing);
     });
 
-    // 險ｪ蝠乗ｸ医∩蛻､螳壹→迴ｾ蝨ｨ菴咲ｽｮ/谺｡縺ｮ逶ｮ逧・慍縺ｮ險ｭ螳・
     states.forEach((state, _key) => {
-      // 險ｪ蝠乗ｸ医∩: 蜈ｨ縺ｦ譛ｪ雉ｼ蜈･縺ｧ縺ｯ縺ｪ縺・縺九▽ (蠕悟屓縺・驕・盾縺ｮ縺ｿ縺ｧ縺ｪ縺・
       const hasFinalStatus = state.items.some(
         (item) =>
           item.purchaseStatus === 'Purchased' ||
@@ -275,7 +266,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const prevRoutePath = useMemo(() => {
     if (!prevCellCoords || !currentCellCoords) return [];
 
-    // 蜑阪・險ｪ蝠丞・縺ｨ迴ｾ蝨ｨ菴咲ｽｮ縺悟酔縺伜ｴ蜷医・繧ｹ繧ｭ繝・・
     if (
       prevCellCoords.row === currentCellCoords.row &&
       prevCellCoords.col === currentCellCoords.col
@@ -306,7 +296,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return simplifyPath(path);
   }, [prevCellCoords, currentCellCoords, mapData, cellsMap]);
 
-  // 繧ｻ繝ｫ縺後・繝ｼ繝ｫ蜀・↓縺ゅｋ縺九ｒpoint-in-polygon縺ｧ蛻､螳壹☆繧九・繝ｫ繝代・
   const findHallForCell = useCallback(
     (row: number, col: number): HallDefinition | null => {
       if (!hallDefinitions || hallDefinitions.length === 0) return null;
@@ -330,7 +319,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     [hallDefinitions],
   );
 
-  // 蜑阪・險ｪ蝠丞・縺ｨ迴ｾ蝨ｨ菴咲ｽｮ縺悟酔縺倥・繝ｼ繝ｫ縺ｫ縺ゅｋ縺九←縺・°
   const prevInSameHall = useMemo(() => {
     if (!prevCellCoords || !currentCellCoords) return false;
     if (!hallDefinitions || hallDefinitions.length === 0) return true;
@@ -340,7 +328,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return prevHall.id === currentHall.id;
   }, [prevCellCoords, currentCellCoords, hallDefinitions, findHallForCell]);
 
-  // 蜑阪・險ｪ蝠丞・繝ｫ繝ｼ繝医ｒ陦ｨ遉ｺ縺吶ｋ縺句愛螳夲ｼ医・繝ｼ繝ｫ蟾ｮ逡ｰ + 霍晞屬繝吶・繧ｹ・・  // 繝帙・繝ｫ縺檎焚縺ｪ繧句ｴ蜷医・陦ｨ遉ｺ縺励↑縺・ょ酔縺倥・繝ｼ繝ｫ縺ｧ繧・轤ｹ縺碁□縺吶℃繧句ｴ蜷医・2轤ｹ縺ｫ繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ
   const showPrevRoute = useMemo(() => {
     if (!prevCellCoords || !currentCellCoords) return false;
     if (
@@ -407,7 +394,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return { minRow, maxRow, minCol, maxCol };
   }, [currentCellCoords, nextCellCoords]);
 
-  // 螳滄圀縺ｫ菴ｿ逕ｨ縺吶ｋ繝ｫ繝ｼ繝育ｯ・峇繧呈ｱｺ螳壹☆繧九◆繧√・譛驕ｩ繧ｺ繝ｼ繝險育ｮ励・繝ｫ繝代・
   const calcOptimalZoom = useCallback(
     (
       bounds: { minRow: number; maxRow: number; minCol: number; maxCol: number },
@@ -509,7 +495,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       setOffset({ x: newOffsetX, y: newOffsetY });
     } else if (!selectedHall) {
-      // 繝帙・繝ｫ縺梧悴驕ｸ謚槭・蝣ｴ蜷医√Ν繝ｼ繝医′縺ゅｌ縺ｰ繝ｫ繝ｼ繝井ｸｭ蠢・√↑縺代ｌ縺ｰ蜴溽せ
       if (routeBounds) {
         const routeCenterCol = (routeBounds.minCol + routeBounds.maxCol) / 2;
         const routeCenterRow = (routeBounds.minRow + routeBounds.maxRow) / 2;
@@ -536,7 +521,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   ]);
 
   useEffect(() => {
-    // 險ｪ蝠丞・繧ｭ繝ｼ縺悟､峨ｏ縺｣縺ｦ縺・↑縺・ｴ蜷医・繧ｹ繧ｭ繝・・
     if (prevVisitKeyRef.current === currentVisitKey) {
       return;
     }
@@ -555,11 +539,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     if (showPrevRoute && routeBoundsAll) {
       const allZoom = calcOptimalZoom(routeBoundsAll, containerWidth, containerHeight);
       if (allZoom >= MIN_ZOOM) {
-        // 3轤ｹ縺稽in zoom莉･荳翫〒蜿弱∪繧・竊・3轤ｹ陦ｨ遉ｺ
         useBounds = routeBoundsAll;
         useShowPrev = true;
       }
-      // 3轤ｹ縺縺ｨmin zoom譛ｪ貅 竊・2轤ｹ縺ｫ繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ・・seBounds縺ｯ縺昴・縺ｾ縺ｾ・・
     }
 
     effectiveShowPrevRef.current = useShowPrev;
@@ -571,7 +553,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       onZoomChange(newZoom);
     }
 
-    // 繝ｫ繝ｼ繝医・荳ｭ蠢・ｒ逕ｻ髱｢荳ｭ螟ｮ縺ｫ驟咲ｽｮ
     const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
     const routeCenterCol = (useBounds.minCol + useBounds.maxCol) / 2;
     const routeCenterRow = (useBounds.minRow + useBounds.maxRow) / 2;
@@ -593,7 +574,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     calcOptimalZoom,
   ]);
 
-  // 謠冗判
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -613,14 +593,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, containerWidth, containerHeight);
 
-    // 繧ｪ繝輔そ繝・ヨ繧帝←逕ｨ
     ctx.save();
     ctx.translate(offset.x, offset.y);
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
-    // 繝薙Η繝ｼ繝昴・繝医・繝ｼ繧ｹ縺ｮ繧ｻ繝ｫ蜿ｯ隕也ｯ・峇繧ｫ繝ｪ繝ｳ繧ｰ
     const visMinCol = Math.max(1, Math.floor(-offset.x / cellSize));
     const visMaxCol = Math.min(
       mapData.maxCol,
@@ -646,7 +624,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       );
     };
 
-    // 1. 閭梧勹繧呈緒逕ｻ
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
 
@@ -660,7 +637,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const width = spanCols * cellSize;
       const height = spanRows * cellSize;
 
-      // 閭梧勹濶ｲ
       if (cell.backgroundColor) {
         ctx.fillStyle = cell.backgroundColor;
         ctx.fillRect(x, y, width, height);
@@ -669,38 +645,31 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const state = cellStates.get(`${cell.row}-${cell.col}`);
       if (state && state.hasItems) {
         if (state.isCurrentPosition) {
-          // 迴ｾ蝨ｨ菴咲ｽｮ: 邱題レ譎ｯ
           ctx.fillStyle = 'rgba(34, 197, 94, 0.6)';
           ctx.fillRect(x, y, width, height);
         } else if (state.isNextDestination) {
-          // 谺｡縺ｮ險ｪ蝠丞・: 繧ｪ繝ｬ繝ｳ繧ｸ閭梧勹
           ctx.fillStyle = 'rgba(255, 152, 0, 0.6)';
           ctx.fillRect(x, y, width, height);
         } else if (effectiveShowPrevRef.current && state.isPreviousPosition) {
-          // 蜑阪・險ｪ蝠丞・: 阮・＞髱堤ｴｫ閭梧勹・亥燕繝ｫ繝ｼ繝郁｡ｨ遉ｺ譎ゅ・縺ｿ・・
           ctx.fillStyle = 'rgba(139, 148, 191, 0.45)';
           ctx.fillRect(x, y, width, height);
         } else if (state.isVisited) {
-          // 險ｪ蝠乗ｸ医∩・亥・縺ｦ蜃ｦ逅・ｸ医∩縲∝ｾ悟屓縺・驕・盾縺ｮ縺ｿ縺ｧ縺ｪ縺・ｼ・ 繧ｰ繝ｬ繝ｼ
           ctx.fillStyle = 'rgba(158, 158, 158, 0.5)';
           ctx.fillRect(x, y, width, height);
         } else if (state.hasPostponed && currentPhase !== 'postponed') {
-          // 蠕悟屓縺励い繧､繝・Β縺ゅｊ・亥ｾ悟屓縺励ヵ繧ｧ繝ｼ繧ｺ莉･螟厄ｼ・ 邏ｫ邉ｻ
           ctx.fillStyle = 'rgba(156, 39, 176, 0.4)';
           ctx.fillRect(x, y, width, height);
         } else if (state.hasLate && currentPhase !== 'late') {
-          // 驕・盾繧｢繧､繝・Β縺ゅｊ・磯≦蜿ゅヵ繧ｧ繝ｼ繧ｺ莉･螟厄ｼ・ 髱堤ｳｻ
           ctx.fillStyle = 'rgba(33, 150, 243, 0.4)';
           ctx.fillRect(x, y, width, height);
         } else if (state.allNone) {
-          // 蜈ｨ縺ｦ譛ｪ雉ｼ蜈･: 騾壼ｸｸ縺ｮ髱・
           ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';
           ctx.fillRect(x, y, width, height);
         }
       }
     });
 
-    // 2. 鄂ｫ邱壹ｒ謠冗判
+    // 2. セルの罫線を描画する。
     if (showBorders) {
       mapData.cells.forEach((cell) => {
         if (cell.isMerged) return;
@@ -755,7 +724,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
     }
 
-    // 3. 繝・く繧ｹ繝医ｒ謠冗判
     if (showNumbers) {
       mapData.cells.forEach((cell) => {
         if (cell.isMerged || cell.value === null) return;
@@ -775,22 +743,18 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
         let fontSize: number;
         if (merge) {
-          // 邨仙粋繧ｻ繝ｫ縺ｯ螟ｧ縺阪ａ
           if (isVertical) {
-            // 邵ｦ譖ｸ縺阪・蝣ｴ蜷医・鬮倥＆縺ｫ蝓ｺ縺･縺・※繧ｵ繧､繧ｺ繧定ｪｿ謨ｴ
             const charCount = text.replace(/\n/g, '').length;
             fontSize = Math.min(width * 0.6, (height / (charCount + 1)) * 0.9, 16);
           } else {
             fontSize = Math.min(width, height) * (isDetailedView ? 0.5 : 0.4);
           }
         } else if (typeof cell.value === 'number') {
-          // 謨ｰ蛟､繧ｻ繝ｫ
           fontSize = Math.min(cellSize * 0.45, 14);
         } else {
-          // 繝・く繧ｹ繝医そ繝ｫ
           fontSize = Math.min(cellSize * 0.4, 12);
         }
-        fontSize = Math.max(fontSize, 8); // 譛蟆上し繧､繧ｺ
+        fontSize = Math.max(fontSize, 8);
 
         ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
         ctx.textAlign = 'center';
@@ -833,7 +797,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
     }
 
-    // 4a. 蜑阪・險ｪ蝠丞・竊堤樟蝨ｨ菴咲ｽｮ縺ｮ繝ｫ繝ｼ繝医ｒ謠冗判・郁埋縺・ｮ溽ｷ夲ｼ・    // effectiveShowPrevRef: 繝帙・繝ｫ縺檎焚縺ｪ繧・or 3轤ｹ縺碁□縺吶℃繧句ｴ蜷医・髱櫁｡ｨ遉ｺ
     const isPrevSameAsCurrent =
       prevCellCoords &&
       currentCellCoords &&
@@ -843,9 +806,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     if (effectiveShowPrevRef.current && prevRoutePath.length >= 2 && !isPrevSameAsCurrent) {
       const lineWidth = Math.max(2, cellSize * 0.08);
 
-      // 阮・＞螳溽ｷ壹〒謠冗判・郁ｨｪ蝠乗ｸ医∩繝ｫ繝ｼ繝茨ｼ・
       ctx.beginPath();
-      ctx.strokeStyle = 'rgba(156, 163, 175, 0.6)'; // 繧ｰ繝ｬ繝ｼ蜊企乗・
+      ctx.strokeStyle = 'rgba(156, 163, 175, 0.6)';
       ctx.lineWidth = lineWidth;
       ctx.lineCap = 'round';
       ctx.setLineDash([]);
@@ -862,7 +824,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
       ctx.stroke();
 
-      // 蟋狗せ・亥燕縺ｮ險ｪ蝠丞・・峨↓蟆上＆縺・ｸｸ繝槭・繧ｫ繝ｼ
       if (prevRoutePath.length >= 1) {
         const first = prevRoutePath[0];
         const startX = (first.col - 0.5) * cellSize;
@@ -874,7 +835,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         ctx.fill();
       }
 
-      // 邨らせ・育樟蝨ｨ菴咲ｽｮ譁ｹ蜷托ｼ峨↓遏｢蜊ｰ
       if (prevRoutePath.length >= 2) {
         const last = prevRoutePath[prevRoutePath.length - 1];
         const prev = prevRoutePath[prevRoutePath.length - 2];
@@ -903,7 +863,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
     }
 
-    // 4b. 繝ｫ繝ｼ繝医ｒ謠冗判・育せ邱・ 譛ｪ險ｪ蝠城Κ蛻・∝ｮ溽ｷ・ 險ｪ蝠乗ｸ医∩驛ｨ蛻・ｼ・    // 迴ｾ蝨ｨ菴咲ｽｮ縺ｨ谺｡縺ｮ逶ｮ逧・慍縺檎焚縺ｪ繧句ｴ蜷医・縺ｿ繝ｫ繝ｼ繝医ｒ謠冗判
     const isSamePosition =
       currentCellCoords &&
       nextCellCoords &&
@@ -913,9 +872,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     if (routePath.length >= 2 && !isSamePosition) {
       const lineWidth = Math.max(3, cellSize * 0.1);
 
-      // 轤ｹ邱壹〒謠冗判・域悴險ｪ蝠上Ν繝ｼ繝茨ｼ・
       ctx.beginPath();
-      ctx.strokeStyle = '#FF5722'; // 繧ｪ繝ｬ繝ｳ繧ｸ
+      ctx.strokeStyle = '#FF5722';
       ctx.lineWidth = lineWidth;
       ctx.lineCap = 'round';
       ctx.setLineDash([cellSize * 0.2, cellSize * 0.1]);
@@ -933,7 +891,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // 邨らせ縺ｫ遏｢蜊ｰ
       if (routePath.length >= 2) {
         const last = routePath[routePath.length - 1];
         const prev = routePath[routePath.length - 2];
@@ -962,7 +919,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
     }
 
-    // 5. 蠕悟屓縺・驕・盾繧ｪ繝ｼ繝舌・繝ｬ繧､
     cellStates.forEach((state, key) => {
       if (!state.hasItems) return;
 
@@ -975,16 +931,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
 
       if (state.hasPostponed && !state.allNone && currentPhase !== 'postponed') {
-        // 蜊企乗・繧ｪ繝ｼ繝舌・繝ｬ繧､
         ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
         ctx.fillRect(x, y, width, height);
 
-        // 縲悟ｾ後阪い繧､繧ｳ繝ｳ
         const iconSize = Math.max(12, cellSize * 0.4);
         ctx.font = `bold ${iconSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#7B1FA2'; // 邏ｫ
+        ctx.fillStyle = '#7B1FA2';
         ctx.fillText('後', x + width / 2, y + height / 2);
       }
 
@@ -1005,14 +959,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const x = (prevCellCoords.col - 1) * cellSize;
       const y = (prevCellCoords.row - 1) * cellSize;
 
-      // 繧ｰ繝ｬ繝ｼ譫・域而縺医ａ・・
       ctx.strokeStyle = 'rgba(107, 114, 128, 0.6)';
       ctx.lineWidth = Math.max(2, cellSize * 0.08);
       ctx.setLineDash([cellSize * 0.15, cellSize * 0.1]);
       ctx.strokeRect(x - 1, y - 1, cellSize + 2, cellSize + 2);
       ctx.setLineDash([]);
 
-      // 漠繝槭・繧ｫ繝ｼ
       const markerSize = Math.max(12, cellSize * 0.38);
       ctx.font = `${markerSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
       ctx.textAlign = 'center';
@@ -1024,12 +976,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const x = (nextCellCoords.col - 1) * cellSize;
       const y = (nextCellCoords.row - 1) * cellSize;
 
-      // 繧ｪ繝ｬ繝ｳ繧ｸ譫
       ctx.strokeStyle = '#FF6D00';
       ctx.lineWidth = Math.max(3, cellSize * 0.12);
       ctx.strokeRect(x - 1, y - 1, cellSize + 2, cellSize + 2);
 
-      // 圸繝槭・繧ｫ繝ｼ
       const markerSize = Math.max(14, cellSize * 0.45);
       ctx.font = `${markerSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
       ctx.textAlign = 'center';
@@ -1041,12 +991,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const x = (currentCellCoords.col - 1) * cellSize;
       const y = (currentCellCoords.row - 1) * cellSize;
 
-      // 邱第棧
       ctx.strokeStyle = '#22c55e';
       ctx.lineWidth = Math.max(4, cellSize * 0.15);
       ctx.strokeRect(x - 2, y - 2, cellSize + 4, cellSize + 4);
 
-      // 桃繝槭・繧ｫ繝ｼ
       const markerSize = Math.max(16, cellSize * 0.5);
       ctx.font = `${markerSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
       ctx.textAlign = 'center';
@@ -1054,7 +1002,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.fillText('📍', x + cellSize / 2, y - 2);
     }
 
-    // ctx.translate 繧定ｧ｣髯､
     ctx.restore();
   }, [
     mapData,
@@ -1078,7 +1025,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const container = containerRef.current;
     if (!container) return;
 
-    // 繝帙う繝ｼ繝ｫ繧ｺ繝ｼ繝
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (!onZoomChange) return;
@@ -1104,7 +1050,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       onZoomChange(newZoom);
     };
 
-    // 繝斐Φ繝√ぜ繝ｼ繝
     const handleTouchStart = (e: TouchEvent) => {
       Array.from(e.changedTouches).forEach((t) => {
         activeTouchesRef.current.set(t.identifier, { x: t.clientX, y: t.clientY });
@@ -1217,7 +1162,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         return false;
       });
     }
-    // 騾壼ｸｸ縺ｮ遏ｩ蠖｢繝悶Ο繝・け
     return (
       row >= block.startRow && row <= block.endRow && col >= block.startCol && col <= block.endCol
     );
@@ -1231,7 +1175,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
         const canvasRect = canvas.getBoundingClientRect();
 
-        // 繧｢繝励Μ蜈ｨ菴薙・繧ｺ繝ｼ繝繧ｹ繧ｱ繝ｼ繝ｫ
         const appScale = appZoomLevel / 100;
 
         const viewX = (e.clientX - canvasRect.left) / appScale;
@@ -1244,9 +1187,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
         if (row >= 1 && row <= mapData.maxRow && col >= 1 && col <= mapData.maxCol) {
           for (const block of mapData.blocks) {
-            // 螢√ヶ繝ｭ繝・け繧ょ性繧√※蜈ｨ縺ｦ縺ｮ繝悶Ο繝・け繧貞・逅・
             if (isCellInBlock(row, col, block)) {
-              // 繝悶Ο繝・け蜷阪そ繝ｫ縺ｪ繧峨せ繧ｭ繝・・
               if (
                 block.nameCells &&
                 block.nameCells.some((nc) => nc.row === row && nc.col === col)
@@ -1263,7 +1204,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
               if (foundNumber === null) {
                 let cell = cellsMap.get(`${row}-${col}`);
 
-                // 繧ｻ繝ｫ縺瑚ｦ九▽縺九ｉ縺ｪ縺・ｴ蜷医∫ｵ仙粋繧ｻ繝ｫ蜀・°繝√ぉ繝・け
                 if (!cell) {
                   for (const merge of mapData.mergedCells) {
                     if (
