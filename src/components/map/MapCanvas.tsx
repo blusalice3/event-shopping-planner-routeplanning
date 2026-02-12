@@ -768,28 +768,94 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.restore();
     };
 
-    const splitTextByWidth = (sourceText: string, maxLineWidth: number): string[] => {
-      const lines: string[] = [];
+    const splitTokenByWidth = (token: string, maxLineWidth: number): string[] => {
+      const chunks: string[] = [];
       let current = '';
 
-      Array.from(sourceText).forEach((char) => {
-        if (char === '\n') {
-          lines.push(current);
-          current = '';
-          return;
-        }
-
+      Array.from(token).forEach((char) => {
         const next = current + char;
         if (current.length > 0 && ctx.measureText(next).width > maxLineWidth) {
-          lines.push(current);
+          chunks.push(current);
           current = char;
         } else {
           current = next;
         }
       });
 
-      lines.push(current);
-      return lines.length > 0 ? lines : [''];
+      if (current.length > 0) {
+        chunks.push(current);
+      }
+      return chunks.length > 0 ? chunks : [''];
+    };
+
+    const tokenizeLineForWrap = (line: string): string[] => {
+      const tokens: string[] = [];
+      let currentAsciiWord = '';
+
+      const flushAsciiWord = () => {
+        if (currentAsciiWord.length === 0) return;
+        tokens.push(currentAsciiWord);
+        currentAsciiWord = '';
+      };
+
+      Array.from(line).forEach((char) => {
+        if (/\s/.test(char)) {
+          flushAsciiWord();
+          tokens.push(char);
+          return;
+        }
+        if (/[0-9A-Za-z０-９Ａ-Ｚａ-ｚ]/.test(char)) {
+          currentAsciiWord += char;
+          return;
+        }
+        flushAsciiWord();
+        tokens.push(char);
+      });
+      flushAsciiWord();
+
+      return tokens.length > 0 ? tokens : [''];
+    };
+
+    const splitTextByWidth = (sourceText: string, maxLineWidth: number): string[] => {
+      const rawLines = sourceText.split('\n');
+      const wrappedLines: string[] = [];
+
+      rawLines.forEach((rawLine) => {
+        if (rawLine.length === 0) {
+          wrappedLines.push('');
+          return;
+        }
+
+        const tokens = tokenizeLineForWrap(rawLine);
+        let current = '';
+
+        tokens.forEach((token) => {
+          const next = current + token;
+          if (current.length > 0 && ctx.measureText(next).width > maxLineWidth) {
+            wrappedLines.push(current.trimEnd());
+
+            const normalizedToken = token.trimStart();
+            if (normalizedToken.length === 0) {
+              current = '';
+              return;
+            }
+
+            if (ctx.measureText(normalizedToken).width > maxLineWidth) {
+              const chunks = splitTokenByWidth(normalizedToken, maxLineWidth);
+              wrappedLines.push(...chunks.slice(0, -1));
+              current = chunks[chunks.length - 1];
+            } else {
+              current = normalizedToken;
+            }
+          } else {
+            current = next;
+          }
+        });
+
+        wrappedLines.push(current.trimEnd());
+      });
+
+      return wrappedLines.length > 0 ? wrappedLines : [''];
     };
 
     const trimLineToWidth = (line: string, maxLineWidth: number): string => {
@@ -844,23 +910,16 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.rect(x, y, width, height);
       ctx.clip();
       ctx.font = `${resolvedFontSize}px ${fontFamily}`;
-      ctx.textAlign = 'left';
+      ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
 
       const totalTextHeight = resolvedLines.length * resolvedLineHeight;
       const startY = y + (height - totalTextHeight) / 2 + resolvedLineHeight / 2;
+      const centerX = x + width / 2;
 
       resolvedLines.forEach((line, lineIndex) => {
-        const chars = Array.from(line);
-        const charWidths = chars.map((char) => ctx.measureText(char).width);
-        const lineWidth = charWidths.reduce((sum, charWidth) => sum + charWidth, 0);
-        let cursorX = x + (width - lineWidth) / 2;
         const lineY = startY + lineIndex * resolvedLineHeight;
-
-        chars.forEach((char, charIndex) => {
-          drawUprightText(char, cursorX, lineY);
-          cursorX += charWidths[charIndex];
-        });
+        drawUprightText(line, centerX, lineY);
       });
 
       ctx.restore();
