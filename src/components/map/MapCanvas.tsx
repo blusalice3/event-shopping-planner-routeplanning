@@ -36,6 +36,7 @@ interface MapCanvasProps {
 
 const BASE_CELL_SIZE = 28; // 基本セルサイズ
 const SCROLL_MARGIN = 5; // スクロール余白（行/列数）
+const FILLED_SCROLL_MARGIN = 10; // 入力済みセル境界からの追加余白（行/列数）
 
 const hasCellInputValue = (value: string | number | null): boolean => {
   if (value === null || value === undefined) return false;
@@ -1456,12 +1457,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     });
 
     if (!hasBounds) return null;
-    return { minRow, maxRow, minCol, maxCol };
+    return {
+      minRow: minRow - FILLED_SCROLL_MARGIN,
+      maxRow: maxRow + FILLED_SCROLL_MARGIN,
+      minCol: minCol - FILLED_SCROLL_MARGIN,
+      maxCol: maxCol + FILLED_SCROLL_MARGIN,
+    };
   }, [mapData.cells, mapData.mergedCells]);
 
   const activeScrollBounds = useMemo(
-    () => hallScrollBounds || filledCellScrollBounds,
-    [hallScrollBounds, filledCellScrollBounds],
+    () => filledCellScrollBounds || hallScrollBounds,
+    [filledCellScrollBounds, hallScrollBounds],
   );
 
   // スクロール制限を計算する関数
