@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ShoppingItem,
   PurchaseStatus,
@@ -119,7 +119,7 @@ const App: React.FC = () => {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [selectedBlockFilters, setSelectedBlockFilters] = useState<Set<string>>(new Set());
   const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
-  // 襍ｷ轤ｹ縺ｨ邨らせ繧堤ｮ｡逅・ｼ亥・繧ｿ繧､繝励→繧｢繧､繝・ΒID縺ｮ繝壹い・・
+  // 処理の補足です。
   const [rangeStart, setRangeStart] = useState<{
     itemId: string;
     columnType: 'execute' | 'candidate';
@@ -129,7 +129,7 @@ const App: React.FC = () => {
     columnType: 'execute' | 'candidate';
   } | null>(null);
 
-  // 繝槭ャ繝励°繧峨・譁ｰ隕上い繧､繝・Β霑ｽ蜉逕ｨ縺ｮ蛻晄悄蛟､
+  // 処理の補足です。
 
   const [newItemDefaults, setNewItemDefaults] = useState<{
     eventDate: string;
@@ -137,7 +137,7 @@ const App: React.FC = () => {
     number: string;
   } | null>(null);
 
-  // 譖ｴ譁ｰ讖溯・逕ｨ縺ｮ迥ｶ諷・
+  // 処理の補足です。
 
   const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
   const [updateData, setUpdateData] = useState<EventUpdateDiff | null>(null);
@@ -147,13 +147,13 @@ const App: React.FC = () => {
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [eventToRename, setEventToRename] = useState<string | null>(null);
 
-  // 讀懃ｴ｢讖溯・縺ｮ迥ｶ諷・
+  // 処理の補足です。
 
   const [searchKeyword, setSearchKeyword] = useState('');
   const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
-  // 繝ｬ繧､繧｢繧ｦ繝医Δ繝ｼ繝臥憾諷具ｼ医ン繝･繝ｼ繝昴・繝亥ｹ・〒蛻晄悄蛹厄ｼ・
+  // 処理の補足です。
 
   const [layoutMode, setLayoutMode] = useState<'pc' | 'smartphone'>(() =>
     typeof window !== 'undefined' && window.innerWidth < 768 ? 'smartphone' : 'pc',
@@ -165,7 +165,7 @@ const App: React.FC = () => {
 
   const { themeMode, setThemeMode } = useThemeMode();
 
-  // 繝槭ャ繝玲ｩ溯・縺ｮ迥ｶ諷・
+  // 処理の補足です。
 
   const [mapData, setMapData] = useState<MapDataStore>({});
   const [routeSettings, setRouteSettings] = useState<RouteSettingsStore>({});
@@ -176,7 +176,7 @@ const App: React.FC = () => {
   const mapFileInputRef = useRef<HTMLInputElement>(null);
   const exportFileInputRef = useRef<HTMLInputElement>(null);
 
-  // 繝槭ャ繝怜叙繧願ｾｼ縺ｿ繝繧､繧｢繝ｭ繧ｰ逕ｨ縺ｮ迥ｶ諷・
+  // 処理の補足です。
 
   const [mapImportDialogOpen, setMapImportDialogOpen] = useState(false);
   const [mapImportPendingFile, setMapImportPendingFile] = useState<File | null>(null);
@@ -209,7 +209,7 @@ const App: React.FC = () => {
     [activeEventName, eventLists],
   );
 
-  // 迴ｾ蝨ｨ縺ｮ繧､繝吶Φ繝医・蜿ょ刈譌･繝ｪ繧ｹ繝医ｒ蜿門ｾ・
+  // 処理の補足です。
 
   const eventDates = useMemo(() => extractEventDates(items), [items]);
 
@@ -231,7 +231,7 @@ const App: React.FC = () => {
     hallRouteSettings,
   });
 
-  // 繝帙・繝ｫ蜀・・險ｪ蝠丞・繧｢繧､繝・Β謨ｰ繧貞叙蠕暦ｼ亥━蜈医・譛蜆ｪ蜈医げ繝ｫ繝ｼ繝励ｂ蜷ｫ繧・・
+  // 処理の補足です。
 
   const getHallExecuteCount = useCallback(
     (hallId: string): number => {
@@ -247,7 +247,7 @@ const App: React.FC = () => {
         const item = items.find((i) => i.id === itemId);
         if (!item) return false;
 
-        // 繝悶Ο繝・け縺九ｉ繝帙・繝ｫID繧貞愛螳・
+        // 処理の補足です。
 
         const block = currentMapData.blocks.find((b) => b.name === item.block);
         if (!block) return false;
@@ -268,7 +268,7 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, activeTab, currentMapData, currentHalls, items, executeModeItems],
   );
 
-  // 繝帙・繝ｫ蜀・・蜈ｨ繧｢繧､繝・Β謨ｰ繧貞叙蠕・
+  // 処理の補足です。
 
   const getHallTotalItemCount = useCallback(
     (hallId: string): number => {
@@ -281,7 +281,7 @@ const App: React.FC = () => {
       const dayItems = items.filter((item) => item.eventDate === dayName);
 
       return dayItems.filter((item) => {
-        // 繝悶Ο繝・け縺九ｉ繝帙・繝ｫID繧貞愛螳・
+        // 処理の補足です。
         const block = currentMapData.blocks.find((b) => b.name === item.block);
         if (!block) return false;
 
@@ -301,7 +301,7 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, activeTab, currentMapData, currentHalls, items],
   );
 
-  // 繧｢繧､繝・Β縺後←縺ｮ繝帙・繝ｫ縺ｫ螻槭☆繧九°繧貞愛螳・
+  // 処理の補足です。
 
   const getItemHallId = useCallback(
     (item: ShoppingItem, eventDate: string): string | null => {
@@ -309,7 +309,7 @@ const App: React.FC = () => {
       const mapDataForDate = getMapDataForDate(eventDate);
       if (!halls.length || !mapDataForDate) return null;
 
-      // 繝悶Ο繝・け縺ｮ荳ｭ蠢・せ繧貞叙蠕・
+      // 処理の補足です。
 
       const block = mapDataForDate.blocks.find((b) => b.name === item.block);
       if (!block) return null;
@@ -317,7 +317,7 @@ const App: React.FC = () => {
       const centerRow = (block.startRow + block.endRow) / 2;
       const centerCol = (block.startCol + block.endCol) / 2;
 
-      // 縺ｩ縺ｮ繝帙・繝ｫ縺ｫ螻槭☆繧九°蛻､螳・
+      // 処理の補足です。
 
       for (const hall of halls) {
         if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
@@ -329,19 +329,19 @@ const App: React.FC = () => {
     [getHallsForDate, getMapDataForDate],
   );
 
-  // 2縺､縺ｮ繧｢繧､繝・Β縺悟酔縺倥・繝ｼ繝ｫ縺ｫ螻槭☆繧九°繧貞愛螳・
+  // 処理の補足です。
 
   const areItemsInSameHall = useCallback(
     (itemId1: string, itemId2: string, eventDate: string): boolean => {
       const item1 = items.find((i) => i.id === itemId1);
       const item2 = items.find((i) => i.id === itemId2);
-      if (!item1 || !item2) return true; // 繧｢繧､繝・Β縺瑚ｦ九▽縺九ｉ縺ｪ縺・ｴ蜷医・蛻ｶ髯舌↑縺・
+      if (!item1 || !item2) return true; // 判定に必要な情報が不足するため true を返します。
       const halls = getHallsForDate(eventDate);
-      if (!halls.length) return true; // 繝帙・繝ｫ螳夂ｾｩ縺後↑縺・ｴ蜷医・蛻ｶ髯舌↑縺・
+      if (!halls.length) return true; // 判定に必要な情報が不足するため true を返します。
       const hallId1 = getItemHallId(item1, eventDate);
       const hallId2 = getItemHallId(item2, eventDate);
 
-      // 縺ｩ縺｡繧峨°縺後・繝ｼ繝ｫ縺ｫ螻槭＠縺ｦ縺・↑縺・ｴ蜷医・蛻ｶ髯舌↑縺・
+      // 処理の補足です。
 
       if (hallId1 === null || hallId2 === null) return true;
 
@@ -352,18 +352,18 @@ const App: React.FC = () => {
 
   const currentMode = useMemo(() => {
     if (!activeEventName) return 'execute';
-    // 繝槭ャ繝励ち繝悶・蝣ｴ蜷医・邱ｨ髮・Δ繝ｼ繝峨ｒ霑斐☆
+    // 処理の補足です。
     if (isMapTab) return 'edit';
     const modes = dayModes[activeEventName];
     if (!modes) return 'edit';
-    // activeTab縺悟盾蜉譌･・・1譌･逶ｮ', '2譌･逶ｮ'縺ｪ縺ｩ・峨・蝣ｴ蜷・
+    // 処理の補足です。
     if (eventDates.includes(activeTab)) {
       return modes[activeTab] || 'edit';
     }
     return 'edit';
   }, [activeEventName, dayModes, activeTab, eventDates, isMapTab]);
 
-  // 迴ｾ蝨ｨ縺ｮ譚｡莉ｶ縺ｫ蝓ｺ縺･縺上・繝・ム繝ｼ/繧ｿ繝悶ヰ繝ｼ陦ｨ遉ｺ迥ｶ諷・
+  // 処理の補足です。
 
   const { showHeaderBar, showTabBar, rawHideSomething } = useMemo(() => {
     if (!activeEventName) {
@@ -479,20 +479,20 @@ const App: React.FC = () => {
       if (!activeEventName) return;
 
       setEventLists((prev) => {
-        // 雉ｼ蜈･迥ｶ諷九′螟画峩縺輔ｌ縺溘°繝√ぉ繝・け
+        // 処理の補足です。
         const currentItem = prev[activeEventName]?.find((item) => item.id === updatedItem.id);
         const purchaseStatusChanged =
           currentItem && currentItem.purchaseStatus !== updatedItem.purchaseStatus;
         const priceChanged = currentItem && currentItem.price !== updatedItem.price;
 
-        // 雉ｼ蜈･迥ｶ諷九′螟画峩縺輔ｌ縺溷ｴ蜷医∵怙霑大､画峩縺輔ｌ縺溘い繧､繝・Β縺ｨ縺励※險倬鹸
+        // 処理の補足です。
 
         if (purchaseStatusChanged) {
           setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
         }
 
-        // 螳溯｡後Δ繝ｼ繝峨・髮・ｸｭ繝｢繝ｼ繝峨〒雉ｼ蜈･迥ｶ諷九∪縺溘・萓｡譬ｼ縺悟､画峩縺輔ｌ縺溷ｴ蜷医∽ｿ晁ｭｷ繝ｬ繝吶Ν繧・deletable'縺ｫ閾ｪ蜍募､画峩
-        // ・域・遉ｺ逧・↓protectionLevel縺瑚ｨｭ螳壹＆繧後※縺・↑縺・ｴ蜷医・縺ｿ・・
+        // 処理の補足です。
+        // 処理の補足です。
         const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
         const currentMode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
         let finalItem = updatedItem;
@@ -501,7 +501,7 @@ const App: React.FC = () => {
           (currentMode === 'execute' || currentMode === 'focus') &&
           (purchaseStatusChanged || priceChanged)
         ) {
-          // 迴ｾ蝨ｨ縺ｮ菫晁ｭｷ繝ｬ繝吶Ν縺系one・井ｿ晁ｭｷ縺ｪ縺暦ｼ峨・蝣ｴ蜷医・縺ｿ縲‥eletable・亥炎髯､縺ｮ縺ｿ險ｱ蜿ｯ・峨↓螟画峩
+          // 処理の補足です。
           const currentProtection =
             currentItem?.protectionLevel ?? (currentItem?.source === 'app' ? 'full' : 'none');
           if (currentProtection === 'none') {
@@ -534,31 +534,31 @@ const App: React.FC = () => {
       const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
       const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
 
-      // 繝ｪ繧ｹ繝域忰蟆ｾ縺ｸ縺ｮ霑ｽ蜉蛻､螳・
+      // 処理の補足です。
 
       const isAppendToEnd = hoverId === '__END_OF_LIST__';
 
-      // 蛻鈴俣遘ｻ蜍輔・蜃ｦ逅・ｼ育ｷｨ髮・Δ繝ｼ繝峨・縺ｿ・・
+      // 処理の補足です。
 
       if (mode === 'edit' && sourceColumn && targetColumn && sourceColumn !== targetColumn) {
         const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
 
         if (sourceColumn === 'candidate' && targetColumn === 'execute') {
-          // 蛟呵｣懊Μ繧ｹ繝・竊・螳溯｡悟・縺ｸ縺ｮ遘ｻ蜍・        // candidateColumnItems縺ｨ蜷後§繝ｭ繧ｸ繝・け縺ｧ蛟呵｣懊Μ繧ｹ繝医・繧｢繧､繝・Β繧貞叙蠕暦ｼ磯・ｺ上ｒ邯ｭ謖・ｼ・
+          // 処理の補足です。
           const currentTabItemsForMove = items.filter((item) => item.eventDate === activeTab);
           let candidateItems = currentTabItemsForMove.filter((item) => !executeIdsSet.has(item.id));
 
-          // 繝悶Ο繝・け繝輔ぅ繝ｫ繧ｿ繧帝←逕ｨ・・andidateColumnItems縺ｨ蜷後§・・
+          // 処理の補足です。
 
           if (selectedBlockFilters.size > 0) {
             candidateItems = candidateItems.filter((item) => selectedBlockFilters.has(item.block));
           }
 
-          // 遘ｻ蜍輔☆繧九い繧､繝・Β繧貞叙蠕暦ｼ亥呵｣懊Μ繧ｹ繝医・鬆・ｺ上ｒ邯ｭ謖・ｼ・
+          // 処理の補足です。
 
           let itemsToMove: ShoppingItem[] = [];
           if (selectedItemIds.has(dragId)) {
-            // 蛟呵｣懊Μ繧ｹ繝医・鬆・ｺ上ｒ邯ｭ謖√＠縺ｪ縺後ｉ驕ｸ謚槭＆繧後◆繧｢繧､繝・Β繧呈歓蜃ｺ
+            // 処理の補足です。
             itemsToMove = candidateItems.filter((item) => selectedItemIds.has(item.id));
           } else {
             const item = candidateItems.find((item) => item.id === dragId);
@@ -569,7 +569,7 @@ const App: React.FC = () => {
 
           const itemIdsToMove = itemsToMove.map((item) => item.id);
 
-          // executeModeItems縺ｫ霑ｽ蜉
+          // 処理の補足です。
 
           setExecuteModeItems((prevExecute) => {
             const eventItems = prevExecute[activeEventName] || {};
@@ -603,7 +603,7 @@ const App: React.FC = () => {
           });
           return;
         } else if (sourceColumn === 'execute' && targetColumn === 'candidate') {
-          // 螳溯｡悟・ 竊・蛟呵｣懊Μ繧ｹ繝医∈縺ｮ遘ｻ蜍・
+          // 処理の補足です。
           setEventLists((prev) => {
             const allItems = [...(prev[activeEventName] || [])];
             const executeItems = allItems.filter(
@@ -613,7 +613,7 @@ const App: React.FC = () => {
               (item) => item.eventDate.includes(currentEventDate) && !executeIdsSet.has(item.id),
             );
 
-            // 遘ｻ蜍輔☆繧九い繧､繝・Β繧貞叙蠕・
+            // 処理の補足です。
 
             let itemsToMove: ShoppingItem[] = [];
             if (selectedItemIds.has(dragId)) {
@@ -627,7 +627,7 @@ const App: React.FC = () => {
 
             const itemIdsToMove = itemsToMove.map((item) => item.id);
 
-            // executeModeItems縺九ｉ蜑企勁
+            // 処理の補足です。
 
             setExecuteModeItems((prevExecute) => {
               const eventItems = prevExecute[activeEventName] || {};
@@ -640,7 +640,7 @@ const App: React.FC = () => {
               };
             });
 
-            // 蛟呵｣懊Μ繧ｹ繝医↓謖ｿ蜈･
+            // 処理の補足です。
 
             let newCandidateList: ShoppingItem[] = [];
             if (isAppendToEnd) {
@@ -658,7 +658,7 @@ const App: React.FC = () => {
               }
             }
 
-            // 蜀咲ｵ仙粋蜃ｦ逅・
+            // 処理の補足です。
 
             const remainingExecuteItems = executeItems.filter(
               (item) => !itemIdsToMove.includes(item.id),
@@ -683,13 +683,13 @@ const App: React.FC = () => {
       }
 
       if (mode === 'edit' && targetColumn === 'execute') {
-        // 邱ｨ髮・Δ繝ｼ繝・ 螳溯｡悟・蜀・〒縺ｮ荳ｦ縺ｳ譖ｿ縺・
+        // 処理の補足です。
         setExecuteModeItems((prev) => {
           const eventItems = prev[activeEventName] || {};
           const dayItems = [...(eventItems[currentEventDate] || [])];
 
           if (selectedItemIds.has(dragId)) {
-            // 隍・焚驕ｸ謚樊凾
+            // 処理の補足です。
             const selectedBlock = dayItems.filter((id) => selectedItemIds.has(id));
             const listWithoutSelection = dayItems.filter((id) => !selectedItemIds.has(id));
 
@@ -712,9 +712,9 @@ const App: React.FC = () => {
               [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection },
             };
           } else {
-            // 蜊倅ｸ繧｢繧､繝・Β
+            // 処理の補足です。
             const dragIndex = dayItems.findIndex((id) => id === dragId);
-            if (dragIndex === -1) return prev; // 隕九▽縺九ｉ縺ｪ縺・ｴ蜷・
+            if (dragIndex === -1) return prev; // 条件に合わないため状態は変更しません。
             const [draggedItem] = dayItems.splice(dragIndex, 1);
 
             if (isAppendToEnd) {
@@ -732,7 +732,7 @@ const App: React.FC = () => {
           }
         });
       } else if (mode === 'edit' && targetColumn === 'candidate') {
-        // 邱ｨ髮・Δ繝ｼ繝・ 蛟呵｣懊Μ繧ｹ繝亥・縺ｧ縺ｮ荳ｦ縺ｳ譖ｿ縺・
+        // 処理の補足です。
         setEventLists((prev) => {
           const allItems = [...(prev[activeEventName] || [])];
           const currentTabKey = currentEventDate;
@@ -745,7 +745,7 @@ const App: React.FC = () => {
           );
 
           if (selectedItemIds.has(dragId)) {
-            // 隍・焚驕ｸ謚樊凾
+            // 処理の補足です。
             const selectedBlock = candidateItems.filter((item) => selectedItemIds.has(item.id));
             const listWithoutSelection = candidateItems.filter(
               (item) => !selectedItemIds.has(item.id),
@@ -762,7 +762,7 @@ const App: React.FC = () => {
               newCandidateList = listWithoutSelection;
             }
 
-            // 蜀咲ｵ仙粋蜃ｦ逅・
+            // 処理の補足です。
 
             const executeItems = allItems.filter(
               (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
@@ -781,7 +781,7 @@ const App: React.FC = () => {
 
             return { ...prev, [activeEventName]: newItems };
           } else {
-            // 蜊倅ｸ繧｢繧､繝・Β
+            // 処理の補足です。
             const dragIndex = candidateItems.findIndex((item) => item.id === dragId);
             if (dragIndex === -1) return prev;
 
@@ -816,7 +816,7 @@ const App: React.FC = () => {
           }
         });
       } else if (mode === 'execute') {
-        // 螳溯｡後Δ繝ｼ繝・ 騾壼ｸｸ縺ｮ荳ｦ縺ｳ譖ｿ縺・
+        // 処理の補足です。
         setEventLists((prev) => {
           const newItems = [...(prev[activeEventName] || [])];
 
@@ -872,33 +872,33 @@ const App: React.FC = () => {
       const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
 
       if (mode === 'edit' && targetColumn === 'execute') {
-        // 邱ｨ髮・Δ繝ｼ繝・ 螳溯｡悟・蜀・〒縺ｮ荳ｦ縺ｳ譖ｿ縺・
+        // 処理の補足です。
         setExecuteModeItems((prev) => {
           const eventItems = prev[activeEventName] || {};
           const dayItems = [...(eventItems[currentEventDate] || [])];
           const currentIndex = dayItems.findIndex((id) => id === itemId);
 
-          if (currentIndex <= 0) return prev; // 譌｢縺ｫ蜈磯ｭ縺ｾ縺溘・隕九▽縺九ｉ縺ｪ縺・
-          // 繝帙・繝ｫ髢鍋ｧｻ蜍募宛髯舌メ繧ｧ繝・け
+          if (currentIndex <= 0) return prev; // 条件に合わないため状態は変更しません。
+          // 処理の補足です。
           const targetId = dayItems[currentIndex - 1];
           if (!areItemsInSameHall(itemId, targetId, currentEventDate)) {
-            return prev; // 逡ｰ縺ｪ繧九・繝ｼ繝ｫ縺ｪ縺ｮ縺ｧ遘ｻ蜍穂ｸ榊庄
+            return prev; // 条件に合わないため状態は変更しません。
           }
 
-          // 隍・焚驕ｸ謚樊凾縺ｯ驕ｸ謚槭＆繧後◆繧｢繧､繝・Β縺吶∋縺ｦ繧堤ｧｻ蜍・
+          // 処理の補足です。
 
           if (selectedItemIds.has(itemId)) {
             const selectedIds = dayItems.filter((id) => selectedItemIds.has(id));
             const listWithoutSelection = dayItems.filter((id) => !selectedItemIds.has(id));
 
-            // 驕ｸ謚槭＆繧後◆繧｢繧､繝・Β縺ｮ譛蛻昴・菴咲ｽｮ繧貞渕貅悶↓遘ｻ蜍・
+            // 処理の補足です。
 
             const firstSelectedIndex = dayItems.findIndex((id) => selectedItemIds.has(id));
             if (firstSelectedIndex > 0) {
-              // 繝帙・繝ｫ髢鍋ｧｻ蜍募宛髯舌メ繧ｧ繝・け・磯∈謚槭げ繝ｫ繝ｼ繝怜・菴難ｼ・
+              // 処理の補足です。
               const targetIdForGroup = dayItems[firstSelectedIndex - 1];
               if (!areItemsInSameHall(selectedIds[0], targetIdForGroup, currentEventDate)) {
-                return prev; // 逡ｰ縺ｪ繧九・繝ｼ繝ｫ縺ｪ縺ｮ縺ｧ遘ｻ蜍穂ｸ榊庄
+                return prev; // 条件に合わないため状態は変更しません。
               }
               const newTargetIndex = firstSelectedIndex - 1;
               listWithoutSelection.splice(newTargetIndex, 0, ...selectedIds);
@@ -909,7 +909,7 @@ const App: React.FC = () => {
             }
             return prev;
           } else {
-            // 蜊倅ｸ繧｢繧､繝・Β
+            // 処理の補足です。
             [dayItems[currentIndex - 1], dayItems[currentIndex]] = [
               dayItems[currentIndex],
               dayItems[currentIndex - 1],
@@ -921,7 +921,7 @@ const App: React.FC = () => {
           }
         });
       } else if (mode === 'edit' && targetColumn === 'candidate') {
-        // 邱ｨ髮・Δ繝ｼ繝・ 蛟呵｣懊Μ繧ｹ繝亥・縺ｧ縺ｮ荳ｦ縺ｳ譖ｿ縺・
+        // 処理の補足です。
         setEventLists((prev) => {
           const allItems = [...(prev[activeEventName] || [])];
           const currentTabKey = currentEventDate;
@@ -929,16 +929,16 @@ const App: React.FC = () => {
             executeModeItems[activeEventName]?.[currentEventDate] || [],
           );
 
-          // 蛟呵｣懊Μ繧ｹ繝医・繧｢繧､繝・Β縺ｮ縺ｿ繧貞叙蠕・
+          // 処理の補足です。
 
           const candidateItems = allItems.filter(
             (item) => item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id),
           );
 
           const currentIndex = candidateItems.findIndex((item) => item.id === itemId);
-          if (currentIndex <= 0) return prev; // 譌｢縺ｫ蜈磯ｭ縺ｾ縺溘・隕九▽縺九ｉ縺ｪ縺・
+          if (currentIndex <= 0) return prev; // 条件に合わないため状態は変更しません。
           if (selectedItemIds.has(itemId)) {
-            // 隍・焚驕ｸ謚樊凾
+            // 処理の補足です。
             const selectedBlock = candidateItems.filter((item) => selectedItemIds.has(item.id));
             const listWithoutSelection = candidateItems.filter(
               (item) => !selectedItemIds.has(item.id),
@@ -951,7 +951,7 @@ const App: React.FC = () => {
               const newTargetIndex = firstSelectedIndex - 1;
               listWithoutSelection.splice(newTargetIndex, 0, ...selectedBlock);
 
-              // 螳溯｡後Δ繝ｼ繝牙・縺ｮ繧｢繧､繝・Β縺ｯ縺昴・縺ｾ縺ｾ縲∝呵｣懊Μ繧ｹ繝医・縺ｿ荳ｦ縺ｳ譖ｿ縺・
+              // 処理の補足です。
 
               const executeItems = allItems.filter(
                 (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
@@ -972,13 +972,13 @@ const App: React.FC = () => {
             }
             return prev;
           } else {
-            // 蜊倅ｸ繧｢繧､繝・Β
+            // 処理の補足です。
             [candidateItems[currentIndex - 1], candidateItems[currentIndex]] = [
               candidateItems[currentIndex],
               candidateItems[currentIndex - 1],
             ];
 
-            // 螳溯｡後Δ繝ｼ繝牙・縺ｮ繧｢繧､繝・Β縺ｯ縺昴・縺ｾ縺ｾ縲∝呵｣懊Μ繧ｹ繝医・縺ｿ荳ｦ縺ｳ譖ｿ縺・
+            // 処理の補足です。
 
             const executeItems = allItems.filter(
               (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
@@ -999,12 +999,12 @@ const App: React.FC = () => {
           }
         });
       } else if (mode === 'execute') {
-        // 螳溯｡後Δ繝ｼ繝・ 騾壼ｸｸ縺ｮ荳ｦ縺ｳ譖ｿ縺・
+        // 処理の補足です。
         setEventLists((prev) => {
           const newItems = [...(prev[activeEventName] || [])];
           const currentIndex = newItems.findIndex((item) => item.id === itemId);
 
-          if (currentIndex <= 0) return prev; // 譌｢縺ｫ蜈磯ｭ縺ｾ縺溘・隕九▽縺九ｉ縺ｪ縺・
+          if (currentIndex <= 0) return prev; // 条件に合わないため状態は変更しません。
           if (selectedItemIds.has(itemId)) {
             const selectedBlock = newItems.filter((item) => selectedItemIds.has(item.id));
             const listWithoutSelection = newItems.filter((item) => !selectedItemIds.has(item.id));
@@ -1047,39 +1047,39 @@ const App: React.FC = () => {
       const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
 
       if (mode === 'edit' && targetColumn === 'execute') {
-        // 邱ｨ髮・Δ繝ｼ繝・ 螳溯｡悟・蜀・〒縺ｮ荳ｦ縺ｳ譖ｿ縺・
+        // 処理の補足です。
         setExecuteModeItems((prev) => {
           const eventItems = prev[activeEventName] || {};
           const dayItems = [...(eventItems[currentEventDate] || [])];
           const currentIndex = dayItems.findIndex((id) => id === itemId);
 
-          if (currentIndex < 0 || currentIndex >= dayItems.length - 1) return prev; // 譌｢縺ｫ譛ｫ蟆ｾ縺ｾ縺溘・隕九▽縺九ｉ縺ｪ縺・
-          // 繝帙・繝ｫ髢鍋ｧｻ蜍募宛髯舌メ繧ｧ繝・け
+          if (currentIndex < 0 || currentIndex >= dayItems.length - 1) return prev; // 条件に合わないため状態は変更しません。
+          // 処理の補足です。
           const targetId = dayItems[currentIndex + 1];
           if (!areItemsInSameHall(itemId, targetId, currentEventDate)) {
-            return prev; // 逡ｰ縺ｪ繧九・繝ｼ繝ｫ縺ｪ縺ｮ縺ｧ遘ｻ蜍穂ｸ榊庄
+            return prev; // 条件に合わないため状態は変更しません。
           }
 
-          // 隍・焚驕ｸ謚樊凾縺ｯ驕ｸ謚槭＆繧後◆繧｢繧､繝・Β縺吶∋縺ｦ繧堤ｧｻ蜍・
+          // 処理の補足です。
 
           if (selectedItemIds.has(itemId)) {
             const selectedIds = dayItems.filter((id) => selectedItemIds.has(id));
             const listWithoutSelection = dayItems.filter((id) => !selectedItemIds.has(id));
 
-            // 驕ｸ謚槭＆繧後◆繧｢繧､繝・Β縺ｮ荳ｭ縺ｧ譛繧ょｾ後ｍ縺ｮ菴咲ｽｮ繧定ｦ九▽縺代ｋ
+            // 処理の補足です。
 
             let lastSelectedIndex = -1;
             dayItems.forEach((id, index) => {
               if (selectedItemIds.has(id)) lastSelectedIndex = index;
             });
 
-            // 驕ｸ謚槭＆繧後◆繧｢繧､繝・Β縺梧怙蠕後↓縺ｪ縺・ｴ蜷医・縺ｿ遘ｻ蜍・
+            // 処理の補足です。
 
             if (lastSelectedIndex >= 0 && lastSelectedIndex < dayItems.length - 1) {
-              // 鬟帙・雜翫∴繧句ｯｾ雎｡縺ｮ繧｢繧､繝・Β・磯∈謚樒ｯ・峇縺ｮ逶ｴ蠕後・繧｢繧､繝・Β・・
+              // 処理の補足です。
               const jumpOverItemId = dayItems[lastSelectedIndex + 1];
 
-              // 繝帙・繝ｫ髢鍋ｧｻ蜍募宛髯舌メ繧ｧ繝・け・磯∈謚槭げ繝ｫ繝ｼ繝怜・菴難ｼ・
+              // 処理の補足です。
 
               if (
                 !areItemsInSameHall(
@@ -1088,17 +1088,17 @@ const App: React.FC = () => {
                   currentEventDate,
                 )
               ) {
-                return prev; // 逡ｰ縺ｪ繧九・繝ｼ繝ｫ縺ｪ縺ｮ縺ｧ遘ｻ蜍穂ｸ榊庄
+                return prev; // 条件に合わないため状態は変更しません。
               }
 
-              // 髱樣∈謚槭Μ繧ｹ繝亥・縺ｧ縺ｮ縺昴・繧｢繧､繝・Β縺ｮ菴咲ｽｮ
+              // 処理の補足です。
 
               const targetIndexInListWithout = listWithoutSelection.findIndex(
                 (id) => id === jumpOverItemId,
               );
 
               if (targetIndexInListWithout !== -1) {
-                // 縺昴・繧｢繧､繝・Β縺ｮ蠕後ｍ縺ｫ謖ｿ蜈･
+                // 処理の補足です。
                 listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedIds);
                 return {
                   ...prev,
@@ -1108,7 +1108,7 @@ const App: React.FC = () => {
             }
             return prev;
           } else {
-            // 蜊倅ｸ繧｢繧､繝・Β
+            // 処理の補足です。
             [dayItems[currentIndex], dayItems[currentIndex + 1]] = [
               dayItems[currentIndex + 1],
               dayItems[currentIndex],
@@ -1120,7 +1120,7 @@ const App: React.FC = () => {
           }
         });
       } else if (mode === 'edit' && targetColumn === 'candidate') {
-        // 邱ｨ髮・Δ繝ｼ繝・ 蛟呵｣懊Μ繧ｹ繝亥・縺ｧ縺ｮ荳ｦ縺ｳ譖ｿ縺・
+        // 処理の補足です。
         setEventLists((prev) => {
           const allItems = [...(prev[activeEventName] || [])];
           const currentTabKey = currentEventDate;
@@ -1128,29 +1128,29 @@ const App: React.FC = () => {
             executeModeItems[activeEventName]?.[currentEventDate] || [],
           );
 
-          // 蛟呵｣懊Μ繧ｹ繝医・繧｢繧､繝・Β縺ｮ縺ｿ繧貞叙蠕・
+          // 処理の補足です。
 
           const candidateItems = allItems.filter(
             (item) => item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id),
           );
 
           const currentIndex = candidateItems.findIndex((item) => item.id === itemId);
-          if (currentIndex < 0 || currentIndex >= candidateItems.length - 1) return prev; // 譌｢縺ｫ譛ｫ蟆ｾ縺ｾ縺溘・隕九▽縺九ｉ縺ｪ縺・
+          if (currentIndex < 0 || currentIndex >= candidateItems.length - 1) return prev; // 条件に合わないため状態は変更しません。
           if (selectedItemIds.has(itemId)) {
-            // 隍・焚驕ｸ謚樊凾
+            // 処理の補足です。
             const selectedBlock = candidateItems.filter((item) => selectedItemIds.has(item.id));
             const listWithoutSelection = candidateItems.filter(
               (item) => !selectedItemIds.has(item.id),
             );
 
-            // 驕ｸ謚槭＆繧後◆繧｢繧､繝・Β縺ｮ荳ｭ縺ｧ譛繧ょｾ後ｍ縺ｮ菴咲ｽｮ繧定ｦ九▽縺代ｋ
+            // 処理の補足です。
 
             let lastSelectedIndex = -1;
             candidateItems.forEach((item, index) => {
               if (selectedItemIds.has(item.id)) lastSelectedIndex = index;
             });
 
-            // 驕ｸ謚槭＆繧後◆繧｢繧､繝・Β縺梧怙蠕後↓縺ｪ縺・ｴ蜷医・縺ｿ遘ｻ蜍・
+            // 処理の補足です。
 
             if (lastSelectedIndex >= 0 && lastSelectedIndex < candidateItems.length - 1) {
               const jumpOverItemId = candidateItems[lastSelectedIndex + 1].id;
@@ -1161,7 +1161,7 @@ const App: React.FC = () => {
               if (targetIndexInListWithout !== -1) {
                 listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedBlock);
 
-                // 螳溯｡後Δ繝ｼ繝牙・縺ｮ繧｢繧､繝・Β縺ｯ縺昴・縺ｾ縺ｾ縲∝呵｣懊Μ繧ｹ繝医・縺ｿ荳ｦ縺ｳ譖ｿ縺・
+                // 処理の補足です。
 
                 const executeItems = allItems.filter(
                   (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
@@ -1183,13 +1183,13 @@ const App: React.FC = () => {
             }
             return prev;
           } else {
-            // 蜊倅ｸ繧｢繧､繝・Β
+            // 処理の補足です。
             [candidateItems[currentIndex], candidateItems[currentIndex + 1]] = [
               candidateItems[currentIndex + 1],
               candidateItems[currentIndex],
             ];
 
-            // 螳溯｡後Δ繝ｼ繝牙・縺ｮ繧｢繧､繝・Β縺ｯ縺昴・縺ｾ縺ｾ縲∝呵｣懊Μ繧ｹ繝医・縺ｿ荳ｦ縺ｳ譖ｿ縺・
+            // 処理の補足です。
 
             const executeItems = allItems.filter(
               (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
@@ -1210,24 +1210,24 @@ const App: React.FC = () => {
           }
         });
       } else if (mode === 'execute') {
-        // 螳溯｡後Δ繝ｼ繝・ 騾壼ｸｸ縺ｮ荳ｦ縺ｳ譖ｿ縺・
+        // 処理の補足です。
         setEventLists((prev) => {
           const newItems = [...(prev[activeEventName] || [])];
           const currentIndex = newItems.findIndex((item) => item.id === itemId);
 
-          if (currentIndex < 0 || currentIndex >= newItems.length - 1) return prev; // 譌｢縺ｫ譛ｫ蟆ｾ縺ｾ縺溘・隕九▽縺九ｉ縺ｪ縺・
+          if (currentIndex < 0 || currentIndex >= newItems.length - 1) return prev; // 条件に合わないため状態は変更しません。
           if (selectedItemIds.has(itemId)) {
             const selectedBlock = newItems.filter((item) => selectedItemIds.has(item.id));
             const listWithoutSelection = newItems.filter((item) => !selectedItemIds.has(item.id));
 
-            // 驕ｸ謚槭＆繧後◆繧｢繧､繝・Β縺ｮ荳ｭ縺ｧ譛繧ょｾ後ｍ縺ｮ菴咲ｽｮ繧定ｦ九▽縺代ｋ
+            // 処理の補足です。
 
             let lastSelectedIndex = -1;
             newItems.forEach((item, index) => {
               if (selectedItemIds.has(item.id)) lastSelectedIndex = index;
             });
 
-            // 驕ｸ謚槭＆繧後◆繧｢繧､繝・Β縺梧怙蠕後↓縺ｪ縺・ｴ蜷医・縺ｿ遘ｻ蜍・
+            // 処理の補足です。
 
             if (lastSelectedIndex >= 0 && lastSelectedIndex < newItems.length - 1) {
               const jumpOverItemId = newItems[lastSelectedIndex + 1].id;
@@ -1266,15 +1266,15 @@ const App: React.FC = () => {
     (itemIds: string[]) => {
       if (!activeEventName) return;
 
-      // 菫ｮ豁｣1: 陦ｨ遉ｺ蛛ｴ(View)縺ｨ蜷後§繝ｭ繧ｸ繝・け縺ｧ迴ｾ蝨ｨ縺ｮ蟇ｾ雎｡譌･繧堤音螳壹☆繧・
+      // 処理の補足です。
 
       const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
 
-      // 迴ｾ蝨ｨ縺ｮ螳溯｡悟・縺ｫ縺ゅｋID繧ｻ繝・ヨ
+      // 処理の補足です。
 
       const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
 
-      // 遽・峇驕ｸ謚槭・襍ｷ轤ｹ繝ｻ邨らせ縺檎ｧｻ蜍募ｯｾ雎｡縺ｫ蜷ｫ縺ｾ繧後※縺・ｋ蝣ｴ蜷医∫ｯ・峇驕ｸ謚槭ｒ繝ｪ繧ｻ繝・ヨ
+      // 処理の補足です。
 
       if (
         rangeStart &&
@@ -1291,21 +1291,21 @@ const App: React.FC = () => {
         setRangeEnd(null);
       }
 
-      // 菫ｮ豁｣2: activeTab縺ｧ縺ｯ縺ｪ縺上∫音螳壹＠縺歡urrentEventDate繧剃ｽｿ逕ｨ縺励※繧｢繧､繝・Β繧呈歓蜃ｺ・郁｡ｨ遉ｺ蛛ｴ縺ｨ荳閾ｴ縺輔○繧具ｼ・    // 縺薙ｌ縺ｫ繧医ｊ縲∫判髱｢荳翫・荳ｦ縺ｳ鬆・ｼ・tems縺ｮ鬆・ｺ擾ｼ峨′豁｣縺ｧ縺ゅｋ縺ｨ縺・≧蜑肴署縺ｧ豈埼寔蝗｣繧剃ｽ懊ｊ縺ｾ縺・
+      // 処理の補足です。
 
       const currentTabItemsForMove = items.filter((item) => item.eventDate === currentEventDate);
 
-      // 菫ｮ豁｣3: 陦ｨ遉ｺ縺輔ｌ縺ｦ縺・ｋ縲悟呵｣懊Μ繧ｹ繝医阪→螳悟・縺ｫ蜷後§繝ｭ繧ｸ繝・け縺ｧ繝ｪ繧ｹ繝医ｒ蜀肴ｧ狗ｯ峨☆繧・    // 1. 譌｢縺ｫ蟾ｦ蛻励↓縺ゅｋ繧ゅ・繧帝勁螟・
+      // 処理の補足です。
 
       let candidateItems = currentTabItemsForMove.filter((item) => !executeIdsSet.has(item.id));
 
-      // 2. 繝悶Ο繝・け繝輔ぅ繝ｫ繧ｿ縺碁←逕ｨ縺輔ｌ縺ｦ縺・ｋ蝣ｴ蜷医・縺昴ｌ繧る←逕ｨ・郁ｦ九∴縺ｦ縺・↑縺・い繧､繝・Β縺ｯ遘ｻ蜍輔＆縺帙↑縺・ｻ墓ｧ倥・蝣ｴ蜷茨ｼ・    // 繧ゅ＠縲瑚ｦ九∴縺ｦ縺・↑縺・′驕ｸ謚槭＆繧後※縺・ｋ繧｢繧､繝・Β縲阪ｂ遘ｻ蜍輔＆縺帙◆縺・ｴ蜷医・縺薙・繝悶Ο繝・け繧貞､悶＠縺ｾ縺吶′縲・    // 騾壼ｸｸ縺ｯ縲瑚ｦ九∴縺ｦ縺・ｋ鬆・ｺ上阪ｒ邯ｭ謖√☆繧九◆繧√√％縺ｮ繝輔ぅ繝ｫ繧ｿ繧ょ性繧√ｋ縺ｮ縺碁←蛻・〒縺吶・
+      // 処理の補足です。
 
       if (selectedBlockFilters.size > 0) {
         candidateItems = candidateItems.filter((item) => selectedBlockFilters.has(item.block));
       }
 
-      // 菫ｮ豁｣4: 蜀肴ｧ狗ｯ峨＠縺溘檎判髱｢縺ｨ蜷後§鬆・ｺ上・繝ｪ繧ｹ繝・candidateItems)縲阪ｒ蝓ｺ貅悶↓縺励※縲・    // 驕ｸ謚槭＆繧後◆ID縺悟性縺ｾ繧後※縺・ｋ縺九メ繧ｧ繝・け縺励※謚ｽ蜃ｺ縺吶ｋ縲・    // 縺薙ｌ縺ｫ繧医ｊ縲（temIds・亥ｼ墓焚・峨・鬆・ｺ擾ｼ磯∈謚樣・↑縺ｩ・峨↓髢｢菫ゅ↑縺上√Μ繧ｹ繝井ｸ翫・荳翫°繧我ｸ九・鬆・ｺ上〒謚ｽ蜃ｺ縺輔ｌ繧九・
+      // 処理の補足です。
 
       const itemIdsSet = new Set(itemIds);
       const itemsToMove = candidateItems.filter((item) => itemIdsSet.has(item.id));
@@ -1315,7 +1315,7 @@ const App: React.FC = () => {
         const eventItems = prev[activeEventName] || {};
         const currentDayItems = [...(eventItems[currentEventDate] || [])];
 
-        // 譌｢蟄倥・繧｢繧､繝・Β繧剃ｿ晄戟縺励∵眠縺励＞繧｢繧､繝・Β繧呈忰蟆ｾ縺ｫ霑ｽ蜉・育判髱｢荳翫・鬆・ｺ上ｒ邯ｭ謖√＠縺殪rderedItemIds繧剃ｽｿ逕ｨ・・
+        // 処理の補足です。
 
         const existingIdsSet = new Set(currentDayItems);
         const newItemIds = orderedItemIds.filter((id) => !existingIdsSet.has(id));
@@ -1348,7 +1348,7 @@ const App: React.FC = () => {
 
       const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
 
-      // 遽・峇驕ｸ謚槭・襍ｷ轤ｹ繝ｻ邨らせ縺檎ｧｻ蜍募ｯｾ雎｡縺ｫ蜷ｫ縺ｾ繧後※縺・ｋ蝣ｴ蜷医∫ｯ・峇驕ｸ謚槭ｒ繝ｪ繧ｻ繝・ヨ
+      // 処理の補足です。
 
       if (
         rangeStart &&
@@ -1404,7 +1404,7 @@ const App: React.FC = () => {
     setCandidateNumberSortDirection(null);
   }, [activeEventName, activeTab, dayModes, eventDates]);
 
-  // 繝｢繝ｼ繝峨ｒ逶ｴ謗･險ｭ螳壹☆繧矩未謨ｰ
+  // 処理の補足です。
 
   const handleSetViewMode = useCallback(
     (mode: ViewMode, scrollToItemId?: string) => {
@@ -1423,16 +1423,16 @@ const App: React.FC = () => {
       setSelectedItemIds(new Set());
       setCandidateNumberSortDirection(null);
 
-      // 髮・ｸｭ繝｢繝ｼ繝我ｻ･螟悶↓蛻・ｊ譖ｿ縺医◆蝣ｴ蜷医√・繝・・陦ｨ遉ｺ迥ｶ諷九ｒ繝ｪ繧ｻ繝・ヨ
+      // 処理の補足です。
 
       if (mode !== 'focus') {
         setFocusModeMapVisible(false);
       }
-      // 繝｢繝ｼ繝牙・譖ｿ譎ゅ↓繧ｪ繝ｼ繝舌・繝ｩ繧､繝峨ｒ繝ｪ繧ｻ繝・ヨ
+      // 処理の補足です。
       setUiVisibilityOverride(false);
       setUiSettingsPanelOpen(false);
 
-      // 繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ蜈医・繧｢繧､繝・ΒID縺梧欠螳壹＆繧後※縺・ｋ蝣ｴ蜷・
+      // 処理の補足です。
 
       if (scrollToItemId) {
         setTimeout(() => {
@@ -1499,19 +1499,19 @@ const App: React.FC = () => {
 
       setExecuteModeItems((prev) => renameRecordKey(prev, eventToRename, newName));
 
-      // 繝槭ャ繝励ョ繝ｼ繧ｿ縺ｮ蜷榊燕螟画峩
+      // 処理の補足です。
 
       setMapData((prev) => renameRecordKey(prev, eventToRename, newName));
 
-      // 繝ｫ繝ｼ繝郁ｨｭ螳壹・蜷榊燕螟画峩
+      // 処理の補足です。
 
       setRouteSettings((prev) => renameRecordKey(prev, eventToRename, newName));
 
-      // 繝帙・繝ｫ螳夂ｾｩ縺ｮ蜷榊燕螟画峩
+      // 処理の補足です。
 
       setHallDefinitions((prev) => renameRecordKey(prev, eventToRename, newName));
 
-      // 繝帙・繝ｫ繝ｫ繝ｼ繝郁ｨｭ螳壹・蜷榊燕螟画峩
+      // 処理の補足です。
 
       setHallRouteSettings((prev) => renameRecordKey(prev, eventToRename, newName));
 
@@ -1528,7 +1528,7 @@ const App: React.FC = () => {
   const handleSortToggle = () => {
     setSelectedItemIds(new Set());
     setBlockSortDirection(null);
-    // 繝輔ぅ繝ｫ繧ｿ螟画峩譎ゅ↓譛霑大､画峩縺輔ｌ縺溘い繧､繝・Β縺ｮ霑ｽ霍｡繧偵Μ繧ｻ繝・ヨ
+    // 処理の補足です。
     setRecentlyChangedItemIds(new Set());
     const currentIndex = sortCycle.indexOf(sortState);
     const nextIndex = (currentIndex + 1) % sortCycle.length;
@@ -1586,7 +1586,7 @@ const App: React.FC = () => {
       const currentTabKey = currentEventDate;
       const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
 
-      // 蛟呵｣懊Μ繧ｹ繝医・繧｢繧､繝・Β縺ｮ縺ｿ繧貞叙蠕・
+      // 処理の補足です。
 
       const candidateItems = allItems.filter(
         (item) => item.eventDate === currentTabKey && !executeIds.has(item.id),
@@ -1605,13 +1605,13 @@ const App: React.FC = () => {
         return nextDirection === 'asc' ? comparison : -comparison;
       });
 
-      // 螳溯｡後Δ繝ｼ繝牙・縺ｮ繧｢繧､繝・Β縺ｯ縺昴・縺ｾ縺ｾ縲∝呵｣懊Μ繧ｹ繝医・繧｢繧､繝・Β縺ｮ縺ｿ荳ｦ縺ｳ譖ｿ縺・
+      // 処理の補足です。
 
       const executeItems = allItems.filter(
         (item) => item.eventDate === currentTabKey && executeIds.has(item.id),
       );
 
-      // 螳溯｡後Δ繝ｼ繝牙・縺ｨ蛟呵｣懊Μ繧ｹ繝医ｒ邨仙粋・亥ｮ溯｡後Δ繝ｼ繝牙・縺悟・・・
+      // 処理の補足です。
 
       const newItems = allItems.map((item) => {
         if (item.eventDate !== currentTabKey) {
@@ -1650,7 +1650,7 @@ const App: React.FC = () => {
       [activeEventName]: prev[activeEventName].filter((item) => item.id !== deletedId),
     }));
 
-    // 螳溯｡後Δ繝ｼ繝峨い繧､繝・Β縺九ｉ繧ょ炎髯､
+    // 処理の補足です。
 
     setExecuteModeItems((prev) => {
       const eventItems = prev[activeEventName];
@@ -1696,7 +1696,7 @@ const App: React.FC = () => {
             : 'candidate'
           : 'execute');
 
-      // 迴ｾ蝨ｨ縺ｮ蛻励・繧｢繧､繝・Β繧堤峩謗･險育ｮ・
+      // 処理の補足です。
 
       let currentItems: ShoppingItem[] = [];
       if (activeEventName) {
@@ -1709,7 +1709,7 @@ const App: React.FC = () => {
           let filtered = items.filter(
             (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
           );
-          // 繝悶Ο繝・け繝輔ぅ繝ｫ繧ｿ繧帝←逕ｨ
+          // 処理の補足です。
           if (selectedBlockFilters.size > 0) {
             filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
           }
@@ -1723,7 +1723,7 @@ const App: React.FC = () => {
 
         if (wasSelected) {
           newSet.delete(itemId);
-          // 驕ｸ謚櫁ｧ｣髯､譎ゅ・襍ｷ轤ｹ繝ｻ邨らせ繧偵Μ繧ｻ繝・ヨ
+          // 処理の補足です。
           if (rangeStart?.itemId === itemId && rangeStart.columnType === currentColumnType) {
             setRangeStart(null);
             setRangeEnd(null);
@@ -1733,24 +1733,24 @@ const App: React.FC = () => {
         } else {
           newSet.add(itemId);
 
-          // 襍ｷ轤ｹ縺梧悴險ｭ螳壹・蝣ｴ蜷医√∪縺溘・逡ｰ縺ｪ繧句・縺ｮ蝣ｴ蜷医・襍ｷ轤ｹ繧定ｨｭ螳・
+          // 処理の補足です。
 
           if (!rangeStart || rangeStart.columnType !== currentColumnType) {
             setRangeStart({ itemId, columnType: currentColumnType });
             setRangeEnd(null);
           } else {
-            // 襍ｷ轤ｹ縺瑚ｨｭ螳壽ｸ医∩縺ｧ縲∝酔縺伜・縺ｮ蝣ｴ蜷・                // 襍ｷ轤ｹ縺ｮ逶ｴ荳翫∪縺溘・逶ｴ荳九・繧｢繧､繝・Β縺九メ繧ｧ繝・け
+            // 処理の補足です。
             const startIndex = currentItems.findIndex((item) => item.id === rangeStart.itemId);
             const currentIndex = currentItems.findIndex((item) => item.id === itemId);
 
-            // 襍ｷ轤ｹ縺ｮ逶ｴ荳翫∪縺溘・逶ｴ荳九〒縺ｪ縺・ｴ蜷医・縺ｿ邨らせ縺ｨ縺励※險ｭ螳・
+            // 処理の補足です。
 
             if (startIndex !== -1 && currentIndex !== -1) {
               const isAdjacent = Math.abs(startIndex - currentIndex) === 1;
               if (!isAdjacent) {
                 setRangeEnd({ itemId, columnType: currentColumnType });
               } else {
-                // 逶ｴ荳翫∪縺溘・逶ｴ荳九・蝣ｴ蜷医・邨らせ繧偵Μ繧ｻ繝・ヨ
+                // 処理の補足です。
                 setRangeEnd(null);
               }
             }
@@ -1803,13 +1803,13 @@ const App: React.FC = () => {
       const currentTabKey = currentEventDate;
       const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
 
-      // 蛟呵｣懊Μ繧ｹ繝医・繧｢繧､繝・Β縺ｮ縺ｿ繧貞叙蠕・
+      // 処理の補足です。
 
       const candidateItems = allItems.filter(
         (item) => item.eventDate === currentTabKey && !executeIds.has(item.id),
       );
 
-      // 繝悶Ο繝・け繝輔ぅ繝ｫ繧ｿ繧帝←逕ｨ
+      // 処理の補足です。
 
       let filteredCandidateItems = candidateItems;
       if (selectedBlockFilters.size > 0) {
@@ -1820,7 +1820,7 @@ const App: React.FC = () => {
 
       if (filteredCandidateItems.length === 0) return prev;
 
-      // 繝翫Φ繝舌・縺ｧ繧ｽ繝ｼ繝・
+      // 処理の補足です。
 
       const sortedCandidateItems = [...filteredCandidateItems].sort((a, b) => {
         const comparison = a.number.localeCompare(b.number, undefined, {
@@ -1830,13 +1830,13 @@ const App: React.FC = () => {
         return nextDirection === 'asc' ? comparison : -comparison;
       });
 
-      // 蛟呵｣懊Μ繧ｹ繝医・繧｢繧､繝・Β縺ｮID縺ｨ鬆・ｺ上ｒ繝槭ャ繝・
+      // 処理の補足です。
 
       const sortedCandidateMap = new Map(
         sortedCandidateItems.map((item, index) => [item.id, { item, sortIndex: index }]),
       );
 
-      // 蜈・・繝ｪ繧ｹ繝医ｒ邯ｭ謖√＠縺､縺､縲∝呵｣懊Μ繧ｹ繝医・繧｢繧､繝・Β縺ｮ縺ｿ繧偵た繝ｼ繝磯・↓蜀埼・鄂ｮ
+      // 処理の補足です。
 
       const otherItems: ShoppingItem[] = [];
       const candidateItemsToSort: {
@@ -1858,10 +1858,10 @@ const App: React.FC = () => {
         }
       });
 
-      // 繧ｽ繝ｼ繝医う繝ｳ繝・ャ繧ｯ繧ｹ縺ｧ繧ｽ繝ｼ繝・
+      // 処理の補足です。
       candidateItemsToSort.sort((a, b) => a.sortIndex - b.sortIndex);
 
-      // 蜈・・鬆・ｺ上ｒ菫晄戟縺励▽縺､縲∝呵｣懊Μ繧ｹ繝医・繧｢繧､繝・Β繧偵た繝ｼ繝磯・↓驟咲ｽｮ
+      // 処理の補足です。
 
       const resultItems: ShoppingItem[] = [];
       let candidateIndex = 0;
@@ -1901,7 +1901,7 @@ const App: React.FC = () => {
     setRangeEnd(null);
   }, []);
 
-  // 遽・峇蜀・・繧｢繧､繝・Β繧剃ｸ諡ｬ縺ｧ繝√ぉ繝・け/繝√ぉ繝・け隗｣髯､縺吶ｋ髢｢謨ｰ
+  // 処理の補足です。
 
   const handleToggleRangeSelection = useCallback(
     (columnType: 'execute' | 'candidate') => {
@@ -1918,7 +1918,7 @@ const App: React.FC = () => {
 
       const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
 
-      // 迴ｾ蝨ｨ縺ｮ蛻励・繧｢繧､繝・Β繧堤峩謗･險育ｮ・
+      // 処理の補足です。
 
       let currentItems: ShoppingItem[] = [];
       if (columnType === 'execute') {
@@ -1930,22 +1930,22 @@ const App: React.FC = () => {
         let filtered = items.filter(
           (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
         );
-        // 繝悶Ο繝・け繝輔ぅ繝ｫ繧ｿ繧帝←逕ｨ
+        // 処理の補足です。
         if (selectedBlockFilters.size > 0) {
           filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
         }
         currentItems = filtered;
       }
 
-      // 繝帙・繝ｫ螳夂ｾｩ縺ｨ繝槭ャ繝励ョ繝ｼ繧ｿ繧貞叙蠕励＠縺ｦ繧ｰ繝ｫ繝ｼ繝怜喧
+      // 処理の補足です。
 
       const halls = getHallsForDate(currentEventDate);
       const currentMapData = getMapDataForDate(currentEventDate);
 
-      // 繧ｰ繝ｫ繝ｼ繝怜喧縺梧怏蜉ｹ縺ｪ蝣ｴ蜷医∝酔荳繧ｰ繝ｫ繝ｼ繝怜・縺ｮ繧｢繧､繝・Β縺ｮ縺ｿ繧貞ｯｾ雎｡縺ｫ縺吶ｋ
+      // 処理の補足です。
 
       if (halls.length > 0 && currentMapData) {
-        // 繧｢繧､繝・Β縺ｮ繝帙・繝ｫID繧貞叙蠕励☆繧九・繝ｫ繝代・
+        // 処理の補足です。
         const getHallIdForItem = (item: ShoppingItem): string | null => {
           const block = currentMapData.blocks.find((b) => b.name === item.block);
           if (!block) return null;
@@ -1959,7 +1959,7 @@ const App: React.FC = () => {
           );
           if (!cell) return null;
 
-          // 螟夊ｧ貞ｽ｢蜀・愛螳・
+          // 処理の補足です。
 
           const isPointInPoly = (
             row: number,
@@ -1993,7 +1993,7 @@ const App: React.FC = () => {
           return null;
         };
 
-        // 繧ｰ繝ｫ繝ｼ繝悠D繧堤函謌舌☆繧九・繝ｫ繝代・
+        // 処理の補足です。
 
         const buildGroupId = (
           hallId: string | null,
@@ -2015,7 +2015,7 @@ const App: React.FC = () => {
           return buildGroupId(hallId, priority);
         };
 
-        // rangeStart縺ｨrangeEnd縺ｮ繧ｰ繝ｫ繝ｼ繝悠D繧堤｢ｺ隱・
+        // 処理の補足です。
 
         const startItem = currentItems.find((item) => item.id === rangeStart.itemId);
         const endItem = currentItems.find((item) => item.id === rangeEnd.itemId);
@@ -2025,13 +2025,13 @@ const App: React.FC = () => {
         const startGroupId = getItemGroupId(startItem);
         const endGroupId = getItemGroupId(endItem);
 
-        // 逡ｰ縺ｪ繧九げ繝ｫ繝ｼ繝励・蝣ｴ蜷医・菴輔ｂ縺励↑縺・
+        // 処理の補足です。
 
         if (startGroupId !== endGroupId) {
           return;
         }
 
-        // 蜷後§繧ｰ繝ｫ繝ｼ繝怜・縺ｮ繧｢繧､繝・Β縺ｮ縺ｿ繧貞ｯｾ雎｡縺ｫ縺吶ｋ
+        // 処理の補足です。
 
         const groupItems = currentItems.filter((item) => getItemGroupId(item) === startGroupId);
 
@@ -2044,7 +2044,7 @@ const App: React.FC = () => {
         const maxIndex = Math.max(startIndex, endIndex);
         const rangeItems = groupItems.slice(minIndex, maxIndex + 1);
 
-        // 遽・峇蜀・・繧｢繧､繝・Β縺悟・縺ｦ繝√ぉ繝・け貂医∩縺九メ繧ｧ繝・け
+        // 処理の補足です。
 
         setSelectedItemIds((prev) => {
           const allSelected = rangeItems.every((item) => prev.has(item.id));
@@ -2061,7 +2061,7 @@ const App: React.FC = () => {
         return;
       }
 
-      // 繧ｰ繝ｫ繝ｼ繝怜喧縺檎┌蜉ｹ縺ｪ蝣ｴ蜷医・蠕捺擂縺ｮ繝ｭ繧ｸ繝・け
+      // 処理の補足です。
 
       const startIndex = currentItems.findIndex((item) => item.id === rangeStart.itemId);
       const endIndex = currentItems.findIndex((item) => item.id === rangeEnd.itemId);
@@ -2072,19 +2072,19 @@ const App: React.FC = () => {
       const maxIndex = Math.max(startIndex, endIndex);
       const rangeItems = currentItems.slice(minIndex, maxIndex + 1);
 
-      // 遽・峇蜀・・繧｢繧､繝・Β縺悟・縺ｦ繝√ぉ繝・け貂医∩縺九メ繧ｧ繝・け
+      // 処理の補足です。
 
       setSelectedItemIds((prev) => {
         const allSelected = rangeItems.every((item) => prev.has(item.id));
         const newSet = new Set(prev);
         if (allSelected) {
-          // 蜈ｨ縺ｦ繝√ぉ繝・け貂医∩縺ｮ蝣ｴ蜷医・繝√ぉ繝・け繧貞､悶☆
-          // 繝√ぉ繝・け隗｣髯､譎ゅ・襍ｷ轤ｹ繝ｻ邨らせ繧ゅΜ繧ｻ繝・ヨ・育判髱｢蜿ｳ荳翫・笨悶・繧ｿ繝ｳ縺ｨ蜷梧ｧ倥・蜍穂ｽ懶ｼ・
+          // 処理の補足です。
+          // 処理の補足です。
           rangeItems.forEach((item) => newSet.delete(item.id));
           setRangeStart(null);
           setRangeEnd(null);
         } else {
-          // 譛ｪ繝√ぉ繝・け縺ｮ繧｢繧､繝・Β縺後≠繧句ｴ蜷医・蜈ｨ縺ｦ繝√ぉ繝・け繧貞・繧後ｋ
+          // 処理の補足です。
           rangeItems.forEach((item) => newSet.add(item.id));
         }
         return newSet;
@@ -2113,14 +2113,14 @@ const App: React.FC = () => {
       const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
 
       if (mode === 'edit') {
-        // 邱ｨ髮・Δ繝ｼ繝・ 驕ｸ謚槭＆繧後◆繧｢繧､繝・Β縺悟ｮ溯｡後Δ繝ｼ繝牙・縺句呵｣懊Μ繧ｹ繝医°繧貞愛螳・
+        // 処理の補足です。
         const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
         const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
         const isInExecuteColumn = selectedItems.some((item) => executeIds.has(item.id));
         const isInCandidateColumn = selectedItems.some((item) => !executeIds.has(item.id));
 
         if (isInExecuteColumn && !isInCandidateColumn) {
-          // 螳溯｡後Δ繝ｼ繝牙・縺ｮ縺ｿ
+          // 処理の補足です。
           setExecuteModeItems((prev) => {
             const eventItems = prev[activeEventName] || {};
             const dayItems = [...(eventItems[currentEventDate] || [])];
@@ -2150,7 +2150,7 @@ const App: React.FC = () => {
             };
           });
         } else if (isInCandidateColumn && !isInExecuteColumn) {
-          // 蛟呵｣懊Μ繧ｹ繝医・縺ｿ
+          // 処理の補足です。
           setEventLists((prev) => {
             const allItems = [...(prev[activeEventName] || [])];
             const currentTabKey = currentEventDate;
@@ -2184,7 +2184,7 @@ const App: React.FC = () => {
             const sortedCandidateItems = [...otherCandidateItems];
             sortedCandidateItems.splice(firstSelectedIndex, 0, ...selectedCandidateItems);
 
-            // 螳溯｡後Δ繝ｼ繝牙・縺ｮ繧｢繧､繝・Β縺ｯ縺昴・縺ｾ縺ｾ縲∝呵｣懊Μ繧ｹ繝医・縺ｿ荳ｦ縺ｳ譖ｿ縺・
+            // 処理の補足です。
 
             const executeItems = allItems.filter(
               (item) => item.eventDate === currentTabKey && executeIdsSet.has(item.id),
@@ -2205,7 +2205,7 @@ const App: React.FC = () => {
           });
         }
       } else {
-        // 螳溯｡後Δ繝ｼ繝・ 騾壼ｸｸ繧ｽ繝ｼ繝・
+        // 処理の補足です。
         setEventLists((prev) => {
           const currentItems = [...(prev[activeEventName] || [])];
           const selectedItems = currentItems.filter((item) => selectedItemIds.has(item.id));
@@ -2232,7 +2232,7 @@ const App: React.FC = () => {
     [activeEventName, selectedItemIds, items, activeTab, dayModes, executeModeItems, eventDates],
   );
 
-  // 繧ｨ繧ｯ繧ｹ繝昴・繝医が繝励す繝ｧ繝ｳ繝繧､繧｢繝ｭ繧ｰ繧定｡ｨ遉ｺ
+  // 処理の補足です。
 
   const handleExportEvent = useCallback(
     (eventName: string) => {
@@ -2247,7 +2247,7 @@ const App: React.FC = () => {
     [eventLists],
   );
 
-  // 螳滄圀縺ｮ繧ｨ繧ｯ繧ｹ繝昴・繝亥・逅・ｼ・lsx蠖｢蠑擾ｼ・
+  // 処理の補足です。
 
   const handleConfirmExport = useCallback(
     async (options: ExportOptions) => {
@@ -2295,14 +2295,14 @@ const App: React.FC = () => {
     ],
   );
 
-  // 繧ｨ繧ｯ繧ｹ繝昴・繝医ヵ繧｡繧､繝ｫ縺ｮ繧､繝ｳ繝昴・繝亥・逅・
+  // 処理の補足です。
 
   const handleExportFileImport = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      // input 繧偵Μ繧ｻ繝・ヨ
+      // 処理の補足です。
       e.target.value = '';
 
       try {
@@ -2318,23 +2318,23 @@ const App: React.FC = () => {
           return;
         }
 
-        // 繧､繝吶Φ繝亥錐縺ｮ驥崎､・メ繧ｧ繝・け - 蜷悟錐縺後≠繧句ｴ蜷医・荳頑嶌縺肴峩譁ｰ
+        // 処理の補足です。
         const importedData = toImportedEventData(result);
         const eventName = importedData.eventName;
         const isUpdate = !!eventLists[eventName];
 
-        // 繧｢繧､繝・Β繧剃ｿ晏ｭ・
+        // 処理の補足です。
 
         setEventLists((prev) => upsertRecordKey(prev, eventName, importedData.items));
 
-        // 繝｡繧ｿ繝・・繧ｿ繧剃ｿ晏ｭ・
+        // 処理の補足です。
 
         if (importedData.metadata) {
           const metadata = importedData.metadata;
           setEventMetadata((prev) => upsertRecordKey(prev, eventName, metadata));
         }
 
-        // 驟咲ｽｮ諠・ｱ繧剃ｿ晏ｭ・
+        // 処理の補足です。
 
         if (importedData.executeModeItems) {
           const executeItems = importedData.executeModeItems;
@@ -2345,28 +2345,28 @@ const App: React.FC = () => {
           setDayModes((prev) => upsertRecordKey(prev, eventName, importedDayModes));
         }
 
-        // 繝槭ャ繝励ョ繝ｼ繧ｿ繧剃ｿ晏ｭ・
+        // 処理の補足です。
 
         if (importedData.mapData) {
           const importedMapData = importedData.mapData;
           setMapData((prev) => upsertRecordKey(prev, eventName, importedMapData));
         }
 
-        // 繝ｫ繝ｼ繝郁ｨｭ螳壹ｒ菫晏ｭ・
+        // 処理の補足です。
 
         if (importedData.routeSettings) {
           const importedRouteSettings = importedData.routeSettings;
           setRouteSettings((prev) => upsertRecordKey(prev, eventName, importedRouteSettings));
         }
 
-        // 繝帙・繝ｫ螳夂ｾｩ繧剃ｿ晏ｭ・
+        // 処理の補足です。
 
         if (importedData.hallDefinitions) {
           const importedHallDefinitions = importedData.hallDefinitions;
           setHallDefinitions((prev) => upsertRecordKey(prev, eventName, importedHallDefinitions));
         }
 
-        // 繝帙・繝ｫ繝ｫ繝ｼ繝郁ｨｭ螳壹ｒ菫晏ｭ・
+        // 処理の補足です。
 
         if (importedData.hallRouteSettings) {
           const importedHallRouteSettings = importedData.hallRouteSettings;
@@ -2375,7 +2375,7 @@ const App: React.FC = () => {
           );
         }
 
-        // 繧ｨ繝ｩ繝ｼ縺後≠繧後・陦ｨ遉ｺ
+        // 処理の補足です。
 
         alert(
           buildImportCompletionMessage({
@@ -2386,7 +2386,7 @@ const App: React.FC = () => {
           }),
         );
 
-        // 繧､繝ｳ繝昴・繝医＠縺溘う繝吶Φ繝医ｒ驕ｸ謚・
+        // 処理の補足です。
 
         setActiveEventName(eventName);
         setActiveTab(resolveEventListTab(importedData.items));
@@ -2398,7 +2398,7 @@ const App: React.FC = () => {
     [eventLists],
   );
 
-  // 繧｢繧､繝・Β譖ｴ譁ｰ讖溯・
+  // 処理の補足です。
 
   const handleUpdateEvent = useCallback(
     async (eventName: string, urlOverride?: { url: string; sheetName: string }) => {
@@ -2440,7 +2440,7 @@ const App: React.FC = () => {
       return { ...prev, [eventName]: newItems };
     });
 
-    // 蜑企勁縺輔ｌ縺溘い繧､繝・Β繧貞ｮ溯｡後Δ繝ｼ繝峨い繧､繝・Β縺九ｉ繧ょ炎髯､
+    // 処理の補足です。
 
     setExecuteModeItems((prev) => {
       const eventItems = prev[eventName];
@@ -2472,7 +2472,7 @@ const App: React.FC = () => {
     [pendingUpdateEventName, handleUpdateEvent],
   );
 
-  // 繝槭ャ繝励ョ繝ｼ繧ｿ蜿悶ｊ霎ｼ縺ｿ
+  // 処理の補足です。
 
   const handleImportMapData = useCallback(async (eventName: string) => {
     if (mapFileInputRef.current) {
@@ -2487,27 +2487,27 @@ const App: React.FC = () => {
 
     if (!file || !eventName) return;
 
-    // 繝繧､繧｢繝ｭ繧ｰ繧帝幕縺・
+    // 処理の補足です。
 
     setMapImportPendingFile(file);
     setMapImportPendingEventName(eventName);
     setMapImportDialogOpen(true);
 
-    // 繝輔ぃ繧､繝ｫ蜈･蜉帙ｒ繝ｪ繧ｻ繝・ヨ
+    // 処理の補足です。
     e.target.value = '';
   }, []);
 
-  // 繝槭ャ繝怜叙繧願ｾｼ縺ｿ繝繧､繧｢繝ｭ繧ｰ縺九ｉ縺ｮ蜿悶ｊ霎ｼ縺ｿ遒ｺ螳・
+  // 処理の補足です。
 
   const handleMapImportConfirm = useCallback(
     (parsedData: Record<string, DayMapData>, settings: BlockDetectionSettings) => {
       const eventName = mapImportPendingEventName;
       if (!eventName) return;
 
-      // 險ｭ螳壹ｒlocalStorage縺ｫ菫晏ｭ・
+      // 処理の補足です。
       saveBlockDetectionSettings(eventName, settings);
 
-      // 繝槭ャ繝励ョ繝ｼ繧ｿ繧剃ｿ晏ｭ・
+      // 処理の補足です。
 
       setMapData((prev) => ({
         ...prev,
@@ -2519,14 +2519,14 @@ const App: React.FC = () => {
 
       const mapCount = Object.keys(parsedData).length;
 
-      // 譛蛻昴・繝槭ャ繝励ち繝悶↓蛻・ｊ譖ｿ縺・
+      // 処理の補足です。
 
       const firstMapName = Object.keys(parsedData)[0];
       if (firstMapName) {
         setActiveTab(firstMapName);
       }
 
-      // 繝繧､繧｢繝ｭ繧ｰ繧帝哩縺倥ｋ
+      // 処理の補足です。
 
       setMapImportDialogOpen(false);
       setMapImportPendingFile(null);
@@ -2537,7 +2537,7 @@ const App: React.FC = () => {
     [mapImportPendingEventName],
   );
 
-  // 繝槭ャ繝怜叙繧願ｾｼ縺ｿ繝繧､繧｢繝ｭ繧ｰ縺ｮ繧ｭ繝｣繝ｳ繧ｻ繝ｫ
+  // 処理の補足です。
 
   const handleMapImportClose = useCallback(() => {
     setMapImportDialogOpen(false);
@@ -2545,24 +2545,24 @@ const App: React.FC = () => {
     setMapImportPendingEventName('');
   }, []);
 
-  // 繝槭ャ繝励ン繝･繝ｼ縺ｧ縺ｮ險ｪ蝠丞・霑ｽ蜉
+  // 処理の補足です。
 
   const handleAddToExecuteListFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
 
-      // 繝槭ャ繝怜錐縺九ｉ蜿ょ刈譌･繧貞叙蠕・
+      // 処理の補足です。
 
       const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
-      // 繧｢繧､繝・Β縺ｮ繝帙・繝ｫID繧貞叙蠕・
+      // 処理の補足です。
 
       const item = items.find((i) => i.id === itemId);
       if (!item) return;
 
-      // 繝帙・繝ｫ螳夂ｾｩ繧貞叙蠕・
+      // 処理の補足です。
 
       const halls = hallDefinitions[activeEventName]?.[activeTab] || [];
       const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[activeTab] || {
@@ -2570,7 +2570,7 @@ const App: React.FC = () => {
         hallVisitLists: [],
       };
 
-      // 繧｢繧､繝・Β縺ｮ繝悶Ο繝・け縺九ｉ繝帙・繝ｫID繧堤音螳・
+      // 処理の補足です。
 
       const currentMapData = mapData[activeEventName]?.[activeTab];
       let itemHallId: string | null = null;
@@ -2599,11 +2599,11 @@ const App: React.FC = () => {
         const eventItems = prev[activeEventName] || {};
         const dayItems = [...(eventItems[dayName] || [])];
 
-        // 譌｢縺ｫ霑ｽ蜉縺輔ｌ縺ｦ縺・ｋ蝣ｴ蜷医・菴輔ｂ縺励↑縺・
+        // 処理の補足です。
 
         if (dayItems.includes(itemId)) return prev;
 
-        // 繝帙・繝ｫ縺檎音螳壹〒縺阪↑縺・ｴ蜷医・譛ｫ蟆ｾ縺ｫ霑ｽ蜉
+        // 処理の補足です。
 
         if (!itemHallId || halls.length === 0) {
           dayItems.push(itemId);
@@ -2616,14 +2616,14 @@ const App: React.FC = () => {
           };
         }
 
-        // 繝帙・繝ｫ鬆・ｺ上ｒ蜿門ｾ暦ｼ郁ｨｭ螳壹′縺ｪ縺代ｌ縺ｰ繝帙・繝ｫ縺ｮ螳夂ｾｩ鬆・ｼ・
+        // 処理の補足です。
 
         const hallOrder =
           hallRouteSettingsForMap.hallOrder.length > 0
             ? hallRouteSettingsForMap.hallOrder
             : halls.map((h) => h.id);
 
-        // 蜷・い繧､繝・Β縺ｮ繝帙・繝ｫID繧偵・繝・・
+        // 処理の補足です。
 
         const itemsMap = new Map(items.map((i) => [i.id, i]));
         const getHallIdForItem = (id: string): string | null => {
@@ -2645,13 +2645,13 @@ const App: React.FC = () => {
           return null;
         };
 
-        // 蜷後§繝帙・繝ｫ縺ｮ譛蠕後・菴咲ｽｮ繧呈爾縺・
+        // 処理の補足です。
 
-        let insertIndex = dayItems.length; // 繝・ヵ繧ｩ繝ｫ繝医・譛ｫ蟆ｾ
+        let insertIndex = dayItems.length; // 処理の補足です。
         const itemHallIndex = hallOrder.indexOf(itemHallId);
 
         if (itemHallIndex >= 0) {
-          // 蜷後§繝帙・繝ｫ縺ｮ譛蠕後・繧｢繧､繝・Β縺ｮ菴咲ｽｮ繧呈爾縺・
+          // 処理の補足です。
           let lastSameHallIndex = -1;
           let firstLaterHallIndex = -1;
 
@@ -2668,10 +2668,10 @@ const App: React.FC = () => {
           }
 
           if (lastSameHallIndex >= 0) {
-            // 蜷後§繝帙・繝ｫ縺ｮ繧｢繧､繝・Β縺後≠繧句ｴ蜷医√◎縺ｮ谺｡縺ｫ謖ｿ蜈･
+            // 処理の補足です。
             insertIndex = lastSameHallIndex + 1;
           } else if (firstLaterHallIndex >= 0) {
-            // 蜷後§繝帙・繝ｫ縺ｮ繧｢繧､繝・Β縺後↑縺・′縲∝ｾ後・繝帙・繝ｫ縺ｮ繧｢繧､繝・Β縺後≠繧句ｴ蜷医√◎縺ｮ蜑阪↓謖ｿ蜈･
+            // 処理の補足です。
             insertIndex = firstLaterHallIndex;
           }
         }
@@ -2690,7 +2690,7 @@ const App: React.FC = () => {
     [activeEventName, activeTab, isMapTab, items, hallDefinitions, hallRouteSettings, mapData],
   );
 
-  // 繝槭ャ繝励ン繝･繝ｼ縺ｧ縺ｮ險ｪ蝠丞・霑ｽ蜉・井ｽ咲ｽｮ謖・ｮ壹≠繧奇ｼ・
+  // 処理の補足です。
 
   const handleAddToExecuteListFromMapAtPosition = useCallback(
     (itemId: string, referenceItemId: string, position: 'before' | 'after') => {
@@ -2704,15 +2704,15 @@ const App: React.FC = () => {
         const eventItems = prev[activeEventName] || {};
         const dayItems = [...(eventItems[dayName] || [])];
 
-        // 譌｢縺ｫ霑ｽ蜉縺輔ｌ縺ｦ縺・ｋ蝣ｴ蜷医・菴輔ｂ縺励↑縺・
+        // 処理の補足です。
 
         if (dayItems.includes(itemId)) return prev;
 
-        // 蜿ら・繧｢繧､繝・Β縺ｮ菴咲ｽｮ繧呈爾縺・
+        // 処理の補足です。
 
         const refIndex = dayItems.indexOf(referenceItemId);
         if (refIndex < 0) {
-          // 蜿ら・繧｢繧､繝・Β縺瑚ｦ九▽縺九ｉ縺ｪ縺・ｴ蜷医・譛ｫ蟆ｾ縺ｫ霑ｽ蜉
+          // 処理の補足です。
           dayItems.push(itemId);
         } else {
           const insertIndex = position === 'before' ? refIndex : refIndex + 1;
@@ -2731,13 +2731,13 @@ const App: React.FC = () => {
     [activeEventName, activeTab, isMapTab],
   );
 
-  // 繝槭ャ繝励ン繝･繝ｼ縺ｧ縺ｮ險ｪ蝠丞・蜑企勁
+  // 処理の補足です。
 
   const handleRemoveFromExecuteListFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
 
-      // 繝槭ャ繝怜錐縺九ｉ蜿ょ刈譌･繧貞叙蠕・
+      // 処理の補足です。
 
       const dayMatch = activeTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
@@ -2759,11 +2759,11 @@ const App: React.FC = () => {
     [activeEventName, activeTab, isMapTab],
   );
 
-  // 繝槭ャ繝励ン繝･繝ｼ縺九ｉ縺ｮ譁ｰ隕上い繧､繝・Β霑ｽ蜉
+  // 処理の補足です。
 
   const handleAddNewItemFromMap = useCallback(
     (eventDate: string, block: string, number: string) => {
-      // 蛻晄悄蛟､繧定ｨｭ螳壹＠縺ｦ繧｢繧､繝・Β霑ｽ蜉繧ｿ繝悶↓驕ｷ遘ｻ
+      // 処理の補足です。
       setNewItemDefaults({ eventDate, block, number });
       setItemToEdit(null);
       setActiveTab('import');
@@ -2771,40 +2771,40 @@ const App: React.FC = () => {
     [],
   );
 
-  // 髮・ｸｭ繝｢繝ｼ繝峨°繧峨・逶ｴ謗･繧｢繧､繝・Β霑ｽ蜉
+  // 処理の補足です。
 
   const handleAddItemFromFocusMode = useCallback(
     (newItem: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => {
       if (!activeEventName) return;
 
-      // 雉ｼ蜈･迥ｶ諷九ｒ豎ｺ螳夲ｼ域欠螳壹′縺ｪ縺代ｌ縺ｰ'None'・・
+      // 処理の補足です。
 
       const purchaseStatus = newItem.purchaseStatus || 'None';
 
-      // 譁ｰ縺励＞繧｢繧､繝・Β繧剃ｽ懈・
+      // 処理の補足です。
 
       const item: ShoppingItem = {
         ...newItem,
         id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         purchaseStatus,
-        source: 'app' as const, // 繧｢繝励Μ縺九ｉ縺ｮ霑ｽ蜉
-        protectionLevel: 'full' as const, // 螳悟・菫晁ｭｷ
+        source: 'app' as const, // アプリ側で生成したデータとして扱います。
+        protectionLevel: 'full' as const, // 完全保護レベルで設定します。
       };
 
-      // 繧｢繧､繝・Β繧定ｿｽ蜉
+      // 処理の補足です。
 
       setEventLists((prev) => ({
         ...prev,
         [activeEventName]: [...(prev[activeEventName] || []), item],
       }));
 
-      // 雉ｼ蜈･貂医・蝣ｴ蜷医・蛟呵｣懊Μ繧ｹ繝医・縺ｿ縺ｫ霑ｽ蜉・亥ｮ溯｡悟・縺ｫ縺ｯ霑ｽ蜉縺励↑縺・ｼ・
+      // 処理の補足です。
 
       if (purchaseStatus === 'Purchased') {
         return;
       }
 
-      // 蠕悟屓縺励・驕・盾縺ｮ蝣ｴ蜷医・螳溯｡悟・縺ｮ驕ｩ蛻・↑繝輔ぉ繝ｼ繧ｺ縺ｫ譛遏ｭ邨瑚ｷｯ菴咲ｽｮ縺ｧ霑ｽ蜉
+      // 処理の補足です。
 
       const dayName = newItem.eventDate;
       const mapTab = getMapTabForDate(dayName);
@@ -2814,19 +2814,19 @@ const App: React.FC = () => {
         const dayItems = [...(eventItems[dayName] || [])];
         const allItems = eventLists[activeEventName] || [];
         const itemsMap = new Map(allItems.map((i) => [i.id, i]));
-        itemsMap.set(item.id, item); // 譁ｰ繧｢繧､繝・Β繧りｿｽ蜉
+        itemsMap.set(item.id, item); // 新しいアイテムをマップに登録します。
 
-        // 繝槭ャ繝励ョ繝ｼ繧ｿ縺ｨ繝帙・繝ｫ諠・ｱ繧貞叙蠕・
+        // 処理の補足です。
 
         const currentMapData = mapData[activeEventName]?.[mapTab];
         const halls = hallDefinitions[activeEventName]?.[mapTab] || [];
         const hallSettings = hallRouteSettings[activeEventName]?.[mapTab];
 
-        // 繝帙・繝ｫ鬆・ｺ上ｒ蜿門ｾ・
+        // 処理の補足です。
 
         const hallOrder = hallSettings?.hallOrder || halls.map((h) => h.id);
 
-        // 繧｢繧､繝・Β縺ｮ蠎ｧ讓吶ｒ蜿門ｾ励☆繧九・繝ｫ繝代・
+        // 処理の補足です。
 
         const getItemPosition = (id: string): { row: number; col: number } | null => {
           const targetItem = itemsMap.get(id);
@@ -2836,7 +2836,7 @@ const App: React.FC = () => {
           const targetBlock = currentMapData.blocks.find((b) => b.name === blockName);
           if (!targetBlock) return null;
 
-          // 繝翫Φ繝舌・繧ｻ繝ｫ縺ｮ蠎ｧ讓吶ｒ謗｢縺・
+          // 処理の補足です。
 
           const numberCells = targetBlock.numberCells || [];
           const normalizedNumber = targetItem.number.toLowerCase();
@@ -2847,7 +2847,7 @@ const App: React.FC = () => {
             }
           }
 
-          // 隕九▽縺九ｉ縺ｪ縺・ｴ蜷医・繝悶Ο繝・け縺ｮ荳ｭ蠢・ｒ霑斐☆
+          // 処理の補足です。
 
           return {
             row: (targetBlock.startRow + targetBlock.endRow) / 2,
@@ -2855,7 +2855,7 @@ const App: React.FC = () => {
           };
         };
 
-        // 2轤ｹ髢薙・霍晞屬繧定ｨ育ｮ・
+        // 処理の補足です。
 
         const calcDistance = (
           pos1: { row: number; col: number },
@@ -2864,7 +2864,7 @@ const App: React.FC = () => {
           return Math.abs(pos1.row - pos2.row) + Math.abs(pos1.col - pos2.col);
         };
 
-        // 蜷後§繝輔ぉ繝ｼ繧ｺ縺ｮ繧｢繧､繝・Β縺ｮ繧､繝ｳ繝・ャ繧ｯ繧ｹ繧貞庶髮・
+        // 処理の補足です。
 
         const phaseStatus = purchaseStatus; // 'Postpone' or 'Late'
         const samePhaseIndices: number[] = [];
@@ -2876,24 +2876,24 @@ const App: React.FC = () => {
           }
         }
 
-        // 譁ｰ繧｢繧､繝・Β縺ｮ蠎ｧ讓吶ｒ蜿門ｾ・
+        // 処理の補足です。
 
         const newItemPos = getItemPosition(item.id);
 
         if (samePhaseIndices.length === 0 || !newItemPos) {
-          // 蜷後§繝輔ぉ繝ｼ繧ｺ縺ｮ繧｢繧､繝・Β縺後↑縺・ｴ蜷医・譛ｫ蟆ｾ縺ｫ霑ｽ蜉
+          // 処理の補足です。
           dayItems.push(item.id);
         } else {
-          // 蜷後§繝輔ぉ繝ｼ繧ｺ縺ｮ繧｢繧､繝・Β髢薙〒譛遏ｭ邨瑚ｷｯ縺ｫ縺ｪ繧倶ｽ咲ｽｮ繧呈爾縺・
+          // 処理の補足です。
           let bestInsertIndex = samePhaseIndices[samePhaseIndices.length - 1] + 1;
           let minTotalDistance = Infinity;
 
-          // 蜷・諺蜈･菴咲ｽｮ縺ｧ縺ｮ邱剰ｷ晞屬繧定ｨ育ｮ・
+          // 処理の補足です。
 
           for (let insertIdx = 0; insertIdx <= samePhaseIndices.length; insertIdx++) {
             let totalDistance = 0;
 
-            // 謖ｿ蜈･菴咲ｽｮ縺ｮ蜑阪・繧｢繧､繝・Β
+            // 処理の補足です。
 
             if (insertIdx > 0) {
               const prevItemId = dayItems[samePhaseIndices[insertIdx - 1]];
@@ -2903,7 +2903,7 @@ const App: React.FC = () => {
               }
             }
 
-            // 謖ｿ蜈･菴咲ｽｮ縺ｮ蠕後・繧｢繧､繝・Β
+            // 処理の補足です。
 
             if (insertIdx < samePhaseIndices.length) {
               const nextItemId = dayItems[samePhaseIndices[insertIdx]];
@@ -2912,7 +2912,7 @@ const App: React.FC = () => {
                 totalDistance += calcDistance(newItemPos, nextPos);
               }
 
-              // 蜈・・・蜑榊ｾ後・霍晞屬繧貞ｼ輔￥・域眠繧｢繧､繝・Β繧呈諺蜈･縺吶ｋ縺薙→縺ｧ荳崎ｦ√↓縺ｪ繧玖ｷ晞屬・・
+              // 処理の補足です。
 
               if (insertIdx > 0) {
                 const prevItemId = dayItems[samePhaseIndices[insertIdx - 1]];
@@ -2925,7 +2925,7 @@ const App: React.FC = () => {
 
             if (totalDistance < minTotalDistance) {
               minTotalDistance = totalDistance;
-              // 螳滄圀縺ｮ謖ｿ蜈･菴咲ｽｮ繧定ｨ育ｮ・
+              // 処理の補足です。
               if (insertIdx === 0) {
                 bestInsertIndex = samePhaseIndices[0];
               } else if (insertIdx === samePhaseIndices.length) {
@@ -2951,7 +2951,7 @@ const App: React.FC = () => {
     [activeEventName, eventLists, mapData, hallDefinitions, hallRouteSettings, getMapTabForDate],
   );
 
-  // 繝槭ャ繝励ン繝･繝ｼ縺ｧ縺ｮ蜈磯ｭ遘ｻ蜍・
+  // 処理の補足です。
 
   const handleMoveToFirstFromMap = useCallback(
     (itemId: string) => {
@@ -2977,7 +2977,7 @@ const App: React.FC = () => {
     [activeEventName, activeTab, isMapTab],
   );
 
-  // 繝槭ャ繝励ン繝･繝ｼ縺ｧ縺ｮ譛ｫ蟆ｾ遘ｻ蜍・
+  // 処理の補足です。
 
   const handleMoveToLastFromMap = useCallback(
     (itemId: string) => {
@@ -3003,7 +3003,7 @@ const App: React.FC = () => {
     [activeEventName, activeTab, isMapTab],
   );
 
-  // 迴ｾ蝨ｨ縺ｮ繝槭ャ繝励↓蟇ｾ蠢懊☆繧句盾蜉譌･縺ｮ螳溯｡悟・繧｢繧､繝・ΒID繧貞叙蠕・
+  // 処理の補足です。
 
   const currentMapExecuteItemIds = useMemo(() => {
     if (!activeEventName || !isMapTab) return [];
@@ -3015,14 +3015,14 @@ const App: React.FC = () => {
     return executeModeItems[activeEventName]?.[dayName] || [];
   }, [activeEventName, activeTab, isMapTab, executeModeItems]);
 
-  // 迴ｾ蝨ｨ縺ｮ繧ｿ繝悶・蜿ょ刈譌･縺ｫ隧ｲ蠖薙☆繧九い繧､繝・Β繧貞叙蠕・
+  // 処理の補足です。
 
   const currentTabItems = useMemo(() => {
     if (!activeEventName || !eventDates.includes(activeTab)) return [];
     return items.filter((item) => item.eventDate === activeTab);
   }, [items, activeTab, activeEventName, eventDates]);
 
-  // 繝槭ャ繝励ち繝悶Γ繝九Η繝ｼ縺ｮ迥ｶ諷・
+  // 処理の補足です。
 
   const [mapTabMenuOpen, setMapTabMenuOpen] = useState<string | null>(null);
   const [mapTabMenuPosition, setMapTabMenuPosition] = useState<{ left: number; top: number }>({
@@ -3040,7 +3040,7 @@ const App: React.FC = () => {
   const [pendingTabChange, setPendingTabChange] = useState<string | null>(null);
   const [blockDefinitionMode, setBlockDefinitionMode] = useState(false);
 
-  // 繝槭ャ繝励ン繝･繝ｼ縺ｮ繧ｳ繝ｳ繝医Ο繝ｼ繝ｫ逕ｨ迥ｶ諷具ｼ医・繝・ム繝ｼ縺九ｉ蛻ｶ蠕｡・・
+  // 処理の補足です。
 
   const [mapSelectedHallId, setMapSelectedHallId] = useState<string>('all');
   const [mapIsRouteVisible, setMapIsRouteVisible] = useState(true);
@@ -3049,7 +3049,7 @@ const App: React.FC = () => {
   const [mapSmartInsertEnabled, setMapSmartInsertEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('mapSmartInsertEnabled');
-      return saved !== null ? saved === 'true' : true; // 繝・ヵ繧ｩ繝ｫ繝・N
+      return saved !== null ? saved === 'true' : true; // 処理の補足です。
     } catch {
       return true;
     }
@@ -3066,7 +3066,7 @@ const App: React.FC = () => {
   const smartInsertLongPressRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const smartInsertLongPressTriggeredRef = React.useRef(false);
 
-  // 繧ｹ繝槭・繝井ｽ咲ｽｮ驕ｸ謚槭・險ｭ螳壹ｒ豌ｸ邯壼喧
+  // 処理の補足です。
 
   React.useEffect(() => {
     try {
@@ -3080,7 +3080,7 @@ const App: React.FC = () => {
     } catch {}
   }, [mapSmartInsertMode]);
 
-  // 繝医・繧ｹ繝郁・蜍暮撼陦ｨ遉ｺ
+  // 処理の補足です。
 
   React.useEffect(() => {
     if (smartInsertToast) {
@@ -3089,7 +3089,7 @@ const App: React.FC = () => {
     }
   }, [smartInsertToast]);
 
-  // 繧ｻ繝ｫ驕ｸ謚槭Δ繝ｼ繝峨・迥ｶ諷具ｼ医ヶ繝ｭ繝・け螳夂ｾｩ逕ｨ・・
+  // 処理の補足です。
 
   const [cellSelectionMode, setCellSelectionMode] = useState<{
     type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual';
@@ -3097,7 +3097,7 @@ const App: React.FC = () => {
     editingBlockData?: unknown;
   } | null>(null);
 
-  // 繧ｻ繝ｫ驕ｸ謚槫ｮ御ｺ・凾縺ｫBlockDefinitionPanel縺ｫ貂｡縺吶ョ繝ｼ繧ｿ
+  // 処理の補足です。
 
   const [pendingCellSelection, setPendingCellSelection] = useState<{
     type: string;
@@ -3105,23 +3105,23 @@ const App: React.FC = () => {
     editingData?: unknown;
   } | null>(null);
 
-  // 險ｪ蝠丞・繝ｪ繧ｹ繝医ヱ繝阪Ν繧帝幕縺・
+  // 処理の補足です。
 
   const openVisitListPanel = useCallback(
     (mapTab: string) => {
       if (!activeEventName) return;
 
-      // 蟇ｾ蠢懊☆繧区律莉倥ｒ蜿門ｾ暦ｼ井ｾ具ｼ壹・譌･逶ｮ繝槭ャ繝励坂・縲・譌･逶ｮ縲搾ｼ・
+      // 処理の補足です。
 
       const dayMatch = mapTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
-      // 螳溯｡悟・縺ｮ繧｢繧､繝・ΒID繧貞叙蠕・
+      // 処理の補足です。
 
       const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
 
-      // 蜈・・鬆・ｺ上ｒ菫晏ｭ・
+      // 処理の補足です。
 
       setVisitListOriginalOrder([...executeIds]);
       setVisitListPanelMapTab(mapTab);
@@ -3131,13 +3131,13 @@ const App: React.FC = () => {
     [activeEventName, executeModeItems],
   );
 
-  // 險ｪ蝠丞・繝ｪ繧ｹ繝郁｡ｨ遉ｺ荳ｭ縺ｫ繝槭ャ繝励ち繝悶ｒ蛻・ｊ譖ｿ縺医◆蝣ｴ蜷医∵眠縺励＞繝槭ャ繝励・險ｪ蝠丞・繝ｪ繧ｹ繝医↓蛻・ｊ譖ｿ縺・
+  // 処理の補足です。
 
   React.useEffect(() => {
     if (!visitListPanelOpen || !isMapTab || !activeEventName) return;
-    // 迴ｾ蝨ｨ縺ｮ繝代ロ繝ｫ縺悟挨縺ｮ繝槭ャ繝励ち繝悶ｒ謖・＠縺ｦ縺・◆繧牙・繧頑崛縺・
+    // 処理の補足です。
     if (visitListPanelMapTab !== activeTab) {
-      // 譛ｪ菫晏ｭ倥・螟画峩縺後≠繧句ｴ蜷医・閾ｪ蜍慕｢ｺ螳・
+      // 処理の補足です。
       if (visitListHasUnsavedChanges) {
         setVisitListHasUnsavedChanges(false);
       }
@@ -3159,7 +3159,7 @@ const App: React.FC = () => {
     executeModeItems,
   ]);
 
-  // 險ｪ蝠丞・繝ｪ繧ｹ繝医・鬆・ｺ上ｒ譖ｴ譁ｰ
+  // 処理の補足です。
 
   const handleVisitListOrderUpdate = useCallback(
     (newOrderItems: ShoppingItem[]) => {
@@ -3169,7 +3169,7 @@ const App: React.FC = () => {
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
-      // 譁ｰ縺励＞鬆・ｺ上・ID驟榊・
+      // 処理の補足です。
 
       const newIds = newOrderItems.map((item) => item.id);
 
@@ -3187,14 +3187,14 @@ const App: React.FC = () => {
     [visitListPanelMapTab, activeEventName],
   );
 
-  // 險ｪ蝠丞・繝ｪ繧ｹ繝医・遒ｺ螳・
+  // 処理の補足です。
 
   const handleVisitListConfirm = useCallback(() => {
     setVisitListHasUnsavedChanges(false);
     setVisitListOriginalOrder([]);
   }, []);
 
-  // 險ｪ蝠丞・繝ｪ繧ｹ繝医・繧ｭ繝｣繝ｳ繧ｻ繝ｫ
+  // 処理の補足です。
 
   const handleVisitListCancel = useCallback(() => {
     if (!visitListPanelMapTab || !activeEventName) return;
@@ -3203,7 +3203,7 @@ const App: React.FC = () => {
     if (!dayMatch) return;
     const dayName = dayMatch[1];
 
-    // 蜈・・鬆・ｺ上↓謌ｻ縺・
+    // 処理の補足です。
 
     if (visitListOriginalOrder.length > 0) {
       setExecuteModeItems((prev) => ({
@@ -3218,14 +3218,14 @@ const App: React.FC = () => {
     setVisitListOriginalOrder([]);
   }, [visitListOriginalOrder, visitListPanelMapTab, activeEventName]);
 
-  // 險ｪ蝠丞・繝ｪ繧ｹ繝医ヱ繝阪Ν繧帝哩縺倥ｋ・亥､画峩繧剃ｿ晄戟・・
+  // 処理の補足です。
 
   const handleVisitListClose = useCallback(() => {
     setVisitListPanelOpen(false);
-    // 螻･豁ｴ縺ｨ迥ｶ諷九・菫晄戟・磯哩縺倥◆縺縺代〒縺ｯ遐ｴ譽・＠縺ｪ縺・ｼ・
+    // 処理の補足です。
   }, []);
 
-  // 繝槭ャ繝励そ繝ｫ縺ｮ繝上う繝ｩ繧､繝・
+  // 処理の補足です。
 
   const handleHighlightMapCell = useCallback((row: number, col: number) => {
     setHighlightedMapCell({ row, col });
@@ -3235,7 +3235,7 @@ const App: React.FC = () => {
     setHighlightedMapCell(null);
   }, []);
 
-  // 險ｪ蝠丞・繝ｪ繧ｹ繝育畑縺ｮ螳溯｡悟・繧｢繧､繝・Β
+  // 処理の補足です。
 
   const visitListItems = useMemo(() => {
     if (!visitListPanelMapTab || !activeEventName) return [];
@@ -3247,7 +3247,7 @@ const App: React.FC = () => {
     const dayItems = items.filter((item) => item.eventDate === dayName);
     const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
 
-    // executeIds縺ｮ鬆・ｺ上〒霑斐☆
+    // 処理の補足です。
 
     return executeIds
       .filter((id: string) => dayItems.some((item) => item.id === id))
@@ -3255,7 +3255,7 @@ const App: React.FC = () => {
       .filter(Boolean);
   }, [visitListPanelMapTab, activeEventName, items, executeModeItems]);
 
-  // 險ｪ蝠丞・繝ｪ繧ｹ繝育畑縺ｮ繝帙・繝ｫ鬆・ｺ・
+  // 処理の補足です。
 
   const visitListHallOrder = useMemo(() => {
     if (!visitListPanelMapTab || !activeEventName) return [];
@@ -3267,18 +3267,18 @@ const App: React.FC = () => {
       return routeSettings.hallOrder;
     }
 
-    // 繝・ヵ繧ｩ繝ｫ繝医・繝帙・繝ｫ螳夂ｾｩ鬆・
+    // 処理の補足です。
 
     return halls.map((h) => h.id);
   }, [visitListPanelMapTab, activeEventName, hallDefinitions, hallRouteSettings]);
 
-  // 繧｢繧､繝・Β縺ｮ蜆ｪ蜈亥ｺｦ繧貞､画峩縺吶ｋ繝上Φ繝峨Λ
+  // 処理の補足です。
 
   const handleUpdateItemPriority = useCallback(
     (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
       if (!activeEventName || !visitListPanelMapTab) return;
 
-      // 繧｢繧､繝・Β縺ｮ蜆ｪ蜈亥ｺｦ繧呈峩譁ｰ
+      // 処理の補足です。
 
       setEventLists((prev) => ({
         ...prev,
@@ -3287,7 +3287,7 @@ const App: React.FC = () => {
         ),
       }));
 
-      // 繧｢繧､繝・Β縺ｮ繝帙・繝ｫID繧貞叙蠕・
+      // 処理の補足です。
 
       const item = items.find((i) => i.id === itemId);
       if (!item) return;
@@ -3295,7 +3295,7 @@ const App: React.FC = () => {
       const halls = hallDefinitions[activeEventName]?.[visitListPanelMapTab] || [];
       const mapDataForTab = mapData[activeEventName]?.[visitListPanelMapTab];
 
-      // 繧｢繧､繝・Β縺ｮ繝帙・繝ｫID繧堤音螳・
+      // 処理の補足です。
 
       let itemHallId: string | null = null;
       if (mapDataForTab) {
@@ -3307,7 +3307,7 @@ const App: React.FC = () => {
             const cell = block.numberCells.find((nc) => nc.value === num);
             if (cell) {
               for (const hall of halls) {
-                // 螟夊ｧ貞ｽ｢蜀・愛螳・
+                // 処理の補足です。
                 const isPointInPolygon = (
                   row: number,
                   col: number,
@@ -3331,7 +3331,7 @@ const App: React.FC = () => {
                   itemHallId = hall.id;
                   break;
                 }
-                // 鬆らせ荳翫↓縺ゅｋ縺・
+                // 処理の補足です。
                 for (const vertex of hall.vertices) {
                   if (vertex.row === cell.row && vertex.col === cell.col) {
                     itemHallId = hall.id;
@@ -3345,7 +3345,7 @@ const App: React.FC = () => {
         }
       }
 
-      // 繧ｰ繝ｫ繝ｼ繝悠D繧堤函謌・
+      // 処理の補足です。
 
       const buildGroupId = (
         hallId: string | null,
@@ -3375,24 +3375,24 @@ const App: React.FC = () => {
         };
         let newHallOrder = [...currentSettings.hallOrder];
 
-        // 迴ｾ蝨ｨ縺ｮhallOrder縺ｫ繝吶・繧ｹ繝帙・繝ｫ・磯壼ｸｸ繧ｰ繝ｫ繝ｼ繝暦ｼ峨′縺ｪ縺代ｌ縺ｰ霑ｽ蜉
+        // 処理の補足です。
 
         if (!newHallOrder.includes(baseGroupId)) {
           newHallOrder.push(baseGroupId);
         }
 
-        // 譁ｰ縺励＞繧ｰ繝ｫ繝ｼ繝励′蠢・ｦ√°遒ｺ隱搾ｼ磯壼ｸｸ繧ｰ繝ｫ繝ｼ繝励↓謌ｻ縺吝ｴ蜷医・荳崎ｦ・ｼ・
+        // 処理の補足です。
 
         if (priorityLevel !== 'none' && !newHallOrder.includes(newGroupId)) {
-          // 騾壼ｸｸ繧ｰ繝ｫ繝ｼ繝暦ｼ医∪縺溘・蜆ｪ蜈医げ繝ｫ繝ｼ繝暦ｼ峨・逶ｴ蜑阪↓謖ｿ蜈･
+          // 処理の補足です。
           const priorityGroupId = buildGroupId(itemHallId, 'priority');
 
-          // 謖ｿ蜈･菴咲ｽｮ繧呈ｱｺ螳・
+          // 処理の補足です。
 
           let insertIndex = newHallOrder.length;
 
           if (priorityLevel === 'highest') {
-            // 譛蜆ｪ蜈医・縲∝━蜈医げ繝ｫ繝ｼ繝励∪縺溘・騾壼ｸｸ繧ｰ繝ｫ繝ｼ繝励・逶ｴ蜑・
+            // 処理の補足です。
             const priorityIndex = newHallOrder.indexOf(priorityGroupId);
             const baseIndex = newHallOrder.indexOf(baseGroupId);
 
@@ -3402,7 +3402,7 @@ const App: React.FC = () => {
               insertIndex = baseIndex;
             }
           } else if (priorityLevel === 'priority') {
-            // 蜆ｪ蜈医・騾壼ｸｸ繧ｰ繝ｫ繝ｼ繝励・逶ｴ蜑・
+            // 処理の補足です。
             const baseIndex = newHallOrder.indexOf(baseGroupId);
             if (baseIndex !== -1) {
               insertIndex = baseIndex;
@@ -3412,15 +3412,15 @@ const App: React.FC = () => {
           newHallOrder.splice(insertIndex, 0, newGroupId);
         }
 
-        // 蜿､縺・げ繝ｫ繝ｼ繝励′遨ｺ縺ｫ縺ｪ繧九°遒ｺ隱搾ｼ亥酔縺倥・繝ｼ繝ｫ繝ｻ蜷後§蜆ｪ蜈亥ｺｦ縺ｮ莉悶・繧｢繧､繝・Β縺後≠繧九°・・      // 豕ｨ諢・ 縺薙・譎らせ縺ｧ縺ｯitem縺ｮ蜆ｪ蜈亥ｺｦ縺ｯ譌｢縺ｫ譖ｴ譁ｰ縺輔ｌ縺ｦ縺・ｋ縺溘ａ縲∵峩譁ｰ蠕後・items繧剃ｽｿ縺・ｿ・ｦ√′縺ゅｋ
-        // 縺励°縺励《etEventLists縺ｨsetHallRouteSettings縺ｯ髱槫酔譛溘↑縺ｮ縺ｧ縲∫樟蝨ｨ縺ｮitems繧剃ｽｿ縺・
+        // 処理の補足です。
+        // 処理の補足です。
         if (oldPriority !== 'none' && oldGroupId !== newGroupId) {
-          // 蜷後§繝帙・繝ｫ繝ｻ蜷後§蜆ｪ蜈亥ｺｦ縺ｮ莉悶・繧｢繧､繝・Β縺後≠繧九°遒ｺ隱・
+          // 処理の補足です。
           const otherItemsInOldGroup = items.filter((i) => {
             if (i.id === itemId) return false;
             if ((i.priorityLevel || 'none') !== oldPriority) return false;
 
-            // 蜷後§繝帙・繝ｫ縺九←縺・°遒ｺ隱・
+            // 処理の補足です。
 
             if (!mapDataForTab) return false;
             const iBlock = mapDataForTab.blocks.find((b) => b.name === i.block);
@@ -3431,7 +3431,7 @@ const App: React.FC = () => {
             const iCell = iBlock.numberCells.find((nc) => nc.value === iNum);
             if (!iCell) return false;
 
-            // 縺薙・繧｢繧､繝・Β縺ｮ繝帙・繝ｫID繧堤音螳・
+            // 処理の補足です。
 
             let iHallId: string | null = null;
             for (const h of halls) {
@@ -3489,7 +3489,7 @@ const App: React.FC = () => {
     [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData],
   );
 
-  // 繧ｿ繝門､画峩譎ゅ・遒ｺ隱阪ム繧､繧｢繝ｭ繧ｰ蜃ｦ逅・ｼ亥ｰ・擂逧・↓TabButton縺ｧ菴ｿ逕ｨ・・
+  // 処理の補足です。
   const handleTabChangeWithVisitListCheck = (newTab: string): boolean => {
     if (visitListPanelOpen && visitListHasUnsavedChanges) {
       setPendingTabChange(newTab);
@@ -3499,7 +3499,7 @@ const App: React.FC = () => {
     return true;
   };
 
-  // 遒ｺ隱阪ム繧､繧｢繝ｭ繧ｰ縺ｧ遒ｺ螳壹ｒ驕ｸ謚・
+  // 処理の補足です。
 
   const handleVisitListDialogConfirm = useCallback(() => {
     handleVisitListConfirm();
@@ -3511,7 +3511,7 @@ const App: React.FC = () => {
     }
   }, [handleVisitListConfirm, pendingTabChange]);
 
-  // 遒ｺ隱阪ム繧､繧｢繝ｭ繧ｰ縺ｧ繧ｭ繝｣繝ｳ繧ｻ繝ｫ繧帝∈謚・
+  // 処理の補足です。
 
   const handleVisitListDialogCancel = useCallback(() => {
     handleVisitListCancel();
@@ -3523,7 +3523,7 @@ const App: React.FC = () => {
     }
   }, [handleVisitListCancel, pendingTabChange]);
 
-  // 繝悶Ο繝・け螳夂ｾｩ繧呈峩譁ｰ
+  // 処理の補足です。
 
   const handleUpdateBlocks = useCallback(
     (blocks: BlockDefinition[]) => {
@@ -3543,7 +3543,7 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, activeTab, currentMapData],
   );
 
-  // 繝帙・繝ｫ螳夂ｾｩ繧呈峩譁ｰ
+  // 処理の補足です。
 
   const handleUpdateHalls = useCallback(
     (halls: HallDefinition[]) => {
@@ -3557,7 +3557,7 @@ const App: React.FC = () => {
         },
       }));
 
-      // 繝帙・繝ｫ鬆・ｺ上ｂ譖ｴ譁ｰ・域眠隕上・繝ｼ繝ｫ縺ｯ繝ｪ繧ｹ繝医・譛蠕後↓霑ｽ蜉・・
+      // 処理の補足です。
 
       const existingOrder = currentHallRouteSettings.hallOrder;
       const newHallIds = halls.map((h) => h.id);
@@ -3580,7 +3580,7 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, activeTab, currentHallRouteSettings],
   );
 
-  // 繝帙・繝ｫ繝ｫ繝ｼ繝郁ｨｭ螳壹ｒ譖ｴ譁ｰ
+  // 処理の補足です。
 
   const handleUpdateHallRouteSettings = useCallback(
     (settings: HallRouteSettings) => {
@@ -3597,7 +3597,7 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, activeTab],
   );
 
-  // 螳溯｡悟・繧偵・繝ｼ繝ｫ鬆・ｺ上〒荳ｦ縺ｳ譖ｿ縺・
+  // 処理の補足です。
 
   const handleReorderExecuteListByHallOrder = useCallback(
     (hallOrder: string[]) => {
@@ -3622,7 +3622,7 @@ const App: React.FC = () => {
 
         if (dayItems.length === 0) return prev;
 
-        // 蜷・い繧､繝・Β縺ｮ繝帙・繝ｫID繧貞叙蠕励☆繧矩未謨ｰ
+        // 処理の補足です。
 
         const itemsMap = new Map(items.map((i) => [i.id, i]));
         const getHallIdForItem = (itemId: string): string | null => {
@@ -3630,7 +3630,7 @@ const App: React.FC = () => {
           if (!item || !currentMapData) return null;
 
           const blockName = item.block?.trim() || '';
-          // 螳悟・荳閾ｴ蜆ｪ蜈医〒繝悶Ο繝・け繧呈､懃ｴ｢
+          // 処理の補足です。
           let block = currentMapData.blocks.find((b) => b.name === blockName);
           if (!block) {
             const candidates = currentMapData.blocks.filter(
@@ -3656,7 +3656,7 @@ const App: React.FC = () => {
           return null;
         };
 
-        // 繧｢繧､繝・Β繧偵・繝ｼ繝ｫ縺斐→縺ｫ繧ｰ繝ｫ繝ｼ繝怜喧
+        // 処理の補足です。
 
         const itemsByHall = new Map<string | null, Set<string>>();
         dayItems.forEach((itemId) => {
@@ -3667,7 +3667,7 @@ const App: React.FC = () => {
           itemsByHall.get(hallId)!.add(itemId);
         });
 
-        // hallVisitLists縺ｮ鬆・ｺ上・繝・・繧剃ｽ懈・
+        // 処理の補足です。
 
         const visitOrderMap = new Map<string, number>();
         currentHallRouteSettings.hallVisitLists.forEach((list) => {
@@ -3676,7 +3676,7 @@ const App: React.FC = () => {
           });
         });
 
-        // 繝帙・繝ｫ蜀・・繧｢繧､繝・Β繧定ｨｪ蝠丞・謖・ｮ夐・〒繧ｽ繝ｼ繝・
+        // 処理の補足です。
 
         const sortItemsInHall = (itemIds: Set<string>): string[] => {
           const itemsArray = Array.from(itemIds);
@@ -3684,24 +3684,24 @@ const App: React.FC = () => {
             const orderA = visitOrderMap.get(a);
             const orderB = visitOrderMap.get(b);
 
-            // 荳｡譁ｹ縺ｨ繧りｨｪ蝠丞・繝ｪ繧ｹ繝医↓縺ゅｋ蝣ｴ蜷医√◎縺ｮ鬆・ｺ上〒荳ｦ縺ｹ繧・
+            // 処理の補足です。
 
             if (orderA !== undefined && orderB !== undefined) {
               return orderA - orderB;
             }
-            // 荳譁ｹ縺ｮ縺ｿ縺後Μ繧ｹ繝医↓縺ゅｋ蝣ｴ蜷医√Μ繧ｹ繝医↓縺ゅｋ譁ｹ繧貞・縺ｫ
+            // 処理の補足です。
             if (orderA !== undefined) return -1;
             if (orderB !== undefined) return 1;
-            // 縺ｩ縺｡繧峨ｂ繝ｪ繧ｹ繝医↓縺ｪ縺・ｴ蜷医∝・縺ｮ螳溯｡悟・鬆・ｺ上ｒ邯ｭ謖・
+            // 処理の補足です。
             return dayItems.indexOf(a) - dayItems.indexOf(b);
           });
         };
 
-        // 繝帙・繝ｫ鬆・ｺ上↓蠕薙▲縺ｦ荳ｦ縺ｳ譖ｿ縺・
+        // 処理の補足です。
 
         const reorderedItems: string[] = [];
 
-        // 縺ｾ縺壹・繝ｼ繝ｫ鬆・ｺ上↓蠕薙▲縺ｦ霑ｽ蜉
+        // 処理の補足です。
         hallOrder.forEach((hallId) => {
           const hallItems = itemsByHall.get(hallId);
           if (hallItems && hallItems.size > 0) {
@@ -3710,7 +3710,7 @@ const App: React.FC = () => {
           }
         });
 
-        // 繝帙・繝ｫ鬆・ｺ上↓蜷ｫ縺ｾ繧後※縺・↑縺・・繝ｼ繝ｫ縺ｮ繧｢繧､繝・Β繧定ｿｽ蜉
+        // 処理の補足です。
         itemsByHall.forEach((hallItems) => {
           if (hallItems.size > 0) {
             reorderedItems.push(...sortItemsInHall(hallItems));
@@ -3729,43 +3729,43 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, activeTab, mapData, hallDefinitions, hallRouteSettings, items],
   );
 
-  // 繝帙・繝ｫ螳夂ｾｩ繝｢繝ｼ繝峨・迥ｶ諷・
+  // 処理の補足です。
 
   const [hallDefinitionMode, setHallDefinitionMode] = useState(false);
 
-  // 繝帙・繝ｫ鬆らせ驕ｸ謚槭Δ繝ｼ繝峨・迥ｶ諷・
+  // 処理の補足です。
 
   const [vertexSelectionMode, setVertexSelectionMode] = useState<{
     clickedVertices: { row: number; col: number }[];
     editingData?: unknown;
   } | null>(null);
 
-  // 繝帙・繝ｫ鬆らせ驕ｸ謚槫ｮ御ｺ・凾縺ｫHallDefinitionPanel縺ｫ貂｡縺吶ョ繝ｼ繧ｿ
+  // 処理の補足です。
 
   const [pendingVertexSelection, setPendingVertexSelection] = useState<{
     vertices: { row: number; col: number }[];
     editingData?: unknown;
   } | null>(null);
 
-  // 繝帙・繝ｫ鬆らせ驕ｸ謚槭Δ繝ｼ繝峨ｒ髢句ｧ・
+  // 処理の補足です。
 
   const handleStartVertexSelection = useCallback((editingData?: unknown) => {
     setVertexSelectionMode({ clickedVertices: [], editingData });
     setHallDefinitionMode(false);
   }, []);
 
-  // 鬆らせ繧帝㍾蠢・°繧峨・隗貞ｺｦ縺ｧ繧ｽ繝ｼ繝医＠縲∬ｾｺ縺御ｺ､蟾ｮ縺励↑縺・腰邏泌､夊ｧ貞ｽ｢繧剃ｽ懊ｋ
+  // 処理の補足です。
 
   const sortVerticesNonCrossing = useCallback(
     (vertices: { row: number; col: number }[]): { row: number; col: number }[] => {
       if (vertices.length <= 2) return vertices;
 
-      // 驥榊ｿ・ｒ險育ｮ・
+      // 処理の補足です。
 
       const centroidRow = vertices.reduce((sum, v) => sum + v.row, 0) / vertices.length;
       const centroidCol = vertices.reduce((sum, v) => sum + v.col, 0) / vertices.length;
 
-      // 驥榊ｿ・°繧峨・隗貞ｺｦ縺ｧ繧ｽ繝ｼ繝茨ｼ亥渚譎りｨ亥屓繧奇ｼ・
+      // 処理の補足です。
 
       const sorted = [...vertices].sort((a, b) => {
         const angleA = Math.atan2(a.row - centroidRow, a.col - centroidCol);
@@ -3778,11 +3778,11 @@ const App: React.FC = () => {
     [],
   );
 
-  // 繝帙・繝ｫ鬆らせ驕ｸ謚槭ｒ遒ｺ螳・
+  // 処理の補足です。
 
   const handleConfirmVertexSelection = useCallback(() => {
     if (vertexSelectionMode) {
-      // 鬆らせ繧定・蜍穂ｸｦ縺ｹ譖ｿ縺茨ｼ郁ｾｺ縺御ｺ､蟾ｮ縺励↑縺・腰邏泌､夊ｧ貞ｽ｢縺ｫ縺吶ｋ・・
+      // 処理の補足です。
       const sorted = sortVerticesNonCrossing(vertexSelectionMode.clickedVertices);
       setPendingVertexSelection({
         vertices: sorted,
@@ -3793,7 +3793,7 @@ const App: React.FC = () => {
     setHallDefinitionMode(true);
   }, [sortVerticesNonCrossing, vertexSelectionMode]);
 
-  // 繝帙・繝ｫ鬆らせ驕ｸ謚槭ｒ繧ｭ繝｣繝ｳ繧ｻ繝ｫ
+  // 処理の補足です。
 
   const handleCancelVertexSelection = useCallback(() => {
     if (vertexSelectionMode?.editingData) {
@@ -3806,7 +3806,7 @@ const App: React.FC = () => {
     setHallDefinitionMode(true);
   }, [vertexSelectionMode]);
 
-  // 繝槭ャ繝励そ繝ｫ繧ｯ繝ｪ繝・け譎ゅ↓繝帙・繝ｫ鬆らせ驕ｸ謚槭↓霑ｽ蜉/蜑企勁
+  // 処理の補足です。
 
   useEffect(() => {
     const handleMapCellClickForVertex = (e: CustomEvent<{ row: number; col: number }>) => {
@@ -3817,7 +3817,7 @@ const App: React.FC = () => {
       setVertexSelectionMode((prev) => {
         if (!prev) return prev;
 
-        // 譌｢蟄倥・鬆らせ繧偵け繝ｪ繝・け縺励◆蝣ｴ蜷医・蜑企勁
+        // 処理の補足です。
 
         const existingIndex = prev.clickedVertices.findIndex((v) => v.row === row && v.col === col);
         if (existingIndex !== -1) {
@@ -3827,7 +3827,7 @@ const App: React.FC = () => {
           };
         }
 
-        // 譛螟ｧ6鬆らせ縺ｾ縺ｧ
+        // 処理の補足です。
 
         if (prev.clickedVertices.length >= 6) {
           return prev;
@@ -3846,21 +3846,21 @@ const App: React.FC = () => {
     };
   }, [vertexSelectionMode]);
 
-  // 繧ｻ繝ｫ驕ｸ謚槭Δ繝ｼ繝峨ｒ髢句ｧ具ｼ・lockDefinitionPanel縺九ｉ蜻ｼ縺ｰ繧後ｋ・・
+  // 処理の補足です。
 
   const handleStartCellSelection = useCallback(
     (type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual', editingData?: unknown) => {
       setCellSelectionMode({ type, clickedCells: [], editingBlockData: editingData });
-      setBlockDefinitionMode(false); // 繝代ロ繝ｫ繧剃ｸ譎ら噪縺ｫ髱櫁｡ｨ遉ｺ
+      setBlockDefinitionMode(false); // ブロック定義パネルの表示状態を更新します。
     },
     [],
   );
 
-  // 遽・峇繧貞渚譏縺励※繝代ロ繝ｫ繧貞・陦ｨ遉ｺ
+  // 処理の補足です。
 
   const handleConfirmCellSelection = useCallback(() => {
     if (cellSelectionMode) {
-      // pendingCellSelection繧偵そ繝・ヨ縺励※BlockDefinitionPanel縺ｫ貂｡縺・
+      // 処理の補足です。
       setPendingCellSelection({
         type: cellSelectionMode.type,
         cells: cellSelectionMode.clickedCells,
@@ -3868,25 +3868,25 @@ const App: React.FC = () => {
       });
     }
     setCellSelectionMode(null);
-    setBlockDefinitionMode(true); // 繝代ロ繝ｫ繧貞・陦ｨ遉ｺ
+    setBlockDefinitionMode(true); // ブロック定義パネルの表示状態を更新します。
   }, [cellSelectionMode]);
 
-  // 繧ｻ繝ｫ驕ｸ謚槭ｒ繧ｭ繝｣繝ｳ繧ｻ繝ｫ・育ｷｨ髮・判髱｢縺ｫ謌ｻ繧具ｼ・
+  // 処理の補足です。
 
   const handleCancelCellSelection = useCallback(() => {
-    // 邱ｨ髮・ョ繝ｼ繧ｿ繧剃ｿ晄戟縺励◆縺ｾ縺ｾ繝代ロ繝ｫ繧貞・陦ｨ遉ｺ
+    // 処理の補足です。
     if (cellSelectionMode?.editingBlockData) {
       setPendingCellSelection({
-        type: 'cancelled', // 繧ｭ繝｣繝ｳ繧ｻ繝ｫ逕ｨ縺ｮ迚ｹ谿翫ち繧､繝・
+        type: 'cancelled', // 処理の補足です。
         cells: [],
         editingData: cellSelectionMode.editingBlockData,
       });
     }
     setCellSelectionMode(null);
-    setBlockDefinitionMode(true); // 繝代ロ繝ｫ繧貞・陦ｨ遉ｺ
+    setBlockDefinitionMode(true); // ブロック定義パネルの表示状態を更新します。
   }, [cellSelectionMode]);
 
-  // 繝槭ャ繝励そ繝ｫ繧ｯ繝ｪ繝・け繧偵Μ繝・せ繝ｳ縺励※繧ｻ繝ｫ驕ｸ謚槭↓霑ｽ蜉
+  // 処理の補足です。
 
   useEffect(() => {
     const handleMapCellClick = (e: CustomEvent<{ row: number; col: number }>) => {
@@ -3897,7 +3897,7 @@ const App: React.FC = () => {
       setCellSelectionMode((prev) => {
         if (!prev) return prev;
 
-        // 譌｢縺ｫ驕ｸ謚槭＆繧後※縺・ｋ蝣ｴ蜷医・蜑企勁・亥・繝｢繝ｼ繝牙・騾夲ｼ・
+        // 処理の補足です。
 
         const existingIndex = prev.clickedCells.findIndex((c) => c.row === row && c.col === col);
         if (existingIndex >= 0) {
@@ -3934,7 +3934,7 @@ const App: React.FC = () => {
     const handlePointerDown = (e: React.PointerEvent) => {
       if (!activeEventName) return;
 
-      // 髟ｷ謚ｼ縺鈴幕蟋区凾縺ｫ繝懊ち繝ｳ縺ｮ菴咲ｽｮ繧定ｨ倬鹸
+      // 処理の補足です。
 
       const target = e.currentTarget as HTMLButtonElement;
       const rect = target.getBoundingClientRect();
@@ -3943,11 +3943,11 @@ const App: React.FC = () => {
 
       longPressTimeout.current = window.setTimeout(() => {
         if (isMapTabProp) {
-          // 繝槭ャ繝励ち繝悶・髟ｷ謚ｼ縺励Γ繝九Η繝ｼ - 險倬鹸縺励◆菴咲ｽｮ縺ｧ繝｡繝九Η繝ｼ繧定｡ｨ遉ｺ
+          // 処理の補足です。
           setMapTabMenuPosition({ left: menuLeft, top: menuTop });
           setMapTabMenuOpen(tab);
         } else if (eventDates.includes(tab)) {
-          // 騾壼ｸｸ縺ｮ譌･莉倥ち繝悶・髟ｷ謚ｼ縺暦ｼ医Δ繝ｼ繝牙・繧頑崛縺茨ｼ・
+          // 処理の補足です。
           handleToggleMode();
         }
         longPressTimeout.current = null;
@@ -3962,14 +3962,14 @@ const App: React.FC = () => {
     };
 
     const handleClick = () => {
-      // 繝｡繝九Η繝ｼ縺碁幕縺・※縺・ｋ蝣ｴ蜷・
+      // 処理の補足です。
       if (mapTabMenuOpen) {
-        // 縺薙・繧ｿ繝悶・繝｡繝九Η繝ｼ縺碁幕縺・※縺・ｋ蝣ｴ蜷医・髢峨§繧九□縺・
+        // 処理の補足です。
         if (mapTabMenuOpen === tab) {
           setMapTabMenuOpen(null);
           return;
         }
-        // 莉悶・繧ｿ繝悶・繝｡繝九Η繝ｼ縺碁幕縺・※縺・ｋ蝣ｴ蜷医・髢峨§縺ｦ繧ｿ繝夜・遘ｻ
+        // 処理の補足です。
         setMapTabMenuOpen(null);
       }
       if (onClick) {
@@ -3983,7 +3983,7 @@ const App: React.FC = () => {
       }
     };
 
-    // 繝｡繝九Η繝ｼ螟悶け繝ｪ繝・け縺ｧ髢峨§繧・
+    // 処理の補足です。
 
     React.useEffect(() => {
       const handleClickOutside = (e: MouseEvent) => {
@@ -4002,13 +4002,13 @@ const App: React.FC = () => {
       }
     }, [tab]);
 
-    // 繝｡繝九Η繝ｼ鬆・岼繧ｯ繝ｪ繝・け譎ゑｼ壹∪縺壹◎縺ｮ繧ｿ繝悶↓驕ｷ遘ｻ縺励※縺九ｉ讖溯・繧帝幕縺・
+    // 処理の補足です。
 
     const handleMenuItemClick = (action: 'visitList' | 'blockDefinition' | 'hallDefinition') => {
-      // 縺ｾ縺壹Γ繝九Η繝ｼ繧帝哩縺倥ｋ
+      // 処理の補足です。
       setMapTabMenuOpen(null);
 
-      // 髟ｷ謚ｼ縺励＠縺溘ち繝悶↓驕ｷ遘ｻ
+      // 処理の補足です。
 
       setItemToEdit(null);
       setSelectedItemIds(new Set());
@@ -4016,7 +4016,7 @@ const App: React.FC = () => {
       setCandidateNumberSortDirection(null);
       setActiveTab(tab);
 
-      // 讖溯・繧帝幕縺擾ｼ医ち繝夜・遘ｻ蠕後↓螳溯｡後＆繧後ｋ繧医≧setTimeout縺ｧ驕・ｻｶ・・
+      // 処理の補足です。
 
       setTimeout(() => {
         switch (action) {
@@ -4055,7 +4055,7 @@ const App: React.FC = () => {
           )}
         </button>
 
-        {/* 繝槭ャ繝励ち繝夜聞謚ｼ縺励Γ繝九Η繝ｼ - fixed驟咲ｽｮ縺ｧ繧ｿ繝悶・縺吶＄荳九↓陦ｨ遉ｺ */}
+        {/* 表示処理の補足 */}
         {mapTabMenuOpen === tab && isMapTabProp && (
           <div
             ref={menuRef}
@@ -4067,7 +4067,7 @@ const App: React.FC = () => {
               zIndex: 9999,
             }}
           >
-            {/* 遏｢蜊ｰ・井ｸ雁髄縺搾ｼ・*/}
+            {/* 表示処理の補足 */}
             <div className="absolute left-1/2 -translate-x-1/2 -top-2">
               <div className="w-3 h-3 bg-white dark:bg-slate-800 border-l border-t border-slate-200 dark:border-slate-700 transform rotate-45" />
             </div>
@@ -4114,18 +4114,18 @@ const App: React.FC = () => {
     const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
 
     if (mode === 'execute') {
-      // 螳溯｡後Δ繝ｼ繝・ 螳溯｡悟・縺ｮ繧｢繧､繝・Β縺ｮ縺ｿ陦ｨ遉ｺ・育ｷｨ髮・Δ繝ｼ繝峨〒驟咲ｽｮ縺励◆鬆・ｺ上ｒ菫晄戟・・
+      // 処理の補足です。
       if (sortState === 'Manual') {
         return executeColumnItems;
       }
-      // 繝輔ぅ繝ｫ繧ｿ縺ｫ隧ｲ蠖薙☆繧九い繧､繝・Β縲√∪縺溘・譛霑大､画峩縺輔ｌ縺溘い繧､繝・Β繧定｡ｨ遉ｺ
+      // 処理の補足です。
       const filterStatus = sortState as Exclude<SortState, 'Manual'>;
       return executeColumnItems.filter(
         (item) => item.purchaseStatus === filterStatus || recentlyChangedItemIds.has(item.id),
       );
     }
 
-    // 邱ｨ髮・Δ繝ｼ繝・ 縺吶∋縺ｦ縺ｮ繧｢繧､繝・Β繧定｡ｨ遉ｺ・亥・蛻・￠縺ｯ繧ｳ繝ｳ繝昴・繝阪Φ繝亥・縺ｧ蜃ｦ逅・ｼ・
+    // 処理の補足です。
 
     return itemsForTab;
   }, [
@@ -4139,7 +4139,7 @@ const App: React.FC = () => {
     recentlyChangedItemIds,
   ]);
 
-  // 讀懃ｴ｢讖溯・: 迴ｾ蝨ｨ縺ｮ繧ｿ繝悶・繧｢繧､繝・Β繧呈､懃ｴ｢
+  // 処理の補足です。
 
   const searchMatches = useMemo(() => {
     if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
@@ -4149,7 +4149,7 @@ const App: React.FC = () => {
     const keyword = searchKeyword.trim().toLowerCase();
     const matches: string[] = [];
 
-    // 迴ｾ蝨ｨ縺ｮ繧ｿ繝悶・繧｢繧､繝・Β繧呈､懃ｴ｢
+    // 処理の補足です。
     currentTabItems.forEach((item) => {
       const circleMatch = item.circle.toLowerCase().includes(keyword);
       const titleMatch = item.title.toLowerCase().includes(keyword);
@@ -4163,7 +4163,7 @@ const App: React.FC = () => {
     return matches;
   }, [searchKeyword, activeEventName, activeTab, currentTabItems, eventDates]);
 
-  // 讀懃ｴ｢繧ｭ繝ｼ繝ｯ繝ｼ繝峨′螟画峩縺輔ｌ縺溘→縺阪↓讀懃ｴ｢邨先棡繧偵Μ繧ｻ繝・ヨ
+  // 処理の補足です。
 
   useEffect(() => {
     if (searchKeyword.trim()) {
@@ -4179,14 +4179,14 @@ const App: React.FC = () => {
     }
   }, [searchKeyword, searchMatches]);
 
-  // 繧ｿ繝悶′蛻・ｊ譖ｿ繧上▲縺溘→縺阪↓讀懃ｴ｢邨先棡繧偵Μ繧ｻ繝・ヨ
+  // 処理の補足です。
 
   useEffect(() => {
     setCurrentSearchIndex(-1);
     setHighlightedItemId(null);
   }, [activeTab]);
 
-  // 蜷・盾蜉譌･繧ｿ繝紋ｸｭ縺ｮ繧｢繧､繝・Β縺ｧ繧ｵ繝ｼ繧ｯ繝ｫ蜷阪′驥崎､・☆繧九い繧､繝・Β縺ｮID繧ｻ繝・ヨ繧定ｨ育ｮ・
+  // 処理の補足です。
 
   const duplicateCircleItemIds = useMemo(() => {
     if (!activeEventName || !eventDates.includes(activeTab)) return new Set<string>();
@@ -4194,7 +4194,7 @@ const App: React.FC = () => {
     const circleCountMap = new Map<string, number>();
     const circleItemIdsMap = new Map<string, string[]>();
 
-    // 繧ｵ繝ｼ繧ｯ繝ｫ蜷阪＃縺ｨ縺ｫ繧｢繧､繝・Β謨ｰ繧偵き繧ｦ繝ｳ繝・
+    // 処理の補足です。
     itemsForTab.forEach((item) => {
       const circle = item.circle.trim();
       if (circle) {
@@ -4208,7 +4208,7 @@ const App: React.FC = () => {
       }
     });
 
-    // 驥崎､・☆繧九し繝ｼ繧ｯ繝ｫ蜷阪・繧｢繧､繝・ΒID繧貞庶髮・
+    // 処理の補足です。
 
     const duplicateIds = new Set<string>();
     circleCountMap.forEach((count, circle) => {
@@ -4221,7 +4221,7 @@ const App: React.FC = () => {
     return duplicateIds;
   }, [activeEventName, activeTab, currentTabItems, eventDates]);
 
-  // 蛟呵｣懊Μ繧ｹ繝医°繧牙虚逧・↓繝悶Ο繝・け蛟､繧貞叙蠕・
+  // 処理の補足です。
 
   const availableBlocks = useMemo(() => {
     if (!activeEventName) return [];
@@ -4245,7 +4245,7 @@ const App: React.FC = () => {
     const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
     let filtered = currentTabItems.filter((item) => !executeIds.has(item.id));
 
-    // 繝悶Ο繝・け繝輔ぅ繝ｫ繧ｿ繧帝←逕ｨ
+    // 処理の補足です。
 
     if (selectedBlockFilters.size > 0) {
       filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
@@ -4261,7 +4261,7 @@ const App: React.FC = () => {
     eventDates,
   ]);
 
-  // 陦ｨ遉ｺ縺輔ｌ縺ｦ縺・ｋ繧｢繧､繝・Β縺ｮ縺ｿ繧呈､懃ｴ｢蟇ｾ雎｡縺ｨ縺吶ｋ
+  // 処理の補足です。
 
   const visibleSearchMatches = useMemo(() => {
     if (searchMatches.length === 0) return [];
@@ -4272,10 +4272,10 @@ const App: React.FC = () => {
     let visibleItemIds: Set<string>;
 
     if (mode === 'execute') {
-      // 螳溯｡後Δ繝ｼ繝・ executeColumnItems縺ｾ縺溘・visibleItems
+      // 処理の補足です。
       visibleItemIds = new Set(visibleItems.map((item) => item.id));
     } else {
-      // 邱ｨ髮・Δ繝ｼ繝・ executeColumnItems + candidateColumnItems
+      // 処理の補足です。
       const allVisibleIds = new Set([
         ...executeColumnItems.map((item) => item.id),
         ...candidateColumnItems.map((item) => item.id),
@@ -4295,17 +4295,17 @@ const App: React.FC = () => {
     candidateColumnItems,
   ]);
 
-  // 縲梧ｬ｡繧呈､懃ｴ｢縲阪・繧ｿ繝ｳ縺ｮ繝上Φ繝峨Λ
+  // 処理の補足です。
 
   const handleSearchNext = useCallback(() => {
     if (!searchKeyword.trim() || visibleSearchMatches.length === 0) {
       if (searchMatches.length > 0 && visibleSearchMatches.length === 0) {
-        alert('No matches in the current filtered view.');
+        alert('現在の絞り込み条件では一致する項目がありません。');
       }
       return;
     }
 
-    // 谺｡縺ｮ繧､繝ｳ繝・ャ繧ｯ繧ｹ繧定ｨ育ｮ暦ｼ医Ν繝ｼ繝暦ｼ・    // currentSearchIndex縺・1縺ｮ蝣ｴ蜷医・0縺九ｉ蟋九ａ繧・
+    // 処理の補足です。
 
     const startIndex = currentSearchIndex === -1 ? -1 : currentSearchIndex;
     const nextIndex = (startIndex + 1) % visibleSearchMatches.length;
@@ -4314,7 +4314,7 @@ const App: React.FC = () => {
     const nextItemId = visibleSearchMatches[nextIndex];
     setHighlightedItemId(nextItemId);
 
-    // 繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ蜃ｦ逅・
+    // 処理の補足です。
 
     setTimeout(() => {
       const element = document.querySelector(`[data-item-id="${nextItemId}"]`);
@@ -4324,7 +4324,7 @@ const App: React.FC = () => {
     }, 100);
   }, [searchKeyword, visibleSearchMatches, currentSearchIndex, searchMatches]);
 
-  // 蜷・ヶ繝ｭ繝・け縺ｮ蛟呵｣懊Μ繧ｹ繝亥・縺ｮ繧｢繧､繝・Β縺ｮ蛯呵・ｬ・↓縲悟━蜈医阪∪縺溘・縲悟ｧ碑ｨ礼┌縲阪′蜷ｫ縺ｾ繧後※縺・ｋ縺九ｒ繝√ぉ繝・け
+  // 処理の補足です。
 
   const blocksWithPriorityRemarks = useMemo(() => {
     if (!activeEventName) return new Set<string>();
@@ -4342,7 +4342,7 @@ const App: React.FC = () => {
     return blocksWithPriority;
   }, [activeEventName, activeTab, executeModeItems, currentTabItems, eventDates]);
 
-  // 蛟呵｣懊Μ繧ｹ繝医・繧｢繧､繝・Β縺碁∈謚槭＆繧後※縺・ｋ縺九メ繧ｧ繝・け
+  // 処理の補足です。
 
   const hasCandidateSelection = useMemo(() => {
     if (!activeEventName || currentMode !== 'edit' || selectedItemIds.size === 0) return false;
@@ -4361,7 +4361,7 @@ const App: React.FC = () => {
     eventDates,
   ]);
 
-  // 螳溯｡後Δ繝ｼ繝牙・縺ｮ繧｢繧､繝・Β縺碁∈謚槭＆繧後※縺・ｋ縺九メ繧ｧ繝・け
+  // 処理の補足です。
 
   const hasExecuteSelection = useMemo(() => {
     if (!activeEventName || currentMode !== 'edit' || selectedItemIds.size === 0) return false;
@@ -4380,7 +4380,7 @@ const App: React.FC = () => {
     eventDates,
   ]);
 
-  // 蟾ｦ蜿ｳ荳｡蛻励・繧｢繧､繝・Β縺悟酔譎ゅ↓驕ｸ謚槭＆繧後※縺・ｋ蝣ｴ蜷医・遘ｻ蜍輔・繧ｿ繝ｳ繧定｡ｨ遉ｺ縺励↑縺・
+  // 処理の補足です。
 
   const showMoveButtons =
     (hasCandidateSelection && !hasExecuteSelection) ||
@@ -4466,7 +4466,7 @@ const App: React.FC = () => {
                       {activeEventName}
                     </h2>
                   )}
-                  {/* 繝・・繝槫・繧頑崛縺医ヨ繧ｰ繝ｫ */}
+                  {/* 表示処理の補足 */}
                   <button
                     onClick={(e) => {
                       e.preventDefault();
@@ -4537,7 +4537,7 @@ const App: React.FC = () => {
                     )}
                   </button>
 
-                  {/* UI陦ｨ遉ｺ險ｭ螳夲ｼ域ｭｯ霆翫い繧､繧ｳ繝ｳ・・*/}
+                  {/* 表示処理の補足 */}
                   <div className="relative">
                     <button
                       onClick={(e) => {
@@ -4550,7 +4550,7 @@ const App: React.FC = () => {
                           ? 'bg-slate-200 dark:bg-slate-700'
                           : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
                       }`}
-                      title="UI visibility settings"
+                      title="表示項目の設定"
                       style={{
                         WebkitTapHighlightColor: 'transparent',
                         minWidth: '44px',
@@ -4579,7 +4579,7 @@ const App: React.FC = () => {
                       </svg>
                     </button>
 
-                    {/* UI陦ｨ遉ｺ險ｭ螳壹ヱ繝阪Ν */}
+                    {/* 表示処理の補足 */}
                     {uiSettingsPanelOpen && (
                       <>
                         <div
@@ -4591,7 +4591,7 @@ const App: React.FC = () => {
                             ヘッダー/タブバー表示設定
                           </h3>
 
-                          {/* 髮・ｸｭ繝｢繝ｼ繝芽ｨｭ螳・*/}
+                          {/* 表示処理の補足 */}
                           <div className="mb-3">
                             <h4 className="text-xs font-semibold text-purple-600 dark:text-purple-400 mb-2">
                               集中モード
@@ -4599,10 +4599,10 @@ const App: React.FC = () => {
                             <div className="space-y-2">
                               {(
                                 [
-                                  ['focus_sp_mapOn', 'SP・マップON'],
-                                  ['focus_sp_mapOff', 'SP・マップOFF'],
-                                  ['focus_pc_mapOn', 'PC・マップON'],
-                                  ['focus_pc_mapOff', 'PC・マップOFF'],
+                                  ['focus_sp_mapOn', 'スマホ・マップ表示'],
+                                  ['focus_sp_mapOff', 'スマホ・マップ非表示'],
+                                  ['focus_pc_mapOn', 'パソコン・マップ表示'],
+                                  ['focus_pc_mapOff', 'パソコン・マップ非表示'],
                                 ] as [keyof typeof uiVisibilitySettings, string][]
                               ).map(([key, label]) => (
                                 <div
@@ -4651,7 +4651,7 @@ const App: React.FC = () => {
                             </div>
                           </div>
 
-                          {/* 螳溯｡後Δ繝ｼ繝芽ｨｭ螳・*/}
+                          {/* 表示処理の補足 */}
                           <div className="mb-3">
                             <h4 className="text-xs font-semibold text-green-600 dark:text-green-400 mb-2">
                               実行モード
@@ -4660,7 +4660,7 @@ const App: React.FC = () => {
                               {(
                                 [
                                   ['execute_sp', 'スマートフォン'],
-                                  ['execute_pc', 'PC / タブレット'],
+                                  ['execute_pc', 'パソコン / タブレット'],
                                 ] as [keyof typeof uiVisibilitySettings, string][]
                               ).map(([key, label]) => (
                                 <div
@@ -4709,7 +4709,7 @@ const App: React.FC = () => {
                             </div>
                           </div>
 
-                          {/* 繝ｪ繧ｻ繝・ヨ繝懊ち繝ｳ */}
+                          {/* 表示処理の補足 */}
                           <button
                             onClick={() => setUiVisibilitySettings(DEFAULT_UI_VISIBILITY)}
                             className="w-full mt-1 px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
@@ -4721,10 +4721,10 @@ const App: React.FC = () => {
                     )}
                   </div>
 
-                  {/* 繝｢繝ｼ繝牙・譖ｿ繧｢繧､繧ｳ繝ｳ・域律莉倥ち繝冶｡ｨ遉ｺ譎ゅ・縺ｿ・・*/}
+                  {/* 表示処理の補足 */}
                   {activeEventName && mainContentVisible && (
                     <div className="flex items-center gap-1 ml-2 border-l border-slate-300 dark:border-slate-600 pl-2">
-                      {/* 邱ｨ髮・Δ繝ｼ繝・*/}
+                      {/* 表示処理の補足 */}
                       <button
                         onClick={() => handleSetViewMode('edit')}
                         className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
@@ -4743,7 +4743,7 @@ const App: React.FC = () => {
                         <span className="text-lg">📝</span>
                       </button>
 
-                      {/* 螳溯｡後Δ繝ｼ繝・*/}
+                      {/* 表示処理の補足 */}
                       <button
                         onClick={() => handleSetViewMode('execute')}
                         className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
@@ -4762,7 +4762,7 @@ const App: React.FC = () => {
                         <span className="text-lg">🏃‍♂️</span>
                       </button>
 
-                      {/* 髮・ｸｭ繝｢繝ｼ繝・*/}
+                      {/* 表示処理の補足 */}
                       <button
                         onClick={() => handleSetViewMode('focus')}
                         className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
@@ -4783,10 +4783,10 @@ const App: React.FC = () => {
                     </div>
                   )}
 
-                  {/* 繝槭ャ繝励さ繝ｳ繝医Ο繝ｼ繝ｫ・医・繝・・繧ｿ繝冶｡ｨ遉ｺ譎ゅ・縺ｿ・・*/}
+                  {/* 表示処理の補足 */}
                   {activeEventName && isMapTab && currentMapData && currentHalls.length > 0 && (
                     <>
-                      {/* 繝帙・繝ｫ驕ｸ謚・*/}
+                      {/* 表示処理の補足 */}
                       <div className="relative">
                         <button
                           onClick={() => setMapHallSelectorOpen(!mapHallSelectorOpen)}
@@ -4803,7 +4803,7 @@ const App: React.FC = () => {
                           }}
                           type="button"
                         >
-                          {/* 繝帙・繝ｫ繧｢繧､繧ｳ繝ｳ・医ン繝・げ繧ｵ繧､繝医す繝ｫ繧ｨ繝・ヨ鬚ｨ・・*/}
+                          {/* 表示処理の補足 */}
                           <svg
                             className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none"
                             viewBox="0 0 24 24"
@@ -4817,10 +4817,10 @@ const App: React.FC = () => {
                           <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full"></span>
                         )}
 
-                        {/* 繝帙・繝ｫ驕ｸ謚槭ラ繝ｭ繝・・繝繧ｦ繝ｳ繝｡繝九Η繝ｼ */}
+                        {/* 表示処理の補足 */}
                         {mapHallSelectorOpen && (
                           <>
-                            {/* 閭梧勹繧ｪ繝ｼ繝舌・繝ｬ繧､・医け繝ｪ繝・け縺ｧ髢峨§繧具ｼ・*/}
+                            {/* 表示処理の補足 */}
                             <div
                               className="fixed inset-0 z-40"
                               onClick={() => setMapHallSelectorOpen(false)}
@@ -4867,7 +4867,7 @@ const App: React.FC = () => {
                         )}
                       </div>
 
-                      {/* 繝帙・繝ｫ鬆・ｺ・*/}
+                      {/* 表示処理の補足 */}
                       <button
                         onClick={() => setMapIsHallOrderOpen(true)}
                         className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
@@ -4894,7 +4894,7 @@ const App: React.FC = () => {
                         </svg>
                       </button>
 
-                      {/* 繝ｫ繝ｼ繝郁｡ｨ遉ｺON/OFF */}
+                      {/* 表示処理の補足 */}
                       <button
                         onClick={() => setMapIsRouteVisible(!mapIsRouteVisible)}
                         className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
@@ -4902,7 +4902,7 @@ const App: React.FC = () => {
                             ? 'bg-blue-100 dark:bg-blue-900/50 hover:bg-blue-200 dark:hover:bg-blue-800'
                             : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
                         }`}
-                        title={mapIsRouteVisible ? 'ルート表示ON' : 'ルート表示OFF'}
+                        title={mapIsRouteVisible ? 'ルート表示: 有効' : 'ルート表示: 無効'}
                         style={{
                           WebkitTapHighlightColor: 'transparent',
                           minWidth: '44px',
@@ -4910,7 +4910,7 @@ const App: React.FC = () => {
                         }}
                         type="button"
                       >
-                        {/* 繝ｫ繝ｼ繝医い繧､繧ｳ繝ｳ */}
+                        {/* 表示処理の補足 */}
                         <svg
                           className={`w-5 h-5 pointer-events-none ${mapIsRouteVisible ? 'text-blue-600 dark:text-blue-400' : 'text-slate-600 dark:text-slate-400'}`}
                           fill="none"
@@ -4928,7 +4928,7 @@ const App: React.FC = () => {
                         </svg>
                       </button>
 
-                      {/* 繧ｹ繝槭・繝井ｽ咲ｽｮ驕ｸ謚朧N/OFF (髟ｷ謚ｼ縺励〒繝｢繝ｼ繝牙・譖ｿ) */}
+                      {/* 表示処理の補足 */}
                       <button
                         onPointerDown={() => {
                           smartInsertLongPressTriggeredRef.current = false;
@@ -4967,7 +4967,7 @@ const App: React.FC = () => {
                             ? 'bg-green-100 dark:bg-green-900/50 hover:bg-green-200 dark:hover:bg-green-800'
                             : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
                         }`}
-                        title={`Smart insert ${mapSmartInsertEnabled ? 'ON' : 'OFF'} (${mapSmartInsertMode === 'card' ? 'Card' : 'Preview'})`}
+                        title={`スマート挿入: ${mapSmartInsertEnabled ? '有効' : '無効'}（${mapSmartInsertMode === 'card' ? 'カード' : 'プレビュー'}）`}
                         style={{
                           WebkitTapHighlightColor: 'transparent',
                           minWidth: '44px',
@@ -4994,7 +4994,7 @@ const App: React.FC = () => {
                             d="M5 12h14"
                           />
                         </svg>
-                        {/* 繝｢繝ｼ繝峨う繝ｳ繧ｸ繧ｱ繝ｼ繧ｿ繝ｼ */}
+                        {/* 表示処理の補足 */}
                         {mapSmartInsertEnabled && (
                           <div className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 text-[8px] font-bold leading-none text-green-600 dark:text-green-400">
                             {mapSmartInsertMode === 'preview' ? 'P' : 'C'}
@@ -5108,7 +5108,7 @@ const App: React.FC = () => {
         </header>
       )}
 
-      {/* 繝輔Ο繝ｼ繝・ぅ繝ｳ繧ｰ蜈ｨ陦ｨ遉ｺ繝懊ち繝ｳ・郁ｨｭ螳壻ｸ贋ｽ輔°縺碁撼陦ｨ遉ｺ縺ｮ蝣ｴ蜷茨ｼ・*/}
+      {/* 表示処理の補足 */}
       {rawHideSomething &&
         activeEventName &&
         (currentMode === 'focus' || currentMode === 'execute') && (
@@ -5122,7 +5122,7 @@ const App: React.FC = () => {
                 ? 'bg-blue-600 text-white hover:bg-blue-700'
                 : 'bg-white/80 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-600 backdrop-blur-sm border border-slate-200 dark:border-slate-600'
             }`}
-            title={uiVisibilityOverride ? 'Return to auto visibility' : 'Show all UI'}
+            title={uiVisibilityOverride ? '自動表示に戻す' : '画面要素をすべて表示'}
             style={{ WebkitTapHighlightColor: 'transparent' }}
             type="button"
           >
@@ -5188,7 +5188,7 @@ const App: React.FC = () => {
             onClearNewItemDefaults={() => setNewItemDefaults(null)}
           />
         )}
-        {/* 繝槭ャ繝励ン繝･繝ｼ */}
+        {/* 表示処理の補足 */}
         {activeEventName && isMapTab && currentMapData && (
           <MapView
             mapData={currentMapData}
@@ -5235,7 +5235,7 @@ const App: React.FC = () => {
           >
             {currentMode === 'edit' ? (
               <div className="grid grid-cols-2 gap-4">
-                {/* 蟾ｦ蛻・ 螳溯｡後Δ繝ｼ繝芽｡ｨ遉ｺ蛻・*/}
+                {/* 表示処理の補足 */}
                 <div className="space-y-2">
                   <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg p-3">
                     <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2">
@@ -5283,7 +5283,7 @@ const App: React.FC = () => {
                   />
                 </div>
 
-                {/* 蜿ｳ蛻・ 蛟呵｣懊Μ繧ｹ繝・*/}
+                {/* 表示処理の補足 */}
                 <div className="space-y-2">
                   <div className="bg-slate-100 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg p-3">
                     <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
@@ -5483,7 +5483,7 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* 繧ｨ繧ｯ繧ｹ繝昴・繝医が繝励す繝ｧ繝ｳ繝繧､繧｢繝ｭ繧ｰ */}
+      {/* 表示処理の補足 */}
       {showExportOptions && exportEventName && (
         <ExportOptionsDialog
           isOpen={showExportOptions}
@@ -5502,7 +5502,7 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* 繝悶Ο繝・け螳夂ｾｩ繝代ロ繝ｫ */}
+      {/* 表示処理の補足 */}
       {blockDefinitionMode && currentMapData && (
         <BlockDefinitionPanel
           isOpen={blockDefinitionMode}
@@ -5518,7 +5518,7 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* 繧ｻ繝ｫ驕ｸ謚槭Δ繝ｼ繝峨・繝輔Ο繝ｼ繝・ぅ繝ｳ繧ｰUI */}
+      {/* 表示処理の補足 */}
       {cellSelectionMode && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-4 min-w-80">
           <div className="text-center mb-3">
@@ -5567,7 +5567,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* 繝帙・繝ｫ螳夂ｾｩ繝代ロ繝ｫ */}
+      {/* 表示処理の補足 */}
       {hallDefinitionMode && currentMapData && (
         <HallDefinitionPanel
           isOpen={hallDefinitionMode}
@@ -5584,7 +5584,7 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* 險ｪ蝠丞・繝ｪ繧ｹ繝医ヱ繝阪Ν */}
+      {/* 表示処理の補足 */}
       {visitListPanelOpen && currentMapData && (
         <VisitListPanel
           isOpen={visitListPanelOpen}
@@ -5604,7 +5604,7 @@ const App: React.FC = () => {
         />
       )}
 
-      {/* 險ｪ蝠丞・繝ｪ繧ｹ繝育｢ｺ隱阪ム繧､繧｢繝ｭ繧ｰ */}
+      {/* 表示処理の補足 */}
       {showVisitListConfirmDialog && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
           <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
@@ -5632,13 +5632,13 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* 繝帙・繝ｫ鬆らせ驕ｸ謚槭Δ繝ｼ繝峨・繝輔Ο繝ｼ繝・ぅ繝ｳ繧ｰUI */}
+      {/* 表示処理の補足 */}
       {vertexSelectionMode && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-4 min-w-80">
           <div className="text-center mb-3">
             <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
               ホールの頂点をクリック ({vertexSelectionMode.clickedVertices.length}
-              /4縲・)
+              /4)
             </div>
             <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
               クリック順に多角形を作成します。
@@ -5668,7 +5668,7 @@ const App: React.FC = () => {
         </div>
       )}
 
-      {/* 繝槭ャ繝励ヵ繧｡繧､繝ｫ蜈･蜉幢ｼ磯撼陦ｨ遉ｺ・・*/}
+      {/* 表示処理の補足 */}
       <input
         type="file"
         ref={mapFileInputRef}
@@ -5677,7 +5677,7 @@ const App: React.FC = () => {
         style={{ display: 'none' }}
       />
 
-      {/* 繝槭ャ繝怜叙繧願ｾｼ縺ｿ繝繧､繧｢繝ｭ繧ｰ */}
+      {/* 表示処理の補足 */}
       <MapImportDialog
         isOpen={mapImportDialogOpen}
         file={mapImportPendingFile}
@@ -5689,7 +5689,7 @@ const App: React.FC = () => {
         onClose={handleMapImportClose}
       />
 
-      {/* 繧ｨ繧ｯ繧ｹ繝昴・繝医ヵ繧｡繧､繝ｫ繧､繝ｳ繝昴・繝育畑蜈･蜉幢ｼ磯撼陦ｨ遉ｺ・・*/}
+      {/* 表示処理の補足 */}
       <input
         type="file"
         ref={exportFileInputRef}
@@ -5715,7 +5715,7 @@ const App: React.FC = () => {
         <ZoomControl zoomLevel={zoomLevel} onZoomChange={handleZoomChange} />
       )}
 
-      {/* 繧ｹ繝槭・繝郁ｿｽ蜉繝｢繝ｼ繝牙・譖ｿ繝医・繧ｹ繝・*/}
+      {/* 表示処理の補足 */}
       {smartInsertToast && (
         <div className="fixed top-16 left-1/2 transform -translate-x-1/2 z-[10000] bg-green-600 text-white px-5 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-pulse">
           {smartInsertToast}
