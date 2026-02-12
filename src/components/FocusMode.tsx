@@ -37,6 +37,9 @@ interface FocusModeProps {
 
 // スワイプ判定の閾値
 const SWIPE_THRESHOLD = 50;
+const FOOTER_HEIGHT_SP = 56;
+const HEADER_HEIGHT = 64;
+const FOOTER_HEIGHT_PC = 64;
 
 // ナンバーからベース部分（アルファベットとその左側の数値）を抽出
 const extractBaseNumber = (number: string): string => {
@@ -132,6 +135,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const [selectedHallId, setSelectedHallId] = useState<string | 'follow'>('follow');
   const [splitRatio, setSplitRatio] = useState(50);
   const splitDragRef = useRef<{ startY: number; startRatio: number } | null>(null);
+  const [measuredFooterHeight, setMeasuredFooterHeight] = useState<number>(FOOTER_HEIGHT_SP);
 
   // セルクリックポップアップの状態
   const [cellPopupState, setCellPopupState] = useState<{
@@ -164,6 +168,39 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const hasMapData = useMemo(() => {
     return mapData && Object.keys(mapData).length > 0;
   }, [mapData]);
+
+  useEffect(() => {
+    const fallbackHeight = layoutMode === 'smartphone' ? FOOTER_HEIGHT_SP : FOOTER_HEIGHT_PC;
+    setMeasuredFooterHeight(fallbackHeight);
+  }, [layoutMode]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') return;
+    if (!isMapVisible || isCompleted) return;
+
+    const footer = document.getElementById('focus-mode-footer');
+    if (!footer) return;
+
+    const updateHeight = () => {
+      const nextHeight = footer.getBoundingClientRect().height;
+      if (!Number.isFinite(nextHeight) || nextHeight <= 0) return;
+      setMeasuredFooterHeight((prev) => (Math.abs(prev - nextHeight) > 0.5 ? nextHeight : prev));
+    };
+
+    updateHeight();
+
+    let resizeObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      resizeObserver = new ResizeObserver(() => updateHeight());
+      resizeObserver.observe(footer);
+    }
+
+    window.addEventListener('resize', updateHeight);
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener('resize', updateHeight);
+    };
+  }, [layoutMode, isMapVisible, isCompleted]);
 
   // 実行列のアイテムを取得
   const executeItems = useMemo(() => {
@@ -1483,10 +1520,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
     ? `${nextVisit.items[0].eventDate}-${nextVisit.items[0].block}-${extractBaseNumber(nextVisit.items[0].number)}`
     : null;
 
-  // フッターの高さ定数
-  const FOOTER_HEIGHT_SP = 56;
   // App.tsx側で scale されるため、高さは逆補正して実表示高さを安定させる
   const safeAppScale = Math.max(0.01, appZoomLevel / 100);
+  // サブピクセル誤差でフッターに僅かに重なるのを防ぐ
+  const footerOverlapGuardPx = 1;
 
   // フェーズ切り替え確認ダイアログ
   const PhaseChangeDialog = () => {
@@ -1826,7 +1863,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // スマートフォン+マップ表示モード
   if (layoutMode === 'smartphone' && isMapVisible && currentMapData && !isCompleted) {
-    const availableHeight = `calc((100vh - ${FOOTER_HEIGHT_SP}px) / ${safeAppScale})`;
+    const availableHeight = `calc((100dvh - ${measuredFooterHeight + footerOverlapGuardPx}px) / ${safeAppScale})`;
 
     return (
       <div className="relative flex flex-col" style={{ height: availableHeight }}>
@@ -1920,7 +1957,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
         {/* フッター（createPortalでtransform文脈の外に描画） */}
         {ReactDOM.createPortal(
-          <div className="fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
+          <div
+            id="focus-mode-footer"
+            className="fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20"
+          >
             <div className="px-4 py-2">
               <div className="flex justify-between items-center">
                 <div className="text-slate-700 dark:text-slate-300">
@@ -1995,13 +2035,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
 
-  // フッターの高さ定数（PC用）
-  const HEADER_HEIGHT = 64;
-  const FOOTER_HEIGHT_PC = 64;
-
   // PC+マップ表示モード
   if (layoutMode === 'pc' && isMapVisible && currentMapData && !isCompleted) {
-    const availableHeight = `calc((100vh - ${HEADER_HEIGHT + FOOTER_HEIGHT_PC}px) / ${safeAppScale})`;
+    const availableHeight = `calc((100dvh - ${HEADER_HEIGHT + measuredFooterHeight + footerOverlapGuardPx}px) / ${safeAppScale})`;
 
     return (
       <div className="relative flex" style={{ height: availableHeight }}>
@@ -2098,7 +2134,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
         {/* フッター（createPortalでtransform文脈の外に描画） */}
         {ReactDOM.createPortal(
-          <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
+          <div
+            id="focus-mode-footer"
+            className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20"
+          >
             <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
               <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
                 <div className="text-slate-700 dark:text-slate-300">

@@ -75,6 +75,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
   const scale = zoomLevel / 100;
+  const appScale = Math.max(0.01, appZoomLevel / 100);
   const cellSize = BASE_CELL_SIZE * scale;
   // 陦ｨ遉ｺ蛟咲紫縺ｫ髢｢繧上ｉ縺壼・縺ｦ縺ｮ蜀・ｮｹ繧定｡ｨ遉ｺ
   const isDetailedView = true;
@@ -1185,8 +1186,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       if (e.buttons !== 1) return;
       if (activeTouchesRef.current.size >= 2) return;
 
-      const dx = e.clientX - dragStart.x;
-      const dy = e.clientY - dragStart.y;
+      const dx = (e.clientX - dragStart.x) / appScale;
+      const dy = (e.clientY - dragStart.y) / appScale;
 
       if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
         setIsDragging(true);
@@ -1197,7 +1198,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         y: dragStartOffset.y + dy,
       });
     },
-    [dragStart, dragStartOffset],
+    [dragStart, dragStartOffset, appScale],
   );
 
   const isCellInBlock = useCallback((row: number, col: number, block: BlockDefinition): boolean => {
