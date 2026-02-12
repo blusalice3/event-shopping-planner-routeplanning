@@ -495,6 +495,22 @@ const App: React.FC = () => {
     uiVisibilitySettings,
   ]);
 
+  const updateUIVisibilityConfig = useCallback(
+    (key: keyof UIVisibilitySettings, field: 'header' | 'tabBar', value: boolean) => {
+      setUiVisibilitySettings((prev) => ({
+        ...prev,
+        [key]: {
+          ...DEFAULT_UI_VISIBILITY[key],
+          ...prev[key],
+          [field]: value,
+        },
+      }));
+      // 設定変更時は強制表示モードを解除して即時反映する
+      setUiVisibilityOverride(false);
+    },
+    [setUiVisibilitySettings],
+  );
+
   const handleBulkAdd = useCallback(
     (
       eventName: string,
@@ -4724,10 +4740,7 @@ const App: React.FC = () => {
                                         type="checkbox"
                                         checked={uiVisibilitySettings[key].header}
                                         onChange={(e) =>
-                                          setUiVisibilitySettings((prev) => ({
-                                            ...prev,
-                                            [key]: { ...prev[key], header: e.target.checked },
-                                          }))
+                                          updateUIVisibilityConfig(key, 'header', e.target.checked)
                                         }
                                         className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
                                       />
@@ -4740,10 +4753,7 @@ const App: React.FC = () => {
                                         type="checkbox"
                                         checked={uiVisibilitySettings[key].tabBar}
                                         onChange={(e) =>
-                                          setUiVisibilitySettings((prev) => ({
-                                            ...prev,
-                                            [key]: { ...prev[key], tabBar: e.target.checked },
-                                          }))
+                                          updateUIVisibilityConfig(key, 'tabBar', e.target.checked)
                                         }
                                         className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
                                       />
@@ -4782,10 +4792,7 @@ const App: React.FC = () => {
                                         type="checkbox"
                                         checked={uiVisibilitySettings[key].header}
                                         onChange={(e) =>
-                                          setUiVisibilitySettings((prev) => ({
-                                            ...prev,
-                                            [key]: { ...prev[key], header: e.target.checked },
-                                          }))
+                                          updateUIVisibilityConfig(key, 'header', e.target.checked)
                                         }
                                         className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
                                       />
@@ -4798,10 +4805,7 @@ const App: React.FC = () => {
                                         type="checkbox"
                                         checked={uiVisibilitySettings[key].tabBar}
                                         onChange={(e) =>
-                                          setUiVisibilitySettings((prev) => ({
-                                            ...prev,
-                                            [key]: { ...prev[key], tabBar: e.target.checked },
-                                          }))
+                                          updateUIVisibilityConfig(key, 'tabBar', e.target.checked)
                                         }
                                         className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
                                       />
@@ -4817,7 +4821,10 @@ const App: React.FC = () => {
 
                           {/* 表示処理の補足 */}
                           <button
-                            onClick={() => setUiVisibilitySettings(DEFAULT_UI_VISIBILITY)}
+                            onClick={() => {
+                              setUiVisibilitySettings(DEFAULT_UI_VISIBILITY);
+                              setUiVisibilityOverride(false);
+                            }}
                             className="w-full mt-1 px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                           >
                             デフォルトに戻す
