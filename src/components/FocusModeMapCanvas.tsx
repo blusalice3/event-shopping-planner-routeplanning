@@ -1,4 +1,4 @@
-﻿import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   DayMapData,
   CellData,
@@ -102,7 +102,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   }, [mapData.mergedCells]);
 
   const dayName = useMemo(() => {
-    const dayMatch = mapName.match(/^(.+)繝槭ャ繝・/);
+    const dayMatch = mapName.match(/^(.+)マップ$/);
     return dayMatch ? dayMatch[1].trim() : '';
   }, [mapName]);
 
