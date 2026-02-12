@@ -4700,115 +4700,119 @@ const App: React.FC = () => {
                   )}
 
                   {/* 表示処理の補足 */}
-                  {activeEventName && isMapTab && currentMapData && currentHalls.length > 0 && (
+                  {activeEventName && isMapTab && currentMapData && (
                     <>
-                      {/* 表示処理の補足 */}
-                      <div className="relative">
-                        <button
-                          onClick={() => setMapHallSelectorOpen(!mapHallSelectorOpen)}
-                          className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                            mapHallSelectorOpen
-                              ? 'bg-slate-200 dark:bg-slate-700'
-                              : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
-                          }`}
-                          title={`表示ホール: ${mapSelectedHallId === 'all' ? '全ホール' : currentHalls.find((h) => h.id === mapSelectedHallId)?.name || ''}`}
-                          style={{
-                            WebkitTapHighlightColor: 'transparent',
-                            minWidth: '44px',
-                            minHeight: '44px',
-                          }}
-                          type="button"
-                        >
+                      {currentHalls.length > 0 && (
+                        <>
                           {/* 表示処理の補足 */}
-                          <svg
-                            className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none"
-                            viewBox="0 0 24 24"
-                            fill="currentColor"
-                          >
-                            <path d="M2 18h3v-4h2v4h2v-6H7l-2-4-2 4H2v6zm5-8h2V8h2V6h2v2h2v2h2v8h-3v-4h-2v4h-3v-8z" />
-                            <path d="M14 10h2v2h-2zM14 14h2v2h-2zM18 10h2v2h-2zM18 14h2v2h-2z" />
-                          </svg>
-                        </button>
-                        {mapSelectedHallId !== 'all' && (
-                          <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full"></span>
-                        )}
-
-                        {/* 表示処理の補足 */}
-                        {mapHallSelectorOpen && (
-                          <>
-                            {/* 表示処理の補足 */}
-                            <div
-                              className="fixed inset-0 z-40"
-                              onClick={() => setMapHallSelectorOpen(false)}
-                            />
-                            <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 py-1 min-w-[200px]">
-                              <button
-                                onClick={() => {
-                                  setMapSelectedHallId('all');
-                                  setMapHallSelectorOpen(false);
-                                }}
-                                className={`w-full px-4 py-2 text-left text-sm transition-colors ${
-                                  mapSelectedHallId === 'all'
-                                    ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
-                                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-                                }`}
+                          <div className="relative">
+                            <button
+                              onClick={() => setMapHallSelectorOpen(!mapHallSelectorOpen)}
+                              className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                                mapHallSelectorOpen
+                                  ? 'bg-slate-200 dark:bg-slate-700'
+                                  : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
+                              }`}
+                              title={`表示ホール: ${mapSelectedHallId === 'all' ? '全ホール' : currentHalls.find((h) => h.id === mapSelectedHallId)?.name || ''}`}
+                              style={{
+                                WebkitTapHighlightColor: 'transparent',
+                                minWidth: '44px',
+                                minHeight: '44px',
+                              }}
+                              type="button"
+                            >
+                              {/* 表示処理の補足 */}
+                              <svg
+                                className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none"
+                                viewBox="0 0 24 24"
+                                fill="currentColor"
                               >
-                                全ホール
-                              </button>
-                              {currentHalls.map((hall) => {
-                                const executeCount = getHallExecuteCount(hall.id);
-                                const totalCount = getHallTotalItemCount(hall.id);
-                                return (
+                                <path d="M2 18h3v-4h2v4h2v-6H7l-2-4-2 4H2v6zm5-8h2V8h2V6h2v2h2v2h2v8h-3v-4h-2v4h-3v-8z" />
+                                <path d="M14 10h2v2h-2zM14 14h2v2h-2zM18 10h2v2h-2zM18 14h2v2h-2z" />
+                              </svg>
+                            </button>
+                            {mapSelectedHallId !== 'all' && (
+                              <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full"></span>
+                            )}
+
+                            {/* 表示処理の補足 */}
+                            {mapHallSelectorOpen && (
+                              <>
+                                {/* 表示処理の補足 */}
+                                <div
+                                  className="fixed inset-0 z-40"
+                                  onClick={() => setMapHallSelectorOpen(false)}
+                                />
+                                <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 py-1 min-w-[200px]">
                                   <button
-                                    key={hall.id}
                                     onClick={() => {
-                                      setMapSelectedHallId(hall.id);
+                                      setMapSelectedHallId('all');
                                       setMapHallSelectorOpen(false);
                                     }}
-                                    className={`w-full px-4 py-2 text-left text-sm transition-colors flex justify-between items-center ${
-                                      mapSelectedHallId === hall.id
+                                    className={`w-full px-4 py-2 text-left text-sm transition-colors ${
+                                      mapSelectedHallId === 'all'
                                         ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
                                         : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
                                     }`}
                                   >
-                                    <span>{hall.name}</span>
-                                    <span className="text-xs text-slate-500 dark:text-slate-400 ml-2">
-                                      ({executeCount}/{totalCount}件)
-                                    </span>
+                                    全ホール
                                   </button>
-                                );
-                              })}
-                            </div>
-                          </>
-                        )}
-                      </div>
+                                  {currentHalls.map((hall) => {
+                                    const executeCount = getHallExecuteCount(hall.id);
+                                    const totalCount = getHallTotalItemCount(hall.id);
+                                    return (
+                                      <button
+                                        key={hall.id}
+                                        onClick={() => {
+                                          setMapSelectedHallId(hall.id);
+                                          setMapHallSelectorOpen(false);
+                                        }}
+                                        className={`w-full px-4 py-2 text-left text-sm transition-colors flex justify-between items-center ${
+                                          mapSelectedHallId === hall.id
+                                            ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
+                                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
+                                        }`}
+                                      >
+                                        <span>{hall.name}</span>
+                                        <span className="text-xs text-slate-500 dark:text-slate-400 ml-2">
+                                          ({executeCount}/{totalCount}件)
+                                        </span>
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </>
+                            )}
+                          </div>
 
-                      {/* 表示処理の補足 */}
-                      <button
-                        onClick={() => setMapIsHallOrderOpen(true)}
-                        className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
-                        title="ホール順を編集"
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          minWidth: '44px',
-                          minHeight: '44px',
-                        }}
-                        type="button"
-                      >
-                        <svg
-                          className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                          />
-                        </svg>
-                      </button>
+                          {/* 表示処理の補足 */}
+                          <button
+                            onClick={() => setMapIsHallOrderOpen(true)}
+                            className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
+                            title="ホール順を編集"
+                            style={{
+                              WebkitTapHighlightColor: 'transparent',
+                              minWidth: '44px',
+                              minHeight: '44px',
+                            }}
+                            type="button"
+                          >
+                            <svg
+                              className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path
+                                strokeLinecap="round"
+                                strokeLinejoin="round"
+                                strokeWidth={2}
+                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
+                              />
+                            </svg>
+                          </button>
+                        </>
+                      )}
 
                       {/* 表示処理の補足 */}
                       <button

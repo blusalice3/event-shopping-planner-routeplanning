@@ -23,6 +23,7 @@ interface FocusModeMapCanvasProps {
   nextVisitKey: string | null;
   prevVisitKey: string | null;
   currentPhase: 'normal' | 'postponed' | 'late';
+  selectedHallMode?: string | 'follow';
   onZoomChange?: (newZoom: number) => void;
   onCellClick?: (blockName: string, number: number, matchingItems: ShoppingItem[]) => void;
   appZoomLevel?: number;
@@ -33,6 +34,13 @@ interface FocusModeMapCanvasProps {
 
 const BASE_CELL_SIZE = 28;
 const SCROLL_MARGIN = 5;
+const FILLED_SCROLL_MARGIN = 10;
+
+const hasCellInputValue = (value: string | number | null): boolean => {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  return true;
+};
 
 const normalizeRotationAngle = (angle: number): number => {
   const normalized = Math.round(angle) % 360;
@@ -139,6 +147,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   nextVisitKey,
   prevVisitKey,
   currentPhase,
+  selectedHallMode = 'follow',
   onZoomChange,
   onCellClick,
   appZoomLevel = 100,
@@ -1601,7 +1610,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   ]);
 
   const activeScrollBounds = useMemo(() => {
-    if (selectedHall && selectedHall.vertices.length >= 4) {
+    const isExplicitHallSelection = selectedHallMode !== 'follow';
+    if (isExplicitHallSelection && selectedHall && selectedHall.vertices.length >= 4) {
       const rows = selectedHall.vertices.map((v) => v.row);
       const cols = selectedHall.vertices.map((v) => v.col);
       return {
@@ -1612,11 +1622,37 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       };
     }
 
-    if (showPrevRoute && routeBoundsAll) {
-      return routeBoundsAll;
-    }
-    if (routeBoundsCurrentNext) {
-      return routeBoundsCurrentNext;
+    let minRow = Number.POSITIVE_INFINITY;
+    let maxRow = Number.NEGATIVE_INFINITY;
+    let minCol = Number.POSITIVE_INFINITY;
+    let maxCol = Number.NEGATIVE_INFINITY;
+    let hasBounds = false;
+
+    mapData.cells.forEach((cell) => {
+      if (!hasCellInputValue(cell.value)) return;
+      hasBounds = true;
+      minRow = Math.min(minRow, cell.row);
+      maxRow = Math.max(maxRow, cell.row);
+      minCol = Math.min(minCol, cell.col);
+      maxCol = Math.max(maxCol, cell.col);
+    });
+
+    mapData.mergedCells.forEach((merge) => {
+      if (!hasCellInputValue(merge.value)) return;
+      hasBounds = true;
+      minRow = Math.min(minRow, merge.startRow);
+      maxRow = Math.max(maxRow, merge.endRow);
+      minCol = Math.min(minCol, merge.startCol);
+      maxCol = Math.max(maxCol, merge.endCol);
+    });
+
+    if (hasBounds) {
+      return {
+        minRow: minRow - FILLED_SCROLL_MARGIN,
+        maxRow: maxRow + FILLED_SCROLL_MARGIN,
+        minCol: minCol - FILLED_SCROLL_MARGIN,
+        maxCol: maxCol + FILLED_SCROLL_MARGIN,
+      };
     }
 
     return {
@@ -1626,10 +1662,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       maxCol: mapData.maxCol,
     };
   }, [
+    selectedHallMode,
     selectedHall,
-    showPrevRoute,
-    routeBoundsAll,
-    routeBoundsCurrentNext,
+    mapData.cells,
+    mapData.mergedCells,
     mapData.maxRow,
     mapData.maxCol,
   ]);
