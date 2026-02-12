@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+﻿import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   DayMapData,
   CellData,
@@ -1013,10 +1013,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       // 漠繝槭・繧ｫ繝ｼ
       const markerSize = Math.max(12, cellSize * 0.38);
-      ctx.font = `${markerSize}px sans-serif`;
+      ctx.font = `${markerSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('漠', x + cellSize / 2, y - 1);
+      ctx.fillText('🔙', x + cellSize / 2, y - 1);
     }
 
     if (nextCellCoords) {
@@ -1030,10 +1030,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       // 圸繝槭・繧ｫ繝ｼ
       const markerSize = Math.max(14, cellSize * 0.45);
-      ctx.font = `${markerSize}px sans-serif`;
+      ctx.font = `${markerSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('圸', x + cellSize / 2, y - 2);
+      ctx.fillText('🚩', x + cellSize / 2, y - 2);
     }
 
     if (currentCellCoords) {
@@ -1047,10 +1047,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       // 桃繝槭・繧ｫ繝ｼ
       const markerSize = Math.max(16, cellSize * 0.5);
-      ctx.font = `${markerSize}px sans-serif`;
+      ctx.font = `${markerSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('桃', x + cellSize / 2, y - 2);
+      ctx.fillText('📍', x + cellSize / 2, y - 2);
     }
 
     // ctx.translate 繧定ｧ｣髯､
