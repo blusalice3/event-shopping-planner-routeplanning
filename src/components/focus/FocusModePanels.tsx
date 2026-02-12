@@ -1,6 +1,7 @@
 import React from 'react';
 import { HallDefinition, ShoppingItem } from '../../types';
 import ShoppingItemCard from '../ShoppingItemCard';
+import MapRotationControls from '../map/MapRotationControls';
 
 type FocusPhase = 'normal' | 'postponed' | 'late';
 
@@ -43,6 +44,9 @@ interface FocusModeMapControlsProps {
   onSelectedHallIdChange: (value: string | 'follow') => void;
   hallDefinitions?: HallDefinition[];
   mapZoomLevel: number;
+  mapRotationAngle: number;
+  mapInitialRotationAngle: number;
+  onMapRotationAngleChange: (angle: number) => void;
 }
 
 export const FocusModeItemList: React.FC<FocusModeItemListProps> = ({
@@ -190,8 +194,11 @@ export const FocusModeMapControls: React.FC<FocusModeMapControlsProps> = ({
   onSelectedHallIdChange,
   hallDefinitions,
   mapZoomLevel,
+  mapRotationAngle,
+  mapInitialRotationAngle,
+  onMapRotationAngleChange,
 }) => (
-  <div className="flex items-center gap-2 p-2 bg-white/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700">
+  <div className="flex items-center gap-2 p-2 bg-white/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 flex-wrap">
     <select
       value={selectedHallId}
       onChange={(e) => onSelectedHallIdChange(e.target.value as string | 'follow')}
@@ -208,5 +215,11 @@ export const FocusModeMapControls: React.FC<FocusModeMapControlsProps> = ({
     <div className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-3 text-slate-700 dark:text-slate-300">
       {Math.round(mapZoomLevel)}%
     </div>
+    <MapRotationControls
+      angle={mapRotationAngle}
+      initialAngle={mapInitialRotationAngle}
+      onAngleChange={onMapRotationAngleChange}
+      showHint={true}
+    />
   </div>
 );

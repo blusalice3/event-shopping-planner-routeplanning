@@ -65,6 +65,8 @@ interface MapViewProps {
   hideInternalControls?: boolean;
   smartInsertEnabled?: boolean;
   smartInsertMode?: SmartInsertMode;
+  rotationAngle?: number;
+  onRotationAngleChange?: (newAngle: number) => void;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -97,6 +99,8 @@ const MapView: React.FC<MapViewProps> = ({
   hideInternalControls = false,
   smartInsertEnabled = true,
   smartInsertMode = 'card',
+  rotationAngle = 0,
+  onRotationAngleChange,
 }) => {
   void _onMoveToFirst;
   void _onMoveToLast;
@@ -743,6 +747,8 @@ const MapView: React.FC<MapViewProps> = ({
         cellSelectionMode={cellSelectionMode}
         highlightedCell={highlightedCell}
         onZoomChange={setZoomLevel}
+        rotationAngle={rotationAngle}
+        onRotationAngleChange={onRotationAngleChange}
       />
 
       {/* セルアイテムポップアップ */}

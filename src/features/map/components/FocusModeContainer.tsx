@@ -29,6 +29,9 @@ type FocusModeContainerProps = {
   appZoomLevel?: number;
   resumeState?: FocusModeSessionState | null;
   onSessionStateChange?: (state: FocusModeSessionState) => void;
+  mapRotationAngle?: number;
+  mapInitialRotationAngle?: number;
+  onMapRotationAngleChange?: (angle: number) => void;
 };
 
 const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
@@ -50,6 +53,9 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   appZoomLevel,
   resumeState,
   onSessionStateChange,
+  mapRotationAngle = 0,
+  mapInitialRotationAngle = 0,
+  onMapRotationAngleChange,
 }) => {
   const currentDay = useMemo(
     () => (eventDates.includes(activeTab) ? activeTab : eventDates[0] || ''),
@@ -80,6 +86,9 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       appZoomLevel={appZoomLevel}
       resumeState={resumeState}
       onSessionStateChange={onSessionStateChange}
+      mapRotationAngle={mapRotationAngle}
+      mapInitialRotationAngle={mapInitialRotationAngle}
+      onMapRotationAngleChange={onMapRotationAngleChange}
     />
   );
 };

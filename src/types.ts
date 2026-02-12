@@ -148,6 +148,18 @@ export interface MapDataStore {
   };
 }
 
+export interface DayMapRotationState {
+  initialAngle: number;
+  mapTabAngle: number;
+  focusModeAngle: number;
+}
+
+export interface MapRotationSettingsStore {
+  [eventName: string]: {
+    [dayMapName: string]: DayMapRotationState;
+  };
+}
+
 export interface BlockDefinitionsStore {
   [eventName: string]: {
     [dayMapName: string]: BlockDefinition[];

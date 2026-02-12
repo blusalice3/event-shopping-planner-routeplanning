@@ -17,6 +17,7 @@ import {
   DayMapData,
   BlockDetectionSettings,
   FocusModeSessionState,
+  MapRotationSettingsStore,
 } from './types';
 import ImportScreen from './components/ImportScreen';
 import ShoppingList from './components/ShoppingList';
@@ -79,6 +80,7 @@ import {
   type UIVisibilitySettings,
 } from './hooks/useUIVisibilitySettings';
 import { useIndexedDbPersistence } from './hooks/useIndexedDbPersistence';
+import MapRotationControls from './components/map/MapRotationControls';
 
 type ActiveTab = 'eventList' | 'import' | string;
 type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'None' | 'Purchased';
@@ -172,6 +174,24 @@ const isFocusModeSessionStateEqual = (
   );
 };
 
+const normalizeRotationAngle = (angle: number): number => {
+  const normalized = Math.round(angle) % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+};
+
+type RotationScreenType = 'mapTab' | 'focusMode';
+
+const resolveDayMapRotationState = (
+  state: { initialAngle?: number; mapTabAngle?: number; focusModeAngle?: number } | undefined,
+) => {
+  const initialAngle = normalizeRotationAngle(state?.initialAngle ?? 0);
+  return {
+    initialAngle,
+    mapTabAngle: normalizeRotationAngle(state?.mapTabAngle ?? initialAngle),
+    focusModeAngle: normalizeRotationAngle(state?.focusModeAngle ?? initialAngle),
+  };
+};
+
 const App: React.FC = () => {
   // イベント単位で保持する主要データ。
   const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>({});
@@ -236,6 +256,7 @@ const App: React.FC = () => {
 
   // マップ・ホール関連の永続データ。
   const [mapData, setMapData] = useState<MapDataStore>({});
+  const [mapRotationSettings, setMapRotationSettings] = useState<MapRotationSettingsStore>({});
   const [routeSettings, setRouteSettings] = useState<RouteSettingsStore>({});
   const [hallDefinitions, setHallDefinitions] = useState<HallDefinitionsStore>({});
   const [hallRouteSettings, setHallRouteSettings] = useState<HallRouteSettingsStore>({});
@@ -255,6 +276,7 @@ const App: React.FC = () => {
       executeModeItems,
       dayModes,
       mapData,
+      mapRotationSettings,
       routeSettings,
       hallDefinitions,
       hallRouteSettings,
@@ -265,6 +287,7 @@ const App: React.FC = () => {
       setExecuteModeItems,
       setDayModes,
       setMapData,
+      setMapRotationSettings,
       setRouteSettings,
       setHallDefinitions,
       setHallRouteSettings,
@@ -444,6 +467,81 @@ const App: React.FC = () => {
       });
     },
     [currentFocusSessionKey],
+  );
+
+  const currentFocusEventDate = useMemo(
+    () => (eventDates.includes(activeTab) ? activeTab : eventDates[0] || ''),
+    [activeTab, eventDates],
+  );
+
+  const currentFocusMapName = useMemo(
+    () => (currentFocusEventDate ? `${currentFocusEventDate}マップ` : ''),
+    [currentFocusEventDate],
+  );
+
+  const getDayMapRotationState = useCallback(
+    (eventName: string, dayMapName: string) =>
+      resolveDayMapRotationState(mapRotationSettings[eventName]?.[dayMapName]),
+    [mapRotationSettings],
+  );
+
+  const updateMapRotationAngle = useCallback(
+    (eventName: string, dayMapName: string, screen: RotationScreenType, angle: number) => {
+      const normalizedAngle = normalizeRotationAngle(angle);
+      setMapRotationSettings((prev) => {
+        const eventSettings = prev[eventName] || {};
+        const currentState = resolveDayMapRotationState(eventSettings[dayMapName]);
+        const nextState =
+          screen === 'mapTab'
+            ? { ...currentState, mapTabAngle: normalizedAngle }
+            : { ...currentState, focusModeAngle: normalizedAngle };
+        if (
+          currentState.initialAngle === nextState.initialAngle &&
+          currentState.mapTabAngle === nextState.mapTabAngle &&
+          currentState.focusModeAngle === nextState.focusModeAngle
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [eventName]: {
+            ...eventSettings,
+            [dayMapName]: nextState,
+          },
+        };
+      });
+    },
+    [],
+  );
+
+  const currentMapTabRotationState = useMemo(() => {
+    if (!activeEventName || !isMapTab) {
+      return resolveDayMapRotationState(undefined);
+    }
+    return getDayMapRotationState(activeEventName, activeTab);
+  }, [activeEventName, isMapTab, activeTab, getDayMapRotationState]);
+
+  const currentFocusMapRotationState = useMemo(() => {
+    if (!activeEventName || !currentFocusMapName) {
+      return resolveDayMapRotationState(undefined);
+    }
+    return getDayMapRotationState(activeEventName, currentFocusMapName);
+  }, [activeEventName, currentFocusMapName, getDayMapRotationState]);
+
+  const handleMapTabRotationAngleChange = useCallback(
+    (angle: number) => {
+      if (!activeEventName || !isMapTab) return;
+      updateMapRotationAngle(activeEventName, activeTab, 'mapTab', angle);
+    },
+    [activeEventName, isMapTab, activeTab, updateMapRotationAngle],
+  );
+
+  const handleFocusMapRotationAngleChange = useCallback(
+    (angle: number) => {
+      if (!activeEventName || !currentFocusMapName) return;
+      updateMapRotationAngle(activeEventName, currentFocusMapName, 'focusMode', angle);
+    },
+    [activeEventName, currentFocusMapName, updateMapRotationAngle],
   );
 
   const { showHeaderBar, showTabBar, rawHideSomething } = useMemo(() => {
@@ -1496,6 +1594,7 @@ const App: React.FC = () => {
       setEventMetadata((prev) => removeRecordKey(prev, eventName));
       setExecuteModeItems((prev) => removeRecordKey(prev, eventName));
       setDayModes((prev) => removeRecordKey(prev, eventName));
+      setMapRotationSettings((prev) => removeRecordKey(prev, eventName));
       setFocusModeSessions((prev) => removeFocusModeSessionByEvent(prev, eventName));
       if (activeEventName === eventName) {
         setActiveEventName(null);
@@ -1535,6 +1634,7 @@ const App: React.FC = () => {
 
 
       setMapData((prev) => renameRecordKey(prev, eventToRename, newName));
+      setMapRotationSettings((prev) => renameRecordKey(prev, eventToRename, newName));
 
 
       setRouteSettings((prev) => renameRecordKey(prev, eventToRename, newName));
@@ -2470,7 +2570,11 @@ const App: React.FC = () => {
 
 
   const handleMapImportConfirm = useCallback(
-    (parsedData: Record<string, DayMapData>, settings: BlockDetectionSettings) => {
+    (
+      parsedData: Record<string, DayMapData>,
+      settings: BlockDetectionSettings,
+      initialAngles: Record<string, number>,
+    ) => {
       const eventName = mapImportPendingEventName;
       if (!eventName) return;
 
@@ -2484,6 +2588,25 @@ const App: React.FC = () => {
           ...parsedData,
         },
       }));
+
+      setMapRotationSettings((prev) => {
+        const currentEventSettings = prev[eventName] || {};
+        const nextEventSettings = { ...currentEventSettings };
+
+        Object.keys(parsedData).forEach((dayMapName) => {
+          const importedInitialAngle = normalizeRotationAngle(initialAngles[dayMapName] ?? 0);
+          nextEventSettings[dayMapName] = {
+            initialAngle: importedInitialAngle,
+            mapTabAngle: importedInitialAngle,
+            focusModeAngle: importedInitialAngle,
+          };
+        });
+
+        return {
+          ...prev,
+          [eventName]: nextEventSettings,
+        };
+      });
 
       const mapCount = Object.keys(parsedData).length;
 
@@ -4796,6 +4919,14 @@ const App: React.FC = () => {
                       </button>
                     </>
                   )}
+                  {activeEventName && isMapTab && currentMapData && (
+                    <MapRotationControls
+                      angle={currentMapTabRotationState.mapTabAngle}
+                      initialAngle={currentMapTabRotationState.initialAngle}
+                      onAngleChange={handleMapTabRotationAngleChange}
+                      showHint={true}
+                    />
+                  )}
                 </div>
               </div>
               <div className="flex items-center gap-4">
@@ -5016,6 +5147,8 @@ const App: React.FC = () => {
             hideInternalControls={true}
             smartInsertEnabled={mapSmartInsertEnabled}
             smartInsertMode={mapSmartInsertMode}
+            rotationAngle={currentMapTabRotationState.mapTabAngle}
+            onRotationAngleChange={handleMapTabRotationAngleChange}
           />
         )}
         {activeEventName && mainContentVisible && (
@@ -5199,6 +5332,9 @@ const App: React.FC = () => {
                 appZoomLevel={zoomLevel}
                 resumeState={currentFocusResumeState}
                 onSessionStateChange={handleFocusSessionStateChange}
+                mapRotationAngle={currentFocusMapRotationState.focusModeAngle}
+                mapInitialRotationAngle={currentFocusMapRotationState.initialAngle}
+                onMapRotationAngleChange={handleFocusMapRotationAngleChange}
               />
             ) : (
               <ShoppingList

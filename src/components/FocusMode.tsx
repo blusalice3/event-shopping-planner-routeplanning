@@ -33,6 +33,9 @@ interface FocusModeProps {
   appZoomLevel?: number;
   resumeState?: FocusModeSessionState | null;
   onSessionStateChange?: (state: FocusModeSessionState) => void;
+  mapRotationAngle?: number;
+  mapInitialRotationAngle?: number;
+  onMapRotationAngleChange?: (angle: number) => void;
 }
 
 // スワイプ判定の閾値
@@ -69,6 +72,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
   appZoomLevel = 100,
   resumeState = null,
   onSessionStateChange,
+  mapRotationAngle = 0,
+  mapInitialRotationAngle = 0,
+  onMapRotationAngleChange,
 }) => {
   // 現在のフェーズ（ユーザー操作でのみ変更）
   const [currentPhase, setCurrentPhase] = useState<FocusPhase>(
@@ -1888,6 +1894,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onSelectedHallIdChange={setSelectedHallId}
             hallDefinitions={hallDefinitions}
             mapZoomLevel={mapZoomLevel}
+            mapRotationAngle={mapRotationAngle}
+            mapInitialRotationAngle={mapInitialRotationAngle}
+            onMapRotationAngleChange={onMapRotationAngleChange || (() => {})}
           />
           <div className="flex-grow relative overflow-hidden">
             <FocusModeMapCanvas
@@ -1905,6 +1914,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
               onCellClick={handleMapCellClick}
               appZoomLevel={appZoomLevel}
               hallDefinitions={hallDefinitions}
+              rotationAngle={mapRotationAngle}
+              onRotationAngleChange={onMapRotationAngleChange}
             />
           </div>
         </div>
@@ -2062,6 +2073,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onSelectedHallIdChange={setSelectedHallId}
             hallDefinitions={hallDefinitions}
             mapZoomLevel={mapZoomLevel}
+            mapRotationAngle={mapRotationAngle}
+            mapInitialRotationAngle={mapInitialRotationAngle}
+            onMapRotationAngleChange={onMapRotationAngleChange || (() => {})}
           />
           <div className="flex-grow relative overflow-hidden">
             <FocusModeMapCanvas
@@ -2079,6 +2093,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
               onCellClick={handleMapCellClick}
               appZoomLevel={appZoomLevel}
               hallDefinitions={hallDefinitions}
+              rotationAngle={mapRotationAngle}
+              onRotationAngleChange={onMapRotationAngleChange}
             />
           </div>
         </div>

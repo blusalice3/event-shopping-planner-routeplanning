@@ -27,10 +27,35 @@ interface FocusModeMapCanvasProps {
   onCellClick?: (blockName: string, number: number, matchingItems: ShoppingItem[]) => void;
   appZoomLevel?: number;
   hallDefinitions?: HallDefinition[];
+  rotationAngle?: number;
+  onRotationAngleChange?: (angle: number) => void;
 }
 
 const BASE_CELL_SIZE = 28;
 const SCROLL_MARGIN = 5;
+
+const normalizeRotationAngle = (angle: number): number => {
+  const normalized = Math.round(angle) % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+};
+
+const rotatePointAroundCenter = (
+  x: number,
+  y: number,
+  centerX: number,
+  centerY: number,
+  angleRad: number,
+): { x: number; y: number } => {
+  if (angleRad === 0) return { x, y };
+  const dx = x - centerX;
+  const dy = y - centerY;
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  return {
+    x: dx * cos - dy * sin + centerX,
+    y: dx * sin + dy * cos + centerY,
+  };
+};
 
 const extractBaseNumber = (number: string): string => {
   const match = number.match(/^(\d+[a-zA-Z])/);
@@ -118,6 +143,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   onCellClick,
   appZoomLevel = 100,
   hallDefinitions,
+  rotationAngle = 0,
+  onRotationAngleChange,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -125,6 +152,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
+  const [isRotationInteracting, setIsRotationInteracting] = useState(false);
+  const rotationInteractionTimerRef = useRef<number | null>(null);
 
   // ピンチ操作中のタッチ座標を識別子ごとに保持する。
   const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
@@ -142,6 +171,16 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const showBorders = true;
 
   const prevSelectedHallRef = useRef<HallDefinition | null>(null);
+  const normalizedRotationAngle = useMemo(
+    () => normalizeRotationAngle(rotationAngle),
+    [rotationAngle],
+  );
+  const rotationRadians = useMemo(
+    () => (normalizedRotationAngle * Math.PI) / 180,
+    [normalizedRotationAngle],
+  );
+  const mapCenterX = useMemo(() => (mapData.maxCol * cellSize) / 2, [mapData.maxCol, cellSize]);
+  const mapCenterY = useMemo(() => (mapData.maxRow * cellSize) / 2, [mapData.maxRow, cellSize]);
 
   const cellsMap = useMemo(() => {
     const map = new Map<string, CellData>();
@@ -478,6 +517,68 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
   const prevVisitKeyRef = useRef<string | null>(null);
 
+  const toMapCoordinates = useCallback(
+    (viewX: number, viewY: number, currentOffset = offset) => {
+      const translatedX = viewX - currentOffset.x;
+      const translatedY = viewY - currentOffset.y;
+      if (rotationRadians === 0) return { x: translatedX, y: translatedY };
+
+      const dx = translatedX - mapCenterX;
+      const dy = translatedY - mapCenterY;
+      const cos = Math.cos(rotationRadians);
+      const sin = Math.sin(rotationRadians);
+
+      return {
+        x: dx * cos + dy * sin + mapCenterX,
+        y: -dx * sin + dy * cos + mapCenterY,
+      };
+    },
+    [offset, rotationRadians, mapCenterX, mapCenterY],
+  );
+
+  const calculateCenteredOffset = useCallback(
+    (
+      mapX: number,
+      mapY: number,
+      containerWidth: number,
+      containerHeight: number,
+      targetCellSize: number,
+      angleRad: number,
+    ) => {
+      const targetCenterX = (mapData.maxCol * targetCellSize) / 2;
+      const targetCenterY = (mapData.maxRow * targetCellSize) / 2;
+      const rotatedPoint = rotatePointAroundCenter(
+        mapX,
+        mapY,
+        targetCenterX,
+        targetCenterY,
+        angleRad,
+      );
+      return {
+        x: containerWidth / 2 - rotatedPoint.x,
+        y: containerHeight / 2 - rotatedPoint.y,
+      };
+    },
+    [mapData.maxCol, mapData.maxRow],
+  );
+
+  useEffect(() => {
+    setIsRotationInteracting(true);
+    if (rotationInteractionTimerRef.current !== null) {
+      clearTimeout(rotationInteractionTimerRef.current);
+    }
+    rotationInteractionTimerRef.current = window.setTimeout(() => {
+      setIsRotationInteracting(false);
+      rotationInteractionTimerRef.current = null;
+    }, 150);
+
+    return () => {
+      if (rotationInteractionTimerRef.current !== null) {
+        clearTimeout(rotationInteractionTimerRef.current);
+      }
+    };
+  }, [normalizedRotationAngle]);
+
 
   useEffect(() => {
     if (prevSelectedHallRef.current?.id === selectedHall?.id) {
@@ -519,10 +620,16 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const routeCenterX = (routeCenterCol - 0.5) * newCellSize;
       const routeCenterY = (routeCenterRow - 0.5) * newCellSize;
 
-      const newOffsetX = containerWidth / 2 - routeCenterX;
-      const newOffsetY = containerHeight / 2 - routeCenterY;
-
-      setOffset({ x: newOffsetX, y: newOffsetY });
+      setOffset(
+        calculateCenteredOffset(
+          routeCenterX,
+          routeCenterY,
+          containerWidth,
+          containerHeight,
+          newCellSize,
+          rotationRadians,
+        ),
+      );
       return;
     }
 
@@ -533,30 +640,20 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const maxRow = Math.max(...rows) + SCROLL_MARGIN;
       const minCol = Math.max(1, Math.min(...cols) - SCROLL_MARGIN);
       const maxCol = Math.max(...cols) + SCROLL_MARGIN;
-
-      const hallLeft = (minCol - 1) * cellSize;
-      const hallRight = maxCol * cellSize;
-      const hallTop = (minRow - 1) * cellSize;
-      const hallBottom = maxRow * cellSize;
-      const hallWidth = hallRight - hallLeft;
-      const hallHeight = hallBottom - hallTop;
-
-      let newOffsetX: number;
-      let newOffsetY: number;
-
-      if (hallWidth <= containerWidth) {
-        newOffsetX = (containerWidth - hallWidth) / 2 - hallLeft;
-      } else {
-        newOffsetX = -hallLeft;
-      }
-
-      if (hallHeight <= containerHeight) {
-        newOffsetY = (containerHeight - hallHeight) / 2 - hallTop;
-      } else {
-        newOffsetY = -hallTop;
-      }
-
-      setOffset({ x: newOffsetX, y: newOffsetY });
+      const centerCol = (minCol + maxCol) / 2;
+      const centerRow = (minRow + maxRow) / 2;
+      const centerX = (centerCol - 0.5) * cellSize;
+      const centerY = (centerRow - 0.5) * cellSize;
+      setOffset(
+        calculateCenteredOffset(
+          centerX,
+          centerY,
+          containerWidth,
+          containerHeight,
+          cellSize,
+          rotationRadians,
+        ),
+      );
     } else if (!selectedHall) {
       if (routeBounds) {
         const routeCenterCol = (routeBounds.minCol + routeBounds.maxCol) / 2;
@@ -564,10 +661,16 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         const routeCenterX = (routeCenterCol - 0.5) * cellSize;
         const routeCenterY = (routeCenterRow - 0.5) * cellSize;
 
-        const newOffsetX = containerWidth / 2 - routeCenterX;
-        const newOffsetY = containerHeight / 2 - routeCenterY;
-
-        setOffset({ x: newOffsetX, y: newOffsetY });
+        setOffset(
+          calculateCenteredOffset(
+            routeCenterX,
+            routeCenterY,
+            containerWidth,
+            containerHeight,
+            cellSize,
+            rotationRadians,
+          ),
+        );
       } else {
         setOffset({ x: 0, y: 0 });
       }
@@ -581,6 +684,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     onZoomChange,
     showPrevRoute,
     calcOptimalZoom,
+    calculateCenteredOffset,
   ]);
 
   useEffect(() => {
@@ -622,10 +726,16 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const routeCenterX = (routeCenterCol - 0.5) * newCellSize;
     const routeCenterY = (routeCenterRow - 0.5) * newCellSize;
 
-    const newOffsetX = containerWidth / 2 - routeCenterX;
-    const newOffsetY = containerHeight / 2 - routeCenterY;
-
-    setOffset({ x: newOffsetX, y: newOffsetY });
+    setOffset(
+      calculateCenteredOffset(
+        routeCenterX,
+        routeCenterY,
+        containerWidth,
+        containerHeight,
+        newCellSize,
+        rotationRadians,
+      ),
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     currentVisitKey,
@@ -635,6 +745,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     onZoomChange,
     showPrevRoute,
     calcOptimalZoom,
+    calculateCenteredOffset,
   ]);
 
   useEffect(() => {
@@ -658,20 +769,30 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
     ctx.save();
     ctx.translate(offset.x, offset.y);
+    if (rotationRadians !== 0) {
+      ctx.translate(mapCenterX, mapCenterY);
+      ctx.rotate(rotationRadians);
+      ctx.translate(-mapCenterX, -mapCenterY);
+    }
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
-    const visMinCol = Math.max(1, Math.floor(-offset.x / cellSize));
-    const visMaxCol = Math.min(
-      mapData.maxCol,
-      Math.ceil((-offset.x + containerWidth) / cellSize) + 1,
-    );
-    const visMinRow = Math.max(1, Math.floor(-offset.y / cellSize));
-    const visMaxRow = Math.min(
-      mapData.maxRow,
-      Math.ceil((-offset.y + containerHeight) / cellSize) + 1,
-    );
+    const viewportCorners = [
+      toMapCoordinates(0, 0),
+      toMapCoordinates(containerWidth, 0),
+      toMapCoordinates(0, containerHeight),
+      toMapCoordinates(containerWidth, containerHeight),
+    ];
+    const visibleMinX = Math.min(...viewportCorners.map((point) => point.x)) - cellSize * 2;
+    const visibleMaxX = Math.max(...viewportCorners.map((point) => point.x)) + cellSize * 2;
+    const visibleMinY = Math.min(...viewportCorners.map((point) => point.y)) - cellSize * 2;
+    const visibleMaxY = Math.max(...viewportCorners.map((point) => point.y)) + cellSize * 2;
+
+    const visMinCol = Math.max(1, Math.floor(visibleMinX / cellSize) + 1);
+    const visMaxCol = Math.min(mapData.maxCol, Math.ceil(visibleMaxX / cellSize) + 1);
+    const visMinRow = Math.max(1, Math.floor(visibleMinY / cellSize) + 1);
+    const visMaxRow = Math.min(mapData.maxRow, Math.ceil(visibleMaxY / cellSize) + 1);
 
     const isCellVisible = (
       row: number,
@@ -685,6 +806,18 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         row + spanRows - 1 >= visMinRow &&
         row <= visMaxRow
       );
+    };
+
+    const drawUprightText = (text: string, x: number, y: number) => {
+      if (rotationRadians === 0) {
+        ctx.fillText(text, x, y);
+        return;
+      }
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-rotationRadians);
+      ctx.fillText(text, 0, 0);
+      ctx.restore();
     };
 
     mapData.cells.forEach((cell) => {
@@ -733,7 +866,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     });
 
     // 2. セルの罫線を描画する。
-    if (showBorders) {
+    if (showBorders && !isRotationInteracting) {
       mapData.cells.forEach((cell) => {
         if (cell.isMerged) return;
 
@@ -851,11 +984,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
             chars.forEach((char, charIndex) => {
               const charY = startY + charIndex * fontSize * 1.1;
-              ctx.fillText(char, lineX, charY);
+              drawUprightText(char, lineX, charY);
             });
           });
         } else {
-          ctx.fillText(text, x + width / 2, y + height / 2);
+          drawUprightText(text, x + width / 2, y + height / 2);
         }
       });
     }
@@ -866,7 +999,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       prevCellCoords.row === currentCellCoords.row &&
       prevCellCoords.col === currentCellCoords.col;
 
-    if (effectiveShowPrevRef.current && prevRoutePath.length >= 2 && !isPrevSameAsCurrent) {
+    if (
+      !isRotationInteracting &&
+      effectiveShowPrevRef.current &&
+      prevRoutePath.length >= 2 &&
+      !isPrevSameAsCurrent
+    ) {
       const lineWidth = Math.max(2, cellSize * 0.08);
 
       ctx.beginPath();
@@ -932,7 +1070,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       currentCellCoords.row === nextCellCoords.row &&
       currentCellCoords.col === nextCellCoords.col;
 
-    if (routePath.length >= 2 && !isSamePosition) {
+    if (!isRotationInteracting && routePath.length >= 2 && !isSamePosition) {
       const lineWidth = Math.max(3, cellSize * 0.1);
 
       ctx.beginPath();
@@ -982,43 +1120,45 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
     }
 
-    cellStates.forEach((state, key) => {
-      if (!state.hasItems) return;
+    if (!isRotationInteracting) {
+      cellStates.forEach((state, key) => {
+        if (!state.hasItems) return;
 
-      const [row, col] = key.split('-').map(Number);
-      const x = (col - 1) * cellSize;
-      const y = (row - 1) * cellSize;
+        const [row, col] = key.split('-').map(Number);
+        const x = (col - 1) * cellSize;
+        const y = (row - 1) * cellSize;
 
-      const merge = mergedCellsMap.get(key);
-      const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
-      const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
+        const merge = mergedCellsMap.get(key);
+        const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
+        const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
 
-      if (state.hasPostponed && !state.allNone && currentPhase !== 'postponed') {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-        ctx.fillRect(x, y, width, height);
+        if (state.hasPostponed && !state.allNone && currentPhase !== 'postponed') {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.fillRect(x, y, width, height);
 
-        const iconSize = Math.max(12, cellSize * 0.4);
-        ctx.font = `bold ${iconSize}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#7B1FA2';
-        ctx.fillText('後', x + width / 2, y + height / 2);
-      }
+          const iconSize = Math.max(12, cellSize * 0.4);
+          ctx.font = `bold ${iconSize}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#7B1FA2';
+          drawUprightText('後', x + width / 2, y + height / 2);
+        }
 
-      if (state.hasLate && !state.allNone && currentPhase !== 'late') {
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-        ctx.fillRect(x, y, width, height);
+        if (state.hasLate && !state.allNone && currentPhase !== 'late') {
+          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+          ctx.fillRect(x, y, width, height);
 
-        const iconSize = Math.max(12, cellSize * 0.4);
-        ctx.font = `bold ${iconSize}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#1976D2';
-        ctx.fillText('遅', x + width / 2, y + height / 2);
-      }
-    });
+          const iconSize = Math.max(12, cellSize * 0.4);
+          ctx.font = `bold ${iconSize}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#1976D2';
+          drawUprightText('遅', x + width / 2, y + height / 2);
+        }
+      });
+    }
 
-    if (effectiveShowPrevRef.current && prevCellCoords && !isPrevSameAsCurrent) {
+    if (!isRotationInteracting && effectiveShowPrevRef.current && prevCellCoords && !isPrevSameAsCurrent) {
       const x = (prevCellCoords.col - 1) * cellSize;
       const y = (prevCellCoords.row - 1) * cellSize;
 
@@ -1032,10 +1172,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.font = `${markerSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('🔙', x + cellSize / 2, y - 1);
+      drawUprightText('🔙', x + cellSize / 2, y - 1);
     }
 
-    if (nextCellCoords) {
+    if (!isRotationInteracting && nextCellCoords) {
       const x = (nextCellCoords.col - 1) * cellSize;
       const y = (nextCellCoords.row - 1) * cellSize;
 
@@ -1047,10 +1187,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.font = `${markerSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('🚩', x + cellSize / 2, y - 2);
+      drawUprightText('🚩', x + cellSize / 2, y - 2);
     }
 
-    if (currentCellCoords) {
+    if (!isRotationInteracting && currentCellCoords) {
       const x = (currentCellCoords.col - 1) * cellSize;
       const y = (currentCellCoords.row - 1) * cellSize;
 
@@ -1062,7 +1202,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.font = `${markerSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('📍', x + cellSize / 2, y - 2);
+      drawUprightText('📍', x + cellSize / 2, y - 2);
     }
 
     ctx.restore();
@@ -1082,6 +1222,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     prevCellCoords,
     currentPhase,
     isDarkMode,
+    isRotationInteracting,
+    rotationRadians,
+    mapCenterX,
+    mapCenterY,
+    toMapCoordinates,
     offset,
   ]);
 
@@ -1089,8 +1234,36 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const container = containerRef.current;
     if (!container) return;
 
+    const calculateOffsetForZoomPoint = (viewX: number, viewY: number, newZoom: number) => {
+      const oldCellSize = BASE_CELL_SIZE * (zoomLevel / 100);
+      const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
+      const mapPoint = toMapCoordinates(viewX, viewY);
+      const normalizedMapX = mapPoint.x / oldCellSize;
+      const normalizedMapY = mapPoint.y / oldCellSize;
+      const scaledMapX = normalizedMapX * newCellSize;
+      const scaledMapY = normalizedMapY * newCellSize;
+      const newMapCenterX = (mapData.maxCol * newCellSize) / 2;
+      const newMapCenterY = (mapData.maxRow * newCellSize) / 2;
+      const rotatedPoint = rotatePointAroundCenter(
+        scaledMapX,
+        scaledMapY,
+        newMapCenterX,
+        newMapCenterY,
+        rotationRadians,
+      );
+      return {
+        x: viewX - rotatedPoint.x,
+        y: viewY - rotatedPoint.y,
+      };
+    };
+
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
+      if (e.shiftKey && onRotationAngleChange) {
+        const deltaAngle = e.deltaY < 0 ? -15 : 15;
+        onRotationAngleChange(normalizeRotationAngle(rotationAngle + deltaAngle));
+        return;
+      }
       if (!onZoomChange) return;
 
       const rect = container.getBoundingClientRect();
@@ -1099,18 +1272,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         y: e.clientY - rect.top,
       };
 
-      const oldCellSize = BASE_CELL_SIZE * (zoomLevel / 100);
       const delta = -e.deltaY * 0.1;
       const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(zoomLevel + delta)));
       if (newZoom === zoomLevel) return;
 
-      const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
-      const mapCoordX = (zoomCenter.x - offset.x) / oldCellSize;
-      const mapCoordY = (zoomCenter.y - offset.y) / oldCellSize;
-      const newOffsetX = zoomCenter.x - mapCoordX * newCellSize;
-      const newOffsetY = zoomCenter.y - mapCoordY * newCellSize;
-
-      setOffset({ x: newOffsetX, y: newOffsetY });
+      setOffset(calculateOffsetForZoomPoint(zoomCenter.x, zoomCenter.y, newZoom));
       onZoomChange(newZoom);
     };
 
@@ -1144,17 +1310,13 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         const midY = (touches[0].y + touches[1].y) / 2 - rect.top;
 
         const scaleRatio = currentDist / pinchStartDistRef.current;
-        const oldCellSize = BASE_CELL_SIZE * (zoomLevel / 100);
         const newZoom = Math.max(
           MIN_ZOOM,
           Math.min(MAX_ZOOM, Math.round(pinchStartZoomRef.current * scaleRatio)),
         );
         if (newZoom === zoomLevel) return;
 
-        const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
-        const mapCoordX = (midX - offset.x) / oldCellSize;
-        const mapCoordY = (midY - offset.y) / oldCellSize;
-        setOffset({ x: midX - mapCoordX * newCellSize, y: midY - mapCoordY * newCellSize });
+        setOffset(calculateOffsetForZoomPoint(midX, midY, newZoom));
         onZoomChange(newZoom);
       }
     };
@@ -1178,7 +1340,82 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       container.removeEventListener('touchend', handleTouchEnd);
       container.removeEventListener('touchcancel', handleTouchEnd);
     };
-  }, [zoomLevel, offset, onZoomChange]);
+  }, [
+    zoomLevel,
+    onZoomChange,
+    mapData.maxCol,
+    mapData.maxRow,
+    rotationRadians,
+    toMapCoordinates,
+    onRotationAngleChange,
+    rotationAngle,
+  ]);
+
+  const activeScrollBounds = useMemo(() => {
+    if (selectedHall && selectedHall.vertices.length >= 4) {
+      const rows = selectedHall.vertices.map((v) => v.row);
+      const cols = selectedHall.vertices.map((v) => v.col);
+      return {
+        minRow: Math.max(1, Math.min(...rows) - SCROLL_MARGIN),
+        maxRow: Math.max(...rows) + SCROLL_MARGIN,
+        minCol: Math.max(1, Math.min(...cols) - SCROLL_MARGIN),
+        maxCol: Math.max(...cols) + SCROLL_MARGIN,
+      };
+    }
+
+    if (showPrevRoute && routeBoundsAll) {
+      return routeBoundsAll;
+    }
+    if (routeBoundsCurrentNext) {
+      return routeBoundsCurrentNext;
+    }
+
+    return {
+      minRow: 1,
+      maxRow: mapData.maxRow,
+      minCol: 1,
+      maxCol: mapData.maxCol,
+    };
+  }, [
+    selectedHall,
+    showPrevRoute,
+    routeBoundsAll,
+    routeBoundsCurrentNext,
+    mapData.maxRow,
+    mapData.maxCol,
+  ]);
+
+  const calculateScrollLimits = useCallback(() => {
+    const container = containerRef.current;
+    if (!container) return null;
+
+    const containerWidth = container.clientWidth;
+    const containerHeight = container.clientHeight;
+
+    const boundsLeft = (activeScrollBounds.minCol - 1) * cellSize;
+    const boundsRight = activeScrollBounds.maxCol * cellSize;
+    const boundsTop = (activeScrollBounds.minRow - 1) * cellSize;
+    const boundsBottom = activeScrollBounds.maxRow * cellSize;
+
+    const rotatedCorners = [
+      rotatePointAroundCenter(boundsLeft, boundsTop, mapCenterX, mapCenterY, rotationRadians),
+      rotatePointAroundCenter(boundsRight, boundsTop, mapCenterX, mapCenterY, rotationRadians),
+      rotatePointAroundCenter(boundsLeft, boundsBottom, mapCenterX, mapCenterY, rotationRadians),
+      rotatePointAroundCenter(boundsRight, boundsBottom, mapCenterX, mapCenterY, rotationRadians),
+    ];
+
+    const rotatedMinX = Math.min(...rotatedCorners.map((point) => point.x));
+    const rotatedMaxX = Math.max(...rotatedCorners.map((point) => point.x));
+    const rotatedMinY = Math.min(...rotatedCorners.map((point) => point.y));
+    const rotatedMaxY = Math.max(...rotatedCorners.map((point) => point.y));
+
+    return {
+      minX: containerWidth - rotatedMaxX,
+      maxX: -rotatedMinX,
+      minY: containerHeight - rotatedMaxY,
+      maxY: -rotatedMinY,
+    };
+  }, [activeScrollBounds, cellSize, mapCenterX, mapCenterY, rotationRadians]);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -1202,12 +1439,21 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         setIsDragging(true);
       }
 
+      let newX = dragStartOffset.x + dx;
+      let newY = dragStartOffset.y + dy;
+
+      const limits = calculateScrollLimits();
+      if (limits) {
+        newX = Math.max(limits.minX, Math.min(limits.maxX, newX));
+        newY = Math.max(limits.minY, Math.min(limits.maxY, newY));
+      }
+
       setOffset({
-        x: dragStartOffset.x + dx,
-        y: dragStartOffset.y + dy,
+        x: newX,
+        y: newY,
       });
     },
-    [dragStart, dragStartOffset, appScale],
+    [dragStart, dragStartOffset, appScale, calculateScrollLimits],
   );
 
   const isCellInBlock = useCallback((row: number, col: number, block: BlockDefinition): boolean => {
@@ -1243,8 +1489,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
         const viewX = (e.clientX - canvasRect.left) / appScale;
         const viewY = (e.clientY - canvasRect.top) / appScale;
-        const mapX = viewX - offset.x;
-        const mapY = viewY - offset.y;
+        const { x: mapX, y: mapY } = toMapCoordinates(viewX, viewY);
 
         const col = Math.floor(mapX / cellSize) + 1;
         const row = Math.floor(mapY / cellSize) + 1;
@@ -1320,7 +1565,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       cellsMap,
       isCellInBlock,
       appZoomLevel,
-      offset,
+      toMapCoordinates,
     ],
   );
 

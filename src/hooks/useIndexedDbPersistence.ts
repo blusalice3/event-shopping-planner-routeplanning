@@ -6,6 +6,7 @@ import {
   HallDefinitionsStore,
   HallRouteSettingsStore,
   MapDataStore,
+  MapRotationSettingsStore,
   RouteSettingsStore,
   ShoppingItem,
 } from '../types';
@@ -17,6 +18,7 @@ type PersistedStateValues = {
   executeModeItems: Record<string, ExecuteModeItems>;
   dayModes: Record<string, DayModeState>;
   mapData: MapDataStore;
+  mapRotationSettings: MapRotationSettingsStore;
   routeSettings: RouteSettingsStore;
   hallDefinitions: HallDefinitionsStore;
   hallRouteSettings: HallRouteSettingsStore;
@@ -28,6 +30,7 @@ type PersistedStateSetters = {
   setExecuteModeItems: Dispatch<SetStateAction<Record<string, ExecuteModeItems>>>;
   setDayModes: Dispatch<SetStateAction<Record<string, DayModeState>>>;
   setMapData: Dispatch<SetStateAction<MapDataStore>>;
+  setMapRotationSettings: Dispatch<SetStateAction<MapRotationSettingsStore>>;
   setRouteSettings: Dispatch<SetStateAction<RouteSettingsStore>>;
   setHallDefinitions: Dispatch<SetStateAction<HallDefinitionsStore>>;
   setHallRouteSettings: Dispatch<SetStateAction<HallRouteSettingsStore>>;
@@ -52,6 +55,7 @@ export function useIndexedDbPersistence({
     executeModeItems,
     dayModes,
     mapData,
+    mapRotationSettings,
     routeSettings,
     hallDefinitions,
     hallRouteSettings,
@@ -62,6 +66,7 @@ export function useIndexedDbPersistence({
     setExecuteModeItems,
     setDayModes,
     setMapData,
+    setMapRotationSettings,
     setRouteSettings,
     setHallDefinitions,
     setHallRouteSettings,
@@ -78,6 +83,7 @@ export function useIndexedDbPersistence({
           loadedExecuteItems,
           loadedDayModes,
           loadedMapData,
+          loadedMapRotationSettings,
           loadedRouteSettings,
           loadedHallDefinitions,
           loadedHallRouteSettings,
@@ -87,6 +93,7 @@ export function useIndexedDbPersistence({
           db.loadExecuteModeItems(),
           db.loadDayModes(),
           db.loadMapData(),
+          db.loadMapRotationSettings(),
           db.loadRouteSettings(),
           db.loadHallDefinitions(),
           db.loadHallRouteSettings(),
@@ -107,6 +114,7 @@ export function useIndexedDbPersistence({
         setExecuteModeItems(loadedExecuteItems);
         setDayModes(loadedDayModes as Record<string, DayModeState>);
         setMapData(loadedMapData as MapDataStore);
+        setMapRotationSettings(loadedMapRotationSettings as MapRotationSettingsStore);
         setRouteSettings(loadedRouteSettings as RouteSettingsStore);
         setHallDefinitions(loadedHallDefinitions as HallDefinitionsStore);
         setHallRouteSettings(loadedHallRouteSettings as HallRouteSettingsStore);
@@ -125,6 +133,7 @@ export function useIndexedDbPersistence({
     setHallDefinitions,
     setHallRouteSettings,
     setMapData,
+    setMapRotationSettings,
     setRouteSettings,
   ]);
 
@@ -140,6 +149,7 @@ export function useIndexedDbPersistence({
           db.saveExecuteModeItems(executeModeItems),
           db.saveDayModes(dayModes),
           db.saveMapData(mapData),
+          db.saveMapRotationSettings(mapRotationSettings),
           db.saveRouteSettings(routeSettings),
           db.saveHallDefinitions(hallDefinitions),
           db.saveHallRouteSettings(hallRouteSettings),
@@ -162,6 +172,7 @@ export function useIndexedDbPersistence({
     executeModeItems,
     dayModes,
     mapData,
+    mapRotationSettings,
     routeSettings,
     hallDefinitions,
     hallRouteSettings,

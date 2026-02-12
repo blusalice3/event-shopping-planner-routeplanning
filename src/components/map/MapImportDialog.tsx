@@ -13,12 +13,21 @@ interface MapImportDialogProps {
   file: File | null;
   eventName: string;
   savedSettings: BlockDetectionSettings | null;
-  onImport: (parsedData: Record<string, DayMapData>, settings: BlockDetectionSettings) => void;
+  onImport: (
+    parsedData: Record<string, DayMapData>,
+    settings: BlockDetectionSettings,
+    initialAngles: Record<string, number>,
+  ) => void;
   onClose: () => void;
 }
 
 // 設定のlocalStorageキー
 const SETTINGS_STORAGE_KEY = 'blockDetectionSettings';
+
+const normalizeRotationAngle = (angle: number): number => {
+  const normalized = Math.round(angle) % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+};
 
 // 設定をlocalStorageから読み込む
 export function loadBlockDetectionSettings(eventName: string): BlockDetectionSettings | null {
@@ -197,6 +206,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
   const [previewData, setPreviewData] = useState<Record<string, DayMapData> | null>(null);
   const [highlightBlock, setHighlightBlock] = useState<string | null>(null);
   const [activePreviewSheet, setActivePreviewSheet] = useState<string>('');
+  const [initialAngles, setInitialAngles] = useState<Record<string, number>>({});
 
   // ダイアログが開くときに設定をリセット
   useEffect(() => {
@@ -206,8 +216,26 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
       setIsAccordionOpen(false);
       setHighlightBlock(null);
       setActivePreviewSheet('');
+      setInitialAngles({});
     }
   }, [isOpen, savedSettings]);
+
+  useEffect(() => {
+    if (!previewData) return;
+    const sheetNames = Object.keys(previewData);
+    if (sheetNames.length === 0) return;
+    setInitialAngles((prev) => {
+      let changed = false;
+      const next = { ...prev };
+      sheetNames.forEach((sheetName) => {
+        if (typeof next[sheetName] !== 'number' || Number.isNaN(next[sheetName])) {
+          next[sheetName] = 0;
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [previewData]);
 
   // プレビュー実行
   const handlePreview = useCallback(async () => {
@@ -242,7 +270,13 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
         alert('マップデータの解析に失敗しました。');
         return;
       }
-      onImport(data, settings);
+      const angleMap: Record<string, number> = {};
+      Object.keys(data).forEach((sheetName) => {
+        const rawAngle = initialAngles[sheetName];
+        const angle = typeof rawAngle === 'number' && Number.isFinite(rawAngle) ? rawAngle : 0;
+        angleMap[sheetName] = normalizeRotationAngle(angle);
+      });
+      onImport(data, settings, angleMap);
     } catch (error) {
       console.error('Import error:', error);
       alert(
@@ -251,7 +285,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [file, settings, previewData, onImport]);
+  }, [file, settings, previewData, onImport, initialAngles]);
 
   // 初期値にリセット
   const handleResetSettings = useCallback(() => {
@@ -692,6 +726,53 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
               )}
             </div>
           )}
+
+          <div className="space-y-2 border border-slate-200 dark:border-slate-600 rounded-lg p-3">
+            <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+              日別マップの初期角度（0〜359°、未設定は0°）
+            </p>
+            <p className="text-xs text-slate-500 dark:text-slate-400">
+              ここで設定した角度は「リセット」の戻り先になります。
+            </p>
+            {!previewData ? (
+              <p className="text-xs text-slate-400 dark:text-slate-500">
+                プレビュー後に日別マップごとの角度を入力できます。
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {Object.keys(previewData).map((sheetName) => {
+                  const angle = initialAngles[sheetName] ?? 0;
+                  return (
+                    <label
+                      key={sheetName}
+                      className="flex items-center justify-between gap-3 text-sm text-slate-700 dark:text-slate-300"
+                    >
+                      <span className="font-medium">{sheetName}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        max={359}
+                        step={1}
+                        value={angle}
+                        onChange={(e) => {
+                          const parsed = Number(e.target.value);
+                          const safeValue =
+                            Number.isFinite(parsed) && !Number.isNaN(parsed)
+                              ? Math.max(0, Math.min(359, parsed))
+                              : 0;
+                          setInitialAngles((prev) => ({
+                            ...prev,
+                            [sheetName]: safeValue,
+                          }));
+                        }}
+                        className="w-24 px-2 py-1 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-800 dark:text-slate-100 text-right"
+                      />
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* フッター */}

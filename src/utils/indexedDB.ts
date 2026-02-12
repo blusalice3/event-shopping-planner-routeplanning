@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'EventShoppingPlannerDB';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 // ストア名
 const STORES = {
@@ -13,6 +13,7 @@ const STORES = {
   EXECUTE_MODE_ITEMS: 'executeModeItems',
   DAY_MODES: 'dayModes',
   MAP_DATA: 'mapData',
+  MAP_ROTATION_SETTINGS: 'mapRotationSettings',
   ROUTE_SETTINGS: 'routeSettings',
   HALL_DEFINITIONS: 'hallDefinitions',
   HALL_ROUTE_SETTINGS: 'hallRouteSettings',
@@ -198,6 +199,7 @@ async function migrateFromLocalStorage(): Promise<boolean> {
       { key: 'executeModeItems', store: STORES.EXECUTE_MODE_ITEMS },
       { key: 'dayModes', store: STORES.DAY_MODES },
       { key: 'mapData', store: STORES.MAP_DATA },
+      { key: 'mapRotationSettings', store: STORES.MAP_ROTATION_SETTINGS },
       { key: 'routeSettings', store: STORES.ROUTE_SETTINGS },
       { key: 'hallDefinitions', store: STORES.HALL_DEFINITIONS },
       { key: 'hallRouteSettings', store: STORES.HALL_ROUTE_SETTINGS },
@@ -236,6 +238,7 @@ export interface AppData {
   executeModeItems: Record<string, Record<string, string[]>>;
   dayModes: Record<string, Record<string, string>>;
   mapData: Record<string, Record<string, unknown>>;
+  mapRotationSettings: Record<string, Record<string, unknown>>;
   routeSettings: Record<string, Record<string, unknown>>;
   hallDefinitions: Record<string, Record<string, unknown[]>>;
   hallRouteSettings: Record<string, Record<string, unknown>>;
@@ -285,6 +288,14 @@ export const db = {
     return (await loadData(STORES.MAP_DATA, 'data')) || {};
   },
 
+  // マップ回転設定
+  async saveMapRotationSettings(data: Record<string, Record<string, unknown>>): Promise<void> {
+    await saveData(STORES.MAP_ROTATION_SETTINGS, 'data', data);
+  },
+  async loadMapRotationSettings(): Promise<Record<string, Record<string, unknown>>> {
+    return (await loadData(STORES.MAP_ROTATION_SETTINGS, 'data')) || {};
+  },
+
   // ルート設定
   async saveRouteSettings(data: Record<string, Record<string, unknown>>): Promise<void> {
     await saveData(STORES.ROUTE_SETTINGS, 'data', data);
@@ -321,6 +332,11 @@ export const db = {
       },
       { store: STORES.DAY_MODES, loader: db.loadDayModes, saver: db.saveDayModes },
       { store: STORES.MAP_DATA, loader: db.loadMapData, saver: db.saveMapData },
+      {
+        store: STORES.MAP_ROTATION_SETTINGS,
+        loader: db.loadMapRotationSettings,
+        saver: db.saveMapRotationSettings,
+      },
       { store: STORES.ROUTE_SETTINGS, loader: db.loadRouteSettings, saver: db.saveRouteSettings },
       {
         store: STORES.HALL_DEFINITIONS,
@@ -355,6 +371,7 @@ export const db = {
       executeModeItems: await db.loadExecuteModeItems(),
       dayModes: await db.loadDayModes(),
       mapData: await db.loadMapData(),
+      mapRotationSettings: await db.loadMapRotationSettings(),
       routeSettings: await db.loadRouteSettings(),
       hallDefinitions: await db.loadHallDefinitions(),
       hallRouteSettings: await db.loadHallRouteSettings(),

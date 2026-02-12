@@ -20,6 +20,7 @@ interface MapCanvasProps {
   items: ShoppingItem[];
   executeModeItemIds: string[]; // 配列（順序維持）
   zoomLevel: ZoomLevel;
+  rotationAngle?: number;
   isRouteVisible: boolean;
   onCellClick: (row: number, col: number, matchingItems: ShoppingItem[]) => void;
   selectedHall?: HallDefinition;
@@ -32,6 +33,7 @@ interface MapCanvasProps {
   } | null;
   highlightedCell?: { row: number; col: number } | null;
   onZoomChange?: (newZoom: number) => void;
+  onRotationAngleChange?: (newAngle: number) => void;
 }
 
 const BASE_CELL_SIZE = 28; // 基本セルサイズ
@@ -42,6 +44,29 @@ const hasCellInputValue = (value: string | number | null): boolean => {
   if (value === null || value === undefined) return false;
   if (typeof value === 'string') return value.trim().length > 0;
   return true;
+};
+
+const normalizeRotationAngle = (angle: number): number => {
+  const normalized = Math.round(angle) % 360;
+  return normalized < 0 ? normalized + 360 : normalized;
+};
+
+const rotatePointAroundCenter = (
+  x: number,
+  y: number,
+  centerX: number,
+  centerY: number,
+  angleRad: number,
+): { x: number; y: number } => {
+  if (angleRad === 0) return { x, y };
+  const dx = x - centerX;
+  const dy = y - centerY;
+  const cos = Math.cos(angleRad);
+  const sin = Math.sin(angleRad);
+  return {
+    x: dx * cos - dy * sin + centerX,
+    y: dx * sin + dy * cos + centerY,
+  };
 };
 
 type RgbColor = { r: number; g: number; b: number };
@@ -117,6 +142,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   items,
   executeModeItemIds,
   zoomLevel,
+  rotationAngle = 0,
   isRouteVisible,
   onCellClick,
   selectedHall,
@@ -124,6 +150,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   cellSelectionMode,
   highlightedCell,
   onZoomChange,
+  onRotationAngleChange,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -155,6 +182,96 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const pinchStartZoomRef = useRef<number>(zoomLevel);
   const pinchCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const [isRotationInteracting, setIsRotationInteracting] = useState(false);
+  const rotationInteractionTimerRef = useRef<number | null>(null);
+
+  const normalizedRotationAngle = useMemo(
+    () => normalizeRotationAngle(rotationAngle),
+    [rotationAngle],
+  );
+  const rotationRadians = useMemo(
+    () => (normalizedRotationAngle * Math.PI) / 180,
+    [normalizedRotationAngle],
+  );
+  const mapCenterX = useMemo(() => (mapData.maxCol * cellSize) / 2, [mapData.maxCol, cellSize]);
+  const mapCenterY = useMemo(() => (mapData.maxRow * cellSize) / 2, [mapData.maxRow, cellSize]);
+
+  const toMapCoordinates = useCallback(
+    (viewX: number, viewY: number, currentOffset = offset) => {
+      const translatedX = viewX - currentOffset.x;
+      const translatedY = viewY - currentOffset.y;
+      if (rotationRadians === 0) return { x: translatedX, y: translatedY };
+
+      const dx = translatedX - mapCenterX;
+      const dy = translatedY - mapCenterY;
+      const cos = Math.cos(rotationRadians);
+      const sin = Math.sin(rotationRadians);
+
+      return {
+        x: dx * cos + dy * sin + mapCenterX,
+        y: -dx * sin + dy * cos + mapCenterY,
+      };
+    },
+    [offset, rotationRadians, mapCenterX, mapCenterY],
+  );
+
+  const rotateAroundMapCenter = useCallback(
+    (x: number, y: number, angleRad = rotationRadians) => {
+      if (angleRad === 0) return { x, y };
+      const dx = x - mapCenterX;
+      const dy = y - mapCenterY;
+      const cos = Math.cos(angleRad);
+      const sin = Math.sin(angleRad);
+      return {
+        x: dx * cos - dy * sin + mapCenterX,
+        y: dx * sin + dy * cos + mapCenterY,
+      };
+    },
+    [mapCenterX, mapCenterY, rotationRadians],
+  );
+
+  const calculateOffsetForZoomPoint = useCallback(
+    (viewX: number, viewY: number, newZoom: number, currentOffset = offset) => {
+      const currentCellSize = BASE_CELL_SIZE * (zoomLevel / 100);
+      const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
+      const mapPoint = toMapCoordinates(viewX, viewY, currentOffset);
+      const normalizedMapX = mapPoint.x / currentCellSize;
+      const normalizedMapY = mapPoint.y / currentCellSize;
+      const scaledMapX = normalizedMapX * newCellSize;
+      const scaledMapY = normalizedMapY * newCellSize;
+      const newMapCenterX = (mapData.maxCol * newCellSize) / 2;
+      const newMapCenterY = (mapData.maxRow * newCellSize) / 2;
+      const rotatedPoint = rotatePointAroundCenter(
+        scaledMapX,
+        scaledMapY,
+        newMapCenterX,
+        newMapCenterY,
+        rotationRadians,
+      );
+      return {
+        x: viewX - rotatedPoint.x,
+        y: viewY - rotatedPoint.y,
+      };
+    },
+    [offset, zoomLevel, toMapCoordinates, mapData.maxCol, mapData.maxRow, rotationRadians],
+  );
+
+  useEffect(() => {
+    setIsRotationInteracting(true);
+    if (rotationInteractionTimerRef.current !== null) {
+      clearTimeout(rotationInteractionTimerRef.current);
+    }
+    rotationInteractionTimerRef.current = window.setTimeout(() => {
+      setIsRotationInteracting(false);
+      rotationInteractionTimerRef.current = null;
+    }, 150);
+
+    return () => {
+      if (rotationInteractionTimerRef.current !== null) {
+        clearTimeout(rotationInteractionTimerRef.current);
+      }
+    };
+  }, [normalizedRotationAngle]);
 
   // ズームレベル変更時に視点を維持するオフセット調整（外部からのズーム変更に対応）
   useEffect(() => {
@@ -190,6 +307,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();
+      if (e.shiftKey && onRotationAngleChange) {
+        const delta = e.deltaY < 0 ? -15 : 15;
+        onRotationAngleChange(normalizeRotationAngle(rotationAngle + delta));
+        return;
+      }
       if (!onZoomChange) return;
 
       const container = containerRef.current;
@@ -208,22 +330,20 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
       if (newZoom === currentZoom) return;
 
-      // マウス位置のマップ座標を計算
-      const currentCellSize = BASE_CELL_SIZE * (currentZoom / 100);
+      const newOffset = calculateOffsetForZoomPoint(mouseX, mouseY, newZoom);
       const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
 
-      const mapX = (mouseX - offset.x) / currentCellSize;
-      const mapY = (mouseY - offset.y) / currentCellSize;
-
-      // 新しいオフセット（マウス位置を固定）
-      const newOffsetX = mouseX - mapX * newCellSize;
-      const newOffsetY = mouseY - mapY * newCellSize;
-
-      setOffset({ x: newOffsetX, y: newOffsetY });
+      setOffset(newOffset);
       prevCellSizeRef.current = newCellSize;
       onZoomChange(newZoom);
     },
-    [zoomLevel, offset, onZoomChange],
+    [
+      zoomLevel,
+      onZoomChange,
+      onRotationAngleChange,
+      rotationAngle,
+      calculateOffsetForZoomPoint,
+    ],
   );
 
   // ピンチズーム処理（スマートフォン/タブレット: ピンチ中心を基準にズーム）
@@ -281,24 +401,16 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
         if (newZoom === zoomLevel) return;
 
-        // ピンチ中心のマップ座標を計算
-        const currentCellSize = BASE_CELL_SIZE * (zoomLevel / 100);
-        const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
         const cx = pinchCenterRef.current.x;
         const cy = pinchCenterRef.current.y;
-
-        const mapX = (cx - offset.x) / currentCellSize;
-        const mapY = (cy - offset.y) / currentCellSize;
-
-        const newOffsetX = cx - mapX * newCellSize;
-        const newOffsetY = cy - mapY * newCellSize;
-
-        setOffset({ x: newOffsetX, y: newOffsetY });
+        const newOffset = calculateOffsetForZoomPoint(cx, cy, newZoom);
+        const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
+        setOffset(newOffset);
         prevCellSizeRef.current = newCellSize;
         onZoomChange(newZoom);
       }
     },
-    [zoomLevel, offset, onZoomChange],
+    [zoomLevel, onZoomChange, calculateOffsetForZoomPoint],
   );
 
   const handleTouchEnd = useCallback((e: TouchEvent) => {
@@ -604,21 +716,31 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     // クリア
     ctx.clearRect(0, 0, containerWidth, containerHeight);
 
-    // オフセットを適用（以降の描画はマップ座標系で行う）
+    // オフセットと回転を適用（以降の描画はマップ座標系で行う）
     ctx.save();
     ctx.translate(offset.x, offset.y);
+    if (rotationRadians !== 0) {
+      ctx.translate(mapCenterX, mapCenterY);
+      ctx.rotate(rotationRadians);
+      ctx.translate(-mapCenterX, -mapCenterY);
+    }
+
+    const viewportCorners = [
+      toMapCoordinates(0, 0),
+      toMapCoordinates(containerWidth, 0),
+      toMapCoordinates(0, containerHeight),
+      toMapCoordinates(containerWidth, containerHeight),
+    ];
+    const visibleMinX = Math.min(...viewportCorners.map((p) => p.x)) - cellSize * 2;
+    const visibleMaxX = Math.max(...viewportCorners.map((p) => p.x)) + cellSize * 2;
+    const visibleMinY = Math.min(...viewportCorners.map((p) => p.y)) - cellSize * 2;
+    const visibleMaxY = Math.max(...viewportCorners.map((p) => p.y)) + cellSize * 2;
 
     // 可視セル範囲を計算（描画最適化）
-    const visMinCol = Math.max(1, Math.floor(-offset.x / cellSize));
-    const visMaxCol = Math.min(
-      mapData.maxCol,
-      Math.ceil((-offset.x + containerWidth) / cellSize) + 1,
-    );
-    const visMinRow = Math.max(1, Math.floor(-offset.y / cellSize));
-    const visMaxRow = Math.min(
-      mapData.maxRow,
-      Math.ceil((-offset.y + containerHeight) / cellSize) + 1,
-    );
+    const visMinCol = Math.max(1, Math.floor(visibleMinX / cellSize) + 1);
+    const visMaxCol = Math.min(mapData.maxCol, Math.ceil(visibleMaxX / cellSize) + 1);
+    const visMinRow = Math.max(1, Math.floor(visibleMinY / cellSize) + 1);
+    const visMaxRow = Math.min(mapData.maxRow, Math.ceil(visibleMaxY / cellSize) + 1);
 
     // セルが可視範囲内かチェックするヘルパー
     const isCellVisible = (row: number, col: number, spanRows = 1, spanCols = 1): boolean => {
@@ -634,8 +756,21 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
+    const drawUprightText = (text: string, x: number, y: number) => {
+      if (rotationRadians === 0) {
+        ctx.fillText(text, x, y);
+        return;
+      }
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-rotationRadians);
+      ctx.fillText(text, 0, 0);
+      ctx.restore();
+    };
+
     // 黄色と黒の斜めストライプパターンを作成
     const createWarningStripePattern = () => {
+      if (isRotationInteracting) return null;
       const patternCanvas = document.createElement('canvas');
       const stripeSize = Math.max(8, cellSize * 0.4); // ストライプの太さ
       patternCanvas.width = stripeSize * 2;
@@ -696,6 +831,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           // 黄色と黒の斜めストライプ：優先/委託無の未訪問アイテムあり（一部訪問より優先）
           ctx.fillStyle = warningPattern;
           ctx.fillRect(x, y, width, height);
+        } else if (state.hasPriorityUnvisited) {
+          // 回転操作中は単色で簡略表示
+          ctx.fillStyle = 'rgba(255, 214, 0, 0.45)';
+          ctx.fillRect(x, y, width, height);
         } else if (state.isVisited) {
           ctx.fillStyle = 'rgba(255, 238, 88, 0.5)'; // 黄：一部訪問済み（優先アイテムは訪問済み）
           ctx.fillRect(x, y, width, height);
@@ -707,7 +846,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     });
 
     // 2. 罫線を描画（ズームレベルに応じて）
-    if (showBorders) {
+    if (showBorders && !isRotationInteracting) {
       mapData.cells.forEach((cell) => {
         if (cell.isMerged) return;
 
@@ -874,11 +1013,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
             chars.forEach((char, charIndex) => {
               const charY = startY + charIndex * fontSize * 1.1;
-              ctx.fillText(char, lineX, charY);
+              drawUprightText(char, lineX, charY);
             });
           });
         } else {
-          ctx.fillText(text, x + width / 2, y + height / 2);
+          drawUprightText(text, x + width / 2, y + height / 2);
         }
       });
     } else {
@@ -923,7 +1062,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }
 
     // 4. ルートを描画（優先度で色分け、重複部分は平行線）
-    if (isRouteVisible && routeSegments.length > 0) {
+    if (!isRotationInteracting && isRouteVisible && routeSegments.length > 0) {
       // 優先度ごとの色を定義
       const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
         switch (priority) {
@@ -1138,13 +1277,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           ctx.textAlign = 'center';
           ctx.textBaseline = 'middle';
           ctx.fillStyle = '#FFFFFF';
-          ctx.fillText(String(point.order + 1), px, py);
+          drawUprightText(String(point.order + 1), px, py);
         });
       }
     }
 
     // 5. 訪問先リストからのセルハイライト
-    if (highlightedCell) {
+    if (!isRotationInteracting && highlightedCell) {
       const x = (highlightedCell.col - 1) * cellSize;
       const y = (highlightedCell.row - 1) * cellSize;
 
@@ -1165,7 +1304,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }
 
     // 6. ホール頂点選択プレビュー（多角形オーバーレイ）
-    if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length >= 3) {
+    if (!isRotationInteracting && vertexSelectionMode && vertexSelectionMode.clickedVertices.length >= 3) {
       const vertices = vertexSelectionMode.clickedVertices;
 
       // プレビュー用に重心角度ソートして辺交差を防止
@@ -1216,9 +1355,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#FF0000';
-        ctx.fillText(String(i + 1), px, py);
+        drawUprightText(String(i + 1), px, py);
       });
-    } else if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
+    } else if (!isRotationInteracting && vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
       // 3点未満の場合は点と線のみ表示
       const vertices = vertexSelectionMode.clickedVertices;
 
@@ -1260,12 +1399,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#FF0000';
-        ctx.fillText(String(i + 1), px, py);
+        drawUprightText(String(i + 1), px, py);
       });
     }
 
     // 7. ブロック定義セル選択マーカー + 範囲プレビュー
-    if (cellSelectionMode && cellSelectionMode.clickedCells.length > 0) {
+    if (!isRotationInteracting && cellSelectionMode && cellSelectionMode.clickedCells.length > 0) {
       const clickedCells = cellSelectionMode.clickedCells;
       const selType = cellSelectionMode.type;
 
@@ -1352,7 +1491,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
         ctx.fillStyle = '#2196F3';
-        ctx.fillText(String(i + 1), px, py);
+        drawUprightText(String(i + 1), px, py);
       });
     }
 
@@ -1374,6 +1513,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     cellSelectionMode,
     highlightedCell,
     isDarkMode,
+    isRotationInteracting,
+    rotationRadians,
+    mapCenterX,
+    mapCenterY,
+    toMapCoordinates,
     offset,
   ]);
 
@@ -1393,8 +1537,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       // ビューポート座標 → マップ座標（オフセットを引く）
       const viewX = (e.clientX - rect.left) * scaleX;
       const viewY = (e.clientY - rect.top) * scaleY;
-      const x = viewX - offset.x;
-      const y = viewY - offset.y;
+      const { x, y } = toMapCoordinates(viewX, viewY);
 
       // 頂点選択モード中は、まず頂点マーカーのクリックをチェック
       if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
@@ -1496,6 +1639,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       cellSelectionMode,
       mergedCellsMap,
       offset,
+      toMapCoordinates,
     ],
   );
 
@@ -1562,43 +1706,30 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    // ホール範囲のピクセル座標
-    const hallLeft = (activeScrollBounds.minCol - 1) * cellSize;
-    const hallRight = activeScrollBounds.maxCol * cellSize;
-    const hallTop = (activeScrollBounds.minRow - 1) * cellSize;
-    const hallBottom = activeScrollBounds.maxRow * cellSize;
-    const hallWidth = hallRight - hallLeft;
-    const hallHeight = hallBottom - hallTop;
+    const boundsLeft = (activeScrollBounds.minCol - 1) * cellSize;
+    const boundsRight = activeScrollBounds.maxCol * cellSize;
+    const boundsTop = (activeScrollBounds.minRow - 1) * cellSize;
+    const boundsBottom = activeScrollBounds.maxRow * cellSize;
 
-    // スクロール制限を計算
-    // 原則: ホール範囲が常に画面内に表示されるようにする
-    let minX: number, maxX: number, minY: number, maxY: number;
+    const rotatedCorners = [
+      rotateAroundMapCenter(boundsLeft, boundsTop),
+      rotateAroundMapCenter(boundsRight, boundsTop),
+      rotateAroundMapCenter(boundsLeft, boundsBottom),
+      rotateAroundMapCenter(boundsRight, boundsBottom),
+    ];
 
-    if (hallWidth <= containerWidth) {
-      // ホール幅が画面幅以下の場合、ホールを画面内に収める
-      // offset.x = -hallLeft でホール左端が画面左端に来る
-      // offset.x = containerWidth - hallRight でホール右端が画面右端に来る
-      minX = containerWidth - hallRight;
-      maxX = -hallLeft;
-    } else {
-      // ホール幅が画面幅より大きい場合
-      // ホール左端が画面右端より左に、ホール右端が画面左端より右に
-      minX = containerWidth - hallRight;
-      maxX = -hallLeft;
-    }
+    const rotatedMinX = Math.min(...rotatedCorners.map((point) => point.x));
+    const rotatedMaxX = Math.max(...rotatedCorners.map((point) => point.x));
+    const rotatedMinY = Math.min(...rotatedCorners.map((point) => point.y));
+    const rotatedMaxY = Math.max(...rotatedCorners.map((point) => point.y));
 
-    if (hallHeight <= containerHeight) {
-      // ホール高さが画面高さ以下の場合
-      minY = containerHeight - hallBottom;
-      maxY = -hallTop;
-    } else {
-      // ホール高さが画面高さより大きい場合
-      minY = containerHeight - hallBottom;
-      maxY = -hallTop;
-    }
-
-    return { minX, maxX, minY, maxY };
-  }, [activeScrollBounds, cellSize]);
+    return {
+      minX: containerWidth - rotatedMaxX,
+      maxX: -rotatedMinX,
+      minY: containerHeight - rotatedMaxY,
+      maxY: -rotatedMinY,
+    };
+  }, [activeScrollBounds, cellSize, rotateAroundMapCenter]);
 
   // ドラッグ処理
   const handlePointerDown = useCallback(
