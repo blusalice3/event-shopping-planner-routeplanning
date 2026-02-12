@@ -768,6 +768,190 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.restore();
     };
 
+    const splitTextByWidth = (sourceText: string, maxLineWidth: number): string[] => {
+      const lines: string[] = [];
+      let current = '';
+
+      Array.from(sourceText).forEach((char) => {
+        if (char === '\n') {
+          lines.push(current);
+          current = '';
+          return;
+        }
+
+        const next = current + char;
+        if (current.length > 0 && ctx.measureText(next).width > maxLineWidth) {
+          lines.push(current);
+          current = char;
+        } else {
+          current = next;
+        }
+      });
+
+      lines.push(current);
+      return lines.length > 0 ? lines : [''];
+    };
+
+    const trimLineToWidth = (line: string, maxLineWidth: number): string => {
+      let next = line;
+      while (next.length > 0 && ctx.measureText(`${next}…`).width > maxLineWidth) {
+        next = next.slice(0, -1);
+      }
+      return next.length > 0 ? `${next}…` : '…';
+    };
+
+    const drawFittedHorizontalTextInCell = (
+      sourceText: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      preferredFontSize: number,
+    ) => {
+      const fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      const minFontSize = 6;
+      const innerPaddingX = Math.max(1, preferredFontSize * 0.2);
+      const innerPaddingY = Math.max(1, preferredFontSize * 0.2);
+      const maxLineWidth = Math.max(1, width - innerPaddingX * 2);
+      const maxTextHeight = Math.max(1, height - innerPaddingY * 2);
+
+      let resolvedFontSize = Math.max(minFontSize, Math.floor(preferredFontSize));
+      let resolvedLineHeight = resolvedFontSize * 1.15;
+      let resolvedLines = splitTextByWidth(sourceText, maxLineWidth);
+
+      for (let size = Math.max(minFontSize, Math.floor(preferredFontSize)); size >= minFontSize; size--) {
+        ctx.font = `${size}px ${fontFamily}`;
+        const candidateLines = splitTextByWidth(sourceText, maxLineWidth);
+        const candidateLineHeight = size * 1.15;
+        if (candidateLines.length * candidateLineHeight <= maxTextHeight) {
+          resolvedFontSize = size;
+          resolvedLineHeight = candidateLineHeight;
+          resolvedLines = candidateLines;
+          break;
+        }
+      }
+
+      ctx.font = `${resolvedFontSize}px ${fontFamily}`;
+      const maxLines = Math.max(1, Math.floor(maxTextHeight / resolvedLineHeight));
+      if (resolvedLines.length > maxLines) {
+        const clamped = resolvedLines.slice(0, maxLines);
+        clamped[maxLines - 1] = trimLineToWidth(clamped[maxLines - 1], maxLineWidth);
+        resolvedLines = clamped;
+      }
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, width, height);
+      ctx.clip();
+      ctx.font = `${resolvedFontSize}px ${fontFamily}`;
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'middle';
+
+      const totalTextHeight = resolvedLines.length * resolvedLineHeight;
+      const startY = y + (height - totalTextHeight) / 2 + resolvedLineHeight / 2;
+
+      resolvedLines.forEach((line, lineIndex) => {
+        const chars = Array.from(line);
+        const charWidths = chars.map((char) => ctx.measureText(char).width);
+        const lineWidth = charWidths.reduce((sum, charWidth) => sum + charWidth, 0);
+        let cursorX = x + (width - lineWidth) / 2;
+        const lineY = startY + lineIndex * resolvedLineHeight;
+
+        chars.forEach((char, charIndex) => {
+          drawUprightText(char, cursorX, lineY);
+          cursorX += charWidths[charIndex];
+        });
+      });
+
+      ctx.restore();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+    };
+
+    const drawFittedVerticalTextInCell = (
+      sourceText: string,
+      x: number,
+      y: number,
+      width: number,
+      height: number,
+      preferredFontSize: number,
+    ) => {
+      const fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      const minFontSize = 6;
+      const columns = sourceText.split(/\n/).map((line) => line || ' ');
+      const innerPaddingX = Math.max(1, preferredFontSize * 0.2);
+      const innerPaddingY = Math.max(1, preferredFontSize * 0.2);
+      const maxTextWidth = Math.max(1, width - innerPaddingX * 2);
+      const maxTextHeight = Math.max(1, height - innerPaddingY * 2);
+
+      const canFitVerticalText = (fontSize: number): boolean => {
+        const columnSpacing = fontSize * 1.2;
+        const rowSpacing = fontSize * 1.1;
+        const requiredWidth = columns.length * columnSpacing;
+        const requiredHeight = Math.max(...columns.map((column) => Array.from(column).length)) * rowSpacing;
+        return requiredWidth <= maxTextWidth && requiredHeight <= maxTextHeight;
+      };
+
+      let resolvedFontSize = Math.max(minFontSize, Math.floor(preferredFontSize));
+      for (let size = Math.max(minFontSize, Math.floor(preferredFontSize)); size >= minFontSize; size--) {
+        if (canFitVerticalText(size)) {
+          resolvedFontSize = size;
+          break;
+        }
+      }
+
+      const columnSpacing = resolvedFontSize * 1.2;
+      const rowSpacing = resolvedFontSize * 1.1;
+      const maxColumns = Math.max(1, Math.floor(maxTextWidth / columnSpacing));
+      const maxRows = Math.max(1, Math.floor(maxTextHeight / rowSpacing));
+
+      let drawableColumns = columns.slice(0, maxColumns).map((column) => Array.from(column));
+      const hadHiddenColumns = columns.length > maxColumns;
+
+      drawableColumns = drawableColumns.map((chars) => {
+        if (chars.length <= maxRows) return chars;
+        const trimmed = chars.slice(0, maxRows);
+        trimmed[maxRows - 1] = '…';
+        return trimmed;
+      });
+
+      if (hadHiddenColumns) {
+        const lastColumnIndex = drawableColumns.length - 1;
+        const lastColumn = drawableColumns[lastColumnIndex];
+        if (lastColumn.length < maxRows) {
+          lastColumn.push('…');
+        } else {
+          lastColumn[lastColumn.length - 1] = '…';
+        }
+      }
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x, y, width, height);
+      ctx.clip();
+      ctx.font = `${resolvedFontSize}px ${fontFamily}`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+
+      const totalWidth = drawableColumns.length * columnSpacing;
+      const startX = x + width / 2 + (totalWidth - columnSpacing) / 2;
+
+      drawableColumns.forEach((chars, columnIndex) => {
+        const totalHeight = chars.length * rowSpacing;
+        const startY = y + (height - totalHeight) / 2 + rowSpacing / 2;
+        const columnX = startX - columnIndex * columnSpacing;
+
+        chars.forEach((char, charIndex) => {
+          const charY = startY + charIndex * rowSpacing;
+          drawUprightText(char, columnX, charY);
+        });
+      });
+
+      ctx.restore();
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+    };
+
     // 黄色と黒の斜めストライプパターンを作成
     const createWarningStripePattern = () => {
       if (isRotationInteracting) return null;
@@ -999,23 +1183,29 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
         // 縦書きの場合
         if (isVertical) {
-          // 改行で分割されている場合は各行を別々に描画
-          const lines = text.split(/\n/);
-          const lineSpacing = fontSize * 1.2;
-          const totalWidth = lines.length * lineSpacing;
-          const startX = x + width / 2 + (totalWidth - lineSpacing) / 2;
+          if (rotationRadians !== 0) {
+            drawFittedVerticalTextInCell(text, x, y, width, height, fontSize);
+          } else {
+            // 改行で分割されている場合は各行を別々に描画
+            const lines = text.split(/\n/);
+            const lineSpacing = fontSize * 1.2;
+            const totalWidth = lines.length * lineSpacing;
+            const startX = x + width / 2 + (totalWidth - lineSpacing) / 2;
 
-          lines.forEach((line, lineIndex) => {
-            const chars = line.split('');
-            const totalHeight = chars.length * fontSize * 1.1;
-            const startY = y + (height - totalHeight) / 2 + fontSize / 2;
-            const lineX = startX - lineIndex * lineSpacing;
+            lines.forEach((line, lineIndex) => {
+              const chars = line.split('');
+              const totalHeight = chars.length * fontSize * 1.1;
+              const startY = y + (height - totalHeight) / 2 + fontSize / 2;
+              const lineX = startX - lineIndex * lineSpacing;
 
-            chars.forEach((char, charIndex) => {
-              const charY = startY + charIndex * fontSize * 1.1;
-              drawUprightText(char, lineX, charY);
+              chars.forEach((char, charIndex) => {
+                const charY = startY + charIndex * fontSize * 1.1;
+                drawUprightText(char, lineX, charY);
+              });
             });
-          });
+          }
+        } else if (rotationRadians !== 0) {
+          drawFittedHorizontalTextInCell(text, x, y, width, height, fontSize);
         } else {
           drawUprightText(text, x + width / 2, y + height / 2);
         }
