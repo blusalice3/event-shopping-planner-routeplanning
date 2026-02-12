@@ -1,11 +1,17 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
-import { ShoppingItem, DayMapData, HallDefinition, PurchaseStatus } from '../types';
+import {
+  ShoppingItem,
+  DayMapData,
+  HallDefinition,
+  PurchaseStatus,
+  FocusModeSessionState,
+  FocusPhase,
+} from '../types';
 import FocusModeMapCanvas from './FocusModeMapCanvas';
 import { FocusModeHeader, FocusModeItemList, FocusModeMapControls } from './focus/FocusModePanels';
 
 // フェーズの定義
-type FocusPhase = 'normal' | 'postponed' | 'late';
 
 interface FocusModeProps {
   items: ShoppingItem[];
@@ -25,6 +31,8 @@ interface FocusModeProps {
   onDeleteRequest?: (item: ShoppingItem) => void;
   // アプリ全体の表示倍率
   appZoomLevel?: number;
+  resumeState?: FocusModeSessionState | null;
+  onSessionStateChange?: (state: FocusModeSessionState) => void;
 }
 
 // スワイプ判定の閾値
@@ -56,11 +64,17 @@ const FocusMode: React.FC<FocusModeProps> = ({
   onEditRequest,
   onDeleteRequest,
   appZoomLevel = 100,
+  resumeState = null,
+  onSessionStateChange,
 }) => {
   // 現在のフェーズ（ユーザー操作でのみ変更）
-  const [currentPhase, setCurrentPhase] = useState<FocusPhase>('normal');
+  const [currentPhase, setCurrentPhase] = useState<FocusPhase>(
+    () => resumeState?.phase || 'normal',
+  );
   // 現在のフェーズ内での訪問先インデックス
-  const [currentPhaseIndex, setCurrentPhaseIndex] = useState(0);
+  const [currentPhaseIndex, setCurrentPhaseIndex] = useState(() =>
+    Math.max(0, resumeState?.phaseIndex || 0),
+  );
   // 最後に操作したアイテムID
   const [lastInteractedItemId, setLastInteractedItemId] = useState<string | null>(null);
   // 次へボタンの点滅状態
@@ -70,7 +84,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 通知メッセージ
   const [notification, setNotification] = useState<string | null>(null);
   // 完了状態
-  const [isCompleted, setIsCompleted] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(() => resumeState?.isCompleted || false);
   // 自動進行タイマーID
   const autoAdvanceTimerRef = useRef<NodeJS.Timeout | null>(null);
   // カウントダウンインターバルID
@@ -89,9 +103,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const swipeContainerRef = useRef<HTMLDivElement>(null);
 
   // 後回しフェーズで表示するアイテムID（通常フェーズ終了時に確定）
-  const [postponedPhaseItemIds, setPostponedPhaseItemIds] = useState<Set<string>>(new Set());
+  const [postponedPhaseItemIds, setPostponedPhaseItemIds] = useState<Set<string>>(
+    () => new Set(resumeState?.postponedItemIds || []),
+  );
   // 遅参フェーズで表示するアイテムID（後回しフェーズ終了時に確定）
-  const [latePhaseItemIds, setLatePhaseItemIds] = useState<Set<string>>(new Set());
+  const [latePhaseItemIds, setLatePhaseItemIds] = useState<Set<string>>(
+    () => new Set(resumeState?.lateItemIds || []),
+  );
 
   // フェーズ切り替え確認ダイアログの状態
   const [phaseChangeDialog, setPhaseChangeDialog] = useState<{
@@ -102,11 +120,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
   }>({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
 
   // 各フェーズで最後に表示していたインデックスを記憶
-  const [savedPhaseIndices, setSavedPhaseIndices] = useState<Record<FocusPhase, number>>({
-    normal: 0,
-    postponed: 0,
-    late: 0,
-  });
+  const [savedPhaseIndices, setSavedPhaseIndices] = useState<Record<FocusPhase, number>>(() => ({
+    normal: resumeState?.savedPhaseIndices?.normal || 0,
+    postponed: resumeState?.savedPhaseIndices?.postponed || 0,
+    late: resumeState?.savedPhaseIndices?.late || 0,
+  }));
 
   // マップ表示関連の状態
   const [isMapVisible, setIsMapVisible] = useState(false);
@@ -470,6 +488,32 @@ const FocusMode: React.FC<FocusModeProps> = ({
       [currentPhase]: currentPhaseIndex,
     }));
   }, [currentPhase, currentPhaseIndex]);
+
+  useEffect(() => {
+    if (!onSessionStateChange) return;
+    onSessionStateChange({
+      phase: currentPhase,
+      phaseIndex: currentPhaseIndex,
+      savedPhaseIndices: {
+        normal: savedPhaseIndices.normal,
+        postponed: savedPhaseIndices.postponed,
+        late: savedPhaseIndices.late,
+      },
+      postponedItemIds: Array.from(postponedPhaseItemIds),
+      lateItemIds: Array.from(latePhaseItemIds),
+      isCompleted,
+    });
+  }, [
+    onSessionStateChange,
+    currentPhase,
+    currentPhaseIndex,
+    savedPhaseIndices.normal,
+    savedPhaseIndices.postponed,
+    savedPhaseIndices.late,
+    postponedPhaseItemIds,
+    latePhaseItemIds,
+    isCompleted,
+  ]);
 
   // タイマーをクリアする関数（フェーズ切り替えでも使用するので先に定義）
   const clearAutoAdvanceTimer = useCallback(() => {

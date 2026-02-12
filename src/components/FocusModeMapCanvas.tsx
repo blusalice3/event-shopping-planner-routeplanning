@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+﻿import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   DayMapData,
   CellData,
@@ -19,31 +19,27 @@ interface FocusModeMapCanvasProps {
   executeModeItemIds: string[];
   zoomLevel: number;
   selectedHall: HallDefinition | null;
-  // 集中モード固有のプロパティ
-  currentVisitKey: string | null; // 現在位置（eventDate-block-baseNumber）
-  nextVisitKey: string | null; // 次の目的地
-  prevVisitKey: string | null; // 前の訪問先
+  // 髮・ｸｭ繝｢繝ｼ繝牙崋譛峨・繝励Ο繝代ユ繧｣
+  currentVisitKey: string | null;
+  nextVisitKey: string | null; // 谺｡縺ｮ逶ｮ逧・慍
+  prevVisitKey: string | null; // 蜑阪・險ｪ蝠丞・
   currentPhase: 'normal' | 'postponed' | 'late';
-  // 自動ズーム用コールバック
+  // 閾ｪ蜍輔ぜ繝ｼ繝逕ｨ繧ｳ繝ｼ繝ｫ繝舌ャ繧ｯ
   onZoomChange?: (newZoom: number) => void;
-  // セルクリック時のコールバック（新規アイテム追加用）
   onCellClick?: (blockName: string, number: number, matchingItems: ShoppingItem[]) => void;
-  // アプリ全体の表示倍率（親要素のtransform scaleに対応）
   appZoomLevel?: number;
-  // ホール定義（前の訪問先と現在位置のホール比較用）
   hallDefinitions?: HallDefinition[];
 }
 
 const BASE_CELL_SIZE = 28;
 const SCROLL_MARGIN = 5;
 
-// ナンバーからベース部分（数字+アルファベット）を抽出
+// 繝翫Φ繝舌・縺九ｉ繝吶・繧ｹ驛ｨ蛻・ｼ域焚蟄・繧｢繝ｫ繝輔ぃ繝吶ャ繝茨ｼ峨ｒ謚ｽ蜃ｺ
 const extractBaseNumber = (number: string): string => {
   const match = number.match(/^(\d+[a-zA-Z])/);
   return match ? match[1].toLowerCase() : number.toLowerCase();
 };
 
-// 訪問先キーを生成（参加日 + ブロック + ベースナンバー）
 const getVisitKey = (item: ShoppingItem): string => {
   const baseNumber = extractBaseNumber(item.number);
   return `${item.eventDate}-${item.block}-${baseNumber}`;
@@ -72,7 +68,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
 
-  // ピンチズーム用refs
+  // 繝斐Φ繝√ぜ繝ｼ繝逕ｨrefs
   const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchStartDistRef = useRef<number>(0);
   const pinchStartZoomRef = useRef<number>(zoomLevel);
@@ -80,16 +76,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
   const scale = zoomLevel / 100;
   const cellSize = BASE_CELL_SIZE * scale;
-  // 表示倍率に関わらず全ての内容を表示
+  // 陦ｨ遉ｺ蛟咲紫縺ｫ髢｢繧上ｉ縺壼・縺ｦ縺ｮ蜀・ｮｹ繧定｡ｨ遉ｺ
   const isDetailedView = true;
   const showNumbers = true;
   const showBorders = true;
 
-  const prevCellSizeRef = useRef<number>(cellSize);
-  const initializedRef = useRef<boolean>(false);
   const prevSelectedHallRef = useRef<HallDefinition | null>(null);
 
-  // セルマップを作成
+  // 繧ｻ繝ｫ繝槭ャ繝励ｒ菴懈・
   const cellsMap = useMemo(() => {
     const map = new Map<string, CellData>();
     mapData.cells.forEach((cell) => {
@@ -98,7 +92,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return map;
   }, [mapData.cells]);
 
-  // 結合セルのマップを作成
+  // 邨仙粋繧ｻ繝ｫ縺ｮ繝槭ャ繝励ｒ菴懈・
   const mergedCellsMap = useMemo(() => {
     const map = new Map<string, MergedCellInfo>();
     mapData.mergedCells.forEach((merge) => {
@@ -107,29 +101,25 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return map;
   }, [mapData.mergedCells]);
 
-  // 日名を取得
   const dayName = useMemo(() => {
-    const dayMatch = mapName.match(/^(.+)マップ$/);
+    const dayMatch = mapName.match(/^(.+)繝槭ャ繝・/);
     return dayMatch ? dayMatch[1].trim() : '';
   }, [mapName]);
 
-  // セルごとの状態を計算（購入状態を考慮）
   const cellStates = useMemo(() => {
     const states = new Map<
       string,
       {
         hasItems: boolean;
         items: ShoppingItem[];
-        visitKeys: Set<string>; // 複数のvisitKeyを保持
+        visitKeys: Set<string>; // 隍・焚縺ｮvisitKey繧剃ｿ晄戟
         isCurrentPosition: boolean;
         isNextDestination: boolean;
         isPreviousPosition: boolean;
-        // 購入状態の集計
-        allNone: boolean; // 全て未購入
-        allProcessed: boolean; // 全て処理済み（未購入以外）
-        hasPostponed: boolean; // 後回しアイテムあり
-        hasLate: boolean; // 遅参アイテムあり
-        // 訪問済みかどうか（未購入がないかつ後回し/遅参のみでない）
+        allNone: boolean; // 蜈ｨ縺ｦ譛ｪ雉ｼ蜈･
+        allProcessed: boolean; // 蜈ｨ縺ｦ蜃ｦ逅・ｸ医∩・域悴雉ｼ蜈･莉･螟厄ｼ・
+        hasPostponed: boolean; // 蠕悟屓縺励い繧､繝・Β縺ゅｊ
+        hasLate: boolean; // 驕・盾繧｢繧､繝・Β縺ゅｊ
         isVisited: boolean;
       }
     >();
@@ -177,9 +167,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       existing.hasItems = true;
       existing.items.push(item);
-      existing.visitKeys.add(visitKey); // 複数のvisitKeyを保持
+      existing.visitKeys.add(visitKey); // 隍・焚縺ｮvisitKey繧剃ｿ晄戟
 
-      // 購入状態の更新
+      // 雉ｼ蜈･迥ｶ諷九・譖ｴ譁ｰ
       if (item.purchaseStatus === 'None') {
         existing.allProcessed = false;
       } else {
@@ -195,24 +185,21 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       states.set(key, existing);
     });
 
-    // 訪問済み判定と現在位置/次の目的地の設定
+    // 險ｪ蝠乗ｸ医∩蛻､螳壹→迴ｾ蝨ｨ菴咲ｽｮ/谺｡縺ｮ逶ｮ逧・慍縺ｮ險ｭ螳・
     states.forEach((state, _key) => {
-      // 訪問済み: 全て未購入ではない かつ (後回し/遅参のみでない)
-      // つまり、購入済み/売切/欠席のいずれかがある場合
+      // 險ｪ蝠乗ｸ医∩: 蜈ｨ縺ｦ譛ｪ雉ｼ蜈･縺ｧ縺ｯ縺ｪ縺・縺九▽ (蠕悟屓縺・驕・盾縺ｮ縺ｿ縺ｧ縺ｪ縺・
       const hasFinalStatus = state.items.some(
         (item) =>
           item.purchaseStatus === 'Purchased' ||
           item.purchaseStatus === 'SoldOut' ||
           item.purchaseStatus === 'Absent',
       );
-      // 後回し/遅参のみの場合は訪問済みとしない
       const onlyPostponedOrLate = state.items.every(
         (item) => item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'Late',
       );
       state.isVisited =
         !state.allNone && (hasFinalStatus || (!state.allNone && !onlyPostponedOrLate));
 
-      // 現在位置と次の目的地（visitKeysのSetで判定）
       if (currentVisitKey && state.visitKeys.has(currentVisitKey)) {
         state.isCurrentPosition = true;
       }
@@ -227,7 +214,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return states;
   }, [mapData.blocks, items, dayName, currentVisitKey, nextVisitKey, prevVisitKey]);
 
-  // 現在位置と次の目的地のセル座標を取得
   const currentCellCoords = useMemo(() => {
     for (const [key, state] of cellStates.entries()) {
       if (state.isCurrentPosition) {
@@ -258,11 +244,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return null;
   }, [cellStates]);
 
-  // ルート計算（現在位置→次の目的地）
   const routePath = useMemo(() => {
     if (!currentCellCoords || !nextCellCoords) return [];
 
-    // ブロック名セルを収集（通過可能）
     const blockNameCells = new Set<string>();
     mapData.blocks.forEach((block) => {
       for (let r = block.startRow; r <= block.endRow; r++) {
@@ -287,11 +271,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return simplifyPath(path);
   }, [currentCellCoords, nextCellCoords, mapData, cellsMap]);
 
-  // ルート計算（前の訪問先→現在位置）
   const prevRoutePath = useMemo(() => {
     if (!prevCellCoords || !currentCellCoords) return [];
 
-    // 前の訪問先と現在位置が同じ場合はスキップ
+    // 蜑阪・險ｪ蝠丞・縺ｨ迴ｾ蝨ｨ菴咲ｽｮ縺悟酔縺伜ｴ蜷医・繧ｹ繧ｭ繝・・
     if (
       prevCellCoords.row === currentCellCoords.row &&
       prevCellCoords.col === currentCellCoords.col
@@ -322,7 +305,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return simplifyPath(path);
   }, [prevCellCoords, currentCellCoords, mapData, cellsMap]);
 
-  // セルがホール内にあるかをpoint-in-polygonで判定するヘルパー
+  // 繧ｻ繝ｫ縺後・繝ｼ繝ｫ蜀・↓縺ゅｋ縺九ｒpoint-in-polygon縺ｧ蛻､螳壹☆繧九・繝ｫ繝代・
   const findHallForCell = useCallback(
     (row: number, col: number): HallDefinition | null => {
       if (!hallDefinitions || hallDefinitions.length === 0) return null;
@@ -346,35 +329,28 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     [hallDefinitions],
   );
 
-  // 前の訪問先と現在位置が同じホールにあるかどうか
+  // 蜑阪・險ｪ蝠丞・縺ｨ迴ｾ蝨ｨ菴咲ｽｮ縺悟酔縺倥・繝ｼ繝ｫ縺ｫ縺ゅｋ縺九←縺・°
   const prevInSameHall = useMemo(() => {
     if (!prevCellCoords || !currentCellCoords) return false;
-    // ホール定義がない場合は同じホールとみなす（ルートを表示）
     if (!hallDefinitions || hallDefinitions.length === 0) return true;
     const prevHall = findHallForCell(prevCellCoords.row, prevCellCoords.col);
     const currentHall = findHallForCell(currentCellCoords.row, currentCellCoords.col);
-    // どちらかがホール外の場合は異なるホール扱い
     if (!prevHall || !currentHall) return false;
     return prevHall.id === currentHall.id;
   }, [prevCellCoords, currentCellCoords, hallDefinitions, findHallForCell]);
 
-  // 前の訪問先ルートを表示するか判定（ホール差異 + 距離ベース）
-  // ホールが異なる場合は表示しない。同じホールでも3点が遠すぎる場合は2点にフォールバック
+  // 蜑阪・險ｪ蝠丞・繝ｫ繝ｼ繝医ｒ陦ｨ遉ｺ縺吶ｋ縺句愛螳夲ｼ医・繝ｼ繝ｫ蟾ｮ逡ｰ + 霍晞屬繝吶・繧ｹ・・  // 繝帙・繝ｫ縺檎焚縺ｪ繧句ｴ蜷医・陦ｨ遉ｺ縺励↑縺・ょ酔縺倥・繝ｼ繝ｫ縺ｧ繧・轤ｹ縺碁□縺吶℃繧句ｴ蜷医・2轤ｹ縺ｫ繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ
   const showPrevRoute = useMemo(() => {
-    // 前の訪問先がない場合は表示しない
     if (!prevCellCoords || !currentCellCoords) return false;
-    // 同一セルの場合は表示しない
     if (
       prevCellCoords.row === currentCellCoords.row &&
       prevCellCoords.col === currentCellCoords.col
     )
       return false;
-    // ホールが異なる場合は表示しない
     if (!prevInSameHall) return false;
     return true;
   }, [prevCellCoords, currentCellCoords, prevInSameHall]);
 
-  // 3点ルートの範囲（前の訪問先が同じホールの場合のみprevを含む）
   const routeBoundsAll = useMemo(() => {
     if (!currentCellCoords) return null;
 
@@ -406,7 +382,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return { minRow, maxRow, minCol, maxCol };
   }, [currentCellCoords, nextCellCoords, prevCellCoords, showPrevRoute]);
 
-  // 2点ルートの範囲（現在位置と次の目的地のみ）
   const routeBoundsCurrentNext = useMemo(() => {
     if (!currentCellCoords) return null;
 
@@ -431,7 +406,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return { minRow, maxRow, minCol, maxCol };
   }, [currentCellCoords, nextCellCoords]);
 
-  // 実際に使用するルート範囲を決定するための最適ズーム計算ヘルパー
+  // 螳滄圀縺ｫ菴ｿ逕ｨ縺吶ｋ繝ｫ繝ｼ繝育ｯ・峇繧呈ｱｺ螳壹☆繧九◆繧√・譛驕ｩ繧ｺ繝ｼ繝險育ｮ励・繝ｫ繝代・
   const calcOptimalZoom = useCallback(
     (
       bounds: { minRow: number; maxRow: number; minCol: number; maxCol: number },
@@ -447,55 +422,13 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     [],
   );
 
-  // 3点が遠すぎるかどうかの判定用ref（描画やauto-zoomで共有）
   const effectiveShowPrevRef = useRef<boolean>(true);
 
-  // 基本のルート範囲（現在位置+次の目的地ベース、ズーム維持等で使用）
   const routeBounds = routeBoundsCurrentNext;
 
-  // 前回の訪問先キーを記憶（変更検知用）
   const prevVisitKeyRef = useRef<string | null>(null);
 
-  // ズームレベル変更時の視点維持（ルートの中心を維持）
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
 
-    const prevCellSize = prevCellSizeRef.current;
-
-    // 初回はスキップ
-    if (!initializedRef.current) {
-      prevCellSizeRef.current = cellSize;
-      initializedRef.current = true;
-      return;
-    }
-
-    // セルサイズが変わっていない場合はスキップ
-    if (prevCellSize === cellSize) {
-      return;
-    }
-
-    // ルートの中心を維持してズーム
-    if (routeBounds) {
-      const containerWidth = container.clientWidth;
-      const containerHeight = container.clientHeight;
-
-      const routeCenterCol = (routeBounds.minCol + routeBounds.maxCol) / 2;
-      const routeCenterRow = (routeBounds.minRow + routeBounds.maxRow) / 2;
-
-      const routeCenterX = (routeCenterCol - 0.5) * cellSize;
-      const routeCenterY = (routeCenterRow - 0.5) * cellSize;
-
-      const newOffsetX = containerWidth / 2 - routeCenterX;
-      const newOffsetY = containerHeight / 2 - routeCenterY;
-
-      setOffset({ x: newOffsetX, y: newOffsetY });
-    }
-
-    prevCellSizeRef.current = cellSize;
-  }, [cellSize, routeBounds]);
-
-  // ホール選択時のオフセット自動調整（ルート全体が収まるように）
   useEffect(() => {
     if (prevSelectedHallRef.current?.id === selectedHall?.id) {
       return;
@@ -508,7 +441,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    // ルートがある場合はルート全体を中心に表示（3→2フォールバック付き）
     if (routeBoundsCurrentNext && currentCellCoords) {
       let useBounds = routeBoundsCurrentNext;
 
@@ -544,7 +476,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       return;
     }
 
-    // ルートがない場合でホールが選択されている場合
     if (selectedHall && selectedHall.vertices.length >= 4) {
       const rows = selectedHall.vertices.map((v) => v.row);
       const cols = selectedHall.vertices.map((v) => v.col);
@@ -577,7 +508,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       setOffset({ x: newOffsetX, y: newOffsetY });
     } else if (!selectedHall) {
-      // ホールが未選択の場合、ルートがあればルート中心、なければ原点
+      // 繝帙・繝ｫ縺梧悴驕ｸ謚槭・蝣ｴ蜷医√Ν繝ｼ繝医′縺ゅｌ縺ｰ繝ｫ繝ｼ繝井ｸｭ蠢・√↑縺代ｌ縺ｰ蜴溽せ
       if (routeBounds) {
         const routeCenterCol = (routeBounds.minCol + routeBounds.maxCol) / 2;
         const routeCenterRow = (routeBounds.minRow + routeBounds.maxRow) / 2;
@@ -595,7 +526,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     selectedHall,
-    cellSize,
     routeBoundsCurrentNext,
     routeBoundsAll,
     currentCellCoords,
@@ -604,9 +534,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     calcOptimalZoom,
   ]);
 
-  // 訪問先が変わった時にルート全体を画面に収める（3点→2点フォールバック付き）
   useEffect(() => {
-    // 訪問先キーが変わっていない場合はスキップ
+    // 險ｪ蝠丞・繧ｭ繝ｼ縺悟､峨ｏ縺｣縺ｦ縺・↑縺・ｴ蜷医・繧ｹ繧ｭ繝・・
     if (prevVisitKeyRef.current === currentVisitKey) {
       return;
     }
@@ -619,23 +548,21 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    // 3点表示を試行（前の訪問先が同じホールにある場合のみ）
     let useBounds = routeBoundsCurrentNext;
     let useShowPrev = false;
 
     if (showPrevRoute && routeBoundsAll) {
       const allZoom = calcOptimalZoom(routeBoundsAll, containerWidth, containerHeight);
       if (allZoom >= MIN_ZOOM) {
-        // 3点がmin zoom以上で収まる → 3点表示
+        // 3轤ｹ縺稽in zoom莉･荳翫〒蜿弱∪繧・竊・3轤ｹ陦ｨ遉ｺ
         useBounds = routeBoundsAll;
         useShowPrev = true;
       }
-      // 3点だとmin zoom未満 → 2点にフォールバック（useBoundsはそのまま）
+      // 3轤ｹ縺縺ｨmin zoom譛ｪ貅 竊・2轤ｹ縺ｫ繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ・・seBounds縺ｯ縺昴・縺ｾ縺ｾ・・
     }
 
     effectiveShowPrevRef.current = useShowPrev;
 
-    // 選択したboundsで最適なズームを計算
     const optimalZoom = calcOptimalZoom(useBounds, containerWidth, containerHeight);
     const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(optimalZoom)));
 
@@ -643,7 +570,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       onZoomChange(newZoom);
     }
 
-    // ルートの中心を画面中央に配置
+    // 繝ｫ繝ｼ繝医・荳ｭ蠢・ｒ逕ｻ髱｢荳ｭ螟ｮ縺ｫ驟咲ｽｮ
     const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
     const routeCenterCol = (useBounds.minCol + useBounds.maxCol) / 2;
     const routeCenterRow = (useBounds.minRow + useBounds.maxRow) / 2;
@@ -665,7 +592,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     calcOptimalZoom,
   ]);
 
-  // 描画
+  // 謠冗判
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -674,7 +601,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // キャンバスサイズをコンテナ（ビューポート）サイズに設定
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
@@ -686,14 +612,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, containerWidth, containerHeight);
 
-    // オフセットを適用
+    // 繧ｪ繝輔そ繝・ヨ繧帝←逕ｨ
     ctx.save();
     ctx.translate(offset.x, offset.y);
 
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
-    // ビューポートベースのセル可視範囲カリング
+    // 繝薙Η繝ｼ繝昴・繝医・繝ｼ繧ｹ縺ｮ繧ｻ繝ｫ蜿ｯ隕也ｯ・峇繧ｫ繝ｪ繝ｳ繧ｰ
     const visMinCol = Math.max(1, Math.floor(-offset.x / cellSize));
     const visMaxCol = Math.min(
       mapData.maxCol,
@@ -719,7 +645,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       );
     };
 
-    // 1. 背景を描画
+    // 1. 閭梧勹繧呈緒逕ｻ
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
 
@@ -733,48 +659,47 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const width = spanCols * cellSize;
       const height = spanRows * cellSize;
 
-      // 背景色
+      // 閭梧勹濶ｲ
       if (cell.backgroundColor) {
         ctx.fillStyle = cell.backgroundColor;
         ctx.fillRect(x, y, width, height);
       }
 
-      // セル状態に応じた背景（購入状態ベース）
       const state = cellStates.get(`${cell.row}-${cell.col}`);
       if (state && state.hasItems) {
         if (state.isCurrentPosition) {
-          // 現在位置: 緑背景
+          // 迴ｾ蝨ｨ菴咲ｽｮ: 邱題レ譎ｯ
           ctx.fillStyle = 'rgba(34, 197, 94, 0.6)';
           ctx.fillRect(x, y, width, height);
         } else if (state.isNextDestination) {
-          // 次の訪問先: オレンジ背景
+          // 谺｡縺ｮ險ｪ蝠丞・: 繧ｪ繝ｬ繝ｳ繧ｸ閭梧勹
           ctx.fillStyle = 'rgba(255, 152, 0, 0.6)';
           ctx.fillRect(x, y, width, height);
         } else if (effectiveShowPrevRef.current && state.isPreviousPosition) {
-          // 前の訪問先: 薄い青紫背景（前ルート表示時のみ）
+          // 蜑阪・險ｪ蝠丞・: 阮・＞髱堤ｴｫ閭梧勹・亥燕繝ｫ繝ｼ繝郁｡ｨ遉ｺ譎ゅ・縺ｿ・・
           ctx.fillStyle = 'rgba(139, 148, 191, 0.45)';
           ctx.fillRect(x, y, width, height);
         } else if (state.isVisited) {
-          // 訪問済み（全て処理済み、後回し/遅参のみでない）: グレー
+          // 險ｪ蝠乗ｸ医∩・亥・縺ｦ蜃ｦ逅・ｸ医∩縲∝ｾ悟屓縺・驕・盾縺ｮ縺ｿ縺ｧ縺ｪ縺・ｼ・ 繧ｰ繝ｬ繝ｼ
           ctx.fillStyle = 'rgba(158, 158, 158, 0.5)';
           ctx.fillRect(x, y, width, height);
         } else if (state.hasPostponed && currentPhase !== 'postponed') {
-          // 後回しアイテムあり（後回しフェーズ以外）: 紫系
+          // 蠕悟屓縺励い繧､繝・Β縺ゅｊ・亥ｾ悟屓縺励ヵ繧ｧ繝ｼ繧ｺ莉･螟厄ｼ・ 邏ｫ邉ｻ
           ctx.fillStyle = 'rgba(156, 39, 176, 0.4)';
           ctx.fillRect(x, y, width, height);
         } else if (state.hasLate && currentPhase !== 'late') {
-          // 遅参アイテムあり（遅参フェーズ以外）: 青系
+          // 驕・盾繧｢繧､繝・Β縺ゅｊ・磯≦蜿ゅヵ繧ｧ繝ｼ繧ｺ莉･螟厄ｼ・ 髱堤ｳｻ
           ctx.fillStyle = 'rgba(33, 150, 243, 0.4)';
           ctx.fillRect(x, y, width, height);
         } else if (state.allNone) {
-          // 全て未購入: 通常の青
+          // 蜈ｨ縺ｦ譛ｪ雉ｼ蜈･: 騾壼ｸｸ縺ｮ髱・
           ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';
           ctx.fillRect(x, y, width, height);
         }
       }
     });
 
-    // 2. 罫線を描画
+    // 2. 鄂ｫ邱壹ｒ謠冗判
     if (showBorders) {
       mapData.cells.forEach((cell) => {
         if (cell.isMerged) return;
@@ -800,7 +725,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
           ctx.beginPath();
           ctx.strokeStyle = border.color || '#000000';
-          // MapCanvasと同じ罫線太さ
           let lineWidth = 1;
           switch (border.style) {
             case 'thin':
@@ -830,7 +754,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
     }
 
-    // 3. テキストを描画
+    // 3. 繝・く繧ｹ繝医ｒ謠冗判
     if (showNumbers) {
       mapData.cells.forEach((cell) => {
         if (cell.isMerged || cell.value === null) return;
@@ -848,39 +772,41 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         const text = String(cell.value);
         const isVertical = cell.isVerticalText;
 
-        // MapCanvasと同じフォントサイズ計算
         let fontSize: number;
         if (merge) {
-          // 結合セルは大きめ
+          // 邨仙粋繧ｻ繝ｫ縺ｯ螟ｧ縺阪ａ
           if (isVertical) {
-            // 縦書きの場合は高さに基づいてサイズを調整
+            // 邵ｦ譖ｸ縺阪・蝣ｴ蜷医・鬮倥＆縺ｫ蝓ｺ縺･縺・※繧ｵ繧､繧ｺ繧定ｪｿ謨ｴ
             const charCount = text.replace(/\n/g, '').length;
             fontSize = Math.min(width * 0.6, (height / (charCount + 1)) * 0.9, 16);
           } else {
             fontSize = Math.min(width, height) * (isDetailedView ? 0.5 : 0.4);
           }
         } else if (typeof cell.value === 'number') {
-          // 数値セル
+          // 謨ｰ蛟､繧ｻ繝ｫ
           fontSize = Math.min(cellSize * 0.45, 14);
         } else {
-          // テキストセル
+          // 繝・く繧ｹ繝医そ繝ｫ
           fontSize = Math.min(cellSize * 0.4, 12);
         }
-        fontSize = Math.max(fontSize, 8); // 最小サイズ
+        fontSize = Math.max(fontSize, 8); // 譛蟆上し繧､繧ｺ
 
         ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
         const state = cellStates.get(`${cell.row}-${cell.col}`);
-        if (state?.isCurrentPosition) {
-          ctx.fillStyle = '#E65100'; // オレンジ（現在位置）
+        const explicitFontColor = cell.fontColor?.trim();
+        if (explicitFontColor) {
+          ctx.fillStyle = explicitFontColor;
+        } else if (state?.isCurrentPosition) {
+          ctx.fillStyle = '#E65100';
         } else if (state?.isVisited) {
-          ctx.fillStyle = '#616161'; // グレー（訪問済み）
+          ctx.fillStyle = '#616161';
         } else if (state?.hasItems) {
-          ctx.fillStyle = '#1565C0'; // 青（未訪問）
+          ctx.fillStyle = '#1565C0';
         } else {
-          ctx.fillStyle = '#333333';
+          ctx.fillStyle = cell.fontColor || '#333333';
         }
 
         if (isVertical) {
@@ -906,8 +832,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
     }
 
-    // 4a. 前の訪問先→現在位置のルートを描画（薄い実線）
-    // effectiveShowPrevRef: ホールが異なる or 3点が遠すぎる場合は非表示
+    // 4a. 蜑阪・險ｪ蝠丞・竊堤樟蝨ｨ菴咲ｽｮ縺ｮ繝ｫ繝ｼ繝医ｒ謠冗判・郁埋縺・ｮ溽ｷ夲ｼ・    // effectiveShowPrevRef: 繝帙・繝ｫ縺檎焚縺ｪ繧・or 3轤ｹ縺碁□縺吶℃繧句ｴ蜷医・髱櫁｡ｨ遉ｺ
     const isPrevSameAsCurrent =
       prevCellCoords &&
       currentCellCoords &&
@@ -917,9 +842,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     if (effectiveShowPrevRef.current && prevRoutePath.length >= 2 && !isPrevSameAsCurrent) {
       const lineWidth = Math.max(2, cellSize * 0.08);
 
-      // 薄い実線で描画（訪問済みルート）
+      // 阮・＞螳溽ｷ壹〒謠冗判・郁ｨｪ蝠乗ｸ医∩繝ｫ繝ｼ繝茨ｼ・
       ctx.beginPath();
-      ctx.strokeStyle = 'rgba(156, 163, 175, 0.6)'; // グレー半透明
+      ctx.strokeStyle = 'rgba(156, 163, 175, 0.6)'; // 繧ｰ繝ｬ繝ｼ蜊企乗・
       ctx.lineWidth = lineWidth;
       ctx.lineCap = 'round';
       ctx.setLineDash([]);
@@ -936,7 +861,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
       ctx.stroke();
 
-      // 始点（前の訪問先）に小さい丸マーカー
+      // 蟋狗せ・亥燕縺ｮ險ｪ蝠丞・・峨↓蟆上＆縺・ｸｸ繝槭・繧ｫ繝ｼ
       if (prevRoutePath.length >= 1) {
         const first = prevRoutePath[0];
         const startX = (first.col - 0.5) * cellSize;
@@ -948,7 +873,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         ctx.fill();
       }
 
-      // 終点（現在位置方向）に矢印
+      // 邨らせ・育樟蝨ｨ菴咲ｽｮ譁ｹ蜷托ｼ峨↓遏｢蜊ｰ
       if (prevRoutePath.length >= 2) {
         const last = prevRoutePath[prevRoutePath.length - 1];
         const prev = prevRoutePath[prevRoutePath.length - 2];
@@ -977,8 +902,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
     }
 
-    // 4b. ルートを描画（点線: 未訪問部分、実線: 訪問済み部分）
-    // 現在位置と次の目的地が異なる場合のみルートを描画
+    // 4b. 繝ｫ繝ｼ繝医ｒ謠冗判・育せ邱・ 譛ｪ險ｪ蝠城Κ蛻・∝ｮ溽ｷ・ 險ｪ蝠乗ｸ医∩驛ｨ蛻・ｼ・    // 迴ｾ蝨ｨ菴咲ｽｮ縺ｨ谺｡縺ｮ逶ｮ逧・慍縺檎焚縺ｪ繧句ｴ蜷医・縺ｿ繝ｫ繝ｼ繝医ｒ謠冗判
     const isSamePosition =
       currentCellCoords &&
       nextCellCoords &&
@@ -988,9 +912,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     if (routePath.length >= 2 && !isSamePosition) {
       const lineWidth = Math.max(3, cellSize * 0.1);
 
-      // 点線で描画（未訪問ルート）
+      // 轤ｹ邱壹〒謠冗判・域悴險ｪ蝠上Ν繝ｼ繝茨ｼ・
       ctx.beginPath();
-      ctx.strokeStyle = '#FF5722'; // オレンジ
+      ctx.strokeStyle = '#FF5722'; // 繧ｪ繝ｬ繝ｳ繧ｸ
       ctx.lineWidth = lineWidth;
       ctx.lineCap = 'round';
       ctx.setLineDash([cellSize * 0.2, cellSize * 0.1]);
@@ -1008,7 +932,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.stroke();
       ctx.setLineDash([]);
 
-      // 終点に矢印
+      // 邨らせ縺ｫ遏｢蜊ｰ
       if (routePath.length >= 2) {
         const last = routePath[routePath.length - 1];
         const prev = routePath[routePath.length - 2];
@@ -1037,7 +961,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
     }
 
-    // 5. 後回し/遅参オーバーレイ
+    // 5. 蠕悟屓縺・驕・盾繧ｪ繝ｼ繝舌・繝ｬ繧､
     cellStates.forEach((state, key) => {
       if (!state.hasItems) return;
 
@@ -1049,22 +973,20 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
       const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
 
-      // 後回しオーバーレイ（後回しフェーズ以外で表示）
       if (state.hasPostponed && !state.allNone && currentPhase !== 'postponed') {
-        // 半透明オーバーレイ
+        // 蜊企乗・繧ｪ繝ｼ繝舌・繝ｬ繧､
         ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
         ctx.fillRect(x, y, width, height);
 
-        // 「後」アイコン
+        // 縲悟ｾ後阪い繧､繧ｳ繝ｳ
         const iconSize = Math.max(12, cellSize * 0.4);
         ctx.font = `bold ${iconSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#7B1FA2'; // 紫
+        ctx.fillStyle = '#7B1FA2'; // 邏ｫ
         ctx.fillText('後', x + width / 2, y + height / 2);
       }
 
-      // 遅参オーバーレイ（遅参フェーズ以外で表示）
       if (state.hasLate && !state.allNone && currentPhase !== 'late') {
         ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
         ctx.fillRect(x, y, width, height);
@@ -1073,68 +995,65 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         ctx.font = `bold ${iconSize}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#1976D2'; // 青
+        ctx.fillStyle = '#1976D2';
         ctx.fillText('遅', x + width / 2, y + height / 2);
       }
     });
 
-    // 6. 前の訪問先マーカー（最も下のレイヤー、前ルート非表示時はスキップ）
     if (effectiveShowPrevRef.current && prevCellCoords && !isPrevSameAsCurrent) {
       const x = (prevCellCoords.col - 1) * cellSize;
       const y = (prevCellCoords.row - 1) * cellSize;
 
-      // グレー枠（控えめ）
+      // 繧ｰ繝ｬ繝ｼ譫・域而縺医ａ・・
       ctx.strokeStyle = 'rgba(107, 114, 128, 0.6)';
       ctx.lineWidth = Math.max(2, cellSize * 0.08);
       ctx.setLineDash([cellSize * 0.15, cellSize * 0.1]);
       ctx.strokeRect(x - 1, y - 1, cellSize + 2, cellSize + 2);
       ctx.setLineDash([]);
 
-      // 🔙マーカー
+      // 漠繝槭・繧ｫ繝ｼ
       const markerSize = Math.max(12, cellSize * 0.38);
       ctx.font = `${markerSize}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('🔙', x + cellSize / 2, y - 1);
+      ctx.fillText('漠', x + cellSize / 2, y - 1);
     }
 
-    // 7. 次の目的地マーカー（現在位置より先に描画して下に配置）
     if (nextCellCoords) {
       const x = (nextCellCoords.col - 1) * cellSize;
       const y = (nextCellCoords.row - 1) * cellSize;
 
-      // オレンジ枠
+      // 繧ｪ繝ｬ繝ｳ繧ｸ譫
       ctx.strokeStyle = '#FF6D00';
       ctx.lineWidth = Math.max(3, cellSize * 0.12);
       ctx.strokeRect(x - 1, y - 1, cellSize + 2, cellSize + 2);
 
-      // 🚩マーカー
+      // 圸繝槭・繧ｫ繝ｼ
       const markerSize = Math.max(14, cellSize * 0.45);
       ctx.font = `${markerSize}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('🚩', x + cellSize / 2, y - 2);
+      ctx.fillText('圸', x + cellSize / 2, y - 2);
     }
 
-    // 8. 現在位置マーカー（次の目的地より上に描画）
     if (currentCellCoords) {
       const x = (currentCellCoords.col - 1) * cellSize;
       const y = (currentCellCoords.row - 1) * cellSize;
 
-      // 緑枠
+      // 邱第棧
       ctx.strokeStyle = '#22c55e';
       ctx.lineWidth = Math.max(4, cellSize * 0.15);
       ctx.strokeRect(x - 2, y - 2, cellSize + 4, cellSize + 4);
 
-      // 📍マーカー
+      // 桃繝槭・繧ｫ繝ｼ
       const markerSize = Math.max(16, cellSize * 0.5);
       ctx.font = `${markerSize}px sans-serif`;
       ctx.textAlign = 'center';
       ctx.textBaseline = 'bottom';
-      ctx.fillText('📍', x + cellSize / 2, y - 2);
+      ctx.fillText('桃', x + cellSize / 2, y - 2);
     }
 
-    // ctx.translate を解除
+    // ctx.translate 繧定ｧ｣髯､
     ctx.restore();
   }, [
     mapData,
@@ -1154,12 +1073,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     offset,
   ]);
 
-  // ホイール/ピンチズーム処理
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
-    // ホイールズーム
+    // 繝帙う繝ｼ繝ｫ繧ｺ繝ｼ繝
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (!onZoomChange) return;
@@ -1185,7 +1103,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       onZoomChange(newZoom);
     };
 
-    // ピンチズーム
+    // 繝斐Φ繝√ぜ繝ｼ繝
     const handleTouchStart = (e: TouchEvent) => {
       Array.from(e.changedTouches).forEach((t) => {
         activeTouchesRef.current.set(t.identifier, { x: t.clientX, y: t.clientY });
@@ -1252,7 +1170,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     };
   }, [zoomLevel, offset, onZoomChange]);
 
-  // ドラッグ処理
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       if (activeTouchesRef.current.size >= 2) return;
@@ -1283,9 +1200,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     [dragStart, dragStartOffset],
   );
 
-  // セルがブロックの範囲内にあるかチェック（cellGroups対応）
   const isCellInBlock = useCallback((row: number, col: number, block: BlockDefinition): boolean => {
-    // cellGroupsがある場合（複数範囲ブロックや壁ブロック）
     if (block.cellGroups && block.cellGroups.length > 0) {
       return block.cellGroups.some((group) => {
         if (group.type === 'range') {
@@ -1301,7 +1216,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         return false;
       });
     }
-    // 通常の矩形ブロック
+    // 騾壼ｸｸ縺ｮ遏ｩ蠖｢繝悶Ο繝・け
     return (
       row >= block.startRow && row <= block.endRow && col >= block.startCol && col <= block.endCol
     );
@@ -1309,34 +1224,28 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
-      // ドラッグ中でなければクリックとして処理
       if (!isDragging && onCellClick) {
         const canvas = canvasRef.current;
         if (!canvas) return;
 
         const canvasRect = canvas.getBoundingClientRect();
 
-        // アプリ全体のズームスケール
+        // 繧｢繝励Μ蜈ｨ菴薙・繧ｺ繝ｼ繝繧ｹ繧ｱ繝ｼ繝ｫ
         const appScale = appZoomLevel / 100;
 
-        // ビューポート座標（appScale補正）→ マップ座標（オフセットを引く）
         const viewX = (e.clientX - canvasRect.left) / appScale;
         const viewY = (e.clientY - canvasRect.top) / appScale;
         const mapX = viewX - offset.x;
         const mapY = viewY - offset.y;
 
-        // セル座標を計算
         const col = Math.floor(mapX / cellSize) + 1;
         const row = Math.floor(mapY / cellSize) + 1;
 
         if (row >= 1 && row <= mapData.maxRow && col >= 1 && col <= mapData.maxCol) {
-          // ブロック定義内の数値セルか確認
           for (const block of mapData.blocks) {
-            // 壁ブロックも含めて全てのブロックを処理
-
-            // ブロック範囲内かチェック（cellGroups対応）
+            // 螢√ヶ繝ｭ繝・け繧ょ性繧√※蜈ｨ縺ｦ縺ｮ繝悶Ο繝・け繧貞・逅・
             if (isCellInBlock(row, col, block)) {
-              // ブロック名セルならスキップ
+              // 繝悶Ο繝・け蜷阪そ繝ｫ縺ｪ繧峨せ繧ｭ繝・・
               if (
                 block.nameCells &&
                 block.nameCells.some((nc) => nc.row === row && nc.col === col)
@@ -1344,21 +1253,17 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
                 continue;
               }
 
-              // numberCells配列から数値セルを探す
               let foundNumber: number | null = null;
               const numberCell = block.numberCells.find((nc) => nc.row === row && nc.col === col);
               if (numberCell) {
                 foundNumber = numberCell.value;
               }
 
-              // numberCellsに見つからない場合、セルの内容が数値かチェック（ユーザー定義ブロック対応）
               if (foundNumber === null) {
-                // まずクリック位置のセルを探す
                 let cell = cellsMap.get(`${row}-${col}`);
 
-                // セルが見つからない場合、結合セル内かチェック
+                // 繧ｻ繝ｫ縺瑚ｦ九▽縺九ｉ縺ｪ縺・ｴ蜷医∫ｵ仙粋繧ｻ繝ｫ蜀・°繝√ぉ繝・け
                 if (!cell) {
-                  // 結合セルの開始位置を探す
                   for (const merge of mapData.mergedCells) {
                     if (
                       row >= merge.startRow &&
@@ -1382,7 +1287,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
               }
 
               if (foundNumber !== null) {
-                // このセルに対応するアイテムを取得
                 const matchingItems = items.filter((item) => {
                   if (item.block !== block.name) return false;
                   const numStr = extractNumberFromItemNumber(item.number);
@@ -1415,7 +1319,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     ],
   );
 
-  // ポインターがキャンバスから離れた時のハンドラ（ドラッグ状態のリセットのみ）
   const handlePointerLeave = useCallback(() => {
     setTimeout(() => {
       setIsDragging(false);
@@ -1447,3 +1350,4 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 };
 
 export default FocusModeMapCanvas;
+

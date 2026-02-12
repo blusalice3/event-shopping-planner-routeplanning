@@ -16,6 +16,7 @@ import {
   HallRouteSettingsStore,
   DayMapData,
   BlockDetectionSettings,
+  FocusModeSessionState,
 } from './types';
 import ImportScreen from './components/ImportScreen';
 import ShoppingList from './components/ShoppingList';
@@ -103,6 +104,70 @@ const sortLabels: Record<SortState, string> = {
   Purchased: '購入済',
 };
 
+const buildFocusSessionKey = (eventName: string, eventDate: string): string =>
+  `${eventName}::${eventDate}`;
+
+const removeFocusModeSessionByEvent = (
+  sessions: Record<string, FocusModeSessionState>,
+  eventName: string,
+): Record<string, FocusModeSessionState> => {
+  let changed = false;
+  const next: Record<string, FocusModeSessionState> = {};
+
+  Object.entries(sessions).forEach(([key, value]) => {
+    if (key.startsWith(`${eventName}::`)) {
+      changed = true;
+      return;
+    }
+    next[key] = value;
+  });
+
+  return changed ? next : sessions;
+};
+
+const renameFocusModeSessionKeys = (
+  sessions: Record<string, FocusModeSessionState>,
+  oldEventName: string,
+  newEventName: string,
+): Record<string, FocusModeSessionState> => {
+  let changed = false;
+  const next: Record<string, FocusModeSessionState> = {};
+
+  Object.entries(sessions).forEach(([key, value]) => {
+    if (key.startsWith(`${oldEventName}::`)) {
+      const suffix = key.slice(oldEventName.length);
+      next[`${newEventName}${suffix}`] = value;
+      changed = true;
+    } else {
+      next[key] = value;
+    }
+  });
+
+  return changed ? next : sessions;
+};
+
+const areStringArraysEqual = (a: string[], b: string[]): boolean => {
+  if (a.length !== b.length) return false;
+  return a.every((value, index) => value === b[index]);
+};
+
+const isFocusModeSessionStateEqual = (
+  a: FocusModeSessionState | undefined,
+  b: FocusModeSessionState,
+): boolean => {
+  if (!a) return false;
+  return (
+    a.phase === b.phase &&
+    a.phaseIndex === b.phaseIndex &&
+    a.isCompleted === b.isCompleted &&
+    a.savedPhaseIndices.normal === b.savedPhaseIndices.normal &&
+    a.savedPhaseIndices.postponed === b.savedPhaseIndices.postponed &&
+    a.savedPhaseIndices.late === b.savedPhaseIndices.late &&
+    areStringArraysEqual(a.postponedItemIds, b.postponedItemIds) &&
+    areStringArraysEqual(a.lateItemIds, b.lateItemIds)
+  );
+};
+
 const App: React.FC = () => {
   const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>({});
   const [eventMetadata, setEventMetadata] = useState<Record<string, EventMetadata>>({});
@@ -162,6 +227,9 @@ const App: React.FC = () => {
   const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
   const [uiSettingsPanelOpen, setUiSettingsPanelOpen] = useState(false);
   const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
+  const [focusModeSessions, setFocusModeSessions] = useState<Record<string, FocusModeSessionState>>(
+    {},
+  );
 
   const { themeMode, setThemeMode } = useThemeMode();
 
@@ -364,6 +432,33 @@ const App: React.FC = () => {
   }, [activeEventName, dayModes, activeTab, eventDates, isMapTab]);
 
   // 処理の補足です。
+
+  const currentFocusSessionKey = useMemo(() => {
+    if (!activeEventName) return null;
+    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+    if (!currentEventDate) return null;
+    return buildFocusSessionKey(activeEventName, currentEventDate);
+  }, [activeEventName, activeTab, eventDates]);
+
+  const currentFocusResumeState = useMemo(() => {
+    if (!currentFocusSessionKey) return null;
+    return focusModeSessions[currentFocusSessionKey] || null;
+  }, [focusModeSessions, currentFocusSessionKey]);
+
+  const handleFocusSessionStateChange = useCallback(
+    (state: FocusModeSessionState) => {
+      if (!currentFocusSessionKey) return;
+      setFocusModeSessions((prev) => {
+        const existing = prev[currentFocusSessionKey];
+        if (isFocusModeSessionStateEqual(existing, state)) return prev;
+        return {
+          ...prev,
+          [currentFocusSessionKey]: state,
+        };
+      });
+    },
+    [currentFocusSessionKey],
+  );
 
   const { showHeaderBar, showTabBar, rawHideSomething } = useMemo(() => {
     if (!activeEventName) {
@@ -1427,6 +1522,15 @@ const App: React.FC = () => {
 
       if (mode !== 'focus') {
         setFocusModeMapVisible(false);
+        if (currentEventDate) {
+          const sessionKey = buildFocusSessionKey(activeEventName, currentEventDate);
+          setFocusModeSessions((prev) => {
+            if (!prev[sessionKey]) return prev;
+            const next = { ...prev };
+            delete next[sessionKey];
+            return next;
+          });
+        }
       }
       // 処理の補足です。
       setUiVisibilityOverride(false);
@@ -1463,6 +1567,7 @@ const App: React.FC = () => {
       setEventMetadata((prev) => removeRecordKey(prev, eventName));
       setExecuteModeItems((prev) => removeRecordKey(prev, eventName));
       setDayModes((prev) => removeRecordKey(prev, eventName));
+      setFocusModeSessions((prev) => removeFocusModeSessionByEvent(prev, eventName));
       if (activeEventName === eventName) {
         setActiveEventName(null);
         setActiveTab('eventList');
@@ -1514,6 +1619,7 @@ const App: React.FC = () => {
       // 処理の補足です。
 
       setHallRouteSettings((prev) => renameRecordKey(prev, eventToRename, newName));
+      setFocusModeSessions((prev) => renameFocusModeSessionKeys(prev, eventToRename, newName));
 
       if (activeEventName === eventToRename) {
         setActiveEventName(newName);
@@ -5387,6 +5493,7 @@ const App: React.FC = () => {
               </div>
             ) : currentMode === 'focus' ? (
               <FocusModeContainer
+                key={currentFocusSessionKey || 'focus-mode'}
                 activeEventName={activeEventName}
                 activeTab={activeTab}
                 eventDates={eventDates}
@@ -5403,6 +5510,8 @@ const App: React.FC = () => {
                 onEditRequest={handleEditRequest}
                 onDeleteRequest={handleDeleteRequest}
                 appZoomLevel={zoomLevel}
+                resumeState={currentFocusResumeState}
+                onSessionStateChange={handleFocusSessionStateChange}
               />
             ) : (
               <ShoppingList

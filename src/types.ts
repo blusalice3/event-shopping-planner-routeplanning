@@ -36,6 +36,17 @@ export interface ShoppingItem {
 
 export type ViewMode = 'edit' | 'execute' | 'focus';
 
+export type FocusPhase = 'normal' | 'postponed' | 'late';
+
+export interface FocusModeSessionState {
+  phase: FocusPhase;
+  phaseIndex: number;
+  savedPhaseIndices: Record<FocusPhase, number>;
+  postponedItemIds: string[];
+  lateItemIds: string[];
+  isCompleted: boolean;
+}
+
 export interface EventMetadata {
   spreadsheetUrl: string;
   spreadsheetSheetName: string;

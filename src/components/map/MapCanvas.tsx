@@ -37,6 +37,12 @@ interface MapCanvasProps {
 const BASE_CELL_SIZE = 28; // 基本セルサイズ
 const SCROLL_MARGIN = 5; // スクロール余白（行/列数）
 
+const hasCellInputValue = (value: string | number | null): boolean => {
+  if (value === null || value === undefined) return false;
+  if (typeof value === 'string') return value.trim().length > 0;
+  return true;
+};
+
 const MapCanvas: React.FC<MapCanvasProps> = ({
   mapData,
   mapName,
@@ -1424,9 +1430,43 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return null;
   }, [selectedHall]);
 
+  const filledCellScrollBounds = useMemo(() => {
+    let minRow = Number.POSITIVE_INFINITY;
+    let maxRow = Number.NEGATIVE_INFINITY;
+    let minCol = Number.POSITIVE_INFINITY;
+    let maxCol = Number.NEGATIVE_INFINITY;
+    let hasBounds = false;
+
+    mapData.cells.forEach((cell) => {
+      if (!hasCellInputValue(cell.value)) return;
+      hasBounds = true;
+      minRow = Math.min(minRow, cell.row);
+      maxRow = Math.max(maxRow, cell.row);
+      minCol = Math.min(minCol, cell.col);
+      maxCol = Math.max(maxCol, cell.col);
+    });
+
+    mapData.mergedCells.forEach((merge) => {
+      if (!hasCellInputValue(merge.value)) return;
+      hasBounds = true;
+      minRow = Math.min(minRow, merge.startRow);
+      maxRow = Math.max(maxRow, merge.endRow);
+      minCol = Math.min(minCol, merge.startCol);
+      maxCol = Math.max(maxCol, merge.endCol);
+    });
+
+    if (!hasBounds) return null;
+    return { minRow, maxRow, minCol, maxCol };
+  }, [mapData.cells, mapData.mergedCells]);
+
+  const activeScrollBounds = useMemo(
+    () => hallScrollBounds || filledCellScrollBounds,
+    [hallScrollBounds, filledCellScrollBounds],
+  );
+
   // スクロール制限を計算する関数
   const calculateScrollLimits = useCallback(() => {
-    if (!hallScrollBounds) return null;
+    if (!activeScrollBounds) return null;
     const container = containerRef.current;
     if (!container) return null;
 
@@ -1434,10 +1474,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const containerHeight = container.clientHeight;
 
     // ホール範囲のピクセル座標
-    const hallLeft = (hallScrollBounds.minCol - 1) * cellSize;
-    const hallRight = hallScrollBounds.maxCol * cellSize;
-    const hallTop = (hallScrollBounds.minRow - 1) * cellSize;
-    const hallBottom = hallScrollBounds.maxRow * cellSize;
+    const hallLeft = (activeScrollBounds.minCol - 1) * cellSize;
+    const hallRight = activeScrollBounds.maxCol * cellSize;
+    const hallTop = (activeScrollBounds.minRow - 1) * cellSize;
+    const hallBottom = activeScrollBounds.maxRow * cellSize;
     const hallWidth = hallRight - hallLeft;
     const hallHeight = hallBottom - hallTop;
 
@@ -1469,7 +1509,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }
 
     return { minX, maxX, minY, maxY };
-  }, [hallScrollBounds, cellSize]);
+  }, [activeScrollBounds, cellSize]);
 
   // ドラッグ処理
   const handlePointerDown = useCallback(

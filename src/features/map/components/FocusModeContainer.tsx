@@ -4,6 +4,7 @@ import type {
   ExecuteModeItems,
   HallDefinition,
   HallDefinitionsStore,
+  FocusModeSessionState,
   MapDataStore,
   PurchaseStatus,
   ShoppingItem,
@@ -26,6 +27,8 @@ type FocusModeContainerProps = {
   onEditRequest?: (item: ShoppingItem) => void;
   onDeleteRequest?: (item: ShoppingItem) => void;
   appZoomLevel?: number;
+  resumeState?: FocusModeSessionState | null;
+  onSessionStateChange?: (state: FocusModeSessionState) => void;
 };
 
 const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
@@ -45,6 +48,8 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   onEditRequest,
   onDeleteRequest,
   appZoomLevel,
+  resumeState,
+  onSessionStateChange,
 }) => {
   const currentDay = useMemo(
     () => (eventDates.includes(activeTab) ? activeTab : eventDates[0] || ''),
@@ -73,6 +78,8 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       onEditRequest={onEditRequest}
       onDeleteRequest={onDeleteRequest}
       appZoomLevel={appZoomLevel}
+      resumeState={resumeState}
+      onSessionStateChange={onSessionStateChange}
     />
   );
 };
