@@ -1,9 +1,14 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { ShoppingItem } from '../types';
 import { getItemKey } from '../utils/itemComparison';
+import type { BulkAddLayoutInfo, BulkAddMetadata } from '../features/events/bulkAdd';
 
 interface ImportScreenProps {
-  onBulkAdd: (eventName: string, items: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[], metadata?: { url?: string; sheetName?: string, layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }>, source?: 'spreadsheet' | 'app' }) => void;
+  onBulkAdd: (
+    eventName: string,
+    items: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[],
+    metadata?: BulkAddMetadata,
+  ) => void;
   activeEventName: string | null;
   itemToEdit: ShoppingItem | null;
   onUpdateItem: (item: ShoppingItem) => void;
@@ -12,7 +17,15 @@ interface ImportScreenProps {
   onClearNewItemDefaults?: () => void;
 }
 
-const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName, itemToEdit, onUpdateItem, onDoneEditing, newItemDefaults, onClearNewItemDefaults }) => {
+const ImportScreen: React.FC<ImportScreenProps> = ({
+  onBulkAdd,
+  activeEventName,
+  itemToEdit,
+  onUpdateItem,
+  onDoneEditing,
+  newItemDefaults,
+  onClearNewItemDefaults,
+}) => {
   // State for bulk add (creating new list)
   const [eventName, setEventName] = useState('');
   const [circles, setCircles] = useState('');
@@ -37,24 +50,24 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
   const [singleRemarks, setSingleRemarks] = useState('');
   const [singleUrl, setSingleUrl] = useState('');
   const [isCustomEventDate, setIsCustomEventDate] = useState(false);
-  
+
   const isEditing = itemToEdit !== null;
   const isCreatingNew = activeEventName === null;
 
   useEffect(() => {
     if (isEditing) {
-        setSingleCircle(itemToEdit.circle);
-        setSingleEventDate(itemToEdit.eventDate);
-        setSingleBlock(itemToEdit.block);
-        setSingleNumber(itemToEdit.number);
-        setSingleTitle(itemToEdit.title);
-        setSinglePrice(itemToEdit.price === null ? '' : String(itemToEdit.price));
-        setSingleQuantity(String(itemToEdit.quantity ?? 1));
-        setSingleRemarks(itemToEdit.remarks);
-        setSingleUrl(itemToEdit.url || '');
-        // 編集時は、1日目～4日目に含まれない場合はカスタムモードにする
-        const defaultDates = ['1日目', '2日目', '3日目', '4日目'];
-        setIsCustomEventDate(!defaultDates.includes(itemToEdit.eventDate));
+      setSingleCircle(itemToEdit.circle);
+      setSingleEventDate(itemToEdit.eventDate);
+      setSingleBlock(itemToEdit.block);
+      setSingleNumber(itemToEdit.number);
+      setSingleTitle(itemToEdit.title);
+      setSinglePrice(itemToEdit.price === null ? '' : String(itemToEdit.price));
+      setSingleQuantity(String(itemToEdit.quantity ?? 1));
+      setSingleRemarks(itemToEdit.remarks);
+      setSingleUrl(itemToEdit.url || '');
+      // 編集時は、1日目～4日目に含まれない場合はカスタムモードにする
+      const defaultDates = ['1日目', '2日目', '3日目', '4日目'];
+      setIsCustomEventDate(!defaultDates.includes(itemToEdit.eventDate));
     }
   }, [itemToEdit, isEditing]);
 
@@ -77,21 +90,27 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     e.preventDefault();
     const pasteData = e.clipboardData.getData('text');
-    const rows = pasteData.split('\n').filter(row => row.trim() !== '');
+    const rows = pasteData.split('\n').filter((row) => row.trim() !== '');
 
     const cols: { [key: string]: string[] } = {
-        circles: [], eventDates: [], blocks: [], numbers: [], titles: [], prices: [], urls: [],
+      circles: [],
+      eventDates: [],
+      blocks: [],
+      numbers: [],
+      titles: [],
+      prices: [],
+      urls: [],
     };
 
-    rows.forEach(row => {
-        const cells = row.split('\t');
-        cols.circles.push(cells[0] || '');
-        cols.eventDates.push(cells[1] || '');
-        cols.blocks.push(cells[2] || '');
-        cols.numbers.push(cells[3] || '');
-        cols.titles.push(cells[4] || '');
-        cols.prices.push(cells[5] || '');
-        cols.urls.push(cells[6] || '');
+    rows.forEach((row) => {
+      const cells = row.split('\t');
+      cols.circles.push(cells[0] || '');
+      cols.eventDates.push(cells[1] || '');
+      cols.blocks.push(cells[2] || '');
+      cols.numbers.push(cells[3] || '');
+      cols.titles.push(cells[4] || '');
+      cols.prices.push(cells[5] || '');
+      cols.urls.push(cells[6] || '');
     });
 
     setCircles(cols.circles.join('\n'));
@@ -110,7 +129,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
 
     for (let j = 0; j < line.length; j++) {
       const char = line[j];
-      
+
       if (char === '"') {
         if (insideQuotes && line[j + 1] === '"') {
           currentCell += '"';
@@ -129,23 +148,25 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
     return cells;
   };
 
-  const processImportData = (lines: string[]): {
+  const processImportData = (
+    lines: string[],
+  ): {
     items: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[];
     spreadsheetUrl?: string;
-    layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }>;
+    layoutInfo?: BulkAddLayoutInfo[];
   } => {
     const newItems: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[] = [];
     let spreadsheetUrl: string | undefined;
-    const layoutInfo: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> = [];
-    
+    const layoutInfo: BulkAddLayoutInfo[] = [];
+
     // ヘッダー行とメタデータ行をスキップ
     let startIndex = 0;
-    
+
     // 1行目がヘッダー行かチェック
     if (lines.length > 0 && lines[0].includes('サークル名')) {
       startIndex = 1;
     }
-    
+
     // メタデータ行をチェック（ファイルの最後にある可能性がある）
     for (let i = lines.length - 1; i >= 0; i--) {
       if (lines[i].startsWith('#METADATA')) {
@@ -157,23 +178,23 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         break;
       }
     }
-    
+
     for (let i = startIndex; i < lines.length; i++) {
       const line = lines[i];
       if (!line.trim()) continue;
-      
+
       // メタデータ行をスキップ
       if (line.startsWith('#METADATA')) {
         continue;
       }
-      
+
       // ヘッダー行をスキップ（念のため再チェック）
       if (line.includes('サークル名') && line.includes('参加日') && line.includes('ブロック')) {
         continue;
       }
-      
+
       const cells = parseCSVLine(line);
-      
+
       // エクスポートされたCSVファイル形式（A列から始まる）を優先的にチェック
       let circle = cells[0]?.trim() || ''; // A列: サークル名
       let eventDate = cells[1]?.trim() || ''; // B列: 参加日
@@ -186,7 +207,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
       let url = cells[11]?.trim() || ''; // L列: URL
       let columnType: 'execute' | 'candidate' | null = null; // J列: 列の種類
       let order = 0; // K列: 列内順番
-      
+
       // 配置情報がある場合（エクスポートされたCSV形式）
       if (cells.length >= 11) {
         const columnTypeStr = cells[9]?.trim() || '';
@@ -197,7 +218,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         }
         order = parseInt(cells[10]?.trim() || '0', 10) || 0;
       }
-      
+
       // A列からD列が全て入力されているかチェック
       if (!circle || !eventDate || !block || !number) {
         // スプレッドシート形式（M列から始まる）を試す
@@ -211,18 +232,21 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         url = cells[24]?.trim() || ''; // Y列: URL
         // AA列から数量を取得
         quantityStr = cells[26]?.trim() || ''; // AA列 (0-indexed: 26)
-        
+
         // それでも必須項目が揃わない場合はスキップ
         if (!circle || !eventDate || !block || !number) {
           continue;
         }
       }
-      
+
       // 空欄の場合はnull、0と入力されている場合は0を設定
-      const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0);
+      const price = priceStr === '' ? null : parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0;
       // 数量: 空欄時は1、それ以外は数値を反映（1-10の範囲に制限）
-      const quantity = quantityStr === '' ? 1 : Math.max(1, Math.min(10, parseInt(quantityStr.replace(/[^0-9]/g, ''), 10) || 1));
-      
+      const quantity =
+        quantityStr === ''
+          ? 1
+          : Math.max(1, Math.min(10, parseInt(quantityStr.replace(/[^0-9]/g, ''), 10) || 1));
+
       const item: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
         circle,
         eventDate,
@@ -234,9 +258,9 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         remarks,
         ...(url ? { url } : {}),
       };
-      
+
       newItems.push(item);
-      
+
       // 配置情報を記録
       if (columnType && order > 0) {
         const itemKey = getItemKey(item);
@@ -248,35 +272,35 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         });
       }
     }
-    
+
     // 各参加日タブ中でサークル名が重複するアイテムのURL転記処理
     const eventDateGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
-    newItems.forEach(item => {
+    newItems.forEach((item) => {
       if (!eventDateGroups.has(item.eventDate)) {
         eventDateGroups.set(item.eventDate, []);
       }
       eventDateGroups.get(item.eventDate)!.push(item);
     });
-    
+
     eventDateGroups.forEach((items) => {
       // サークル名でグループ化
       const circleGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
-      items.forEach(item => {
+      items.forEach((item) => {
         if (!circleGroups.has(item.circle)) {
           circleGroups.set(item.circle, []);
         }
         circleGroups.get(item.circle)!.push(item);
       });
-      
+
       // サークル名が重複するアイテムが2つ以上ある場合
       circleGroups.forEach((circleItems) => {
         if (circleItems.length >= 2) {
           // URLが入力されているアイテムを探す
-          const itemWithUrl = circleItems.find(item => item.url && item.url.trim() !== '');
-          
+          const itemWithUrl = circleItems.find((item) => item.url && item.url.trim() !== '');
+
           if (itemWithUrl && itemWithUrl.url) {
             // URLが入力されていないアイテムにURLを転記
-            circleItems.forEach(item => {
+            circleItems.forEach((item) => {
               if (!item.url || item.url.trim() === '') {
                 item.url = itemWithUrl.url;
               }
@@ -285,7 +309,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         }
       });
     });
-    
+
     return {
       items: newItems,
       spreadsheetUrl,
@@ -298,27 +322,38 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
     if (!file) return;
 
     const text = await file.text();
-    const lines = text.split('\n').filter(line => line.trim() !== '');
+    const lines = text.split('\n').filter((line) => line.trim() !== '');
     const importResult = processImportData(lines);
-    
+
     if (importResult.items.length > 0) {
-      const metadata: { url?: string; layoutInfo?: Array<{ itemKey: string, eventDate: string, columnType: 'execute' | 'candidate', order: number }> } = {};
+      const metadata: BulkAddMetadata = {};
       if (importResult.spreadsheetUrl) {
         metadata.url = importResult.spreadsheetUrl;
       }
       if (importResult.layoutInfo) {
         metadata.layoutInfo = importResult.layoutInfo;
       }
-      
-      onBulkAdd(eventName || 'インポートリスト', importResult.items, Object.keys(metadata).length > 0 ? metadata : undefined);
+
+      onBulkAdd(
+        eventName || 'インポートリスト',
+        importResult.items,
+        Object.keys(metadata).length > 0 ? metadata : undefined,
+      );
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }
       const urlMessage = importResult.spreadsheetUrl ? `スプレッドシートURLも保存されました。` : '';
-      const layoutMessage = importResult.layoutInfo && importResult.layoutInfo.length > 0 ? `配置情報も復元されました。` : '';
-      alert(`${importResult.items.length}件のアイテムをインポートしました。${urlMessage}${layoutMessage}`);
+      const layoutMessage =
+        importResult.layoutInfo && importResult.layoutInfo.length > 0
+          ? `配置情報も復元されました。`
+          : '';
+      alert(
+        `${importResult.items.length}件のアイテムをインポートしました。${urlMessage}${layoutMessage}`,
+      );
     } else {
-      alert('インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。');
+      alert(
+        'インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。',
+      );
     }
   };
 
@@ -341,29 +376,31 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
 
       const sheetName = '品目表';
       const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetIdMatch[1]}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
-      
+
       const response = await fetch(csvUrl);
       if (!response.ok) {
         throw new Error('スプレッドシートの読み込みに失敗しました。');
       }
 
       const text = await response.text();
-      const lines = text.split('\n').filter(line => line.trim() !== '');
+      const lines = text.split('\n').filter((line) => line.trim() !== '');
       const importResult = processImportData(lines);
-      
+
       if (importResult.items.length > 0) {
         onBulkAdd(eventName.trim(), importResult.items, { url: spreadsheetUrl, sheetName });
         setSpreadsheetUrl('');
         alert(`${importResult.items.length}件のアイテムをインポートしました。`);
       } else {
-        alert('インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。');
+        alert(
+          'インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。',
+        );
       }
     } catch (error) {
       console.error('Import error:', error);
       alert('スプレッドシートのインポートに失敗しました。URLが正しいか確認してください。');
     }
   };
-  
+
   const resetSingleForm = () => {
     setSingleCircle('');
     setSingleEventDate('1日目');
@@ -376,7 +413,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
     setSingleUrl('');
     setIsCustomEventDate(false);
   };
-  
+
   const handleEventDateSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
     if (value === '__custom__') {
@@ -387,12 +424,12 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
       setSingleEventDate(value);
     }
   };
-  
+
   const handleEventDateInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
     setSingleEventDate(value);
   };
-  
+
   const handleEventDateInputBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     const value = e.target.value.trim();
     // 1日目～4日目のいずれかが入力されたら、セレクトボックスに戻す
@@ -405,48 +442,60 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (isEditing) {
-        if (!singleCircle.trim() && !singleTitle.trim()) {
-            alert('サークル名かタイトルを入力してください。');
-            return;
-        }
-        // 空欄の場合はnull、0と入力されている場合は0を設定
-        const priceStr = String(singlePrice).trim();
-        const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0);
-        const quantity = Math.max(1, Math.min(10, parseInt(singleQuantity.replace(/[^0-9]/g, ''), 10) || 1));
-        const updatedItem: ShoppingItem = {
-            ...itemToEdit,
-            circle: singleCircle.trim(),
-            eventDate: singleEventDate,
-            block: singleBlock.trim(),
-            number: singleNumber.trim(),
-            title: singleTitle.trim(),
-            price: price,
-            quantity: quantity,
-            remarks: singleRemarks.trim(),
-            url: singleUrl.trim() || undefined,
-        };
-        onUpdateItem(updatedItem);
-        onDoneEditing();
+      if (!singleCircle.trim() && !singleTitle.trim()) {
+        alert('サークル名かタイトルを入力してください。');
         return;
+      }
+      // 空欄の場合はnull、0と入力されている場合は0を設定
+      const priceStr = String(singlePrice).trim();
+      const price = priceStr === '' ? null : parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0;
+      const quantity = Math.max(
+        1,
+        Math.min(10, parseInt(singleQuantity.replace(/[^0-9]/g, ''), 10) || 1),
+      );
+      const updatedItem: ShoppingItem = {
+        ...itemToEdit,
+        circle: singleCircle.trim(),
+        eventDate: singleEventDate,
+        block: singleBlock.trim(),
+        number: singleNumber.trim(),
+        title: singleTitle.trim(),
+        price: price,
+        quantity: quantity,
+        remarks: singleRemarks.trim(),
+        url: singleUrl.trim() || undefined,
+      };
+      onUpdateItem(updatedItem);
+      onDoneEditing();
+      return;
     }
 
     if (isCreatingNew) {
       if (!eventName.trim()) {
-          alert('即売会名を入力してください。');
-          return;
+        alert('即売会名を入力してください。');
+        return;
       }
       const finalEventName = eventName.trim();
-      const circlesArr = circles.split('\n').map(s => s.trim());
-      const eventDatesArr = eventDates.split('\n').map(s => s.trim());
-      const blocksArr = blocks.split('\n').map(s => s.trim());
-      const numbersArr = numbers.split('\n').map(s => s.trim());
-      const titlesArr = titles.split('\n').map(s => s.trim());
-      const pricesArr = prices.split('\n').map(s => s.trim());
-      const remarksArr = remarks.split('\n').map(s => s.trim());
-      const urlsArr = urls.split('\n').map(s => s.trim());
-      const numItems = Math.max(circlesArr.length, eventDatesArr.length, blocksArr.length, numbersArr.length, titlesArr.length, pricesArr.length, remarksArr.length, urlsArr.length);
+      const circlesArr = circles.split('\n').map((s) => s.trim());
+      const eventDatesArr = eventDates.split('\n').map((s) => s.trim());
+      const blocksArr = blocks.split('\n').map((s) => s.trim());
+      const numbersArr = numbers.split('\n').map((s) => s.trim());
+      const titlesArr = titles.split('\n').map((s) => s.trim());
+      const pricesArr = prices.split('\n').map((s) => s.trim());
+      const remarksArr = remarks.split('\n').map((s) => s.trim());
+      const urlsArr = urls.split('\n').map((s) => s.trim());
+      const numItems = Math.max(
+        circlesArr.length,
+        eventDatesArr.length,
+        blocksArr.length,
+        numbersArr.length,
+        titlesArr.length,
+        pricesArr.length,
+        remarksArr.length,
+        urlsArr.length,
+      );
       if (numItems === 0 || (circlesArr.length === 1 && circlesArr[0] === '')) {
         alert('インポートするデータがありません。');
         return;
@@ -463,42 +512,50 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
         }
         // 空欄の場合はnull、0と入力されている場合は0を設定
         const priceString = pricesArr[i] || '';
-        const price = priceString === '' ? null : (parseInt(priceString.replace(/[^0-9]/g, ''), 10) || 0);
+        const price =
+          priceString === '' ? null : parseInt(priceString.replace(/[^0-9]/g, ''), 10) || 0;
         const url = urlsArr[i] || '';
         newItems.push({
-          circle, eventDate, block, number, title: titlesArr[i] || '', price: price, quantity: 1, remarks: remarksArr[i] || '',
+          circle,
+          eventDate,
+          block,
+          number,
+          title: titlesArr[i] || '',
+          price: price,
+          quantity: 1,
+          remarks: remarksArr[i] || '',
           ...(url ? { url } : {}),
         });
       }
-      
+
       // 各参加日タブ中でサークル名が重複するアイテムのURL転記処理
       const eventDateGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
-      newItems.forEach(item => {
+      newItems.forEach((item) => {
         if (!eventDateGroups.has(item.eventDate)) {
           eventDateGroups.set(item.eventDate, []);
         }
         eventDateGroups.get(item.eventDate)!.push(item);
       });
-      
+
       eventDateGroups.forEach((items) => {
         // サークル名でグループ化
         const circleGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
-        items.forEach(item => {
+        items.forEach((item) => {
           if (!circleGroups.has(item.circle)) {
             circleGroups.set(item.circle, []);
           }
           circleGroups.get(item.circle)!.push(item);
         });
-        
+
         // サークル名が重複するアイテムが2つ以上ある場合
         circleGroups.forEach((circleItems) => {
           if (circleItems.length >= 2) {
             // URLが入力されているアイテムを探す
-            const itemWithUrl = circleItems.find(item => item.url && item.url.trim() !== '');
-            
+            const itemWithUrl = circleItems.find((item) => item.url && item.url.trim() !== '');
+
             if (itemWithUrl && itemWithUrl.url) {
               // URLが入力されていないアイテムにURLを転記
-              circleItems.forEach(item => {
+              circleItems.forEach((item) => {
                 if (!item.url || item.url.trim() === '') {
                   item.url = itemWithUrl.url;
                 }
@@ -507,242 +564,446 @@ const ImportScreen: React.FC<ImportScreenProps> = ({ onBulkAdd, activeEventName,
           }
         });
       });
-      
+
       if (newItems.length > 0) {
-          onBulkAdd(finalEventName, newItems);
-          setEventName(''); setCircles(''); setEventDates(''); setBlocks(''); setNumbers(''); setTitles(''); setPrices(''); setRemarks(''); setUrls('');
+        onBulkAdd(finalEventName, newItems);
+        setEventName('');
+        setCircles('');
+        setEventDates('');
+        setBlocks('');
+        setNumbers('');
+        setTitles('');
+        setPrices('');
+        setRemarks('');
+        setUrls('');
       } else {
-          alert('有効なアイテムデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。');
+        alert(
+          '有効なアイテムデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。',
+        );
       }
-    } else { // Adding single item to existing list
-        if (!singleCircle.trim() && !singleTitle.trim()) {
-            alert('サークル名かタイトルを入力してください。');
-            return;
-        }
-        // 空欄の場合はnull、0と入力されている場合は0を設定
-        const priceStr = String(singlePrice).trim();
-        const price = priceStr === '' ? null : (parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0);
-        const quantity = Math.max(1, Math.min(10, parseInt(singleQuantity.replace(/[^0-9]/g, ''), 10) || 1));
-        const newItem: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
-            circle: singleCircle.trim(),
-            eventDate: singleEventDate,
-            block: singleBlock.trim(),
-            number: singleNumber.trim(),
-            title: singleTitle.trim(),
-            price: price,
-            quantity: quantity,
-            remarks: singleRemarks.trim(),
-            url: singleUrl.trim() || undefined,
-        };
-        onBulkAdd(activeEventName, [newItem], { source: 'app' });
-        resetSingleForm();
+    } else {
+      // Adding single item to existing list
+      if (!singleCircle.trim() && !singleTitle.trim()) {
+        alert('サークル名かタイトルを入力してください。');
+        return;
+      }
+      // 空欄の場合はnull、0と入力されている場合は0を設定
+      const priceStr = String(singlePrice).trim();
+      const price = priceStr === '' ? null : parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0;
+      const quantity = Math.max(
+        1,
+        Math.min(10, parseInt(singleQuantity.replace(/[^0-9]/g, ''), 10) || 1),
+      );
+      const newItem: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
+        circle: singleCircle.trim(),
+        eventDate: singleEventDate,
+        block: singleBlock.trim(),
+        number: singleNumber.trim(),
+        title: singleTitle.trim(),
+        price: price,
+        quantity: quantity,
+        remarks: singleRemarks.trim(),
+        url: singleUrl.trim() || undefined,
+      };
+      onBulkAdd(activeEventName, [newItem], { source: 'app' });
+      resetSingleForm();
     }
   };
 
   const priceOptions = useMemo(() => {
     const options: number[] = [0];
     for (let i = 100; i <= 15000; i += 100) {
-        options.push(i);
+      options.push(i);
     }
     return options;
   }, []);
 
-  const formTextareaClass = "w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow duration-200 h-32 resize-y font-mono text-sm";
-  const formInputClass = "block w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition";
-  const labelClass = "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
-  
+  const formTextareaClass =
+    'w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow duration-200 h-32 resize-y font-mono text-sm';
+  const formInputClass =
+    'block w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition';
+  const labelClass = 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1';
+
   const handlePriceInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value;
-      // Allow only numbers
-      if (/^\d*$/.test(value)) {
-          setSinglePrice(value);
-      }
+    const value = e.target.value;
+    // Allow only numbers
+    if (/^\d*$/.test(value)) {
+      setSinglePrice(value);
+    }
   };
-  
+
   const handlePriceSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-      setSinglePrice(e.target.value);
+    setSinglePrice(e.target.value);
   };
-  
+
   return (
     <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg p-6 sm:p-8 animate-fade-in">
       <h2 className="text-xl sm:text-2xl font-bold mb-2 text-slate-900 dark:text-white text-center">
-        {isEditing ? 'アイテムを編集' : isCreatingNew ? '新規リスト作成' : `「${activeEventName}」にアイテムを追加`}
+        {isEditing
+          ? 'アイテムを編集'
+          : isCreatingNew
+            ? '新規リスト作成'
+            : `「${activeEventName}」にアイテムを追加`}
       </h2>
       <p className="text-center text-slate-600 dark:text-slate-400 mb-6">
-        {isCreatingNew 
+        {isCreatingNew
           ? 'スプレッドシートのM列からR列とW列をコピーし、下の「サークル名」の欄に貼り付けてください。データが自動で振り分けられます。'
-          : isEditing ? 'アイテムの情報を編集してください。' : '追加するアイテムのデータを入力してください。'
-        }
+          : isEditing
+            ? 'アイテムの情報を編集してください。'
+            : '追加するアイテムのデータを入力してください。'}
       </p>
-      
+
       <form onSubmit={handleSubmit} className="space-y-6">
         {isCreatingNew ? (
-            <>
-                <div>
-                    <label htmlFor="eventName" className={labelClass}>即売会名</label>
-                    <input 
-                        type="text" 
-                        id="eventName" 
-                        value={eventName} 
-                        onChange={e => setEventName(e.target.value)}
-                        className={`mt-1 ${formInputClass.replace('p-2', 'p-2 mt-1')}`}
-                        placeholder="例: C105"
-                        required 
-                    />
-                </div>
-                
-                {/* インポート方法の選択 */}
-                <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
-                  <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">インポート方法</h3>
-                  
-                  {/* URLインポート */}
-                  <div className="mb-4">
-                    <label htmlFor="spreadsheetUrl" className={labelClass}>スプレッドシートURLからインポート</label>
-                    <div className="flex gap-2">
-                      <input 
-                        type="text" 
-                        id="spreadsheetUrl" 
-                        value={spreadsheetUrl} 
-                        onChange={e => setSpreadsheetUrl(e.target.value)}
-                        className={formInputClass}
-                        placeholder="https://docs.google.com/spreadsheets/d/..../edit"
-                      />
-                      <button
-                        type="button"
-                        onClick={handleUrlImport}
-                        className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors whitespace-nowrap"
-                      >
-                        URLからインポート
-                      </button>
-                    </div>
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">シート名「品目表」のM列からR列とW列をインポートします</p>
-                  </div>
-                  
-                  {/* CSVファイルインポート */}
-                  <div className="mb-4">
-                    <label htmlFor="csvFile" className={labelClass}>CSVファイルからインポート</label>
-                    <input
-                      type="file"
-                      id="csvFile"
-                      ref={fileInputRef}
-                      accept=".csv"
-                      onChange={handleFileImport}
-                      className={formInputClass}
-                    />
-                    <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">A列からD列の値が全て入力されている行のみをインポートします</p>
-                  </div>
-                  
-                  <div className="text-center text-slate-500 dark:text-slate-400 my-4">または</div>
-                </div>
-                
-                <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-                    <div className="md:col-span-1"><label htmlFor="circles" className={labelClass}>サークル名 </label><textarea id="circles" value={circles} onChange={e => setCircles(e.target.value)} onPaste={handlePaste} className={formTextareaClass} placeholder="サークルA&#10;サークルB" /></div>
-                    <div className="md:col-span-1"><label htmlFor="event-dates" className={labelClass}>参加日 </label><textarea id="event-dates" value={eventDates} onChange={e => setEventDates(e.target.value)} className={formTextareaClass} placeholder="1日目&#10;2日目" /></div>
-                    <div className="md:col-span-1"><label htmlFor="blocks" className={labelClass}>ブロック </label><textarea id="blocks" value={blocks} onChange={e => setBlocks(e.target.value)} className={formTextareaClass} placeholder="G&#10;カ" /></div>
-                    <div className="md:col-span-1"><label htmlFor="numbers" className={labelClass}>ナンバー </label><textarea id="numbers" value={numbers} onChange={e => setNumbers(e.target.value)} className={formTextareaClass} placeholder="01a&#10;03b" /></div>
-                    <div className="md:col-span-1"><label htmlFor="titles" className={labelClass}>タイトル </label><textarea id="titles" value={titles} onChange={e => setTitles(e.target.value)} className={formTextareaClass} placeholder="新刊セット&#10;既刊1" /></div>
-                    <div className="md:col-span-1"><label htmlFor="prices" className={labelClass}>頒布価格 </label><textarea id="prices" value={prices} onChange={e => setPrices(e.target.value)} className={formTextareaClass} placeholder="1000&#10;500" /></div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label htmlFor="remarks" className={labelClass}>備考 </label>
-                        <textarea id="remarks" value={remarks} onChange={e => setRemarks(e.target.value)} className={`${formTextareaClass} h-16`} placeholder="スケブお願い&#10;挨拶に行く" />
-                    </div>
-                    <div>
-                        <label htmlFor="urls" className={labelClass}>URL </label>
-                        <textarea id="urls" value={urls} onChange={e => setUrls(e.target.value)} className={`${formTextareaClass} h-16`} placeholder="https://example.com&#10;https://example2.com" />
-                    </div>
-                </div>
-            </>
-        ) : (
-            <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div><label htmlFor="singleCircle" className={labelClass}>サークル名</label><input type="text" id="singleCircle" value={singleCircle} onChange={e => setSingleCircle(e.target.value)} className={formInputClass} placeholder="サークル名" /></div>
-                    <div><label htmlFor="singleTitle" className={labelClass}>タイトル</label><input type="text" id="singleTitle" value={singleTitle} onChange={e => setSingleTitle(e.target.value)} className={formInputClass} placeholder="新刊セット" /></div>
-                </div>
-                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                        <label htmlFor="singleEventDate" className={labelClass}>参加日</label>
-                        {isCustomEventDate ? (
-                            <input 
-                                type="text" 
-                                id="singleEventDate" 
-                                value={singleEventDate} 
-                                onChange={handleEventDateInputChange}
-                                onBlur={handleEventDateInputBlur}
-                                className={formInputClass} 
-                                placeholder="1日目" 
-                            />
-                        ) : (
-                            <select id="singleEventDate" value={singleEventDate} onChange={handleEventDateSelectChange} className={formInputClass}>
-                                <option value="1日目">1日目</option>
-                                <option value="2日目">2日目</option>
-                                <option value="3日目">3日目</option>
-                                <option value="4日目">4日目</option>
-                                <option value="__custom__">任意の値を入力</option>
-                            </select>
-                        )}
-                    </div>
-                    <div><label htmlFor="singleBlock" className={labelClass}>ブロック</label><input type="text" id="singleBlock" value={singleBlock} onChange={e => setSingleBlock(e.target.value)} className={formInputClass} placeholder="東1" /></div>
-                    <div>
-                        <label htmlFor="singleNumber" className={labelClass}>ナンバー</label>
-                        <input type="text" id="singleNumber" value={singleNumber} onChange={e => setSingleNumber(e.target.value)} className={formInputClass} inputMode="text" pattern="[a-zA-Z0-9-]*" placeholder="A-01a" />
-                    </div>
-                </div>
-                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-                    <div className="relative">
-                        <label htmlFor="singlePrice" className={labelClass}>頒布価格</label>
-                        <input
-                            type="text"
-                            id="singlePrice"
-                            value={singlePrice}
-                            onChange={handlePriceInputChange}
-                            className={`${formInputClass} pr-12`}
-                            placeholder="0"
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                        />
-                        <span className="absolute right-3 top-9 text-slate-500 dark:text-slate-400">円</span>
-                    </div>
-                    <div>
-                        <label htmlFor="price-quick-select" className={labelClass}>クイック選択</label>
-                        <select 
-                            id="price-quick-select"
-                            onChange={handlePriceSelectChange}
-                            className={formInputClass}
-                            value={priceOptions.includes(Number(singlePrice)) ? singlePrice : ""}
-                        >
-                            <option value="" disabled>金額を選択...</option>
-                            {priceOptions.map(p => <option key={p} value={p}>{p.toLocaleString()}円</option>)}
-                        </select>
-                    </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label htmlFor="singleQuantity" className={labelClass}>数量</label>
-                        <select
-                            id="singleQuantity"
-                            value={singleQuantity}
-                            onChange={e => setSingleQuantity(e.target.value)}
-                            className={formInputClass}
-                        >
-                            {Array.from({ length: 10 }, (_, i) => i + 1).map(num => (
-                                <option key={num} value={num}>{num}</option>
-                            ))}
-                        </select>
-                    </div>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label htmlFor="singleRemarks" className={labelClass}>備考</label>
-                        <input type="text" id="singleRemarks" value={singleRemarks} onChange={e => setSingleRemarks(e.target.value)} className={formInputClass} placeholder="スケブお願い" />
-                    </div>
-                    <div>
-                        <label htmlFor="singleUrl" className={labelClass}>URL</label>
-                        <input type="text" id="singleUrl" value={singleUrl} onChange={e => setSingleUrl(e.target.value)} className={formInputClass} placeholder="https://example.com" />
-                    </div>
-                </div>
+          <>
+            <div>
+              <label htmlFor="eventName" className={labelClass}>
+                即売会名
+              </label>
+              <input
+                type="text"
+                id="eventName"
+                value={eventName}
+                onChange={(e) => setEventName(e.target.value)}
+                className={`mt-1 ${formInputClass.replace('p-2', 'p-2 mt-1')}`}
+                placeholder="例: C105"
+                required
+              />
             </div>
+
+            {/* インポート方法の選択 */}
+            <div className="border-t border-slate-200 dark:border-slate-700 pt-4">
+              <h3 className="text-lg font-semibold text-slate-900 dark:text-white mb-4">
+                インポート方法
+              </h3>
+
+              {/* URLインポート */}
+              <div className="mb-4">
+                <label htmlFor="spreadsheetUrl" className={labelClass}>
+                  スプレッドシートURLからインポート
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    id="spreadsheetUrl"
+                    value={spreadsheetUrl}
+                    onChange={(e) => setSpreadsheetUrl(e.target.value)}
+                    className={formInputClass}
+                    placeholder="https://docs.google.com/spreadsheets/d/..../edit"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleUrlImport}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors whitespace-nowrap"
+                  >
+                    URLからインポート
+                  </button>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  シート名「品目表」のM列からR列とW列をインポートします
+                </p>
+              </div>
+
+              {/* CSVファイルインポート */}
+              <div className="mb-4">
+                <label htmlFor="csvFile" className={labelClass}>
+                  CSVファイルからインポート
+                </label>
+                <input
+                  type="file"
+                  id="csvFile"
+                  ref={fileInputRef}
+                  accept=".csv"
+                  onChange={handleFileImport}
+                  className={formInputClass}
+                />
+                <p className="text-xs text-slate-500 dark:text-slate-400 mt-1">
+                  A列からD列の値が全て入力されている行のみをインポートします
+                </p>
+              </div>
+
+              <div className="text-center text-slate-500 dark:text-slate-400 my-4">または</div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+              <div className="md:col-span-1">
+                <label htmlFor="circles" className={labelClass}>
+                  サークル名{' '}
+                </label>
+                <textarea
+                  id="circles"
+                  value={circles}
+                  onChange={(e) => setCircles(e.target.value)}
+                  onPaste={handlePaste}
+                  className={formTextareaClass}
+                  placeholder="サークルA&#10;サークルB"
+                />
+              </div>
+              <div className="md:col-span-1">
+                <label htmlFor="event-dates" className={labelClass}>
+                  参加日{' '}
+                </label>
+                <textarea
+                  id="event-dates"
+                  value={eventDates}
+                  onChange={(e) => setEventDates(e.target.value)}
+                  className={formTextareaClass}
+                  placeholder="1日目&#10;2日目"
+                />
+              </div>
+              <div className="md:col-span-1">
+                <label htmlFor="blocks" className={labelClass}>
+                  ブロック{' '}
+                </label>
+                <textarea
+                  id="blocks"
+                  value={blocks}
+                  onChange={(e) => setBlocks(e.target.value)}
+                  className={formTextareaClass}
+                  placeholder="G&#10;カ"
+                />
+              </div>
+              <div className="md:col-span-1">
+                <label htmlFor="numbers" className={labelClass}>
+                  ナンバー{' '}
+                </label>
+                <textarea
+                  id="numbers"
+                  value={numbers}
+                  onChange={(e) => setNumbers(e.target.value)}
+                  className={formTextareaClass}
+                  placeholder="01a&#10;03b"
+                />
+              </div>
+              <div className="md:col-span-1">
+                <label htmlFor="titles" className={labelClass}>
+                  タイトル{' '}
+                </label>
+                <textarea
+                  id="titles"
+                  value={titles}
+                  onChange={(e) => setTitles(e.target.value)}
+                  className={formTextareaClass}
+                  placeholder="新刊セット&#10;既刊1"
+                />
+              </div>
+              <div className="md:col-span-1">
+                <label htmlFor="prices" className={labelClass}>
+                  頒布価格{' '}
+                </label>
+                <textarea
+                  id="prices"
+                  value={prices}
+                  onChange={(e) => setPrices(e.target.value)}
+                  className={formTextareaClass}
+                  placeholder="1000&#10;500"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="remarks" className={labelClass}>
+                  備考{' '}
+                </label>
+                <textarea
+                  id="remarks"
+                  value={remarks}
+                  onChange={(e) => setRemarks(e.target.value)}
+                  className={`${formTextareaClass} h-16`}
+                  placeholder="スケブお願い&#10;挨拶に行く"
+                />
+              </div>
+              <div>
+                <label htmlFor="urls" className={labelClass}>
+                  URL{' '}
+                </label>
+                <textarea
+                  id="urls"
+                  value={urls}
+                  onChange={(e) => setUrls(e.target.value)}
+                  className={`${formTextareaClass} h-16`}
+                  placeholder="https://example.com&#10;https://example2.com"
+                />
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="singleCircle" className={labelClass}>
+                  サークル名
+                </label>
+                <input
+                  type="text"
+                  id="singleCircle"
+                  value={singleCircle}
+                  onChange={(e) => setSingleCircle(e.target.value)}
+                  className={formInputClass}
+                  placeholder="サークル名"
+                />
+              </div>
+              <div>
+                <label htmlFor="singleTitle" className={labelClass}>
+                  タイトル
+                </label>
+                <input
+                  type="text"
+                  id="singleTitle"
+                  value={singleTitle}
+                  onChange={(e) => setSingleTitle(e.target.value)}
+                  className={formInputClass}
+                  placeholder="新刊セット"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div>
+                <label htmlFor="singleEventDate" className={labelClass}>
+                  参加日
+                </label>
+                {isCustomEventDate ? (
+                  <input
+                    type="text"
+                    id="singleEventDate"
+                    value={singleEventDate}
+                    onChange={handleEventDateInputChange}
+                    onBlur={handleEventDateInputBlur}
+                    className={formInputClass}
+                    placeholder="1日目"
+                  />
+                ) : (
+                  <select
+                    id="singleEventDate"
+                    value={singleEventDate}
+                    onChange={handleEventDateSelectChange}
+                    className={formInputClass}
+                  >
+                    <option value="1日目">1日目</option>
+                    <option value="2日目">2日目</option>
+                    <option value="3日目">3日目</option>
+                    <option value="4日目">4日目</option>
+                    <option value="__custom__">任意の値を入力</option>
+                  </select>
+                )}
+              </div>
+              <div>
+                <label htmlFor="singleBlock" className={labelClass}>
+                  ブロック
+                </label>
+                <input
+                  type="text"
+                  id="singleBlock"
+                  value={singleBlock}
+                  onChange={(e) => setSingleBlock(e.target.value)}
+                  className={formInputClass}
+                  placeholder="東1"
+                />
+              </div>
+              <div>
+                <label htmlFor="singleNumber" className={labelClass}>
+                  ナンバー
+                </label>
+                <input
+                  type="text"
+                  id="singleNumber"
+                  value={singleNumber}
+                  onChange={(e) => setSingleNumber(e.target.value)}
+                  className={formInputClass}
+                  inputMode="text"
+                  pattern="[a-zA-Z0-9-]*"
+                  placeholder="A-01a"
+                />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+              <div className="relative">
+                <label htmlFor="singlePrice" className={labelClass}>
+                  頒布価格
+                </label>
+                <input
+                  type="text"
+                  id="singlePrice"
+                  value={singlePrice}
+                  onChange={handlePriceInputChange}
+                  className={`${formInputClass} pr-12`}
+                  placeholder="0"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                />
+                <span className="absolute right-3 top-9 text-slate-500 dark:text-slate-400">
+                  円
+                </span>
+              </div>
+              <div>
+                <label htmlFor="price-quick-select" className={labelClass}>
+                  クイック選択
+                </label>
+                <select
+                  id="price-quick-select"
+                  onChange={handlePriceSelectChange}
+                  className={formInputClass}
+                  value={priceOptions.includes(Number(singlePrice)) ? singlePrice : ''}
+                >
+                  <option value="" disabled>
+                    金額を選択...
+                  </option>
+                  {priceOptions.map((p) => (
+                    <option key={p} value={p}>
+                      {p.toLocaleString()}円
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="singleQuantity" className={labelClass}>
+                  数量
+                </label>
+                <select
+                  id="singleQuantity"
+                  value={singleQuantity}
+                  onChange={(e) => setSingleQuantity(e.target.value)}
+                  className={formInputClass}
+                >
+                  {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                    <option key={num} value={num}>
+                      {num}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label htmlFor="singleRemarks" className={labelClass}>
+                  備考
+                </label>
+                <input
+                  type="text"
+                  id="singleRemarks"
+                  value={singleRemarks}
+                  onChange={(e) => setSingleRemarks(e.target.value)}
+                  className={formInputClass}
+                  placeholder="スケブお願い"
+                />
+              </div>
+              <div>
+                <label htmlFor="singleUrl" className={labelClass}>
+                  URL
+                </label>
+                <input
+                  type="text"
+                  id="singleUrl"
+                  value={singleUrl}
+                  onChange={(e) => setSingleUrl(e.target.value)}
+                  className={formInputClass}
+                  placeholder="https://example.com"
+                />
+              </div>
+            </div>
+          </div>
         )}
 
         <div className="pt-4 flex flex-col sm:flex-row-reverse sm:justify-start sm:space-x-4 sm:space-x-reverse space-y-4 sm:space-y-0">

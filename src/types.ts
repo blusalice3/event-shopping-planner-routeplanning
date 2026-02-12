@@ -7,15 +7,15 @@ export const PurchaseStatuses = [
   'Late',
 ] as const;
 
-export type PurchaseStatus = typeof PurchaseStatuses[number];
+export type PurchaseStatus = (typeof PurchaseStatuses)[number];
 
 // 保護レベル
 export const ProtectionLevels = ['full', 'deletable', 'none'] as const;
-export type ProtectionLevel = typeof ProtectionLevels[number];
+export type ProtectionLevel = (typeof ProtectionLevels)[number];
 
 // アイテムの追加元
 export const ItemSources = ['spreadsheet', 'app'] as const;
-export type ItemSource = typeof ItemSources[number];
+export type ItemSource = (typeof ItemSources)[number];
 
 export interface ShoppingItem {
   id: string;
@@ -29,12 +29,23 @@ export interface ShoppingItem {
   quantity: number;
   remarks: string;
   url?: string;
-  priorityLevel?: 'none' | 'priority' | 'highest';  // 優先度レベル
-  protectionLevel?: ProtectionLevel;  // 保護レベル（未設定の場合はsourceに基づくデフォルト）
-  source?: ItemSource;  // アイテムの追加元（未設定の場合は'spreadsheet'として扱う）
+  priorityLevel?: 'none' | 'priority' | 'highest'; // 優先度レベル
+  protectionLevel?: ProtectionLevel; // 保護レベル（未設定の場合はsourceに基づくデフォルト）
+  source?: ItemSource; // アイテムの追加元（未設定の場合は'spreadsheet'として扱う）
 }
 
 export type ViewMode = 'edit' | 'execute' | 'focus';
+
+export type FocusPhase = 'normal' | 'postponed' | 'late';
+
+export interface FocusModeSessionState {
+  phase: FocusPhase;
+  phaseIndex: number;
+  savedPhaseIndices: Record<FocusPhase, number>;
+  postponedItemIds: string[];
+  lateItemIds: string[];
+  isCompleted: boolean;
+}
 
 export interface EventMetadata {
   spreadsheetUrl: string;
@@ -69,11 +80,11 @@ export interface CellData {
   col: number;
   value: string | number | null;
   backgroundColor: string | null;
-  fontColor?: string | null;  // フォント色（Excelから抽出）
+  fontColor?: string | null; // フォント色（Excelから抽出）
   borders: CellBorders;
   isMerged?: boolean;
   mergeParent?: { row: number; col: number };
-  isVerticalText?: boolean;  // 縦書きかどうか
+  isVerticalText?: boolean; // 縦書きかどうか
 }
 
 export interface MergedCellInfo {
@@ -92,7 +103,7 @@ export interface NumberCellInfo {
 
 // 壁ブロック用のセル群定義
 export interface CellGroup {
-  type: 'range' | 'individual';  // range: 2セル間の範囲, individual: 個別セル指定
+  type: 'range' | 'individual'; // range: 2セル間の範囲, individual: 個別セル指定
   // rangeタイプ用
   startRow?: number;
   startCol?: number;
@@ -117,7 +128,7 @@ export interface BlockDefinition {
   isAutoDetected?: boolean;
   // 壁ブロック用
   isWallBlock?: boolean;
-  cellGroups?: CellGroup[];  // 最大6群
+  cellGroups?: CellGroup[]; // 最大6群
 }
 
 export interface DayMapData {
@@ -134,6 +145,18 @@ export interface DayMapData {
 export interface MapDataStore {
   [eventName: string]: {
     [dayMapName: string]: DayMapData;
+  };
+}
+
+export interface DayMapRotationState {
+  initialAngle: number;
+  mapTabAngle: number;
+  focusModeAngle: number;
+}
+
+export interface MapRotationSettingsStore {
+  [eventName: string]: {
+    [dayMapName: string]: DayMapRotationState;
   };
 }
 
@@ -253,12 +276,17 @@ export interface MapCellStateDetail {
   isVisited: boolean;
   isFullyVisited: boolean;
   items: ShoppingItem[];
-  hasPriorityItem: boolean;  // 「優先」「委託無」のアイテムがあるか
-  hasPriorityUnvisited: boolean;  // 未訪問の優先アイテムがあるか
+  hasPriorityItem: boolean; // 「優先」「委託無」のアイテムがあるか
+  hasPriorityUnvisited: boolean; // 未訪問の優先アイテムがあるか
 }
 
 // マップセルの状態（シンプル版、後方互換用）
-export type MapCellState = 'default' | 'hasItems' | 'partialVisit' | 'allVisit' | MapCellStateDetail;
+export type MapCellState =
+  | 'default'
+  | 'hasItems'
+  | 'partialVisit'
+  | 'allVisit'
+  | MapCellStateDetail;
 
 // マップ表示用のセル情報
 export interface MapDisplayCell {
@@ -294,8 +322,8 @@ export interface RouteSegment {
   toRow: number;
   toCol: number;
   path: { row: number; col: number }[];
-  fromPriority?: 'none' | 'priority' | 'highest';  // 出発点の優先度
-  toPriority?: 'none' | 'priority' | 'highest';  // 到着点の優先度
+  fromPriority?: 'none' | 'priority' | 'highest'; // 出発点の優先度
+  toPriority?: 'none' | 'priority' | 'highest'; // 到着点の優先度
 }
 
 // ズームレベル
@@ -320,13 +348,13 @@ export interface HallDefinition {
 // ホールごとの訪問先リスト
 export interface HallVisitList {
   hallId: string;
-  itemIds: string[];  // 訪問順に並んだアイテムID
+  itemIds: string[]; // 訪問順に並んだアイテムID
 }
 
 // ホール間移動順序を含むルート設定（拡張版）
 export interface HallRouteSettings {
-  hallOrder: string[];  // ホールIDの訪問順序
-  hallVisitLists: HallVisitList[];  // 各ホールの訪問先リスト
+  hallOrder: string[]; // ホールIDの訪問順序
+  hallVisitLists: HallVisitList[]; // 各ホールの訪問先リスト
 }
 
 // ホール定義のストア

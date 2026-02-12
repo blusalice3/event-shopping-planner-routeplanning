@@ -63,14 +63,23 @@ const CardMode: React.FC<{
         const orderLabel = `#${nearby.visitIndex + 1}`;
 
         return (
-          <div key={nearby.item.id} className="rounded-lg border border-slate-200 dark:border-slate-600 overflow-hidden">
+          <div
+            key={nearby.item.id}
+            className="rounded-lg border border-slate-200 dark:border-slate-600 overflow-hidden"
+          >
             <div className="bg-slate-50 dark:bg-slate-700/50 px-3 py-1.5 text-xs text-slate-600 dark:text-slate-300 flex items-center gap-2">
-              <span className="bg-slate-200 dark:bg-slate-600 px-1.5 py-0.5 rounded text-[10px] font-mono">{orderLabel}</span>
+              <span className="bg-slate-200 dark:bg-slate-600 px-1.5 py-0.5 rounded text-[10px] font-mono">
+                {orderLabel}
+              </span>
               <span className="font-semibold">{label}</span>
               <span className="truncate text-slate-500 dark:text-slate-400">{circle}</span>
               {nearbyNum !== 0 && (
                 <span className="ml-auto text-[10px] text-slate-400">
-                  {nearbyNum < addingNum ? `Δ-${addingNum - nearbyNum}` : nearbyNum > addingNum ? `Δ+${nearbyNum - addingNum}` : '同番'}
+                  {nearbyNum < addingNum
+                    ? `Δ-${addingNum - nearbyNum}`
+                    : nearbyNum > addingNum
+                      ? `Δ+${nearbyNum - addingNum}`
+                      : '同番'}
                 </span>
               )}
             </div>
@@ -147,7 +156,7 @@ const PreviewMode: React.FC<{
 
   // 近接アイテムのvisitIndexのセット
   const nearbyIndicesSet = useMemo(() => {
-    return new Set(nearbyVisitItems.map(n => n.visitIndex));
+    return new Set(nearbyVisitItems.map((n) => n.visitIndex));
   }, [nearbyVisitItems]);
 
   // 表示範囲を計算
@@ -161,7 +170,7 @@ const PreviewMode: React.FC<{
     const rangeStart = Math.max(0, minIdx - CONTEXT_COUNT);
     const rangeEnd = Math.min(allVisitItems.length - 1, maxIdx + CONTEXT_COUNT);
 
-    return allVisitItems.filter(v => v.visitIndex >= rangeStart && v.visitIndex <= rangeEnd);
+    return allVisitItems.filter((v) => v.visitIndex >= rangeStart && v.visitIndex <= rangeEnd);
   }, [nearbyVisitItems, allVisitItems]);
 
   return (
@@ -184,11 +193,13 @@ const PreviewMode: React.FC<{
               {/* この行の前の挿入候補 */}
               <InsertMarker
                 letter={letter}
-                onSelect={() => onSelect(
-                  idx === 0
-                    ? { type: 'before', referenceItemId: entry.item.id }
-                    : { type: 'after', referenceItemId: displayItems[idx - 1].item.id }
-                )}
+                onSelect={() =>
+                  onSelect(
+                    idx === 0
+                      ? { type: 'before', referenceItemId: entry.item.id }
+                      : { type: 'after', referenceItemId: displayItems[idx - 1].item.id },
+                  )
+                }
               />
 
               {/* アイテム行 */}
@@ -202,13 +213,21 @@ const PreviewMode: React.FC<{
                 <span className="bg-slate-200 dark:bg-slate-600 px-1.5 py-0.5 rounded text-[10px] font-mono flex-shrink-0">
                   #{entry.visitIndex + 1}
                 </span>
-                <span className={`font-semibold flex-shrink-0 ${isNearby ? 'text-blue-700 dark:text-blue-300' : 'text-slate-600 dark:text-slate-400'}`}>
+                <span
+                  className={`font-semibold flex-shrink-0 ${isNearby ? 'text-blue-700 dark:text-blue-300' : 'text-slate-600 dark:text-slate-400'}`}
+                >
                   {label}
                 </span>
-                <span className="truncate text-slate-500 dark:text-slate-400 text-[11px]">{circle}</span>
+                <span className="truncate text-slate-500 dark:text-slate-400 text-[11px]">
+                  {circle}
+                </span>
                 {isNearby && nearbyNum !== 0 && (
                   <span className="ml-auto text-[10px] text-blue-400 dark:text-blue-500 flex-shrink-0">
-                    {nearbyNum < addingNum ? `Δ-${addingNum - nearbyNum}` : nearbyNum > addingNum ? `Δ+${nearbyNum - addingNum}` : '同番'}
+                    {nearbyNum < addingNum
+                      ? `Δ-${addingNum - nearbyNum}`
+                      : nearbyNum > addingNum
+                        ? `Δ+${nearbyNum - addingNum}`
+                        : '同番'}
                   </span>
                 )}
               </div>
@@ -268,7 +287,9 @@ const InsertPositionDialog: React.FC<InsertPositionDialogProps> = ({
   return (
     <div
       className="fixed inset-0 bg-black/50 flex items-center justify-center z-[9999]"
-      onClick={(e) => { if (e.target === e.currentTarget) onCancel(); }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
     >
       <div className="bg-white dark:bg-slate-800 rounded-xl shadow-2xl w-[340px] max-h-[80vh] flex flex-col overflow-hidden">
         {/* ヘッダー */}

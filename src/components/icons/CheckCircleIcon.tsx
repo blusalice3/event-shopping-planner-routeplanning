@@ -1,4 +1,3 @@
-
 import React from 'react';
 
 const CheckCircleIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (

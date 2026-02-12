@@ -6,11 +6,7 @@ interface UrlUpdateDialogProps {
   onCancel: () => void;
 }
 
-const UrlUpdateDialog: React.FC<UrlUpdateDialogProps> = ({
-  currentUrl,
-  onConfirm,
-  onCancel,
-}) => {
+const UrlUpdateDialog: React.FC<UrlUpdateDialogProps> = ({ currentUrl, onConfirm, onCancel }) => {
   const [url, setUrl] = useState(currentUrl);
   const [sheetName, setSheetName] = useState('');
 
@@ -25,11 +21,16 @@ const UrlUpdateDialog: React.FC<UrlUpdateDialogProps> = ({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-md w-full mx-4">
         <div className="p-6">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">スプレッドシートURLを更新</h2>
-          
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">
+            スプレッドシートURLを更新
+          </h2>
+
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="url" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+              <label
+                htmlFor="url"
+                className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+              >
                 スプレッドシートURL
               </label>
               <input
@@ -42,9 +43,12 @@ const UrlUpdateDialog: React.FC<UrlUpdateDialogProps> = ({
                 required
               />
             </div>
-            
+
             <div>
-              <label htmlFor="sheetName" className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+              <label
+                htmlFor="sheetName"
+                className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+              >
                 シート名（オプション）
               </label>
               <input
@@ -56,7 +60,7 @@ const UrlUpdateDialog: React.FC<UrlUpdateDialogProps> = ({
                 placeholder="シート1"
               />
             </div>
-            
+
             <div className="flex justify-end space-x-3 pt-4">
               <button
                 type="button"
@@ -80,4 +84,3 @@ const UrlUpdateDialog: React.FC<UrlUpdateDialogProps> = ({
 };
 
 export default UrlUpdateDialog;
-

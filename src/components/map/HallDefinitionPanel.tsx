@@ -16,9 +16,18 @@ interface HallDefinitionPanelProps {
 }
 
 const HALL_COLORS = [
-  '#FFE0B2', '#FFCCBC', '#D7CCC8', '#CFD8DC', '#B2DFDB',
-  '#C8E6C9', '#DCEDC8', '#F0F4C3', '#FFF9C4', '#FFECB3',
-  '#E1BEE7', '#D1C4E9',
+  '#FFE0B2',
+  '#FFCCBC',
+  '#D7CCC8',
+  '#CFD8DC',
+  '#B2DFDB',
+  '#C8E6C9',
+  '#DCEDC8',
+  '#F0F4C3',
+  '#FFF9C4',
+  '#FFECB3',
+  '#E1BEE7',
+  '#D1C4E9',
 ];
 
 interface EditingHallData {
@@ -44,18 +53,21 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
   const [isAddingNew, setIsAddingNew] = useState(false);
 
   // ブロックがどのホールに属するか判定
-  const getBlocksInHall = useCallback((hall: HallDefinition): BlockDefinition[] => {
-    if (!hall.vertices || hall.vertices.length < 4) return [];
-    
-    return mapData.blocks.filter(block => {
-      // ブロックの中心点を計算
-      const centerRow = (block.startRow + block.endRow) / 2;
-      const centerCol = (block.startCol + block.endCol) / 2;
-      
-      // 多角形内に点があるか判定（Ray casting algorithm）
-      return isPointInPolygon(centerRow, centerCol, hall.vertices);
-    });
-  }, [mapData.blocks]);
+  const getBlocksInHall = useCallback(
+    (hall: HallDefinition): BlockDefinition[] => {
+      if (!hall.vertices || hall.vertices.length < 4) return [];
+
+      return mapData.blocks.filter((block) => {
+        // ブロックの中心点を計算
+        const centerRow = (block.startRow + block.endRow) / 2;
+        const centerCol = (block.startCol + block.endCol) / 2;
+
+        // 多角形内に点があるか判定（Ray casting algorithm）
+        return isPointInPolygon(centerRow, centerCol, hall.vertices);
+      });
+    },
+    [mapData.blocks],
+  );
 
   // 選択中ホールのブロック
   const selectedHallBlocks = useMemo(() => {
@@ -66,21 +78,21 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
   // 頂点選択結果を受け取った時の処理
   React.useEffect(() => {
     if (!pendingVertexSelection || !isOpen) return;
-    
+
     const { vertices, editingData } = pendingVertexSelection;
     const data = editingData as EditingHallData | undefined;
-    
+
     if (data) {
       if (data.currentHalls) setLocalHalls(data.currentHalls);
       setEditingHall(data.hall);
       setIsAddingNew(data.isAddingNew);
       setSelectedHallIndex(data.selectedIndex);
     }
-    
+
     if (vertices && vertices.length >= 4) {
-      setEditingHall(prev => ({ ...prev, vertices: [...vertices] }));
+      setEditingHall((prev) => ({ ...prev, vertices: [...vertices] }));
     }
-    
+
     if (onClearPendingVertexSelection) {
       onClearPendingVertexSelection();
     }
@@ -109,11 +121,11 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
     }
 
     const name = editingHall.name.trim();
-    
+
     // 重複チェック
-    if (isAddingNew && localHalls.find(h => h.name === name)) {
+    if (isAddingNew && localHalls.find((h) => h.name === name)) {
       if (!confirm(`「${name}」は既に存在します。置き換えますか？`)) return;
-      setLocalHalls(prev => prev.filter(h => h.name !== name));
+      setLocalHalls((prev) => prev.filter((h) => h.name !== name));
     }
 
     const saved: HallDefinition = {
@@ -124,9 +136,9 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
     };
 
     if (isAddingNew) {
-      setLocalHalls(prev => [...prev, saved]);
+      setLocalHalls((prev) => [...prev, saved]);
     } else if (selectedHallIndex !== null) {
-      setLocalHalls(prev => prev.map((h, i) => i === selectedHallIndex ? saved : h));
+      setLocalHalls((prev) => prev.map((h, i) => (i === selectedHallIndex ? saved : h)));
     }
 
     setEditingHall(null);
@@ -142,16 +154,19 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
   }, []);
 
   // ホール削除
-  const handleDeleteHall = useCallback((index: number) => {
-    const hall = localHalls[index];
-    if (confirm(`「${hall.name}」を削除しますか？`)) {
-      setLocalHalls(prev => prev.filter((_, i) => i !== index));
-      if (selectedHallIndex === index) {
-        setSelectedHallIndex(null);
-        setEditingHall(null);
+  const handleDeleteHall = useCallback(
+    (index: number) => {
+      const hall = localHalls[index];
+      if (confirm(`「${hall.name}」を削除しますか？`)) {
+        setLocalHalls((prev) => prev.filter((_, i) => i !== index));
+        if (selectedHallIndex === index) {
+          setSelectedHallIndex(null);
+          setEditingHall(null);
+        }
       }
-    }
-  }, [localHalls, selectedHallIndex]);
+    },
+    [localHalls, selectedHallIndex],
+  );
 
   if (!isOpen) return null;
 
@@ -160,9 +175,14 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         {/* ヘッダー */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">ホール（表示エリア）定義</h2>
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+            ホール（表示エリア）定義
+          </h2>
           <button
-            onClick={() => { setLocalHalls(halls); onClose(); }}
+            onClick={() => {
+              setLocalHalls(halls);
+              onClose();
+            }}
             className="text-2xl text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
           >
             ✕
@@ -275,7 +295,9 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                       <input
                         type="text"
                         value={editingHall.name || ''}
-                        onChange={(e) => setEditingHall(prev => ({ ...prev, name: e.target.value }))}
+                        onChange={(e) =>
+                          setEditingHall((prev) => ({ ...prev, name: e.target.value }))
+                        }
                         placeholder="例: 東1ホール, 西34ホール"
                         className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
                       />
@@ -313,7 +335,7 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                         {HALL_COLORS.map((c) => (
                           <button
                             key={c}
-                            onClick={() => setEditingHall(prev => ({ ...prev, color: c }))}
+                            onClick={() => setEditingHall((prev) => ({ ...prev, color: c }))}
                             className={`w-8 h-8 rounded border-2 ${
                               editingHall.color === c ? 'border-blue-500' : 'border-transparent'
                             }`}
@@ -372,13 +394,19 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
         {/* フッター */}
         <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3">
           <button
-            onClick={() => { setLocalHalls(halls); onClose(); }}
+            onClick={() => {
+              setLocalHalls(halls);
+              onClose();
+            }}
             className="px-4 py-2 text-sm rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
           >
             キャンセル
           </button>
           <button
-            onClick={() => { onUpdateHalls(localHalls); onClose(); }}
+            onClick={() => {
+              onUpdateHalls(localHalls);
+              onClose();
+            }}
             className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
           >
             適用
@@ -393,23 +421,23 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
 function isPointInPolygon(
   row: number,
   col: number,
-  vertices: { row: number; col: number }[]
+  vertices: { row: number; col: number }[],
 ): boolean {
   let inside = false;
   const n = vertices.length;
-  
+
   for (let i = 0, j = n - 1; i < n; j = i++) {
     const vi = vertices[i];
     const vj = vertices[j];
-    
+
     if (
-      ((vi.col > col) !== (vj.col > col)) &&
-      (row < (vj.row - vi.row) * (col - vi.col) / (vj.col - vi.col) + vi.row)
+      vi.col > col !== vj.col > col &&
+      row < ((vj.row - vi.row) * (col - vi.col)) / (vj.col - vi.col) + vi.row
     ) {
       inside = !inside;
     }
   }
-  
+
   return inside;
 }
 

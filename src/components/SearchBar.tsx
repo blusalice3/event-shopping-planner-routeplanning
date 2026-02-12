@@ -53,13 +53,10 @@ const SearchBar: React.FC<SearchBarProps> = ({
         </span>
       )}
       {searchKeyword.trim() && matchCount === 0 && (
-        <span className="text-xs text-red-600 dark:text-red-400 whitespace-nowrap">
-          該当なし
-        </span>
+        <span className="text-xs text-red-600 dark:text-red-400 whitespace-nowrap">該当なし</span>
       )}
     </div>
   );
 };
 
 export default SearchBar;
-
