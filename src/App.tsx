@@ -3722,6 +3722,10 @@ const App: React.FC = () => {
     vertices: { row: number; col: number }[];
     editingData?: unknown;
   } | null>(null);
+  const [vertexGuideOptions, setVertexGuideOptions] = useState({
+    showGrid: true,
+    showRuler: true,
+  });
 
 
   const handleStartVertexSelection = useCallback((editingData?: unknown) => {
@@ -5153,6 +5157,7 @@ const App: React.FC = () => {
             smartInsertMode={mapSmartInsertMode}
             rotationAngle={currentMapTabRotationState.mapTabAngle}
             onRotationAngleChange={handleMapTabRotationAngleChange}
+            selectionGuideOptions={vertexGuideOptions}
           />
         )}
         {activeEventName && mainContentVisible && (
@@ -5574,7 +5579,7 @@ const App: React.FC = () => {
           <div className="text-center mb-3">
             <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
               ホールの頂点をクリック ({vertexSelectionMode.clickedVertices.length}
-              /4)
+              /6)
             </div>
             <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
               クリック順に多角形を作成します。
@@ -5585,6 +5590,32 @@ const App: React.FC = () => {
                 {vertexSelectionMode.clickedVertices.map((v) => `(${v.row},${v.col})`).join(' → ')}
               </div>
             )}
+          </div>
+          <div className="flex gap-2 justify-center mb-3">
+            <button
+              onClick={() =>
+                setVertexGuideOptions((prev) => ({ ...prev, showGrid: !prev.showGrid }))
+              }
+              className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                vertexGuideOptions.showGrid
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              補助グリッド {vertexGuideOptions.showGrid ? 'ON' : 'OFF'}
+            </button>
+            <button
+              onClick={() =>
+                setVertexGuideOptions((prev) => ({ ...prev, showRuler: !prev.showRuler }))
+              }
+              className={`px-3 py-1.5 text-xs rounded transition-colors ${
+                vertexGuideOptions.showRuler
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+              }`}
+            >
+              座標尺 {vertexGuideOptions.showRuler ? 'ON' : 'OFF'}
+            </button>
           </div>
           <div className="flex gap-2 justify-center">
             <button
