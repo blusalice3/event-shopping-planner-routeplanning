@@ -44,10 +44,15 @@ const BASE_CELL_SIZE = 28; // 基本セルサイズ
 const SCROLL_MARGIN = 5; // スクロール余白（行/列数）
 const FILLED_SCROLL_MARGIN = 25; // 入力済みセル境界からの追加余白（行/列数）
 const getDragPanMultiplier = (zoom: number): number => {
-  if (zoom < 70) return 1.8;
-  if (zoom < 120) return 1.5;
-  return 1.1;
+  if (zoom < 70) return 2.0;
+  if (zoom < 120) return 1.6;
+  return 1.3;
 };
+const extractDayNameFromMapName = (mapName: string): string => {
+  const dayMatch = mapName.match(/^(.+)マップ$/);
+  return dayMatch ? dayMatch[1].trim() : '';
+};
+
 const hasCellInputValue = (value: string | number | null): boolean => {
   if (value === null || value === undefined) return false;
   if (typeof value === 'string') return value.trim().length > 0;
@@ -635,9 +640,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const cellStates = useMemo(() => {
     const states = new Map<string, MapCellStateDetail>();
 
-    const dayMatch = mapName.match(/^(.+)郢晄ｧｭ繝｣郢昴・/);
-    if (!dayMatch) return states;
-    const dayName = dayMatch[1].trim();
+    const dayName = extractDayNameFromMapName(mapName);
+    if (!dayName) return states;
 
     // 陷・ｽｪ陷亥現縺・ｹｧ・､郢昴・ﾎ堤ｸｺ荵昶・邵ｺ繝ｻﾂｰ郢ｧ雋樊・陞ｳ螢ｹ笘・ｹｧ遏ｩ譛ｪ隰ｨ・ｰ
     const isPriorityItem = (item: (typeof items)[number]) => {
@@ -719,9 +723,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const routePoints = useMemo(() => {
     if (!isRouteVisible) return [];
 
-    const dayMatch = mapName.match(/^(.+)郢晄ｧｭ繝｣郢昴・/);
-    if (!dayMatch) return [];
-    const dayName = dayMatch[1];
+    const dayName = extractDayNameFromMapName(mapName);
+    if (!dayName) return [];
 
     // executeModeItemIds邵ｺ・ｮ鬯・・・ｺ荳奇ｽ帝け・ｭ隰問・笘・ｹｧ荵昶螺郢ｧ竏壺・邵ｲ・．邵ｺ・ｮ鬩滓ｦ翫・鬯・・竊鍋ｹｧ・｢郢ｧ・､郢昴・ﾎ堤ｹｧ雋槫徐陟輔・
     const itemsMap = new Map(items.map((item) => [item.id, item]));
@@ -2415,8 +2418,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 };
 
 export default MapCanvas;
-
-
 
 
 
