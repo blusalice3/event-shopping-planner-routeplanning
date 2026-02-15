@@ -1,4 +1,4 @@
-﻿import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   DayMapData,
   CellData,
@@ -175,6 +175,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const offsetRef = useRef(offset);
+  const zoomLevelRef = useRef(zoomLevel);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
@@ -204,7 +206,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   // 繝斐Φ繝√ぜ繝ｼ繝逕ｨ縺ｮ迥ｶ諷・
   const pinchStartDistRef = useRef<number>(0);
   const pinchStartZoomRef = useRef<number>(zoomLevel);
-  const pinchCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const pinchStartOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const [isRotationInteracting, setIsRotationInteracting] = useState(false);
   const rotationInteractionTimerRef = useRef<number | null>(null);
@@ -257,12 +259,37 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   );
 
   const calculateOffsetForZoomPoint = useCallback(
-    (viewX: number, viewY: number, newZoom: number, currentOffset = offset) => {
-      const currentCellSize = BASE_CELL_SIZE * (zoomLevel / 100);
+    (
+      viewX: number,
+      viewY: number,
+      newZoom: number,
+      options?: {
+        baseZoom?: number;
+        baseOffset?: { x: number; y: number };
+      },
+    ) => {
+      const baseZoom = options?.baseZoom ?? zoomLevel;
+      const baseOffset = options?.baseOffset ?? offset;
+      const currentCellSize = BASE_CELL_SIZE * (baseZoom / 100);
       const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
-      const mapPoint = toMapCoordinates(viewX, viewY, currentOffset);
-      const normalizedMapX = mapPoint.x / currentCellSize;
-      const normalizedMapY = mapPoint.y / currentCellSize;
+      const translatedX = viewX - baseOffset.x;
+      const translatedY = viewY - baseOffset.y;
+      let mapPointX = translatedX;
+      let mapPointY = translatedY;
+
+      if (rotationRadians !== 0) {
+        const currentMapCenterX = (mapData.maxCol * currentCellSize) / 2;
+        const currentMapCenterY = (mapData.maxRow * currentCellSize) / 2;
+        const dx = translatedX - currentMapCenterX;
+        const dy = translatedY - currentMapCenterY;
+        const cos = Math.cos(rotationRadians);
+        const sin = Math.sin(rotationRadians);
+        mapPointX = dx * cos + dy * sin + currentMapCenterX;
+        mapPointY = -dx * sin + dy * cos + currentMapCenterY;
+      }
+
+      const normalizedMapX = mapPointX / currentCellSize;
+      const normalizedMapY = mapPointY / currentCellSize;
       const scaledMapX = normalizedMapX * newCellSize;
       const scaledMapY = normalizedMapY * newCellSize;
       const newMapCenterX = (mapData.maxCol * newCellSize) / 2;
@@ -279,7 +306,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         y: viewY - rotatedPoint.y,
       };
     },
-    [offset, zoomLevel, toMapCoordinates, mapData.maxCol, mapData.maxRow, rotationRadians],
+    [offset, zoomLevel, mapData.maxCol, mapData.maxRow, rotationRadians],
   );
 
   const getPointerViewMetrics = useCallback(
@@ -308,6 +335,14 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       tapAssistTimerRef.current = null;
     }, TAP_ASSIST_DURATION_MS);
   }, []);
+
+  useEffect(() => {
+    offsetRef.current = offset;
+  }, [offset]);
+
+  useEffect(() => {
+    zoomLevelRef.current = zoomLevel;
+  }, [zoomLevel]);
 
   useEffect(() => {
     setIsRotationInteracting(true);
@@ -384,22 +419,26 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const mouseY = e.clientY - rect.top;
 
       // 迴ｾ蝨ｨ縺ｮ繧ｺ繝ｼ繝繝ｬ繝吶Ν
-      const currentZoom = zoomLevel;
+      const currentZoom = zoomLevelRef.current;
       // 繧ｺ繝ｼ繝驥擾ｼ医せ繧ｯ繝ｭ繝ｼ繝ｫ驥上↓蠢懊§縺ｦ・・
       const zoomDelta = -e.deltaY * 0.1;
       const newZoom = Math.round(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentZoom + zoomDelta)));
 
       if (newZoom === currentZoom) return;
 
-      const newOffset = calculateOffsetForZoomPoint(mouseX, mouseY, newZoom);
+      const newOffset = calculateOffsetForZoomPoint(mouseX, mouseY, newZoom, {
+        baseZoom: currentZoom,
+        baseOffset: offsetRef.current,
+      });
       const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
 
       setOffset(newOffset);
+      offsetRef.current = newOffset;
       prevCellSizeRef.current = newCellSize;
+      zoomLevelRef.current = newZoom;
       onZoomChange(newZoom);
     },
     [
-      zoomLevel,
       onZoomChange,
       onRotationAngleChange,
       rotationAngle,
@@ -422,20 +461,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const dx = touches[1].x - touches[0].x;
         const dy = touches[1].y - touches[0].y;
         pinchStartDistRef.current = Math.sqrt(dx * dx + dy * dy);
-        pinchStartZoomRef.current = zoomLevel;
-
-        // 繝斐Φ繝∽ｸｭ蠢・ｼ医さ繝ｳ繝・リ蜀・ｺｧ讓呻ｼ・
-        const container = containerRef.current;
-        if (container) {
-          const rect = container.getBoundingClientRect();
-          pinchCenterRef.current = {
-            x: (touches[0].x + touches[1].x) / 2 - rect.left,
-            y: (touches[0].y + touches[1].y) / 2 - rect.top,
-          };
-        }
+        pinchStartZoomRef.current = zoomLevelRef.current;
+        pinchStartOffsetRef.current = { ...offsetRef.current };
       }
     },
-    [zoomLevel],
+    [],
   );
 
   const handleTouchMove = useCallback(
@@ -460,18 +490,27 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, pinchStartZoomRef.current * scaleRatio)),
         );
 
-        if (newZoom === zoomLevel) return;
+        const container = containerRef.current;
+        if (!container) return;
+        const rect = container.getBoundingClientRect();
+        const midX = (touches[0].x + touches[1].x) / 2 - rect.left;
+        const midY = (touches[0].y + touches[1].y) / 2 - rect.top;
 
-        const cx = pinchCenterRef.current.x;
-        const cy = pinchCenterRef.current.y;
-        const newOffset = calculateOffsetForZoomPoint(cx, cy, newZoom);
+        if (newZoom === zoomLevelRef.current) return;
+
+        const newOffset = calculateOffsetForZoomPoint(midX, midY, newZoom, {
+          baseZoom: pinchStartZoomRef.current,
+          baseOffset: pinchStartOffsetRef.current,
+        });
         const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
         setOffset(newOffset);
+        offsetRef.current = newOffset;
         prevCellSizeRef.current = newCellSize;
+        zoomLevelRef.current = newZoom;
         onZoomChange(newZoom);
       }
     },
-    [zoomLevel, onZoomChange, calculateOffsetForZoomPoint],
+    [onZoomChange, calculateOffsetForZoomPoint],
   );
 
   const handleTouchEnd = useCallback((e: TouchEvent) => {
@@ -2287,9 +2326,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (activeTouchesRef.current.size >= 2) return;
       setIsDragging(false);
       setDragStart({ x: e.clientX, y: e.clientY });
-      setDragStartOffset({ ...offset });
+      setDragStartOffset({ ...offsetRef.current });
     },
-    [offset],
+    [],
   );
 
   const handlePointerMove = useCallback(
@@ -2323,10 +2362,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         newY = Math.max(limits.minY, Math.min(limits.maxY, newY));
       }
 
-      setOffset({
+      const nextOffset = {
         x: newX,
         y: newY,
-      });
+      };
+      setOffset(nextOffset);
+      offsetRef.current = nextOffset;
     },
     [
       dragStart,
