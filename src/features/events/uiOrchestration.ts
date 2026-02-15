@@ -1,4 +1,4 @@
-﻿import type { ShoppingItem } from '../../types';
+import type { ShoppingItem } from '../../types';
 import { extractEventDates } from '../../utils/eventDates';
 
 export function resolveEventListTab(items: ShoppingItem[]): string {
