@@ -34,6 +34,10 @@ interface MapCanvasProps {
   highlightedCell?: { row: number; col: number } | null;
   onZoomChange?: (newZoom: number) => void;
   onRotationAngleChange?: (newAngle: number) => void;
+  selectionGuideOptions?: {
+    showGrid: boolean;
+    showRuler: boolean;
+  };
 }
 
 const BASE_CELL_SIZE = 28; // 基本セルサイズ
@@ -45,6 +49,22 @@ const hasCellInputValue = (value: string | number | null): boolean => {
   if (typeof value === 'string') return value.trim().length > 0;
   return true;
 };
+
+const TAP_ASSIST_DURATION_MS = 900;
+
+interface HoverGuideState {
+  row: number;
+  col: number;
+  viewX: number;
+  viewY: number;
+}
+
+interface TapAssistState {
+  row: number;
+  col: number;
+  viewX: number;
+  viewY: number;
+}
 
 const normalizeRotationAngle = (angle: number): number => {
   const normalized = Math.round(angle) % 360;
@@ -151,6 +171,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   highlightedCell,
   onZoomChange,
   onRotationAngleChange,
+  selectionGuideOptions,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -158,6 +179,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
+  const [hoverGuide, setHoverGuide] = useState<HoverGuideState | null>(null);
+  const [tapAssist, setTapAssist] = useState<TapAssistState | null>(null);
+  const lastPointerTypeRef = useRef<string>('mouse');
+  const tapAssistTimerRef = useRef<number | null>(null);
 
   // デバイスピクセル比
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
@@ -195,6 +220,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   );
   const mapCenterX = useMemo(() => (mapData.maxCol * cellSize) / 2, [mapData.maxCol, cellSize]);
   const mapCenterY = useMemo(() => (mapData.maxRow * cellSize) / 2, [mapData.maxRow, cellSize]);
+  const showSelectionGrid = selectionGuideOptions?.showGrid ?? false;
+  const showSelectionRuler = selectionGuideOptions?.showRuler ?? false;
 
   const toMapCoordinates = useCallback(
     (viewX: number, viewY: number, currentOffset = offset) => {
@@ -256,6 +283,33 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     [offset, zoomLevel, toMapCoordinates, mapData.maxCol, mapData.maxRow, rotationRadians],
   );
 
+  const getPointerViewMetrics = useCallback(
+    (clientX: number, clientY: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / dpr / rect.width;
+      const scaleY = canvas.height / dpr / rect.height;
+
+      return {
+        viewX: (clientX - rect.left) * scaleX,
+        viewY: (clientY - rect.top) * scaleY,
+      };
+    },
+    [dpr],
+  );
+
+  const showTapAssist = useCallback((next: TapAssistState) => {
+    setTapAssist(next);
+    if (tapAssistTimerRef.current !== null) {
+      clearTimeout(tapAssistTimerRef.current);
+    }
+    tapAssistTimerRef.current = window.setTimeout(() => {
+      setTapAssist(null);
+      tapAssistTimerRef.current = null;
+    }, TAP_ASSIST_DURATION_MS);
+  }, []);
+
   useEffect(() => {
     setIsRotationInteracting(true);
     if (rotationInteractionTimerRef.current !== null) {
@@ -272,6 +326,14 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     };
   }, [normalizedRotationAngle]);
+
+  useEffect(() => {
+    return () => {
+      if (tapAssistTimerRef.current !== null) {
+        clearTimeout(tapAssistTimerRef.current);
+      }
+    };
+  }, []);
 
   // ズームレベル変更時に視点を維持するオフセット調整（外部からのズーム変更に対応）
   useEffect(() => {
@@ -1043,6 +1105,73 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     const warningPattern = createWarningStripePattern();
 
+    if (!isRotationInteracting && vertexSelectionMode && (showSelectionGrid || showSelectionRuler)) {
+      if (showSelectionGrid) {
+        ctx.save();
+        ctx.strokeStyle = isDarkMode ? 'rgba(148, 163, 184, 0.22)' : 'rgba(59, 130, 246, 0.2)';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 3]);
+
+        for (let row = visMinRow; row <= visMaxRow + 1; row++) {
+          const y = (row - 1) * cellSize;
+          ctx.beginPath();
+          ctx.moveTo((visMinCol - 1) * cellSize, y);
+          ctx.lineTo(visMaxCol * cellSize, y);
+          ctx.stroke();
+        }
+
+        for (let col = visMinCol; col <= visMaxCol + 1; col++) {
+          const x = (col - 1) * cellSize;
+          ctx.beginPath();
+          ctx.moveTo(x, (visMinRow - 1) * cellSize);
+          ctx.lineTo(x, visMaxRow * cellSize);
+          ctx.stroke();
+        }
+
+        ctx.setLineDash([]);
+        ctx.restore();
+      }
+
+      if (showSelectionRuler) {
+        const labelFontSize = Math.max(8, Math.min(11, cellSize * 0.38));
+        const topLabelHeight = Math.max(12, cellSize * 0.42);
+        const leftLabelWidth = Math.max(18, cellSize * 0.55);
+        const labelBg = isDarkMode ? 'rgba(15, 23, 42, 0.78)' : 'rgba(255, 255, 255, 0.82)';
+        const labelText = isDarkMode ? '#E2E8F0' : '#1E293B';
+
+        ctx.save();
+        ctx.font = `${labelFontSize}px sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = labelBg;
+
+        for (let col = visMinCol; col <= visMaxCol; col++) {
+          const x = (col - 1) * cellSize;
+          const y = (visMinRow - 1) * cellSize;
+          ctx.fillRect(x, y, cellSize, topLabelHeight);
+        }
+
+        for (let row = visMinRow; row <= visMaxRow; row++) {
+          const x = (visMinCol - 1) * cellSize;
+          const y = (row - 1) * cellSize;
+          ctx.fillRect(x, y, leftLabelWidth, cellSize);
+        }
+
+        ctx.fillStyle = labelText;
+        for (let col = visMinCol; col <= visMaxCol; col++) {
+          const x = (col - 0.5) * cellSize;
+          const y = (visMinRow - 1) * cellSize + topLabelHeight / 2;
+          drawUprightText(String(col), x, y);
+        }
+        for (let row = visMinRow; row <= visMaxRow; row++) {
+          const x = (visMinCol - 1) * cellSize + leftLabelWidth / 2;
+          const y = (row - 0.5) * cellSize;
+          drawUprightText(String(row), x, y);
+        }
+        ctx.restore();
+      }
+    }
+
     // 1. 背景を描画
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
@@ -1553,6 +1682,52 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }
 
     // 6. ホール頂点選択プレビュー（多角形オーバーレイ）
+    if (!isRotationInteracting && vertexSelectionMode && hoverGuide) {
+      const hoverCellX = (hoverGuide.col - 1) * cellSize;
+      const hoverCellY = (hoverGuide.row - 1) * cellSize;
+      const hoverCenterX = (hoverGuide.col - 0.5) * cellSize;
+      const hoverCenterY = (hoverGuide.row - 0.5) * cellSize;
+
+      ctx.save();
+      ctx.strokeStyle = '#0EA5E9';
+      ctx.lineWidth = Math.max(2, cellSize * 0.08);
+      ctx.strokeRect(hoverCellX + 1, hoverCellY + 1, cellSize - 2, cellSize - 2);
+
+      if (vertexSelectionMode.clickedVertices.length > 0) {
+        const lastVertex =
+          vertexSelectionMode.clickedVertices[vertexSelectionMode.clickedVertices.length - 1];
+        const lastX = (lastVertex.col - 0.5) * cellSize;
+        const lastY = (lastVertex.row - 0.5) * cellSize;
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(14, 165, 233, 0.85)';
+        ctx.lineWidth = Math.max(2, cellSize * 0.08);
+        ctx.setLineDash([6, 4]);
+        ctx.moveTo(lastX, lastY);
+        ctx.lineTo(hoverCenterX, hoverCenterY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      const label = `(${hoverGuide.row},${hoverGuide.col})`;
+      ctx.font = `${Math.max(10, cellSize * 0.33)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const labelPaddingX = 7;
+      const labelWidth = ctx.measureText(label).width + labelPaddingX * 2;
+      const labelHeight = Math.max(18, cellSize * 0.46);
+      const labelX = hoverCenterX + labelWidth / 2 + 6;
+      const labelY = hoverCenterY - labelHeight / 2 - 6;
+
+      ctx.fillStyle = isDarkMode ? 'rgba(15, 23, 42, 0.92)' : 'rgba(255, 255, 255, 0.94)';
+      ctx.fillRect(labelX - labelWidth / 2, labelY - labelHeight / 2, labelWidth, labelHeight);
+      ctx.strokeStyle = 'rgba(14, 165, 233, 0.9)';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(labelX - labelWidth / 2, labelY - labelHeight / 2, labelWidth, labelHeight);
+      ctx.fillStyle = isDarkMode ? '#E2E8F0' : '#0F172A';
+      drawUprightText(label, labelX, labelY);
+      ctx.restore();
+    }
+
     if (!isRotationInteracting && vertexSelectionMode && vertexSelectionMode.clickedVertices.length >= 3) {
       const vertices = vertexSelectionMode.clickedVertices;
 
@@ -1746,6 +1921,84 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     // ctx.translate を解除
     ctx.restore();
+
+    if ((vertexSelectionMode || cellSelectionMode) && tapAssist) {
+      const lensRadius = Math.max(36, Math.min(64, cellSize * 1.4));
+      const lensDiameter = lensRadius * 2;
+      const sourceSize = Math.max(24, cellSize * 1.8);
+      const srcX = Math.max(
+        0,
+        Math.min(containerWidth - sourceSize, tapAssist.viewX - sourceSize / 2),
+      );
+      const srcY = Math.max(
+        0,
+        Math.min(containerHeight - sourceSize, tapAssist.viewY - sourceSize / 2),
+      );
+      const lensCenterX = Math.max(
+        lensRadius + 8,
+        Math.min(containerWidth - lensRadius - 8, tapAssist.viewX),
+      );
+      const lensCenterY = Math.max(
+        lensRadius + 8,
+        Math.min(containerHeight - lensRadius - 8, tapAssist.viewY - lensRadius - 20),
+      );
+
+      ctx.save();
+      ctx.shadowColor = 'rgba(15, 23, 42, 0.35)';
+      ctx.shadowBlur = 10;
+      ctx.beginPath();
+      ctx.arc(lensCenterX, lensCenterY, lensRadius, 0, Math.PI * 2);
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.fill();
+      ctx.clip();
+      ctx.drawImage(
+        canvas,
+        srcX * dpr,
+        srcY * dpr,
+        sourceSize * dpr,
+        sourceSize * dpr,
+        lensCenterX - lensRadius,
+        lensCenterY - lensRadius,
+        lensDiameter,
+        lensDiameter,
+      );
+      ctx.strokeStyle = '#0EA5E9';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.moveTo(lensCenterX - 10, lensCenterY);
+      ctx.lineTo(lensCenterX + 10, lensCenterY);
+      ctx.moveTo(lensCenterX, lensCenterY - 10);
+      ctx.lineTo(lensCenterX, lensCenterY + 10);
+      ctx.strokeStyle = 'rgba(14, 165, 233, 0.9)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+      ctx.restore();
+
+      const label = `(${tapAssist.row}, ${tapAssist.col})`;
+      const labelPaddingX = 7;
+      const labelPaddingY = 4;
+      const labelY = lensCenterY + lensRadius + 12;
+      ctx.save();
+      ctx.font = `${Math.max(10, cellSize * 0.34)}px sans-serif`;
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      const labelWidth = ctx.measureText(label).width + labelPaddingX * 2;
+      const labelHeight = Math.max(18, cellSize * 0.45) + labelPaddingY;
+      const labelX = Math.max(
+        labelWidth / 2 + 8,
+        Math.min(containerWidth - labelWidth / 2 - 8, lensCenterX),
+      );
+      ctx.fillStyle = isDarkMode ? 'rgba(15, 23, 42, 0.92)' : 'rgba(255, 255, 255, 0.94)';
+      ctx.fillRect(labelX - labelWidth / 2, labelY - labelHeight / 2, labelWidth, labelHeight);
+      ctx.strokeStyle = '#0EA5E9';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(labelX - labelWidth / 2, labelY - labelHeight / 2, labelWidth, labelHeight);
+      ctx.fillStyle = isDarkMode ? '#E2E8F0' : '#0F172A';
+      ctx.fillText(label, labelX, labelY);
+      ctx.restore();
+    }
   }, [
     mapData,
     cellSize,
@@ -1758,9 +2011,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     isDetailedView,
     showNumbers,
     showBorders,
+    showSelectionGrid,
+    showSelectionRuler,
     vertexSelectionMode,
     cellSelectionMode,
     highlightedCell,
+    hoverGuide,
+    tapAssist,
     isDarkMode,
     isRotationInteracting,
     rotationRadians,
@@ -1864,6 +2121,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
 
       // ブロック定義パネル用のカスタムイベントを発火
+      const shouldShowTapAssist =
+        (vertexSelectionMode || cellSelectionMode) &&
+        (lastPointerTypeRef.current === 'touch' || lastPointerTypeRef.current === 'pen');
+      if (shouldShowTapAssist) {
+        showTapAssist({
+          row: resolvedRow,
+          col: resolvedCol,
+          viewX,
+          viewY,
+        });
+      }
+
       window.dispatchEvent(
         new CustomEvent('mapCellClick', {
           detail: { row: resolvedRow, col: resolvedCol },
@@ -1886,6 +2155,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       dpr,
       vertexSelectionMode,
       cellSelectionMode,
+      showTapAssist,
       mergedCellsMap,
       offset,
       toMapCoordinates,
@@ -1980,9 +2250,44 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     };
   }, [activeScrollBounds, cellSize, rotateAroundMapCenter]);
 
+  useEffect(() => {
+    if (!vertexSelectionMode) {
+      setHoverGuide(null);
+    }
+  }, [vertexSelectionMode]);
+
+  const updateHoverGuideFromPointer = useCallback(
+    (clientX: number, clientY: number) => {
+      const metrics = getPointerViewMetrics(clientX, clientY);
+      if (!metrics) {
+        setHoverGuide(null);
+        return;
+      }
+
+      const { viewX, viewY } = metrics;
+      const { x, y } = toMapCoordinates(viewX, viewY);
+      const col = Math.floor(x / cellSize) + 1;
+      const row = Math.floor(y / cellSize) + 1;
+
+      if (row < 1 || row > mapData.maxRow || col < 1 || col > mapData.maxCol) {
+        setHoverGuide(null);
+        return;
+      }
+
+      setHoverGuide((prev) => {
+        if (prev && prev.row === row && prev.col === col) {
+          return prev;
+        }
+        return { row, col, viewX, viewY };
+      });
+    },
+    [cellSize, getPointerViewMetrics, mapData.maxRow, mapData.maxCol, toMapCoordinates],
+  );
+
   // ドラッグ処理
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
+      lastPointerTypeRef.current = e.pointerType;
       // ピンチズーム中はドラッグを無視
       if (activeTouchesRef.current.size >= 2) return;
       setIsDragging(false);
@@ -1994,6 +2299,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
+      lastPointerTypeRef.current = e.pointerType;
+      if (e.pointerType === 'mouse' && vertexSelectionMode) {
+        updateHoverGuideFromPointer(e.clientX, e.clientY);
+      } else if (e.pointerType !== 'mouse' && hoverGuide) {
+        setHoverGuide(null);
+      }
+
       if (e.buttons !== 1) return;
       // ピンチズーム中はドラッグを無視
       if (activeTouchesRef.current.size >= 2) return;
@@ -2021,7 +2333,14 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         y: newY,
       });
     },
-    [dragStart, dragStartOffset, calculateScrollLimits],
+    [
+      dragStart,
+      dragStartOffset,
+      calculateScrollLimits,
+      hoverGuide,
+      updateHoverGuideFromPointer,
+      vertexSelectionMode,
+    ],
   );
 
   const handlePointerUp = useCallback(() => {
@@ -2029,6 +2348,15 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       setIsDragging(false);
     }, 100);
   }, []);
+
+  const handlePointerLeave = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      lastPointerTypeRef.current = e.pointerType;
+      setHoverGuide(null);
+      handlePointerUp();
+    },
+    [handlePointerUp],
+  );
 
   return (
     <MapCanvasPresentation
@@ -2039,6 +2367,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onPointerLeave={handlePointerLeave}
     />
   );
 };

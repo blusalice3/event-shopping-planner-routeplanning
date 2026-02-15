@@ -67,6 +67,10 @@ interface MapViewProps {
   smartInsertMode?: SmartInsertMode;
   rotationAngle?: number;
   onRotationAngleChange?: (newAngle: number) => void;
+  selectionGuideOptions?: {
+    showGrid: boolean;
+    showRuler: boolean;
+  };
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -101,6 +105,7 @@ const MapView: React.FC<MapViewProps> = ({
   smartInsertMode = 'card',
   rotationAngle = 0,
   onRotationAngleChange,
+  selectionGuideOptions,
 }) => {
   void _onMoveToFirst;
   void _onMoveToLast;
@@ -749,6 +754,7 @@ const MapView: React.FC<MapViewProps> = ({
         onZoomChange={setZoomLevel}
         rotationAngle={rotationAngle}
         onRotationAngleChange={onRotationAngleChange}
+        selectionGuideOptions={selectionGuideOptions}
       />
 
       {/* セルアイテムポップアップ */}
