@@ -18,7 +18,7 @@ interface MapCanvasProps {
   mapData: DayMapData;
   mapName: string;
   items: ShoppingItem[];
-  executeModeItemIds: string[]; // 螳溯｡後Δ繝ｼ繝我ｸｭ縺ｮ險ｪ蝠乗ｸ医∩ID
+  executeModeItemIds: string[];
   zoomLevel: ZoomLevel;
   rotationAngle?: number;
   isRouteVisible: boolean;
@@ -195,25 +195,20 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const lastPointerTypeRef = useRef<string>('mouse');
   const tapAssistTimerRef = useRef<number | null>(null);
 
-  // 郢昴・繝ｰ郢ｧ・､郢ｧ・ｹ郢晄鱒縺醍ｹｧ・ｻ郢晢ｽｫ雎医・
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
 
-  // 郢ｧ・ｹ郢ｧ・ｱ郢晢ｽｼ郢晢ｽｫ髫ｪ閧ｲ・ｮ繝ｻ
   const scale = zoomLevel / 100;
   const cellSize = BASE_CELL_SIZE * scale;
   const isDarkMode =
     typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
 
-  // 陝ｶ・ｸ邵ｺ・ｫ100%隴弱ｅ竊定惺讙趣ｽｭ蟲ｨ繝ｻ隲繝ｻ・ｰ・ｱ鬩･荳奇ｽ帝勗・ｨ驕会ｽｺ繝ｻ蛹ｻ縺懃ｹ晢ｽｼ郢晢｣ｰ郢晢ｽｬ郢晏生ﾎ晉ｸｺ・ｫ鬮｢・｢闖ｫ繧・・邵ｺ荳槭・隲繝ｻ・ｰ・ｱ郢ｧ蜻育ｷ帝包ｽｻ繝ｻ繝ｻ
   const isDetailedView = true;
   const showNumbers = true;
   const showBorders = true;
 
-  // 陷第ｦ雁ｱ鍋ｸｺ・ｮ郢ｧ・ｻ郢晢ｽｫ郢ｧ・ｵ郢ｧ・､郢ｧ・ｺ郢ｧ螳夲ｽｨ菫ｶ繝ｻ
   const prevCellSizeRef = useRef<number>(cellSize);
   const initializedRef = useRef<boolean>(false);
 
-  // 郢晄鱒ﾎｦ郢昶・縺懃ｹ晢ｽｼ郢晢｣ｰ騾包ｽｨ邵ｺ・ｮ霑･・ｶ隲ｷ繝ｻ
   const pinchStartDistRef = useRef<number>(0);
   const pinchStartZoomRef = useRef<number>(zoomLevel);
   const pinchStartOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -268,6 +263,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     [mapCenterX, mapCenterY, rotationRadians],
   );
 
+  // 指定した画面座標を基準に、ズーム後も同じ地点を指すようオフセットを再計算する。
   const calculateOffsetForZoomPoint = useCallback(
     (
       viewX: number,
@@ -379,21 +375,19 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     };
   }, []);
 
-  // 郢ｧ・ｺ郢晢ｽｼ郢晢｣ｰ郢晢ｽｬ郢晏生ﾎ晁棔逕ｻ蟲ｩ隴弱ｅ竊馴囎荵溘○郢ｧ蝣､・ｶ・ｭ隰問・笘・ｹｧ荵昴′郢晁ｼ斐◎郢昴・繝ｨ髫ｱ・ｿ隰ｨ・ｴ繝ｻ莠･・､螟慚夂ｸｺ荵晢ｽ臥ｸｺ・ｮ郢ｧ・ｺ郢晢ｽｼ郢晢｣ｰ陞溽判蟲ｩ邵ｺ・ｫ陝・ｽｾ陟｢諛ｶ・ｼ繝ｻ
+  // ズーム変更時は、表示中心が大きくずれないようにオフセットを補正する。
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const prevCellSize = prevCellSizeRef.current;
 
-    // 陋ｻ譎丞ｱ鍋ｸｺ・ｾ邵ｺ貅倥・郢ｧ・ｻ郢晢ｽｫ郢ｧ・ｵ郢ｧ・､郢ｧ・ｺ邵ｺ謔滂ｽ､蟲ｨ・冗ｸｺ・｣邵ｺ・ｦ邵ｺ繝ｻ竊醍ｸｺ繝ｻ・ｰ・ｴ陷ｷ蛹ｻ繝ｻ郢ｧ・ｹ郢ｧ・ｭ郢昴・繝ｻ
     if (!initializedRef.current || prevCellSize === cellSize) {
       prevCellSizeRef.current = cellSize;
       initializedRef.current = true;
       return;
     }
 
-    // 郢ｧ・ｳ郢晢ｽｳ郢昴・繝ｪ邵ｺ・ｮ闕ｳ・ｭ陞滂ｽｮ陟趣ｽｧ隶灘生・定搏・ｺ雋・じ竊鍋ｹｧ・ｺ郢晢ｽｼ郢晢｣ｰ繝ｻ莠･・､螟慚夊棔逕ｻ蟲ｩ邵ｺ・ｮ陜｣・ｴ陷ｷ蛹ｻ繝ｻ郢晁ｼ斐°郢晢ｽｼ郢晢ｽｫ郢晁・繝｣郢ｧ・ｯ繝ｻ繝ｻ
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
     const centerX = containerWidth / 2;
@@ -409,7 +403,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     prevCellSizeRef.current = cellSize;
   }, [cellSize, offset.x, offset.y]);
 
-  // 郢晏ｸ吶≧郢晢ｽｼ郢晢ｽｫ郢ｧ・ｺ郢晢ｽｼ郢晢｣ｰ陷・ｽｦ騾・・・ｼ繝ｻC郢晄じﾎ帷ｹｧ・ｦ郢ｧ・ｶ: 郢晄ｧｭ縺育ｹｧ・ｹ郢ｧ・ｫ郢晢ｽｼ郢ｧ・ｽ郢晢ｽｫ闖ｴ蜥ｲ・ｽ・ｮ郢ｧ蜑・ｽｸ・ｭ陟｢繝ｻ竊鍋ｹｧ・ｺ郢晢ｽｼ郢晢｣ｰ繝ｻ繝ｻ
+  // ホイール操作: 通常はズーム、Shift+ホイールは回転。
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();
@@ -424,13 +418,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (!container) return;
 
       const rect = container.getBoundingClientRect();
-      // 郢晄ｧｭ縺育ｹｧ・ｹ闖ｴ蜥ｲ・ｽ・ｮ繝ｻ蛹ｻ縺慕ｹ晢ｽｳ郢昴・繝ｪ陷繝ｻ・ｺ・ｧ隶灘遜・ｼ繝ｻ
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
-      // 霑ｴ・ｾ陜ｨ・ｨ邵ｺ・ｮ郢ｧ・ｺ郢晢ｽｼ郢晢｣ｰ郢晢ｽｬ郢晏生ﾎ・
       const currentZoom = zoomLevelRef.current;
-      // 郢ｧ・ｺ郢晢ｽｼ郢晢｣ｰ鬩･謫ｾ・ｼ蛹ｻ縺帷ｹｧ・ｯ郢晢ｽｭ郢晢ｽｼ郢晢ｽｫ鬩･荳岩・陟｢諛環ｧ邵ｺ・ｦ繝ｻ繝ｻ
       const zoomDelta = -e.deltaY * 0.1;
       const newZoom = Math.round(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentZoom + zoomDelta)));
 
@@ -456,10 +447,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     ],
   );
 
-  // 郢晄鱒ﾎｦ郢昶・縺懃ｹ晢ｽｼ郢晢｣ｰ陷・ｽｦ騾・・・ｼ蛹ｻ縺帷ｹ晄ｧｭ繝ｻ郢晏現繝ｵ郢ｧ・ｩ郢晢ｽｳ/郢ｧ・ｿ郢晄じﾎ樒ｹ昴・繝ｨ: 郢晄鱒ﾎｦ郢昶或・ｸ・ｭ陟｢繝ｻ・定搏・ｺ雋・じ竊鍋ｹｧ・ｺ郢晢ｽｼ郢晢｣ｰ繝ｻ繝ｻ
   const handleTouchStart = useCallback(
     (e: TouchEvent) => {
-      // 郢ｧ・ｿ郢昴・繝｡郢晄亢縺・ｹ晢ｽｳ郢晏現・帝坎蛟ｬ鮖ｸ
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
         activeTouchesRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
@@ -480,7 +469,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
   const handleTouchMove = useCallback(
     (e: TouchEvent) => {
-      // 郢ｧ・ｿ郢昴・繝｡郢晄亢縺・ｹ晢ｽｳ郢晏現・定ｭ厄ｽｴ隴・ｽｰ
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
         activeTouchesRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
@@ -532,7 +520,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }
   }, []);
 
-  // 郢晏ｸ吶≧郢晢ｽｼ郢晢ｽｫ郢晢ｽｻ郢ｧ・ｿ郢昴・繝｡郢ｧ・､郢晏生ﾎｦ郢晏現繝ｻ騾具ｽｻ鬪ｭ・ｲ
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -552,12 +539,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     };
   }, [handleWheel, handleTouchStart, handleTouchMove, handleTouchEnd]);
 
-  // 郢晏ｸ吶・郢晢ｽｫ鬩包ｽｸ隰壽ｨ雁・邵ｺ・ｫ郢ｧ・ｪ郢晁ｼ斐◎郢昴・繝ｨ郢ｧ螳壹・陷肴・・ｪ・ｿ隰ｨ・ｴ邵ｺ蜉ｱ窶ｻ郢晏ｸ吶・郢晢ｽｫ郢ｧ蝣､蛻､鬮ｱ・｢陷繝ｻ竊馴ｩ溷調・ｽ・ｮ
-  // selectedHall邵ｺ謔滂ｽ､逕ｻ蟲ｩ邵ｺ霈費ｽ檎ｸｺ貊灘・邵ｺ・ｮ邵ｺ・ｿ陞ｳ貅ｯ・｡魃会ｽｼ蛹ｻ縺懃ｹ晢ｽｼ郢晢｣ｰ陞溽判蟲ｩ隴弱ｅ繝ｻ陞ｳ貅ｯ・｡蠕鯉ｼ邵ｺ・ｪ邵ｺ繝ｻ・ｼ繝ｻ
   const prevSelectedHallRef = useRef<HallDefinition | undefined>(undefined);
 
   useEffect(() => {
-    // selectedHall邵ｺ謔滂ｽ､蟲ｨ・冗ｸｺ・｣邵ｺ・ｦ邵ｺ繝ｻ竊醍ｸｺ繝ｻ・ｰ・ｴ陷ｷ蛹ｻ繝ｻ郢ｧ・ｹ郢ｧ・ｭ郢昴・繝ｻ
     if (prevSelectedHallRef.current?.id === selectedHall?.id) {
       return;
     }
@@ -570,7 +554,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const containerWidth = container.clientWidth;
       const containerHeight = container.clientHeight;
 
-      // 郢晏ｸ吶・郢晢ｽｫ邵ｺ・ｮ驕ｽ繝ｻ蟲・ｹｧ螳夲ｽｨ閧ｲ・ｮ證ｦ・ｼ蛹ｻ繝ｻ郢晢ｽｼ郢ｧ・ｸ郢晢ｽｳ髴趣ｽｼ邵ｺ・ｿ繝ｻ繝ｻ
       const rows = selectedHall.vertices.map((v) => v.row);
       const cols = selectedHall.vertices.map((v) => v.col);
       const minRow = Math.max(1, Math.min(...rows) - SCROLL_MARGIN);
@@ -578,7 +561,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const minCol = Math.max(1, Math.min(...cols) - SCROLL_MARGIN);
       const maxCol = Math.max(...cols) + SCROLL_MARGIN;
 
-      // 郢晏ｸ吶・郢晢ｽｫ驕ｽ繝ｻ蟲・ｸｺ・ｮ郢晄鱒縺醍ｹｧ・ｻ郢晢ｽｫ陟趣ｽｧ隶薙・
       const hallLeft = (minCol - 1) * cellSize;
       const hallRight = maxCol * cellSize;
       const hallTop = (minRow - 1) * cellSize;
@@ -589,31 +571,24 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       let newOffsetX: number;
       let newOffsetY: number;
 
-      // 郢晏ｸ吶・郢晢ｽｫ邵ｺ讙主愛鬮ｱ・｢邵ｺ・ｫ陷ｿ蠑ｱ竏ｪ郢ｧ蜿･・ｰ・ｴ陷ｷ蛹ｻ繝ｻ闕ｳ・ｭ陞滂ｽｮ邵ｺ・ｫ鬩溷調・ｽ・ｮ邵ｲ竏晏ｺｶ邵ｺ・ｾ郢ｧ蟲ｨ竊醍ｸｺ繝ｻ・ｰ・ｴ陷ｷ蛹ｻ繝ｻ陝ｾ・ｦ闕ｳ鄙ｫ・定搏・ｺ雋・じ竊・
       if (hallWidth <= containerWidth) {
-        // 郢晏ｸ吶・郢晢ｽｫ郢ｧ蜻茨ｽｰ・ｴ陝ｷ・ｳ隴・ｽｹ陷ｷ蜿ｰ・ｸ・ｭ陞滂ｽｮ邵ｺ・ｫ
         newOffsetX = (containerWidth - hallWidth) / 2 - hallLeft;
       } else {
-        // 郢晏ｸ吶・郢晢ｽｫ陝ｾ・ｦ驕ｶ・ｯ郢ｧ蝣､蛻､鬮ｱ・｢陝ｾ・ｦ驕ｶ・ｯ邵ｺ・ｫ陷ｷ蛹ｻ・冗ｸｺ蟶呻ｽ・
         newOffsetX = -hallLeft;
       }
 
       if (hallHeight <= containerHeight) {
-        // 郢晏ｸ吶・郢晢ｽｫ郢ｧ雋樊｡咎ｶ・ｴ隴・ｽｹ陷ｷ蜿ｰ・ｸ・ｭ陞滂ｽｮ邵ｺ・ｫ
         newOffsetY = (containerHeight - hallHeight) / 2 - hallTop;
       } else {
-        // 郢晏ｸ吶・郢晢ｽｫ闕ｳ鬘費ｽｫ・ｯ郢ｧ蝣､蛻､鬮ｱ・｢闕ｳ鬘費ｽｫ・ｯ邵ｺ・ｫ陷ｷ蛹ｻ・冗ｸｺ蟶呻ｽ・
         newOffsetY = -hallTop;
       }
 
       setOffset({ x: newOffsetX, y: newOffsetY });
     } else if (!selectedHall) {
-      // 郢晏ｸ吶・郢晢ｽｫ隴幢ｽｪ鬩包ｽｸ隰壽ｧｭ竊楢ｬ鯉ｽｻ邵ｺ・｣邵ｺ貊灘・邵ｺ・ｯ郢ｧ・ｪ郢晁ｼ斐◎郢昴・繝ｨ郢ｧ蛛ｵﾎ懃ｹｧ・ｻ郢昴・繝ｨ
       setOffset({ x: 0, y: 0 });
     }
   }, [selectedHall, cellSize]);
 
-  // 郢ｧ・ｻ郢晢ｽｫ郢晄ｧｭ繝｣郢晏干・定抄諛医・
   const cellsMap = useMemo(() => {
     const map = new Map<string, CellData>();
     mapData.cells.forEach((cell) => {
@@ -622,7 +597,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return map;
   }, [mapData.cells]);
 
-  // 驍ｨ莉咏ｲ狗ｹｧ・ｻ郢晢ｽｫ邵ｺ・ｮ郢晄ｧｭ繝｣郢晏干・定抄諛医・
   const mergedCellsMap = useMemo(() => {
     const map = new Map<string, MergedCellInfo>();
     mapData.mergedCells.forEach((merge) => {
@@ -631,39 +605,33 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return map;
   }, [mapData.mergedCells]);
 
-  // executeModeItemIds郢ｧ諡・t邵ｺ・ｫ陞溽判驪､繝ｻ閧ｲ諞ｾ隲ｷ邇厄ｽｨ閧ｲ・ｮ遉ｼ逡代・繝ｻ
   const executeModeItemIdsSet = useMemo(() => {
     return new Set(executeModeItemIds);
   }, [executeModeItemIds]);
 
-  // 郢ｧ・ｻ郢晢ｽｫ邵ｺ蠕後＞郢ｧ・､郢昴・ﾎ堤ｹｧ蜻域亜邵ｺ・､邵ｺ荵昶・邵ｺ繝ｻﾂｰ邵ｺ・ｮ霑･・ｶ隲ｷ荵晢ｽ帝坎閧ｲ・ｮ繝ｻ
+  // アイテムを「日付 + ブロック + 番号」でマップ上のセルに紐付ける。
   const cellStates = useMemo(() => {
     const states = new Map<string, MapCellStateDetail>();
 
     const dayName = extractDayNameFromMapName(mapName);
     if (!dayName) return states;
 
-    // 陷・ｽｪ陷亥現縺・ｹｧ・､郢昴・ﾎ堤ｸｺ荵昶・邵ｺ繝ｻﾂｰ郢ｧ雋樊・陞ｳ螢ｹ笘・ｹｧ遏ｩ譛ｪ隰ｨ・ｰ
     const isPriorityItem = (item: (typeof items)[number]) => {
       const remarks = item.remarks?.toLowerCase() || '';
       return remarks.includes('優先') || remarks.includes('最優先');
     };
 
     items.forEach((item) => {
-      // 隴鯉ｽ･闔牙･繝ｻ雎育｢托ｽｼ繝ｻ・ｼ蛹ｻ繝ｨ郢晢ｽｪ郢晢｣ｰ雋ょ現竏ｩ繝ｻ繝ｻ
       const itemEventDate = item.eventDate?.trim() || '';
       if (itemEventDate !== dayName) return;
 
-      // 郢晄じﾎ溽ｹ昴・縺題惺髦ｪ繝ｻ雎育｢托ｽｼ繝ｻ      // 邵ｺ・ｾ邵ｺ螢ｼ・ｮ謔溘・闕ｳﾂ髢ｾ・ｴ郢ｧ螳夲ｽｩ・ｦ邵ｺ・ｿ邵ｲ竏ｬ・ｦ荵昶命邵ｺ荵晢ｽ臥ｸｺ・ｪ邵ｺ繝ｻ・ｰ・ｴ陷ｷ蛹ｻ繝ｻ邵ｺ・ｿ陞滂ｽｧ隴√・・ｭ繝ｻ陝・ｹ玲椢陝・､ｼ笏碁囎繝ｻ
       const itemBlockName = item.block?.trim() || '';
       let block = mapData.blocks.find((b) => b.name === itemBlockName);
 
-      // 陞ｳ謔溘・闕ｳﾂ髢ｾ・ｴ邵ｺ蠕娯・邵ｺ繝ｻ・ｰ・ｴ陷ｷ蛹ｻﾂ竏晢ｽ､・ｧ隴√・・ｭ繝ｻ陝・ｹ玲椢陝・干・定ｾ滂ｽ｡髫墓じ・邵ｺ・ｦ隶諛・ｽｴ・｢繝ｻ蛹ｻ笳・ｸｺ・ｰ邵ｺ諤憺・陷ｷ髦ｪ繝ｶ郢晢ｽｭ郢昴・縺醍ｸｺ迹夲ｽ､繝ｻ辟夂ｸｺ繧・ｽ玖撻・ｴ陷ｷ蛹ｻ繝ｻ鬮ｯ・､邵ｺ謫ｾ・ｼ繝ｻ
       if (!block) {
         const candidates = mapData.blocks.filter(
           (b) => b.name.toLowerCase() === itemBlockName.toLowerCase(),
         );
-        // 陋溷揃・｣諛岩ｲ1邵ｺ・､邵ｺ・ｰ邵ｺ莉｣竊醍ｹｧ逕ｻ豐ｻ騾包ｽｨ繝ｻ驛・ｽ､繝ｻ辟夂ｸｺ繧・ｽ玖撻・ｴ陷ｷ蛹ｻ繝ｻ隴門戟荵らｸｺ・ｪ邵ｺ・ｮ邵ｺ・ｧ隰暦ｽ｡騾包ｽｨ邵ｺ蜉ｱ竊醍ｸｺ繝ｻ・ｼ繝ｻ
         if (candidates.length === 1) {
           block = candidates[0];
         }
@@ -693,10 +661,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       existing.itemCount++;
       existing.items.push(item);
 
-      // 陷・ｽｪ陷亥現縺・ｹｧ・､郢昴・ﾎ堤ｸｺ荵昶・邵ｺ繝ｻﾂｰ郢ｧ蛛ｵ繝｡郢ｧ・ｧ郢昴・縺・
       if (isPriorityItem(item)) {
         existing.hasPriorityItem = true;
-        // 髫ｪ・ｪ陜荳槭・邵ｺ・ｫ隴幢ｽｪ隰悶・・ｮ螢ｹ繝ｻ陷・ｽｪ陷亥現縺・ｹｧ・､郢昴・ﾎ堤ｸｺ蠕娯旺郢ｧ荵敖ｰ郢昶・縺臥ｹ昴・縺・
         if (!executeModeItemIdsSet.has(item.id)) {
           existing.hasPriorityUnvisited = true;
         }
@@ -719,14 +685,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return states;
   }, [mapData.blocks, items, mapName, executeModeItemIdsSet]);
 
-  // 郢晢ｽｫ郢晢ｽｼ郢晁ご蜃ｽ隰梧腸・ｼ莠･笏∬怦莠･・ｺ・ｦ隲繝ｻ・ｰ・ｱ闔牙･窶ｳ繝ｻ繝ｻ
+  // 実行リストの順序に沿ってルート用の通過点を作る。
   const routePoints = useMemo(() => {
     if (!isRouteVisible) return [];
 
     const dayName = extractDayNameFromMapName(mapName);
     if (!dayName) return [];
 
-    // executeModeItemIds邵ｺ・ｮ鬯・・・ｺ荳奇ｽ帝け・ｭ隰問・笘・ｹｧ荵昶螺郢ｧ竏壺・邵ｲ・．邵ｺ・ｮ鬩滓ｦ翫・鬯・・竊鍋ｹｧ・｢郢ｧ・､郢昴・ﾎ堤ｹｧ雋槫徐陟輔・
     const itemsMap = new Map(items.map((item) => [item.id, item]));
     const executeModeItemIdsArray = Array.from(executeModeItemIds);
 
@@ -746,7 +711,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     visitItems.forEach((item, index) => {
       const itemBlockName = item.block?.trim() || '';
 
-      // 陞ｳ謔溘・闕ｳﾂ髢ｾ・ｴ陷・ｽｪ陷亥現縲堤ｹ晄じﾎ溽ｹ昴・縺醍ｹｧ蜻茨ｽ､諛・ｽｴ・｢
       let block = mapData.blocks.find((b) => b.name === itemBlockName);
       if (!block) {
         const candidates = mapData.blocks.filter(
@@ -776,7 +740,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return points;
   }, [mapData.blocks, items, mapName, executeModeItemIds, isRouteVisible]);
 
-  // 郢晢ｽｫ郢晢ｽｼ郢晏現縺晉ｹｧ・ｰ郢晢ｽ｡郢晢ｽｳ郢昴・
   const routeSegments = useMemo(() => {
     if (!isRouteVisible || routePoints.length < 2) return [];
 
@@ -799,7 +762,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }));
   }, [isRouteVisible, routePoints, mapData, cellsMap]);
 
-  // 隰蜀怜愛
+  // キャンバス描画本体。状態変化に応じて再描画する。
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -808,7 +771,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // 郢ｧ・ｭ郢晢ｽ｣郢晢ｽｳ郢晁・縺帷ｹｧ・ｵ郢ｧ・､郢ｧ・ｺ郢ｧ蛛ｵ縺慕ｹ晢ｽｳ郢昴・繝ｪ繝ｻ蛹ｻ繝ｳ郢晢ｽ･郢晢ｽｼ郢晄亢繝ｻ郢晁肩・ｼ蟲ｨ縺礼ｹｧ・､郢ｧ・ｺ邵ｺ・ｫ髫ｪ・ｭ陞ｳ螟ｲ・ｼ逎ｯ・ｫ蛟ｩ・ｧ・｣陷剃ｸ橸ｽｺ・ｦ陝・ｽｾ陟｢諛ｶ・ｼ繝ｻ
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
@@ -817,13 +779,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     canvas.width = containerWidth * dpr;
     canvas.height = containerHeight * dpr;
 
-    // 郢ｧ・ｹ郢ｧ・ｱ郢晢ｽｼ郢晢ｽｫ髫ｱ・ｿ隰ｨ・ｴ
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // 郢ｧ・ｯ郢晢ｽｪ郢ｧ・｢
     ctx.clearRect(0, 0, containerWidth, containerHeight);
 
-    // 郢ｧ・ｪ郢晁ｼ斐◎郢昴・繝ｨ邵ｺ・ｨ陜玲ｫ・ｽｻ・｢郢ｧ蟶昶・騾包ｽｨ繝ｻ莠包ｽｻ・･鬮ｯ髦ｪ繝ｻ隰蜀怜愛邵ｺ・ｯ郢晄ｧｭ繝｣郢晄懶ｽｺ・ｧ隶灘衷・ｳ・ｻ邵ｺ・ｧ髯ｦ蠕娯鴬繝ｻ繝ｻ
     ctx.save();
     ctx.translate(offset.x, offset.y);
     if (rotationRadians !== 0) {
@@ -843,13 +802,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const visibleMinY = Math.min(...viewportCorners.map((p) => p.y)) - cellSize * 2;
     const visibleMaxY = Math.max(...viewportCorners.map((p) => p.y)) + cellSize * 2;
 
-    // 陷ｿ・ｯ髫墓じ縺晉ｹ晢ｽｫ驕ｽ繝ｻ蟲・ｹｧ螳夲ｽｨ閧ｲ・ｮ證ｦ・ｼ蝓溽ｷ帝包ｽｻ隴崢鬩包ｽｩ陋ｹ蜴・ｽｼ繝ｻ
     const visMinCol = Math.max(1, Math.floor(visibleMinX / cellSize) + 1);
     const visMaxCol = Math.min(mapData.maxCol, Math.ceil(visibleMaxX / cellSize) + 1);
     const visMinRow = Math.max(1, Math.floor(visibleMinY / cellSize) + 1);
     const visMaxRow = Math.min(mapData.maxRow, Math.ceil(visibleMaxY / cellSize) + 1);
 
-    // 郢ｧ・ｻ郢晢ｽｫ邵ｺ謔溷ｺ・囎荵滂ｽｯ繝ｻ蟲・怙繝ｻﾂｰ郢昶・縺臥ｹ昴・縺醍ｸｺ蜷ｶ・狗ｹ晏･ﾎ晉ｹ昜ｻ｣繝ｻ
     const isCellVisible = (row: number, col: number, spanRows = 1, spanCols = 1): boolean => {
       return (
         col + spanCols - 1 >= visMinCol &&
@@ -859,7 +816,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       );
     };
 
-    // 郢ｧ・｢郢晢ｽｳ郢昶・縺顔ｹｧ・､郢晢ｽｪ郢ｧ・｢郢ｧ・ｹ髫ｪ・ｭ陞ｳ繝ｻ
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
@@ -967,10 +923,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     const trimLineToWidth = (line: string, maxLineWidth: number): string => {
       let next = line;
-      while (next.length > 0 && ctx.measureText(`${next}遯ｶ・ｦ`).width > maxLineWidth) {
+      while (next.length > 0 && ctx.measureText(`${next}…`).width > maxLineWidth) {
         next = next.slice(0, -1);
       }
-      return next.length > 0 ? `${next}遯ｶ・ｦ` : '遯ｶ・ｦ';
+      return next.length > 0 ? `${next}…` : '…';
     };
 
     const drawFittedHorizontalTextInCell = (
@@ -1077,7 +1033,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       drawableColumns = drawableColumns.map((chars) => {
         if (chars.length <= maxRows) return chars;
         const trimmed = chars.slice(0, maxRows);
-        trimmed[maxRows - 1] = '遯ｶ・ｦ';
+        trimmed[maxRows - 1] = '…';
         return trimmed;
       });
 
@@ -1085,9 +1041,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const lastColumnIndex = drawableColumns.length - 1;
         const lastColumn = drawableColumns[lastColumnIndex];
         if (lastColumn.length < maxRows) {
-          lastColumn.push('遯ｶ・ｦ');
+          lastColumn.push('…');
         } else {
-          lastColumn[lastColumn.length - 1] = '遯ｶ・ｦ';
+          lastColumn[lastColumn.length - 1] = '…';
         }
       }
 
@@ -1118,24 +1074,20 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.textBaseline = 'middle';
     };
 
-    // 魄溘・迚｡邵ｺ・ｨ魄溷・繝ｻ隴∵㈱・∫ｹｧ・ｹ郢晏現ﾎ帷ｹｧ・､郢晏干繝ｱ郢ｧ・ｿ郢晢ｽｼ郢晢ｽｳ郢ｧ蜑・ｽｽ諛医・
     const createWarningStripePattern = () => {
       if (isRotationInteracting) return null;
       const patternCanvas = document.createElement('canvas');
-      const stripeSize = Math.max(8, cellSize * 0.4); // 郢ｧ・ｹ郢晏現ﾎ帷ｹｧ・､郢晏干繝ｻ陞滂ｽｪ邵ｺ繝ｻ
+      const stripeSize = Math.max(8, cellSize * 0.4);
       patternCanvas.width = stripeSize * 2;
       patternCanvas.height = stripeSize * 2;
       const patternCtx = patternCanvas.getContext('2d');
       if (!patternCtx) return null;
 
-      // 髢ｭ譴ｧ蜍ｹ郢ｧ蟶晢ｽｻ繝ｻ迚｡邵ｺ・ｧ陜ｪ蜉ｱ・顔ｸｺ・､邵ｺ・ｶ邵ｺ繝ｻ
       patternCtx.fillStyle = '#FFD600';
       patternCtx.fillRect(0, 0, stripeSize * 2, stripeSize * 2);
 
-      // 魄溷・繝ｻ隴∵㈱・∫ｹｧ・ｹ郢晏現ﾎ帷ｹｧ・､郢晏干・定ｬ蜀怜愛
       patternCtx.fillStyle = '#212121';
       patternCtx.beginPath();
-      // 陝ｾ・ｦ闕ｳ荵敖ｰ郢ｧ迚呎価闕ｳ鄙ｫ竏育ｸｺ・ｮ隴∵㈱・・こ螟ｲ・ｼ蛹ｻ繝ｱ郢ｧ・ｿ郢晢ｽｼ郢晢ｽｳ邵ｺ・ｨ邵ｺ蜉ｱ窶ｻ驛｢・ｰ郢ｧ鬘假ｽｿ譁撰ｼ・ｹｧ蠕鯉ｽ九・繝ｻ
       patternCtx.moveTo(0, stripeSize * 2);
       patternCtx.lineTo(stripeSize, stripeSize * 2);
       patternCtx.lineTo(stripeSize * 2, stripeSize);
@@ -1217,7 +1169,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     }
 
-    // 1. 髢ｭ譴ｧ蜍ｹ郢ｧ蜻育ｷ帝包ｽｻ
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
 
@@ -1232,37 +1183,33 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const width = spanCols * cellSize;
       const height = spanRows * cellSize;
 
-      // 髢ｭ譴ｧ蜍ｹ豼ｶ・ｲ
+      // セル背景色
       if (cell.backgroundColor) {
         ctx.fillStyle = cell.backgroundColor;
         ctx.fillRect(x, y, width, height);
       }
 
-      // 郢ｧ・ｻ郢晢ｽｫ霑･・ｶ隲ｷ荵昶・陟｢諛環ｧ邵ｺ貅ｯ繝ｬ隴趣ｽｯ
       const state = cellStates.get(`${cell.row}-${cell.col}`);
       if (state) {
         if (state.isFullyVisited) {
-          ctx.fillStyle = 'rgba(239, 83, 80, 0.5)'; // 隘搾ｽ､繝ｻ螢ｼ繝ｻ髫ｪ・ｪ陜荵暦ｽｸ蛹ｻ竏ｩ
+          ctx.fillStyle = 'rgba(239, 83, 80, 0.5)';
           ctx.fillRect(x, y, width, height);
         } else if (state.hasPriorityUnvisited && warningPattern) {
-          // 魄溘・迚｡邵ｺ・ｨ魄溷・繝ｻ隴∵㈱・∫ｹｧ・ｹ郢晏現ﾎ帷ｹｧ・､郢晄圜・ｼ螢ｼ笏∬怦繝ｻ陝狗｢托ｽｨ遉ｼ笏檎ｸｺ・ｮ隴幢ｽｪ髫ｪ・ｪ陜荳翫＞郢ｧ・､郢昴・ﾎ堤ｸｺ繧・ｽ翫・莠包ｽｸﾂ鬩幢ｽｨ髫ｪ・ｪ陜荳奇ｽ育ｹｧ髮≫煤陷郁肩・ｼ繝ｻ
           ctx.fillStyle = warningPattern;
           ctx.fillRect(x, y, width, height);
         } else if (state.hasPriorityUnvisited) {
-          // 陜玲ｫ・ｽｻ・｢隰ｫ蝣ｺ・ｽ諛会ｽｸ・ｭ邵ｺ・ｯ陷雁ｩ迚｡邵ｺ・ｧ驍・ｽ｡騾｡・･髯ｦ・ｨ驕会ｽｺ
           ctx.fillStyle = 'rgba(255, 214, 0, 0.45)';
           ctx.fillRect(x, y, width, height);
         } else if (state.isVisited) {
-          ctx.fillStyle = 'rgba(255, 238, 88, 0.5)'; // 魄溘・・ｼ螢ｻ・ｸﾂ鬩幢ｽｨ髫ｪ・ｪ陜荵暦ｽｸ蛹ｻ竏ｩ繝ｻ莠･笏∬怦蛹ｻ縺・ｹｧ・､郢昴・ﾎ堤ｸｺ・ｯ髫ｪ・ｪ陜荵暦ｽｸ蛹ｻ竏ｩ繝ｻ繝ｻ
+          ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';
           ctx.fillRect(x, y, width, height);
         } else if (state.hasItems) {
-          ctx.fillStyle = 'rgba(66, 165, 245, 0.3)'; // 鬮ｱ謚ｵ・ｼ螟青螢ｼ・ｸ・ｸ邵ｺ・ｮ隴幢ｽｪ髫ｪ・ｪ陜荳翫＞郢ｧ・､郢昴・ﾎ堤ｸｺ繧・ｽ・
+          ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';
           ctx.fillRect(x, y, width, height);
         }
       }
     });
 
-    // 2. 驗ゑｽｫ驍ｱ螢ｹ・定ｬ蜀怜愛繝ｻ蛹ｻ縺懃ｹ晢ｽｼ郢晢｣ｰ郢晢ｽｬ郢晏生ﾎ晉ｸｺ・ｫ陟｢諛環ｧ邵ｺ・ｦ繝ｻ繝ｻ
     if (showBorders && !isRotationInteracting) {
       mapData.cells.forEach((cell) => {
         if (cell.isMerged) return;
@@ -1290,7 +1237,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           if (!border) return;
 
           ctx.beginPath();
-          ctx.strokeStyle = border.color || '#000000'; // 郢昴・繝ｵ郢ｧ・ｩ郢晢ｽｫ郢晞メ迚｡郢ｧ蟶晢ｽｻ蛛ｵ竊楢棔逕ｻ蟲ｩ
+          ctx.strokeStyle = border.color || '#000000';
 
           let lineWidth = 1;
           switch (border.style) {
@@ -1318,11 +1265,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         if (borders.bottom) drawBorder(x, y + height, x + width, y + height, borders.bottom);
         if (borders.left) drawBorder(x, y, x, y + height, borders.left);
 
-        // 謨ｰ蟄励そ繝ｫ縺ｮ鄂ｫ邱壹・閭梧勹蝪励ｊ縺ｮ縺ｿ縺ｧ陦ｨ遉ｺ縺吶ｋ
       });
     }
 
-    // 3. 郢昴・縺冗ｹｧ・ｹ郢晏現・定ｬ蜀怜愛繝ｻ蛹ｻ縺懃ｹ晢ｽｼ郢晢｣ｰ郢晢ｽｬ郢晏生ﾎ晉ｸｺ・ｫ陟｢諛環ｧ邵ｺ・ｦ繝ｻ繝ｻ
     if (showNumbers) {
       mapData.cells.forEach((cell) => {
         if (cell.isMerged || cell.value === null) return;
@@ -1341,45 +1286,37 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const text = String(cell.value);
         const isVertical = cell.isVerticalText;
 
-        // 郢晁ｼ斐°郢晢ｽｳ郢晏現縺礼ｹｧ・､郢ｧ・ｺ郢ｧ螳夲ｽｨ閧ｲ・ｮ繝ｻ
         let fontSize: number;
         if (merge) {
-          // 驍ｨ莉咏ｲ狗ｹｧ・ｻ郢晢ｽｫ邵ｺ・ｯ陞滂ｽｧ邵ｺ髦ｪ・・
           if (isVertical) {
-            // 驍ｵ・ｦ隴厄ｽｸ邵ｺ髦ｪ繝ｻ陜｣・ｴ陷ｷ蛹ｻ繝ｻ鬯ｮ蛟･・・ｸｺ・ｫ陜難ｽｺ邵ｺ・･邵ｺ繝ｻ窶ｻ郢ｧ・ｵ郢ｧ・､郢ｧ・ｺ郢ｧ螳夲ｽｪ・ｿ隰ｨ・ｴ
             const charCount = text.replace(/\n/g, '').length;
             fontSize = Math.min(width * 0.6, (height / (charCount + 1)) * 0.9, 16);
           } else {
             fontSize = Math.min(width, height) * (isDetailedView ? 0.5 : 0.4);
           }
         } else if (typeof cell.value === 'number') {
-          // 隰ｨ・ｰ陋滂ｽ､郢ｧ・ｻ郢晢ｽｫ
           fontSize = Math.min(cellSize * 0.45, 14);
         } else {
-          // 郢昴・縺冗ｹｧ・ｹ郢晏現縺晉ｹ晢ｽｫ
           fontSize = Math.min(cellSize * 0.4, 12);
         }
 
-        fontSize = Math.max(fontSize, 8); // 隴崢陝・ｸ翫＠郢ｧ・､郢ｧ・ｺ
+        fontSize = Math.max(fontSize, 8);
 
         ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // 郢昴・縺冗ｹｧ・ｹ郢晞メ迚｡邵ｺ・ｨ郢ｧ・ｹ郢ｧ・ｿ郢ｧ・､郢晢ｽｫ
         const state = cellStates.get(`${cell.row}-${cell.col}`);
         const explicitFontColor = cell.fontColor?.trim();
         const enforceBlackNumberTextInDarkMode =
           isDarkMode && Boolean(state?.hasItems) && isNumberLikeCellValue(cell.value);
 
-        // 陷・ｽｪ陷亥現縺・ｹｧ・､郢昴・ﾎ偵・逎ｯ・ｻ繝ｻ・ｻ蛛ｵ縺帷ｹ晏現ﾎ帷ｹｧ・､郢晁挙繝ｬ隴趣ｽｯ繝ｻ蟲ｨ繝ｻ陜｣・ｴ陷ｷ蛹ｻ繝ｻ騾具ｽｽ髢ｭ譴ｧ蜍ｹ郢ｧ蜻育ｷ帝包ｽｻ
         if (state?.hasPriorityUnvisited && typeof cell.value === 'number') {
           const textMetrics = ctx.measureText(text);
           const textWidth = textMetrics.width;
           const textHeight = fontSize;
           const padding = fontSize * 0.3;
 
-          // 髫怜宴・ｸ・ｸ邵ｺ・ｮ騾具ｽｽ髢ｭ譴ｧ蜍ｹ郢ｧ蜻育ｷ帝包ｽｻ
           const bgX = x + width / 2 - textWidth / 2 - padding;
           const bgY = y + height / 2 - textHeight / 2 - padding * 0.5;
           const bgWidth = textWidth + padding * 2;
@@ -1396,7 +1333,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           } else if (explicitFontColor) {
             ctx.fillStyle = resolveMapTextColorForTheme(explicitFontColor, isDarkMode, '#212121');
           } else {
-            // 郢昴・縺冗ｹｧ・ｹ郢晞メ迚｡邵ｺ・ｯ魄溷・縲帝ｶ・ｮ驕ｶ荵昶螺邵ｺ蟶呻ｽ・
             ctx.fillStyle = '#212121';
           }
         } else if (enforceBlackNumberTextInDarkMode && !isWhiteLikeColor(explicitFontColor)) {
@@ -1404,21 +1340,19 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         } else if (explicitFontColor) {
           ctx.fillStyle = resolveMapTextColorForTheme(explicitFontColor, isDarkMode);
         } else if (state?.isFullyVisited) {
-          ctx.fillStyle = '#B71C1C'; // 雎ｼ繝ｻ・櫁･搾ｽ､繝ｻ螢ｼ繝ｻ髫ｪ・ｪ陜荵暦ｽｸ蛹ｻ竏ｩ
+          ctx.fillStyle = '#B71C1C';
         } else if (state?.isVisited) {
-          ctx.fillStyle = '#F57F17'; // 郢ｧ・ｪ郢晢ｽｬ郢晢ｽｳ郢ｧ・ｸ繝ｻ螢ｻ・ｸﾂ鬩幢ｽｨ髫ｪ・ｪ陜荵暦ｽｸ蛹ｻ竏ｩ
+          ctx.fillStyle = '#F57F17';
         } else if (state?.hasItems) {
-          ctx.fillStyle = '#1565C0'; // 鬮ｱ謚ｵ・ｼ螟青螢ｼ・ｸ・ｸ邵ｺ・ｮ隴幢ｽｪ髫ｪ・ｪ陜荳翫＞郢ｧ・､郢昴・ﾎ堤ｸｺ繧・ｽ・
+          ctx.fillStyle = '#1565C0';
         } else {
           ctx.fillStyle = resolveMapTextColorForTheme(cell.fontColor, isDarkMode);
         }
 
-        // 驍ｵ・ｦ隴厄ｽｸ邵ｺ髦ｪ繝ｻ陜｣・ｴ陷ｷ繝ｻ
         if (isVertical) {
           if (rotationRadians !== 0) {
             drawFittedVerticalTextInCell(text, x, y, width, height, fontSize);
           } else {
-            // 隰ｾ・ｹ髯ｦ蠕後定崕繝ｻ迚｡邵ｺ霈費ｽ檎ｸｺ・ｦ邵ｺ繝ｻ・玖撻・ｴ陷ｷ蛹ｻ繝ｻ陷ｷ繝ｻ・｡蠕鯉ｽ定崕・･邵ｲ繝ｻ竊楢ｬ蜀怜愛
             const lines = text.split(/\n/);
             const lineSpacing = fontSize * 1.2;
             const totalWidth = lines.length * lineSpacing;
@@ -1443,7 +1377,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       });
     } else {
-      // 驍ｵ・ｮ陝・ｹ怜・邵ｺ・ｯ隰ｨ・ｰ陋滂ｽ､郢ｧ・ｻ郢晢ｽｫ邵ｺ・ｮ邵ｺ・ｿ郢晏ｳｨ繝｣郢晞メ・｡・ｨ驕会ｽｺ
       mapData.cells.forEach((cell) => {
         if (cell.isMerged) return;
 
@@ -1457,25 +1390,23 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
         const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
 
-        // 郢晏ｳｨ繝｣郢晞メ・｡・ｨ驕会ｽｺ
         const dotSize = Math.max(cellSize * 0.4, 4);
         ctx.beginPath();
 
         if (state.isFullyVisited) {
-          ctx.fillStyle = '#EF5350'; // 隘搾ｽ､繝ｻ螢ｼ繝ｻ髫ｪ・ｪ陜荵暦ｽｸ蛹ｻ竏ｩ
+          ctx.fillStyle = '#EF5350';
         } else if (state.hasPriorityUnvisited) {
-          // 魄溘・・ｻ蛛ｵ繝ｻ髫ｴ・ｦ陷ｻ鬘倡横繝ｻ蛹ｻ繝ｩ郢昴・繝ｨ邵ｺ・ｧ邵ｺ・ｯ魄溘・迚｡邵ｺ・ｫ魄溷争譽ｧ繝ｻ繝ｻ 闕ｳﾂ鬩幢ｽｨ髫ｪ・ｪ陜荳奇ｽ育ｹｧ髮≫煤陷医・
           ctx.arc(x + width / 2, y + height / 2, dotSize / 2, 0, Math.PI * 2);
           ctx.fillStyle = '#FFD600';
           ctx.fill();
           ctx.strokeStyle = '#212121';
           ctx.lineWidth = Math.max(1, dotSize * 0.2);
           ctx.stroke();
-          return; // 譌｢縺ｫ謠冗判貂医∩縺ｪ縺ｮ縺ｧ縺薙％縺ｧ邨ゆｺ・
+          return; // この分岐で描画が完了するため早期 return
         } else if (state.isVisited) {
-          ctx.fillStyle = '#FFEE58'; // 魄溘・・ｼ螢ｻ・ｸﾂ鬩幢ｽｨ髫ｪ・ｪ陜荵暦ｽｸ蛹ｻ竏ｩ
+          ctx.fillStyle = '#FFEE58';
         } else {
-          ctx.fillStyle = '#42A5F5'; // 鬮ｱ謚ｵ・ｼ螟青螢ｼ・ｸ・ｸ邵ｺ・ｮ隴幢ｽｪ髫ｪ・ｪ陜荳翫＞郢ｧ・､郢昴・ﾎ堤ｸｺ繧・ｽ・
+          ctx.fillStyle = '#42A5F5';
         }
 
         ctx.arc(x + width / 2, y + height / 2, dotSize / 2, 0, Math.PI * 2);
@@ -1483,21 +1414,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
 
-    // 4. 郢晢ｽｫ郢晢ｽｼ郢晏現・定ｬ蜀怜愛繝ｻ莠･笏∬怦莠･・ｺ・ｦ邵ｺ・ｧ豼ｶ・ｲ陋ｻ繝ｻ・邵ｲ繝ｻ纃ｾ髫阪・ﾎ夊崕繝ｻ繝ｻ陝ｷ・ｳ髯ｦ讙趣ｽｷ螟ｲ・ｼ繝ｻ
     if (!isRotationInteracting && isRouteVisible && routeSegments.length > 0) {
-      // 陷・ｽｪ陷井ｺ･・ｺ・ｦ邵ｺ譁絶・邵ｺ・ｮ豼ｶ・ｲ郢ｧ雋橸ｽｮ螟ゑｽｾ・ｩ
       const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
         switch (priority) {
           case 'highest':
-            return '#EF4444'; // 隘搾ｽ､
+            return '#EF4444'; // 最優先
           case 'priority':
-            return '#F97316'; // 郢ｧ・ｪ郢晢ｽｬ郢晢ｽｳ郢ｧ・ｸ
+            return '#F97316';
           default:
-            return '#1976D2'; // 髱・
+            return '#1976D2'; // 通常
         }
       };
 
-      // 郢ｧ・ｰ郢晢ｽｫ郢晢ｽｼ郢晞斡菫｣隰暦ｽ･驍ｯ螢ｹﾂｰ邵ｺ・ｩ邵ｺ繝ｻﾂｰ郢ｧ雋樊・陞ｳ繝ｻ
       const isGroupTransition = (
         fromPriority: string | undefined,
         toPriority: string | undefined,
@@ -1507,22 +1435,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         return from !== to;
       };
 
-      // 郢ｧ・ｨ郢昴・縺夂ｸｺ譁絶・邵ｺ・ｮ鬨ｾ螟絶с隲繝ｻ・ｰ・ｱ郢ｧ雋槫ｺｶ鬮ｮ繝ｻ・ｼ逎ｯ纃ｾ髫阪・・､諛ｷ繝ｻ騾包ｽｨ繝ｻ繝ｻ      // 郢ｧ・ｭ郢晢ｽｼ: "row1,col1-row2,col2"繝ｻ莠･・ｰ荳奇ｼ・ｸｺ繝ｻ・ｺ・ｧ隶灘生・定怦蛹ｻ竊薙・繝ｻ
       const edgeUsage = new Map<string, Set<'none' | 'priority' | 'highest'>>();
 
       const getEdgeKey = (r1: number, c1: number, r2: number, c2: number): string => {
-        // 陝ｶ・ｸ邵ｺ・ｫ陝・ｸ奇ｼ・ｸｺ繝ｻ・ｺ・ｧ隶灘生・定怦蛹ｻ竊鍋ｸｺ蜉ｱ窶ｻ雎・ｽ｣髫穂ｸ槫密
         if (r1 < r2 || (r1 === r2 && c1 < c2)) {
           return `${r1},${c1}-${r2},${c2}`;
         }
         return `${r2},${c2}-${r1},${c1}`;
       };
 
-      // 陷茨ｽｨ郢ｧ・ｻ郢ｧ・ｰ郢晢ｽ｡郢晢ｽｳ郢晏現繝ｻ郢ｧ・ｨ郢昴・縺夂ｹｧ雋槫ｺｶ鬮ｮ繝ｻ
       routeSegments.forEach((segment) => {
         if (segment.path.length < 2) return;
 
-        // 郢ｧ・ｰ郢晢ｽｫ郢晢ｽｼ郢晞斡菫｣隰暦ｽ･驍ｯ螢ｹ繝ｻ郢ｧ・ｰ郢晢ｽｬ郢晢ｽｼ邵ｺ・ｪ邵ｺ・ｮ邵ｺ・ｧ鬩･蟠趣ｽ､繝ｻ縺咲ｹｧ・ｦ郢晢ｽｳ郢晏現竊楢惺・ｫ郢ｧ竏壺・邵ｺ繝ｻ
         if (isGroupTransition(segment.fromPriority, segment.toPriority)) return;
 
         const priority = segment.fromPriority || 'none';
@@ -1539,12 +1463,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       });
 
-      // 郢ｧ・ｻ郢ｧ・ｰ郢晢ｽ｡郢晢ｽｳ郢晏現・定ｬ蜀怜愛
-      const lineWidth = Math.max(2, cellSize * 0.08); // 陝・ｻ｣・驍擾ｽｰ邵ｺ繝ｻ
-      // 陝ｷ・ｳ髯ｦ讙趣ｽｷ螢ｹ繝ｻ郢ｧ・ｪ郢晁ｼ斐◎郢昴・繝ｨ鬩･荳奇ｽ帝坎閧ｲ・ｮ證ｦ・ｼ蛹ｻ縺晉ｹ晢ｽｫ郢ｧ・ｵ郢ｧ・､郢ｧ・ｺ邵ｺ・ｫ陟｢諛環ｧ邵ｺ・ｦ髫ｱ・ｿ隰ｨ・ｴ繝ｻ繝ｻ
+      const lineWidth = Math.max(2, cellSize * 0.08);
       const parallelOffset = Math.max(3, cellSize * 0.12);
 
-      // 驍ｱ螢ｹ・堤ｹｧ・ｪ郢晁ｼ斐◎郢昴・繝ｨ邵ｺ蜷ｶ・矩ｫ｢・｢隰ｨ・ｰ
       const getOffsetPoints = (
         px1: number,
         py1: number,
@@ -1552,13 +1473,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         py2: number,
         offset: number,
       ): { x1: number; y1: number; x2: number; y2: number } => {
-        // 驍ｱ螢ｹ繝ｻ隴・ｽｹ陷ｷ莉｣繝ｻ郢ｧ・ｯ郢晏現ﾎ・
         const dx = px2 - px1;
         const dy = py2 - py1;
         const len = Math.sqrt(dx * dx + dy * dy);
         if (len === 0) return { x1: px1, y1: py1, x2: px2, y2: py2 };
 
-        // 雎墓・・ｷ螢ｹ繝ｻ郢ｧ・ｯ郢晏現ﾎ昴・繝ｻ0陟趣ｽｦ陜玲ｫ・ｽｻ・｢繝ｻ繝ｻ
         const nx = -dy / len;
         const ny = dx / len;
 
@@ -1576,10 +1495,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const isTransition = isGroupTransition(segment.fromPriority, segment.toPriority);
         const segmentPriority = segment.fromPriority || 'none';
 
-        // 郢ｧ・ｰ郢晢ｽｫ郢晢ｽｼ郢晞斡菫｣隰暦ｽ･驍ｯ螢ｹ繝ｻ郢ｧ・ｰ郢晢ｽｬ郢晢ｽｼ
         const baseColor = isTransition ? '#9CA3AF' : getPriorityColor(segment.fromPriority);
 
-        // 郢昜ｻ｣縺帷ｹｧ蜑・ｽｸﾂ陟趣ｽｦ邵ｺ・ｫ隰蜀怜愛邵ｺ蜷ｶ・狗ｸｺ・ｮ邵ｺ・ｧ邵ｺ・ｯ邵ｺ・ｪ邵ｺ荳環竏壹♀郢昴・縺夂ｸｺ譁絶・邵ｺ・ｫ隰蜀怜愛
         for (let i = 0; i < segment.path.length - 1; i++) {
           const p1 = segment.path[i];
           const p2 = segment.path[i + 1];
@@ -1590,7 +1507,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const px2 = (p2.col - 0.5) * cellSize;
           const py2 = (p2.row - 0.5) * cellSize;
 
-          // 郢ｧ・ｰ郢晢ｽｫ郢晢ｽｼ郢晞斡菫｣隰暦ｽ･驍ｯ螢ｹ繝ｻ鬩･蟠趣ｽ､繝ｻ繝｡郢ｧ・ｧ郢昴・縺題叉蟠趣ｽｦ繝ｻ・ｼ莠包ｽｸ・ｭ陞滂ｽｮ邵ｺ・ｫ隰蜀怜愛繝ｻ繝ｻ
           if (isTransition) {
             ctx.beginPath();
             ctx.strokeStyle = baseColor;
@@ -1603,27 +1519,22 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             continue;
           }
 
-          // 鬩･蟠趣ｽ､繝ｻ・邵ｺ・ｦ邵ｺ繝ｻ・狗ｹｧ・ｨ郢昴・縺夂ｸｺ荵昶・邵ｺ繝ｻﾂｰ郢ｧ蝣､・｢・ｺ髫ｱ繝ｻ
           const usedPriorities = edgeUsage.get(edgeKey);
           const isOverlapping = usedPriorities && usedPriorities.size > 1;
 
           if (isOverlapping) {
-            // 鬩･蟠趣ｽ､繝ｻ縺顔ｹ昴・縺壹・螢ｼ・ｹ・ｳ髯ｦ讙趣ｽｷ螢ｹ縲定ｬ蜀怜愛
             const priorities = Array.from(usedPriorities!).sort((a, b) => {
               const order = { highest: 0, priority: 1, none: 2 };
               return order[a] - order[b];
             });
 
-            // 邵ｺ阮吶・郢ｧ・ｻ郢ｧ・ｰ郢晢ｽ｡郢晢ｽｳ郢晏現繝ｻ陷・ｽｪ陷井ｺ･・ｺ・ｦ邵ｺ・ｮ郢ｧ・､郢晢ｽｳ郢昴・繝｣郢ｧ・ｯ郢ｧ・ｹ郢ｧ雋槫徐陟輔・
             const priorityIndex = priorities.indexOf(segmentPriority);
             if (priorityIndex === -1) continue;
 
-            // 郢ｧ・ｪ郢晁ｼ斐◎郢昴・繝ｨ鬩･荳奇ｽ帝坎閧ｲ・ｮ證ｦ・ｼ莠包ｽｸ・ｭ陞滂ｽｮ郢ｧ雋樊ｸ戊ｲ・じ竊楢攬繝ｻ・ｭ蟲ｨ竊馴ｩ溷調・ｽ・ｮ繝ｻ繝ｻ
             const totalLines = priorities.length;
             const offsetIndex = priorityIndex - (totalLines - 1) / 2;
             const offset = offsetIndex * parallelOffset;
 
-            // 郢ｧ・ｪ郢晁ｼ斐◎郢昴・繝ｨ邵ｺ蜉ｱ笳・趣ｽｧ隶灘生・帝坎閧ｲ・ｮ繝ｻ
             const offsetted = getOffsetPoints(px1, py1, px2, py2, offset);
 
             ctx.beginPath();
@@ -1635,7 +1546,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             ctx.lineTo(offsetted.x2, offsetted.y2);
             ctx.stroke();
           } else {
-            // 鬩･蟠趣ｽ､繝ｻ竊醍ｸｺ證ｦ・ｼ螟青螢ｼ・ｸ・ｸ邵ｺ・ｮ陞ｳ貅ｽ・ｷ繝ｻ
             ctx.beginPath();
             ctx.strokeStyle = baseColor;
             ctx.lineWidth = lineWidth;
@@ -1647,7 +1557,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           }
         }
 
-        // 驕擾ｽ｢陷奇ｽｰ繝ｻ蛹ｻ縺晉ｹｧ・ｰ郢晢ｽ｡郢晢ｽｳ郢晁ご・ｵ繧峨○邵ｺ・ｫ隰蜀怜愛繝ｻ繝ｻ
         if (segment.path.length >= 2) {
           const last = segment.path[segment.path.length - 1];
           const prev = segment.path[segment.path.length - 2];
@@ -1676,10 +1585,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       });
 
-      // setLineDash郢ｧ蛛ｵﾎ懃ｹｧ・ｻ郢昴・繝ｨ
       ctx.setLineDash([]);
 
-      // 髫ｪ・ｪ陜蝓趣｣ｰ繝ｻ蛻・愾・ｷ繝ｻ莠･笏∬怦莠･・ｺ・ｦ邵ｺ・ｧ豼ｶ・ｲ陋ｻ繝ｻ・繝ｻ繝ｻ
       if (isDetailedView) {
         routePoints.forEach((point) => {
           const px = (point.col - 0.5) * cellSize;
@@ -1702,20 +1609,16 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     }
 
-    // 5. 髫ｪ・ｪ陜荳槭・郢晢ｽｪ郢ｧ・ｹ郢晏現ﾂｰ郢ｧ蟲ｨ繝ｻ郢ｧ・ｻ郢晢ｽｫ郢昜ｸ翫≧郢晢ｽｩ郢ｧ・､郢昴・
     if (!isRotationInteracting && highlightedCell) {
       const x = (highlightedCell.col - 1) * cellSize;
       const y = (highlightedCell.row - 1) * cellSize;
 
-      // 郢昜ｻ｣ﾎ晉ｹｧ・ｹ郢ｧ・｢郢昜ｹ斟鍋ｹ晢ｽｼ郢ｧ・ｷ郢晢ｽｧ郢晢ｽｳ鬯夲ｽｨ邵ｺ・ｮ郢昜ｸ翫≧郢晢ｽｩ郢ｧ・､郢昴・
       ctx.save();
 
-      // 陞滄摩繝ｻ邵ｺ・ｮ郢晢ｽｪ郢晢ｽｳ郢ｧ・ｰ
       ctx.strokeStyle = '#FF6B00';
       ctx.lineWidth = Math.max(4, cellSize * 0.15);
       ctx.strokeRect(x - 2, y - 2, cellSize + 4, cellSize + 4);
 
-      // 陷繝ｻ繝ｻ邵ｺ・ｮ郢晢ｽｪ郢晢ｽｳ郢ｧ・ｰ
       ctx.strokeStyle = '#FFD600';
       ctx.lineWidth = Math.max(2, cellSize * 0.08);
       ctx.strokeRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
@@ -1723,7 +1626,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.restore();
     }
 
-    // 6. 郢晏ｸ吶・郢晢ｽｫ鬯・ｉ縺幃ｩ包ｽｸ隰壽ｧｭ繝ｻ郢晢ｽｬ郢晁侭ﾎ礼ｹ晢ｽｼ繝ｻ莠･・､螟奇ｽｧ雋橸ｽｽ・｢郢ｧ・ｪ郢晢ｽｼ郢晁・繝ｻ郢晢ｽｬ郢ｧ・､繝ｻ繝ｻ
     if (!isRotationInteracting && vertexSelectionMode && hoverGuide) {
       const hoverCellX = (hoverGuide.col - 1) * cellSize;
       const hoverCellY = (hoverGuide.row - 1) * cellSize;
@@ -1773,7 +1675,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     if (!isRotationInteracting && vertexSelectionMode && vertexSelectionMode.clickedVertices.length >= 3) {
       const vertices = vertexSelectionMode.clickedVertices;
 
-      // 郢晏干ﾎ樒ｹ晁侭ﾎ礼ｹ晢ｽｼ騾包ｽｨ邵ｺ・ｫ鬩･讎奇ｽｿ繝ｻ・ｧ雋橸ｽｺ・ｦ郢ｧ・ｽ郢晢ｽｼ郢晏現・邵ｺ・ｦ髴趣ｽｺ闔・､陝ｾ・ｮ郢ｧ蟶昜ｺ溯ｱ・ｽ｢
       const centroidRow = vertices.reduce((s, v) => s + v.row, 0) / vertices.length;
       const centroidCol = vertices.reduce((s, v) => s + v.col, 0) / vertices.length;
       const sortedVertices = [...vertices].sort((a, b) => {
@@ -1784,10 +1685,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
 
       ctx.beginPath();
-      ctx.fillStyle = 'rgba(255, 0, 0, 0.4)'; // 闕ｳ蝓ｼﾂ荵励・陟趣ｽｦ40%邵ｺ・ｮ隘搾ｽ､
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
 
       sortedVertices.forEach((vertex, i) => {
-        // 郢ｧ・ｻ郢晢ｽｫ邵ｺ・ｮ闕ｳ・ｭ陟｢繝ｻ・ｺ・ｧ隶薙・
         const px = (vertex.col - 0.5) * cellSize;
         const py = (vertex.row - 0.5) * cellSize;
 
@@ -1801,12 +1701,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.closePath();
       ctx.fill();
 
-      // 鬯・ｉ縺帷ｹ晄ｧｭ繝ｻ郢ｧ・ｫ郢晢ｽｼ邵ｺ・ｨ騾｡・ｪ陷ｿ・ｷ郢ｧ蜻育ｷ帝包ｽｻ繝ｻ蛹ｻ縺醍ｹ晢ｽｪ郢昴・縺鷹ｬ・・縲帝勗・ｨ驕会ｽｺ繝ｻ繝ｻ
       vertices.forEach((vertex, i) => {
         const px = (vertex.col - 0.5) * cellSize;
         const py = (vertex.row - 0.5) * cellSize;
 
-        // 鬯・ｉ縺帷ｹ晄ｧｭ繝ｻ郢ｧ・ｫ郢晢ｽｼ繝ｻ閧ｲ蜊邵ｺ繝ｻ繝ｻ繝ｻ繝ｻ
         ctx.beginPath();
         ctx.fillStyle = '#FFFFFF';
         ctx.strokeStyle = '#FF0000';
@@ -1816,7 +1714,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fill();
         ctx.stroke();
 
-        // 騾｡・ｪ陷ｿ・ｷ
+        // 頂点番号ラベル
         ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1824,10 +1722,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         drawUprightText(String(i + 1), px, py);
       });
     } else if (!isRotationInteracting && vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
-      // 3霓､・ｹ隴幢ｽｪ雋・邵ｺ・ｮ陜｣・ｴ陷ｷ蛹ｻ繝ｻ霓､・ｹ邵ｺ・ｨ驍ｱ螢ｹ繝ｻ邵ｺ・ｿ髯ｦ・ｨ驕会ｽｺ
       const vertices = vertexSelectionMode.clickedVertices;
 
-      // 驍ｱ螢ｹ・定ｬ蜀怜愛繝ｻ繝ｻ霓､・ｹ闔会ｽ･闕ｳ鄙ｫ繝ｻ陜｣・ｴ陷ｷ闌ｨ・ｼ繝ｻ
       if (vertices.length >= 2) {
         ctx.beginPath();
         ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
@@ -1847,7 +1743,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.stroke();
       }
 
-      // 鬯・ｉ縺帷ｹ晄ｧｭ繝ｻ郢ｧ・ｫ郢晢ｽｼ邵ｺ・ｨ騾｡・ｪ陷ｿ・ｷ郢ｧ蜻育ｷ帝包ｽｻ
       vertices.forEach((vertex, i) => {
         const px = (vertex.col - 0.5) * cellSize;
         const py = (vertex.row - 0.5) * cellSize;
@@ -1869,17 +1764,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
 
-    // 7. 郢晄じﾎ溽ｹ昴・縺題楜螟ゑｽｾ・ｩ郢ｧ・ｻ郢晢ｽｫ鬩包ｽｸ隰壽ｧｭ繝ｻ郢晢ｽｼ郢ｧ・ｫ郢晢ｽｼ + 驕ｽ繝ｻ蟲・ｹ晏干ﾎ樒ｹ晁侭ﾎ礼ｹ晢ｽｼ
     if (!isRotationInteracting && cellSelectionMode && cellSelectionMode.clickedCells.length > 0) {
       const clickedCells = cellSelectionMode.clickedCells;
       const selType = cellSelectionMode.type;
 
-      // Phase 3: 髦ｮ繝ｻ・ｷ鬘檎横邵ｺ・ｮ驕ｽ繝ｻ蟲・ｹ晏干ﾎ樒ｹ晁侭ﾎ礼ｹ晢ｽｼ繝ｻ繝ｻ霓､・ｹ闔会ｽ･闕ｳ螂・ｽｼ繝ｻ
       if (clickedCells.length >= 2) {
         if (selType === 'individual') {
-          // 陋溷唱謖ｨ郢晢ｽ｢郢晢ｽｼ郢昴・ 陷ｷ繝ｻ縺晉ｹ晢ｽｫ郢ｧ雋楪蜿･謖ｨ邵ｺ・ｫ髦ｮ繝ｻ・ｷ莉｣縲堤ｹ昜ｸ翫≧郢晢ｽｩ郢ｧ・､郢昴・
           clickedCells.forEach((cell) => {
-            // 驍ｨ莉咏ｲ狗ｹｧ・ｻ郢晢ｽｫ陝・ｽｾ陟｢繝ｻ
             const mergeInfo = mergedCellsMap.get(`${cell.row}-${cell.col}`);
             const cx = mergeInfo ? (mergeInfo.startCol - 1) * cellSize : (cell.col - 1) * cellSize;
             const cy = mergeInfo ? (mergeInfo.startRow - 1) * cellSize : (cell.row - 1) * cellSize;
@@ -1893,7 +1784,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             ctx.fillRect(cx, cy, cw, ch);
           });
         } else {
-          // corner/multiCorner/rangeStart: 郢晁・縺育ｹ晢ｽｳ郢昴・縺・ｹ晢ｽｳ郢ｧ・ｰ郢晄㈱繝｣郢ｧ・ｯ郢ｧ・ｹ郢ｧ螳壼沂驍ｱ莉｣縲堤ｹ昜ｸ翫≧郢晢ｽｩ郢ｧ・､郢昴・
           const rows = clickedCells.map((c) => c.row);
           const cols = clickedCells.map((c) => c.col);
           const minRow = Math.min(...rows);
@@ -1901,7 +1791,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const minCol = Math.min(...cols);
           const maxCol = Math.max(...cols);
 
-          // 驍ｨ莉咏ｲ狗ｹｧ・ｻ郢晢ｽｫ郢ｧ螳堋繝ｻ繝ｻ邵ｺ蜉ｱ窶ｻ陞ｳ貊・怙邵ｺ・ｮ髯ｦ・ｨ驕会ｽｺ驕ｽ繝ｻ蟲・ｹｧ蜻亥ヱ陟托ｽｵ
           let displayMaxRow = maxRow;
           let displayMaxCol = maxCol;
           clickedCells.forEach((cell) => {
@@ -1918,7 +1807,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const rh = (displayMaxRow - minRow + 1) * cellSize;
           ctx.fillStyle = 'rgba(144, 238, 144, 0.35)';
           ctx.fillRect(rx, ry, rw, rh);
-          // 隴ｫ・ｰ驍ｱ繝ｻ
           ctx.strokeStyle = 'rgba(76, 175, 80, 0.7)';
           ctx.lineWidth = 2;
           ctx.setLineDash([6, 3]);
@@ -1927,9 +1815,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       }
 
-      // Phase 2: 鬮ｱ螳夂横郢晄ｧｭ繝ｻ郢ｧ・ｫ郢晢ｽｼ郢ｧ蜻育ｷ帝包ｽｻ
       clickedCells.forEach((cell, i) => {
-        // 驍ｨ莉咏ｲ狗ｹｧ・ｻ郢晢ｽｫ邵ｺ・ｮ陜｣・ｴ陷ｷ蛹ｻ繝ｻ驍ｨ莉咏ｲ矩⊃繝ｻ蟲・ｸｺ・ｮ闕ｳ・ｭ陟｢繝ｻ竊鍋ｹ晄ｧｭ繝ｻ郢ｧ・ｫ郢晢ｽｼ郢ｧ螳夲ｽ｡・ｨ驕会ｽｺ
         const mergeInfo = mergedCellsMap.get(`${cell.row}-${cell.col}`);
         let px: number, py: number;
         if (mergeInfo) {
@@ -1942,7 +1828,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           py = (cell.row - 0.5) * cellSize;
         }
 
-        // 郢晄ｧｭ繝ｻ郢ｧ・ｫ郢晢ｽｼ繝ｻ閧ｲ蜊邵ｺ繝ｻ繝ｻ繝ｻ遏ｩ謳ｨ隴ｫ・ｰ繝ｻ繝ｻ
         ctx.beginPath();
         ctx.fillStyle = '#FFFFFF';
         ctx.strokeStyle = '#2196F3';
@@ -1952,7 +1837,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fill();
         ctx.stroke();
 
-        // 騾｡・ｪ陷ｿ・ｷ
+        // セル番号ラベル
         ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1961,7 +1846,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
 
-    // ctx.translate 郢ｧ螳夲ｽｧ・｣鬮ｯ・､
     ctx.restore();
 
     if ((vertexSelectionMode || cellSelectionMode) && tapAssist) {
@@ -2069,7 +1953,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     offset,
   ]);
 
-  // 郢ｧ・ｯ郢晢ｽｪ郢昴・縺題怎・ｦ騾・・
+  // クリック座標をセル座標に変換し、対象セルのアイテムを通知する。
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (isDragging) return;
@@ -2078,19 +1962,16 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (!canvas) return;
 
       const rect = canvas.getBoundingClientRect();
-      // Canvas髯ｦ・ｨ驕会ｽｺ郢ｧ・ｵ郢ｧ・､郢ｧ・ｺ邵ｺ・ｫ陝・ｽｾ邵ｺ蜷ｶ・狗ｹｧ・ｯ郢晢ｽｪ郢昴・縺題抄蜥ｲ・ｽ・ｮ郢ｧ螳夲ｽｨ閧ｲ・ｮ繝ｻ
       const scaleX = canvas.width / dpr / rect.width;
       const scaleY = canvas.height / dpr / rect.height;
 
-      // 郢晁侭ﾎ礼ｹ晢ｽｼ郢晄亢繝ｻ郢昜ｺ･・ｺ・ｧ隶薙・遶翫・郢晄ｧｭ繝｣郢晄懶ｽｺ・ｧ隶灘遜・ｼ蛹ｻ縺檎ｹ晁ｼ斐◎郢昴・繝ｨ郢ｧ雋橸ｽｼ霈費ｿ･繝ｻ繝ｻ
       const viewX = (e.clientX - rect.left) * scaleX;
       const viewY = (e.clientY - rect.top) * scaleY;
       const { x, y } = toMapCoordinates(viewX, viewY);
 
-      // 鬯・ｉ縺幃ｩ包ｽｸ隰壽ｧｭﾎ皮ｹ晢ｽｼ郢晄・・ｸ・ｭ邵ｺ・ｯ邵ｲ竏壺穐邵ｺ螟撰｣ｰ繧峨○郢晄ｧｭ繝ｻ郢ｧ・ｫ郢晢ｽｼ邵ｺ・ｮ郢ｧ・ｯ郢晢ｽｪ郢昴・縺醍ｹｧ蛛ｵ繝｡郢ｧ・ｧ郢昴・縺・
       if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
         const markerSize = Math.max(10, cellSize * 0.4);
-        const clickRadius = markerSize; // 郢ｧ・ｯ郢晢ｽｪ郢昴・縺題崕・､陞ｳ螢ｹ・定氣莉｣・陟弱・・∫ｸｺ・ｫ
+        const clickRadius = markerSize;
 
         for (const vertex of vertexSelectionMode.clickedVertices) {
           const markerX = (vertex.col - 0.5) * cellSize;
@@ -2098,13 +1979,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const distance = Math.sqrt(Math.pow(x - markerX, 2) + Math.pow(y - markerY, 2));
 
           if (distance <= clickRadius) {
-            // 鬯・ｉ縺帷ｹ晄ｧｭ繝ｻ郢ｧ・ｫ郢晢ｽｼ邵ｺ蠕後￠郢晢ｽｪ郢昴・縺醍ｸｺ霈費ｽ檎ｸｺ繝ｻ遶翫・邵ｺ譏ｴ繝ｻ鬯・ｉ縺帷ｸｺ・ｮ郢ｧ・ｻ郢晢ｽｫ陟趣ｽｧ隶灘生縲堤ｹｧ・､郢晏生ﾎｦ郢晁ご蛹ｱ霓｣・ｫ
             window.dispatchEvent(
               new CustomEvent('mapCellClick', {
                 detail: { row: vertex.row, col: vertex.col },
               }),
             );
-            return; // 鬯・ｉ縺帷ｹｧ・ｯ郢晢ｽｪ郢昴・縺醍ｸｺ・ｮ陜｣・ｴ陷ｷ蛹ｻ繝ｻ鬨ｾ螢ｼ・ｸ・ｸ邵ｺ・ｮ郢ｧ・ｻ郢晢ｽｫ郢ｧ・ｯ郢晢ｽｪ郢昴・縺題怎・ｦ騾・・・堤ｹｧ・ｹ郢ｧ・ｭ郢昴・繝ｻ
+            return;
           }
         }
       }
@@ -2116,7 +1996,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         return;
       }
 
-      // 郢ｧ・ｻ郢晢ｽｫ鬩包ｽｸ隰壽ｧｭﾎ皮ｹ晢ｽｼ郢晄・・ｸ・ｭ繝ｻ螟先勢郢晄ｧｭ繝ｻ郢ｧ・ｫ郢晢ｽｼ邵ｺ・ｮ郢ｧ・ｯ郢晢ｽｪ郢昴・縺題ｮ諛ｷ繝ｻ
       if (cellSelectionMode && cellSelectionMode.clickedCells.length > 0) {
         const markerSize = Math.max(10, cellSize * 0.4);
         const clickRadius = markerSize;
@@ -2133,7 +2012,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           }
           const distance = Math.sqrt(Math.pow(x - mx, 2) + Math.pow(y - my, 2));
           if (distance <= clickRadius) {
-            // 郢晄ｧｭ繝ｻ郢ｧ・ｫ郢晢ｽｼ郢ｧ・ｯ郢晢ｽｪ郢昴・縺・遶翫・邵ｺ譏ｴ繝ｻ郢ｧ・ｻ郢晢ｽｫ陟趣ｽｧ隶灘生縲堤ｹｧ・､郢晏生ﾎｦ郢晁ご蛹ｱ霓｣・ｫ繝ｻ驛・ｽｧ・｣鬮ｯ・､邵ｺ霈費ｽ檎ｹｧ蜈ｷ・ｼ繝ｻ
             window.dispatchEvent(
               new CustomEvent('mapCellClick', {
                 detail: { row: cell.row, col: cell.col },
@@ -2144,7 +2022,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       }
 
-      // 郢ｧ・ｻ郢晢ｽｫ鬩包ｽｸ隰壽ｧｭﾎ皮ｹ晢ｽｼ郢晄・・ｸ・ｭ繝ｻ螟ゑｽｵ莉咏ｲ狗ｹｧ・ｻ郢晢ｽｫ郢ｧ蟶晏ｹ戊沂荵昴◎郢晢ｽｫ邵ｺ・ｫ髫暦ｽ｣雎趣ｽｺ
       let resolvedRow = row;
       let resolvedCol = col;
       if (cellSelectionMode) {
@@ -2162,7 +2039,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       }
 
-      // 郢晄じﾎ溽ｹ昴・縺題楜螟ゑｽｾ・ｩ郢昜ｻ｣繝ｭ郢晢ｽｫ騾包ｽｨ邵ｺ・ｮ郢ｧ・ｫ郢ｧ・ｹ郢ｧ・ｿ郢晢｣ｰ郢ｧ・､郢晏生ﾎｦ郢晏現・帝具ｽｺ霓｣・ｫ
       const shouldShowTapAssist =
         (vertexSelectionMode || cellSelectionMode) &&
         (lastPointerTypeRef.current === 'touch' || lastPointerTypeRef.current === 'pen');
@@ -2204,7 +2080,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     ],
   );
 
-  // 郢晏ｸ吶・郢晢ｽｫ邵ｺ・ｮ郢ｧ・ｹ郢ｧ・ｯ郢晢ｽｭ郢晢ｽｼ郢晢ｽｫ驕ｽ繝ｻ蟲・ｹｧ螳夲ｽｨ閧ｲ・ｮ繝ｻ
   const hallScrollBounds = useMemo(() => {
     if (selectedHall && selectedHall.vertices.length >= 4) {
       const rows = selectedHall.vertices.map((v) => v.row);
@@ -2258,7 +2133,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     [filledCellScrollBounds, hallScrollBounds],
   );
 
-  // 郢ｧ・ｹ郢ｧ・ｯ郢晢ｽｭ郢晢ｽｼ郢晢ｽｫ陋ｻ・ｶ鬮ｯ闊鯉ｽ帝坎閧ｲ・ｮ蜉ｱ笘・ｹｧ遏ｩ譛ｪ隰ｨ・ｰ
+  // ドラッグで移動できる範囲（表示境界）を計算する。
   const calculateScrollLimits = useCallback(() => {
     if (!activeScrollBounds) return null;
     const container = containerRef.current;
@@ -2326,11 +2201,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     [cellSize, getPointerViewMetrics, mapData.maxRow, mapData.maxCol, toMapCoordinates],
   );
 
-  // 郢晏ｳｨﾎ帷ｹ昴・縺定怎・ｦ騾・・
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       lastPointerTypeRef.current = e.pointerType;
-      // 郢晄鱒ﾎｦ郢昶・縺懃ｹ晢ｽｼ郢晢｣ｰ闕ｳ・ｭ邵ｺ・ｯ郢晏ｳｨﾎ帷ｹ昴・縺堤ｹｧ蝣､笏碁囎繝ｻ
       if (activeTouchesRef.current.size >= 2) return;
       setIsDragging(false);
       setDragStart({ x: e.clientX, y: e.clientY });
@@ -2339,6 +2212,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     [],
   );
 
+  // ポインタドラッグでマップをパン移動する。
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       lastPointerTypeRef.current = e.pointerType;
@@ -2349,7 +2223,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
 
       if (e.buttons !== 1) return;
-      // 郢晄鱒ﾎｦ郢昶・縺懃ｹ晢ｽｼ郢晢｣ｰ闕ｳ・ｭ邵ｺ・ｯ郢晏ｳｨﾎ帷ｹ昴・縺堤ｹｧ蝣､笏碁囎繝ｻ
       if (activeTouchesRef.current.size >= 2) return;
 
       const dx = e.clientX - dragStart.x;
@@ -2359,12 +2232,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         setIsDragging(true);
       }
 
-      // 隴・ｽｰ邵ｺ蜉ｱ・樒ｹｧ・ｪ郢晁ｼ斐◎郢昴・繝ｨ郢ｧ螳夲ｽｨ閧ｲ・ｮ繝ｻ
       const dragPanMultiplier = getDragPanMultiplier(zoomLevelRef.current);
       let newX = dragStartOffset.x + dx * dragPanMultiplier;
       let newY = dragStartOffset.y + dy * dragPanMultiplier;
 
-      // 郢晏ｸ吶・郢晢ｽｫ鬩包ｽｸ隰壽ｨ雁・邵ｺ・ｯ郢ｧ・ｹ郢ｧ・ｯ郢晢ｽｭ郢晢ｽｼ郢晢ｽｫ驕ｽ繝ｻ蟲・ｹｧ雋槫ｮ幃ｫｯ繝ｻ
       const limits = calculateScrollLimits();
       if (limits) {
         newX = Math.max(limits.minX, Math.min(limits.maxX, newX));
