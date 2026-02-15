@@ -46,7 +46,7 @@ const FILLED_SCROLL_MARGIN = 25; // 入力済みセル境界からの追加余�
 const getDragPanMultiplier = (zoom: number): number => {
   if (zoom < 70) return 2.0;
   if (zoom < 120) return 1.6;
-  return 1.3;
+  return 1.1;
 };
 const hasCellInputValue = (value: string | number | null): boolean => {
   if (value === null || value === undefined) return false;
@@ -2415,6 +2415,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 };
 
 export default MapCanvas;
+
 
 
 
