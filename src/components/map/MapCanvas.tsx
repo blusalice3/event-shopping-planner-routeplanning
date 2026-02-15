@@ -44,8 +44,8 @@ const BASE_CELL_SIZE = 28; // 基本セルサイズ
 const SCROLL_MARGIN = 5; // スクロール余白（行/列数）
 const FILLED_SCROLL_MARGIN = 25; // 入力済みセル境界からの追加余白（行/列数）
 const getDragPanMultiplier = (zoom: number): number => {
-  if (zoom < 70) return 2.0;
-  if (zoom < 120) return 1.6;
+  if (zoom < 70) return 1.8;
+  if (zoom < 120) return 1.5;
   return 1.1;
 };
 const hasCellInputValue = (value: string | number | null): boolean => {
@@ -2415,6 +2415,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 };
 
 export default MapCanvas;
+
 
 
 
