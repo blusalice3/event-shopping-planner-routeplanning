@@ -684,7 +684,7 @@ async function parseMapSheetWithExcelJS(
   const colCount = worksheet.columnCount;
 
   if (rowCount === 0 || colCount === 0) return null;
-  const IMPORT_CLICK_MARGIN = 15;
+  const IMPORT_CLICK_MARGIN = 25;
 
   // 結合セル情報を取得
   const mergedCells: MergedCellInfo[] = [];
