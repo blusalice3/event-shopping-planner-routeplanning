@@ -33,8 +33,8 @@ interface FocusModeMapCanvasProps {
 }
 
 const BASE_CELL_SIZE = 28;
-const SCROLL_MARGIN = 15;
-const FILLED_SCROLL_MARGIN = 30;
+const SCROLL_MARGIN = 5;
+const FILLED_SCROLL_MARGIN = 15;
 
 const hasCellInputValue = (value: string | number | null): boolean => {
   if (value === null || value === undefined) return false;
@@ -1885,6 +1885,4 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 };
 
 export default FocusModeMapCanvas;
-
-
 

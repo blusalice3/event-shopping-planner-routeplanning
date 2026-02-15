@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+﻿import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   DayMapData,
   CellData,
@@ -18,7 +18,7 @@ interface MapCanvasProps {
   mapData: DayMapData;
   mapName: string;
   items: ShoppingItem[];
-  executeModeItemIds: string[]; // 配列（順序維持）
+  executeModeItemIds: string[]; // 実行モード中の訪問済みID
   zoomLevel: ZoomLevel;
   rotationAngle?: number;
   isRouteVisible: boolean;
@@ -41,9 +41,8 @@ interface MapCanvasProps {
 }
 
 const BASE_CELL_SIZE = 28; // 基本セルサイズ
-const SCROLL_MARGIN = 15; // スクロール余白（行/列数）
-const FILLED_SCROLL_MARGIN = 30; // 入力済みセル境界からの追加余白（行/列数）
-
+const SCROLL_MARGIN = 5; // スクロール余白（行/列数）
+const FILLED_SCROLL_MARGIN = 15; // 入力済みセル境界からの追加余白（行/列数）
 const hasCellInputValue = (value: string | number | null): boolean => {
   if (value === null || value === undefined) return false;
   if (typeof value === 'string') return value.trim().length > 0;
@@ -184,25 +183,25 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const lastPointerTypeRef = useRef<string>('mouse');
   const tapAssistTimerRef = useRef<number | null>(null);
 
-  // デバイスピクセル比
+  // 繝・ヰ繧､繧ｹ繝斐け繧ｻ繝ｫ豈・
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
 
-  // スケール計算
+  // 繧ｹ繧ｱ繝ｼ繝ｫ險育ｮ・
   const scale = zoomLevel / 100;
   const cellSize = BASE_CELL_SIZE * scale;
   const isDarkMode =
     typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
 
-  // 常に100%時と同等の情報量を表示（ズームレベルに関係なく全情報を描画）
+  // 蟶ｸ縺ｫ100%譎ゅ→蜷檎ｭ峨・諠・ｱ驥上ｒ陦ｨ遉ｺ・医ぜ繝ｼ繝繝ｬ繝吶Ν縺ｫ髢｢菫ゅ↑縺丞・諠・ｱ繧呈緒逕ｻ・・
   const isDetailedView = true;
   const showNumbers = true;
   const showBorders = true;
 
-  // 前回のセルサイズを記憶
+  // 蜑榊屓縺ｮ繧ｻ繝ｫ繧ｵ繧､繧ｺ繧定ｨ俶・
   const prevCellSizeRef = useRef<number>(cellSize);
   const initializedRef = useRef<boolean>(false);
 
-  // ピンチズーム用の状態
+  // 繝斐Φ繝√ぜ繝ｼ繝逕ｨ縺ｮ迥ｶ諷・
   const pinchStartDistRef = useRef<number>(0);
   const pinchStartZoomRef = useRef<number>(zoomLevel);
   const pinchCenterRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
@@ -335,21 +334,21 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     };
   }, []);
 
-  // ズームレベル変更時に視点を維持するオフセット調整（外部からのズーム変更に対応）
+  // 繧ｺ繝ｼ繝繝ｬ繝吶Ν螟画峩譎ゅ↓隕也せ繧堤ｶｭ謖√☆繧九が繝輔そ繝・ヨ隱ｿ謨ｴ・亥､夜Κ縺九ｉ縺ｮ繧ｺ繝ｼ繝螟画峩縺ｫ蟇ｾ蠢懶ｼ・
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
 
     const prevCellSize = prevCellSizeRef.current;
 
-    // 初回またはセルサイズが変わっていない場合はスキップ
+    // 蛻晏屓縺ｾ縺溘・繧ｻ繝ｫ繧ｵ繧､繧ｺ縺悟､峨ｏ縺｣縺ｦ縺・↑縺・ｴ蜷医・繧ｹ繧ｭ繝・・
     if (!initializedRef.current || prevCellSize === cellSize) {
       prevCellSizeRef.current = cellSize;
       initializedRef.current = true;
       return;
     }
 
-    // コンテナの中央座標を基準にズーム（外部変更の場合のフォールバック）
+    // 繧ｳ繝ｳ繝・リ縺ｮ荳ｭ螟ｮ蠎ｧ讓吶ｒ蝓ｺ貅悶↓繧ｺ繝ｼ繝・亥､夜Κ螟画峩縺ｮ蝣ｴ蜷医・繝輔か繝ｼ繝ｫ繝舌ャ繧ｯ・・
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
     const centerX = containerWidth / 2;
@@ -365,7 +364,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     prevCellSizeRef.current = cellSize;
   }, [cellSize, offset.x, offset.y]);
 
-  // ホイールズーム処理（PCブラウザ: マウスカーソル位置を中心にズーム）
+  // 繝帙う繝ｼ繝ｫ繧ｺ繝ｼ繝蜃ｦ逅・ｼ・C繝悶Λ繧ｦ繧ｶ: 繝槭え繧ｹ繧ｫ繝ｼ繧ｽ繝ｫ菴咲ｽｮ繧剃ｸｭ蠢・↓繧ｺ繝ｼ繝・・
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();
@@ -380,13 +379,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (!container) return;
 
       const rect = container.getBoundingClientRect();
-      // マウス位置（コンテナ内座標）
+      // 繝槭え繧ｹ菴咲ｽｮ・医さ繝ｳ繝・リ蜀・ｺｧ讓呻ｼ・
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
 
-      // 現在のズームレベル
+      // 迴ｾ蝨ｨ縺ｮ繧ｺ繝ｼ繝繝ｬ繝吶Ν
       const currentZoom = zoomLevel;
-      // ズーム量（スクロール量に応じて）
+      // 繧ｺ繝ｼ繝驥擾ｼ医せ繧ｯ繝ｭ繝ｼ繝ｫ驥上↓蠢懊§縺ｦ・・
       const zoomDelta = -e.deltaY * 0.1;
       const newZoom = Math.round(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentZoom + zoomDelta)));
 
@@ -408,10 +407,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     ],
   );
 
-  // ピンチズーム処理（スマートフォン/タブレット: ピンチ中心を基準にズーム）
+  // 繝斐Φ繝√ぜ繝ｼ繝蜃ｦ逅・ｼ医せ繝槭・繝医ヵ繧ｩ繝ｳ/繧ｿ繝悶Ξ繝・ヨ: 繝斐Φ繝∽ｸｭ蠢・ｒ蝓ｺ貅悶↓繧ｺ繝ｼ繝・・
   const handleTouchStart = useCallback(
     (e: TouchEvent) => {
-      // タッチポイントを記録
+      // 繧ｿ繝・メ繝昴う繝ｳ繝医ｒ險倬鹸
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
         activeTouchesRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
@@ -425,7 +424,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         pinchStartDistRef.current = Math.sqrt(dx * dx + dy * dy);
         pinchStartZoomRef.current = zoomLevel;
 
-        // ピンチ中心（コンテナ内座標）
+        // 繝斐Φ繝∽ｸｭ蠢・ｼ医さ繝ｳ繝・リ蜀・ｺｧ讓呻ｼ・
         const container = containerRef.current;
         if (container) {
           const rect = container.getBoundingClientRect();
@@ -441,7 +440,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
   const handleTouchMove = useCallback(
     (e: TouchEvent) => {
-      // タッチポイントを更新
+      // 繧ｿ繝・メ繝昴う繝ｳ繝医ｒ譖ｴ譁ｰ
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
         activeTouchesRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
@@ -484,7 +483,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }
   }, []);
 
-  // ホイール・タッチイベントの登録
+  // 繝帙う繝ｼ繝ｫ繝ｻ繧ｿ繝・メ繧､繝吶Φ繝医・逋ｻ骭ｲ
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -504,12 +503,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     };
   }, [handleWheel, handleTouchStart, handleTouchMove, handleTouchEnd]);
 
-  // ホール選択時にオフセットを自動調整してホールを画面内に配置
-  // selectedHallが変更された時のみ実行（ズーム変更時は実行しない）
+  // 繝帙・繝ｫ驕ｸ謚樊凾縺ｫ繧ｪ繝輔そ繝・ヨ繧定・蜍戊ｪｿ謨ｴ縺励※繝帙・繝ｫ繧堤判髱｢蜀・↓驟咲ｽｮ
+  // selectedHall縺悟､画峩縺輔ｌ縺滓凾縺ｮ縺ｿ螳溯｡鯉ｼ医ぜ繝ｼ繝螟画峩譎ゅ・螳溯｡後＠縺ｪ縺・ｼ・
   const prevSelectedHallRef = useRef<HallDefinition | undefined>(undefined);
 
   useEffect(() => {
-    // selectedHallが変わっていない場合はスキップ
+    // selectedHall縺悟､峨ｏ縺｣縺ｦ縺・↑縺・ｴ蜷医・繧ｹ繧ｭ繝・・
     if (prevSelectedHallRef.current?.id === selectedHall?.id) {
       return;
     }
@@ -522,7 +521,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const containerWidth = container.clientWidth;
       const containerHeight = container.clientHeight;
 
-      // ホールの範囲を計算（マージン込み）
+      // 繝帙・繝ｫ縺ｮ遽・峇繧定ｨ育ｮ暦ｼ医・繝ｼ繧ｸ繝ｳ霎ｼ縺ｿ・・
       const rows = selectedHall.vertices.map((v) => v.row);
       const cols = selectedHall.vertices.map((v) => v.col);
       const minRow = Math.max(1, Math.min(...rows) - SCROLL_MARGIN);
@@ -530,7 +529,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const minCol = Math.max(1, Math.min(...cols) - SCROLL_MARGIN);
       const maxCol = Math.max(...cols) + SCROLL_MARGIN;
 
-      // ホール範囲のピクセル座標
+      // 繝帙・繝ｫ遽・峇縺ｮ繝斐け繧ｻ繝ｫ蠎ｧ讓・
       const hallLeft = (minCol - 1) * cellSize;
       const hallRight = maxCol * cellSize;
       const hallTop = (minRow - 1) * cellSize;
@@ -541,31 +540,31 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       let newOffsetX: number;
       let newOffsetY: number;
 
-      // ホールが画面に収まる場合は中央に配置、収まらない場合は左上を基準に
+      // 繝帙・繝ｫ縺檎判髱｢縺ｫ蜿弱∪繧句ｴ蜷医・荳ｭ螟ｮ縺ｫ驟咲ｽｮ縲∝庶縺ｾ繧峨↑縺・ｴ蜷医・蟾ｦ荳翫ｒ蝓ｺ貅悶↓
       if (hallWidth <= containerWidth) {
-        // ホールを水平方向中央に
+        // 繝帙・繝ｫ繧呈ｰｴ蟷ｳ譁ｹ蜷台ｸｭ螟ｮ縺ｫ
         newOffsetX = (containerWidth - hallWidth) / 2 - hallLeft;
       } else {
-        // ホール左端を画面左端に合わせる
+        // 繝帙・繝ｫ蟾ｦ遶ｯ繧堤判髱｢蟾ｦ遶ｯ縺ｫ蜷医ｏ縺帙ｋ
         newOffsetX = -hallLeft;
       }
 
       if (hallHeight <= containerHeight) {
-        // ホールを垂直方向中央に
+        // 繝帙・繝ｫ繧貞桙逶ｴ譁ｹ蜷台ｸｭ螟ｮ縺ｫ
         newOffsetY = (containerHeight - hallHeight) / 2 - hallTop;
       } else {
-        // ホール上端を画面上端に合わせる
+        // 繝帙・繝ｫ荳顔ｫｯ繧堤判髱｢荳顔ｫｯ縺ｫ蜷医ｏ縺帙ｋ
         newOffsetY = -hallTop;
       }
 
       setOffset({ x: newOffsetX, y: newOffsetY });
     } else if (!selectedHall) {
-      // ホール未選択に戻った時はオフセットをリセット
+      // 繝帙・繝ｫ譛ｪ驕ｸ謚槭↓謌ｻ縺｣縺滓凾縺ｯ繧ｪ繝輔そ繝・ヨ繧偵Μ繧ｻ繝・ヨ
       setOffset({ x: 0, y: 0 });
     }
   }, [selectedHall, cellSize]);
 
-  // セルマップを作成
+  // 繧ｻ繝ｫ繝槭ャ繝励ｒ菴懈・
   const cellsMap = useMemo(() => {
     const map = new Map<string, CellData>();
     mapData.cells.forEach((cell) => {
@@ -574,7 +573,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return map;
   }, [mapData.cells]);
 
-  // 結合セルのマップを作成
+  // 邨仙粋繧ｻ繝ｫ縺ｮ繝槭ャ繝励ｒ菴懈・
   const mergedCellsMap = useMemo(() => {
     const map = new Map<string, MergedCellInfo>();
     mapData.mergedCells.forEach((merge) => {
@@ -583,41 +582,40 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return map;
   }, [mapData.mergedCells]);
 
-  // executeModeItemIdsをSetに変換（状態計算用）
+  // executeModeItemIds繧担et縺ｫ螟画鋤・育憾諷玖ｨ育ｮ礼畑・・
   const executeModeItemIdsSet = useMemo(() => {
     return new Set(executeModeItemIds);
   }, [executeModeItemIds]);
 
-  // セルがアイテムを持つかどうかの状態を計算
+  // 繧ｻ繝ｫ縺後い繧､繝・Β繧呈戟縺､縺九←縺・°縺ｮ迥ｶ諷九ｒ險育ｮ・
   const cellStates = useMemo(() => {
     const states = new Map<string, MapCellStateDetail>();
 
-    const dayMatch = mapName.match(/^(.+)マップ$/);
+    const dayMatch = mapName.match(/^(.+)繝槭ャ繝・/);
     if (!dayMatch) return states;
     const dayName = dayMatch[1].trim();
 
-    // 優先アイテムかどうかを判定する関数
+    // 蜆ｪ蜈医い繧､繝・Β縺九←縺・°繧貞愛螳壹☆繧矩未謨ｰ
     const isPriorityItem = (item: (typeof items)[number]) => {
       const remarks = item.remarks?.toLowerCase() || '';
-      return remarks.includes('優先') || remarks.includes('委託無');
+      return remarks.includes('優先') || remarks.includes('最優先');
     };
 
     items.forEach((item) => {
-      // 日付の比較（トリム済み）
+      // 譌･莉倥・豈碑ｼ・ｼ医ヨ繝ｪ繝貂医∩・・
       const itemEventDate = item.eventDate?.trim() || '';
       if (itemEventDate !== dayName) return;
 
-      // ブロック名の比較
-      // まず完全一致を試み、見つからない場合のみ大文字/小文字無視
+      // 繝悶Ο繝・け蜷阪・豈碑ｼ・      // 縺ｾ縺壼ｮ悟・荳閾ｴ繧定ｩｦ縺ｿ縲∬ｦ九▽縺九ｉ縺ｪ縺・ｴ蜷医・縺ｿ螟ｧ譁・ｭ・蟆乗枚蟄礼┌隕・
       const itemBlockName = item.block?.trim() || '';
       let block = mapData.blocks.find((b) => b.name === itemBlockName);
 
-      // 完全一致がない場合、大文字/小文字を無視して検索（ただし同名ブロックが複数ある場合は除く）
+      // 螳悟・荳閾ｴ縺後↑縺・ｴ蜷医∝､ｧ譁・ｭ・蟆乗枚蟄励ｒ辟｡隕悶＠縺ｦ讀懃ｴ｢・医◆縺縺怜酔蜷阪ヶ繝ｭ繝・け縺瑚､・焚縺ゅｋ蝣ｴ蜷医・髯､縺擾ｼ・
       if (!block) {
         const candidates = mapData.blocks.filter(
           (b) => b.name.toLowerCase() === itemBlockName.toLowerCase(),
         );
-        // 候補が1つだけなら採用（複数ある場合は曖昧なので採用しない）
+        // 蛟呵｣懊′1縺､縺縺代↑繧画治逕ｨ・郁､・焚縺ゅｋ蝣ｴ蜷医・譖匁乂縺ｪ縺ｮ縺ｧ謗｡逕ｨ縺励↑縺・ｼ・
         if (candidates.length === 1) {
           block = candidates[0];
         }
@@ -647,10 +645,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       existing.itemCount++;
       existing.items.push(item);
 
-      // 優先アイテムかどうかをチェック
+      // 蜆ｪ蜈医い繧､繝・Β縺九←縺・°繧偵メ繧ｧ繝・け
       if (isPriorityItem(item)) {
         existing.hasPriorityItem = true;
-        // 訪問先に未指定の優先アイテムがあるかチェック
+        // 險ｪ蝠丞・縺ｫ譛ｪ謖・ｮ壹・蜆ｪ蜈医い繧､繝・Β縺後≠繧九°繝√ぉ繝・け
         if (!executeModeItemIdsSet.has(item.id)) {
           existing.hasPriorityUnvisited = true;
         }
@@ -673,15 +671,15 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return states;
   }, [mapData.blocks, items, mapName, executeModeItemIdsSet]);
 
-  // ルート生成（優先度情報付き）
+  // 繝ｫ繝ｼ繝育函謌撰ｼ亥━蜈亥ｺｦ諠・ｱ莉倥″・・
   const routePoints = useMemo(() => {
     if (!isRouteVisible) return [];
 
-    const dayMatch = mapName.match(/^(.+)マップ$/);
+    const dayMatch = mapName.match(/^(.+)繝槭ャ繝・/);
     if (!dayMatch) return [];
     const dayName = dayMatch[1];
 
-    // executeModeItemIdsの順序を維持するために、IDの配列順にアイテムを取得
+    // executeModeItemIds縺ｮ鬆・ｺ上ｒ邯ｭ謖√☆繧九◆繧√↓縲！D縺ｮ驟榊・鬆・↓繧｢繧､繝・Β繧貞叙蠕・
     const itemsMap = new Map(items.map((item) => [item.id, item]));
     const executeModeItemIdsArray = Array.from(executeModeItemIds);
 
@@ -701,7 +699,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     visitItems.forEach((item, index) => {
       const itemBlockName = item.block?.trim() || '';
 
-      // 完全一致優先でブロックを検索
+      // 螳悟・荳閾ｴ蜆ｪ蜈医〒繝悶Ο繝・け繧呈､懃ｴ｢
       let block = mapData.blocks.find((b) => b.name === itemBlockName);
       if (!block) {
         const candidates = mapData.blocks.filter(
@@ -731,7 +729,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return points;
   }, [mapData.blocks, items, mapName, executeModeItemIds, isRouteVisible]);
 
-  // ルートセグメント
+  // 繝ｫ繝ｼ繝医そ繧ｰ繝｡繝ｳ繝・
   const routeSegments = useMemo(() => {
     if (!isRouteVisible || routePoints.length < 2) return [];
 
@@ -754,7 +752,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }));
   }, [isRouteVisible, routePoints, mapData, cellsMap]);
 
-  // 描画
+  // 謠冗判
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -763,7 +761,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // キャンバスサイズをコンテナ（ビューポート）サイズに設定（高解像度対応）
+    // 繧ｭ繝｣繝ｳ繝舌せ繧ｵ繧､繧ｺ繧偵さ繝ｳ繝・リ・医ン繝･繝ｼ繝昴・繝茨ｼ峨し繧､繧ｺ縺ｫ險ｭ螳夲ｼ磯ｫ倩ｧ｣蜒丞ｺｦ蟇ｾ蠢懶ｼ・
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
@@ -772,13 +770,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     canvas.width = containerWidth * dpr;
     canvas.height = containerHeight * dpr;
 
-    // スケール調整
+    // 繧ｹ繧ｱ繝ｼ繝ｫ隱ｿ謨ｴ
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
-    // クリア
+    // 繧ｯ繝ｪ繧｢
     ctx.clearRect(0, 0, containerWidth, containerHeight);
 
-    // オフセットと回転を適用（以降の描画はマップ座標系で行う）
+    // 繧ｪ繝輔そ繝・ヨ縺ｨ蝗櫁ｻ｢繧帝←逕ｨ・井ｻ･髯阪・謠冗判縺ｯ繝槭ャ繝怜ｺｧ讓咏ｳｻ縺ｧ陦後≧・・
     ctx.save();
     ctx.translate(offset.x, offset.y);
     if (rotationRadians !== 0) {
@@ -798,13 +796,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const visibleMinY = Math.min(...viewportCorners.map((p) => p.y)) - cellSize * 2;
     const visibleMaxY = Math.max(...viewportCorners.map((p) => p.y)) + cellSize * 2;
 
-    // 可視セル範囲を計算（描画最適化）
+    // 蜿ｯ隕悶そ繝ｫ遽・峇繧定ｨ育ｮ暦ｼ域緒逕ｻ譛驕ｩ蛹厄ｼ・
     const visMinCol = Math.max(1, Math.floor(visibleMinX / cellSize) + 1);
     const visMaxCol = Math.min(mapData.maxCol, Math.ceil(visibleMaxX / cellSize) + 1);
     const visMinRow = Math.max(1, Math.floor(visibleMinY / cellSize) + 1);
     const visMaxRow = Math.min(mapData.maxRow, Math.ceil(visibleMaxY / cellSize) + 1);
 
-    // セルが可視範囲内かチェックするヘルパー
+    // 繧ｻ繝ｫ縺悟庄隕也ｯ・峇蜀・°繝√ぉ繝・け縺吶ｋ繝倥Ν繝代・
     const isCellVisible = (row: number, col: number, spanRows = 1, spanCols = 1): boolean => {
       return (
         col + spanCols - 1 >= visMinCol &&
@@ -814,7 +812,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       );
     };
 
-    // アンチエイリアス設定
+    // 繧｢繝ｳ繝√お繧､繝ｪ繧｢繧ｹ險ｭ螳・
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
@@ -922,10 +920,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     const trimLineToWidth = (line: string, maxLineWidth: number): string => {
       let next = line;
-      while (next.length > 0 && ctx.measureText(`${next}…`).width > maxLineWidth) {
+      while (next.length > 0 && ctx.measureText(`${next}窶ｦ`).width > maxLineWidth) {
         next = next.slice(0, -1);
       }
-      return next.length > 0 ? `${next}…` : '…';
+      return next.length > 0 ? `${next}窶ｦ` : '窶ｦ';
     };
 
     const drawFittedHorizontalTextInCell = (
@@ -1032,7 +1030,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       drawableColumns = drawableColumns.map((chars) => {
         if (chars.length <= maxRows) return chars;
         const trimmed = chars.slice(0, maxRows);
-        trimmed[maxRows - 1] = '…';
+        trimmed[maxRows - 1] = '窶ｦ';
         return trimmed;
       });
 
@@ -1040,9 +1038,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const lastColumnIndex = drawableColumns.length - 1;
         const lastColumn = drawableColumns[lastColumnIndex];
         if (lastColumn.length < maxRows) {
-          lastColumn.push('…');
+          lastColumn.push('窶ｦ');
         } else {
-          lastColumn[lastColumn.length - 1] = '…';
+          lastColumn[lastColumn.length - 1] = '窶ｦ';
         }
       }
 
@@ -1073,24 +1071,24 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.textBaseline = 'middle';
     };
 
-    // 黄色と黒の斜めストライプパターンを作成
+    // 鮟・牡縺ｨ鮟偵・譁懊ａ繧ｹ繝医Λ繧､繝励ヱ繧ｿ繝ｼ繝ｳ繧剃ｽ懈・
     const createWarningStripePattern = () => {
       if (isRotationInteracting) return null;
       const patternCanvas = document.createElement('canvas');
-      const stripeSize = Math.max(8, cellSize * 0.4); // ストライプの太さ
+      const stripeSize = Math.max(8, cellSize * 0.4); // 繧ｹ繝医Λ繧､繝励・螟ｪ縺・
       patternCanvas.width = stripeSize * 2;
       patternCanvas.height = stripeSize * 2;
       const patternCtx = patternCanvas.getContext('2d');
       if (!patternCtx) return null;
 
-      // 背景を黄色で塗りつぶし
+      // 閭梧勹繧帝ｻ・牡縺ｧ蝪励ｊ縺､縺ｶ縺・
       patternCtx.fillStyle = '#FFD600';
       patternCtx.fillRect(0, 0, stripeSize * 2, stripeSize * 2);
 
-      // 黒の斜めストライプを描画
+      // 鮟偵・譁懊ａ繧ｹ繝医Λ繧､繝励ｒ謠冗判
       patternCtx.fillStyle = '#212121';
       patternCtx.beginPath();
-      // 左下から右上への斜め線（パターンとして繰り返される）
+      // 蟾ｦ荳九°繧牙承荳翫∈縺ｮ譁懊ａ邱夲ｼ医ヱ繧ｿ繝ｼ繝ｳ縺ｨ縺励※郢ｰ繧願ｿ斐＆繧後ｋ・・
       patternCtx.moveTo(0, stripeSize * 2);
       patternCtx.lineTo(stripeSize, stripeSize * 2);
       patternCtx.lineTo(stripeSize * 2, stripeSize);
@@ -1172,7 +1170,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     }
 
-    // 1. 背景を描画
+    // 1. 閭梧勹繧呈緒逕ｻ
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
 
@@ -1187,37 +1185,37 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const width = spanCols * cellSize;
       const height = spanRows * cellSize;
 
-      // 背景色
+      // 閭梧勹濶ｲ
       if (cell.backgroundColor) {
         ctx.fillStyle = cell.backgroundColor;
         ctx.fillRect(x, y, width, height);
       }
 
-      // セル状態に応じた背景
+      // 繧ｻ繝ｫ迥ｶ諷九↓蠢懊§縺溯レ譎ｯ
       const state = cellStates.get(`${cell.row}-${cell.col}`);
       if (state) {
         if (state.isFullyVisited) {
-          ctx.fillStyle = 'rgba(239, 83, 80, 0.5)'; // 赤：全訪問済み
+          ctx.fillStyle = 'rgba(239, 83, 80, 0.5)'; // 襍､・壼・險ｪ蝠乗ｸ医∩
           ctx.fillRect(x, y, width, height);
         } else if (state.hasPriorityUnvisited && warningPattern) {
-          // 黄色と黒の斜めストライプ：優先/委託無の未訪問アイテムあり（一部訪問より優先）
+          // 鮟・牡縺ｨ鮟偵・譁懊ａ繧ｹ繝医Λ繧､繝暦ｼ壼━蜈・蟋碑ｨ礼┌縺ｮ譛ｪ險ｪ蝠上い繧､繝・Β縺ゅｊ・井ｸ驛ｨ險ｪ蝠上ｈ繧雁━蜈茨ｼ・
           ctx.fillStyle = warningPattern;
           ctx.fillRect(x, y, width, height);
         } else if (state.hasPriorityUnvisited) {
-          // 回転操作中は単色で簡略表示
+          // 蝗櫁ｻ｢謫堺ｽ應ｸｭ縺ｯ蜊倩牡縺ｧ邁｡逡･陦ｨ遉ｺ
           ctx.fillStyle = 'rgba(255, 214, 0, 0.45)';
           ctx.fillRect(x, y, width, height);
         } else if (state.isVisited) {
-          ctx.fillStyle = 'rgba(255, 238, 88, 0.5)'; // 黄：一部訪問済み（優先アイテムは訪問済み）
+          ctx.fillStyle = 'rgba(255, 238, 88, 0.5)'; // 鮟・ｼ壻ｸ驛ｨ險ｪ蝠乗ｸ医∩・亥━蜈医い繧､繝・Β縺ｯ險ｪ蝠乗ｸ医∩・・
           ctx.fillRect(x, y, width, height);
         } else if (state.hasItems) {
-          ctx.fillStyle = 'rgba(66, 165, 245, 0.3)'; // 青：通常の未訪問アイテムあり
+          ctx.fillStyle = 'rgba(66, 165, 245, 0.3)'; // 髱抵ｼ夐壼ｸｸ縺ｮ譛ｪ險ｪ蝠上い繧､繝・Β縺ゅｊ
           ctx.fillRect(x, y, width, height);
         }
       }
     });
 
-    // 2. 罫線を描画（ズームレベルに応じて）
+    // 2. 鄂ｫ邱壹ｒ謠冗判・医ぜ繝ｼ繝繝ｬ繝吶Ν縺ｫ蠢懊§縺ｦ・・
     if (showBorders && !isRotationInteracting) {
       mapData.cells.forEach((cell) => {
         if (cell.isMerged) return;
@@ -1245,7 +1243,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           if (!border) return;
 
           ctx.beginPath();
-          ctx.strokeStyle = border.color || '#000000'; // デフォルト色を黒に変更
+          ctx.strokeStyle = border.color || '#000000'; // 繝・ヵ繧ｩ繝ｫ繝郁牡繧帝ｻ偵↓螟画峩
 
           let lineWidth = 1;
           switch (border.style) {
@@ -1273,12 +1271,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         if (borders.bottom) drawBorder(x, y + height, x + width, y + height, borders.bottom);
         if (borders.left) drawBorder(x, y, x, y + height, borders.left);
 
-        // 数値セルの枠（罫線がない場合のみ、薄いグレーの点線で表示）
-        // 緑枠は削除 - 訪問先のセルは別の方法でハイライト
+        // 数字セルの罫線は背景塗りのみで表示する
       });
     }
 
-    // 3. テキストを描画（ズームレベルに応じて）
+    // 3. 繝・く繧ｹ繝医ｒ謠冗判・医ぜ繝ｼ繝繝ｬ繝吶Ν縺ｫ蠢懊§縺ｦ・・
     if (showNumbers) {
       mapData.cells.forEach((cell) => {
         if (cell.isMerged || cell.value === null) return;
@@ -1297,45 +1294,45 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const text = String(cell.value);
         const isVertical = cell.isVerticalText;
 
-        // フォントサイズを計算
+        // 繝輔か繝ｳ繝医し繧､繧ｺ繧定ｨ育ｮ・
         let fontSize: number;
         if (merge) {
-          // 結合セルは大きめ
+          // 邨仙粋繧ｻ繝ｫ縺ｯ螟ｧ縺阪ａ
           if (isVertical) {
-            // 縦書きの場合は高さに基づいてサイズを調整
+            // 邵ｦ譖ｸ縺阪・蝣ｴ蜷医・鬮倥＆縺ｫ蝓ｺ縺･縺・※繧ｵ繧､繧ｺ繧定ｪｿ謨ｴ
             const charCount = text.replace(/\n/g, '').length;
             fontSize = Math.min(width * 0.6, (height / (charCount + 1)) * 0.9, 16);
           } else {
             fontSize = Math.min(width, height) * (isDetailedView ? 0.5 : 0.4);
           }
         } else if (typeof cell.value === 'number') {
-          // 数値セル
+          // 謨ｰ蛟､繧ｻ繝ｫ
           fontSize = Math.min(cellSize * 0.45, 14);
         } else {
-          // テキストセル
+          // 繝・く繧ｹ繝医そ繝ｫ
           fontSize = Math.min(cellSize * 0.4, 12);
         }
 
-        fontSize = Math.max(fontSize, 8); // 最小サイズ
+        fontSize = Math.max(fontSize, 8); // 譛蟆上し繧､繧ｺ
 
         ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // テキスト色とスタイル
+        // 繝・く繧ｹ繝郁牡縺ｨ繧ｹ繧ｿ繧､繝ｫ
         const state = cellStates.get(`${cell.row}-${cell.col}`);
         const explicitFontColor = cell.fontColor?.trim();
         const enforceBlackNumberTextInDarkMode =
           isDarkMode && Boolean(state?.hasItems) && isNumberLikeCellValue(cell.value);
 
-        // 優先アイテム（黄黒ストライプ背景）の場合は白背景を描画
+        // 蜆ｪ蜈医い繧､繝・Β・磯ｻ・ｻ偵せ繝医Λ繧､繝苓レ譎ｯ・峨・蝣ｴ蜷医・逋ｽ閭梧勹繧呈緒逕ｻ
         if (state?.hasPriorityUnvisited && typeof cell.value === 'number') {
           const textMetrics = ctx.measureText(text);
           const textWidth = textMetrics.width;
           const textHeight = fontSize;
           const padding = fontSize * 0.3;
 
-          // 角丸の白背景を描画
+          // 隗剃ｸｸ縺ｮ逋ｽ閭梧勹繧呈緒逕ｻ
           const bgX = x + width / 2 - textWidth / 2 - padding;
           const bgY = y + height / 2 - textHeight / 2 - padding * 0.5;
           const bgWidth = textWidth + padding * 2;
@@ -1352,7 +1349,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           } else if (explicitFontColor) {
             ctx.fillStyle = resolveMapTextColorForTheme(explicitFontColor, isDarkMode, '#212121');
           } else {
-            // テキスト色は黒で目立たせる
+            // 繝・く繧ｹ繝郁牡縺ｯ鮟偵〒逶ｮ遶九◆縺帙ｋ
             ctx.fillStyle = '#212121';
           }
         } else if (enforceBlackNumberTextInDarkMode && !isWhiteLikeColor(explicitFontColor)) {
@@ -1360,21 +1357,21 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         } else if (explicitFontColor) {
           ctx.fillStyle = resolveMapTextColorForTheme(explicitFontColor, isDarkMode);
         } else if (state?.isFullyVisited) {
-          ctx.fillStyle = '#B71C1C'; // 濃い赤：全訪問済み
+          ctx.fillStyle = '#B71C1C'; // 豼・＞襍､・壼・險ｪ蝠乗ｸ医∩
         } else if (state?.isVisited) {
-          ctx.fillStyle = '#F57F17'; // オレンジ：一部訪問済み
+          ctx.fillStyle = '#F57F17'; // 繧ｪ繝ｬ繝ｳ繧ｸ・壻ｸ驛ｨ險ｪ蝠乗ｸ医∩
         } else if (state?.hasItems) {
-          ctx.fillStyle = '#1565C0'; // 青：通常の未訪問アイテムあり
+          ctx.fillStyle = '#1565C0'; // 髱抵ｼ夐壼ｸｸ縺ｮ譛ｪ險ｪ蝠上い繧､繝・Β縺ゅｊ
         } else {
           ctx.fillStyle = resolveMapTextColorForTheme(cell.fontColor, isDarkMode);
         }
 
-        // 縦書きの場合
+        // 邵ｦ譖ｸ縺阪・蝣ｴ蜷・
         if (isVertical) {
           if (rotationRadians !== 0) {
             drawFittedVerticalTextInCell(text, x, y, width, height, fontSize);
           } else {
-            // 改行で分割されている場合は各行を別々に描画
+            // 謾ｹ陦後〒蛻・牡縺輔ｌ縺ｦ縺・ｋ蝣ｴ蜷医・蜷・｡後ｒ蛻･縲・↓謠冗判
             const lines = text.split(/\n/);
             const lineSpacing = fontSize * 1.2;
             const totalWidth = lines.length * lineSpacing;
@@ -1399,7 +1396,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       });
     } else {
-      // 縮小時は数値セルのみドット表示
+      // 邵ｮ蟆乗凾縺ｯ謨ｰ蛟､繧ｻ繝ｫ縺ｮ縺ｿ繝峨ャ繝郁｡ｨ遉ｺ
       mapData.cells.forEach((cell) => {
         if (cell.isMerged) return;
 
@@ -1413,25 +1410,25 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
         const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
 
-        // ドット表示
+        // 繝峨ャ繝郁｡ｨ遉ｺ
         const dotSize = Math.max(cellSize * 0.4, 4);
         ctx.beginPath();
 
         if (state.isFullyVisited) {
-          ctx.fillStyle = '#EF5350'; // 赤：全訪問済み
+          ctx.fillStyle = '#EF5350'; // 襍､・壼・險ｪ蝠乗ｸ医∩
         } else if (state.hasPriorityUnvisited) {
-          // 黄黒の警告色（ドットでは黄色に黒枠）- 一部訪問より優先
+          // 鮟・ｻ偵・隴ｦ蜻願牡・医ラ繝・ヨ縺ｧ縺ｯ鮟・牡縺ｫ鮟呈棧・・ 荳驛ｨ險ｪ蝠上ｈ繧雁━蜈・
           ctx.arc(x + width / 2, y + height / 2, dotSize / 2, 0, Math.PI * 2);
           ctx.fillStyle = '#FFD600';
           ctx.fill();
           ctx.strokeStyle = '#212121';
           ctx.lineWidth = Math.max(1, dotSize * 0.2);
           ctx.stroke();
-          return; // 既に描画済みなので戻る
+          return; // 既に描画済みなのでここで終了
         } else if (state.isVisited) {
-          ctx.fillStyle = '#FFEE58'; // 黄：一部訪問済み
+          ctx.fillStyle = '#FFEE58'; // 鮟・ｼ壻ｸ驛ｨ險ｪ蝠乗ｸ医∩
         } else {
-          ctx.fillStyle = '#42A5F5'; // 青：通常の未訪問アイテムあり
+          ctx.fillStyle = '#42A5F5'; // 髱抵ｼ夐壼ｸｸ縺ｮ譛ｪ險ｪ蝠上い繧､繝・Β縺ゅｊ
         }
 
         ctx.arc(x + width / 2, y + height / 2, dotSize / 2, 0, Math.PI * 2);
@@ -1439,21 +1436,21 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
 
-    // 4. ルートを描画（優先度で色分け、重複部分は平行線）
+    // 4. 繝ｫ繝ｼ繝医ｒ謠冗判・亥━蜈亥ｺｦ縺ｧ濶ｲ蛻・￠縲・㍾隍・Κ蛻・・蟷ｳ陦檎ｷ夲ｼ・
     if (!isRotationInteracting && isRouteVisible && routeSegments.length > 0) {
-      // 優先度ごとの色を定義
+      // 蜆ｪ蜈亥ｺｦ縺斐→縺ｮ濶ｲ繧貞ｮ夂ｾｩ
       const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
         switch (priority) {
           case 'highest':
-            return '#EF4444'; // 赤
+            return '#EF4444'; // 襍､
           case 'priority':
-            return '#F97316'; // オレンジ
+            return '#F97316'; // 繧ｪ繝ｬ繝ｳ繧ｸ
           default:
             return '#1976D2'; // 青
         }
       };
 
-      // グループ間接続かどうかを判定
+      // 繧ｰ繝ｫ繝ｼ繝鈴俣謗･邯壹°縺ｩ縺・°繧貞愛螳・
       const isGroupTransition = (
         fromPriority: string | undefined,
         toPriority: string | undefined,
@@ -1463,23 +1460,22 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         return from !== to;
       };
 
-      // エッジごとの通過情報を収集（重複検出用）
-      // キー: "row1,col1-row2,col2"（小さい座標を先に）
+      // 繧ｨ繝・ず縺斐→縺ｮ騾夐℃諠・ｱ繧貞庶髮・ｼ磯㍾隍・､懷・逕ｨ・・      // 繧ｭ繝ｼ: "row1,col1-row2,col2"・亥ｰ上＆縺・ｺｧ讓吶ｒ蜈医↓・・
       const edgeUsage = new Map<string, Set<'none' | 'priority' | 'highest'>>();
 
       const getEdgeKey = (r1: number, c1: number, r2: number, c2: number): string => {
-        // 常に小さい座標を先にして正規化
+        // 蟶ｸ縺ｫ蟆上＆縺・ｺｧ讓吶ｒ蜈医↓縺励※豁｣隕丞喧
         if (r1 < r2 || (r1 === r2 && c1 < c2)) {
           return `${r1},${c1}-${r2},${c2}`;
         }
         return `${r2},${c2}-${r1},${c1}`;
       };
 
-      // 全セグメントのエッジを収集
+      // 蜈ｨ繧ｻ繧ｰ繝｡繝ｳ繝医・繧ｨ繝・ず繧貞庶髮・
       routeSegments.forEach((segment) => {
         if (segment.path.length < 2) return;
 
-        // グループ間接続はグレーなので重複カウントに含めない
+        // 繧ｰ繝ｫ繝ｼ繝鈴俣謗･邯壹・繧ｰ繝ｬ繝ｼ縺ｪ縺ｮ縺ｧ驥崎､・き繧ｦ繝ｳ繝医↓蜷ｫ繧√↑縺・
         if (isGroupTransition(segment.fromPriority, segment.toPriority)) return;
 
         const priority = segment.fromPriority || 'none';
@@ -1496,13 +1492,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       });
 
-      // セグメントを描画
-      const lineWidth = Math.max(2, cellSize * 0.08); // 少し細く
-
-      // 平行線のオフセット量を計算（セルサイズに応じて調整）
+      // 繧ｻ繧ｰ繝｡繝ｳ繝医ｒ謠冗判
+      const lineWidth = Math.max(2, cellSize * 0.08); // 蟆代＠邏ｰ縺・
+      // 蟷ｳ陦檎ｷ壹・繧ｪ繝輔そ繝・ヨ驥上ｒ險育ｮ暦ｼ医そ繝ｫ繧ｵ繧､繧ｺ縺ｫ蠢懊§縺ｦ隱ｿ謨ｴ・・
       const parallelOffset = Math.max(3, cellSize * 0.12);
 
-      // 線をオフセットする関数
+      // 邱壹ｒ繧ｪ繝輔そ繝・ヨ縺吶ｋ髢｢謨ｰ
       const getOffsetPoints = (
         px1: number,
         py1: number,
@@ -1510,13 +1505,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         py2: number,
         offset: number,
       ): { x1: number; y1: number; x2: number; y2: number } => {
-        // 線の方向ベクトル
+        // 邱壹・譁ｹ蜷代・繧ｯ繝医Ν
         const dx = px2 - px1;
         const dy = py2 - py1;
         const len = Math.sqrt(dx * dx + dy * dy);
         if (len === 0) return { x1: px1, y1: py1, x2: px2, y2: py2 };
 
-        // 法線ベクトル（90度回転）
+        // 豕慕ｷ壹・繧ｯ繝医Ν・・0蠎ｦ蝗櫁ｻ｢・・
         const nx = -dy / len;
         const ny = dx / len;
 
@@ -1534,10 +1529,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const isTransition = isGroupTransition(segment.fromPriority, segment.toPriority);
         const segmentPriority = segment.fromPriority || 'none';
 
-        // グループ間接続はグレー
+        // 繧ｰ繝ｫ繝ｼ繝鈴俣謗･邯壹・繧ｰ繝ｬ繝ｼ
         const baseColor = isTransition ? '#9CA3AF' : getPriorityColor(segment.fromPriority);
 
-        // パスを一度に描画するのではなく、エッジごとに描画
+        // 繝代せ繧剃ｸ蠎ｦ縺ｫ謠冗判縺吶ｋ縺ｮ縺ｧ縺ｯ縺ｪ縺上√お繝・ず縺斐→縺ｫ謠冗判
         for (let i = 0; i < segment.path.length - 1; i++) {
           const p1 = segment.path[i];
           const p2 = segment.path[i + 1];
@@ -1548,7 +1543,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const px2 = (p2.col - 0.5) * cellSize;
           const py2 = (p2.row - 0.5) * cellSize;
 
-          // グループ間接続は重複チェック不要（中央に描画）
+          // 繧ｰ繝ｫ繝ｼ繝鈴俣謗･邯壹・驥崎､・メ繧ｧ繝・け荳崎ｦ・ｼ井ｸｭ螟ｮ縺ｫ謠冗判・・
           if (isTransition) {
             ctx.beginPath();
             ctx.strokeStyle = baseColor;
@@ -1561,27 +1556,27 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             continue;
           }
 
-          // 重複しているエッジかどうかを確認
+          // 驥崎､・＠縺ｦ縺・ｋ繧ｨ繝・ず縺九←縺・°繧堤｢ｺ隱・
           const usedPriorities = edgeUsage.get(edgeKey);
           const isOverlapping = usedPriorities && usedPriorities.size > 1;
 
           if (isOverlapping) {
-            // 重複エッジ：平行線で描画
+            // 驥崎､・お繝・ず・壼ｹｳ陦檎ｷ壹〒謠冗判
             const priorities = Array.from(usedPriorities!).sort((a, b) => {
               const order = { highest: 0, priority: 1, none: 2 };
               return order[a] - order[b];
             });
 
-            // このセグメントの優先度のインデックスを取得
+            // 縺薙・繧ｻ繧ｰ繝｡繝ｳ繝医・蜆ｪ蜈亥ｺｦ縺ｮ繧､繝ｳ繝・ャ繧ｯ繧ｹ繧貞叙蠕・
             const priorityIndex = priorities.indexOf(segmentPriority);
             if (priorityIndex === -1) continue;
 
-            // オフセット量を計算（中央を基準に均等に配置）
+            // 繧ｪ繝輔そ繝・ヨ驥上ｒ險育ｮ暦ｼ井ｸｭ螟ｮ繧貞渕貅悶↓蝮・ｭ峨↓驟咲ｽｮ・・
             const totalLines = priorities.length;
             const offsetIndex = priorityIndex - (totalLines - 1) / 2;
             const offset = offsetIndex * parallelOffset;
 
-            // オフセットした座標を計算
+            // 繧ｪ繝輔そ繝・ヨ縺励◆蠎ｧ讓吶ｒ險育ｮ・
             const offsetted = getOffsetPoints(px1, py1, px2, py2, offset);
 
             ctx.beginPath();
@@ -1593,7 +1588,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             ctx.lineTo(offsetted.x2, offsetted.y2);
             ctx.stroke();
           } else {
-            // 重複なし：通常の実線
+            // 驥崎､・↑縺暦ｼ夐壼ｸｸ縺ｮ螳溽ｷ・
             ctx.beginPath();
             ctx.strokeStyle = baseColor;
             ctx.lineWidth = lineWidth;
@@ -1605,7 +1600,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           }
         }
 
-        // 矢印（セグメント終点に描画）
+        // 遏｢蜊ｰ・医そ繧ｰ繝｡繝ｳ繝育ｵらせ縺ｫ謠冗判・・
         if (segment.path.length >= 2) {
           const last = segment.path[segment.path.length - 1];
           const prev = segment.path[segment.path.length - 2];
@@ -1634,10 +1629,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       });
 
-      // setLineDashをリセット
+      // setLineDash繧偵Μ繧ｻ繝・ヨ
       ctx.setLineDash([]);
 
-      // 訪問順番号（優先度で色分け）
+      // 險ｪ蝠城・分蜿ｷ・亥━蜈亥ｺｦ縺ｧ濶ｲ蛻・￠・・
       if (isDetailedView) {
         routePoints.forEach((point) => {
           const px = (point.col - 0.5) * cellSize;
@@ -1660,20 +1655,20 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     }
 
-    // 5. 訪問先リストからのセルハイライト
+    // 5. 險ｪ蝠丞・繝ｪ繧ｹ繝医°繧峨・繧ｻ繝ｫ繝上う繝ｩ繧､繝・
     if (!isRotationInteracting && highlightedCell) {
       const x = (highlightedCell.col - 1) * cellSize;
       const y = (highlightedCell.row - 1) * cellSize;
 
-      // パルスアニメーション風のハイライト
+      // 繝代Ν繧ｹ繧｢繝九Γ繝ｼ繧ｷ繝ｧ繝ｳ鬚ｨ縺ｮ繝上う繝ｩ繧､繝・
       ctx.save();
 
-      // 外側のリング
+      // 螟門・縺ｮ繝ｪ繝ｳ繧ｰ
       ctx.strokeStyle = '#FF6B00';
       ctx.lineWidth = Math.max(4, cellSize * 0.15);
       ctx.strokeRect(x - 2, y - 2, cellSize + 4, cellSize + 4);
 
-      // 内側のリング
+      // 蜀・・縺ｮ繝ｪ繝ｳ繧ｰ
       ctx.strokeStyle = '#FFD600';
       ctx.lineWidth = Math.max(2, cellSize * 0.08);
       ctx.strokeRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
@@ -1681,7 +1676,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.restore();
     }
 
-    // 6. ホール頂点選択プレビュー（多角形オーバーレイ）
+    // 6. 繝帙・繝ｫ鬆らせ驕ｸ謚槭・繝ｬ繝薙Η繝ｼ・亥､夊ｧ貞ｽ｢繧ｪ繝ｼ繝舌・繝ｬ繧､・・
     if (!isRotationInteracting && vertexSelectionMode && hoverGuide) {
       const hoverCellX = (hoverGuide.col - 1) * cellSize;
       const hoverCellY = (hoverGuide.row - 1) * cellSize;
@@ -1731,7 +1726,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     if (!isRotationInteracting && vertexSelectionMode && vertexSelectionMode.clickedVertices.length >= 3) {
       const vertices = vertexSelectionMode.clickedVertices;
 
-      // プレビュー用に重心角度ソートして辺交差を防止
+      // 繝励Ξ繝薙Η繝ｼ逕ｨ縺ｫ驥榊ｿ・ｧ貞ｺｦ繧ｽ繝ｼ繝医＠縺ｦ霎ｺ莠､蟾ｮ繧帝亟豁｢
       const centroidRow = vertices.reduce((s, v) => s + v.row, 0) / vertices.length;
       const centroidCol = vertices.reduce((s, v) => s + v.col, 0) / vertices.length;
       const sortedVertices = [...vertices].sort((a, b) => {
@@ -1742,10 +1737,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
 
       ctx.beginPath();
-      ctx.fillStyle = 'rgba(255, 0, 0, 0.4)'; // 不透明度40%の赤
+      ctx.fillStyle = 'rgba(255, 0, 0, 0.4)'; // 荳埼乗・蠎ｦ40%縺ｮ襍､
 
       sortedVertices.forEach((vertex, i) => {
-        // セルの中心座標
+        // 繧ｻ繝ｫ縺ｮ荳ｭ蠢・ｺｧ讓・
         const px = (vertex.col - 0.5) * cellSize;
         const py = (vertex.row - 0.5) * cellSize;
 
@@ -1759,12 +1754,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.closePath();
       ctx.fill();
 
-      // 頂点マーカーと番号を描画（クリック順で表示）
+      // 鬆らせ繝槭・繧ｫ繝ｼ縺ｨ逡ｪ蜿ｷ繧呈緒逕ｻ・医け繝ｪ繝・け鬆・〒陦ｨ遉ｺ・・
       vertices.forEach((vertex, i) => {
         const px = (vertex.col - 0.5) * cellSize;
         const py = (vertex.row - 0.5) * cellSize;
 
-        // 頂点マーカー（白い円）
+        // 鬆らせ繝槭・繧ｫ繝ｼ・育區縺・・・・
         ctx.beginPath();
         ctx.fillStyle = '#FFFFFF';
         ctx.strokeStyle = '#FF0000';
@@ -1774,7 +1769,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fill();
         ctx.stroke();
 
-        // 番号
+        // 逡ｪ蜿ｷ
         ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1782,10 +1777,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         drawUprightText(String(i + 1), px, py);
       });
     } else if (!isRotationInteracting && vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
-      // 3点未満の場合は点と線のみ表示
+      // 3轤ｹ譛ｪ貅縺ｮ蝣ｴ蜷医・轤ｹ縺ｨ邱壹・縺ｿ陦ｨ遉ｺ
       const vertices = vertexSelectionMode.clickedVertices;
 
-      // 線を描画（2点以上の場合）
+      // 邱壹ｒ謠冗判・・轤ｹ莉･荳翫・蝣ｴ蜷茨ｼ・
       if (vertices.length >= 2) {
         ctx.beginPath();
         ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
@@ -1805,7 +1800,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.stroke();
       }
 
-      // 頂点マーカーと番号を描画
+      // 鬆らせ繝槭・繧ｫ繝ｼ縺ｨ逡ｪ蜿ｷ繧呈緒逕ｻ
       vertices.forEach((vertex, i) => {
         const px = (vertex.col - 0.5) * cellSize;
         const py = (vertex.row - 0.5) * cellSize;
@@ -1827,17 +1822,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
 
-    // 7. ブロック定義セル選択マーカー + 範囲プレビュー
+    // 7. 繝悶Ο繝・け螳夂ｾｩ繧ｻ繝ｫ驕ｸ謚槭・繝ｼ繧ｫ繝ｼ + 遽・峇繝励Ξ繝薙Η繝ｼ
     if (!isRotationInteracting && cellSelectionMode && cellSelectionMode.clickedCells.length > 0) {
       const clickedCells = cellSelectionMode.clickedCells;
       const selType = cellSelectionMode.type;
 
-      // Phase 3: 薄緑色の範囲プレビュー（2点以上）
+      // Phase 3: 阮・ｷ題牡縺ｮ遽・峇繝励Ξ繝薙Η繝ｼ・・轤ｹ莉･荳奇ｼ・
       if (clickedCells.length >= 2) {
         if (selType === 'individual') {
-          // 個別モード: 各セルを個別に薄緑でハイライト
+          // 蛟句挨繝｢繝ｼ繝・ 蜷・そ繝ｫ繧貞句挨縺ｫ阮・ｷ代〒繝上う繝ｩ繧､繝・
           clickedCells.forEach((cell) => {
-            // 結合セル対応
+            // 邨仙粋繧ｻ繝ｫ蟇ｾ蠢・
             const mergeInfo = mergedCellsMap.get(`${cell.row}-${cell.col}`);
             const cx = mergeInfo ? (mergeInfo.startCol - 1) * cellSize : (cell.col - 1) * cellSize;
             const cy = mergeInfo ? (mergeInfo.startRow - 1) * cellSize : (cell.row - 1) * cellSize;
@@ -1851,7 +1846,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             ctx.fillRect(cx, cy, cw, ch);
           });
         } else {
-          // corner/multiCorner/rangeStart: バウンディングボックスを薄緑でハイライト
+          // corner/multiCorner/rangeStart: 繝舌え繝ｳ繝・ぅ繝ｳ繧ｰ繝懊ャ繧ｯ繧ｹ繧定埋邱代〒繝上う繝ｩ繧､繝・
           const rows = clickedCells.map((c) => c.row);
           const cols = clickedCells.map((c) => c.col);
           const minRow = Math.min(...rows);
@@ -1859,7 +1854,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const minCol = Math.min(...cols);
           const maxCol = Math.max(...cols);
 
-          // 結合セルを考慮して実際の表示範囲を拡張
+          // 邨仙粋繧ｻ繝ｫ繧定・・縺励※螳滄圀縺ｮ陦ｨ遉ｺ遽・峇繧呈僑蠑ｵ
           let displayMaxRow = maxRow;
           let displayMaxCol = maxCol;
           clickedCells.forEach((cell) => {
@@ -1876,7 +1871,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const rh = (displayMaxRow - minRow + 1) * cellSize;
           ctx.fillStyle = 'rgba(144, 238, 144, 0.35)';
           ctx.fillRect(rx, ry, rw, rh);
-          // 枠線
+          // 譫邱・
           ctx.strokeStyle = 'rgba(76, 175, 80, 0.7)';
           ctx.lineWidth = 2;
           ctx.setLineDash([6, 3]);
@@ -1885,9 +1880,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       }
 
-      // Phase 2: 青色マーカーを描画
+      // Phase 2: 髱定牡繝槭・繧ｫ繝ｼ繧呈緒逕ｻ
       clickedCells.forEach((cell, i) => {
-        // 結合セルの場合は結合範囲の中心にマーカーを表示
+        // 邨仙粋繧ｻ繝ｫ縺ｮ蝣ｴ蜷医・邨仙粋遽・峇縺ｮ荳ｭ蠢・↓繝槭・繧ｫ繝ｼ繧定｡ｨ遉ｺ
         const mergeInfo = mergedCellsMap.get(`${cell.row}-${cell.col}`);
         let px: number, py: number;
         if (mergeInfo) {
@@ -1900,7 +1895,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           py = (cell.row - 0.5) * cellSize;
         }
 
-        // マーカー（白い円＋青枠）
+        // 繝槭・繧ｫ繝ｼ・育區縺・・・矩搨譫・・
         ctx.beginPath();
         ctx.fillStyle = '#FFFFFF';
         ctx.strokeStyle = '#2196F3';
@@ -1910,7 +1905,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fill();
         ctx.stroke();
 
-        // 番号
+        // 逡ｪ蜿ｷ
         ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1919,7 +1914,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
 
-    // ctx.translate を解除
+    // ctx.translate 繧定ｧ｣髯､
     ctx.restore();
 
     if ((vertexSelectionMode || cellSelectionMode) && tapAssist) {
@@ -2027,7 +2022,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     offset,
   ]);
 
-  // クリック処理
+  // 繧ｯ繝ｪ繝・け蜃ｦ逅・
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (isDragging) return;
@@ -2036,19 +2031,19 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (!canvas) return;
 
       const rect = canvas.getBoundingClientRect();
-      // Canvas表示サイズに対するクリック位置を計算
+      // Canvas陦ｨ遉ｺ繧ｵ繧､繧ｺ縺ｫ蟇ｾ縺吶ｋ繧ｯ繝ｪ繝・け菴咲ｽｮ繧定ｨ育ｮ・
       const scaleX = canvas.width / dpr / rect.width;
       const scaleY = canvas.height / dpr / rect.height;
 
-      // ビューポート座標 → マップ座標（オフセットを引く）
+      // 繝薙Η繝ｼ繝昴・繝亥ｺｧ讓・竊・繝槭ャ繝怜ｺｧ讓呻ｼ医が繝輔そ繝・ヨ繧貞ｼ輔￥・・
       const viewX = (e.clientX - rect.left) * scaleX;
       const viewY = (e.clientY - rect.top) * scaleY;
       const { x, y } = toMapCoordinates(viewX, viewY);
 
-      // 頂点選択モード中は、まず頂点マーカーのクリックをチェック
+      // 鬆らせ驕ｸ謚槭Δ繝ｼ繝我ｸｭ縺ｯ縲√∪縺夐らせ繝槭・繧ｫ繝ｼ縺ｮ繧ｯ繝ｪ繝・け繧偵メ繧ｧ繝・け
       if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
         const markerSize = Math.max(10, cellSize * 0.4);
-        const clickRadius = markerSize; // クリック判定を少し広めに
+        const clickRadius = markerSize; // 繧ｯ繝ｪ繝・け蛻､螳壹ｒ蟆代＠蠎・ａ縺ｫ
 
         for (const vertex of vertexSelectionMode.clickedVertices) {
           const markerX = (vertex.col - 0.5) * cellSize;
@@ -2056,13 +2051,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const distance = Math.sqrt(Math.pow(x - markerX, 2) + Math.pow(y - markerY, 2));
 
           if (distance <= clickRadius) {
-            // 頂点マーカーがクリックされた → その頂点のセル座標でイベント発火
+            // 鬆らせ繝槭・繧ｫ繝ｼ縺後け繝ｪ繝・け縺輔ｌ縺・竊・縺昴・鬆らせ縺ｮ繧ｻ繝ｫ蠎ｧ讓吶〒繧､繝吶Φ繝育匱轣ｫ
             window.dispatchEvent(
               new CustomEvent('mapCellClick', {
                 detail: { row: vertex.row, col: vertex.col },
               }),
             );
-            return; // 頂点クリックの場合は通常のセルクリック処理をスキップ
+            return; // 鬆らせ繧ｯ繝ｪ繝・け縺ｮ蝣ｴ蜷医・騾壼ｸｸ縺ｮ繧ｻ繝ｫ繧ｯ繝ｪ繝・け蜃ｦ逅・ｒ繧ｹ繧ｭ繝・・
           }
         }
       }
@@ -2074,7 +2069,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         return;
       }
 
-      // セル選択モード中：青マーカーのクリック検出
+      // 繧ｻ繝ｫ驕ｸ謚槭Δ繝ｼ繝我ｸｭ・夐搨繝槭・繧ｫ繝ｼ縺ｮ繧ｯ繝ｪ繝・け讀懷・
       if (cellSelectionMode && cellSelectionMode.clickedCells.length > 0) {
         const markerSize = Math.max(10, cellSize * 0.4);
         const clickRadius = markerSize;
@@ -2091,7 +2086,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           }
           const distance = Math.sqrt(Math.pow(x - mx, 2) + Math.pow(y - my, 2));
           if (distance <= clickRadius) {
-            // マーカークリック → そのセル座標でイベント発火（解除される）
+            // 繝槭・繧ｫ繝ｼ繧ｯ繝ｪ繝・け 竊・縺昴・繧ｻ繝ｫ蠎ｧ讓吶〒繧､繝吶Φ繝育匱轣ｫ・郁ｧ｣髯､縺輔ｌ繧具ｼ・
             window.dispatchEvent(
               new CustomEvent('mapCellClick', {
                 detail: { row: cell.row, col: cell.col },
@@ -2102,7 +2097,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       }
 
-      // セル選択モード中：結合セルを開始セルに解決
+      // 繧ｻ繝ｫ驕ｸ謚槭Δ繝ｼ繝我ｸｭ・夂ｵ仙粋繧ｻ繝ｫ繧帝幕蟋九そ繝ｫ縺ｫ隗｣豎ｺ
       let resolvedRow = row;
       let resolvedCol = col;
       if (cellSelectionMode) {
@@ -2120,7 +2115,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       }
 
-      // ブロック定義パネル用のカスタムイベントを発火
+      // 繝悶Ο繝・け螳夂ｾｩ繝代ロ繝ｫ逕ｨ縺ｮ繧ｫ繧ｹ繧ｿ繝繧､繝吶Φ繝医ｒ逋ｺ轣ｫ
       const shouldShowTapAssist =
         (vertexSelectionMode || cellSelectionMode) &&
         (lastPointerTypeRef.current === 'touch' || lastPointerTypeRef.current === 'pen');
@@ -2162,7 +2157,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     ],
   );
 
-  // ホールのスクロール範囲を計算
+  // 繝帙・繝ｫ縺ｮ繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ遽・峇繧定ｨ育ｮ・
   const hallScrollBounds = useMemo(() => {
     if (selectedHall && selectedHall.vertices.length >= 4) {
       const rows = selectedHall.vertices.map((v) => v.row);
@@ -2216,7 +2211,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     [filledCellScrollBounds, hallScrollBounds],
   );
 
-  // スクロール制限を計算する関数
+  // 繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ蛻ｶ髯舌ｒ險育ｮ励☆繧矩未謨ｰ
   const calculateScrollLimits = useCallback(() => {
     if (!activeScrollBounds) return null;
     const container = containerRef.current;
@@ -2284,11 +2279,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     [cellSize, getPointerViewMetrics, mapData.maxRow, mapData.maxCol, toMapCoordinates],
   );
 
-  // ドラッグ処理
+  // 繝峨Λ繝・げ蜃ｦ逅・
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       lastPointerTypeRef.current = e.pointerType;
-      // ピンチズーム中はドラッグを無視
+      // 繝斐Φ繝√ぜ繝ｼ繝荳ｭ縺ｯ繝峨Λ繝・げ繧堤┌隕・
       if (activeTouchesRef.current.size >= 2) return;
       setIsDragging(false);
       setDragStart({ x: e.clientX, y: e.clientY });
@@ -2307,7 +2302,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
 
       if (e.buttons !== 1) return;
-      // ピンチズーム中はドラッグを無視
+      // 繝斐Φ繝√ぜ繝ｼ繝荳ｭ縺ｯ繝峨Λ繝・げ繧堤┌隕・
       if (activeTouchesRef.current.size >= 2) return;
 
       const dx = e.clientX - dragStart.x;
@@ -2317,11 +2312,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         setIsDragging(true);
       }
 
-      // 新しいオフセットを計算
+      // 譁ｰ縺励＞繧ｪ繝輔そ繝・ヨ繧定ｨ育ｮ・
       let newX = dragStartOffset.x + dx;
       let newY = dragStartOffset.y + dy;
 
-      // ホール選択時はスクロール範囲を制限
+      // 繝帙・繝ｫ驕ｸ謚樊凾縺ｯ繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ遽・峇繧貞宛髯・
       const limits = calculateScrollLimits();
       if (limits) {
         newX = Math.max(limits.minX, Math.min(limits.maxX, newX));
@@ -2373,3 +2368,5 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 };
 
 export default MapCanvas;
+
+

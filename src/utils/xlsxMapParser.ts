@@ -684,6 +684,7 @@ async function parseMapSheetWithExcelJS(
   const colCount = worksheet.columnCount;
 
   if (rowCount === 0 || colCount === 0) return null;
+  const IMPORT_CLICK_MARGIN = 15;
 
   // 結合セル情報を取得
   const mergedCells: MergedCellInfo[] = [];
@@ -733,13 +734,13 @@ async function parseMapSheetWithExcelJS(
     });
   });
 
-  // 5行5列分の余白を追加
-  actualMaxRow += 5;
-  actualMaxCol += 5;
+  // 元シートの実データ最大行・最大列を保持
+  const sourceMaxRow = actualMaxRow;
+  const sourceMaxCol = actualMaxCol;
 
   // 全セルを処理
-  for (let row = 1; row <= actualMaxRow; row++) {
-    for (let col = 1; col <= actualMaxCol; col++) {
+  for (let row = 1; row <= sourceMaxRow; row++) {
+    for (let col = 1; col <= sourceMaxCol; col++) {
       const cell = worksheet.getCell(row, col);
 
       const mergeParent = mergeMap.get(`${row}-${col}`);
@@ -784,18 +785,84 @@ async function parseMapSheetWithExcelJS(
     worksheet,
     mergedCells,
     mergeMap,
-    actualMaxRow,
-    actualMaxCol,
+    sourceMaxRow,
+    sourceMaxCol,
     settings,
   );
 
+  const shiftedCells = cells.map((cell) => ({
+    ...cell,
+    row: cell.row + IMPORT_CLICK_MARGIN,
+    col: cell.col + IMPORT_CLICK_MARGIN,
+    mergeParent: cell.mergeParent
+      ? {
+          row: cell.mergeParent.row + IMPORT_CLICK_MARGIN,
+          col: cell.mergeParent.col + IMPORT_CLICK_MARGIN,
+        }
+      : undefined,
+  }));
+
+  const shiftedMergedCells = mergedCells.map((merge) => ({
+    ...merge,
+    startRow: merge.startRow + IMPORT_CLICK_MARGIN,
+    startCol: merge.startCol + IMPORT_CLICK_MARGIN,
+    endRow: merge.endRow + IMPORT_CLICK_MARGIN,
+    endCol: merge.endCol + IMPORT_CLICK_MARGIN,
+  }));
+
+  const shiftedBlocks = blocks.map((block) => ({
+    ...block,
+    startRow: block.startRow + IMPORT_CLICK_MARGIN,
+    startCol: block.startCol + IMPORT_CLICK_MARGIN,
+    endRow: block.endRow + IMPORT_CLICK_MARGIN,
+    endCol: block.endCol + IMPORT_CLICK_MARGIN,
+    numberCells: block.numberCells.map((numberCell) => ({
+      ...numberCell,
+      row: numberCell.row + IMPORT_CLICK_MARGIN,
+      col: numberCell.col + IMPORT_CLICK_MARGIN,
+    })),
+    nameCells: block.nameCells?.map((nameCell) => ({
+      row: nameCell.row + IMPORT_CLICK_MARGIN,
+      col: nameCell.col + IMPORT_CLICK_MARGIN,
+    })),
+    cellGroups: block.cellGroups?.map((group) => {
+      if (group.type === 'range') {
+        return {
+          ...group,
+          startRow:
+            typeof group.startRow === 'number'
+              ? group.startRow + IMPORT_CLICK_MARGIN
+              : group.startRow,
+          startCol:
+            typeof group.startCol === 'number'
+              ? group.startCol + IMPORT_CLICK_MARGIN
+              : group.startCol,
+          endRow:
+            typeof group.endRow === 'number' ? group.endRow + IMPORT_CLICK_MARGIN : group.endRow,
+          endCol:
+            typeof group.endCol === 'number' ? group.endCol + IMPORT_CLICK_MARGIN : group.endCol,
+        };
+      }
+      return {
+        ...group,
+        cells: group.cells?.map((groupCell) => ({
+          row: groupCell.row + IMPORT_CLICK_MARGIN,
+          col: groupCell.col + IMPORT_CLICK_MARGIN,
+        })),
+      };
+    }),
+  }));
+
+  const shiftedMaxRow = sourceMaxRow + IMPORT_CLICK_MARGIN * 2;
+  const shiftedMaxCol = sourceMaxCol + IMPORT_CLICK_MARGIN * 2;
+
   return {
     sheetName,
-    cells,
-    mergedCells,
-    blocks,
-    maxRow: actualMaxRow,
-    maxCol: actualMaxCol,
+    cells: shiftedCells,
+    mergedCells: shiftedMergedCells,
+    blocks: shiftedBlocks,
+    maxRow: shiftedMaxRow,
+    maxCol: shiftedMaxCol,
   };
 }
 
