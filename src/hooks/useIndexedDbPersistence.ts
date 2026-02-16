@@ -10,7 +10,7 @@ import {
   RouteSettingsStore,
   ShoppingItem,
 } from '../types';
-import { db } from '../utils/indexedDB';
+import { db, type LoadResult } from '../utils/indexedDB';
 
 type PersistedStateValues = {
   eventLists: Record<string, ShoppingItem[]>;
@@ -49,6 +49,7 @@ export function useIndexedDbPersistence({
 }: UseIndexedDbPersistenceParams) {
   const [isInitialized, setIsInitialized] = useState(false);
   const isSavingRef = useRef(false);
+  const hasShownLoadErrorRef = useRef(false);
   const {
     eventLists,
     eventMetadata,
@@ -99,9 +100,43 @@ export function useIndexedDbPersistence({
           db.loadHallRouteSettings(),
         ]);
 
+        const loadErrorStores: string[] = [];
+        const resolveLoadResult = <T extends Record<string, unknown>>(
+          storeLabel: string,
+          result: LoadResult<T>,
+        ): T => {
+          if (result.status === 'ok' && result.data) {
+            return result.data;
+          }
+          if (result.status === 'error') {
+            console.error(`Failed to load ${storeLabel} from IndexedDB:`, result.error);
+            loadErrorStores.push(storeLabel);
+          }
+          return {} as T;
+        };
+
+        const resolvedEventLists = resolveLoadResult('eventLists', loadedEventLists);
+        const resolvedMetadata = resolveLoadResult('eventMetadata', loadedMetadata);
+        const resolvedExecuteItems = resolveLoadResult('executeModeItems', loadedExecuteItems);
+        const resolvedDayModes = resolveLoadResult('dayModes', loadedDayModes);
+        const resolvedMapData = resolveLoadResult('mapData', loadedMapData);
+        const resolvedMapRotationSettings = resolveLoadResult(
+          'mapRotationSettings',
+          loadedMapRotationSettings,
+        );
+        const resolvedRouteSettings = resolveLoadResult('routeSettings', loadedRouteSettings);
+        const resolvedHallDefinitions = resolveLoadResult(
+          'hallDefinitions',
+          loadedHallDefinitions,
+        );
+        const resolvedHallRouteSettings = resolveLoadResult(
+          'hallRouteSettings',
+          loadedHallRouteSettings,
+        );
+
         const migratedLists: Record<string, ShoppingItem[]> = {};
-        Object.keys(loadedEventLists).forEach((eventName) => {
-          migratedLists[eventName] = (loadedEventLists[eventName] as ShoppingItem[]).map(
+        Object.keys(resolvedEventLists).forEach((eventName) => {
+          migratedLists[eventName] = (resolvedEventLists[eventName] as ShoppingItem[]).map(
             (item: ShoppingItem) => ({
               ...item,
               quantity: item.quantity ?? 1,
@@ -110,14 +145,21 @@ export function useIndexedDbPersistence({
         });
 
         setEventLists(migratedLists);
-        setEventMetadata(loadedMetadata as Record<string, EventMetadata>);
-        setExecuteModeItems(loadedExecuteItems);
-        setDayModes(loadedDayModes as Record<string, DayModeState>);
-        setMapData(loadedMapData as MapDataStore);
-        setMapRotationSettings(loadedMapRotationSettings as MapRotationSettingsStore);
-        setRouteSettings(loadedRouteSettings as RouteSettingsStore);
-        setHallDefinitions(loadedHallDefinitions as HallDefinitionsStore);
-        setHallRouteSettings(loadedHallRouteSettings as HallRouteSettingsStore);
+        setEventMetadata(resolvedMetadata as Record<string, EventMetadata>);
+        setExecuteModeItems(resolvedExecuteItems as Record<string, ExecuteModeItems>);
+        setDayModes(resolvedDayModes as Record<string, DayModeState>);
+        setMapData(resolvedMapData as MapDataStore);
+        setMapRotationSettings(resolvedMapRotationSettings as MapRotationSettingsStore);
+        setRouteSettings(resolvedRouteSettings as RouteSettingsStore);
+        setHallDefinitions(resolvedHallDefinitions as HallDefinitionsStore);
+        setHallRouteSettings(resolvedHallRouteSettings as HallRouteSettingsStore);
+
+        if (loadErrorStores.length > 0 && !hasShownLoadErrorRef.current) {
+          hasShownLoadErrorRef.current = true;
+          alert(
+            `一部の保存データの読み込みに失敗したため、初期値で起動しました。\n${loadErrorStores.join('\n')}`,
+          );
+        }
       } catch (error) {
         console.error('Failed to load data from IndexedDB:', error);
       }

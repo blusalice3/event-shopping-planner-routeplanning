@@ -1,9 +1,9 @@
-﻿import type { ShoppingItem } from '../../types';
+import type { ShoppingItem } from '../../types';
 import { extractEventDates } from '../../utils/eventDates';
 
-export function resolveEventListTab(items: ShoppingItem[]): string {
+export function resolveEventListTab(items: ShoppingItem[]): string | null {
   const dates = extractEventDates(items);
-  return dates[0] || 'eventList';
+  return dates[0] ?? null;
 }
 
 export function resolveBulkAddTab(

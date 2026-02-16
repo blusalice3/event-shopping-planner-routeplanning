@@ -878,16 +878,23 @@ function columnLetterToNumber(letters: string): number {
 /**
  * マップファイル（xlsx）を解析（ExcelJS版）
  */
+export type ParseMapFileResult = {
+  data: Record<string, DayMapData> | null;
+  skippedSheets: string[];
+  error: string | null;
+};
+
 export async function parseMapFile(
   file: File,
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
-): Promise<Record<string, DayMapData> | null> {
+): Promise<ParseMapFileResult> {
   try {
     const arrayBuffer = await file.arrayBuffer();
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(arrayBuffer);
 
     const result: Record<string, DayMapData> = {};
+    const skippedSheets: string[] = [];
 
     // "○日目" パターンのシートを探す（半角/全角数字の両方に対応）
     const dayPattern = /^([0-9０-９]+日目)$/;
@@ -896,19 +903,34 @@ export async function parseMapFile(
       const sheetName = worksheet.name.trim();
       const match = sheetName.match(dayPattern);
       if (match) {
-        const mapData = await parseMapSheetWithExcelJS(workbook, sheetName, settings);
-        if (mapData) {
-          // シート名を "○日目マップ" に変換
-          const mapName = `${match[1]}マップ`;
-          result[mapName] = mapData;
+        try {
+          const mapData = await parseMapSheetWithExcelJS(workbook, sheetName, settings);
+          if (mapData) {
+            // シート名を "○日目マップ" に変換
+            const mapName = `${match[1]}マップ`;
+            result[mapName] = mapData;
+          } else {
+            skippedSheets.push(sheetName);
+          }
+        } catch (error) {
+          console.error(`Error parsing map sheet ${sheetName}:`, error);
+          skippedSheets.push(sheetName);
         }
       }
     }
 
-    return Object.keys(result).length > 0 ? result : null;
+    return {
+      data: Object.keys(result).length > 0 ? result : null,
+      skippedSheets,
+      error: null,
+    };
   } catch (error) {
     console.error('Error parsing map file:', error);
-    return null;
+    return {
+      data: null,
+      skippedSheets: [],
+      error: error instanceof Error ? error.message : '不明なエラー',
+    };
   }
 }
 

@@ -14,6 +14,7 @@ import {
   HallDefinitionsStore,
   HallRouteSettingsStore,
   ExportOptions,
+  PurchaseStatuses,
 } from '../types';
 
 // エクスポートデータの型
@@ -49,6 +50,13 @@ export interface ImportResult {
   hallDefinitions?: Record<string, unknown[]>;
   hallRouteSettings?: Record<string, unknown>;
   errors: string[];
+  itemFallbackWarnings?: ItemFallbackWarning[];
+}
+
+export interface ItemFallbackWarning {
+  itemId: string;
+  rowNumber: number;
+  reasons: string[];
 }
 
 const EXPORT_VERSION = '2.0';
@@ -285,11 +293,65 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
     }
 
     const items: ShoppingItem[] = [];
+    const itemFallbackWarnings: ItemFallbackWarning[] = [];
+    const validPurchaseStatuses = new Set<string>(PurchaseStatuses as readonly string[]);
+
     itemsSheet.eachRow((row, rowNumber) => {
       if (rowNumber === 1) return; // ヘッダーをスキップ
 
+      const rowReasons: string[] = [];
+
+      const rawId = String(row.getCell(1).value ?? '').trim();
+      const itemId = rawId || crypto.randomUUID();
+      if (!rawId) {
+        rowReasons.push('IDが空のため自動採番しました');
+      }
+
+      const circle = String(row.getCell(2).value ?? '');
+      const eventDate = String(row.getCell(3).value ?? '');
+      const block = String(row.getCell(4).value ?? '');
+      const number = String(row.getCell(5).value ?? '');
+      const title = String(row.getCell(6).value ?? '');
+
+      const rawPrice = row.getCell(7).value;
+      let price: number | null = null;
+      if (rawPrice !== null && rawPrice !== undefined && String(rawPrice).trim() !== '') {
+        const parsedPrice = Number(rawPrice);
+        if (Number.isFinite(parsedPrice)) {
+          price = parsedPrice;
+        } else {
+          rowReasons.push(`価格「${String(rawPrice)}」は不正のため空値で補完しました`);
+        }
+      }
+
+      const rawQuantity = row.getCell(8).value;
+      let quantity = 1;
+      if (rawQuantity !== null && rawQuantity !== undefined && String(rawQuantity).trim() !== '') {
+        const parsedQuantity = Number(rawQuantity);
+        if (Number.isFinite(parsedQuantity) && parsedQuantity > 0) {
+          quantity = Math.max(1, Math.floor(parsedQuantity));
+        } else {
+          rowReasons.push(`数量「${String(rawQuantity)}」は不正のため1で補完しました`);
+        }
+      }
+
+      if (!Number.isInteger(quantity)) {
+        quantity = Math.max(1, Math.floor(quantity));
+      }
+
+      const rawPurchaseStatus = String(row.getCell(9).value ?? '').trim();
+      const purchaseStatus: ShoppingItem['purchaseStatus'] = validPurchaseStatuses.has(rawPurchaseStatus)
+        ? (rawPurchaseStatus as ShoppingItem['purchaseStatus'])
+        : 'None';
+      if (rawPurchaseStatus && !validPurchaseStatuses.has(rawPurchaseStatus)) {
+        rowReasons.push(`ステータス「${rawPurchaseStatus}」は不正のためNoneで補完しました`);
+      }
+
+      const remarks = String(row.getCell(10).value ?? '');
+      const url = String(row.getCell(11).value ?? '');
+
       // 優先度の値を取得（列12）
-      const priorityValue = String(row.getCell(12).value || '');
+      const priorityValue = String(row.getCell(12).value ?? '').trim();
       let priorityLevel: 'none' | 'priority' | 'highest' | undefined;
       if (priorityValue === 'highest') {
         priorityLevel = 'highest';
@@ -297,10 +359,12 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         priorityLevel = 'priority';
       } else if (priorityValue === 'none' || priorityValue === '') {
         priorityLevel = undefined; // 'none'は保存しない（デフォルト値）
+      } else {
+        rowReasons.push(`優先度「${priorityValue}」は不正のため未設定で補完しました`);
       }
 
       // 保護レベルの値を取得（列13）
-      const protectionValue = String(row.getCell(13).value || '');
+      const protectionValue = String(row.getCell(13).value ?? '').trim();
       let protectionLevel: 'full' | 'deletable' | 'none' | undefined;
       if (protectionValue === 'full') {
         protectionLevel = 'full';
@@ -310,10 +374,13 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         protectionLevel = 'none';
       } else {
         protectionLevel = undefined; // 未設定
+        if (protectionValue) {
+          rowReasons.push(`保護レベル「${protectionValue}」は不正のため未設定で補完しました`);
+        }
       }
 
       // 追加元の値を取得（列14）
-      const sourceValue = String(row.getCell(14).value || '');
+      const sourceValue = String(row.getCell(14).value ?? '').trim();
       let source: 'spreadsheet' | 'app' | undefined;
       if (sourceValue === 'app') {
         source = 'app';
@@ -321,20 +388,23 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         source = 'spreadsheet';
       } else {
         source = undefined; // 未設定
+        if (sourceValue) {
+          rowReasons.push(`追加元「${sourceValue}」は不正のため未設定で補完しました`);
+        }
       }
 
       const item: ShoppingItem = {
-        id: String(row.getCell(1).value || crypto.randomUUID()),
-        circle: String(row.getCell(2).value || ''),
-        eventDate: String(row.getCell(3).value || ''),
-        block: String(row.getCell(4).value || ''),
-        number: String(row.getCell(5).value || ''),
-        title: String(row.getCell(6).value || ''),
-        price: row.getCell(7).value ? Number(row.getCell(7).value) : null,
-        quantity: Number(row.getCell(8).value) || 1,
-        purchaseStatus: String(row.getCell(9).value || 'None') as ShoppingItem['purchaseStatus'],
-        remarks: String(row.getCell(10).value || ''),
-        url: String(row.getCell(11).value || ''),
+        id: itemId,
+        circle,
+        eventDate,
+        block,
+        number,
+        title,
+        price,
+        quantity,
+        purchaseStatus,
+        remarks,
+        url,
         priorityLevel,
         protectionLevel,
         source,
@@ -342,10 +412,20 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
 
       if (item.circle || item.title) {
         items.push(item);
+        if (rowReasons.length > 0) {
+          itemFallbackWarnings.push({
+            itemId: item.id,
+            rowNumber,
+            reasons: rowReasons,
+          });
+        }
       }
     });
 
     result.items = items;
+    if (itemFallbackWarnings.length > 0) {
+      result.itemFallbackWarnings = itemFallbackWarnings;
+    }
 
     // 2. メタデータシートを読み込み
     const metaSheet = workbook.getWorksheet('メタデータ');

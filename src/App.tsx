@@ -45,7 +45,7 @@ import {
 import VisitListPanel from './components/VisitListPanel';
 import FocusModeContainer from './features/map/components/FocusModeContainer';
 import { extractEventDates } from './utils/eventDates';
-import { importFromXlsx, downloadBlob } from './utils/exportImport';
+import { importFromXlsx, downloadBlob, type ItemFallbackWarning } from './utils/exportImport';
 import {
   buildBulkAddUiPlan,
   buildBulkAddEventMetadata,
@@ -179,6 +179,22 @@ const normalizeRotationAngle = (angle: number): number => {
   return normalized < 0 ? normalized + 360 : normalized;
 };
 
+const toHalfWidthDigits = (value: string): string =>
+  value.replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0));
+
+const normalizeMapDayToken = (value: string): string =>
+  toHalfWidthDigits(value)
+    .replace(/[ \u3000]/g, '')
+    .replace(/マップ$/, '');
+
+const resolveImportMapTabName = (mapName: string, eventDates: string[]): string | null => {
+  const normalizedMapDay = normalizeMapDayToken(mapName);
+  const matchedEventDate = eventDates.find(
+    (eventDate) => normalizeMapDayToken(eventDate) === normalizedMapDay,
+  );
+  return matchedEventDate ? `${matchedEventDate}マップ` : null;
+};
+
 type RotationScreenType = 'mapTab' | 'focusMode';
 
 const resolveDayMapRotationState = (
@@ -301,6 +317,10 @@ const App: React.FC = () => {
 
 
   const eventDates = useMemo(() => extractEventDates(items), [items]);
+  const activeEventDate = useMemo(
+    () => (activeEventName && eventDates.includes(activeTab) ? activeTab : ''),
+    [activeEventName, activeTab, eventDates],
+  );
 
   const {
     mapTabs,
@@ -435,19 +455,23 @@ const App: React.FC = () => {
     if (isMapTab) return 'edit';
     const modes = dayModes[activeEventName];
     if (!modes) return 'edit';
-    if (eventDates.includes(activeTab)) {
-      return modes[activeTab] || 'edit';
+    if (activeEventDate) {
+      const mode = modes[activeEventDate];
+      if (mode) {
+        return mode;
+      }
+      return 'edit';
     }
     return 'edit';
-  }, [activeEventName, dayModes, activeTab, eventDates, isMapTab]);
+  }, [activeEventName, dayModes, activeEventDate, isMapTab]);
 
 
   const currentFocusSessionKey = useMemo(() => {
     if (!activeEventName) return null;
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+    const currentEventDate = activeEventDate;
     if (!currentEventDate) return null;
     return buildFocusSessionKey(activeEventName, currentEventDate);
-  }, [activeEventName, activeTab, eventDates]);
+  }, [activeEventName, activeEventDate]);
 
   const currentFocusResumeState = useMemo(() => {
     if (!currentFocusSessionKey) return null;
@@ -469,10 +493,7 @@ const App: React.FC = () => {
     [currentFocusSessionKey],
   );
 
-  const currentFocusEventDate = useMemo(
-    () => (eventDates.includes(activeTab) ? activeTab : eventDates[0] || ''),
-    [activeTab, eventDates],
-  );
+  const currentFocusEventDate = useMemo(() => activeEventDate, [activeEventDate]);
 
   const currentFocusMapName = useMemo(
     () => (currentFocusEventDate ? `${currentFocusEventDate}マップ` : ''),
@@ -684,8 +705,8 @@ const App: React.FC = () => {
           setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
         }
 
-        const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
-        const currentMode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+        const currentEventDate = activeEventDate;
+        const currentMode = dayModes[activeEventName]?.[currentEventDate];
         let finalItem = updatedItem;
 
         if (
@@ -721,8 +742,8 @@ const App: React.FC = () => {
       setSortState('Manual');
       setBlockSortDirection(null);
 
-      const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
-      const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+      const currentEventDate = activeEventDate;
+      const mode = dayModes[activeEventName]?.[currentEventDate];
 
 
       const isAppendToEnd = hoverId === '__END_OF_LIST__';
@@ -1037,8 +1058,8 @@ const App: React.FC = () => {
       setSortState('Manual');
       setBlockSortDirection(null);
 
-      const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
-      const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+      const currentEventDate = activeEventDate;
+      const mode = dayModes[activeEventName]?.[currentEventDate];
 
       if (mode === 'edit' && targetColumn === 'execute') {
         setExecuteModeItems((prev) => {
@@ -1199,8 +1220,8 @@ const App: React.FC = () => {
       setSortState('Manual');
       setBlockSortDirection(null);
 
-      const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
-      const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+      const currentEventDate = activeEventDate;
+      const mode = dayModes[activeEventName]?.[currentEventDate];
 
       if (mode === 'edit' && targetColumn === 'execute') {
         setExecuteModeItems((prev) => {
@@ -1402,7 +1423,7 @@ const App: React.FC = () => {
       if (!activeEventName) return;
 
 
-      const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+      const currentEventDate = activeEventDate;
 
 
       const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
@@ -1473,7 +1494,7 @@ const App: React.FC = () => {
     (itemIds: string[]) => {
       if (!activeEventName) return;
 
-      const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+      const currentEventDate = activeEventDate;
 
 
       if (
@@ -1514,8 +1535,17 @@ const App: React.FC = () => {
   const handleToggleMode = useCallback(() => {
     if (!activeEventName) return;
 
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
-    const currentModeValue = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+    const currentEventDate = activeEventDate;
+    if (!currentEventDate) {
+      alert('参加日タブが選択されていないため、表示モードを切り替えできません。');
+      return;
+    }
+
+    const currentModeValue = dayModes[activeEventName]?.[currentEventDate];
+    if (!currentModeValue) {
+      alert('表示モードが未設定のため、表示モードを切り替えできません。');
+      return;
+    }
     const newMode: ViewMode = currentModeValue === 'edit' ? 'execute' : 'edit';
 
     setDayModes((prev) => ({
@@ -1535,7 +1565,7 @@ const App: React.FC = () => {
     (mode: ViewMode, scrollToItemId?: string) => {
       if (!activeEventName) return;
 
-      const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+      const currentEventDate = activeEventDate;
 
       setDayModes((prev) => ({
         ...prev,
@@ -1579,11 +1609,17 @@ const App: React.FC = () => {
 
   const handleSelectEvent = useCallback(
     (eventName: string) => {
+      const eventItems = eventLists[eventName] || [];
+      const nextTab = resolveEventListTab(eventItems);
+      if (!nextTab) {
+        alert('参加日がないため処理を停止しました。');
+        return;
+      }
+
       setActiveEventName(eventName);
       setSelectedItemIds(new Set());
       setSelectedBlockFilters(new Set());
-      const eventItems = eventLists[eventName] || [];
-      setActiveTab(resolveEventListTab(eventItems));
+      setActiveTab(nextTab);
     },
     [eventLists],
   );
@@ -1669,7 +1705,7 @@ const App: React.FC = () => {
     if (!activeEventName) return;
 
     const nextDirection = blockSortDirection === 'asc' ? 'desc' : 'asc';
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+    const currentEventDate = activeEventDate;
 
     setEventLists((prev) => {
       const allItems = [...(prev[activeEventName] || [])];
@@ -1709,7 +1745,7 @@ const App: React.FC = () => {
     if (!activeEventName) return;
 
     const nextDirection = blockSortDirection === 'asc' ? 'desc' : 'asc';
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+    const currentEventDate = activeEventDate;
 
     setEventLists((prev) => {
       const allItems = [...(prev[activeEventName] || [])];
@@ -1802,9 +1838,8 @@ const App: React.FC = () => {
       setActiveTab(itemToEdit.eventDate);
     } else {
       setItemToEdit(null);
-      if (eventDates.length > 0) {
-        setActiveTab(eventDates[0]);
-      }
+      alert('参加日がないため処理を停止しました。');
+      setActiveTab('eventList');
     }
   };
 
@@ -1813,7 +1848,7 @@ const App: React.FC = () => {
       setSortState('Manual');
       setBlockSortDirection(null);
 
-      const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+      const currentEventDate = activeEventDate;
       const currentColumnType =
         columnType ||
         (activeEventName
@@ -1915,7 +1950,7 @@ const App: React.FC = () => {
     if (!activeEventName) return;
 
     const nextDirection = candidateNumberSortDirection === 'asc' ? 'desc' : 'asc';
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+    const currentEventDate = activeEventDate;
 
     setEventLists((prev) => {
       const allItems = [...(prev[activeEventName] || [])];
@@ -2027,7 +2062,7 @@ const App: React.FC = () => {
 
       if (!activeEventName) return;
 
-      const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+      const currentEventDate = activeEventDate;
 
 
       let currentItems: ShoppingItem[] = [];
@@ -2204,8 +2239,8 @@ const App: React.FC = () => {
       if (!activeEventName || selectedItemIds.size === 0) return;
       setSortState('Manual');
       setBlockSortDirection(null);
-      const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
-      const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+      const currentEventDate = activeEventDate;
+      const mode = dayModes[activeEventName]?.[currentEventDate];
 
       if (mode === 'edit') {
         const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
@@ -2399,12 +2434,76 @@ const App: React.FC = () => {
           return;
         }
 
-        if (result.items.length === 0) {
+        const fallbackWarnings = result.itemFallbackWarnings || [];
+        const skippedItemIds = new Set<string>();
+        const BULK_APPROVAL_THRESHOLD = 6;
+
+        const describeFallbackWarning = (warning: ItemFallbackWarning): string =>
+          `${warning.rowNumber}行目\n${warning.reasons.map((reason) => `- ${reason}`).join('\n')}`;
+
+        if (fallbackWarnings.length >= BULK_APPROVAL_THRESHOLD) {
+          const previewLines = fallbackWarnings
+            .slice(0, 5)
+            .map((warning) => `- ${warning.rowNumber}行目: ${warning.reasons[0] || '補完が必要です'}`);
+          const previewText = previewLines.join('\n');
+          const hasMore = fallbackWarnings.length > 5 ? '\n- ...' : '';
+
+          const complementAll = window.confirm(
+            `不正データが${fallbackWarnings.length}件見つかりました。\n${previewText}${hasMore}\n\nOK: すべて補完して取り込む\nキャンセル: すべてスキップ`,
+          );
+
+          if (!complementAll) {
+            fallbackWarnings.forEach((warning) => {
+              skippedItemIds.add(warning.itemId);
+            });
+          }
+        } else {
+          for (const warning of fallbackWarnings) {
+            const shouldComplement = window.confirm(
+              `不正データを検出しました。\n${describeFallbackWarning(warning)}\n\nOK: この行を補完して取り込む\nキャンセル: この行をスキップ`,
+            );
+            if (!shouldComplement) {
+              skippedItemIds.add(warning.itemId);
+            }
+          }
+        }
+
+        const resolvedItems = result.items.filter((item) => !skippedItemIds.has(item.id));
+        if (resolvedItems.length === 0) {
+          if (result.items.length > 0 && skippedItemIds.size > 0) {
+            alert('不正データをすべてスキップしたため、取り込み対象がありませんでした。');
+          } else {
+            alert('取り込んだファイルにアイテムが見つかりませんでした。');
+          }
+          return;
+        }
+
+        const fallbackResolutionMessages: string[] = [];
+        if (fallbackWarnings.length > 0) {
+          const skippedCount = skippedItemIds.size;
+          const complementedCount = fallbackWarnings.length - skippedCount;
+          if (complementedCount > 0) {
+            fallbackResolutionMessages.push(
+              `不正データ${complementedCount}件を補完して取り込みました。`,
+            );
+          }
+          if (skippedCount > 0) {
+            fallbackResolutionMessages.push(`不正データ${skippedCount}件をスキップしました。`);
+          }
+        }
+
+        const resolvedResult = {
+          ...result,
+          items: resolvedItems,
+          errors: [...result.errors, ...fallbackResolutionMessages],
+        };
+
+        if (resolvedResult.items.length === 0) {
           alert('取り込んだファイルにアイテムが見つかりませんでした。');
           return;
         }
 
-        const importedData = toImportedEventData(result);
+        const importedData = toImportedEventData(resolvedResult);
         const eventName = importedData.eventName;
         const isUpdate = !!eventLists[eventName];
 
@@ -2464,8 +2563,13 @@ const App: React.FC = () => {
         );
 
 
+        const nextTab = resolveEventListTab(importedData.items);
+        if (!nextTab) {
+          alert('参加日がないため処理を停止しました。');
+          return;
+        }
         setActiveEventName(eventName);
-        setActiveTab(resolveEventListTab(importedData.items));
+        setActiveTab(nextTab);
       } catch (error) {
         console.error('Import error:', error);
         alert('アイテムの取り込みに失敗しました。ファイル形式を確認してください。');
@@ -2481,7 +2585,8 @@ const App: React.FC = () => {
       const source = resolveSpreadsheetSource(metadata, urlOverride);
 
       if (!source) {
-        alert('先にスプレッドシートURLを設定してください。');
+        setPendingUpdateEventName(eventName);
+        setShowUrlUpdateDialog(true);
         return;
       }
 
@@ -2538,12 +2643,24 @@ const App: React.FC = () => {
   const handleUrlUpdate = useCallback(
     (newUrl: string, sheetName: string) => {
       setShowUrlUpdateDialog(false);
-      if (pendingUpdateEventName) {
-        handleUpdateEvent(pendingUpdateEventName, { url: newUrl, sheetName });
-        setPendingUpdateEventName(null);
-      }
+      if (!pendingUpdateEventName) return;
+
+      const eventName = pendingUpdateEventName;
+      const currentMetadata = eventMetadata[eventName];
+      const normalizedSheetName = sheetName || currentMetadata?.spreadsheetSheetName || '';
+
+      setEventMetadata((prev) =>
+        upsertRecordKey(prev, eventName, {
+          spreadsheetUrl: newUrl,
+          spreadsheetSheetName: normalizedSheetName,
+          lastImportDate: currentMetadata?.lastImportDate || '',
+        }),
+      );
+
+      setPendingUpdateEventName(null);
+      handleUpdateEvent(eventName, { url: newUrl, sheetName: normalizedSheetName });
     },
-    [pendingUpdateEventName, handleUpdateEvent],
+    [pendingUpdateEventName, eventMetadata, handleUpdateEvent],
   );
 
 
@@ -2580,12 +2697,27 @@ const App: React.FC = () => {
 
       saveBlockDetectionSettings(eventName, settings);
 
+      const eventDatesForTargetEvent = extractEventDates(eventLists[eventName] || []);
+      const skippedDays = new Set<string>();
+      const normalizedParsedData: Record<string, DayMapData> = {};
+      const normalizedInitialAngles: Record<string, number> = {};
+
+      Object.entries(parsedData).forEach(([mapName, dayMapData]) => {
+        const mapTabName = resolveImportMapTabName(mapName, eventDatesForTargetEvent);
+        if (!mapTabName) {
+          skippedDays.add(normalizeMapDayToken(mapName) || mapName);
+          return;
+        }
+
+        normalizedParsedData[mapTabName] = dayMapData;
+        normalizedInitialAngles[mapTabName] = initialAngles[mapName] ?? 0;
+      });
 
       setMapData((prev) => ({
         ...prev,
         [eventName]: {
           ...(prev[eventName] || {}),
-          ...parsedData,
+          ...normalizedParsedData,
         },
       }));
 
@@ -2593,8 +2725,8 @@ const App: React.FC = () => {
         const currentEventSettings = prev[eventName] || {};
         const nextEventSettings = { ...currentEventSettings };
 
-        Object.keys(parsedData).forEach((dayMapName) => {
-          const importedInitialAngle = normalizeRotationAngle(initialAngles[dayMapName] ?? 0);
+        Object.keys(normalizedParsedData).forEach((dayMapName) => {
+          const importedInitialAngle = normalizeRotationAngle(normalizedInitialAngles[dayMapName] ?? 0);
           nextEventSettings[dayMapName] = {
             initialAngle: importedInitialAngle,
             mapTabAngle: importedInitialAngle,
@@ -2608,10 +2740,10 @@ const App: React.FC = () => {
         };
       });
 
-      const mapCount = Object.keys(parsedData).length;
+      const mapCount = Object.keys(normalizedParsedData).length;
 
 
-      const firstMapName = Object.keys(parsedData)[0];
+      const firstMapName = Object.keys(normalizedParsedData)[0];
       if (firstMapName) {
         setActiveTab(firstMapName);
       }
@@ -2621,9 +2753,21 @@ const App: React.FC = () => {
       setMapImportPendingFile(null);
       setMapImportPendingEventName('');
 
-      alert(`${mapCount}件のマップタブを取り込みました。`);
+      const skippedMessages = Array.from(skippedDays)
+        .sort((a, b) => a.localeCompare(b, 'ja'))
+        .map((dayName) => `${dayName}はないので取り込みしませんでした`);
+
+      const messages: string[] = [];
+      if (mapCount > 0) {
+        messages.push(`${mapCount}件のマップタブを取り込みました。`);
+      }
+      messages.push(...skippedMessages);
+
+      if (messages.length > 0) {
+        alert(messages.join('\n'));
+      }
     },
-    [mapImportPendingEventName],
+    [eventLists, mapImportPendingEventName],
   );
 
 
@@ -2879,9 +3023,9 @@ const App: React.FC = () => {
         itemsMap.set(item.id, item); // 新規追加したアイテムも座標計算の対象に含める。
 
 
-        const currentMapData = mapData[activeEventName]?.[mapTab];
-        const halls = hallDefinitions[activeEventName]?.[mapTab] || [];
-        const hallSettings = hallRouteSettings[activeEventName]?.[mapTab];
+        const currentMapData = mapTab ? mapData[activeEventName]?.[mapTab] : undefined;
+        const halls = mapTab ? hallDefinitions[activeEventName]?.[mapTab] || [] : [];
+        const hallSettings = mapTab ? hallRouteSettings[activeEventName]?.[mapTab] : undefined;
 
 
         const hallOrder = hallSettings?.hallOrder || halls.map((h) => h.id);
@@ -3104,21 +3248,36 @@ const App: React.FC = () => {
     }
   });
   const [smartInsertToast, setSmartInsertToast] = useState<string | null>(null);
+  const [smartInsertToastType, setSmartInsertToastType] = useState<'success' | 'error'>('success');
   const smartInsertLongPressRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const smartInsertLongPressTriggeredRef = React.useRef(false);
+
+  const showSmartInsertToast = useCallback(
+    (message: string, type: 'success' | 'error' = 'success') => {
+      setSmartInsertToastType(type);
+      setSmartInsertToast(message);
+    },
+    [],
+  );
 
 
   React.useEffect(() => {
     try {
       localStorage.setItem('mapSmartInsertEnabled', String(mapSmartInsertEnabled));
-    } catch {}
-  }, [mapSmartInsertEnabled]);
+    } catch (error) {
+      console.error('Failed to persist mapSmartInsertEnabled:', error);
+      showSmartInsertToast('スマート挿入設定の保存に失敗しました。', 'error');
+    }
+  }, [mapSmartInsertEnabled, showSmartInsertToast]);
 
   React.useEffect(() => {
     try {
       localStorage.setItem('mapSmartInsertMode', mapSmartInsertMode);
-    } catch {}
-  }, [mapSmartInsertMode]);
+    } catch (error) {
+      console.error('Failed to persist mapSmartInsertMode:', error);
+      showSmartInsertToast('スマート挿入モードの保存に失敗しました。', 'error');
+    }
+  }, [mapSmartInsertMode, showSmartInsertToast]);
 
 
   React.useEffect(() => {
@@ -4050,19 +4209,19 @@ const App: React.FC = () => {
 
   const executeColumnItems = useMemo(() => {
     if (!activeEventName) return [];
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+    const currentEventDate = activeEventDate;
     const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
     const itemsMap = new Map(items.map((item) => [item.id, item]));
     return executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
   }, [activeEventName, activeTab, executeModeItems, items, eventDates]);
 
   const visibleItems = useMemo(() => {
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+    const currentEventDate = activeEventDate;
     const itemsForTab = currentTabItems;
 
     if (!activeEventName) return itemsForTab;
 
-    const mode = dayModes[activeEventName]?.[currentEventDate] || 'edit';
+    const mode = dayModes[activeEventName]?.[currentEventDate];
 
     if (mode === 'execute') {
       if (sortState === 'Manual') {
@@ -4165,7 +4324,7 @@ const App: React.FC = () => {
 
   const availableBlocks = useMemo(() => {
     if (!activeEventName) return [];
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+    const currentEventDate = activeEventDate;
     const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
     const candidateItems = currentTabItems.filter((item) => !executeIds.has(item.id));
     const blocks = new Set(candidateItems.map((item) => item.block).filter(Boolean));
@@ -4181,7 +4340,7 @@ const App: React.FC = () => {
 
   const candidateColumnItems = useMemo(() => {
     if (!activeEventName) return [];
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+    const currentEventDate = activeEventDate;
     const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
     let filtered = currentTabItems.filter((item) => !executeIds.has(item.id));
 
@@ -4204,8 +4363,8 @@ const App: React.FC = () => {
   const visibleSearchMatches = useMemo(() => {
     if (searchMatches.length === 0) return [];
 
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
-    const mode = dayModes[activeEventName || '']?.[currentEventDate] || 'edit';
+    const currentEventDate = activeEventDate;
+    const mode = activeEventName ? dayModes[activeEventName]?.[currentEventDate] : undefined;
 
     let visibleItemIds: Set<string>;
 
@@ -4260,7 +4419,7 @@ const App: React.FC = () => {
 
   const blocksWithPriorityRemarks = useMemo(() => {
     if (!activeEventName) return new Set<string>();
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+    const currentEventDate = activeEventDate;
     const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
     const candidateItems = currentTabItems.filter((item) => !executeIds.has(item.id));
 
@@ -4277,7 +4436,7 @@ const App: React.FC = () => {
 
   const hasCandidateSelection = useMemo(() => {
     if (!activeEventName || currentMode !== 'edit' || selectedItemIds.size === 0) return false;
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+    const currentEventDate = activeEventDate;
     const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
     const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
     return selectedItems.some((item) => currentTabItems.includes(item) && !executeIds.has(item.id));
@@ -4295,7 +4454,7 @@ const App: React.FC = () => {
 
   const hasExecuteSelection = useMemo(() => {
     if (!activeEventName || currentMode !== 'edit' || selectedItemIds.size === 0) return false;
-    const currentEventDate = eventDates.includes(activeTab) ? activeTab : eventDates[0] || '';
+    const currentEventDate = activeEventDate;
     const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
     const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
     return selectedItems.some((item) => currentTabItems.includes(item) && executeIds.has(item.id));
@@ -4860,7 +5019,7 @@ const App: React.FC = () => {
                             smartInsertLongPressTriggeredRef.current = true;
                             const newMode = mapSmartInsertMode === 'card' ? 'preview' : 'card';
                             setMapSmartInsertMode(newMode);
-                            setSmartInsertToast(
+                            showSmartInsertToast(
                               newMode === 'preview'
                                 ? 'プレビューモードに切り替え'
                                 : 'カードモードに切り替え',
@@ -4995,11 +5154,11 @@ const App: React.FC = () => {
                     {eventDates.map((eventDate) => {
                       const count = items.filter((item) => item.eventDate === eventDate).length;
                       const mapTabName = getMapTabForDate(eventDate);
-                      const hasMapData = mapTabs.includes(mapTabName);
+                      const hasMapData = mapTabName ? mapTabs.includes(mapTabName) : false;
                       return (
                         <React.Fragment key={eventDate}>
                           <TabButton tab={eventDate} label={eventDate} count={count} />
-                          {hasMapData && (
+                          {hasMapData && mapTabName && (
                             <TabButton tab={mapTabName} label={mapTabName} isMapTab={true} />
                           )}
                         </React.Fragment>
@@ -5196,7 +5355,7 @@ const App: React.FC = () => {
                     onRemoveFromColumn={handleRemoveFromExecuteColumn}
                     onMoveToColumn={handleMoveToExecuteColumn}
                     columnType="execute"
-                    currentDay={eventDates.includes(activeTab) ? activeTab : eventDates[0] || ''}
+                    currentDay={activeEventDate}
                     onMoveItemUp={handleMoveItemUp}
                     onMoveItemDown={handleMoveItemDown}
                     rangeStart={rangeStart}
@@ -5207,13 +5366,13 @@ const App: React.FC = () => {
                     layoutMode={layoutMode}
                     showHallGroups={true}
                     hallDefinitions={getHallsForDate(
-                      eventDates.includes(activeTab) ? activeTab : eventDates[0] || '',
+                      activeEventDate,
                     )}
                     hallOrder={getHallOrderForDate(
-                      eventDates.includes(activeTab) ? activeTab : eventDates[0] || '',
+                      activeEventDate,
                     )}
                     mapData={getMapDataForDate(
-                      eventDates.includes(activeTab) ? activeTab : eventDates[0] || '',
+                      activeEventDate,
                     )}
                   />
                 </div>
@@ -5308,7 +5467,7 @@ const App: React.FC = () => {
                     onMoveToColumn={handleMoveToExecuteColumn}
                     onRemoveFromColumn={handleRemoveFromExecuteColumn}
                     columnType="candidate"
-                    currentDay={eventDates.includes(activeTab) ? activeTab : eventDates[0] || ''}
+                    currentDay={activeEventDate}
                     onMoveItemUp={handleMoveItemUp}
                     onMoveItemDown={handleMoveItemDown}
                     rangeStart={rangeStart}
@@ -5359,7 +5518,7 @@ const App: React.FC = () => {
                 selectedItemIds={selectedItemIds}
                 onSelectItem={handleSelectItem}
                 columnType="execute"
-                currentDay={eventDates.includes(activeTab) ? activeTab : eventDates[0] || ''}
+                currentDay={activeEventDate}
                 onMoveItemUp={handleMoveItemUp}
                 onMoveItemDown={handleMoveItemDown}
                 rangeStart={rangeStart}
@@ -5409,6 +5568,8 @@ const App: React.FC = () => {
           onCancel={() => {
             setShowUrlUpdateDialog(false);
             setPendingUpdateEventName(null);
+            setActiveEventName(null);
+            setActiveTab('eventList');
           }}
         />
       )}
@@ -5684,7 +5845,11 @@ const App: React.FC = () => {
 
       {/* 表示処理の補足 */}
       {smartInsertToast && (
-        <div className="fixed top-16 left-1/2 transform -translate-x-1/2 z-[10000] bg-green-600 text-white px-5 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-pulse">
+        <div
+          className={`fixed top-16 left-1/2 transform -translate-x-1/2 z-[10000] text-white px-5 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-pulse ${
+            smartInsertToastType === 'error' ? 'bg-red-600' : 'bg-green-600'
+          }`}
+        >
           {smartInsertToast}
         </div>
       )}
@@ -5693,4 +5858,5 @@ const App: React.FC = () => {
 };
 
 export default App;
+
 
