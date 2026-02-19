@@ -18,6 +18,16 @@ import InsertPositionDialog, { InsertPosition, SmartInsertMode } from './InsertP
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { isPointInPolygon } from './HallDefinitionPanel';
 
+const normalizeDisplayText = (value: string | null | undefined): string => {
+  return (value || '').replace(/\u3000/g, ' ').trim();
+};
+
+const extractDayNameFromMapName = (mapName: string): string => {
+  const normalizedMapName = normalizeDisplayText(mapName);
+  const dayMatch = normalizedMapName.match(/^(.+)マップ$/);
+  return dayMatch ? normalizeDisplayText(dayMatch[1]) : '';
+};
+
 interface MapViewProps {
   mapData: DayMapData;
   mapName: string;
@@ -157,16 +167,18 @@ const MapView: React.FC<MapViewProps> = ({
   });
 
   const executeModeItemIdsSet = useMemo(() => new Set(executeModeItemIds), [executeModeItemIds]);
+  const mapDayName = useMemo(() => extractDayNameFromMapName(mapName), [mapName]);
 
-  // 指定セルがどのホールに属するかを判定する
-  const getHallIdByCellPosition = useCallback(
-    (row: number, col: number): string | null => {
+  // 指定セルが属するホールIDをすべて取得する（重なり・境界を考慮）
+  const getHallIdsByCellPosition = useCallback(
+    (row: number, col: number): string[] => {
+      const ids: string[] = [];
       for (const hall of halls) {
         if (hall.vertices.length >= 4 && isPointInPolygon(row, col, hall.vertices)) {
-          return hall.id;
+          ids.push(hall.id);
         }
       }
-      return null;
+      return ids;
     },
     [halls],
   );
@@ -201,13 +213,28 @@ const MapView: React.FC<MapViewProps> = ({
         candidateBlocks.forEach((block) => {
           block.numberCells.forEach((numberCell) => {
             if (numberCell.value !== numValue) return;
-            const hallId = getHallIdByCellPosition(numberCell.row, numberCell.col);
-            if (hallId) {
-              hallIds.add(hallId);
-            }
+            const matchedHallIds = getHallIdsByCellPosition(numberCell.row, numberCell.col);
+            matchedHallIds.forEach((matchedHallId) => hallIds.add(matchedHallId));
           });
         });
       }
+
+      if (hallIds.size > 0) {
+        return hallIds;
+      }
+
+      // 番号セル単体で判定できない場合、ブロック全体の番号セルからホールを一意推定する
+      candidateBlocks.forEach((block) => {
+        const blockHallIds = new Set<string>();
+        block.numberCells.forEach((numberCell) => {
+          const matchedHallIds = getHallIdsByCellPosition(numberCell.row, numberCell.col);
+          matchedHallIds.forEach((matchedHallId) => blockHallIds.add(matchedHallId));
+        });
+
+        if (blockHallIds.size === 1) {
+          blockHallIds.forEach((hallId) => hallIds.add(hallId));
+        }
+      });
 
       if (hallIds.size > 0) {
         return hallIds;
@@ -217,15 +244,13 @@ const MapView: React.FC<MapViewProps> = ({
       candidateBlocks.forEach((block) => {
         const centerRow = (block.startRow + block.endRow) / 2;
         const centerCol = (block.startCol + block.endCol) / 2;
-        const hallId = getHallIdByCellPosition(centerRow, centerCol);
-        if (hallId) {
-          hallIds.add(hallId);
-        }
+        const matchedHallIds = getHallIdsByCellPosition(centerRow, centerCol);
+        matchedHallIds.forEach((matchedHallId) => hallIds.add(matchedHallId));
       });
 
       return hallIds;
     },
-    [getCandidateBlocksForItem, getHallIdByCellPosition],
+    [getCandidateBlocksForItem, getHallIdsByCellPosition],
   );
 
   // アイテムが指定ホールに属するか（候補が複数でも true を返す）
@@ -308,17 +333,12 @@ const MapView: React.FC<MapViewProps> = ({
   // 現在日付タブにおけるホール内の総アイテム件数
   const getTotalItemCountInHall = useCallback(
     (hallId: string): number => {
-
-      const dayMatch = mapName.match(/^(.+)マップ$/);
-      if (!dayMatch) return 0;
-      const dayName = dayMatch[1];
-
       return items.filter((item) => {
-        if (item.eventDate !== dayName) return false;
+        if (mapDayName && normalizeDisplayText(item.eventDate) !== mapDayName) return false;
         return isItemInHall(item, hallId);
       }).length;
     },
-    [items, mapName, isItemInHall],
+    [items, mapDayName, isItemInHall],
   );
 
   // 選択中ホールに合わせて表示用マップを絞り込む
@@ -789,7 +809,7 @@ const MapView: React.FC<MapViewProps> = ({
         onUpdateItem={onUpdateItem}
         onDeleteItem={onDeleteItem}
         onAddItem={onAddItem}
-        eventDate={mapName.replace(/マップ$/, '')}
+        eventDate={mapDayName || normalizeDisplayText(mapName)}
         position={popupState.position}
       />
       {/* 訪問リストパネル */}
