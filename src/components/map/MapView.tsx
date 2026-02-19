@@ -171,61 +171,86 @@ const MapView: React.FC<MapViewProps> = ({
     [halls],
   );
 
-  // アイテムが属するホールを判定する
-  // 1. block + number の実セル座標で判定
-  // 2. 判定不能時のみ中心座標でフォールバック
-  const getItemHallId = useCallback(
-    (item: ShoppingItem): string | null => {
-      const itemBlockName = item.block?.trim() || '';
-      if (!itemBlockName) return null;
+  // アイテムの block 名に対応するブロック候補を取得する
+  const getCandidateBlocksForItem = useCallback(
+    (itemBlockName: string): BlockDefinition[] => {
+      if (!itemBlockName) return [];
+
+      const exactMatches = mapData.blocks.filter((block) => block.name === itemBlockName);
+      if (exactMatches.length > 0) {
+        return exactMatches;
+      }
 
       const normalizedBlockName = itemBlockName.toLowerCase();
-      const candidateBlocks = mapData.blocks.filter(
-        (block) => block.name === itemBlockName || block.name.toLowerCase() === normalizedBlockName,
-      );
-      if (candidateBlocks.length === 0) return null;
+      return mapData.blocks.filter((block) => block.name.toLowerCase() === normalizedBlockName);
+    },
+    [mapData.blocks],
+  );
+
+  // アイテムが属し得るホールID候補を取得する
+  const getHallCandidatesForItem = useCallback(
+    (item: ShoppingItem): Set<string> => {
+      const hallIds = new Set<string>();
+      const itemBlockName = item.block?.trim() || '';
+      const candidateBlocks = getCandidateBlocksForItem(itemBlockName);
+      if (candidateBlocks.length === 0) return hallIds;
 
       const numStr = extractNumberFromItemNumber(item.number);
       if (numStr) {
         const numValue = parseInt(numStr, 10);
-        const matchedHallIds = new Set<string>();
-
         candidateBlocks.forEach((block) => {
           block.numberCells.forEach((numberCell) => {
             if (numberCell.value !== numValue) return;
             const hallId = getHallIdByCellPosition(numberCell.row, numberCell.col);
             if (hallId) {
-              matchedHallIds.add(hallId);
+              hallIds.add(hallId);
             }
           });
         });
-
-        if (matchedHallIds.size === 1) {
-          return Array.from(matchedHallIds)[0];
-        }
-
-        if (matchedHallIds.size > 1) {
-          return null;
-        }
       }
 
-      const fallbackHallIds = new Set<string>();
+      if (hallIds.size > 0) {
+        return hallIds;
+      }
+
+      // 数値セルから判定できない場合のみ中心座標でフォールバック
       candidateBlocks.forEach((block) => {
         const centerRow = (block.startRow + block.endRow) / 2;
         const centerCol = (block.startCol + block.endCol) / 2;
         const hallId = getHallIdByCellPosition(centerRow, centerCol);
         if (hallId) {
-          fallbackHallIds.add(hallId);
+          hallIds.add(hallId);
         }
       });
 
-      if (fallbackHallIds.size === 1) {
-        return Array.from(fallbackHallIds)[0];
-      }
+      return hallIds;
+    },
+    [getCandidateBlocksForItem, getHallIdByCellPosition],
+  );
 
+  // アイテムが指定ホールに属するか（候補が複数でも true を返す）
+  const isItemInHall = useCallback(
+    (item: ShoppingItem, hallId: string): boolean => {
+      return getHallCandidatesForItem(item).has(hallId);
+    },
+    [getHallCandidatesForItem],
+  );
+
+  // アイテムが属するホールを判定する
+  // 1. block + number の実セル座標で判定
+  // 2. 判定不能時のみ中心座標でフォールバック
+  const getItemHallId = useCallback(
+    (item: ShoppingItem): string | null => {
+      const hallCandidates = getHallCandidatesForItem(item);
+      if (hallCandidates.size === 1) {
+        return Array.from(hallCandidates)[0];
+      }
+      if (hallCandidates.size > 1 && selectedHallId !== 'all' && hallCandidates.has(selectedHallId)) {
+        return selectedHallId;
+      }
       return null;
     },
-    [mapData.blocks, getHallIdByCellPosition],
+    [getHallCandidatesForItem, selectedHallId],
   );
 
   // ホールIDと優先度をまとめた groupId を分解する
@@ -256,14 +281,15 @@ const MapView: React.FC<MapViewProps> = ({
         const item = items.find((i) => i.id === itemId);
         if (!item) return false;
 
-        const itemHallId = getItemHallId(item);
-        if (itemHallId !== hallId) return false;
+        const belongsToHall =
+          hallId === null ? getItemHallId(item) === null : isItemInHall(item, hallId);
+        if (!belongsToHall) return false;
 
         const itemPriority = item.priorityLevel || 'none';
         return itemPriority === priority;
       }).length;
     },
-    [executeModeItemIds, items, getItemHallId, parseGroupId],
+    [executeModeItemIds, items, getItemHallId, isItemInHall, parseGroupId],
   );
 
   // ホール内の訪問先件数（優先度を問わない）
@@ -273,11 +299,10 @@ const MapView: React.FC<MapViewProps> = ({
         const item = items.find((i) => i.id === itemId);
         if (!item) return false;
 
-        const itemHallId = getItemHallId(item);
-        return itemHallId === hallId;
+        return isItemInHall(item, hallId);
       }).length;
     },
-    [executeModeItemIds, items, getItemHallId],
+    [executeModeItemIds, items, isItemInHall],
   );
 
   // 現在日付タブにおけるホール内の総アイテム件数
@@ -290,10 +315,10 @@ const MapView: React.FC<MapViewProps> = ({
 
       return items.filter((item) => {
         if (item.eventDate !== dayName) return false;
-        return getItemHallId(item) === hallId;
+        return isItemInHall(item, hallId);
       }).length;
     },
-    [items, mapName, getItemHallId],
+    [items, mapName, isItemInHall],
   );
 
   // 選択中ホールに合わせて表示用マップを絞り込む
@@ -348,8 +373,8 @@ const MapView: React.FC<MapViewProps> = ({
       return items;
     }
 
-    return items.filter((item) => getItemHallId(item) === selectedHallId);
-  }, [items, selectedHallId, halls, getItemHallId]);
+    return items.filter((item) => isItemInHall(item, selectedHallId));
+  }, [items, selectedHallId, halls, isItemInHall]);
 
   // 実行列IDも選択中ホールに合わせて絞り込む
   const filteredExecuteModeItemIds = useMemo(() => {
@@ -360,9 +385,9 @@ const MapView: React.FC<MapViewProps> = ({
     return executeModeItemIds.filter((itemId) => {
       const item = items.find((i) => i.id === itemId);
       if (!item) return false;
-      return getItemHallId(item) === selectedHallId;
+      return isItemInHall(item, selectedHallId);
     });
-  }, [executeModeItemIds, items, selectedHallId, halls, getItemHallId]);
+  }, [executeModeItemIds, items, selectedHallId, halls, isItemInHall]);
 
   // セルがブロック範囲内か判定する（cellGroups 対応）
   const isCellInBlock = useCallback((row: number, col: number, block: BlockDefinition): boolean => {
@@ -639,8 +664,8 @@ const MapView: React.FC<MapViewProps> = ({
   const insertDialogHasHall = useMemo(() => {
     const item = insertDialogState.item;
     if (!item) return false;
-    return getItemHallId(item) !== null;
-  }, [insertDialogState.item, getItemHallId]);
+    return getHallCandidatesForItem(item).size > 0;
+  }, [insertDialogState.item, getHallCandidatesForItem]);
 
   // preview モード時のみ、実行列全体をダイアログ表示用に渡す
   const insertDialogAllVisitItems = useMemo(() => {
