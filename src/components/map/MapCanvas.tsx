@@ -1,4 +1,4 @@
-﻿import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   DayMapData,
   CellData,
@@ -1261,35 +1261,40 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
       mapData.cells.forEach((cell) => {
         const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-        const spanCols = merge ? merge.endCol - merge.startCol + 1 : 1;
-        const spanRows = merge ? merge.endRow - merge.startRow + 1 : 1;
-        if (!isCellVisible(cell.row, cell.col, spanRows, spanCols)) return;
+        if (!isCellVisible(cell.row, cell.col, 1, 1)) return;
 
         const startCol = cell.col - 1;
-        const endCol = startCol + spanCols;
+        const endCol = startCol + 1;
         const startRow = cell.row - 1;
-        const endRow = startRow + spanRows;
-        const { borders } = cell;
+        const endRow = startRow + 1;
 
-        if (borders.top) {
-          for (let col = startCol; col < endCol; col++) {
-            upsertEdge('h', col, startRow, borders.top);
+        let topBorder = cell.borders.top;
+        let rightBorder = cell.borders.right;
+        let bottomBorder = cell.borders.bottom;
+        let leftBorder = cell.borders.left;
+
+        // Excel merged cells keep edge data distributed across member cells.
+        // For the merge parent, right/bottom are often internal edges, so skip them.
+        if (merge) {
+          if (merge.endCol > merge.startCol) {
+            rightBorder = null;
+          }
+          if (merge.endRow > merge.startRow) {
+            bottomBorder = null;
           }
         }
-        if (borders.bottom) {
-          for (let col = startCol; col < endCol; col++) {
-            upsertEdge('h', col, endRow, borders.bottom);
-          }
+
+        if (topBorder) {
+          upsertEdge('h', startCol, startRow, topBorder);
         }
-        if (borders.left) {
-          for (let row = startRow; row < endRow; row++) {
-            upsertEdge('v', startCol, row, borders.left);
-          }
+        if (bottomBorder) {
+          upsertEdge('h', startCol, endRow, bottomBorder);
         }
-        if (borders.right) {
-          for (let row = startRow; row < endRow; row++) {
-            upsertEdge('v', endCol, row, borders.right);
-          }
+        if (leftBorder) {
+          upsertEdge('v', startCol, startRow, leftBorder);
+        }
+        if (rightBorder) {
+          upsertEdge('v', endCol, startRow, rightBorder);
         }
       });
 
