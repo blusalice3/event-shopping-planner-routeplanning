@@ -21,6 +21,14 @@ const STORES = {
 
 type StoreName = (typeof STORES)[keyof typeof STORES];
 
+export type LoadStatus = 'ok' | 'missing' | 'error';
+
+export type LoadResult<T> = {
+  status: LoadStatus;
+  data: T | null;
+  error?: unknown;
+};
+
 let dbInstance: IDBDatabase | null = null;
 
 /**
@@ -83,23 +91,47 @@ async function saveData<T>(storeName: StoreName, key: string, data: T): Promise<
 /**
  * データを読み込み
  */
-async function loadData<T>(storeName: StoreName, key: string): Promise<T | null> {
-  const db = await openDB();
+async function loadData<T>(storeName: StoreName, key: string): Promise<LoadResult<T>> {
+  try {
+    const db = await openDB();
 
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(storeName, 'readonly');
-    const store = transaction.objectStore(storeName);
-    const request = store.get(key);
+    return await new Promise((resolve) => {
+      const transaction = db.transaction(storeName, 'readonly');
+      const store = transaction.objectStore(storeName);
+      const request = store.get(key);
 
-    request.onerror = () => {
-      console.error(`Failed to load from ${storeName}:`, request.error);
-      reject(request.error);
+      request.onerror = () => {
+        console.error(`Failed to load from ${storeName}:`, request.error);
+        resolve({
+          status: 'error',
+          data: null,
+          error: request.error,
+        });
+      };
+
+      request.onsuccess = () => {
+        if (request.result === undefined || request.result === null) {
+          resolve({
+            status: 'missing',
+            data: null,
+          });
+          return;
+        }
+
+        resolve({
+          status: 'ok',
+          data: request.result as T,
+        });
+      };
+    });
+  } catch (error) {
+    console.error(`Failed to load from ${storeName}:`, error);
+    return {
+      status: 'error',
+      data: null,
+      error,
     };
-
-    request.onsuccess = () => {
-      resolve(request.result ?? null);
-    };
-  });
+  }
 }
 
 /**
@@ -244,6 +276,45 @@ export interface AppData {
   hallRouteSettings: Record<string, Record<string, unknown>>;
 }
 
+const resolveLoadResultData = <T extends Record<string, unknown>>(
+  storeName: StoreName,
+  result: LoadResult<T>,
+): T => {
+  if (result.status === 'ok' && result.data) {
+    return result.data;
+  }
+
+  if (result.status === 'error') {
+    console.error(`Failed to load ${storeName}:`, result.error);
+  }
+
+  return {} as T;
+};
+
+const removeEventFromStore = async <T extends Record<string, unknown>>(
+  eventName: string,
+  storeName: StoreName,
+  loader: () => Promise<LoadResult<T>>,
+  saver: (data: T) => Promise<void>,
+): Promise<void> => {
+  const loadResult = await loader();
+  if (loadResult.status === 'error') {
+    console.error(`Failed to load ${storeName} during event deletion:`, loadResult.error);
+    return;
+  }
+  if (loadResult.status !== 'ok' || !loadResult.data) {
+    return;
+  }
+
+  if (!(eventName in loadResult.data)) {
+    return;
+  }
+
+  const nextData = { ...loadResult.data };
+  delete nextData[eventName];
+  await saver(nextData as T);
+};
+
 // 公開API
 export const db = {
   STORES,
@@ -252,129 +323,166 @@ export const db = {
   async saveEventLists(data: Record<string, unknown[]>): Promise<void> {
     await saveData(STORES.EVENT_LISTS, 'data', data);
   },
-  async loadEventLists(): Promise<Record<string, unknown[]>> {
-    return (await loadData(STORES.EVENT_LISTS, 'data')) || {};
+  async loadEventLists(): Promise<LoadResult<Record<string, unknown[]>>> {
+    return loadData(STORES.EVENT_LISTS, 'data');
   },
 
   // イベントメタデータ
   async saveEventMetadata(data: Record<string, unknown>): Promise<void> {
     await saveData(STORES.EVENT_METADATA, 'data', data);
   },
-  async loadEventMetadata(): Promise<Record<string, unknown>> {
-    return (await loadData(STORES.EVENT_METADATA, 'data')) || {};
+  async loadEventMetadata(): Promise<LoadResult<Record<string, unknown>>> {
+    return loadData(STORES.EVENT_METADATA, 'data');
   },
 
   // 実行モードアイテム
   async saveExecuteModeItems(data: Record<string, Record<string, string[]>>): Promise<void> {
     await saveData(STORES.EXECUTE_MODE_ITEMS, 'data', data);
   },
-  async loadExecuteModeItems(): Promise<Record<string, Record<string, string[]>>> {
-    return (await loadData(STORES.EXECUTE_MODE_ITEMS, 'data')) || {};
+  async loadExecuteModeItems(): Promise<LoadResult<Record<string, Record<string, string[]>>>> {
+    return loadData(STORES.EXECUTE_MODE_ITEMS, 'data');
   },
 
   // 日モード
   async saveDayModes(data: Record<string, Record<string, string>>): Promise<void> {
     await saveData(STORES.DAY_MODES, 'data', data);
   },
-  async loadDayModes(): Promise<Record<string, Record<string, string>>> {
-    return (await loadData(STORES.DAY_MODES, 'data')) || {};
+  async loadDayModes(): Promise<LoadResult<Record<string, Record<string, string>>>> {
+    return loadData(STORES.DAY_MODES, 'data');
   },
 
   // マップデータ
   async saveMapData(data: Record<string, Record<string, unknown>>): Promise<void> {
     await saveData(STORES.MAP_DATA, 'data', data);
   },
-  async loadMapData(): Promise<Record<string, Record<string, unknown>>> {
-    return (await loadData(STORES.MAP_DATA, 'data')) || {};
+  async loadMapData(): Promise<LoadResult<Record<string, Record<string, unknown>>>> {
+    return loadData(STORES.MAP_DATA, 'data');
   },
 
   // マップ回転設定
   async saveMapRotationSettings(data: Record<string, Record<string, unknown>>): Promise<void> {
     await saveData(STORES.MAP_ROTATION_SETTINGS, 'data', data);
   },
-  async loadMapRotationSettings(): Promise<Record<string, Record<string, unknown>>> {
-    return (await loadData(STORES.MAP_ROTATION_SETTINGS, 'data')) || {};
+  async loadMapRotationSettings(): Promise<LoadResult<Record<string, Record<string, unknown>>>> {
+    return loadData(STORES.MAP_ROTATION_SETTINGS, 'data');
   },
 
   // ルート設定
   async saveRouteSettings(data: Record<string, Record<string, unknown>>): Promise<void> {
     await saveData(STORES.ROUTE_SETTINGS, 'data', data);
   },
-  async loadRouteSettings(): Promise<Record<string, Record<string, unknown>>> {
-    return (await loadData(STORES.ROUTE_SETTINGS, 'data')) || {};
+  async loadRouteSettings(): Promise<LoadResult<Record<string, Record<string, unknown>>>> {
+    return loadData(STORES.ROUTE_SETTINGS, 'data');
   },
 
   // ホール定義
   async saveHallDefinitions(data: Record<string, Record<string, unknown[]>>): Promise<void> {
     await saveData(STORES.HALL_DEFINITIONS, 'data', data);
   },
-  async loadHallDefinitions(): Promise<Record<string, Record<string, unknown[]>>> {
-    return (await loadData(STORES.HALL_DEFINITIONS, 'data')) || {};
+  async loadHallDefinitions(): Promise<LoadResult<Record<string, Record<string, unknown[]>>>> {
+    return loadData(STORES.HALL_DEFINITIONS, 'data');
   },
 
   // ホールルート設定
   async saveHallRouteSettings(data: Record<string, Record<string, unknown>>): Promise<void> {
     await saveData(STORES.HALL_ROUTE_SETTINGS, 'data', data);
   },
-  async loadHallRouteSettings(): Promise<Record<string, Record<string, unknown>>> {
-    return (await loadData(STORES.HALL_ROUTE_SETTINGS, 'data')) || {};
+  async loadHallRouteSettings(): Promise<LoadResult<Record<string, Record<string, unknown>>>> {
+    return loadData(STORES.HALL_ROUTE_SETTINGS, 'data');
   },
 
   // イベント削除時に関連データも削除
   async deleteEventData(eventName: string): Promise<void> {
-    const stores = [
-      { store: STORES.EVENT_LISTS, loader: db.loadEventLists, saver: db.saveEventLists },
-      { store: STORES.EVENT_METADATA, loader: db.loadEventMetadata, saver: db.saveEventMetadata },
-      {
-        store: STORES.EXECUTE_MODE_ITEMS,
-        loader: db.loadExecuteModeItems,
-        saver: db.saveExecuteModeItems,
-      },
-      { store: STORES.DAY_MODES, loader: db.loadDayModes, saver: db.saveDayModes },
-      { store: STORES.MAP_DATA, loader: db.loadMapData, saver: db.saveMapData },
-      {
-        store: STORES.MAP_ROTATION_SETTINGS,
-        loader: db.loadMapRotationSettings,
-        saver: db.saveMapRotationSettings,
-      },
-      { store: STORES.ROUTE_SETTINGS, loader: db.loadRouteSettings, saver: db.saveRouteSettings },
-      {
-        store: STORES.HALL_DEFINITIONS,
-        loader: db.loadHallDefinitions,
-        saver: db.saveHallDefinitions,
-      },
-      {
-        store: STORES.HALL_ROUTE_SETTINGS,
-        loader: db.loadHallRouteSettings,
-        saver: db.saveHallRouteSettings,
-      },
-    ];
-
-    for (const { loader, saver } of stores) {
-      try {
-        const data = await loader();
-        if (data && eventName in data) {
-          delete (data as Record<string, unknown>)[eventName];
-          await saver(data as never);
-        }
-      } catch (e) {
-        console.error(`Failed to delete ${eventName} from store:`, e);
-      }
+    try {
+      await removeEventFromStore(
+        eventName,
+        STORES.EVENT_LISTS,
+        db.loadEventLists,
+        db.saveEventLists,
+      );
+      await removeEventFromStore(
+        eventName,
+        STORES.EVENT_METADATA,
+        db.loadEventMetadata,
+        db.saveEventMetadata,
+      );
+      await removeEventFromStore(
+        eventName,
+        STORES.EXECUTE_MODE_ITEMS,
+        db.loadExecuteModeItems,
+        db.saveExecuteModeItems,
+      );
+      await removeEventFromStore(eventName, STORES.DAY_MODES, db.loadDayModes, db.saveDayModes);
+      await removeEventFromStore(eventName, STORES.MAP_DATA, db.loadMapData, db.saveMapData);
+      await removeEventFromStore(
+        eventName,
+        STORES.MAP_ROTATION_SETTINGS,
+        db.loadMapRotationSettings,
+        db.saveMapRotationSettings,
+      );
+      await removeEventFromStore(
+        eventName,
+        STORES.ROUTE_SETTINGS,
+        db.loadRouteSettings,
+        db.saveRouteSettings,
+      );
+      await removeEventFromStore(
+        eventName,
+        STORES.HALL_DEFINITIONS,
+        db.loadHallDefinitions,
+        db.saveHallDefinitions,
+      );
+      await removeEventFromStore(
+        eventName,
+        STORES.HALL_ROUTE_SETTINGS,
+        db.loadHallRouteSettings,
+        db.saveHallRouteSettings,
+      );
+    } catch (error) {
+      console.error(`Failed to delete ${eventName} from IndexedDB:`, error);
     }
   },
 
   // 全データを取得（エクスポート用）
   async getAllAppData(): Promise<AppData> {
+    const [
+      eventListsResult,
+      eventMetadataResult,
+      executeModeItemsResult,
+      dayModesResult,
+      mapDataResult,
+      mapRotationSettingsResult,
+      routeSettingsResult,
+      hallDefinitionsResult,
+      hallRouteSettingsResult,
+    ] = await Promise.all([
+      db.loadEventLists(),
+      db.loadEventMetadata(),
+      db.loadExecuteModeItems(),
+      db.loadDayModes(),
+      db.loadMapData(),
+      db.loadMapRotationSettings(),
+      db.loadRouteSettings(),
+      db.loadHallDefinitions(),
+      db.loadHallRouteSettings(),
+    ]);
+
     return {
-      eventLists: await db.loadEventLists(),
-      eventMetadata: await db.loadEventMetadata(),
-      executeModeItems: await db.loadExecuteModeItems(),
-      dayModes: await db.loadDayModes(),
-      mapData: await db.loadMapData(),
-      mapRotationSettings: await db.loadMapRotationSettings(),
-      routeSettings: await db.loadRouteSettings(),
-      hallDefinitions: await db.loadHallDefinitions(),
-      hallRouteSettings: await db.loadHallRouteSettings(),
+      eventLists: resolveLoadResultData(STORES.EVENT_LISTS, eventListsResult),
+      eventMetadata: resolveLoadResultData(STORES.EVENT_METADATA, eventMetadataResult),
+      executeModeItems: resolveLoadResultData(STORES.EXECUTE_MODE_ITEMS, executeModeItemsResult),
+      dayModes: resolveLoadResultData(STORES.DAY_MODES, dayModesResult),
+      mapData: resolveLoadResultData(STORES.MAP_DATA, mapDataResult),
+      mapRotationSettings: resolveLoadResultData(
+        STORES.MAP_ROTATION_SETTINGS,
+        mapRotationSettingsResult,
+      ),
+      routeSettings: resolveLoadResultData(STORES.ROUTE_SETTINGS, routeSettingsResult),
+      hallDefinitions: resolveLoadResultData(STORES.HALL_DEFINITIONS, hallDefinitionsResult),
+      hallRouteSettings: resolveLoadResultData(
+        STORES.HALL_ROUTE_SETTINGS,
+        hallRouteSettingsResult,
+      ),
     };
   },
 

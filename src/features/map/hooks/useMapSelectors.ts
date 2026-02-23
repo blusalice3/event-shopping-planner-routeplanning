@@ -30,7 +30,7 @@ type UseMapSelectorsResult = {
   currentMapData: DayMapData | null;
   currentHalls: HallDefinition[];
   currentHallRouteSettings: HallRouteSettings;
-  getMapTabForDate: (eventDate: string) => string;
+  getMapTabForDate: (eventDate: string) => string | null;
   getHallsForDate: (eventDate: string) => HallDefinition[];
   getMapDataForDate: (eventDate: string) => DayMapData | null;
   getHallOrderForDate: (eventDate: string) => string[];
@@ -77,12 +77,12 @@ export function useMapSelectors({
   }, [activeEventName, activeTab, isMapTab, hallRouteSettings, currentHalls]);
 
   const getMapTabForDate = useCallback(
-    (eventDate: string): string => {
+    (eventDate: string): string | null => {
       const normalizedEventDate = normalizeMapDayToken(eventDate);
       const matchedMapTab = mapTabs.find(
         (tab) => normalizeMapDayToken(tab) === normalizedEventDate,
       );
-      return matchedMapTab ?? `${eventDate}マップ`;
+      return matchedMapTab ?? null;
     },
     [mapTabs],
   );
@@ -91,6 +91,7 @@ export function useMapSelectors({
     (eventDate: string): HallDefinition[] => {
       if (!activeEventName) return [];
       const mapTab = getMapTabForDate(eventDate);
+      if (!mapTab) return [];
       return hallDefinitions[activeEventName]?.[mapTab] || [];
     },
     [activeEventName, hallDefinitions, getMapTabForDate],
@@ -100,6 +101,7 @@ export function useMapSelectors({
     (eventDate: string): DayMapData | null => {
       if (!activeEventName) return null;
       const mapTab = getMapTabForDate(eventDate);
+      if (!mapTab) return null;
       return mapData[activeEventName]?.[mapTab] || null;
     },
     [activeEventName, mapData, getMapTabForDate],
@@ -109,6 +111,7 @@ export function useMapSelectors({
     (eventDate: string): string[] => {
       if (!activeEventName) return [];
       const mapTab = getMapTabForDate(eventDate);
+      if (!mapTab) return [];
       const halls = hallDefinitions[activeEventName]?.[mapTab] || [];
       const routeSettings = hallRouteSettings[activeEventName]?.[mapTab];
 

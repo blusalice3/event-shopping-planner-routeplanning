@@ -483,14 +483,42 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
   );
 };
 
+const POLYGON_EPSILON = 1e-9;
+
+function isPointOnSegment(
+  row: number,
+  col: number,
+  a: { row: number; col: number },
+  b: { row: number; col: number },
+): boolean {
+  const cross = (b.col - a.col) * (row - a.row) - (b.row - a.row) * (col - a.col);
+  if (Math.abs(cross) > POLYGON_EPSILON) return false;
+
+  const minCol = Math.min(a.col, b.col) - POLYGON_EPSILON;
+  const maxCol = Math.max(a.col, b.col) + POLYGON_EPSILON;
+  const minRow = Math.min(a.row, b.row) - POLYGON_EPSILON;
+  const maxRow = Math.max(a.row, b.row) + POLYGON_EPSILON;
+  return col >= minCol && col <= maxCol && row >= minRow && row <= maxRow;
+}
+
 function isPointInPolygon(
   row: number,
   col: number,
   vertices: { row: number; col: number }[],
 ): boolean {
+  if (vertices.length < 3) return false;
+
+  // Boundary is treated as inside to avoid dropping hall-edge cells from counts.
+  for (let i = 0; i < vertices.length; i++) {
+    const a = vertices[i];
+    const b = vertices[(i + 1) % vertices.length];
+    if (isPointOnSegment(row, col, a, b)) {
+      return true;
+    }
+  }
+
   let inside = false;
   const n = vertices.length;
-
   for (let i = 0, j = n - 1; i < n; j = i++) {
     const vi = vertices[i];
     const vj = vertices[j];

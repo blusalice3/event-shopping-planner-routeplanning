@@ -204,6 +204,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [previewData, setPreviewData] = useState<Record<string, DayMapData> | null>(null);
+  const [previewSkippedSheets, setPreviewSkippedSheets] = useState<string[]>([]);
   const [highlightBlock, setHighlightBlock] = useState<string | null>(null);
   const [activePreviewSheet, setActivePreviewSheet] = useState<string>('');
   const [initialAngles, setInitialAngles] = useState<Record<string, number>>({});
@@ -213,12 +214,19 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     if (isOpen) {
       setSettings(savedSettings || { ...DEFAULT_BLOCK_DETECTION_SETTINGS });
       setPreviewData(null);
+      setPreviewSkippedSheets([]);
       setIsAccordionOpen(false);
       setHighlightBlock(null);
       setActivePreviewSheet('');
       setInitialAngles({});
     }
   }, [isOpen, savedSettings]);
+
+  const notifySkippedSheets = useCallback((skippedSheets: string[]) => {
+    if (skippedSheets.length === 0) return;
+    const uniqueSheets = Array.from(new Set(skippedSheets));
+    alert(`次のシートは解析に失敗したためスキップしました:\n${uniqueSheets.join('\n')}`);
+  }, []);
 
   useEffect(() => {
     if (!previewData) return;
@@ -242,11 +250,24 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     if (!file) return;
     setIsPreviewing(true);
     try {
-      const parsed = await parseMapFile(file, settings);
-      setPreviewData(parsed);
-      if (parsed) {
-        const firstKey = Object.keys(parsed)[0];
+      const parsedResult = await parseMapFile(file, settings);
+      if (parsedResult.error) {
+        setPreviewData(null);
+        setPreviewSkippedSheets([]);
+        alert(`プレビューに失敗しました: ${parsedResult.error}`);
+        return;
+      }
+
+      setPreviewData(parsedResult.data);
+      setPreviewSkippedSheets(parsedResult.skippedSheets);
+      notifySkippedSheets(parsedResult.skippedSheets);
+
+      if (parsedResult.data) {
+        const firstKey = Object.keys(parsedResult.data)[0];
         if (firstKey) setActivePreviewSheet(firstKey);
+      } else {
+        setActivePreviewSheet('');
+        alert('マップデータの解析に失敗しました。');
       }
     } catch (error) {
       console.error('Preview error:', error);
@@ -254,7 +275,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     } finally {
       setIsPreviewing(false);
     }
-  }, [file, settings]);
+  }, [file, settings, notifySkippedSheets]);
 
   // インポート実行
   const handleImport = useCallback(async () => {
@@ -263,13 +284,24 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     try {
       // プレビュー済みのデータがあればそれを使う、なければ新たにパース
       let data = previewData;
+      let skippedSheets = previewSkippedSheets;
       if (!data) {
-        data = await parseMapFile(file, settings);
+        const parsedResult = await parseMapFile(file, settings);
+        if (parsedResult.error) {
+          alert(`マップデータの取り込みに失敗しました: ${parsedResult.error}`);
+          return;
+        }
+        data = parsedResult.data;
+        skippedSheets = parsedResult.skippedSheets;
       }
+
+      notifySkippedSheets(skippedSheets);
+
       if (!data) {
         alert('マップデータの解析に失敗しました。');
         return;
       }
+
       const angleMap: Record<string, number> = {};
       Object.keys(data).forEach((sheetName) => {
         const rawAngle = initialAngles[sheetName];
@@ -285,12 +317,13 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     } finally {
       setIsLoading(false);
     }
-  }, [file, settings, previewData, onImport, initialAngles]);
+  }, [file, settings, previewData, previewSkippedSheets, onImport, initialAngles, notifySkippedSheets]);
 
   // 初期値にリセット
   const handleResetSettings = useCallback(() => {
     setSettings({ ...DEFAULT_BLOCK_DETECTION_SETTINGS });
     setPreviewData(null); // 設定変更したらプレビューをクリア
+    setPreviewSkippedSheets([]);
   }, []);
 
   // 設定更新ヘルパー
@@ -298,6 +331,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     <K extends keyof BlockDetectionSettings>(key: K, value: BlockDetectionSettings[K]) => {
       setSettings((prev) => ({ ...prev, [key]: value }));
       setPreviewData(null); // 設定変更したらプレビューをクリア
+      setPreviewSkippedSheets([]);
     },
     [],
   );
@@ -309,6 +343,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
         allowedCharTypes: { ...prev.allowedCharTypes, [charType]: value },
       }));
       setPreviewData(null);
+      setPreviewSkippedSheets([]);
     },
     [],
   );

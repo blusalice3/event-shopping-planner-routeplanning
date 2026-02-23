@@ -18,6 +18,16 @@ import InsertPositionDialog, { InsertPosition, SmartInsertMode } from './InsertP
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { isPointInPolygon } from './HallDefinitionPanel';
 
+const normalizeDisplayText = (value: string | null | undefined): string => {
+  return (value || '').replace(/\u3000/g, ' ').trim();
+};
+
+const extractDayNameFromMapName = (mapName: string): string => {
+  const normalizedMapName = normalizeDisplayText(mapName);
+  const dayMatch = normalizedMapName.match(/^(.+)マップ$/);
+  return dayMatch ? normalizeDisplayText(dayMatch[1]) : '';
+};
+
 interface MapViewProps {
   mapData: DayMapData;
   mapName: string;
@@ -29,33 +39,37 @@ interface MapViewProps {
   onMoveToLast: (itemId: string) => void;
   onUpdateItem?: (item: ShoppingItem) => void;
   onDeleteItem?: (itemId: string) => void;
-  onAddNewItem?: (eventDate: string, block: string, number: string) => void; // 新規アイテム追加（タブ遷移方式、互換用）
+  onAddNewItem?: (eventDate: string, block: string, number: string) => void;
   onAddItem?: (
     item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: import('../../types').PurchaseStatus },
-  ) => void; // 新規アイテム直接追加（ポップアップ方式）
-  // 訪問先リストへの位置指定追加
+  ) => void;
   onAddToExecuteListAtPosition?: (
     itemId: string,
     referenceItemId: string,
     position: 'before' | 'after',
   ) => void;
-  // ホール関連
+
+  // ホール定義と訪問順設定
   halls: HallDefinition[];
   hallRouteSettings: HallRouteSettings;
   onUpdateHallRouteSettings: (settings: HallRouteSettings) => void;
   onReorderExecuteList?: (hallOrder: string[]) => void;
-  // ホール頂点選択モード
+
+  // ホール頂点選択モード（ホール定義パネル連携）
   vertexSelectionMode?: {
     clickedVertices: { row: number; col: number }[];
   } | null;
-  // ブロック定義用セル選択モード
+
+  // セル選択モード（ブロック定義パネル連携）
   cellSelectionMode?: {
     type: string;
     clickedCells: { row: number; col: number }[];
   } | null;
-  // 訪問先リストからのハイライト
+
+  // 外部から指定された強調セル（訪問リストとの連携）
   highlightedCell?: { row: number; col: number } | null;
-  // 外部制御用props（ヘッダーから制御する場合）
+
+  // 親コンポーネントから制御するための外部状態
   externalSelectedHallId?: string;
   onSelectedHallIdChange?: (hallId: string) => void;
   externalIsRouteVisible?: boolean;
@@ -116,13 +130,13 @@ const MapView: React.FC<MapViewProps> = ({
   const [internalIsHallOrderOpen, setInternalIsHallOrderOpen] = useState(false);
   const [internalSelectedHallId, setInternalSelectedHallId] = useState<string>('all');
 
-  // 追加位置選択ダイアログの状態
+  // 追加位置選択ダイアログの表示状態
   const [insertDialogState, setInsertDialogState] = useState<{
     isOpen: boolean;
     item: ShoppingItem | null;
   }>({ isOpen: false, item: null });
 
-  // 外部制御か内部制御かを判定
+  // 外部制御が渡されていればそれを優先し、未指定時は内部 state を使う
   const selectedHallId =
     externalSelectedHallId !== undefined ? externalSelectedHallId : internalSelectedHallId;
   const setSelectedHallId = onSelectedHallIdChange || setInternalSelectedHallId;
@@ -133,7 +147,7 @@ const MapView: React.FC<MapViewProps> = ({
     externalIsHallOrderOpen !== undefined ? externalIsHallOrderOpen : internalIsHallOrderOpen;
   const setIsHallOrderOpen = onHallOrderOpenChange || setInternalIsHallOrderOpen;
 
-  // ポップアップの状態
+  // セルクリック時に表示するポップアップの状態
   const [popupState, setPopupState] = useState<{
     isOpen: boolean;
     row: number;
@@ -153,53 +167,118 @@ const MapView: React.FC<MapViewProps> = ({
   });
 
   const executeModeItemIdsSet = useMemo(() => new Set(executeModeItemIds), [executeModeItemIds]);
+  const mapDayName = useMemo(() => extractDayNameFromMapName(mapName), [mapName]);
 
-  // ブロックがどのホールに属するか判定
-  const blockToHallMap = useMemo(() => {
-    const map = new Map<string, string>(); // blockName -> hallId
-
-    mapData.blocks.forEach((block) => {
-      const centerRow = (block.startRow + block.endRow) / 2;
-      const centerCol = (block.startCol + block.endCol) / 2;
-
+  // 指定セルが属するホールIDをすべて取得する（重なり・境界を考慮）
+  const getHallIdsByCellPosition = useCallback(
+    (row: number, col: number): string[] => {
+      const ids: string[] = [];
       for (const hall of halls) {
-        if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
-          map.set(block.name, hall.id);
-          break;
+        if (hall.vertices.length >= 4 && isPointInPolygon(row, col, hall.vertices)) {
+          ids.push(hall.id);
         }
       }
-    });
+      return ids;
+    },
+    [halls],
+  );
 
-    return map;
-  }, [mapData.blocks, halls]);
+  // アイテムの block 名に対応するブロック候補を取得する
+  const getCandidateBlocksForItem = useCallback(
+    (itemBlockName: string): BlockDefinition[] => {
+      if (!itemBlockName) return [];
 
-  // アイテムがどのホールに属するか判定
-  const getItemHallId = useCallback(
-    (item: ShoppingItem): string | null => {
+      const exactMatches = mapData.blocks.filter((block) => block.name === itemBlockName);
+      if (exactMatches.length > 0) {
+        return exactMatches;
+      }
+
+      const normalizedBlockName = itemBlockName.toLowerCase();
+      return mapData.blocks.filter((block) => block.name.toLowerCase() === normalizedBlockName);
+    },
+    [mapData.blocks],
+  );
+
+  // アイテムが属し得るホールID候補を取得する
+  const getHallCandidatesForItem = useCallback(
+    (item: ShoppingItem): Set<string> => {
+      const hallIds = new Set<string>();
       const itemBlockName = item.block?.trim() || '';
+      const candidateBlocks = getCandidateBlocksForItem(itemBlockName);
+      if (candidateBlocks.length === 0) return hallIds;
 
-      // まず完全一致を試みる
-      const exactMatch = blockToHallMap.get(itemBlockName);
-      if (exactMatch) return exactMatch;
+      const numStr = extractNumberFromItemNumber(item.number);
+      if (numStr) {
+        const numValue = parseInt(numStr, 10);
+        candidateBlocks.forEach((block) => {
+          block.numberCells.forEach((numberCell) => {
+            if (numberCell.value !== numValue) return;
+            const matchedHallIds = getHallIdsByCellPosition(numberCell.row, numberCell.col);
+            matchedHallIds.forEach((matchedHallId) => hallIds.add(matchedHallId));
+          });
+        });
+      }
 
-      // 完全一致がない場合、大文字/小文字を無視して検索（候補が1つの場合のみ）
-      const candidates: string[] = [];
-      blockToHallMap.forEach((hallId, blockName) => {
-        if (blockName.toLowerCase() === itemBlockName.toLowerCase()) {
-          candidates.push(hallId);
+      if (hallIds.size > 0) {
+        return hallIds;
+      }
+
+      // 番号セル単体で判定できない場合、ブロック全体の番号セルからホールを一意推定する
+      candidateBlocks.forEach((block) => {
+        const blockHallIds = new Set<string>();
+        block.numberCells.forEach((numberCell) => {
+          const matchedHallIds = getHallIdsByCellPosition(numberCell.row, numberCell.col);
+          matchedHallIds.forEach((matchedHallId) => blockHallIds.add(matchedHallId));
+        });
+
+        if (blockHallIds.size === 1) {
+          blockHallIds.forEach((hallId) => hallIds.add(hallId));
         }
       });
 
-      if (candidates.length === 1) {
-        return candidates[0];
+      if (hallIds.size > 0) {
+        return hallIds;
       }
 
-      return null;
+      // 数値セルから判定できない場合のみ中心座標でフォールバック
+      candidateBlocks.forEach((block) => {
+        const centerRow = (block.startRow + block.endRow) / 2;
+        const centerCol = (block.startCol + block.endCol) / 2;
+        const matchedHallIds = getHallIdsByCellPosition(centerRow, centerCol);
+        matchedHallIds.forEach((matchedHallId) => hallIds.add(matchedHallId));
+      });
+
+      return hallIds;
     },
-    [blockToHallMap],
+    [getCandidateBlocksForItem, getHallIdsByCellPosition],
   );
 
-  // グループIDからホールIDと優先度を分離するヘルパー
+  // アイテムが指定ホールに属するか（候補が複数でも true を返す）
+  const isItemInHall = useCallback(
+    (item: ShoppingItem, hallId: string): boolean => {
+      return getHallCandidatesForItem(item).has(hallId);
+    },
+    [getHallCandidatesForItem],
+  );
+
+  // アイテムが属するホールを判定する
+  // 1. block + number の実セル座標で判定
+  // 2. 判定不能時のみ中心座標でフォールバック
+  const getItemHallId = useCallback(
+    (item: ShoppingItem): string | null => {
+      const hallCandidates = getHallCandidatesForItem(item);
+      if (hallCandidates.size === 1) {
+        return Array.from(hallCandidates)[0];
+      }
+      if (hallCandidates.size > 1 && selectedHallId !== 'all' && hallCandidates.has(selectedHallId)) {
+        return selectedHallId;
+      }
+      return null;
+    },
+    [getHallCandidatesForItem, selectedHallId],
+  );
+
+  // ホールIDと優先度をまとめた groupId を分解する
   const parseGroupId = useCallback(
     (
       groupId: string | null,
@@ -218,7 +297,7 @@ const MapView: React.FC<MapViewProps> = ({
     [],
   );
 
-  // グループごとの訪問先アイテム数を取得（優先度対応）
+  // 指定グループ（ホール + 優先度）に属する訪問先件数
   const getItemCountInHall = useCallback(
     (groupId: string): number => {
       const { hallId, priority } = parseGroupId(groupId);
@@ -227,50 +306,43 @@ const MapView: React.FC<MapViewProps> = ({
         const item = items.find((i) => i.id === itemId);
         if (!item) return false;
 
-        // ホールIDの一致を確認
-        const itemHallId = getItemHallId(item);
-        if (itemHallId !== hallId) return false;
+        const belongsToHall =
+          hallId === null ? getItemHallId(item) === null : isItemInHall(item, hallId);
+        if (!belongsToHall) return false;
 
-        // 優先度の一致を確認
         const itemPriority = item.priorityLevel || 'none';
         return itemPriority === priority;
       }).length;
     },
-    [executeModeItemIds, items, getItemHallId, parseGroupId],
+    [executeModeItemIds, items, getItemHallId, isItemInHall, parseGroupId],
   );
 
-  // ホール内の全優先度の訪問先アイテム数を取得（プルダウン用）
+  // ホール内の訪問先件数（優先度を問わない）
   const getHallTotalExecuteCount = useCallback(
     (hallId: string): number => {
       return executeModeItemIds.filter((itemId) => {
         const item = items.find((i) => i.id === itemId);
         if (!item) return false;
 
-        // ホールIDの一致を確認（優先度は問わない）
-        const itemHallId = getItemHallId(item);
-        return itemHallId === hallId;
+        return isItemInHall(item, hallId);
       }).length;
     },
-    [executeModeItemIds, items, getItemHallId],
+    [executeModeItemIds, items, isItemInHall],
   );
 
-  // ホールごとの全アイテム数を取得
+  // 現在日付タブにおけるホール内の総アイテム件数
   const getTotalItemCountInHall = useCallback(
     (hallId: string): number => {
-      // マップ名から日付を取得
-      const dayMatch = mapName.match(/^(.+)マップ$/);
-      if (!dayMatch) return 0;
-      const dayName = dayMatch[1];
-
       return items.filter((item) => {
-        if (item.eventDate !== dayName) return false;
-        return getItemHallId(item) === hallId;
+        if (mapDayName && normalizeDisplayText(item.eventDate) !== mapDayName) return false;
+        return isItemInHall(item, hallId);
       }).length;
     },
-    [items, mapName, getItemHallId],
+    [items, mapDayName, isItemInHall],
   );
 
-  // 選択中のホールに表示するマップデータをフィルタ
+  // 選択中ホールに合わせて表示用マップを絞り込む
+  // blocks はマッチング互換のため残しつつ、numberCells はホール内優先で絞る
   const filteredMapData = useMemo(() => {
     if (selectedHallId === 'all' || halls.length === 0) {
       return mapData;
@@ -281,26 +353,20 @@ const MapView: React.FC<MapViewProps> = ({
       return mapData;
     }
 
-    // 選択ホール内のセルのみをフィルタ（表示用）
     const filteredCells = mapData.cells.filter((cell) => {
       return isPointInPolygon(cell.row, cell.col, selectedHall.vertices);
     });
-
-    // ブロックは全て保持する（アイテムマッチング用）
-    // ただし、numberCellsはホール内のセルのみにフィルタ
     const filteredBlocks = mapData.blocks.map((block) => {
       const filteredNumberCells = block.numberCells.filter((nc) => {
         return isPointInPolygon(nc.row, nc.col, selectedHall.vertices);
       });
 
-      // ホール内にセルがないブロックはスキップしない（他の処理のため保持）
       return {
         ...block,
         numberCells: filteredNumberCells.length > 0 ? filteredNumberCells : block.numberCells,
       };
     });
 
-    // 範囲を再計算
     let minRow = Infinity,
       maxRow = 0,
       minCol = Infinity,
@@ -321,16 +387,16 @@ const MapView: React.FC<MapViewProps> = ({
     };
   }, [mapData, selectedHallId, halls]);
 
-  // 選択中のホール内のアイテムのみをフィルタ
+  // 選択中ホールに属するアイテムだけを表示対象にする
   const filteredItems = useMemo(() => {
     if (selectedHallId === 'all' || halls.length === 0) {
       return items;
     }
 
-    return items.filter((item) => getItemHallId(item) === selectedHallId);
-  }, [items, selectedHallId, halls, getItemHallId]);
+    return items.filter((item) => isItemInHall(item, selectedHallId));
+  }, [items, selectedHallId, halls, isItemInHall]);
 
-  // 選択中のホール内の訪問先IDのみをフィルタ
+  // 実行列IDも選択中ホールに合わせて絞り込む
   const filteredExecuteModeItemIds = useMemo(() => {
     if (selectedHallId === 'all' || halls.length === 0) {
       return executeModeItemIds;
@@ -339,13 +405,13 @@ const MapView: React.FC<MapViewProps> = ({
     return executeModeItemIds.filter((itemId) => {
       const item = items.find((i) => i.id === itemId);
       if (!item) return false;
-      return getItemHallId(item) === selectedHallId;
+      return isItemInHall(item, selectedHallId);
     });
-  }, [executeModeItemIds, items, selectedHallId, halls, getItemHallId]);
+  }, [executeModeItemIds, items, selectedHallId, halls, isItemInHall]);
 
-  // セルがブロックの範囲内にあるかチェック（cellGroups対応）
+  // セルがブロック範囲内か判定する（cellGroups 対応）
   const isCellInBlock = useCallback((row: number, col: number, block: BlockDefinition): boolean => {
-    // cellGroupsがある場合（複数範囲ブロックや壁ブロック）
+
     if (block.cellGroups && block.cellGroups.length > 0) {
       return block.cellGroups.some((group) => {
         if (group.type === 'range') {
@@ -361,46 +427,39 @@ const MapView: React.FC<MapViewProps> = ({
         return false;
       });
     }
-    // 通常の矩形ブロック
+
     return (
       row >= block.startRow && row <= block.endRow && col >= block.startCol && col <= block.endCol
     );
   }, []);
 
-  // セルクリック時のハンドラ
+  // セルクリック時: 対象ブロックと番号を解決してポップアップを開く
   const handleCellClick = useCallback(
     (row: number, col: number, matchingItems: ShoppingItem[]) => {
-      // ブロック定義・ホール定義モード中はアイテムポップアップを表示しない
+
       if (vertexSelectionMode || cellSelectionMode) return;
 
-      // セルがブロック定義内にあるかチェック
       let foundBlock: { name: string; number: number } | null = null;
 
       for (const block of mapData.blocks) {
-        // 壁ブロックも含めて全てのブロックを処理
-
-        // ブロック範囲内かチェック（cellGroups対応）
         if (isCellInBlock(row, col, block)) {
-          // ブロック名セルならスキップ（クリックしてもポップアップを出さない）
+
           if (block.nameCells && block.nameCells.some((nc) => nc.row === row && nc.col === col)) {
             continue;
           }
 
-          // 数値セルを探す（numberCells配列から）
           const numberCell = block.numberCells.find((nc) => nc.row === row && nc.col === col);
           if (numberCell) {
             foundBlock = { name: block.name, number: numberCell.value };
             break;
           }
 
-          // numberCellsに見つからない場合、セルの内容が数値かチェック（ユーザー定義ブロック対応）
           if (!foundBlock) {
-            // まずクリック位置のセルを探す
+
             let cell = mapData.cells.find((c) => c.row === row && c.col === col);
 
-            // セルが見つからない場合、結合セル内かチェック
             if (!cell) {
-              // 結合セルの開始位置を探す
+
               for (const merge of mapData.mergedCells) {
                 if (
                   row >= merge.startRow &&
@@ -428,7 +487,6 @@ const MapView: React.FC<MapViewProps> = ({
         }
       }
 
-      // ブロック定義内でない場合かつアイテムもない場合は何もしない
       if (!foundBlock && matchingItems.length === 0) return;
 
       const position = {
@@ -437,7 +495,6 @@ const MapView: React.FC<MapViewProps> = ({
       };
 
       if (foundBlock) {
-        // ブロック定義内のセル
         setPopupState({
           isOpen: true,
           row,
@@ -448,7 +505,7 @@ const MapView: React.FC<MapViewProps> = ({
           position,
         });
       } else if (matchingItems.length > 0) {
-        // ブロック定義外だがアイテムがある場合（既存動作）
+
         const firstItem = matchingItems[0];
         const numStr = extractNumberFromItemNumber(firstItem.number);
         const numValue = numStr ? parseInt(numStr, 10) : 0;
@@ -478,7 +535,7 @@ const MapView: React.FC<MapViewProps> = ({
     setPopupState((prev) => ({ ...prev, isOpen: false }));
   }, []);
 
-  // ホールの訪問先リストにアイテムを追加するヘルパー
+  // ホール別訪問リストへアイテムIDを同期する
   const addToHallVisitList = useCallback(
     (itemId: string) => {
       const item = items.find((i) => i.id === itemId);
@@ -509,16 +566,13 @@ const MapView: React.FC<MapViewProps> = ({
     [items, getItemHallId, hallRouteSettings, onUpdateHallRouteSettings],
   );
 
-  // 訪問先に追加（近接アイテムがある場合はダイアログ表示）
   const handleAddToVisitList = useCallback(
     (itemId: string) => {
       const item = items.find((i) => i.id === itemId);
       if (!item) return;
 
-      // 同ブロック±3以内で訪問先リストに存在するアイテムを検索
       const itemNum = extractNumberFromItemNumber(item.number);
       if (!itemNum) {
-        // ナンバー解析できない場合はデフォルト動作
         onAddToExecuteList(itemId);
         addToHallVisitList(itemId);
         return;
@@ -542,13 +596,10 @@ const MapView: React.FC<MapViewProps> = ({
       });
 
       if (nearbyVisitItems.length === 0 || !onAddToExecuteListAtPosition || !smartInsertEnabled) {
-        // 近接アイテムなし or 位置指定コールバック未提供 or スマート挿入OFF → デフォルト動作
         onAddToExecuteList(itemId);
         addToHallVisitList(itemId);
         return;
       }
-
-      // ダイアログを表示
       setInsertDialogState({ isOpen: true, item });
     },
     [
@@ -561,7 +612,7 @@ const MapView: React.FC<MapViewProps> = ({
     ],
   );
 
-  // ダイアログからの位置選択を処理
+  // スマート挿入ダイアログの選択結果を適用する
   const handleInsertPositionSelect = useCallback(
     (position: InsertPosition) => {
       const item = insertDialogState.item;
@@ -573,10 +624,8 @@ const MapView: React.FC<MapViewProps> = ({
           addToHallVisitList(item.id);
         }
       } else {
-        // hallEnd / listEnd → デフォルト動作（App.tsx側のホール位置計算に任せる）
-        // listEnd の場合は末尾追加のための特別処理が必要
         if (position.type === 'listEnd' && onAddToExecuteListAtPosition) {
-          // 末尾に追加: 最後のアイテムの after として追加
+
           if (executeModeItemIds.length > 0) {
             onAddToExecuteListAtPosition(
               item.id,
@@ -604,7 +653,6 @@ const MapView: React.FC<MapViewProps> = ({
     ],
   );
 
-  // ダイアログ用の近接アイテムデータを計算
   const insertDialogNearbyItems = useMemo(() => {
     const item = insertDialogState.item;
     if (!item) return [];
@@ -632,14 +680,14 @@ const MapView: React.FC<MapViewProps> = ({
     return result;
   }, [insertDialogState.item, items, executeModeItemIds]);
 
-  // ダイアログ用のホール定義有無
+  // 追加対象アイテムがホール判定可能かどうか
   const insertDialogHasHall = useMemo(() => {
     const item = insertDialogState.item;
     if (!item) return false;
-    return getItemHallId(item) !== null;
-  }, [insertDialogState.item, getItemHallId]);
+    return getHallCandidatesForItem(item).size > 0;
+  }, [insertDialogState.item, getHallCandidatesForItem]);
 
-  // ダイアログ用の訪問先リスト全体（preview モード用）
+  // preview モード時のみ、実行列全体をダイアログ表示用に渡す
   const insertDialogAllVisitItems = useMemo(() => {
     if (smartInsertMode !== 'preview') return [];
     return executeModeItemIds
@@ -650,12 +698,11 @@ const MapView: React.FC<MapViewProps> = ({
       .filter((v): v is { item: ShoppingItem; visitIndex: number } => v !== null);
   }, [smartInsertMode, executeModeItemIds, items]);
 
-  // 訪問先から除外
+  // 実行列から削除したアイテムをホール別訪問リストからも除去する
   const handleRemoveFromVisitList = useCallback(
     (itemId: string) => {
       onRemoveFromExecuteList(itemId);
 
-      // ホールの訪問先リストからも削除
       const updatedHallVisitLists = hallRouteSettings.hallVisitLists.map((list) => ({
         ...list,
         itemIds: list.itemIds.filter((id) => id !== itemId),
@@ -680,10 +727,9 @@ const MapView: React.FC<MapViewProps> = ({
       className="relative bg-slate-100 dark:bg-slate-900 overflow-hidden"
       style={{ height: 'calc(100vh - 140px)' }}
     >
-      {/* ツールバー - MapView内に固定（外部制御時は非表示） */}
+      {/* 右上コントロール: ホール選択 / ホール順序 / ルート表示 */}
       {!hideInternalControls && (
         <div className="absolute top-4 right-4 z-10 flex items-center gap-3">
-          {/* ホール選択ドロップダウン */}
           {halls.length > 0 && (
             <select
               value={selectedHallId}
@@ -699,18 +745,14 @@ const MapView: React.FC<MapViewProps> = ({
               ))}
             </select>
           )}
-
-          {/* ホール順序設定ボタン */}
           {halls.length > 0 && (
             <button
               onClick={() => setIsHallOrderOpen(true)}
               className="bg-white dark:bg-slate-800 px-3 py-2 rounded-lg shadow-md border border-slate-200 dark:border-slate-700 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-700"
             >
-              🔄 ホール順序
+              ホール順序
             </button>
           )}
-
-          {/* ルート表示トグル */}
           <label className="flex items-center gap-2 bg-white dark:bg-slate-800 px-3 py-2 rounded-lg shadow-md border border-slate-200 dark:border-slate-700">
             <span className="text-sm text-slate-700 dark:text-slate-300">ルート表示</span>
             <button
@@ -728,15 +770,13 @@ const MapView: React.FC<MapViewProps> = ({
           </label>
         </div>
       )}
-
-      {/* ズーム率表示ラベル - MapView内左下に固定 */}
+      {/* 左下ズーム表示 */}
       <div className="absolute bottom-4 left-4 z-10">
         <div className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm shadow-md text-slate-700 dark:text-slate-300 select-none">
           {zoomLevel}%
         </div>
       </div>
-
-      {/* マップキャンバス */}
+      {/* マップ本体 */}
       <MapCanvas
         mapData={filteredMapData}
         mapName={mapName}
@@ -756,8 +796,7 @@ const MapView: React.FC<MapViewProps> = ({
         onRotationAngleChange={onRotationAngleChange}
         selectionGuideOptions={selectionGuideOptions}
       />
-
-      {/* セルアイテムポップアップ */}
+      {/* セル詳細ポップアップ */}
       <CellItemsPopup
         isOpen={popupState.isOpen}
         onClose={handleClosePopup}
@@ -770,11 +809,10 @@ const MapView: React.FC<MapViewProps> = ({
         onUpdateItem={onUpdateItem}
         onDeleteItem={onDeleteItem}
         onAddItem={onAddItem}
-        eventDate={mapName.replace(/マップ$/, '')}
+        eventDate={mapDayName || normalizeDisplayText(mapName)}
         position={popupState.position}
       />
-
-      {/* 訪問先リストパネル */}
+      {/* 訪問リストパネル */}
       <VisitListPanel
         isOpen={isVisitListOpen}
         onClose={() => setIsVisitListOpen(false)}
@@ -783,7 +821,6 @@ const MapView: React.FC<MapViewProps> = ({
         blocks={filteredMapData.blocks}
         onJumpToCell={handleJumpToCell}
       />
-
       {/* ホール順序設定パネル */}
       <HallOrderPanel
         isOpen={isHallOrderOpen}
@@ -794,8 +831,7 @@ const MapView: React.FC<MapViewProps> = ({
         getItemCountInHall={getItemCountInHall}
         onReorderExecuteList={onReorderExecuteList}
       />
-
-      {/* 追加位置選択ダイアログ */}
+      {/* スマート挿入ダイアログ */}
       {insertDialogState.item && (
         <InsertPositionDialog
           isOpen={insertDialogState.isOpen}
@@ -813,3 +849,5 @@ const MapView: React.FC<MapViewProps> = ({
 };
 
 export default MapView;
+
+

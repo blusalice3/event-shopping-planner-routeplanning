@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+﻿import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   DayMapData,
   CellData,
@@ -40,17 +40,24 @@ interface MapCanvasProps {
   };
 }
 
-const BASE_CELL_SIZE = 28; // 基本セルサイズ
-const SCROLL_MARGIN = 5; // スクロール余白（行/列数）
-const FILLED_SCROLL_MARGIN = 25; // 入力済みセル境界からの追加余白（行/列数）
+const BASE_CELL_SIZE = 28; // 蝓ｺ譛ｬ繧ｻ繝ｫ繧ｵ繧､繧ｺ
+const SCROLL_MARGIN = 5; // 繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ菴咏區・郁｡・蛻玲焚・・
+const FILLED_SCROLL_MARGIN = 25; // 蜈･蜉帶ｸ医∩繧ｻ繝ｫ蠅・阜縺九ｉ縺ｮ霑ｽ蜉菴咏區・郁｡・蛻玲焚・・
+const normalizeDisplayText = (value: string | null | undefined): string => {
+  return (value || '').replace(/\u3000/g, ' ').trim();
+};
 const getDragPanMultiplier = (zoom: number): number => {
   if (zoom < 70) return 2.0;
   if (zoom < 120) return 1.6;
   return 1.3;
 };
 const extractDayNameFromMapName = (mapName: string): string => {
-  const dayMatch = mapName.match(/^(.+)マップ$/);
-  return dayMatch ? dayMatch[1].trim() : '';
+  const normalizedMapName = normalizeDisplayText(mapName);
+  const dayMatch = normalizedMapName.match(/^(.+)マップ$/);
+  if (dayMatch) {
+    return normalizeDisplayText(dayMatch[1]);
+  }
+  return normalizedMapName;
 };
 
 const hasCellInputValue = (value: string | number | null): boolean => {
@@ -263,7 +270,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     [mapCenterX, mapCenterY, rotationRadians],
   );
 
-  // 指定した画面座標を基準に、ズーム後も同じ地点を指すようオフセットを再計算する。
   const calculateOffsetForZoomPoint = useCallback(
     (
       viewX: number,
@@ -375,7 +381,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     };
   }, []);
 
-  // ズーム変更時は、表示中心が大きくずれないようにオフセットを補正する。
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -403,7 +408,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     prevCellSizeRef.current = cellSize;
   }, [cellSize, offset.x, offset.y]);
 
-  // ホイール操作: 通常はズーム、Shift+ホイールは回転。
   const handleWheel = useCallback(
     (e: WheelEvent) => {
       e.preventDefault();
@@ -609,7 +613,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return new Set(executeModeItemIds);
   }, [executeModeItemIds]);
 
-  // アイテムを「日付 + ブロック + 番号」でマップ上のセルに紐付ける。
   const cellStates = useMemo(() => {
     const states = new Map<string, MapCellStateDetail>();
 
@@ -618,7 +621,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     const isPriorityItem = (item: (typeof items)[number]) => {
       const remarks = item.remarks?.toLowerCase() || '';
-      return remarks.includes('優先') || remarks.includes('最優先');
+      return remarks.includes('\u512A\u5148') || remarks.includes('\u6700\u512A\u5148');
     };
 
     items.forEach((item) => {
@@ -685,7 +688,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return states;
   }, [mapData.blocks, items, mapName, executeModeItemIdsSet]);
 
-  // 実行リストの順序に沿ってルート用の通過点を作る。
   const routePoints = useMemo(() => {
     if (!isRouteVisible) return [];
 
@@ -762,7 +764,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }));
   }, [isRouteVisible, routePoints, mapData, cellsMap]);
 
-  // キャンバス描画本体。状態変化に応じて再描画する。
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -923,10 +924,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     const trimLineToWidth = (line: string, maxLineWidth: number): string => {
       let next = line;
-      while (next.length > 0 && ctx.measureText(`${next}…`).width > maxLineWidth) {
+      while (next.length > 0 && ctx.measureText(`${next}窶ｦ`).width > maxLineWidth) {
         next = next.slice(0, -1);
       }
-      return next.length > 0 ? `${next}…` : '…';
+      return next.length > 0 ? `${next}窶ｦ` : '窶ｦ';
     };
 
     const drawFittedHorizontalTextInCell = (
@@ -1033,7 +1034,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       drawableColumns = drawableColumns.map((chars) => {
         if (chars.length <= maxRows) return chars;
         const trimmed = chars.slice(0, maxRows);
-        trimmed[maxRows - 1] = '…';
+        trimmed[maxRows - 1] = '窶ｦ';
         return trimmed;
       });
 
@@ -1041,9 +1042,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const lastColumnIndex = drawableColumns.length - 1;
         const lastColumn = drawableColumns[lastColumnIndex];
         if (lastColumn.length < maxRows) {
-          lastColumn.push('…');
+          lastColumn.push('窶ｦ');
         } else {
-          lastColumn[lastColumn.length - 1] = '…';
+          lastColumn[lastColumn.length - 1] = '窶ｦ';
         }
       }
 
@@ -1183,7 +1184,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const width = spanCols * cellSize;
       const height = spanRows * cellSize;
 
-      // セル背景色
+      // 繧ｻ繝ｫ閭梧勹濶ｲ
       if (cell.backgroundColor) {
         ctx.fillStyle = cell.backgroundColor;
         ctx.fillRect(x, y, width, height);
@@ -1211,60 +1212,128 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     });
 
     if (showBorders && !isRotationInteracting) {
+      type DrawnBorder = NonNullable<CellData['borders']['top']>;
+      type BorderEdge = {
+        orientation: 'h' | 'v';
+        gridX: number;
+        gridY: number;
+        border: DrawnBorder;
+      };
+
+      const borderWeight = (border: DrawnBorder): number => {
+        switch (border.style) {
+          case 'double':
+            return 4;
+          case 'thick':
+            return 3;
+          case 'medium':
+            return 2;
+          case 'thin':
+          default:
+            return 1;
+        }
+      };
+
+      const pickBorder = (
+        current: DrawnBorder | undefined,
+        candidate: DrawnBorder,
+      ): DrawnBorder => {
+        if (!current) return candidate;
+
+        const currentWeight = borderWeight(current);
+        const candidateWeight = borderWeight(candidate);
+        if (candidateWeight > currentWeight) return candidate;
+        if (candidateWeight < currentWeight) return current;
+
+        if (current.color === '#000000' && candidate.color !== '#000000') {
+          return candidate;
+        }
+
+        return current;
+      };
+
+      const edgeMap = new Map<string, BorderEdge>();
+      const upsertEdge = (
+        orientation: 'h' | 'v',
+        gridX: number,
+        gridY: number,
+        border: DrawnBorder | null,
+      ) => {
+        if (!border) return;
+        const key = `${orientation}-${gridX}-${gridY}`;
+        const existing = edgeMap.get(key);
+        const selected = pickBorder(existing?.border, border);
+        edgeMap.set(key, { orientation, gridX, gridY, border: selected });
+      };
+
       mapData.cells.forEach((cell) => {
-        if (cell.isMerged) return;
-
         const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-        const spanCols = merge ? merge.endCol - merge.startCol + 1 : 1;
-        const spanRows = merge ? merge.endRow - merge.startRow + 1 : 1;
-        if (!isCellVisible(cell.row, cell.col, spanRows, spanCols)) return;
+        if (!isCellVisible(cell.row, cell.col, 1, 1)) return;
 
-        const x = (cell.col - 1) * cellSize;
-        const y = (cell.row - 1) * cellSize;
+        const startCol = cell.col - 1;
+        const endCol = startCol + 1;
+        const startRow = cell.row - 1;
+        const endRow = startRow + 1;
 
-        const width = spanCols * cellSize;
-        const height = spanRows * cellSize;
+        let topBorder = cell.borders.top;
+        let rightBorder = cell.borders.right;
+        let bottomBorder = cell.borders.bottom;
+        let leftBorder = cell.borders.left;
 
-        const { borders } = cell;
-
-        const drawBorder = (
-          startX: number,
-          startY: number,
-          endX: number,
-          endY: number,
-          border: typeof borders.top,
-        ) => {
-          if (!border) return;
-
-          ctx.beginPath();
-          ctx.strokeStyle = border.color || '#000000';
-
-          let lineWidth = 1;
-          switch (border.style) {
-            case 'thin':
-              lineWidth = 1;
-              break;
-            case 'medium':
-              lineWidth = 2;
-              break;
-            case 'thick':
-              lineWidth = 3;
-              break;
-            default:
-              lineWidth = 1;
+        // Excel merged cells keep edge data distributed across member cells.
+        // For the merge parent, right/bottom are often internal edges, so skip them.
+        if (merge) {
+          if (merge.endCol > merge.startCol) {
+            rightBorder = null;
           }
-          ctx.lineWidth = lineWidth;
+          if (merge.endRow > merge.startRow) {
+            bottomBorder = null;
+          }
+        }
 
-          ctx.moveTo(startX, startY);
-          ctx.lineTo(endX, endY);
-          ctx.stroke();
-        };
+        if (topBorder) {
+          upsertEdge('h', startCol, startRow, topBorder);
+        }
+        if (bottomBorder) {
+          upsertEdge('h', startCol, endRow, bottomBorder);
+        }
+        if (leftBorder) {
+          upsertEdge('v', startCol, startRow, leftBorder);
+        }
+        if (rightBorder) {
+          upsertEdge('v', endCol, startRow, rightBorder);
+        }
+      });
 
-        if (borders.top) drawBorder(x, y, x + width, y, borders.top);
-        if (borders.right) drawBorder(x + width, y, x + width, y + height, borders.right);
-        if (borders.bottom) drawBorder(x, y + height, x + width, y + height, borders.bottom);
-        if (borders.left) drawBorder(x, y, x, y + height, borders.left);
+      edgeMap.forEach(({ orientation, gridX, gridY, border }) => {
+        let lineWidth = 1;
+        switch (border.style) {
+          case 'double':
+          case 'thick':
+            lineWidth = 3;
+            break;
+          case 'medium':
+            lineWidth = 2;
+            break;
+          case 'thin':
+          default:
+            lineWidth = 1;
+            break;
+        }
 
+        const startX = gridX * cellSize;
+        const startY = gridY * cellSize;
+        const endX = orientation === 'h' ? (gridX + 1) * cellSize : startX;
+        const endY = orientation === 'v' ? (gridY + 1) * cellSize : startY;
+
+        ctx.beginPath();
+        ctx.strokeStyle = border.color || '#000000';
+        ctx.lineCap = 'butt';
+        ctx.lineJoin = 'miter';
+        ctx.lineWidth = lineWidth;
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
       });
     }
 
@@ -1402,7 +1471,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           ctx.strokeStyle = '#212121';
           ctx.lineWidth = Math.max(1, dotSize * 0.2);
           ctx.stroke();
-          return; // この分岐で描画が完了するため早期 return
+          return; // 縺薙・蛻・ｲ舌〒謠冗判縺悟ｮ御ｺ・☆繧九◆繧∵掠譛・return
         } else if (state.isVisited) {
           ctx.fillStyle = '#FFEE58';
         } else {
@@ -1418,11 +1487,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
         switch (priority) {
           case 'highest':
-            return '#EF4444'; // 最優先
-          case 'priority':
+            return '#EF4444'; // 譛蜆ｪ蜈・          case 'priority':
             return '#F97316';
           default:
-            return '#1976D2'; // 通常
+            return '#1976D2'; // 騾壼ｸｸ
         }
       };
 
@@ -1714,7 +1782,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fill();
         ctx.stroke();
 
-        // 頂点番号ラベル
+        // 鬆らせ逡ｪ蜿ｷ繝ｩ繝吶Ν
         ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1837,7 +1905,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fill();
         ctx.stroke();
 
-        // セル番号ラベル
+        // 繧ｻ繝ｫ逡ｪ蜿ｷ繝ｩ繝吶Ν
         ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -1953,7 +2021,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     offset,
   ]);
 
-  // クリック座標をセル座標に変換し、対象セルのアイテムを通知する。
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (isDragging) return;
@@ -2133,7 +2200,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     [filledCellScrollBounds, hallScrollBounds],
   );
 
-  // ドラッグで移動できる範囲（表示境界）を計算する。
   const calculateScrollLimits = useCallback(() => {
     if (!activeScrollBounds) return null;
     const container = containerRef.current;
@@ -2212,7 +2278,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     [],
   );
 
-  // ポインタドラッグでマップをパン移動する。
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       lastPointerTypeRef.current = e.pointerType;
@@ -2289,6 +2354,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 };
 
 export default MapCanvas;
+
 
 
 

@@ -1119,56 +1119,126 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
     // 2. セルの罫線を描画する。
     if (showBorders && !isRotationInteracting) {
-      mapData.cells.forEach((cell) => {
-        if (cell.isMerged) return;
+      type DrawnBorder = NonNullable<CellData['borders']['top']>;
+      type BorderEdge = {
+        orientation: 'h' | 'v';
+        gridX: number;
+        gridY: number;
+        border: DrawnBorder;
+      };
 
-        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-        const spanCols = merge ? merge.endCol - merge.startCol + 1 : 1;
-        const spanRows = merge ? merge.endRow - merge.startRow + 1 : 1;
-        if (!isCellVisible(cell.row, cell.col, spanRows, spanCols)) return;
-
-        const x = (cell.col - 1) * cellSize;
-        const y = (cell.row - 1) * cellSize;
-        const width = spanCols * cellSize;
-        const height = spanRows * cellSize;
-
-        const drawBorder = (
-          fromX: number,
-          fromY: number,
-          toX: number,
-          toY: number,
-          border: { style: string; color: string } | null,
-        ) => {
-          if (!border || border.style === 'none') return;
-
-          ctx.beginPath();
-          ctx.strokeStyle = border.color || '#000000';
-          let lineWidth = 1;
-          switch (border.style) {
-            case 'thin':
-              lineWidth = 1;
-              break;
-            case 'medium':
-              lineWidth = 2;
-              break;
-            case 'thick':
-              lineWidth = 3;
-              break;
-            default:
-              lineWidth = 1;
-          }
-          ctx.lineWidth = lineWidth;
-          ctx.moveTo(fromX, fromY);
-          ctx.lineTo(toX, toY);
-          ctx.stroke();
-        };
-
-        if (cell.borders) {
-          drawBorder(x, y, x + width, y, cell.borders.top);
-          drawBorder(x + width, y, x + width, y + height, cell.borders.right);
-          drawBorder(x, y + height, x + width, y + height, cell.borders.bottom);
-          drawBorder(x, y, x, y + height, cell.borders.left);
+      const borderWeight = (border: DrawnBorder): number => {
+        switch (border.style) {
+          case 'double':
+            return 4;
+          case 'thick':
+            return 3;
+          case 'medium':
+            return 2;
+          case 'thin':
+          default:
+            return 1;
         }
+      };
+
+      const pickBorder = (
+        current: DrawnBorder | undefined,
+        candidate: DrawnBorder,
+      ): DrawnBorder => {
+        if (!current) return candidate;
+
+        const currentWeight = borderWeight(current);
+        const candidateWeight = borderWeight(candidate);
+        if (candidateWeight > currentWeight) return candidate;
+        if (candidateWeight < currentWeight) return current;
+
+        if (current.color === '#000000' && candidate.color !== '#000000') {
+          return candidate;
+        }
+
+        return current;
+      };
+
+      const edgeMap = new Map<string, BorderEdge>();
+      const upsertEdge = (
+        orientation: 'h' | 'v',
+        gridX: number,
+        gridY: number,
+        border: DrawnBorder | null,
+      ) => {
+        if (!border) return;
+        const key = `${orientation}-${gridX}-${gridY}`;
+        const existing = edgeMap.get(key);
+        const selected = pickBorder(existing?.border, border);
+        edgeMap.set(key, { orientation, gridX, gridY, border: selected });
+      };
+
+      mapData.cells.forEach((cell) => {
+        const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+        if (!isCellVisible(cell.row, cell.col, 1, 1)) return;
+
+        const startCol = cell.col - 1;
+        const endCol = startCol + 1;
+        const startRow = cell.row - 1;
+        const endRow = startRow + 1;
+
+        let topBorder = cell.borders.top;
+        let rightBorder = cell.borders.right;
+        let bottomBorder = cell.borders.bottom;
+        let leftBorder = cell.borders.left;
+
+        if (merge) {
+          if (merge.endCol > merge.startCol) {
+            rightBorder = null;
+          }
+          if (merge.endRow > merge.startRow) {
+            bottomBorder = null;
+          }
+        }
+
+        if (topBorder) {
+          upsertEdge('h', startCol, startRow, topBorder);
+        }
+        if (bottomBorder) {
+          upsertEdge('h', startCol, endRow, bottomBorder);
+        }
+        if (leftBorder) {
+          upsertEdge('v', startCol, startRow, leftBorder);
+        }
+        if (rightBorder) {
+          upsertEdge('v', endCol, startRow, rightBorder);
+        }
+      });
+
+      edgeMap.forEach(({ orientation, gridX, gridY, border }) => {
+        let lineWidth = 1;
+        switch (border.style) {
+          case 'double':
+          case 'thick':
+            lineWidth = 3;
+            break;
+          case 'medium':
+            lineWidth = 2;
+            break;
+          case 'thin':
+          default:
+            lineWidth = 1;
+            break;
+        }
+
+        const startX = gridX * cellSize;
+        const startY = gridY * cellSize;
+        const endX = orientation === 'h' ? (gridX + 1) * cellSize : startX;
+        const endY = orientation === 'v' ? (gridY + 1) * cellSize : startY;
+
+        ctx.beginPath();
+        ctx.strokeStyle = border.color || '#000000';
+        ctx.lineCap = 'butt';
+        ctx.lineJoin = 'miter';
+        ctx.lineWidth = lineWidth;
+        ctx.moveTo(startX, startY);
+        ctx.lineTo(endX, endY);
+        ctx.stroke();
       });
     }
 
