@@ -485,14 +485,22 @@ function isNumberCell(
   value: ExcelJS.CellValue,
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
 ): boolean {
-  if (value === null || value === undefined) return false;
-  const num = typeof value === 'number' ? value : parseFloat(String(value));
+  const num = extractNumericCellValue(value);
+  if (num === null) return false;
   return (
-    !isNaN(num) &&
     Number.isInteger(num) &&
     num >= settings.numberCellMin &&
     num <= settings.numberCellMax
   );
+}
+
+function extractNumericCellValue(value: ExcelJS.CellValue): number | null {
+  const extracted = extractCellValue(value);
+  if (extracted === null || extracted === undefined) return null;
+
+  const num = typeof extracted === 'number' ? extracted : parseFloat(String(extracted));
+  if (Number.isNaN(num) || !Number.isFinite(num)) return null;
+  return num;
 }
 
 function generateBlockColor(index: number): string {
@@ -720,6 +728,7 @@ function findNumberCellsByBorderColors(
   targetColors: Set<string>,
   themeColorMap: ThemeColorMap,
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
+  ignoreNumberRange: boolean = false,
 ): NumberCellInfo[] {
   if (targetColors.size === 0) return [];
 
@@ -733,7 +742,10 @@ function findNumberCellsByBorderColors(
       }
 
       const value = worksheet.getCell(row, col).value;
-      if (!isNumberCell(value, settings)) continue;
+      const parsedValue = extractNumericCellValue(value);
+      if (parsedValue === null || !Number.isInteger(parsedValue)) continue;
+      if (!ignoreNumberRange && !isNumberCell(value, settings)) continue;
+      if (ignoreNumberRange && parsedValue <= 0) continue;
 
       const borderColors = collectMediumOrThickBorderColorsForCell(
         worksheet,
@@ -746,7 +758,7 @@ function findNumberCellsByBorderColors(
       const hasMatch = Array.from(borderColors).some((color) => targetColors.has(color));
       if (!hasMatch) continue;
 
-      const numValue = typeof value === 'number' ? value : parseInt(String(value), 10);
+      const numValue = parsedValue;
       result.push({ row, col, value: numValue });
     }
   }
@@ -870,22 +882,20 @@ function detectBlocksWithExcelJS(
     processBlockNameCandidate(blockName, merge.startRow, merge.startCol, nameCellCoords);
   });
 
-  if (settings.minMergedCellCount <= 1) {
-    for (let row = 1; row <= maxRow; row++) {
-      for (let col = 1; col <= maxCol; col++) {
-        const key = `${row}-${col}`;
+  for (let row = 1; row <= maxRow; row++) {
+    for (let col = 1; col <= maxCol; col++) {
+      const key = `${row}-${col}`;
 
-        if (globalProcessedCells.has(key)) continue;
+      if (globalProcessedCells.has(key)) continue;
 
-        const mergeParent = mergeMap.get(key);
-        if (mergeParent) continue;
+      const mergeParent = mergeMap.get(key);
+      if (mergeParent && (mergeParent.row !== row || mergeParent.col !== col)) continue;
 
-        const cell = worksheet.getCell(row, col);
-        if (!isBlockName(cell.value, settings)) continue;
+      const cell = worksheet.getCell(row, col);
+      if (!isBlockName(cell.value, settings)) continue;
 
-        const blockName = String(extractCellValue(cell.value)).trim();
-        processBlockNameCandidate(blockName, row, col, [{ row, col }]);
-      }
+      const blockName = String(extractCellValue(cell.value)).trim();
+      processBlockNameCandidate(blockName, row, col, [{ row, col }]);
     }
   }
 
@@ -907,19 +917,46 @@ function detectBlocksWithExcelJS(
     );
     const nonBlackColors = Array.from(regionBorderColors).filter((color) => color !== '#000000');
 
-    const colorExpandedNumberCells =
-      nonBlackColors.length > 0
-        ? findNumberCellsByBorderColors(
-            worksheet,
-            mergeMap,
-            mergeRangeMap,
-            maxRow,
-            maxCol,
-            new Set(nonBlackColors),
-            themeColorMap,
-            settings,
-          )
-        : [];
+    let colorExpandedNumberCells: NumberCellInfo[] = [];
+    if (nonBlackColors.length > 0) {
+      const targetColorSet = new Set(nonBlackColors);
+      const strictColorExpandedCells = findNumberCellsByBorderColors(
+        worksheet,
+        mergeMap,
+        mergeRangeMap,
+        maxRow,
+        maxCol,
+        targetColorSet,
+        themeColorMap,
+        settings,
+      );
+      colorExpandedNumberCells = strictColorExpandedCells;
+
+      const strictMin = strictColorExpandedCells[0]?.value;
+      const strictMax = strictColorExpandedCells[strictColorExpandedCells.length - 1]?.value;
+      const isLikelyRangeClipped =
+        strictColorExpandedCells.length === 0 ||
+        strictMin === settings.numberCellMin ||
+        strictMax === settings.numberCellMax;
+
+      if (isLikelyRangeClipped) {
+        const relaxedColorExpandedCells = findNumberCellsByBorderColors(
+          worksheet,
+          mergeMap,
+          mergeRangeMap,
+          maxRow,
+          maxCol,
+          targetColorSet,
+          themeColorMap,
+          settings,
+          true,
+        );
+
+        if (relaxedColorExpandedCells.length > strictColorExpandedCells.length) {
+          colorExpandedNumberCells = relaxedColorExpandedCells;
+        }
+      }
+    }
 
     const mergedNumberCells = [...uniqueNumberCells, ...colorExpandedNumberCells]
       .filter(
