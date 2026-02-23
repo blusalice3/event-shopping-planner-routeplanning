@@ -1630,7 +1630,11 @@ const App: React.FC = () => {
       setEventMetadata((prev) => removeRecordKey(prev, eventName));
       setExecuteModeItems((prev) => removeRecordKey(prev, eventName));
       setDayModes((prev) => removeRecordKey(prev, eventName));
+      setMapData((prev) => removeRecordKey(prev, eventName));
       setMapRotationSettings((prev) => removeRecordKey(prev, eventName));
+      setRouteSettings((prev) => removeRecordKey(prev, eventName));
+      setHallDefinitions((prev) => removeRecordKey(prev, eventName));
+      setHallRouteSettings((prev) => removeRecordKey(prev, eventName));
       setFocusModeSessions((prev) => removeFocusModeSessionByEvent(prev, eventName));
       if (activeEventName === eventName) {
         setActiveEventName(null);

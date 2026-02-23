@@ -1,6 +1,6 @@
-/**
- * Excel マップファイル解析ユーティリティ (ExcelJS版)
- * 罫線、結合セル、背景色、ブロック定義を正確に抽出
+﻿/**
+ * Excel 繝槭ャ繝励ヵ繧｡繧､繝ｫ隗｣譫舌Θ繝ｼ繝・ぅ繝ｪ繝・ぅ (ExcelJS迚・
+ * 鄂ｫ邱壹∫ｵ仙粋繧ｻ繝ｫ縲∬レ譎ｯ濶ｲ縲√ヶ繝ｭ繝・け螳夂ｾｩ繧呈ｭ｣遒ｺ縺ｫ謚ｽ蜃ｺ
  */
 
 import ExcelJS from 'exceljs';
@@ -17,7 +17,6 @@ import {
   DEFAULT_BLOCK_DETECTION_SETTINGS,
 } from '../types';
 
-// 罫線スタイルの太さ判定
 type BorderWeight = 'thin' | 'medium' | 'thick' | 'double';
 
 function isMediumOrThickBorder(style?: ExcelJS.BorderStyle): boolean {
@@ -25,7 +24,7 @@ function isMediumOrThickBorder(style?: ExcelJS.BorderStyle): boolean {
   return style === 'medium' || style === 'thick' || style === 'double';
 }
 
-// ExcelJSの罫線スタイルを変換
+// ExcelJS縺ｮ鄂ｫ邱壹せ繧ｿ繧､繝ｫ繧貞､画鋤
 function convertExcelJSBorder(border?: Partial<ExcelJS.Border>): BorderStyle | null {
   if (!border || !border.style) return null;
   if ((border.style as string) === 'none') return null;
@@ -49,10 +48,10 @@ function convertExcelJSBorder(border?: Partial<ExcelJS.Border>): BorderStyle | n
   let color = '#000000';
   if (border.color) {
     if (border.color.argb) {
-      // ARGBの最初の2文字（アルファ）を除去
+      // ARGB縺ｮ譛蛻昴・2譁・ｭ暦ｼ医い繝ｫ繝輔ぃ・峨ｒ髯､蜴ｻ
       color = `#${border.color.argb.substring(2)}`;
     } else if (border.color.theme !== undefined) {
-      color = '#4CAF50'; // テーマカラーはデフォルトの緑色に
+      color = '#4CAF50'; // 繝・・繝槭き繝ｩ繝ｼ縺ｯ繝・ヵ繧ｩ繝ｫ繝医・邱題牡縺ｫ
     }
   }
 
@@ -62,88 +61,198 @@ function convertExcelJSBorder(border?: Partial<ExcelJS.Border>): BorderStyle | n
   };
 }
 
-// Excelのテーマカラーインデックスから色を取得
-// テーマカラーは実際のワークブックのテーマXMLから取得するのが理想だが、
-// ExcelJSでは直接アクセスが難しいため、よく使われる標準的な色を返す
+type BorderDirection = 'top' | 'right' | 'bottom' | 'left';
+
+type MergeRange = {
+  startRow: number;
+  startCol: number;
+  endRow: number;
+  endCol: number;
+};
+
+const toCellKey = (row: number, col: number): string => `${row}-${col}`;
+
+function buildMergeRangeMap(mergedCells: MergedCellInfo[]): Map<string, MergeRange> {
+  const rangeMap = new Map<string, MergeRange>();
+  mergedCells.forEach((merge) => {
+    rangeMap.set(toCellKey(merge.startRow, merge.startCol), {
+      startRow: merge.startRow,
+      startCol: merge.startCol,
+      endRow: merge.endRow,
+      endCol: merge.endCol,
+    });
+  });
+  return rangeMap;
+}
+
+function getBorderStyleWeight(style?: ExcelJS.BorderStyle): number {
+  switch (style) {
+    case 'thin':
+    case 'hair':
+    case 'dotted':
+    case 'dashed':
+    case 'dashDot':
+    case 'dashDotDot':
+      return 1;
+    case 'medium':
+    case 'mediumDashed':
+    case 'mediumDashDot':
+    case 'mediumDashDotDot':
+    case 'slantDashDot':
+      return 2;
+    case 'thick':
+      return 3;
+    case 'double':
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+function pickStrongestBorder(
+  candidates: Array<Partial<ExcelJS.Border> | undefined>,
+): Partial<ExcelJS.Border> | undefined {
+  let selected: Partial<ExcelJS.Border> | undefined;
+  let selectedWeight = 0;
+
+  candidates.forEach((candidate) => {
+    const weight = getBorderStyleWeight(candidate?.style as ExcelJS.BorderStyle | undefined);
+    if (weight > selectedWeight) {
+      selected = candidate;
+      selectedWeight = weight;
+    }
+  });
+
+  return selected;
+}
+
+function getMergedRangeForCell(
+  row: number,
+  col: number,
+  mergeMap: Map<string, { row: number; col: number }>,
+  mergeRangeMap: Map<string, MergeRange>,
+): MergeRange | null {
+  const mergeParent = mergeMap.get(toCellKey(row, col));
+  if (!mergeParent) return null;
+  return mergeRangeMap.get(toCellKey(mergeParent.row, mergeParent.col)) ?? null;
+}
+
+function resolveMergedRangeEdgeBorder(
+  worksheet: ExcelJS.Worksheet,
+  mergeRange: MergeRange,
+  side: BorderDirection,
+): Partial<ExcelJS.Border> | undefined {
+  const candidates: Array<Partial<ExcelJS.Border> | undefined> = [];
+
+  if (side === 'top' || side === 'bottom') {
+    const row = side === 'top' ? mergeRange.startRow : mergeRange.endRow;
+    for (let col = mergeRange.startCol; col <= mergeRange.endCol; col++) {
+      candidates.push(worksheet.getCell(row, col).border?.[side]);
+    }
+    return pickStrongestBorder(candidates);
+  }
+
+  const col = side === 'left' ? mergeRange.startCol : mergeRange.endCol;
+  for (let row = mergeRange.startRow; row <= mergeRange.endRow; row++) {
+    candidates.push(worksheet.getCell(row, col).border?.[side]);
+  }
+  return pickStrongestBorder(candidates);
+}
+
+function resolveMergedRangeDisplayBorders(
+  worksheet: ExcelJS.Worksheet,
+  mergeRange: MergeRange,
+): {
+  top?: Partial<ExcelJS.Border>;
+  right?: Partial<ExcelJS.Border>;
+  bottom?: Partial<ExcelJS.Border>;
+  left?: Partial<ExcelJS.Border>;
+} {
+  return {
+    top: resolveMergedRangeEdgeBorder(worksheet, mergeRange, 'top'),
+    right: resolveMergedRangeEdgeBorder(worksheet, mergeRange, 'right'),
+    bottom: resolveMergedRangeEdgeBorder(worksheet, mergeRange, 'bottom'),
+    left: resolveMergedRangeEdgeBorder(worksheet, mergeRange, 'left'),
+  };
+}
+
+function resolveEffectiveBorderSide(
+  worksheet: ExcelJS.Worksheet,
+  row: number,
+  col: number,
+  side: BorderDirection,
+  mergeMap: Map<string, { row: number; col: number }>,
+  mergeRangeMap: Map<string, MergeRange>,
+): Partial<ExcelJS.Border> | undefined {
+  const mergeRange = getMergedRangeForCell(row, col, mergeMap, mergeRangeMap);
+  if (!mergeRange) {
+    return worksheet.getCell(row, col).border?.[side];
+  }
+
+  if (side === 'top' && row !== mergeRange.startRow) return undefined;
+  if (side === 'bottom' && row !== mergeRange.endRow) return undefined;
+  if (side === 'left' && col !== mergeRange.startCol) return undefined;
+  if (side === 'right' && col !== mergeRange.endCol) return undefined;
+
+  return resolveMergedRangeEdgeBorder(worksheet, mergeRange, side);
+}
+
+// Excel縺ｮ繝・・繝槭き繝ｩ繝ｼ繧､繝ｳ繝・ャ繧ｯ繧ｹ縺九ｉ濶ｲ繧貞叙蠕・// 繝・・繝槭き繝ｩ繝ｼ縺ｯ螳滄圀縺ｮ繝ｯ繝ｼ繧ｯ繝悶ャ繧ｯ縺ｮ繝・・繝杞ML縺九ｉ蜿門ｾ励☆繧九・縺檎炊諠ｳ縺縺後・// ExcelJS縺ｧ縺ｯ逶ｴ謗･繧｢繧ｯ繧ｻ繧ｹ縺碁屮縺励＞縺溘ａ縲√ｈ縺丈ｽｿ繧上ｌ繧区ｨ呎ｺ也噪縺ｪ濶ｲ繧定ｿ斐☆
 //
-// 重要: Excelのテーマインデックスの標準的なマッピング
-// - theme 0: lt1 (Light 1) - 通常は白（背景色）
-// - theme 1: dk1 (Dark 1) - 通常は黒（テキスト色）
-// - theme 2: lt2 (Light 2) - 薄い背景色
-// - theme 3: dk2 (Dark 2) - 濃いテキスト色
-// - theme 4-9: accent1-6 - アクセントカラー
-function getThemeColor(themeIndex: number, tint?: number): string | null {
-  // Excel標準テーマカラー（Office テーマのデフォルト値）
+// 驥崎ｦ・ Excel縺ｮ繝・・繝槭う繝ｳ繝・ャ繧ｯ繧ｹ縺ｮ讓呎ｺ也噪縺ｪ繝槭ャ繝斐Φ繧ｰ
+// - theme 0: lt1 (Light 1) - 騾壼ｸｸ縺ｯ逋ｽ・郁レ譎ｯ濶ｲ・・// - theme 1: dk1 (Dark 1) - 騾壼ｸｸ縺ｯ鮟抵ｼ医ユ繧ｭ繧ｹ繝郁牡・・// - theme 2: lt2 (Light 2) - 阮・＞閭梧勹濶ｲ
+// - theme 3: dk2 (Dark 2) - 豼・＞繝・く繧ｹ繝郁牡
+// - theme 4-9: accent1-6 - 繧｢繧ｯ繧ｻ繝ｳ繝医き繝ｩ繝ｼ
+function getThemeColor(themeIndex: number, _tint?: number): string | null {
   const themeColors: Record<number, string> = {
-    0: '#FFFFFF', // lt1 - Light 1（背景色、通常は白）
-    1: '#000000', // dk1 - Dark 1（テキスト色、通常は黒）
-    2: '#E7E6E6', // lt2 - Light 2（薄い背景色）
-    3: '#44546A', // dk2 - Dark 2（濃いテキスト色）
-    4: '#4472C4', // accent1 - 青
-    5: '#ED7D31', // accent2 - オレンジ
-    6: '#A5A5A5', // accent3 - グレー
-    7: '#FFC000', // accent4 - 黄
-    8: '#5B9BD5', // accent5 - 水色
-    9: '#F79646', // accent6 - オレンジ（多くのテーマでオレンジ系）
+    0: '#FFFFFF',
+    1: '#000000',
+    2: '#E7E6E6',
+    3: '#44546A',
+    4: '#4472C4',
+    5: '#ED7D31',
+    6: '#A5A5A5',
+    7: '#FFC000',
+    8: '#5B9BD5',
+    9: '#F79646',
   };
 
-  let color = themeColors[themeIndex];
-  if (!color) {
-    // 未知のテーマインデックスの場合、nullを返す（背景色なしとして扱う）
-    return null;
-  }
-
-  // tint（明度調整）が指定されている場合は色を調整
-  // 簡易実装: tintが正の場合は明るく、負の場合は暗くする
-  if (tint !== undefined && tint !== 0) {
-    // 詳細なtint計算は複雑なので、ここでは元の色をそのまま返す
-    // 必要に応じて実装可能
-  }
-
-  return color;
+  return themeColors[themeIndex] ?? null;
 }
 
-// Excelのインデックスカラーから色を取得
 function getIndexedColor(colorIndex: number): string | null {
-  // Excel標準パレット（56色 + システムカラー）
   const indexedColors: Record<number, string> = {
-    0: '#000000', // 黒
-    1: '#FFFFFF', // 白
-    2: '#FF0000', // 赤
-    3: '#00FF00', // 緑
-    4: '#0000FF', // 青
-    5: '#FFFF00', // 黄
-    6: '#FF00FF', // マゼンタ
-    7: '#00FFFF', // シアン
-    8: '#000000', // 黒
-    9: '#FFFFFF', // 白
-    10: '#FF0000', // 赤
-    11: '#00FF00', // 緑
-    12: '#0000FF', // 青
-    13: '#FFFF00', // 黄
-    14: '#FF00FF', // マゼンタ
-    15: '#00FFFF', // シアン
-    16: '#800000', // 暗い赤
-    17: '#008000', // 暗い緑
-    18: '#000080', // 暗い青
-    19: '#808000', // 暗い黄
-    20: '#800080', // 暗い紫
-    21: '#008080', // 暗いシアン
-    22: '#C0C0C0', // シルバー
-    23: '#808080', // グレー
-    // ... 他の色も必要に応じて追加
-    64: '#000000', // システムテキスト（黒）
-    65: '#FFFFFF', // システム背景（白）
+    0: '#000000',
+    1: '#FFFFFF',
+    2: '#FF0000',
+    3: '#00FF00',
+    4: '#0000FF',
+    5: '#FFFF00',
+    6: '#FF00FF',
+    7: '#00FFFF',
+    8: '#000000',
+    9: '#FFFFFF',
+    10: '#FF0000',
+    11: '#00FF00',
+    12: '#0000FF',
+    13: '#FFFF00',
+    14: '#FF00FF',
+    15: '#00FFFF',
+    16: '#800000',
+    17: '#008000',
+    18: '#000080',
+    19: '#808000',
+    20: '#800080',
+    21: '#008080',
+    22: '#C0C0C0',
+    23: '#808080',
+    64: '#000000',
+    65: '#FFFFFF',
   };
 
-  const color = indexedColors[colorIndex];
-  if (color) return color;
-
-  // 未知のインデックスの場合はnullを返す（背景色なしとして扱う）
-  return null;
+  return indexedColors[colorIndex] ?? null;
 }
 
-// 背景色を取得（テーマカラー、インデックスカラー、ARGBに対応）
 function getBackgroundColorFromExcelJS(fill?: ExcelJS.Fill): string | null {
   if (!fill) return null;
 
@@ -152,32 +261,26 @@ function getBackgroundColorFromExcelJS(fill?: ExcelJS.Fill): string | null {
     const fgColor = patternFill.fgColor;
 
     if (fgColor) {
-      // ARGB形式の場合
       if (fgColor.argb) {
         const argb = fgColor.argb;
-        // 白のみ除外（黒は壁として認識させるため含める）
         if (argb === 'FFFFFFFF' || argb === 'FFFFFF') {
           return null;
         }
         return `#${argb.length === 8 ? argb.substring(2) : argb}`;
       }
 
-      // テーマカラーの場合
       if (fgColor.theme !== undefined) {
         const tint = (fgColor as { theme: number; tint?: number }).tint;
         const color = getThemeColor(fgColor.theme, tint);
-        // 白（lt1、テーマ0）のみ除外
         if (color === '#FFFFFF' || color === null) {
           return null;
         }
         return color;
       }
 
-      // インデックスカラーの場合
       if ((fgColor as { indexed?: number }).indexed !== undefined) {
         const indexed = (fgColor as { indexed: number }).indexed;
         const color = getIndexedColor(indexed);
-        // 白のみ除外
         if (color === '#FFFFFF') {
           return null;
         }
@@ -189,37 +292,29 @@ function getBackgroundColorFromExcelJS(fill?: ExcelJS.Fill): string | null {
   return null;
 }
 
-// フォント色を取得（テーマカラー、インデックスカラー、ARGBに対応）
 function getFontColorFromExcelJS(font?: Partial<ExcelJS.Font>): string | null {
   if (!font || !font.color) return null;
 
   const fontColor = font.color;
 
-  // ARGB形式の場合
   if (fontColor.argb) {
     const argb = fontColor.argb;
-    const hex = `#${argb.length === 8 ? argb.substring(2) : argb}`;
-    return hex;
+    return `#${argb.length === 8 ? argb.substring(2) : argb}`;
   }
 
-  // テーマカラーの場合
   if (fontColor.theme !== undefined) {
     const tint = (fontColor as { theme: number; tint?: number }).tint;
-    const color = getThemeColor(fontColor.theme, tint);
-    return color;
+    return getThemeColor(fontColor.theme, tint);
   }
 
-  // インデックスカラーの場合
   if ((fontColor as { indexed?: number }).indexed !== undefined) {
     const indexed = (fontColor as { indexed: number }).indexed;
-    const color = getIndexedColor(indexed);
-    return color;
+    return getIndexedColor(indexed);
   }
 
   return null;
 }
 
-// セルの値を抽出（richText形式にも対応）
 function extractCellValue(cellValue: ExcelJS.CellValue): string | number | null {
   if (cellValue === null || cellValue === undefined) return null;
 
@@ -228,20 +323,17 @@ function extractCellValue(cellValue: ExcelJS.CellValue): string | number | null 
   }
 
   if (typeof cellValue === 'object') {
-    // richText形式の処理
     if ('richText' in cellValue && Array.isArray((cellValue as { richText: unknown[] }).richText)) {
       const richText = (cellValue as { richText: Array<{ text: string }> }).richText;
       const text = richText.map((rt) => rt.text || '').join('');
       return text || null;
     }
 
-    // 数式の結果
     if ('result' in cellValue) {
       const result = (cellValue as { result?: unknown }).result;
       if (typeof result === 'string' || typeof result === 'number') {
         return result;
       }
-      // resultがrichText形式の場合
       if (typeof result === 'object' && result !== null && 'richText' in (result as object)) {
         const richText = (result as { richText: Array<{ text: string }> }).richText;
         const text = richText.map((rt) => rt.text || '').join('');
@@ -253,77 +345,68 @@ function extractCellValue(cellValue: ExcelJS.CellValue): string | number | null 
   return null;
 }
 
-// ブロック名かどうかを判定（設定に基づく文字数・文字種チェック）
-// ただし、数字のみの場合はブロック名ではなく数値セルとして扱うため除外
 function isBlockName(
   value: ExcelJS.CellValue,
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
 ): boolean {
-  // まずrichText等から実際の文字列を抽出
   const extracted = extractCellValue(value);
   if (extracted === null) return false;
+
   const str = String(extracted).trim();
   if (str.length === 0 || str.length > settings.maxBlockNameLength) return false;
 
-  // 許可文字種に基づいて正規表現を構築
-  const charTypes = settings.allowedCharTypes;
-  let allowedPattern = '';
-  // コンテンツ文字種（カタカナ・ひらがな・英字・漢字）のパターン
-  const contentPatterns: RegExp[] = [];
+  const isKatakana = (ch: string) => /[\u30A0-\u30FF]/u.test(ch);
+  const isHiragana = (ch: string) => /[\u3040-\u309F]/u.test(ch);
+  const isAlphabet = (ch: string) => /[A-Za-z]/.test(ch);
+  const isKanji = (ch: string) => /[\u3400-\u4DBF\u4E00-\u9FFF]/u.test(ch);
+  const isDigit = (ch: string) => /[0-9\uFF10-\uFF19]/u.test(ch);
+  const isSymbol = (ch: string) => /[-./_+&#*!]/.test(ch);
 
-  if (charTypes.katakana) {
-    allowedPattern += 'ア-ンァ-ヴー';
-    contentPatterns.push(/[ア-ンァ-ヴー]/);
-  }
-  if (charTypes.hiragana) {
-    allowedPattern += 'あ-んぁ-ゔー';
-    contentPatterns.push(/[あ-んぁ-ゔー]/);
-  }
-  if (charTypes.alphabet) {
-    allowedPattern += 'A-Za-z';
-    contentPatterns.push(/[A-Za-z]/);
-  }
-  if (charTypes.kanji) {
-    allowedPattern += '\\u4E00-\\u9FFF\\u3400-\\u4DBF';
-    contentPatterns.push(/[\u4E00-\u9FFF\u3400-\u4DBF]/);
-  }
-  // 数字と記号は補助文字種（これだけではブロック名にならない）
-  if (charTypes.digit) {
-    allowedPattern += '0-9０-９';
-  }
-  if (charTypes.symbol) {
-    // 半角記号: - . / _ + & # * !
-    // 全角記号: − ． ／ ＿ ＋ ＆ ＃ ＊ ！ ・ ： ～ 〜
-    allowedPattern += '\\-\\.\\/\\_\\+\\&\\#\\*\\!−．／＿＋＆＃＊！・：～〜';
+  let hasContentType = false;
+  let hasDigit = false;
+  let hasSymbol = false;
+
+  for (const ch of Array.from(str)) {
+    if (settings.allowedCharTypes.katakana && isKatakana(ch)) {
+      hasContentType = true;
+      continue;
+    }
+    if (settings.allowedCharTypes.hiragana && isHiragana(ch)) {
+      hasContentType = true;
+      continue;
+    }
+    if (settings.allowedCharTypes.alphabet && isAlphabet(ch)) {
+      hasContentType = true;
+      continue;
+    }
+    if (settings.allowedCharTypes.kanji && isKanji(ch)) {
+      hasContentType = true;
+      continue;
+    }
+    if (settings.allowedCharTypes.digit && isDigit(ch)) {
+      hasDigit = true;
+      continue;
+    }
+    if (settings.allowedCharTypes.symbol && isSymbol(ch)) {
+      hasSymbol = true;
+      continue;
+    }
+
+    return false;
   }
 
-  if (allowedPattern.length === 0) return false;
-
-  // 全ての文字が許可された文字種であることを確認
-  const allowedChars = new RegExp(`^[${allowedPattern}]+$`);
-  if (!allowedChars.test(str)) return false;
-
-  // 数字のみの場合は除外（数値セルとして扱うため）
-  // ただし記号が含まれていれば数値セルではないので除外しない
-  const digitsOnly = /^[0-9０-９]+$/;
+  const digitsOnly = /^[0-9\uFF10-\uFF19]+$/u;
   if (digitsOnly.test(str)) return false;
 
-  // コンテンツ文字種（カタカナ・ひらがな・英字・漢字）が含まれていればOK
-  if (contentPatterns.some((pattern) => pattern.test(str))) return true;
+  if (hasContentType) return true;
 
-  // コンテンツ文字種が含まれない場合（数字+記号のみ）
-  // allowDigitSymbolOnly が有効かつ記号が有効なら許可
-  if (settings.allowDigitSymbolOnly && charTypes.symbol && charTypes.digit) {
-    // 数字と記号が両方含まれている場合のみ許可（記号だけ・数字だけは除外済み）
-    const hasDigit = /[0-9０-９]/.test(str);
-    const hasSymbol = /[-.\/_+&#*!−．／＿＋＆＃＊！・：～〜]/.test(str);
+  if (settings.allowDigitSymbolOnly && settings.allowedCharTypes.digit && settings.allowedCharTypes.symbol) {
     return hasDigit && hasSymbol;
   }
 
   return false;
 }
 
-// 数値セルかどうかを判定（設定に基づく範囲チェック）
 function isNumberCell(
   value: ExcelJS.CellValue,
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
@@ -338,7 +421,6 @@ function isNumberCell(
   );
 }
 
-// ブロック用の色を生成
 function generateBlockColor(index: number): string {
   const colors = [
     '#E3F2FD',
@@ -357,15 +439,12 @@ function generateBlockColor(index: number): string {
   return colors[index % colors.length];
 }
 
-/**
- * 太い罫線で囲まれた領域を検出（Flood Fill方式）
- * 指定セルから開始し、太い罫線に囲まれた領域全体を返す
- * 多角形（凹型含む）に対応
- */
 function findBorderedRegion(
   startRow: number,
   startCol: number,
   worksheet: ExcelJS.Worksheet,
+  mergeMap: Map<string, { row: number; col: number }>,
+  mergeRangeMap: Map<string, MergeRange>,
   maxRow: number,
   maxCol: number,
   visited: Set<string>,
@@ -383,47 +462,65 @@ function findBorderedRegion(
 
     region.add(key);
 
-    const cell = worksheet.getCell(row, col);
-    const border = cell.border;
-
-    // 上方向へ
-    if (!isMediumOrThickBorder(border?.top?.style)) {
-      if (row > 1) {
-        const aboveCell = worksheet.getCell(row - 1, col);
-        if (!isMediumOrThickBorder(aboveCell.border?.bottom?.style)) {
-          queue.push({ row: row - 1, col });
-        }
+    const canMoveTo = (
+      nextRow: number,
+      nextCol: number,
+      currentSide: BorderDirection,
+      nextSide: BorderDirection,
+    ): boolean => {
+      if (nextRow < 1 || nextRow > maxRow || nextCol < 1 || nextCol > maxCol) {
+        return false;
       }
+
+      const currentMergeParent = mergeMap.get(toCellKey(row, col));
+      const nextMergeParent = mergeMap.get(toCellKey(nextRow, nextCol));
+      if (
+        currentMergeParent &&
+        nextMergeParent &&
+        currentMergeParent.row === nextMergeParent.row &&
+        currentMergeParent.col === nextMergeParent.col
+      ) {
+        return true;
+      }
+
+      const currentSideStyle = resolveEffectiveBorderSide(
+        worksheet,
+        row,
+        col,
+        currentSide,
+        mergeMap,
+        mergeRangeMap,
+      )?.style as ExcelJS.BorderStyle | undefined;
+      if (isMediumOrThickBorder(currentSideStyle)) {
+        return false;
+      }
+
+      const nextSideStyle = resolveEffectiveBorderSide(
+        worksheet,
+        nextRow,
+        nextCol,
+        nextSide,
+        mergeMap,
+        mergeRangeMap,
+      )?.style as ExcelJS.BorderStyle | undefined;
+      if (isMediumOrThickBorder(nextSideStyle)) {
+        return false;
+      }
+
+      return true;
+    };
+
+    if (canMoveTo(row - 1, col, 'top', 'bottom')) {
+      queue.push({ row: row - 1, col });
     }
-
-    // 下方向へ
-    if (!isMediumOrThickBorder(border?.bottom?.style)) {
-      if (row < maxRow) {
-        const belowCell = worksheet.getCell(row + 1, col);
-        if (!isMediumOrThickBorder(belowCell.border?.top?.style)) {
-          queue.push({ row: row + 1, col });
-        }
-      }
+    if (canMoveTo(row + 1, col, 'bottom', 'top')) {
+      queue.push({ row: row + 1, col });
     }
-
-    // 左方向へ
-    if (!isMediumOrThickBorder(border?.left?.style)) {
-      if (col > 1) {
-        const leftCell = worksheet.getCell(row, col - 1);
-        if (!isMediumOrThickBorder(leftCell.border?.right?.style)) {
-          queue.push({ row, col: col - 1 });
-        }
-      }
+    if (canMoveTo(row, col - 1, 'left', 'right')) {
+      queue.push({ row, col: col - 1 });
     }
-
-    // 右方向へ
-    if (!isMediumOrThickBorder(border?.right?.style)) {
-      if (col < maxCol) {
-        const rightCell = worksheet.getCell(row, col + 1);
-        if (!isMediumOrThickBorder(rightCell.border?.left?.style)) {
-          queue.push({ row, col: col + 1 });
-        }
-      }
+    if (canMoveTo(row, col + 1, 'right', 'left')) {
+      queue.push({ row, col: col + 1 });
     }
   }
 
@@ -431,7 +528,7 @@ function findBorderedRegion(
 }
 
 /**
- * 領域内の数値セルを抽出
+ * 鬆伜沺蜀・・謨ｰ蛟､繧ｻ繝ｫ繧呈歓蜃ｺ
  */
 function extractNumberCellsFromRegion(
   region: Set<string>,
@@ -446,7 +543,6 @@ function extractNumberCellsFromRegion(
     const row = parseInt(rowStr, 10);
     const col = parseInt(colStr, 10);
 
-    // 結合セルの子セルは除外
     const mergeParent = mergeMap.get(key);
     if (mergeParent && (mergeParent.row !== row || mergeParent.col !== col)) {
       return;
@@ -464,9 +560,123 @@ function extractNumberCellsFromRegion(
   return numberCells.sort((a, b) => a.value - b.value);
 }
 
+function normalizeHexColor(color: string | null | undefined): string | null {
+  if (!color) return null;
+  const trimmed = color.trim();
+  if (!trimmed) return null;
+
+  const hex3 = /^#([0-9a-fA-F]{3})$/;
+  const m3 = trimmed.match(hex3);
+  if (m3) {
+    const expanded = m3[1]
+      .split('')
+      .map((ch) => ch + ch)
+      .join('');
+    return `#${expanded}`.toUpperCase();
+  }
+
+  const hex6 = /^#([0-9a-fA-F]{6})$/;
+  const m6 = trimmed.match(hex6);
+  if (m6) {
+    return `#${m6[1]}`.toUpperCase();
+  }
+
+  return null;
+}
+
+function collectMediumOrThickBorderColorsForCell(
+  worksheet: ExcelJS.Worksheet,
+  row: number,
+  col: number,
+  mergeMap: Map<string, { row: number; col: number }>,
+  mergeRangeMap: Map<string, MergeRange>,
+): Set<string> {
+  const colors = new Set<string>();
+  const sides: BorderDirection[] = ['top', 'right', 'bottom', 'left'];
+
+  sides.forEach((side) => {
+    const border = resolveEffectiveBorderSide(worksheet, row, col, side, mergeMap, mergeRangeMap);
+    const style = border?.style as ExcelJS.BorderStyle | undefined;
+    if (!isMediumOrThickBorder(style)) return;
+    const normalized = normalizeHexColor(convertExcelJSBorder(border)?.color);
+    if (normalized) {
+      colors.add(normalized);
+    }
+  });
+
+  return colors;
+}
+
+function collectRegionMediumOrThickBorderColors(
+  regions: Set<string>[],
+  worksheet: ExcelJS.Worksheet,
+  mergeMap: Map<string, { row: number; col: number }>,
+  mergeRangeMap: Map<string, MergeRange>,
+): Set<string> {
+  const colors = new Set<string>();
+
+  regions.forEach((region) => {
+    region.forEach((key) => {
+      const [rowStr, colStr] = key.split('-');
+      const row = parseInt(rowStr, 10);
+      const col = parseInt(colStr, 10);
+      const cellColors = collectMediumOrThickBorderColorsForCell(
+        worksheet,
+        row,
+        col,
+        mergeMap,
+        mergeRangeMap,
+      );
+      cellColors.forEach((color) => colors.add(color));
+    });
+  });
+
+  return colors;
+}
+
+function findNumberCellsByBorderColors(
+  worksheet: ExcelJS.Worksheet,
+  mergeMap: Map<string, { row: number; col: number }>,
+  mergeRangeMap: Map<string, MergeRange>,
+  maxRow: number,
+  maxCol: number,
+  targetColors: Set<string>,
+  settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
+): NumberCellInfo[] {
+  if (targetColors.size === 0) return [];
+
+  const result: NumberCellInfo[] = [];
+
+  for (let row = 1; row <= maxRow; row++) {
+    for (let col = 1; col <= maxCol; col++) {
+      const mergeParent = mergeMap.get(toCellKey(row, col));
+      if (mergeParent && (mergeParent.row !== row || mergeParent.col !== col)) {
+        continue;
+      }
+
+      const value = worksheet.getCell(row, col).value;
+      if (!isNumberCell(value, settings)) continue;
+
+      const borderColors = collectMediumOrThickBorderColorsForCell(
+        worksheet,
+        row,
+        col,
+        mergeMap,
+        mergeRangeMap,
+      );
+      const hasMatch = Array.from(borderColors).some((color) => targetColors.has(color));
+      if (!hasMatch) continue;
+
+      const numValue = typeof value === 'number' ? value : parseInt(String(value), 10);
+      result.push({ row, col, value: numValue });
+    }
+  }
+
+  return result.sort((a, b) => a.value - b.value);
+}
+
 /**
- * 領域の境界ボックスを計算
- */
+ * 鬆伜沺縺ｮ蠅・阜繝懊ャ繧ｯ繧ｹ繧定ｨ育ｮ・ */
 function calculateBoundingBox(region: Set<string>): {
   startRow: number;
   startCol: number;
@@ -498,9 +708,8 @@ function calculateBoundingBox(region: Set<string>): {
 }
 
 /**
- * ブロックを自動検出（ExcelJS版）
- * 太い罫線で囲まれた領域内のブロック名セルと数値セルを検出
- * minMergedCellCount が 1 の場合、非結合（単一）セルも走査対象にする
+ * 繝悶Ο繝・け繧定・蜍墓､懷・・・xcelJS迚茨ｼ・ * 螟ｪ縺・ｽｫ邱壹〒蝗ｲ縺ｾ繧後◆鬆伜沺蜀・・繝悶Ο繝・け蜷阪そ繝ｫ縺ｨ謨ｰ蛟､繧ｻ繝ｫ繧呈､懷・
+ * minMergedCellCount 縺・1 縺ｮ蝣ｴ蜷医・撼邨仙粋・亥腰荳・峨そ繝ｫ繧りｵｰ譟ｻ蟇ｾ雎｡縺ｫ縺吶ｋ
  */
 function detectBlocksWithExcelJS(
   worksheet: ExcelJS.Worksheet,
@@ -511,9 +720,7 @@ function detectBlocksWithExcelJS(
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
 ): BlockDefinition[] {
   const blocks: BlockDefinition[] = [];
-  const globalProcessedCells = new Set<string>(); // グローバルな処理済みセル（D対策）
-
-  // ブロック名でグループ化（同じ名前のブロックは統合）
+  const globalProcessedCells = new Set<string>(); // 繧ｰ繝ｭ繝ｼ繝舌Ν縺ｪ蜃ｦ逅・ｸ医∩繧ｻ繝ｫ・・蟇ｾ遲厄ｼ・
   const blockGroups = new Map<
     string,
     {
@@ -522,8 +729,8 @@ function detectBlocksWithExcelJS(
       nameCells: { row: number; col: number }[];
     }
   >();
+  const mergeRangeMap = buildMergeRangeMap(mergedCells);
 
-  // --- ブロック名候補を処理する共通ヘルパー ---
   const processBlockNameCandidate = (
     blockName: string,
     startRow: number,
@@ -532,27 +739,25 @@ function detectBlocksWithExcelJS(
   ) => {
     const cellKey = `${startRow}-${startCol}`;
 
-    // D対策: 既に処理済みの領域内ならスキップ
     if (globalProcessedCells.has(cellKey)) return;
 
-    // ブロック名セルから太い罫線で囲まれた領域を検出
     const region = findBorderedRegion(
       startRow,
       startCol,
       worksheet,
+      mergeMap,
+      mergeRangeMap,
       maxRow,
       maxCol,
-      new Set(), // 各検出は独立
+      new Set(),
       settings.maxRegionSize,
     );
 
-    // D対策: この領域内のセルをグローバルに処理済みとしてマーク
+    // D蟇ｾ遲・ 縺薙・鬆伜沺蜀・・繧ｻ繝ｫ繧偵げ繝ｭ繝ｼ繝舌Ν縺ｫ蜃ｦ逅・ｸ医∩縺ｨ縺励※繝槭・繧ｯ
     region.forEach((key) => globalProcessedCells.add(key));
 
-    // 領域内の数値セルを抽出
     const numberCells = extractNumberCellsFromRegion(region, worksheet, mergeMap, settings);
 
-    // 同じブロック名のグループに追加
     if (blockGroups.has(blockName)) {
       const group = blockGroups.get(blockName)!;
       group.regions.push(region);
@@ -567,7 +772,6 @@ function detectBlocksWithExcelJS(
     }
   };
 
-  // --- フェーズ1: 結合セルからブロック名を検出 ---
   const blockNameMerges = mergedCells.filter((merge) => {
     const rows = merge.endRow - merge.startRow + 1;
     const cols = merge.endCol - merge.startCol + 1;
@@ -577,7 +781,6 @@ function detectBlocksWithExcelJS(
 
   blockNameMerges.forEach((merge) => {
     const blockName = String(merge.value).trim();
-    // 結合セルが占めるすべてのセル座標をブロック名セルとして記録
     const nameCellCoords: { row: number; col: number }[] = [];
     for (let r = merge.startRow; r <= merge.endRow; r++) {
       for (let c = merge.startCol; c <= merge.endCol; c++) {
@@ -587,16 +790,13 @@ function detectBlocksWithExcelJS(
     processBlockNameCandidate(blockName, merge.startRow, merge.startCol, nameCellCoords);
   });
 
-  // --- フェーズ2: 非結合セルからブロック名を検出（A対策: minMergedCellCount <= 1 の場合のみ） ---
   if (settings.minMergedCellCount <= 1) {
     for (let row = 1; row <= maxRow; row++) {
       for (let col = 1; col <= maxCol; col++) {
         const key = `${row}-${col}`;
 
-        // D対策: 既に処理済みの領域内ならスキップ
         if (globalProcessedCells.has(key)) continue;
 
-        // 結合セルの子セルはスキップ
         const mergeParent = mergeMap.get(key);
         if (mergeParent) continue;
 
@@ -609,10 +809,8 @@ function detectBlocksWithExcelJS(
     }
   }
 
-  // --- ブロック定義を作成（B対策: minNumberCellsPerBlock によるフィルタ） ---
   let colorIndex = 0;
   blockGroups.forEach((group, blockName) => {
-    // B対策: 最小ブース番号数でフィルタ
     const uniqueNumberCells = group.numberCells
       .filter(
         (cell, index, self) =>
@@ -620,9 +818,36 @@ function detectBlocksWithExcelJS(
       )
       .sort((a, b) => a.value - b.value);
 
-    if (uniqueNumberCells.length < settings.minNumberCellsPerBlock) return;
+    const regionBorderColors = collectRegionMediumOrThickBorderColors(
+      group.regions,
+      worksheet,
+      mergeMap,
+      mergeRangeMap,
+    );
+    const nonBlackColors = Array.from(regionBorderColors).filter((color) => color !== '#000000');
 
-    // 全領域を統合した境界ボックスを計算
+    const colorExpandedNumberCells =
+      nonBlackColors.length > 0
+        ? findNumberCellsByBorderColors(
+            worksheet,
+            mergeMap,
+            mergeRangeMap,
+            maxRow,
+            maxCol,
+            new Set(nonBlackColors),
+            settings,
+          )
+        : [];
+
+    const mergedNumberCells = [...uniqueNumberCells, ...colorExpandedNumberCells]
+      .filter(
+        (cell, index, self) =>
+          index === self.findIndex((c) => c.row === cell.row && c.col === cell.col),
+      )
+      .sort((a, b) => a.value - b.value);
+
+    if (mergedNumberCells.length < settings.minNumberCellsPerBlock) return;
+
     const allCells = new Set<string>();
     group.regions.forEach((region) => {
       region.forEach((key) => allCells.add(key));
@@ -630,7 +855,6 @@ function detectBlocksWithExcelJS(
 
     const boundingBox = calculateBoundingBox(allCells);
 
-    // 領域が矩形かどうかを判定（多角形の場合はcellGroupsを作成）
     const boxArea =
       (boundingBox.endRow - boundingBox.startRow + 1) *
       (boundingBox.endCol - boundingBox.startCol + 1);
@@ -642,7 +866,7 @@ function detectBlocksWithExcelJS(
       startCol: boundingBox.startCol,
       endRow: boundingBox.endRow,
       endCol: boundingBox.endCol,
-      numberCells: uniqueNumberCells,
+      numberCells: mergedNumberCells,
       nameCells: group.nameCells.filter(
         (cell, index, self) =>
           index === self.findIndex((c) => c.row === cell.row && c.col === cell.col),
@@ -651,7 +875,6 @@ function detectBlocksWithExcelJS(
       isAutoDetected: true,
     };
 
-    // 多角形ブロックの場合、実際のセル群を保存
     if (isPolygon) {
       blockDef.cellGroups = group.regions.map((region) => ({
         type: 'individual' as const,
@@ -669,8 +892,7 @@ function detectBlocksWithExcelJS(
 }
 
 /**
- * シートからマップデータを解析（ExcelJS版）
- */
+ * 繧ｷ繝ｼ繝医°繧峨・繝・・繝・・繧ｿ繧定ｧ｣譫撰ｼ・xcelJS迚茨ｼ・ */
 async function parseMapSheetWithExcelJS(
   workbook: ExcelJS.Workbook,
   sheetName: string,
@@ -679,21 +901,17 @@ async function parseMapSheetWithExcelJS(
   const worksheet = workbook.getWorksheet(sheetName);
   if (!worksheet) return null;
 
-  // シートの範囲を取得
   const rowCount = worksheet.rowCount;
   const colCount = worksheet.columnCount;
 
   if (rowCount === 0 || colCount === 0) return null;
   const IMPORT_CLICK_MARGIN = 25;
 
-  // 結合セル情報を取得
   const mergedCells: MergedCellInfo[] = [];
   const mergeMap = new Map<string, { row: number; col: number }>();
 
-  // ExcelJSの結合セル情報を処理
   const merges = (worksheet.model as { merges?: string[] })?.merges || [];
   merges.forEach((mergeRange: string) => {
-    // "A1:B2" 形式をパース
     const match = mergeRange.match(/^([A-Z]+)(\d+):([A-Z]+)(\d+)$/);
     if (!match) return;
 
@@ -702,7 +920,6 @@ async function parseMapSheetWithExcelJS(
     const endCol = columnLetterToNumber(match[3]);
     const endRow = parseInt(match[4], 10);
 
-    // 結合セルの値を取得（richText形式にも対応）
     const cell = worksheet.getCell(startRow, startCol);
     const value = extractCellValue(cell.value);
 
@@ -714,15 +931,14 @@ async function parseMapSheetWithExcelJS(
       value,
     });
 
-    // 結合セルのマップを作成
     for (let r = startRow; r <= endRow; r++) {
       for (let c = startCol; c <= endCol; c++) {
         mergeMap.set(`${r}-${c}`, { row: startRow, col: startCol });
       }
     }
   });
+  const mergeRangeMap = buildMergeRangeMap(mergedCells);
 
-  // セルデータを抽出
   const cells: CellData[] = [];
   let actualMaxRow = 0;
   let actualMaxCol = 0;
@@ -734,34 +950,72 @@ async function parseMapSheetWithExcelJS(
     });
   });
 
-  // 元シートの実データ最大行・最大列を保持
   const sourceMaxRow = actualMaxRow;
   const sourceMaxCol = actualMaxCol;
 
-  // 全セルを処理
   for (let row = 1; row <= sourceMaxRow; row++) {
     for (let col = 1; col <= sourceMaxCol; col++) {
       const cell = worksheet.getCell(row, col);
 
-      const mergeParent = mergeMap.get(`${row}-${col}`);
+      const mergeParent = mergeMap.get(toCellKey(row, col));
       const isMerged = !!mergeParent && (mergeParent.row !== row || mergeParent.col !== col);
 
-      // セルの値を取得（richText形式にも対応）
       const value = extractCellValue(cell.value);
 
       const backgroundColor = getBackgroundColorFromExcelJS(cell.fill);
 
-      // フォント色を取得
       const fontColor = getFontColorFromExcelJS(cell.font);
 
+      const mergeRange = mergeParent
+        ? mergeRangeMap.get(toCellKey(mergeParent.row, mergeParent.col)) ?? null
+        : null;
+      const isMergeParent = !!mergeParent && mergeParent.row === row && mergeParent.col === col;
+
+      const resolvedBorderSides =
+        mergeRange && isMergeParent
+          ? resolveMergedRangeDisplayBorders(worksheet, mergeRange)
+          : {
+              top: resolveEffectiveBorderSide(
+                worksheet,
+                row,
+                col,
+                'top',
+                mergeMap,
+                mergeRangeMap,
+              ),
+              right: resolveEffectiveBorderSide(
+                worksheet,
+                row,
+                col,
+                'right',
+                mergeMap,
+                mergeRangeMap,
+              ),
+              bottom: resolveEffectiveBorderSide(
+                worksheet,
+                row,
+                col,
+                'bottom',
+                mergeMap,
+                mergeRangeMap,
+              ),
+              left: resolveEffectiveBorderSide(
+                worksheet,
+                row,
+                col,
+                'left',
+                mergeMap,
+                mergeRangeMap,
+              ),
+            };
+
       const borders: CellBorders = {
-        top: convertExcelJSBorder(cell.border?.top),
-        right: convertExcelJSBorder(cell.border?.right),
-        bottom: convertExcelJSBorder(cell.border?.bottom),
-        left: convertExcelJSBorder(cell.border?.left),
+        top: convertExcelJSBorder(resolvedBorderSides.top),
+        right: convertExcelJSBorder(resolvedBorderSides.right),
+        bottom: convertExcelJSBorder(resolvedBorderSides.bottom),
+        left: convertExcelJSBorder(resolvedBorderSides.left),
       };
 
-      // 縦書き判定（textRotation が 'vertical' または 255 の場合）
       const alignment = cell.alignment;
       const isVerticalText =
         alignment?.textRotation === 'vertical' || alignment?.textRotation === 255;
@@ -780,7 +1034,6 @@ async function parseMapSheetWithExcelJS(
     }
   }
 
-  // ブロックを自動検出
   const blocks = detectBlocksWithExcelJS(
     worksheet,
     mergedCells,
@@ -866,7 +1119,7 @@ async function parseMapSheetWithExcelJS(
   };
 }
 
-// 列文字を数値に変換
+// 蛻玲枚蟄励ｒ謨ｰ蛟､縺ｫ螟画鋤
 function columnLetterToNumber(letters: string): number {
   let col = 0;
   for (let i = 0; i < letters.length; i++) {
@@ -876,8 +1129,7 @@ function columnLetterToNumber(letters: string): number {
 }
 
 /**
- * マップファイル（xlsx）を解析（ExcelJS版）
- */
+ * 繝槭ャ繝励ヵ繧｡繧､繝ｫ・・lsx・峨ｒ隗｣譫撰ｼ・xcelJS迚茨ｼ・ */
 export type ParseMapFileResult = {
   data: Record<string, DayMapData> | null;
   skippedSheets: string[];
@@ -896,7 +1148,6 @@ export async function parseMapFile(
     const result: Record<string, DayMapData> = {};
     const skippedSheets: string[] = [];
 
-    // "○日目" パターンのシートを探す（半角/全角数字の両方に対応）
     const dayPattern = /^([0-9０-９]+日目)$/;
 
     for (const worksheet of workbook.worksheets) {
@@ -906,7 +1157,6 @@ export async function parseMapFile(
         try {
           const mapData = await parseMapSheetWithExcelJS(workbook, sheetName, settings);
           if (mapData) {
-            // シート名を "○日目マップ" に変換
             const mapName = `${match[1]}マップ`;
             result[mapName] = mapData;
           } else {
@@ -929,14 +1179,14 @@ export async function parseMapFile(
     return {
       data: null,
       skippedSheets: [],
-      error: error instanceof Error ? error.message : '不明なエラー',
+      error: error instanceof Error ? error.message : '荳肴・縺ｪ繧ｨ繝ｩ繝ｼ',
     };
   }
 }
 
 /**
- * アイテムの番号から数値部分を抽出
- * 例: "26a" -> "26", "26b1" -> "26"
+ * 繧｢繧､繝・Β縺ｮ逡ｪ蜿ｷ縺九ｉ謨ｰ蛟､驛ｨ蛻・ｒ謚ｽ蜃ｺ
+ * 萓・ "26a" -> "26", "26b1" -> "26"
  */
 export function extractNumberFromItemNumber(itemNumber: string): string | null {
   const match = itemNumber.match(/^(\d+)/);
@@ -944,7 +1194,7 @@ export function extractNumberFromItemNumber(itemNumber: string): string | null {
 }
 
 /**
- * アイテムをマップのセルにマッチング
+ * 繧｢繧､繝・Β繧偵・繝・・縺ｮ繧ｻ繝ｫ縺ｫ繝槭ャ繝√Φ繧ｰ
  */
 export function matchItemToCell(
   item: ShoppingItem,
@@ -955,10 +1205,8 @@ export function matchItemToCell(
 
   const itemBlockName = item.block?.trim() || '';
 
-  // まず完全一致を試みる
   let block = mapData.blocks.find((b) => b.name === itemBlockName);
 
-  // 完全一致がない場合、大文字/小文字を無視して検索（候補が1つの場合のみ）
   if (!block) {
     const candidates = mapData.blocks.filter(
       (b) => b.name.toLowerCase() === itemBlockName.toLowerCase(),
@@ -981,7 +1229,7 @@ export function matchItemToCell(
 }
 
 /**
- * ブロック定義を手動で作成/更新
+ * 繝悶Ο繝・け螳夂ｾｩ繧呈焔蜍輔〒菴懈・/譖ｴ譁ｰ
  */
 export function createBlockDefinition(
   name: string,
@@ -1021,3 +1269,7 @@ export function createBlockDefinition(
     color: '#E3F2FD',
   };
 }
+
+
+
+

@@ -1238,6 +1238,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
           ctx.beginPath();
           ctx.strokeStyle = border.color || '#000000';
+          // 端点をわずかに伸ばして接続部の見た目上の途切れを抑える。
+          ctx.lineCap = 'square';
+          ctx.lineJoin = 'miter';
 
           let lineWidth = 1;
           switch (border.style) {
