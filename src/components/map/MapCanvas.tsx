@@ -43,14 +43,21 @@ interface MapCanvasProps {
 const BASE_CELL_SIZE = 28; // 蝓ｺ譛ｬ繧ｻ繝ｫ繧ｵ繧､繧ｺ
 const SCROLL_MARGIN = 5; // 繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ菴咏區・郁｡・蛻玲焚・・
 const FILLED_SCROLL_MARGIN = 25; // 蜈･蜉帶ｸ医∩繧ｻ繝ｫ蠅・阜縺九ｉ縺ｮ霑ｽ蜉菴咏區・郁｡・蛻玲焚・・
+const normalizeDisplayText = (value: string | null | undefined): string => {
+  return (value || '').replace(/\u3000/g, ' ').trim();
+};
 const getDragPanMultiplier = (zoom: number): number => {
   if (zoom < 70) return 2.0;
   if (zoom < 120) return 1.6;
   return 1.3;
 };
 const extractDayNameFromMapName = (mapName: string): string => {
-  const dayMatch = mapName.match(/^(.+)繝槭ャ繝・/);
-  return dayMatch ? dayMatch[1].trim() : '';
+  const normalizedMapName = normalizeDisplayText(mapName);
+  const dayMatch = normalizedMapName.match(/^(.+)マップ$/);
+  if (dayMatch) {
+    return normalizeDisplayText(dayMatch[1]);
+  }
+  return normalizedMapName;
 };
 
 const hasCellInputValue = (value: string | number | null): boolean => {
