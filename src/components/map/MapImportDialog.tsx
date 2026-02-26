@@ -193,16 +193,49 @@ const MiniMapPreview: React.FC<MiniMapPreviewProps> = ({
         });
       }
 
-      // ハイライト中のブロックは枠線も描画
+      // ハイライト中のブロックは枠線も描画（各構成領域ごとに個別の枠）
       if (highlightBlockName && block.name === highlightBlockName) {
         ctx.strokeStyle = '#1976D2';
         ctx.lineWidth = 2;
-        ctx.strokeRect(
-          (block.startCol - 1) * CELL_SIZE,
-          (block.startRow - 1) * CELL_SIZE,
-          (block.endCol - block.startCol + 1) * CELL_SIZE,
-          (block.endRow - block.startRow + 1) * CELL_SIZE,
-        );
+
+        if (block.cellGroups && block.cellGroups.length > 0) {
+          // cellGroups がある場合は各グループごとにバウンディングボックスを計算して描画
+          block.cellGroups.forEach((group) => {
+            let gMinRow = Infinity, gMinCol = Infinity;
+            let gMaxRow = 0, gMaxCol = 0;
+
+            if (group.type === 'range') {
+              gMinRow = group.startRow ?? block.startRow;
+              gMinCol = group.startCol ?? block.startCol;
+              gMaxRow = group.endRow ?? block.endRow;
+              gMaxCol = group.endCol ?? block.endCol;
+            } else if (group.cells && group.cells.length > 0) {
+              group.cells.forEach((gc) => {
+                gMinRow = Math.min(gMinRow, gc.row);
+                gMinCol = Math.min(gMinCol, gc.col);
+                gMaxRow = Math.max(gMaxRow, gc.row);
+                gMaxCol = Math.max(gMaxCol, gc.col);
+              });
+            }
+
+            if (gMinRow <= gMaxRow && gMinCol <= gMaxCol) {
+              ctx.strokeRect(
+                (gMinCol - 1) * CELL_SIZE,
+                (gMinRow - 1) * CELL_SIZE,
+                (gMaxCol - gMinCol + 1) * CELL_SIZE,
+                (gMaxRow - gMinRow + 1) * CELL_SIZE,
+              );
+            }
+          });
+        } else {
+          // cellGroups がない場合は従来どおりブロック全体のバウンディングボックス
+          ctx.strokeRect(
+            (block.startCol - 1) * CELL_SIZE,
+            (block.startRow - 1) * CELL_SIZE,
+            (block.endCol - block.startCol + 1) * CELL_SIZE,
+            (block.endRow - block.startRow + 1) * CELL_SIZE,
+          );
+        }
       }
     });
   }, [mapData, blocks, highlightBlockName, cellMap, blockCellSets]);
