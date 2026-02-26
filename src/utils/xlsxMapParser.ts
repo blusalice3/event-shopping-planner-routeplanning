@@ -1,6 +1,6 @@
-﻿/**
- * Excel 繝槭ャ繝励ヵ繧｡繧､繝ｫ隗｣譫舌Θ繝ｼ繝・ぅ繝ｪ繝・ぅ (ExcelJS迚・
- * 鄂ｫ邱壹∫ｵ仙粋繧ｻ繝ｫ縲∬レ譎ｯ濶ｲ縲√ヶ繝ｭ繝・け螳夂ｾｩ繧呈ｭ｣遒ｺ縺ｫ謚ｽ蜃ｺ
+/**
+ * Excel マップファイル解析ユーティリティ (ExcelJS版)
+ * 罫線、結合セル、背景色、ブロック定義を正確に抽出
  */
 
 import ExcelJS from 'exceljs';
@@ -164,7 +164,7 @@ function isMediumOrThickBorder(style?: ExcelJS.BorderStyle): boolean {
   return style === 'medium' || style === 'thick' || style === 'double';
 }
 
-// ExcelJS縺ｮ鄂ｫ邱壹せ繧ｿ繧､繝ｫ繧貞､画鋤
+// ExcelJSの罫線スタイルを変換
 function convertExcelJSBorder(
   border?: Partial<ExcelJS.Border>,
   themeColorMap: ThemeColorMap = DEFAULT_THEME_COLOR_MAP,
@@ -610,7 +610,232 @@ function findBorderedRegion(
 }
 
 /**
- * 鬆伜沺蜀・・謨ｰ蛟､繧ｻ繝ｫ繧呈歓蜃ｺ
+ * 2つの隣接セル間に太い罫線が存在するか判定
+ */
+function hasThickBorderBetween(
+  worksheet: ExcelJS.Worksheet,
+  row1: number,
+  col1: number,
+  row2: number,
+  col2: number,
+  mergeMap: Map<string, { row: number; col: number }>,
+  mergeRangeMap: Map<string, MergeRange>,
+): boolean {
+  let currentSide: BorderDirection;
+  let nextSide: BorderDirection;
+
+  if (row2 === row1 - 1 && col2 === col1) {
+    currentSide = 'top';
+    nextSide = 'bottom';
+  } else if (row2 === row1 + 1 && col2 === col1) {
+    currentSide = 'bottom';
+    nextSide = 'top';
+  } else if (col2 === col1 - 1 && row2 === row1) {
+    currentSide = 'left';
+    nextSide = 'right';
+  } else if (col2 === col1 + 1 && row2 === row1) {
+    currentSide = 'right';
+    nextSide = 'left';
+  } else {
+    return false;
+  }
+
+  const currentMergeParent = mergeMap.get(toCellKey(row1, col1));
+  const nextMergeParent = mergeMap.get(toCellKey(row2, col2));
+  if (
+    currentMergeParent &&
+    nextMergeParent &&
+    currentMergeParent.row === nextMergeParent.row &&
+    currentMergeParent.col === nextMergeParent.col
+  ) {
+    return false;
+  }
+
+  const s1 = resolveEffectiveBorderSide(
+    worksheet,
+    row1,
+    col1,
+    currentSide,
+    mergeMap,
+    mergeRangeMap,
+  )?.style as ExcelJS.BorderStyle | undefined;
+  if (isMediumOrThickBorder(s1)) return true;
+
+  const s2 = resolveEffectiveBorderSide(
+    worksheet,
+    row2,
+    col2,
+    nextSide,
+    mergeMap,
+    mergeRangeMap,
+  )?.style as ExcelJS.BorderStyle | undefined;
+  if (isMediumOrThickBorder(s2)) return true;
+
+  return false;
+}
+
+/**
+ * 領域がシート端に到達しない（包囲されている）か判定
+ */
+function isRegionEnclosed(
+  region: Set<string>,
+  maxRow: number,
+  maxCol: number,
+): boolean {
+  for (const key of region) {
+    const [rowStr, colStr] = key.split('-');
+    const row = parseInt(rowStr, 10);
+    const col = parseInt(colStr, 10);
+    if (row <= 1 || row >= maxRow || col <= 1 || col >= maxCol) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * 領域内に別のブロック名セルが含まれるか判定
+ */
+function regionContainsOtherBlockName(
+  region: Set<string>,
+  worksheet: ExcelJS.Worksheet,
+  mergeMap: Map<string, { row: number; col: number }>,
+  currentBlockName: string,
+  settings: BlockDetectionSettings,
+): boolean {
+  for (const key of region) {
+    const [rowStr, colStr] = key.split('-');
+    const row = parseInt(rowStr, 10);
+    const col = parseInt(colStr, 10);
+
+    const mergeParent = mergeMap.get(key);
+    if (mergeParent && (mergeParent.row !== row || mergeParent.col !== col)) continue;
+
+    const cell = worksheet.getCell(row, col);
+    if (isBlockName(cell.value, settings)) {
+      const name = String(extractCellValue(cell.value)).trim();
+      if (name !== currentBlockName) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 太い罫線で囲われた包囲領域を検出（複雑な形状対応）
+ *
+ * 通常のBFS（太い罫線で停止）で初期領域を取得した後、
+ * 太い罫線の向こう側が包囲されている場合は反復的に領域を拡張する。
+ * これにより階段状のような複雑な形状でも全数値セルを正しく検出できる。
+ */
+function findEnclosedRegion(
+  startRow: number,
+  startCol: number,
+  worksheet: ExcelJS.Worksheet,
+  mergeMap: Map<string, { row: number; col: number }>,
+  mergeRangeMap: Map<string, MergeRange>,
+  maxRow: number,
+  maxCol: number,
+  visited: Set<string>,
+  maxRegionSize: number = 2000,
+  blockName: string = '',
+  settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
+): Set<string> {
+  // Phase 1: 通常のBFS（太い罫線で停止）で初期領域を取得
+  const region = findBorderedRegion(
+    startRow,
+    startCol,
+    worksheet,
+    mergeMap,
+    mergeRangeMap,
+    maxRow,
+    maxCol,
+    visited,
+    maxRegionSize,
+  );
+
+  // Phase 2: 太い罫線を越えた包囲領域への反復的拡張
+  let expanded = true;
+  const maxIterations = 500;
+  let iteration = 0;
+  const processedProbes = new Set<string>();
+
+  while (expanded && region.size < maxRegionSize && iteration < maxIterations) {
+    expanded = false;
+    iteration++;
+
+    // 現在の領域の境界で太い罫線によりブロックされた隣接セルを収集
+    const candidates: Array<{ row: number; col: number }> = [];
+
+    for (const key of region) {
+      const [rowStr, colStr] = key.split('-');
+      const row = parseInt(rowStr, 10);
+      const col = parseInt(colStr, 10);
+
+      const neighbors = [
+        { row: row - 1, col },
+        { row: row + 1, col },
+        { row, col: col - 1 },
+        { row, col: col + 1 },
+      ];
+
+      for (const n of neighbors) {
+        if (n.row < 1 || n.row > maxRow || n.col < 1 || n.col > maxCol) continue;
+        const nKey = toCellKey(n.row, n.col);
+        if (region.has(nKey) || visited.has(nKey) || processedProbes.has(nKey)) continue;
+
+        if (hasThickBorderBetween(worksheet, row, col, n.row, n.col, mergeMap, mergeRangeMap)) {
+          candidates.push(n);
+          processedProbes.add(nKey);
+        }
+      }
+    }
+
+    for (const candidate of candidates) {
+      const cKey = toCellKey(candidate.row, candidate.col);
+      if (region.has(cKey)) continue;
+
+      // プローブ: 候補セルからBFS（太い罫線で停止、現在領域は訪問済み扱い）
+      const probeVisited = new Set<string>(region);
+      visited.forEach((k) => probeVisited.add(k));
+
+      const probe = findBorderedRegion(
+        candidate.row,
+        candidate.col,
+        worksheet,
+        mergeMap,
+        mergeRangeMap,
+        maxRow,
+        maxCol,
+        probeVisited,
+        Math.min(maxRegionSize - region.size, maxRegionSize),
+      );
+
+      if (probe.size === 0) continue;
+
+      probe.forEach((k) => processedProbes.add(k));
+
+      // チェック1: プローブ領域が包囲されているか（シート端に到達しない）
+      if (!isRegionEnclosed(probe, maxRow, maxCol)) continue;
+
+      // チェック2: プローブ領域に別のブロック名が含まれていないか
+      if (
+        blockName &&
+        regionContainsOtherBlockName(probe, worksheet, mergeMap, blockName, settings)
+      ) {
+        continue;
+      }
+
+      // プローブ領域を統合
+      probe.forEach((k) => region.add(k));
+      expanded = true;
+    }
+  }
+
+  return region;
+}
+
+/**
+ * 領域内の数値セルを抽出
  */
 function extractNumberCellsFromRegion(
   region: Set<string>,
@@ -767,7 +992,7 @@ function findNumberCellsByBorderColors(
 }
 
 /**
- * 鬆伜沺縺ｮ蠅・阜繝懊ャ繧ｯ繧ｹ繧定ｨ育ｮ・ */
+ * 領域の境界ボックスを計算 */
 function calculateBoundingBox(region: Set<string>): {
   startRow: number;
   startCol: number;
@@ -799,8 +1024,9 @@ function calculateBoundingBox(region: Set<string>): {
 }
 
 /**
- * 繝悶Ο繝・け繧定・蜍墓､懷・・・xcelJS迚茨ｼ・ * 螟ｪ縺・ｽｫ邱壹〒蝗ｲ縺ｾ繧後◆鬆伜沺蜀・・繝悶Ο繝・け蜷阪そ繝ｫ縺ｨ謨ｰ蛟､繧ｻ繝ｫ繧呈､懷・
- * minMergedCellCount 縺・1 縺ｮ蝣ｴ蜷医・撼邨仙粋・亥腰荳・峨そ繝ｫ繧りｵｰ譟ｻ蟇ｾ雎｡縺ｫ縺吶ｋ
+ * ブロックを自動検出する（ExcelJS版）
+ * 太い罫線で囲まれた領域内のブロック名セルと数値セルを検出
+ * minMergedCellCount が1の場合は非結合（単一）セルも検出対象にする
  */
 function detectBlocksWithExcelJS(
   worksheet: ExcelJS.Worksheet,
@@ -812,7 +1038,7 @@ function detectBlocksWithExcelJS(
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
 ): BlockDefinition[] {
   const blocks: BlockDefinition[] = [];
-  const globalProcessedCells = new Set<string>(); // 繧ｰ繝ｭ繝ｼ繝舌Ν縺ｪ蜃ｦ逅・ｸ医∩繧ｻ繝ｫ・・蟇ｾ遲厄ｼ・
+  const globalProcessedCells = new Set<string>(); // グローバルな処理済みセル（重複対策）
   const blockGroups = new Map<
     string,
     {
@@ -833,7 +1059,7 @@ function detectBlocksWithExcelJS(
 
     if (globalProcessedCells.has(cellKey)) return;
 
-    const region = findBorderedRegion(
+    const region = findEnclosedRegion(
       startRow,
       startCol,
       worksheet,
@@ -843,9 +1069,11 @@ function detectBlocksWithExcelJS(
       maxCol,
       new Set(),
       settings.maxRegionSize,
+      blockName,
+      settings,
     );
 
-    // D蟇ｾ遲・ 縺薙・鬆伜沺蜀・・繧ｻ繝ｫ繧偵げ繝ｭ繝ｼ繝舌Ν縺ｫ蜃ｦ逅・ｸ医∩縺ｨ縺励※繝槭・繧ｯ
+    // この領域内のセルをグローバルに処理済みとしてマーク
     region.forEach((key) => globalProcessedCells.add(key));
 
     const numberCells = extractNumberCellsFromRegion(region, worksheet, mergeMap, settings);
@@ -1011,7 +1239,7 @@ function detectBlocksWithExcelJS(
 }
 
 /**
- * 繧ｷ繝ｼ繝医°繧峨・繝・・繝・・繧ｿ繧定ｧ｣譫撰ｼ・xcelJS迚茨ｼ・ */
+ * シートからマップデータを解析（ExcelJS版） */
 async function parseMapSheetWithExcelJS(
   workbook: ExcelJS.Workbook,
   sheetName: string,
@@ -1202,7 +1430,7 @@ async function parseMapSheetWithExcelJS(
   };
 }
 
-// 蛻玲枚蟄励ｒ謨ｰ蛟､縺ｫ螟画鋤
+// 列文字を数値に変換
 function columnLetterToNumber(letters: string): number {
   let col = 0;
   for (let i = 0; i < letters.length; i++) {
@@ -1212,7 +1440,7 @@ function columnLetterToNumber(letters: string): number {
 }
 
 /**
- * 繝槭ャ繝励ヵ繧｡繧､繝ｫ・・lsx・峨ｒ隗｣譫撰ｼ・xcelJS迚茨ｼ・ */
+ * マップファイル（xlsx）を解析（ExcelJS版） */
 export type ParseMapFileResult = {
   data: Record<string, DayMapData> | null;
   skippedSheets: string[];
@@ -1262,14 +1490,14 @@ export async function parseMapFile(
     return {
       data: null,
       skippedSheets: [],
-      error: error instanceof Error ? error.message : '荳肴・縺ｪ繧ｨ繝ｩ繝ｼ',
+      error: error instanceof Error ? error.message : '不明なエラー',
     };
   }
 }
 
 /**
- * 繧｢繧､繝・Β縺ｮ逡ｪ蜿ｷ縺九ｉ謨ｰ蛟､驛ｨ蛻・ｒ謚ｽ蜃ｺ
- * 萓・ "26a" -> "26", "26b1" -> "26"
+ * アイテムの番号から数値部分を抽出
+ * 例: "26a" -> "26", "26b1" -> "26"
  */
 export function extractNumberFromItemNumber(itemNumber: string): string | null {
   const match = itemNumber.match(/^(\d+)/);
@@ -1277,7 +1505,7 @@ export function extractNumberFromItemNumber(itemNumber: string): string | null {
 }
 
 /**
- * 繧｢繧､繝・Β繧偵・繝・・縺ｮ繧ｻ繝ｫ縺ｫ繝槭ャ繝√Φ繧ｰ
+ * アイテムをマップのセルにマッチング
  */
 export function matchItemToCell(
   item: ShoppingItem,
@@ -1312,7 +1540,7 @@ export function matchItemToCell(
 }
 
 /**
- * 繝悶Ο繝・け螳夂ｾｩ繧呈焔蜍輔〒菴懈・/譖ｴ譁ｰ
+ * ブロック定義を自動で作成/更新
  */
 export function createBlockDefinition(
   name: string,
@@ -1352,7 +1580,3 @@ export function createBlockDefinition(
     color: '#E3F2FD',
   };
 }
-
-
-
-
