@@ -56,6 +56,39 @@ export function saveBlockDetectionSettings(
   }
 }
 
+// ===== ブロック名カスタムソート =====
+// 先頭文字でカテゴリ分類: A-Z → a-z → ア-ン → あ-ん → 漢字 → その他
+function getBlockNameCategory(name: string): number {
+  if (!name || name.length === 0) return 5;
+  const ch = name.charCodeAt(0);
+  if (ch >= 0x41 && ch <= 0x5A) return 0; // A-Z
+  if (ch >= 0x61 && ch <= 0x7A) return 1; // a-z
+  if (ch >= 0x30A0 && ch <= 0x30FF) return 2; // カタカナ
+  if (ch >= 0x3040 && ch <= 0x309F) return 3; // ひらがな
+  if (
+    (ch >= 0x4E00 && ch <= 0x9FFF) ||
+    (ch >= 0x3400 && ch <= 0x4DBF) ||
+    (ch >= 0xF900 && ch <= 0xFAFF)
+  )
+    return 4; // 漢字
+  return 5; // その他
+}
+
+function sortBlocksByCustomOrder(blocks: BlockDefinition[]): BlockDefinition[] {
+  return [...blocks].sort((a, b) => {
+    const catA = getBlockNameCategory(a.name);
+    const catB = getBlockNameCategory(b.name);
+    if (catA !== catB) return catA - catB;
+    // 漢字カテゴリは numberCells の数が少ない順
+    if (catA === 4) {
+      const diff = a.numberCells.length - b.numberCells.length;
+      if (diff !== 0) return diff;
+    }
+    // 同一カテゴリ内はロケール順（数値対応）
+    return a.name.localeCompare(b.name, 'ja', { numeric: true, sensitivity: 'base' });
+  });
+}
+
 // ===== 簡易マッププレビューコンポーネント =====
 
 interface MiniMapPreviewProps {
@@ -353,6 +386,12 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     if (!previewData || !activePreviewSheet) return null;
     return previewData[activePreviewSheet] || null;
   }, [previewData, activePreviewSheet]);
+
+  // ソート済みブロック一覧
+  const sortedPreviewBlocks = useMemo(() => {
+    if (!activePreviewMapData) return [];
+    return sortBlocksByCustomOrder(activePreviewMapData.blocks);
+  }, [activePreviewMapData]);
 
   // 全シートのブロック合計数
   const totalBlockCount = useMemo(() => {
@@ -719,12 +758,12 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       検出ブロック ({activePreviewMapData.blocks.length}件)
                     </p>
                     <div className="flex flex-wrap gap-1.5">
-                      {activePreviewMapData.blocks.length === 0 ? (
+                      {sortedPreviewBlocks.length === 0 ? (
                         <span className="text-xs text-slate-400 italic">
                           ブロックが検出されませんでした
                         </span>
                       ) : (
-                        activePreviewMapData.blocks.map((block, idx) => (
+                        sortedPreviewBlocks.map((block, idx) => (
                           <button
                             key={`${block.name}-${idx}`}
                             onClick={() =>
