@@ -721,6 +721,108 @@ function regionContainsOtherBlockName(
 }
 
 /**
+ * プローブ用BFS: 太い罫線で停止しつつ、シート端に到達したら即座にnullを返す
+ * これにより包囲されていない広大な領域の探索を即座に打ち切れる
+ */
+function probeBorderedRegion(
+  startRow: number,
+  startCol: number,
+  worksheet: ExcelJS.Worksheet,
+  mergeMap: Map<string, { row: number; col: number }>,
+  mergeRangeMap: Map<string, MergeRange>,
+  maxRow: number,
+  maxCol: number,
+  visited: Set<string>,
+  maxProbeSize: number,
+): Set<string> | null {
+  const region = new Set<string>();
+  const queue: Array<{ row: number; col: number }> = [{ row: startRow, col: startCol }];
+
+  while (queue.length > 0 && region.size < maxProbeSize) {
+    const { row, col } = queue.shift()!;
+    const key = `${row}-${col}`;
+
+    if (visited.has(key) || region.has(key)) continue;
+    if (row < 1 || row > maxRow || col < 1 || col > maxCol) continue;
+
+    // シート端に到達 → 包囲されていないので即座に中断
+    if (row <= 1 || row >= maxRow || col <= 1 || col >= maxCol) {
+      return null;
+    }
+
+    region.add(key);
+
+    const canMoveTo = (
+      nextRow: number,
+      nextCol: number,
+      currentSide: BorderDirection,
+      nextSide: BorderDirection,
+    ): boolean => {
+      if (nextRow < 1 || nextRow > maxRow || nextCol < 1 || nextCol > maxCol) {
+        return false;
+      }
+
+      const currentMergeParent = mergeMap.get(toCellKey(row, col));
+      const nextMergeParent = mergeMap.get(toCellKey(nextRow, nextCol));
+      if (
+        currentMergeParent &&
+        nextMergeParent &&
+        currentMergeParent.row === nextMergeParent.row &&
+        currentMergeParent.col === nextMergeParent.col
+      ) {
+        return true;
+      }
+
+      const currentSideStyle = resolveEffectiveBorderSide(
+        worksheet,
+        row,
+        col,
+        currentSide,
+        mergeMap,
+        mergeRangeMap,
+      )?.style as ExcelJS.BorderStyle | undefined;
+      if (isMediumOrThickBorder(currentSideStyle)) {
+        return false;
+      }
+
+      const nextSideStyle = resolveEffectiveBorderSide(
+        worksheet,
+        nextRow,
+        nextCol,
+        nextSide,
+        mergeMap,
+        mergeRangeMap,
+      )?.style as ExcelJS.BorderStyle | undefined;
+      if (isMediumOrThickBorder(nextSideStyle)) {
+        return false;
+      }
+
+      return true;
+    };
+
+    if (canMoveTo(row - 1, col, 'top', 'bottom')) {
+      queue.push({ row: row - 1, col });
+    }
+    if (canMoveTo(row + 1, col, 'bottom', 'top')) {
+      queue.push({ row: row + 1, col });
+    }
+    if (canMoveTo(row, col - 1, 'left', 'right')) {
+      queue.push({ row, col: col - 1 });
+    }
+    if (canMoveTo(row, col + 1, 'right', 'left')) {
+      queue.push({ row, col: col + 1 });
+    }
+  }
+
+  // maxProbeSizeに達した場合も包囲判定が不確実なのでnull
+  if (region.size >= maxProbeSize) {
+    return null;
+  }
+
+  return region;
+}
+
+/**
  * 太い罫線で囲われた包囲領域を検出（複雑な形状対応）
  *
  * 通常のBFS（太い罫線で停止）で初期領域を取得した後、
@@ -755,7 +857,7 @@ function findEnclosedRegion(
 
   // Phase 2: 太い罫線を越えた包囲領域への反復的拡張
   let expanded = true;
-  const maxIterations = 500;
+  const maxIterations = 100;
   let iteration = 0;
   const processedProbes = new Set<string>();
 
@@ -794,11 +896,13 @@ function findEnclosedRegion(
       const cKey = toCellKey(candidate.row, candidate.col);
       if (region.has(cKey)) continue;
 
-      // プローブ: 候補セルからBFS（太い罫線で停止、現在領域は訪問済み扱い）
+      // プローブ: シート端到達で即中断するBFS
       const probeVisited = new Set<string>(region);
       visited.forEach((k) => probeVisited.add(k));
+      processedProbes.forEach((k) => probeVisited.add(k));
 
-      const probe = findBorderedRegion(
+      const probeMaxSize = Math.min(maxRegionSize - region.size, maxRegionSize);
+      const probe = probeBorderedRegion(
         candidate.row,
         candidate.col,
         worksheet,
@@ -807,17 +911,16 @@ function findEnclosedRegion(
         maxRow,
         maxCol,
         probeVisited,
-        Math.min(maxRegionSize - region.size, maxRegionSize),
+        probeMaxSize,
       );
 
+      // null = 包囲されていない（シート端に到達 or サイズ超過）
+      if (probe === null) continue;
       if (probe.size === 0) continue;
 
       probe.forEach((k) => processedProbes.add(k));
 
-      // チェック1: プローブ領域が包囲されているか（シート端に到達しない）
-      if (!isRegionEnclosed(probe, maxRow, maxCol)) continue;
-
-      // チェック2: プローブ領域に別のブロック名が含まれていないか
+      // プローブ領域に別のブロック名が含まれていないか
       if (
         blockName &&
         regionContainsOtherBlockName(probe, worksheet, mergeMap, blockName, settings)
