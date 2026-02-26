@@ -675,25 +675,6 @@ function hasThickBorderBetween(
 }
 
 /**
- * 領域がシート端に到達しない（包囲されている）か判定
- */
-function isRegionEnclosed(
-  region: Set<string>,
-  maxRow: number,
-  maxCol: number,
-): boolean {
-  for (const key of region) {
-    const [rowStr, colStr] = key.split('-');
-    const row = parseInt(rowStr, 10);
-    const col = parseInt(colStr, 10);
-    if (row <= 1 || row >= maxRow || col <= 1 || col >= maxCol) {
-      return false;
-    }
-  }
-  return true;
-}
-
-/**
  * 領域内に別のブロック名セルが含まれるか判定
  */
 function regionContainsOtherBlockName(
@@ -721,113 +702,95 @@ function regionContainsOtherBlockName(
 }
 
 /**
- * プローブ用BFS: 太い罫線で停止しつつ、シート端に到達したら即座にnullを返す
- * これにより包囲されていない広大な領域の探索を即座に打ち切れる
+ * シート端からBFSして「外部セル」を事前計算する
+ *
+ * シートの全辺端セルからBFSを開始し、太い罫線で停止する。
+ * 到達できたセル群が「外部」であり、到達できなかったセルは
+ * 太い罫線で包囲された「内部」セルとなる。
+ * これにより任意のセルが包囲内部かどうかをO(1)で判定できる。
  */
-function probeBorderedRegion(
-  startRow: number,
-  startCol: number,
+function computeExteriorCells(
   worksheet: ExcelJS.Worksheet,
   mergeMap: Map<string, { row: number; col: number }>,
   mergeRangeMap: Map<string, MergeRange>,
   maxRow: number,
   maxCol: number,
-  visited: Set<string>,
-  maxProbeSize: number,
-): Set<string> | null {
-  const region = new Set<string>();
-  const queue: Array<{ row: number; col: number }> = [{ row: startRow, col: startCol }];
+): Set<string> {
+  const exterior = new Set<string>();
+  // shift()のO(n)を回避するためインデックスベースのキューを使用
+  const queue: Array<{ row: number; col: number }> = [];
+  let qi = 0;
 
-  while (queue.length > 0 && region.size < maxProbeSize) {
-    const { row, col } = queue.shift()!;
-    const key = `${row}-${col}`;
+  // シートの全辺端セルをキューに投入
+  for (let r = 1; r <= maxRow; r++) {
+    queue.push({ row: r, col: 1 });
+    if (maxCol > 1) queue.push({ row: r, col: maxCol });
+  }
+  for (let c = 2; c < maxCol; c++) {
+    queue.push({ row: 1, col: c });
+    if (maxRow > 1) queue.push({ row: maxRow, col: c });
+  }
 
-    if (visited.has(key) || region.has(key)) continue;
+  const directions: [number, number, BorderDirection, BorderDirection][] = [
+    [-1, 0, 'top', 'bottom'],
+    [1, 0, 'bottom', 'top'],
+    [0, -1, 'left', 'right'],
+    [0, 1, 'right', 'left'],
+  ];
+
+  while (qi < queue.length) {
+    const { row, col } = queue[qi++];
+    const key = toCellKey(row, col);
+
+    if (exterior.has(key)) continue;
     if (row < 1 || row > maxRow || col < 1 || col > maxCol) continue;
 
-    // シート端に到達 → 包囲されていないので即座に中断
-    if (row <= 1 || row >= maxRow || col <= 1 || col >= maxCol) {
-      return null;
-    }
+    exterior.add(key);
 
-    region.add(key);
+    for (const [dr, dc, currentSide, nextSide] of directions) {
+      const nr = row + dr;
+      const nc = col + dc;
+      if (nr < 1 || nr > maxRow || nc < 1 || nc > maxCol) continue;
+      if (exterior.has(toCellKey(nr, nc))) continue;
 
-    const canMoveTo = (
-      nextRow: number,
-      nextCol: number,
-      currentSide: BorderDirection,
-      nextSide: BorderDirection,
-    ): boolean => {
-      if (nextRow < 1 || nextRow > maxRow || nextCol < 1 || nextCol > maxCol) {
-        return false;
-      }
-
+      // 同一マージグループ内なら自由に移動
       const currentMergeParent = mergeMap.get(toCellKey(row, col));
-      const nextMergeParent = mergeMap.get(toCellKey(nextRow, nextCol));
+      const nextMergeParent = mergeMap.get(toCellKey(nr, nc));
       if (
         currentMergeParent &&
         nextMergeParent &&
         currentMergeParent.row === nextMergeParent.row &&
         currentMergeParent.col === nextMergeParent.col
       ) {
-        return true;
+        queue.push({ row: nr, col: nc });
+        continue;
       }
 
-      const currentSideStyle = resolveEffectiveBorderSide(
-        worksheet,
-        row,
-        col,
-        currentSide,
-        mergeMap,
-        mergeRangeMap,
+      // 太い罫線があれば移動不可
+      const s1 = resolveEffectiveBorderSide(
+        worksheet, row, col, currentSide, mergeMap, mergeRangeMap,
       )?.style as ExcelJS.BorderStyle | undefined;
-      if (isMediumOrThickBorder(currentSideStyle)) {
-        return false;
-      }
+      if (isMediumOrThickBorder(s1)) continue;
 
-      const nextSideStyle = resolveEffectiveBorderSide(
-        worksheet,
-        nextRow,
-        nextCol,
-        nextSide,
-        mergeMap,
-        mergeRangeMap,
+      const s2 = resolveEffectiveBorderSide(
+        worksheet, nr, nc, nextSide, mergeMap, mergeRangeMap,
       )?.style as ExcelJS.BorderStyle | undefined;
-      if (isMediumOrThickBorder(nextSideStyle)) {
-        return false;
-      }
+      if (isMediumOrThickBorder(s2)) continue;
 
-      return true;
-    };
-
-    if (canMoveTo(row - 1, col, 'top', 'bottom')) {
-      queue.push({ row: row - 1, col });
-    }
-    if (canMoveTo(row + 1, col, 'bottom', 'top')) {
-      queue.push({ row: row + 1, col });
-    }
-    if (canMoveTo(row, col - 1, 'left', 'right')) {
-      queue.push({ row, col: col - 1 });
-    }
-    if (canMoveTo(row, col + 1, 'right', 'left')) {
-      queue.push({ row, col: col + 1 });
+      queue.push({ row: nr, col: nc });
     }
   }
 
-  // maxProbeSizeに達した場合も包囲判定が不確実なのでnull
-  if (region.size >= maxProbeSize) {
-    return null;
-  }
-
-  return region;
+  return exterior;
 }
 
 /**
  * 太い罫線で囲われた包囲領域を検出（複雑な形状対応）
  *
- * 通常のBFS（太い罫線で停止）で初期領域を取得した後、
- * 太い罫線の向こう側が包囲されている場合は反復的に領域を拡張する。
- * これにより階段状のような複雑な形状でも全数値セルを正しく検出できる。
+ * 事前計算した外部セルマップを利用して、太い罫線の向こう側が
+ * 包囲内部（外部からBFS到達不可能）かどうかをO(1)で判定する。
+ * 内部と判定された隣接領域は反復的に統合し、階段状などの
+ * 複雑な形状でも全数値セルを正しく検出する。
  */
 function findEnclosedRegion(
   startRow: number,
@@ -841,6 +804,7 @@ function findEnclosedRegion(
   maxRegionSize: number = 2000,
   blockName: string = '',
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
+  exteriorCells: Set<string> = new Set(),
 ): Set<string> {
   // Phase 1: 通常のBFS（太い罫線で停止）で初期領域を取得
   const region = findBorderedRegion(
@@ -855,11 +819,16 @@ function findEnclosedRegion(
     maxRegionSize,
   );
 
-  // Phase 2: 太い罫線を越えた包囲領域への反復的拡張
+  // 外部セルマップが空の場合はPhase 1の結果のみ返す（フォールバック）
+  if (exteriorCells.size === 0) {
+    return region;
+  }
+
+  // Phase 2: 太い罫線を越えた包囲内部セルへの反復的拡張
   let expanded = true;
-  const maxIterations = 100;
+  const maxIterations = 200;
   let iteration = 0;
-  const processedProbes = new Set<string>();
+  const rejectedCells = new Set<string>();
 
   while (expanded && region.size < maxRegionSize && iteration < maxIterations) {
     expanded = false;
@@ -883,26 +852,34 @@ function findEnclosedRegion(
       for (const n of neighbors) {
         if (n.row < 1 || n.row > maxRow || n.col < 1 || n.col > maxCol) continue;
         const nKey = toCellKey(n.row, n.col);
-        if (region.has(nKey) || visited.has(nKey) || processedProbes.has(nKey)) continue;
+        if (region.has(nKey) || visited.has(nKey) || rejectedCells.has(nKey)) continue;
 
-        if (hasThickBorderBetween(worksheet, row, col, n.row, n.col, mergeMap, mergeRangeMap)) {
-          candidates.push(n);
-          processedProbes.add(nKey);
+        // 太い罫線でブロックされていない隣接セルは対象外
+        if (!hasThickBorderBetween(worksheet, row, col, n.row, n.col, mergeMap, mergeRangeMap)) {
+          continue;
         }
+
+        // ★核心: 外部セルなら即スキップ（O(1)判定、BFS不要）
+        if (exteriorCells.has(nKey)) {
+          rejectedCells.add(nKey);
+          continue;
+        }
+
+        // 外部でない = 包囲内部セル → 候補
+        candidates.push(n);
       }
     }
 
     for (const candidate of candidates) {
       const cKey = toCellKey(candidate.row, candidate.col);
-      if (region.has(cKey)) continue;
+      if (region.has(cKey) || rejectedCells.has(cKey)) continue;
 
-      // プローブ: シート端到達で即中断するBFS
+      // 包囲内部からのBFS（太い罫線で停止、既存領域は訪問済み扱い）
       const probeVisited = new Set<string>(region);
       visited.forEach((k) => probeVisited.add(k));
-      processedProbes.forEach((k) => probeVisited.add(k));
+      rejectedCells.forEach((k) => probeVisited.add(k));
 
-      const probeMaxSize = Math.min(maxRegionSize - region.size, maxRegionSize);
-      const probe = probeBorderedRegion(
+      const probe = findBorderedRegion(
         candidate.row,
         candidate.col,
         worksheet,
@@ -911,20 +888,20 @@ function findEnclosedRegion(
         maxRow,
         maxCol,
         probeVisited,
-        probeMaxSize,
+        Math.min(maxRegionSize - region.size, maxRegionSize),
       );
 
-      // null = 包囲されていない（シート端に到達 or サイズ超過）
-      if (probe === null) continue;
-      if (probe.size === 0) continue;
+      if (probe.size === 0) {
+        rejectedCells.add(cKey);
+        continue;
+      }
 
-      probe.forEach((k) => processedProbes.add(k));
-
-      // プローブ領域に別のブロック名が含まれていないか
+      // プローブ領域に別のブロック名が含まれていないか確認
       if (
         blockName &&
         regionContainsOtherBlockName(probe, worksheet, mergeMap, blockName, settings)
       ) {
+        probe.forEach((k) => rejectedCells.add(k));
         continue;
       }
 
@@ -1152,6 +1129,12 @@ function detectBlocksWithExcelJS(
   >();
   const mergeRangeMap = buildMergeRangeMap(mergedCells);
 
+  // 外部セルの事前計算（シート端からBFS、太い罫線で停止）
+  // これにより各ブロック候補のプローブ時に包囲判定がO(1)になる
+  const exteriorCells = computeExteriorCells(
+    worksheet, mergeMap, mergeRangeMap, maxRow, maxCol,
+  );
+
   const processBlockNameCandidate = (
     blockName: string,
     startRow: number,
@@ -1174,6 +1157,7 @@ function detectBlocksWithExcelJS(
       settings.maxRegionSize,
       blockName,
       settings,
+      exteriorCells,
     );
 
     // この領域内のセルをグローバルに処理済みとしてマーク
