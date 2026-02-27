@@ -38,6 +38,8 @@ interface MapCanvasProps {
     showGrid: boolean;
     showRuler: boolean;
   };
+  initialOffset?: { x: number; y: number };
+  offsetRef?: React.MutableRefObject<{ x: number; y: number }>;
 }
 
 const BASE_CELL_SIZE = 28; // 蝓ｺ譛ｬ繧ｻ繝ｫ繧ｵ繧､繧ｺ
@@ -188,11 +190,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   onZoomChange,
   onRotationAngleChange,
   selectionGuideOptions,
+  initialOffset,
+  offsetRef: externalOffsetRef,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const offsetRef = useRef(offset);
+  const [offset, setOffsetState] = useState(initialOffset ?? { x: 0, y: 0 });
+  const internalOffsetRef = useRef(offset);
+  const offsetRef = externalOffsetRef ?? internalOffsetRef;
+  const setOffset = useCallback((newOffset: { x: number; y: number }) => {
+    setOffsetState(newOffset);
+    offsetRef.current = newOffset;
+  }, [offsetRef]);
   const zoomLevelRef = useRef(zoomLevel);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });

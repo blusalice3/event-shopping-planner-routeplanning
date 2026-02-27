@@ -7,6 +7,7 @@ import {
   HallRouteSettingsStore,
   MapDataStore,
   MapRotationSettingsStore,
+  MapViewportSettingsStore,
   RouteSettingsStore,
   ShoppingItem,
 } from '../types';
@@ -22,6 +23,7 @@ type PersistedStateValues = {
   routeSettings: RouteSettingsStore;
   hallDefinitions: HallDefinitionsStore;
   hallRouteSettings: HallRouteSettingsStore;
+  mapViewportSettings: MapViewportSettingsStore;
 };
 
 type PersistedStateSetters = {
@@ -34,6 +36,7 @@ type PersistedStateSetters = {
   setRouteSettings: Dispatch<SetStateAction<RouteSettingsStore>>;
   setHallDefinitions: Dispatch<SetStateAction<HallDefinitionsStore>>;
   setHallRouteSettings: Dispatch<SetStateAction<HallRouteSettingsStore>>;
+  setMapViewportSettings: Dispatch<SetStateAction<MapViewportSettingsStore>>;
 };
 
 type UseIndexedDbPersistenceParams = {
@@ -60,6 +63,7 @@ export function useIndexedDbPersistence({
     routeSettings,
     hallDefinitions,
     hallRouteSettings,
+    mapViewportSettings,
   } = values;
   const {
     setEventLists,
@@ -71,6 +75,7 @@ export function useIndexedDbPersistence({
     setRouteSettings,
     setHallDefinitions,
     setHallRouteSettings,
+    setMapViewportSettings,
   } = setters;
 
   useEffect(() => {
@@ -88,6 +93,7 @@ export function useIndexedDbPersistence({
           loadedRouteSettings,
           loadedHallDefinitions,
           loadedHallRouteSettings,
+          loadedMapViewportSettings,
         ] = await Promise.all([
           db.loadEventLists(),
           db.loadEventMetadata(),
@@ -98,6 +104,7 @@ export function useIndexedDbPersistence({
           db.loadRouteSettings(),
           db.loadHallDefinitions(),
           db.loadHallRouteSettings(),
+          db.loadMapViewportSettings(),
         ]);
 
         const loadErrorStores: string[] = [];
@@ -133,6 +140,10 @@ export function useIndexedDbPersistence({
           'hallRouteSettings',
           loadedHallRouteSettings,
         );
+        const resolvedMapViewportSettings = resolveLoadResult(
+          'mapViewportSettings',
+          loadedMapViewportSettings,
+        );
 
         const migratedLists: Record<string, ShoppingItem[]> = {};
         Object.keys(resolvedEventLists).forEach((eventName) => {
@@ -153,6 +164,7 @@ export function useIndexedDbPersistence({
         setRouteSettings(resolvedRouteSettings as RouteSettingsStore);
         setHallDefinitions(resolvedHallDefinitions as HallDefinitionsStore);
         setHallRouteSettings(resolvedHallRouteSettings as HallRouteSettingsStore);
+        setMapViewportSettings(resolvedMapViewportSettings as MapViewportSettingsStore);
 
         if (loadErrorStores.length > 0 && !hasShownLoadErrorRef.current) {
           hasShownLoadErrorRef.current = true;
@@ -176,6 +188,7 @@ export function useIndexedDbPersistence({
     setHallRouteSettings,
     setMapData,
     setMapRotationSettings,
+    setMapViewportSettings,
     setRouteSettings,
   ]);
 
@@ -195,6 +208,7 @@ export function useIndexedDbPersistence({
           db.saveRouteSettings(routeSettings),
           db.saveHallDefinitions(hallDefinitions),
           db.saveHallRouteSettings(hallRouteSettings),
+          db.saveMapViewportSettings(mapViewportSettings),
         ]);
       } catch (error) {
         console.error('Failed to save data to IndexedDB:', error);
@@ -218,6 +232,7 @@ export function useIndexedDbPersistence({
     routeSettings,
     hallDefinitions,
     hallRouteSettings,
+    mapViewportSettings,
   ]);
 
   return { isInitialized } as const;
