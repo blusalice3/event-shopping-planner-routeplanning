@@ -31,7 +31,7 @@ const isAdjacentOrSame = (a: { row: number; col: number }, b: { row: number; col
 describe('pathfinding utilities', () => {
   it('finds a valid path in an open grid', () => {
     const mapData = createMapData(3, 3, []);
-    const path = findPath(mapData, 1, 1, 3, 3, new Set<string>());
+    const path = findPath(mapData, 1, 1, 3, 3);
 
     expect(path[0]).toEqual({ row: 1, col: 1 });
     expect(path[path.length - 1]).toEqual({ row: 3, col: 3 });
@@ -40,7 +40,7 @@ describe('pathfinding utilities', () => {
 
   it('avoids blocked cells when an alternate route exists', () => {
     const mapData = createMapData(3, 3, [{ row: 2, col: 2, value: 100 }]);
-    const path = findPath(mapData, 1, 1, 3, 3, new Set<string>());
+    const path = findPath(mapData, 1, 1, 3, 3);
 
     expect(path).not.toEqual([
       { row: 1, col: 1 },
@@ -55,7 +55,7 @@ describe('pathfinding utilities', () => {
       { row: 2, col: 1, value: 1 },
     ]);
 
-    const path = findPath(mapData, 1, 1, 2, 2, new Set<string>());
+    const path = findPath(mapData, 1, 1, 2, 2);
     expect(path).toEqual([
       { row: 1, col: 1 },
       { row: 2, col: 2 },
@@ -70,7 +70,7 @@ describe('pathfinding utilities', () => {
       { row: 3, col: 3, priorityLevel: 'priority' as const },
     ];
 
-    const segments = generateRouteSegments(mapData, visitPoints, new Set<string>());
+    const segments = generateRouteSegments(mapData, visitPoints);
 
     expect(segments).toHaveLength(2);
     expect(segments[0].fromRow).toBe(1);
