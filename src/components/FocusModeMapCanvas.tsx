@@ -350,29 +350,16 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const routePath = useMemo(() => {
     if (!currentCellCoords || !nextCellCoords) return [];
 
-    const blockNameCells = new Set<string>();
-    mapData.blocks.forEach((block) => {
-      for (let r = block.startRow; r <= block.endRow; r++) {
-        for (let c = block.startCol; c <= block.endCol; c++) {
-          const cell = cellsMap.get(`${r}-${c}`);
-          if (cell && cell.value !== null && typeof cell.value === 'string') {
-            blockNameCells.add(`${r}-${c}`);
-          }
-        }
-      }
-    });
-
     const path = findPath(
       mapData,
       currentCellCoords.row,
       currentCellCoords.col,
       nextCellCoords.row,
       nextCellCoords.col,
-      blockNameCells,
     );
 
     return simplifyPath(path);
-  }, [currentCellCoords, nextCellCoords, mapData, cellsMap]);
+  }, [currentCellCoords, nextCellCoords, mapData]);
 
   const prevRoutePath = useMemo(() => {
     if (!prevCellCoords || !currentCellCoords) return [];
@@ -383,29 +370,16 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     )
       return [];
 
-    const blockNameCells = new Set<string>();
-    mapData.blocks.forEach((block) => {
-      for (let r = block.startRow; r <= block.endRow; r++) {
-        for (let c = block.startCol; c <= block.endCol; c++) {
-          const cell = cellsMap.get(`${r}-${c}`);
-          if (cell && cell.value !== null && typeof cell.value === 'string') {
-            blockNameCells.add(`${r}-${c}`);
-          }
-        }
-      }
-    });
-
     const path = findPath(
       mapData,
       prevCellCoords.row,
       prevCellCoords.col,
       currentCellCoords.row,
       currentCellCoords.col,
-      blockNameCells,
     );
 
     return simplifyPath(path);
-  }, [prevCellCoords, currentCellCoords, mapData, cellsMap]);
+  }, [prevCellCoords, currentCellCoords, mapData]);
 
   const findHallForCell = useCallback(
     (row: number, col: number): HallDefinition | null => {
