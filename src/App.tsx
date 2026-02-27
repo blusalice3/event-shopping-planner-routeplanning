@@ -18,6 +18,8 @@ import {
   BlockDetectionSettings,
   FocusModeSessionState,
   MapRotationSettingsStore,
+  MapViewportSettingsStore,
+  MapViewportState,
 } from './types';
 import ImportScreen from './components/ImportScreen';
 import ShoppingList from './components/ShoppingList';
@@ -273,6 +275,7 @@ const App: React.FC = () => {
   // マップ・ホール関連の永続データ。
   const [mapData, setMapData] = useState<MapDataStore>({});
   const [mapRotationSettings, setMapRotationSettings] = useState<MapRotationSettingsStore>({});
+  const [mapViewportSettings, setMapViewportSettings] = useState<MapViewportSettingsStore>({});
   const [routeSettings, setRouteSettings] = useState<RouteSettingsStore>({});
   const [hallDefinitions, setHallDefinitions] = useState<HallDefinitionsStore>({});
   const [hallRouteSettings, setHallRouteSettings] = useState<HallRouteSettingsStore>({});
@@ -296,6 +299,7 @@ const App: React.FC = () => {
       routeSettings,
       hallDefinitions,
       hallRouteSettings,
+      mapViewportSettings,
     },
     setters: {
       setEventLists,
@@ -307,6 +311,7 @@ const App: React.FC = () => {
       setRouteSettings,
       setHallDefinitions,
       setHallRouteSettings,
+      setMapViewportSettings,
     },
   });
 
@@ -563,6 +568,38 @@ const App: React.FC = () => {
       updateMapRotationAngle(activeEventName, currentFocusMapName, 'focusMode', angle);
     },
     [activeEventName, currentFocusMapName, updateMapRotationAngle],
+  );
+
+  // マップビューポート状態の取得・更新
+  const currentMapTabViewport = useMemo((): MapViewportState | undefined => {
+    if (!activeEventName || !isMapTab) return undefined;
+    return mapViewportSettings[activeEventName]?.[activeTab];
+  }, [activeEventName, isMapTab, activeTab, mapViewportSettings]);
+
+  const handleMapViewportChange = useCallback(
+    (viewport: MapViewportState) => {
+      if (!activeEventName || !isMapTab) return;
+      setMapViewportSettings((prev) => {
+        const eventSettings = prev[activeEventName] || {};
+        const current = eventSettings[activeTab];
+        if (
+          current &&
+          current.zoomLevel === viewport.zoomLevel &&
+          current.offsetX === viewport.offsetX &&
+          current.offsetY === viewport.offsetY
+        ) {
+          return prev;
+        }
+        return {
+          ...prev,
+          [activeEventName]: {
+            ...eventSettings,
+            [activeTab]: viewport,
+          },
+        };
+      });
+    },
+    [activeEventName, isMapTab, activeTab],
   );
 
   const { showHeaderBar, showTabBar, rawHideSomething } = useMemo(() => {
@@ -5321,6 +5358,8 @@ const App: React.FC = () => {
             rotationAngle={currentMapTabRotationState.mapTabAngle}
             onRotationAngleChange={handleMapTabRotationAngleChange}
             selectionGuideOptions={vertexGuideOptions}
+            initialViewport={currentMapTabViewport}
+            onViewportChange={handleMapViewportChange}
           />
         )}
         {activeEventName && mainContentVisible && (
