@@ -1,4 +1,4 @@
-﻿import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   DayMapData,
   CellData,
@@ -38,6 +38,8 @@ interface MapCanvasProps {
     showGrid: boolean;
     showRuler: boolean;
   };
+  initialOffset?: { x: number; y: number };
+  offsetRef?: React.MutableRefObject<{ x: number; y: number }>;
 }
 
 const BASE_CELL_SIZE = 28; // 蝓ｺ譛ｬ繧ｻ繝ｫ繧ｵ繧､繧ｺ
@@ -188,11 +190,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   onZoomChange,
   onRotationAngleChange,
   selectionGuideOptions,
+  initialOffset,
+  offsetRef: externalOffsetRef,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const offsetRef = useRef(offset);
+  const [offset, setOffsetState] = useState(initialOffset ?? { x: 0, y: 0 });
+  const internalOffsetRef = useRef(offset);
+  const offsetRef = externalOffsetRef ?? internalOffsetRef;
+  const setOffset = useCallback((newOffset: { x: number; y: number }) => {
+    setOffsetState(newOffset);
+    offsetRef.current = newOffset;
+  }, [offsetRef]);
   const zoomLevelRef = useRef(zoomLevel);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -745,24 +754,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const routeSegments = useMemo(() => {
     if (!isRouteVisible || routePoints.length < 2) return [];
 
-    const blockNameCells = new Set<string>();
-    mapData.blocks.forEach((block) => {
-      for (let r = block.startRow; r <= block.endRow; r++) {
-        for (let c = block.startCol; c <= block.endCol; c++) {
-          const cell = cellsMap.get(`${r}-${c}`);
-          if (cell && cell.value !== null && typeof cell.value === 'string') {
-            blockNameCells.add(`${r}-${c}`);
-          }
-        }
-      }
-    });
-
-    const segments = generateRouteSegments(mapData, routePoints, blockNameCells);
+    const segments = generateRouteSegments(mapData, routePoints);
     return segments.map((seg) => ({
       ...seg,
       path: simplifyPath(seg.path),
     }));
-  }, [isRouteVisible, routePoints, mapData, cellsMap]);
+  }, [isRouteVisible, routePoints, mapData]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

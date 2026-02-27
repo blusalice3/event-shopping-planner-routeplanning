@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   DayMapData,
   ShoppingItem,
@@ -7,6 +7,7 @@ import {
   HallRouteSettings,
   BlockDefinition,
   CellGroup,
+  MapViewportState,
   MIN_ZOOM,
   MAX_ZOOM,
 } from '../../types';
@@ -85,6 +86,8 @@ interface MapViewProps {
     showGrid: boolean;
     showRuler: boolean;
   };
+  initialViewport?: MapViewportState;
+  onViewportChange?: (viewport: MapViewportState) => void;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -120,11 +123,35 @@ const MapView: React.FC<MapViewProps> = ({
   rotationAngle = 0,
   onRotationAngleChange,
   selectionGuideOptions,
+  initialViewport,
+  onViewportChange,
 }) => {
   void _onMoveToFirst;
   void _onMoveToLast;
 
-  const [zoomLevel, setZoomLevel] = useState<number>(100);
+  const [zoomLevel, setZoomLevelState] = useState<number>(initialViewport?.zoomLevel ?? 100);
+  const zoomLevelRef = useRef(zoomLevel);
+  const canvasOffsetRef = useRef<{ x: number; y: number }>(
+    initialViewport ? { x: initialViewport.offsetX, y: initialViewport.offsetY } : { x: 0, y: 0 },
+  );
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
+
+  const setZoomLevel = useCallback((newZoom: number) => {
+    zoomLevelRef.current = newZoom;
+    setZoomLevelState(newZoom);
+  }, []);
+
+  // アンマウント時にビューポート状態を保存
+  useEffect(() => {
+    return () => {
+      onViewportChangeRef.current?.({
+        zoomLevel: zoomLevelRef.current,
+        offsetX: canvasOffsetRef.current.x,
+        offsetY: canvasOffsetRef.current.y,
+      });
+    };
+  }, []);
   const [internalIsRouteVisible, setInternalIsRouteVisible] = useState(true);
   const [isVisitListOpen, setIsVisitListOpen] = useState(false);
   const [internalIsHallOrderOpen, setInternalIsHallOrderOpen] = useState(false);
@@ -795,6 +822,10 @@ const MapView: React.FC<MapViewProps> = ({
         rotationAngle={rotationAngle}
         onRotationAngleChange={onRotationAngleChange}
         selectionGuideOptions={selectionGuideOptions}
+        initialOffset={
+          initialViewport ? { x: initialViewport.offsetX, y: initialViewport.offsetY } : undefined
+        }
+        offsetRef={canvasOffsetRef}
       />
       {/* セル詳細ポップアップ */}
       <CellItemsPopup

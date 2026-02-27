@@ -56,6 +56,39 @@ export function saveBlockDetectionSettings(
   }
 }
 
+// ===== ブロック名カスタムソート =====
+// 先頭文字でカテゴリ分類: A-Z → a-z → ア-ン → あ-ん → 漢字 → その他
+function getBlockNameCategory(name: string): number {
+  if (!name || name.length === 0) return 5;
+  const ch = name.charCodeAt(0);
+  if (ch >= 0x41 && ch <= 0x5A) return 0; // A-Z
+  if (ch >= 0x61 && ch <= 0x7A) return 1; // a-z
+  if (ch >= 0x30A0 && ch <= 0x30FF) return 2; // カタカナ
+  if (ch >= 0x3040 && ch <= 0x309F) return 3; // ひらがな
+  if (
+    (ch >= 0x4E00 && ch <= 0x9FFF) ||
+    (ch >= 0x3400 && ch <= 0x4DBF) ||
+    (ch >= 0xF900 && ch <= 0xFAFF)
+  )
+    return 4; // 漢字
+  return 5; // その他
+}
+
+function sortBlocksByCustomOrder(blocks: BlockDefinition[]): BlockDefinition[] {
+  return [...blocks].sort((a, b) => {
+    const catA = getBlockNameCategory(a.name);
+    const catB = getBlockNameCategory(b.name);
+    if (catA !== catB) return catA - catB;
+    // 漢字カテゴリは numberCells の数が少ない順
+    if (catA === 4) {
+      const diff = a.numberCells.length - b.numberCells.length;
+      if (diff !== 0) return diff;
+    }
+    // 同一カテゴリ内はロケール順（数値対応）
+    return a.name.localeCompare(b.name, 'ja', { numeric: true, sensitivity: 'base' });
+  });
+}
+
 // ===== 簡易マッププレビューコンポーネント =====
 
 interface MiniMapPreviewProps {
@@ -160,16 +193,49 @@ const MiniMapPreview: React.FC<MiniMapPreviewProps> = ({
         });
       }
 
-      // ハイライト中のブロックは枠線も描画
+      // ハイライト中のブロックは枠線も描画（各構成領域ごとに個別の枠）
       if (highlightBlockName && block.name === highlightBlockName) {
         ctx.strokeStyle = '#1976D2';
         ctx.lineWidth = 2;
-        ctx.strokeRect(
-          (block.startCol - 1) * CELL_SIZE,
-          (block.startRow - 1) * CELL_SIZE,
-          (block.endCol - block.startCol + 1) * CELL_SIZE,
-          (block.endRow - block.startRow + 1) * CELL_SIZE,
-        );
+
+        if (block.cellGroups && block.cellGroups.length > 0) {
+          // cellGroups がある場合は各グループごとにバウンディングボックスを計算して描画
+          block.cellGroups.forEach((group) => {
+            let gMinRow = Infinity, gMinCol = Infinity;
+            let gMaxRow = 0, gMaxCol = 0;
+
+            if (group.type === 'range') {
+              gMinRow = group.startRow ?? block.startRow;
+              gMinCol = group.startCol ?? block.startCol;
+              gMaxRow = group.endRow ?? block.endRow;
+              gMaxCol = group.endCol ?? block.endCol;
+            } else if (group.cells && group.cells.length > 0) {
+              group.cells.forEach((gc) => {
+                gMinRow = Math.min(gMinRow, gc.row);
+                gMinCol = Math.min(gMinCol, gc.col);
+                gMaxRow = Math.max(gMaxRow, gc.row);
+                gMaxCol = Math.max(gMaxCol, gc.col);
+              });
+            }
+
+            if (gMinRow <= gMaxRow && gMinCol <= gMaxCol) {
+              ctx.strokeRect(
+                (gMinCol - 1) * CELL_SIZE,
+                (gMinRow - 1) * CELL_SIZE,
+                (gMaxCol - gMinCol + 1) * CELL_SIZE,
+                (gMaxRow - gMinRow + 1) * CELL_SIZE,
+              );
+            }
+          });
+        } else {
+          // cellGroups がない場合は従来どおりブロック全体のバウンディングボックス
+          ctx.strokeRect(
+            (block.startCol - 1) * CELL_SIZE,
+            (block.startRow - 1) * CELL_SIZE,
+            (block.endCol - block.startCol + 1) * CELL_SIZE,
+            (block.endRow - block.startRow + 1) * CELL_SIZE,
+          );
+        }
       }
     });
   }, [mapData, blocks, highlightBlockName, cellMap, blockCellSets]);
@@ -353,6 +419,12 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     if (!previewData || !activePreviewSheet) return null;
     return previewData[activePreviewSheet] || null;
   }, [previewData, activePreviewSheet]);
+
+  // ソート済みブロック一覧
+  const sortedPreviewBlocks = useMemo(() => {
+    if (!activePreviewMapData) return [];
+    return sortBlocksByCustomOrder(activePreviewMapData.blocks);
+  }, [activePreviewMapData]);
 
   // 全シートのブロック合計数
   const totalBlockCount = useMemo(() => {
@@ -719,12 +791,12 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       検出ブロック ({activePreviewMapData.blocks.length}件)
                     </p>
                     <div className="flex flex-wrap gap-1.5">
-                      {activePreviewMapData.blocks.length === 0 ? (
+                      {sortedPreviewBlocks.length === 0 ? (
                         <span className="text-xs text-slate-400 italic">
                           ブロックが検出されませんでした
                         </span>
                       ) : (
-                        activePreviewMapData.blocks.map((block, idx) => (
+                        sortedPreviewBlocks.map((block, idx) => (
                           <button
                             key={`${block.name}-${idx}`}
                             onClick={() =>

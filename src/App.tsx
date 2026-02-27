@@ -579,7 +579,7 @@ const App: React.FC = () => {
   const handleMapViewportChange = useCallback(
     (viewport: MapViewportState) => {
       if (!activeEventName || !isMapTab) return;
-      setMapViewportSettings((prev) => {
+      setMapViewportSettings((prev: MapViewportSettingsStore) => {
         const eventSettings = prev[activeEventName] || {};
         const current = eventSettings[activeTab];
         if (

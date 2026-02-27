@@ -7,7 +7,6 @@ function isPassableCell(
   col: number,
   maxRow: number,
   maxCol: number,
-  blockNameCells: Set<string>,
 ): boolean {
   if (row < 1 || col < 1 || row > maxRow || col > maxCol) return false;
 
@@ -16,9 +15,6 @@ function isPassableCell(
 
   // セルが存在しない場合は通過可能
   if (!cell) return true;
-
-  // ブロック名セルは通過可能
-  if (blockNameCells.has(key)) return true;
 
   // 数値セルは通過不可
   if (cell.value !== null && typeof cell.value === 'number') return false;
@@ -42,7 +38,6 @@ export function findPath(
   startCol: number,
   endRow: number,
   endCol: number,
-  blockNameCells: Set<string>,
 ): { row: number; col: number }[] {
   const maxRow = mapData.maxRow;
   const maxCol = mapData.maxCol;
@@ -119,7 +114,7 @@ export function findPath(
 
       // 通過不可能なセルはスキップ（ただしゴールセルは例外）
       const isGoal = newRow === endRow && newCol === endCol;
-      if (!isGoal && !isPassableCell(cellsMap, newRow, newCol, maxRow, maxCol, blockNameCells)) {
+      if (!isGoal && !isPassableCell(cellsMap, newRow, newCol, maxRow, maxCol)) {
         continue;
       }
 
@@ -131,7 +126,6 @@ export function findPath(
           currentNode.col,
           maxRow,
           maxCol,
-          blockNameCells,
         );
         const side2Passable = isPassableCell(
           cellsMap,
@@ -139,7 +133,6 @@ export function findPath(
           currentNode.col + dir.dc,
           maxRow,
           maxCol,
-          blockNameCells,
         );
         if (!side1Passable || !side2Passable) continue;
       }
@@ -188,7 +181,6 @@ export function findPath(
 export function generateRouteSegments(
   mapData: DayMapData,
   visitPoints: { row: number; col: number; priorityLevel?: 'none' | 'priority' | 'highest' }[],
-  blockNameCells: Set<string>,
 ): RouteSegment[] {
   if (visitPoints.length < 2) return [];
 
@@ -198,7 +190,7 @@ export function generateRouteSegments(
     const from = visitPoints[i];
     const to = visitPoints[i + 1];
 
-    const path = findPath(mapData, from.row, from.col, to.row, to.col, blockNameCells);
+    const path = findPath(mapData, from.row, from.col, to.row, to.col);
 
     segments.push({
       fromRow: from.row,

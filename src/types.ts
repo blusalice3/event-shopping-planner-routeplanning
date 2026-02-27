@@ -160,6 +160,19 @@ export interface MapRotationSettingsStore {
   };
 }
 
+// マップビューポート状態（ズームレベル・オフセット）
+export interface MapViewportState {
+  zoomLevel: number;
+  offsetX: number;
+  offsetY: number;
+}
+
+export interface MapViewportSettingsStore {
+  [eventName: string]: {
+    [dayMapName: string]: MapViewportState;
+  };
+}
+
 export interface BlockDefinitionsStore {
   [eventName: string]: {
     [dayMapName: string]: BlockDefinition[];

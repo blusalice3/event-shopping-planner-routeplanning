@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'EventShoppingPlannerDB';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 // ストア名
 const STORES = {
@@ -17,6 +17,7 @@ const STORES = {
   ROUTE_SETTINGS: 'routeSettings',
   HALL_DEFINITIONS: 'hallDefinitions',
   HALL_ROUTE_SETTINGS: 'hallRouteSettings',
+  MAP_VIEWPORT_SETTINGS: 'mapViewportSettings',
 } as const;
 
 type StoreName = (typeof STORES)[keyof typeof STORES];
@@ -274,6 +275,7 @@ export interface AppData {
   routeSettings: Record<string, Record<string, unknown>>;
   hallDefinitions: Record<string, Record<string, unknown[]>>;
   hallRouteSettings: Record<string, Record<string, unknown>>;
+  mapViewportSettings: Record<string, Record<string, unknown>>;
 }
 
 const resolveLoadResultData = <T extends Record<string, unknown>>(
@@ -391,6 +393,14 @@ export const db = {
     return loadData(STORES.HALL_ROUTE_SETTINGS, 'data');
   },
 
+  // マップビューポート設定
+  async saveMapViewportSettings(data: Record<string, Record<string, unknown>>): Promise<void> {
+    await saveData(STORES.MAP_VIEWPORT_SETTINGS, 'data', data);
+  },
+  async loadMapViewportSettings(): Promise<LoadResult<Record<string, Record<string, unknown>>>> {
+    return loadData(STORES.MAP_VIEWPORT_SETTINGS, 'data');
+  },
+
   // イベント削除時に関連データも削除
   async deleteEventData(eventName: string): Promise<void> {
     try {
@@ -438,6 +448,12 @@ export const db = {
         db.loadHallRouteSettings,
         db.saveHallRouteSettings,
       );
+      await removeEventFromStore(
+        eventName,
+        STORES.MAP_VIEWPORT_SETTINGS,
+        db.loadMapViewportSettings,
+        db.saveMapViewportSettings,
+      );
     } catch (error) {
       console.error(`Failed to delete ${eventName} from IndexedDB:`, error);
     }
@@ -455,6 +471,7 @@ export const db = {
       routeSettingsResult,
       hallDefinitionsResult,
       hallRouteSettingsResult,
+      mapViewportSettingsResult,
     ] = await Promise.all([
       db.loadEventLists(),
       db.loadEventMetadata(),
@@ -465,6 +482,7 @@ export const db = {
       db.loadRouteSettings(),
       db.loadHallDefinitions(),
       db.loadHallRouteSettings(),
+      db.loadMapViewportSettings(),
     ]);
 
     return {
@@ -482,6 +500,10 @@ export const db = {
       hallRouteSettings: resolveLoadResultData(
         STORES.HALL_ROUTE_SETTINGS,
         hallRouteSettingsResult,
+      ),
+      mapViewportSettings: resolveLoadResultData(
+        STORES.MAP_VIEWPORT_SETTINGS,
+        mapViewportSettingsResult,
       ),
     };
   },
