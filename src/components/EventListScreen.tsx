@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import TrashIcon from './icons/TrashIcon';
 
 const DocumentArrowDownIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
@@ -56,49 +56,7 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
   onImportMap,
   onImportExportFile,
 }) => {
-  const longPressTimeout = useRef<number | null>(null);
-  const longPressTriggeredRef = useRef<boolean>(false);
   const [menuVisibleFor, setMenuVisibleFor] = useState<string | null>(null);
-
-  const handlePointerDown = (eventName: string) => {
-    longPressTriggeredRef.current = false;
-    // Clear any existing menu
-    if (menuVisibleFor !== eventName) {
-      setMenuVisibleFor(null);
-    }
-    longPressTimeout.current = window.setTimeout(() => {
-      longPressTriggeredRef.current = true;
-      setMenuVisibleFor(eventName);
-    }, 500); // 500ms for long press
-  };
-
-  const handlePointerUp = () => {
-    if (longPressTimeout.current) {
-      clearTimeout(longPressTimeout.current);
-      longPressTimeout.current = null;
-    }
-  };
-
-  const handlePointerLeave = () => {
-    // マウスが要素外に出た場合もタイマーをクリア
-    if (longPressTimeout.current) {
-      clearTimeout(longPressTimeout.current);
-      longPressTimeout.current = null;
-    }
-  };
-
-  const handleClick = (eventName: string) => {
-    // 長押しでメニューが表示された直後のclickイベントを無視
-    if (longPressTriggeredRef.current) {
-      longPressTriggeredRef.current = false;
-      return;
-    }
-    if (menuVisibleFor === eventName) {
-      setMenuVisibleFor(null);
-    } else if (menuVisibleFor === null) {
-      onSelect(eventName);
-    }
-  };
 
   const handleDelete = (eventName: string) => {
     if (window.confirm(`「${eventName}」を削除しますか？この操作は元に戻せません。`)) {
@@ -165,20 +123,33 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
         <ul className="divide-y divide-slate-200 dark:divide-slate-700">
           {eventNames.map((name) => (
             <li key={name} className="relative" data-menu-owner>
-              <div
-                className="p-4 flex justify-between items-center cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors duration-200"
-                onMouseDown={() => handlePointerDown(name)}
-                onMouseUp={handlePointerUp}
-                onMouseLeave={handlePointerLeave}
-                onTouchStart={() => handlePointerDown(name)}
-                onTouchEnd={handlePointerUp}
-                onClick={() => handleClick(name)}
-                onContextMenu={(e) => e.preventDefault()}
-              >
-                <span className="font-medium text-slate-800 dark:text-slate-200">{name}</span>
-                {menuVisibleFor !== name && (
-                  <span className="text-xs text-slate-400">クリックで開く / 長押しでメニュー</span>
-                )}
+              <div className="flex items-center">
+                <div
+                  className="flex-1 p-4 cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors duration-200"
+                  onClick={() => {
+                    if (menuVisibleFor) {
+                      setMenuVisibleFor(null);
+                    } else {
+                      onSelect(name);
+                    }
+                  }}
+                >
+                  <span className="font-medium text-slate-800 dark:text-slate-200">{name}</span>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setMenuVisibleFor(menuVisibleFor === name ? null : name);
+                  }}
+                  className="p-3 mr-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
+                  aria-label="メニュー"
+                >
+                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                    <circle cx="12" cy="5" r="2" />
+                    <circle cx="12" cy="12" r="2" />
+                    <circle cx="12" cy="19" r="2" />
+                  </svg>
+                </button>
               </div>
             </li>
           ))}
