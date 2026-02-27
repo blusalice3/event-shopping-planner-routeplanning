@@ -16,7 +16,7 @@ import CellItemsPopup from './CellItemsPopup';
 import VisitListPanel from './VisitListPanel';
 import HallOrderPanel from './HallOrderPanel';
 import InsertPositionDialog, { InsertPosition, SmartInsertMode } from './InsertPositionDialog';
-import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
+import { extractNumberFromItemNumber, extractNumberAlphaPrefix } from '../../utils/xlsxMapParser';
 import { isPointInPolygon } from './HallDefinitionPanel';
 
 const normalizeDisplayText = (value: string | null | undefined): string => {
@@ -597,6 +597,30 @@ const MapView: React.FC<MapViewProps> = ({
     (itemId: string) => {
       const item = items.find((i) => i.id === itemId);
       if (!item) return;
+
+      // 同ブロック+ナンバープレフィックス一致時の自動挿入（スマート挿入より優先）
+      const newItemPrefix = extractNumberAlphaPrefix(item.number);
+      if (newItemPrefix && onAddToExecuteListAtPosition) {
+        const itemBlock = item.block?.trim() || '';
+        let lastMatchId: string | null = null;
+
+        executeModeItemIds.forEach((eid) => {
+          const existingItem = items.find((i) => i.id === eid);
+          if (!existingItem) return;
+          const existingBlock = existingItem.block?.trim() || '';
+          if (existingBlock !== itemBlock) return;
+          const existingPrefix = extractNumberAlphaPrefix(existingItem.number);
+          if (existingPrefix === newItemPrefix) {
+            lastMatchId = eid;
+          }
+        });
+
+        if (lastMatchId) {
+          onAddToExecuteListAtPosition(itemId, lastMatchId, 'after');
+          addToHallVisitList(itemId);
+          return;
+        }
+      }
 
       const itemNum = extractNumberFromItemNumber(item.number);
       if (!itemNum) {
