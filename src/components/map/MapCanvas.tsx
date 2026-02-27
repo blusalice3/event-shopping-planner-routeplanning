@@ -1,4 +1,4 @@
-﻿import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
 import {
   DayMapData,
   CellData,
@@ -745,24 +745,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const routeSegments = useMemo(() => {
     if (!isRouteVisible || routePoints.length < 2) return [];
 
-    const blockNameCells = new Set<string>();
-    mapData.blocks.forEach((block) => {
-      for (let r = block.startRow; r <= block.endRow; r++) {
-        for (let c = block.startCol; c <= block.endCol; c++) {
-          const cell = cellsMap.get(`${r}-${c}`);
-          if (cell && cell.value !== null && typeof cell.value === 'string') {
-            blockNameCells.add(`${r}-${c}`);
-          }
-        }
-      }
-    });
-
-    const segments = generateRouteSegments(mapData, routePoints, blockNameCells);
+    const segments = generateRouteSegments(mapData, routePoints);
     return segments.map((seg) => ({
       ...seg,
       path: simplifyPath(seg.path),
     }));
-  }, [isRouteVisible, routePoints, mapData, cellsMap]);
+  }, [isRouteVisible, routePoints, mapData]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
