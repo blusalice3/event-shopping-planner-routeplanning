@@ -1521,6 +1521,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
     ? `${currentVisit.items[0].eventDate}-${currentVisit.items[0].block}-${extractBaseNumber(currentVisit.items[0].number)}`
     : null;
 
+  // 全スペースのvisitKeyをルート順に格納（マップのルート線描画用）
+  const allVisitKeys = useMemo(() => {
+    return currentPhaseVisits.map((visit) => visit.key);
+  }, [currentPhaseVisits]);
+
   // 次の訪問キー（マップ用）
   const nextVisitKey = nextVisit?.items[0]
     ? `${nextVisit.items[0].eventDate}-${nextVisit.items[0].block}-${extractBaseNumber(nextVisit.items[0].number)}`
@@ -1917,6 +1922,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
               hallDefinitions={hallDefinitions}
               rotationAngle={mapRotationAngle}
               onRotationAngleChange={onMapRotationAngleChange}
+              allVisitKeys={allVisitKeys}
+              currentPhaseIndex={currentPhaseIndex}
             />
           </div>
         </div>
@@ -2097,6 +2104,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
               hallDefinitions={hallDefinitions}
               rotationAngle={mapRotationAngle}
               onRotationAngleChange={onMapRotationAngleChange}
+              allVisitKeys={allVisitKeys}
+              currentPhaseIndex={currentPhaseIndex}
             />
           </div>
         </div>
