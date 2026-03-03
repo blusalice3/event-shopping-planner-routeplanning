@@ -906,6 +906,18 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
 
     clearAutoAdvanceTimer();
+
+    // 後回しフェーズ終端で遅参が存在しない場合は、明示的に完了へ遷移する。
+    // moveToNext側の遷移ロジックと同じ判定を入れて、再描画タイミング差を吸収する。
+    if (currentPhase === 'postponed' && currentPhaseIndex >= currentPhaseVisits.length - 1) {
+      const hasLateItems = executeItems.some((item) => item.purchaseStatus === 'Late');
+      if (!hasLateItems) {
+        setLatePhaseItemIds(new Set());
+        setIsCompleted(true);
+        return;
+      }
+    }
+
     moveToNext();
 
     // チェック漏れがある場合は通知を表示
@@ -914,7 +926,16 @@ const FocusMode: React.FC<FocusModeProps> = ({
         setNotification('前のサークルでチェック漏れがあります');
       }, 100);
     }
-  }, [hasUndefinedPricePurchased, currentVisitDisplayItems, clearAutoAdvanceTimer, moveToNext]);
+  }, [
+    hasUndefinedPricePurchased,
+    currentVisitDisplayItems,
+    clearAutoAdvanceTimer,
+    currentPhase,
+    currentPhaseIndex,
+    currentPhaseVisits.length,
+    executeItems,
+    moveToNext,
+  ]);
 
   // 前の訪問先へ
   const handlePrev = useCallback(() => {
@@ -1130,7 +1151,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return;
     }
 
-    // フェーズに訪問先がない場合は、現状態から次フェーズ/完了へ遷移を確定する。
+    // フェーズに訪問先がない場合は、現状態から次フェーズ/完了へ遷移する。
     if (currentPhaseVisits.length === 0) {
       autoAdvanceProcessedRef.current = false;
       clearAutoAdvanceTimer();
@@ -1160,6 +1181,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         const currentLateIds = new Set(
           executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
         );
+
         if (currentLateIds.size > 0) {
           setLatePhaseItemIds(currentLateIds);
           setCurrentPhase('late');
