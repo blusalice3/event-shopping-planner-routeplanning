@@ -1522,9 +1522,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     : null;
 
   // 全スペースのvisitKeyをルート順に格納（マップのルート線描画用）
-  const allVisitKeys = useMemo(() => {
-    return currentPhaseVisits.map((visit) => visit.key);
-  }, [currentPhaseVisits]);
+  const allVisitKeys = currentPhaseVisits.map((visit) => visit.key);
 
   // 次の訪問キー（マップ用）
   const nextVisitKey = nextVisit?.items[0]
