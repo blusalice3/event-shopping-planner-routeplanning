@@ -1130,9 +1130,46 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return;
     }
 
-    // フェーズに訪問先がない場合も何もしない
+    // フェーズに訪問先がない場合は、現状態から次フェーズ/完了へ遷移を確定する。
     if (currentPhaseVisits.length === 0) {
       autoAdvanceProcessedRef.current = false;
+      clearAutoAdvanceTimer();
+
+      if (currentPhase === 'normal') {
+        const postponedIds = new Set(
+          executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
+        );
+        const lateIds = new Set(
+          executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+        );
+
+        if (postponedIds.size > 0) {
+          setPostponedPhaseItemIds(postponedIds);
+          setLatePhaseItemIds(lateIds);
+          setCurrentPhase('postponed');
+          setCurrentPhaseIndex(0);
+        } else if (lateIds.size > 0) {
+          setPostponedPhaseItemIds(postponedIds);
+          setLatePhaseItemIds(lateIds);
+          setCurrentPhase('late');
+          setCurrentPhaseIndex(0);
+        } else {
+          setIsCompleted(true);
+        }
+      } else if (currentPhase === 'postponed') {
+        const currentLateIds = new Set(
+          executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+        );
+        if (currentLateIds.size > 0) {
+          setLatePhaseItemIds(currentLateIds);
+          setCurrentPhase('late');
+          setCurrentPhaseIndex(0);
+        } else {
+          setIsCompleted(true);
+        }
+      } else {
+        setIsCompleted(true);
+      }
       return;
     }
 
