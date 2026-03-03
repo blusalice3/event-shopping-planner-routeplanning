@@ -47,7 +47,7 @@ import {
 import VisitListPanel from './components/VisitListPanel';
 import FocusModeContainer from './features/map/components/FocusModeContainer';
 import { extractEventDates } from './utils/eventDates';
-import { importFromXlsx, downloadBlob, type ItemFallbackWarning } from './utils/exportImport';
+import type { ItemFallbackWarning } from './utils/exportImport';
 import {
   buildBulkAddUiPlan,
   buildBulkAddEventMetadata,
@@ -67,7 +67,6 @@ import {
   buildEventUpdateDiffFromSpreadsheet,
   resolveSpreadsheetSource,
 } from './features/events/updateFlow';
-import { buildEventExportFile, hasExportableItems } from './features/events/exportFlow';
 import { toImportedEventData } from './features/events/fileImport';
 import { removeRecordKey, renameRecordKey, upsertRecordKey } from './features/events/recordOps';
 import {
@@ -107,6 +106,9 @@ const sortLabels: Record<SortState, string> = {
   None: '未購入',
   Purchased: '購入済',
 };
+
+const hasExportableItems = (items: ShoppingItem[] | undefined): items is ShoppingItem[] =>
+  !!items && items.length > 0;
 
 // 集中モードのセッションキーは「イベント名::日付」で統一する。
 const buildFocusSessionKey = (eventName: string, eventDate: string): string =>
@@ -2423,6 +2425,11 @@ const App: React.FC = () => {
       }
 
       try {
+        const [{ buildEventExportFile }, { downloadBlob }] = await Promise.all([
+          import('./features/events/exportFlow'),
+          import('./utils/exportImport'),
+        ]);
+
         const { blob, filename } = await buildEventExportFile(
           exportEventName,
           itemsToExport,
@@ -2468,6 +2475,7 @@ const App: React.FC = () => {
       e.target.value = '';
 
       try {
+        const { importFromXlsx } = await import('./utils/exportImport');
         const result = await importFromXlsx(file);
 
         if (!result.success) {

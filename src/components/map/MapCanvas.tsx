@@ -10,7 +10,7 @@ import {
   MIN_ZOOM,
   MAX_ZOOM,
 } from '../../types';
-import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
+import { extractNumberFromItemNumber } from '../../utils/itemNumber';
 import { generateRouteSegments, simplifyPath } from '../../utils/pathfinding';
 import MapCanvasPresentation from './MapCanvasPresentation';
 

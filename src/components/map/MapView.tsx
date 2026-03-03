@@ -16,7 +16,7 @@ import CellItemsPopup from './CellItemsPopup';
 import VisitListPanel from './VisitListPanel';
 import HallOrderPanel from './HallOrderPanel';
 import InsertPositionDialog, { InsertPosition, SmartInsertMode } from './InsertPositionDialog';
-import { extractNumberFromItemNumber, extractNumberAlphaPrefix } from '../../utils/xlsxMapParser';
+import { extractNumberFromItemNumber, extractNumberAlphaPrefix } from '../../utils/itemNumber';
 import { isPointInPolygon } from './HallDefinitionPanel';
 
 const normalizeDisplayText = (value: string | null | undefined): string => {
@@ -904,5 +904,4 @@ const MapView: React.FC<MapViewProps> = ({
 };
 
 export default MapView;
-
 
