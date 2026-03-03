@@ -12,12 +12,30 @@ export default defineConfig({
         name: '即売会 購入巡回表',
         short_name: '巡回表',
         description: '同人誌即売会の購入リスト管理アプリ',
+        id: '/',
         theme_color: '#2563eb',
         background_color: '#f8fafc',
         display: 'standalone',
         orientation: 'portrait',
         start_url: '/',
-        icons: [],
+        icons: [
+          {
+            src: '/pwa-192.png',
+            sizes: '192x192',
+            type: 'image/png',
+          },
+          {
+            src: '/pwa-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+          },
+          {
+            src: '/pwa-512.png',
+            sizes: '512x512',
+            type: 'image/png',
+            purpose: 'maskable',
+          },
+        ],
       },
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
