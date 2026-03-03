@@ -30,6 +30,8 @@ interface FocusModeMapCanvasProps {
   hallDefinitions?: HallDefinition[];
   rotationAngle?: number;
   onRotationAngleChange?: (angle: number) => void;
+  allVisitKeys?: string[];
+  currentPhaseIndex?: number;
 }
 
 const BASE_CELL_SIZE = 28;
@@ -154,6 +156,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   hallDefinitions,
   rotationAngle = 0,
   onRotationAngleChange,
+  allVisitKeys = [],
+  currentPhaseIndex = 0,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -226,6 +230,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         allProcessed: boolean;
         hasPostponed: boolean;
         hasLate: boolean;
+        allPostponed: boolean;
+        allLate: boolean;
         isVisited: boolean;
       }
     >();
@@ -268,6 +274,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         allProcessed: true,
         hasPostponed: false,
         hasLate: false,
+        allPostponed: true,
+        allLate: true,
         isVisited: false,
       };
 
@@ -282,9 +290,13 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
       if (item.purchaseStatus === 'Postpone') {
         existing.hasPostponed = true;
+      } else {
+        existing.allPostponed = false;
       }
       if (item.purchaseStatus === 'Late') {
         existing.hasLate = true;
+      } else {
+        existing.allLate = false;
       }
 
       states.set(key, existing);
@@ -347,39 +359,77 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return null;
   }, [cellStates]);
 
-  const routePath = useMemo(() => {
-    if (!currentCellCoords || !nextCellCoords) return [];
+  // ラベル決定ロジック: 各セルに表示するテキストと色を決定
+  const cellLabels = useMemo(() => {
+    const labels = new Map<
+      string,
+      {
+        text: string;
+        bgColor: string;
+        textColor: string;
+      }
+    >();
 
-    const path = findPath(
-      mapData,
-      currentCellCoords.row,
-      currentCellCoords.col,
-      nextCellCoords.row,
-      nextCellCoords.col,
-    );
+    cellStates.forEach((state, key) => {
+      if (!state.hasItems) return;
 
-    return simplifyPath(path);
-  }, [currentCellCoords, nextCellCoords, mapData]);
+      if (state.isCurrentPosition) {
+        if (currentPhaseIndex === 0) {
+          // フェーズの最初のスペース
+          if (currentPhase === 'normal') {
+            labels.set(key, { text: '始', bgColor: 'rgba(255,109,0,0.5)', textColor: '#FFFFFF' });
+          } else if (currentPhase === 'postponed') {
+            labels.set(key, { text: '後始', bgColor: 'rgba(156,39,176,0.5)', textColor: '#FFFFFF' });
+          } else {
+            labels.set(key, { text: '遅始', bgColor: 'rgba(33,150,243,0.5)', textColor: '#FFFFFF' });
+          }
+        } else {
+          labels.set(key, { text: '次', bgColor: 'rgba(255,109,0,0.5)', textColor: '#FFFFFF' });
+        }
+      } else if (state.allProcessed && state.allPostponed) {
+        labels.set(key, { text: '後', bgColor: 'rgba(156,39,176,0.4)', textColor: 'rgba(156,39,176,0.9)' });
+      } else if (state.allProcessed && state.allLate) {
+        labels.set(key, { text: '遅', bgColor: 'rgba(33,150,243,0.4)', textColor: 'rgba(33,150,243,0.9)' });
+      } else if (state.allProcessed) {
+        labels.set(key, { text: '済', bgColor: 'rgba(158,158,158,0.5)', textColor: 'rgba(76,175,80,0.8)' });
+      } else if (state.allNone) {
+        labels.set(key, { text: '未', bgColor: 'rgba(66,165,245,0.3)', textColor: 'rgba(33,150,243,0.8)' });
+      }
+    });
 
-  const prevRoutePath = useMemo(() => {
-    if (!prevCellCoords || !currentCellCoords) return [];
+    return labels;
+  }, [cellStates, currentPhaseIndex, currentPhase]);
 
-    if (
-      prevCellCoords.row === currentCellCoords.row &&
-      prevCellCoords.col === currentCellCoords.col
-    )
-      return [];
+  // 全スペースのセル座標をルート順に取得
+  const allVisitCellCoords = useMemo(() => {
+    const coords: { row: number; col: number; key: string }[] = [];
+    for (const visitKey of allVisitKeys) {
+      for (const [cellKey, state] of cellStates.entries()) {
+        if (state.visitKeys.has(visitKey)) {
+          const [row, col] = cellKey.split('-').map(Number);
+          coords.push({ row, col, key: cellKey });
+          break;
+        }
+      }
+    }
+    return coords;
+  }, [allVisitKeys, cellStates]);
 
-    const path = findPath(
-      mapData,
-      prevCellCoords.row,
-      prevCellCoords.col,
-      currentCellCoords.row,
-      currentCellCoords.col,
-    );
-
-    return simplifyPath(path);
-  }, [prevCellCoords, currentCellCoords, mapData]);
+  // A*経路キャッシュ: 全スペース間のルート線を事前計算
+  const routeSegments = useMemo(() => {
+    const segments: { path: { row: number; col: number }[]; segmentIndex: number }[] = [];
+    for (let i = 0; i < allVisitCellCoords.length - 1; i++) {
+      const from = allVisitCellCoords[i];
+      const to = allVisitCellCoords[i + 1];
+      if (from.row === to.row && from.col === to.col) {
+        segments.push({ path: [], segmentIndex: i });
+        continue;
+      }
+      const path = findPath(mapData, from.row, from.col, to.row, to.col);
+      segments.push({ path: simplifyPath(path), segmentIndex: i });
+    }
+    return segments;
+  }, [allVisitCellCoords, mapData]);
 
   const findHallForCell = useCallback(
     (row: number, col: number): HallDefinition | null => {
@@ -1064,16 +1114,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         ctx.fillRect(x, y, width, height);
       }
 
-      const state = cellStates.get(`${cell.row}-${cell.col}`);
+      const cellKey = `${cell.row}-${cell.col}`;
+      const state = cellStates.get(cellKey);
       if (state && state.hasItems) {
-        if (state.isCurrentPosition) {
-          ctx.fillStyle = 'rgba(34, 197, 94, 0.6)';
-          ctx.fillRect(x, y, width, height);
-        } else if (state.isNextDestination) {
-          ctx.fillStyle = 'rgba(255, 152, 0, 0.6)';
-          ctx.fillRect(x, y, width, height);
-        } else if (effectiveShowPrevRef.current && state.isPreviousPosition) {
-          ctx.fillStyle = 'rgba(139, 148, 191, 0.45)';
+        const label = cellLabels.get(cellKey);
+        if (label) {
+          ctx.fillStyle = label.bgColor;
           ctx.fillRect(x, y, width, height);
         } else if (state.isVisited) {
           ctx.fillStyle = 'rgba(158, 158, 158, 0.5)';
@@ -1083,9 +1129,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           ctx.fillRect(x, y, width, height);
         } else if (state.hasLate && currentPhase !== 'late') {
           ctx.fillStyle = 'rgba(33, 150, 243, 0.4)';
-          ctx.fillRect(x, y, width, height);
-        } else if (state.allNone) {
-          ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';
           ctx.fillRect(x, y, width, height);
         }
       }
@@ -1295,138 +1338,49 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
     }
 
-    const isPrevSameAsCurrent =
-      prevCellCoords &&
-      currentCellCoords &&
-      prevCellCoords.row === currentCellCoords.row &&
-      prevCellCoords.col === currentCellCoords.col;
+    // ルート線描画: 全スペースをA*経路で接続（セグメントごとに色分け）
+    if (!isRotationInteracting && routeSegments.length > 0) {
+      routeSegments.forEach((segment) => {
+        if (segment.path.length < 2) return;
 
-    if (
-      !isRotationInteracting &&
-      effectiveShowPrevRef.current &&
-      prevRoutePath.length >= 2 &&
-      !isPrevSameAsCurrent
-    ) {
-      const lineWidth = Math.max(2, cellSize * 0.08);
+        const lineWidth = Math.max(2, cellSize * 0.08);
+        ctx.beginPath();
+        ctx.lineWidth = lineWidth;
+        ctx.lineCap = 'round';
+        ctx.setLineDash([]);
 
-      ctx.beginPath();
-      ctx.strokeStyle = 'rgba(156, 163, 175, 0.6)';
-      ctx.lineWidth = lineWidth;
-      ctx.lineCap = 'round';
-      ctx.setLineDash([]);
-
-      prevRoutePath.forEach((point, i) => {
-        const px = (point.col - 0.5) * cellSize;
-        const py = (point.row - 0.5) * cellSize;
-
-        if (i === 0) {
-          ctx.moveTo(px, py);
+        // セグメントの色を決定
+        if (segment.segmentIndex < currentPhaseIndex - 1) {
+          // 通過済み区間: 灰色
+          ctx.strokeStyle = 'rgba(156, 163, 175, 0.4)';
+        } else if (segment.segmentIndex === currentPhaseIndex - 1) {
+          // 直前→現在地の区間: 橙
+          ctx.strokeStyle = 'rgba(255, 109, 0, 0.6)';
+          ctx.lineWidth = Math.max(3, cellSize * 0.1);
         } else {
-          ctx.lineTo(px, py);
+          // 未来の区間: 薄青
+          ctx.strokeStyle = 'rgba(66, 165, 245, 0.4)';
         }
+
+        segment.path.forEach((point, i) => {
+          const px = (point.col - 0.5) * cellSize;
+          const py = (point.row - 0.5) * cellSize;
+          if (i === 0) {
+            ctx.moveTo(px, py);
+          } else {
+            ctx.lineTo(px, py);
+          }
+        });
+        ctx.stroke();
       });
-      ctx.stroke();
-
-      if (prevRoutePath.length >= 1) {
-        const first = prevRoutePath[0];
-        const startX = (first.col - 0.5) * cellSize;
-        const startY = (first.row - 0.5) * cellSize;
-        const dotRadius = Math.max(3, cellSize * 0.1);
-        ctx.beginPath();
-        ctx.fillStyle = 'rgba(156, 163, 175, 0.7)';
-        ctx.arc(startX, startY, dotRadius, 0, Math.PI * 2);
-        ctx.fill();
-      }
-
-      if (prevRoutePath.length >= 2) {
-        const last = prevRoutePath[prevRoutePath.length - 1];
-        const prev = prevRoutePath[prevRoutePath.length - 2];
-
-        const endX = (last.col - 0.5) * cellSize;
-        const endY = (last.row - 0.5) * cellSize;
-        const angle = Math.atan2(
-          (last.row - prev.row) * cellSize,
-          (last.col - prev.col) * cellSize,
-        );
-
-        const arrowSize = Math.max(6, cellSize * 0.2);
-        ctx.beginPath();
-        ctx.fillStyle = 'rgba(156, 163, 175, 0.7)';
-        ctx.moveTo(endX, endY);
-        ctx.lineTo(
-          endX - arrowSize * Math.cos(angle - Math.PI / 6),
-          endY - arrowSize * Math.sin(angle - Math.PI / 6),
-        );
-        ctx.lineTo(
-          endX - arrowSize * Math.cos(angle + Math.PI / 6),
-          endY - arrowSize * Math.sin(angle + Math.PI / 6),
-        );
-        ctx.closePath();
-        ctx.fill();
-      }
     }
 
-    const isSamePosition =
-      currentCellCoords &&
-      nextCellCoords &&
-      currentCellCoords.row === nextCellCoords.row &&
-      currentCellCoords.col === nextCellCoords.col;
-
-    if (!isRotationInteracting && routePath.length >= 2 && !isSamePosition) {
-      const lineWidth = Math.max(3, cellSize * 0.1);
-
-      ctx.beginPath();
-      ctx.strokeStyle = '#FF5722';
-      ctx.lineWidth = lineWidth;
-      ctx.lineCap = 'round';
-      ctx.setLineDash([cellSize * 0.2, cellSize * 0.1]);
-
-      routePath.forEach((point, i) => {
-        const px = (point.col - 0.5) * cellSize;
-        const py = (point.row - 0.5) * cellSize;
-
-        if (i === 0) {
-          ctx.moveTo(px, py);
-        } else {
-          ctx.lineTo(px, py);
-        }
-      });
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      if (routePath.length >= 2) {
-        const last = routePath[routePath.length - 1];
-        const prev = routePath[routePath.length - 2];
-
-        const endX = (last.col - 0.5) * cellSize;
-        const endY = (last.row - 0.5) * cellSize;
-        const angle = Math.atan2(
-          (last.row - prev.row) * cellSize,
-          (last.col - prev.col) * cellSize,
-        );
-
-        const arrowSize = Math.max(8, cellSize * 0.3);
-        ctx.beginPath();
-        ctx.fillStyle = '#FF5722';
-        ctx.moveTo(endX, endY);
-        ctx.lineTo(
-          endX - arrowSize * Math.cos(angle - Math.PI / 6),
-          endY - arrowSize * Math.sin(angle - Math.PI / 6),
-        );
-        ctx.lineTo(
-          endX - arrowSize * Math.cos(angle + Math.PI / 6),
-          endY - arrowSize * Math.sin(angle + Math.PI / 6),
-        );
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
-
+    // ラベルテキスト描画: 各スペースに始/次/済/未/後/遅/後始/遅始を表示
     if (!isRotationInteracting) {
-      cellStates.forEach((state, key) => {
-        if (!state.hasItems) return;
-
+      cellLabels.forEach((label, key) => {
         const [row, col] = key.split('-').map(Number);
+        if (!isCellVisible(row, col, 1, 1)) return;
+
         const x = (col - 1) * cellSize;
         const y = (row - 1) * cellSize;
 
@@ -1434,77 +1388,22 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
         const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
 
-        if (state.hasPostponed && !state.allNone && currentPhase !== 'postponed') {
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-          ctx.fillRect(x, y, width, height);
-
-          const iconSize = Math.max(12, cellSize * 0.4);
-          ctx.font = `bold ${iconSize}px sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillStyle = '#7B1FA2';
-          drawUprightText('後', x + width / 2, y + height / 2);
+        // 現在の目的地（始/次/後始/遅始）は枠線で強調
+        const state = cellStates.get(key);
+        if (state?.isCurrentPosition) {
+          ctx.strokeStyle = 'rgba(255, 109, 0, 0.8)';
+          ctx.lineWidth = Math.max(3, cellSize * 0.12);
+          ctx.strokeRect(x - 1, y - 1, width + 2, height + 2);
         }
 
-        if (state.hasLate && !state.allNone && currentPhase !== 'late') {
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-          ctx.fillRect(x, y, width, height);
-
-          const iconSize = Math.max(12, cellSize * 0.4);
-          ctx.font = `bold ${iconSize}px sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillStyle = '#1976D2';
-          drawUprightText('遅', x + width / 2, y + height / 2);
-        }
+        // ラベルテキスト
+        const fontSize = Math.max(10, cellSize * 0.35);
+        ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = label.textColor;
+        drawUprightText(label.text, x + width / 2, y + height / 2);
       });
-    }
-
-    if (!isRotationInteracting && effectiveShowPrevRef.current && prevCellCoords && !isPrevSameAsCurrent) {
-      const x = (prevCellCoords.col - 1) * cellSize;
-      const y = (prevCellCoords.row - 1) * cellSize;
-
-      ctx.strokeStyle = 'rgba(107, 114, 128, 0.6)';
-      ctx.lineWidth = Math.max(2, cellSize * 0.08);
-      ctx.setLineDash([cellSize * 0.15, cellSize * 0.1]);
-      ctx.strokeRect(x - 1, y - 1, cellSize + 2, cellSize + 2);
-      ctx.setLineDash([]);
-
-      const markerSize = Math.max(12, cellSize * 0.38);
-      ctx.font = `${markerSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      drawUprightText('🔙', x + cellSize / 2, y - 1);
-    }
-
-    if (!isRotationInteracting && nextCellCoords) {
-      const x = (nextCellCoords.col - 1) * cellSize;
-      const y = (nextCellCoords.row - 1) * cellSize;
-
-      ctx.strokeStyle = '#FF6D00';
-      ctx.lineWidth = Math.max(3, cellSize * 0.12);
-      ctx.strokeRect(x - 1, y - 1, cellSize + 2, cellSize + 2);
-
-      const markerSize = Math.max(14, cellSize * 0.45);
-      ctx.font = `${markerSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      drawUprightText('🚩', x + cellSize / 2, y - 2);
-    }
-
-    if (!isRotationInteracting && currentCellCoords) {
-      const x = (currentCellCoords.col - 1) * cellSize;
-      const y = (currentCellCoords.row - 1) * cellSize;
-
-      ctx.strokeStyle = '#22c55e';
-      ctx.lineWidth = Math.max(4, cellSize * 0.15);
-      ctx.strokeRect(x - 2, y - 2, cellSize + 4, cellSize + 4);
-
-      const markerSize = Math.max(16, cellSize * 0.5);
-      ctx.font = `${markerSize}px "Segoe UI Emoji", "Apple Color Emoji", sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'bottom';
-      drawUprightText('📍', x + cellSize / 2, y - 2);
     }
 
     ctx.restore();
@@ -1512,16 +1411,15 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     mapData,
     cellSize,
     cellStates,
+    cellLabels,
     mergedCellsMap,
-    routePath,
-    prevRoutePath,
+    routeSegments,
+    currentPhaseIndex,
     dpr,
     isDetailedView,
     showNumbers,
     showBorders,
     currentCellCoords,
-    nextCellCoords,
-    prevCellCoords,
     currentPhase,
     isDarkMode,
     isRotationInteracting,
