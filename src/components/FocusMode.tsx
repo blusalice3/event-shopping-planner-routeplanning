@@ -1328,11 +1328,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     setNewItemForm((prev) => ({ ...prev, price: e.target.value }));
   }, []);
 
-  // 全スペースのvisitKeyをルート順に格納（マップのルート線描画用）
-  const allVisitKeys = useMemo(() => {
-    return currentPhaseVisits.map((visit) => visit.key);
-  }, [currentPhaseVisits]);
-
   // ===== フックの移動ここまで =====
 
   // 訪問先がない場合
@@ -1525,6 +1520,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const currentVisitKey = currentVisit?.items[0]
     ? `${currentVisit.items[0].eventDate}-${currentVisit.items[0].block}-${extractBaseNumber(currentVisit.items[0].number)}`
     : null;
+
+  // 全スペースのvisitKeyをルート順に格納（マップのルート線描画用）
+  const allVisitKeys = useMemo(() => {
+    return currentPhaseVisits.map((visit) => visit.key);
+  }, [currentPhaseVisits]);
 
   // 次の訪問キー（マップ用）
   const nextVisitKey = nextVisit?.items[0]
