@@ -1330,8 +1330,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // ===== フックの移動ここまで =====
 
-  // 訪問先がない場合
-  if (allVisits.length === 0) {
+  // 訪問先がない場合（完了状態を優先するため未完了時のみ表示）
+  if (!isCompleted && allVisits.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
         <div className="text-6xl mb-4">📋</div>
