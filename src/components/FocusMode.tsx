@@ -624,9 +624,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
       setLatePhaseItemIds(lateIds);
     } else if (currentPhase === 'postponed' && targetPhase === 'late') {
       // 後回しフェーズから遅参へ：遅参アイテムを更新
-      const currentLateIds = new Set(
-        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
-      );
+      const currentLateIds = new Set(latePhaseItemIds);
+      executeItems.forEach((item) => {
+        if (item.purchaseStatus === 'Late') {
+          currentLateIds.add(item.id);
+        }
+      });
       setLatePhaseItemIds(currentLateIds);
     }
 
@@ -673,9 +676,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
       );
       setLatePhaseItemIds(lateIds);
     } else if (currentPhase === 'postponed' && targetPhase === 'late') {
-      const currentLateIds = new Set(
-        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
-      );
+      const currentLateIds = new Set(latePhaseItemIds);
+      executeItems.forEach((item) => {
+        if (item.purchaseStatus === 'Late') {
+          currentLateIds.add(item.id);
+        }
+      });
       setLatePhaseItemIds(currentLateIds);
     }
 
@@ -837,9 +843,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
         }
       } else if (currentPhase === 'postponed') {
         // 後回しフェーズ終了 → 遅参アイテムIDを更新（後回しフェーズで遅参にしたものを追加）
-        const currentLateIds = new Set(
-        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
-      );
+        const currentLateIds = new Set(latePhaseItemIds);
+        executeItems.forEach((item) => {
+          if (item.purchaseStatus === 'Late') {
+            currentLateIds.add(item.id);
+          }
+        });
         setLatePhaseItemIds(currentLateIds);
 
         if (currentLateIds.size > 0) {
@@ -906,18 +915,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
 
     clearAutoAdvanceTimer();
-
-    // 後回しフェーズ終端で遅参が存在しない場合は、明示的に完了へ遷移する。
-    // moveToNext側の遷移ロジックと同じ判定を入れて、再描画タイミング差を吸収する。
-    if (currentPhase === 'postponed' && currentPhaseIndex >= currentPhaseVisits.length - 1) {
-      const hasLateItems = executeItems.some((item) => item.purchaseStatus === 'Late');
-      if (!hasLateItems) {
-        setLatePhaseItemIds(new Set());
-        setIsCompleted(true);
-        return;
-      }
-    }
-
     moveToNext();
 
     // チェック漏れがある場合は通知を表示
@@ -926,16 +923,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         setNotification('前のサークルでチェック漏れがあります');
       }, 100);
     }
-  }, [
-    hasUndefinedPricePurchased,
-    currentVisitDisplayItems,
-    clearAutoAdvanceTimer,
-    currentPhase,
-    currentPhaseIndex,
-    currentPhaseVisits.length,
-    executeItems,
-    moveToNext,
-  ]);
+  }, [hasUndefinedPricePurchased, currentVisitDisplayItems, clearAutoAdvanceTimer, moveToNext]);
 
   // 前の訪問先へ
   const handlePrev = useCallback(() => {
@@ -1151,47 +1139,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return;
     }
 
-    // フェーズに訪問先がない場合は、現状態から次フェーズ/完了へ遷移する。
+    // フェーズに訪問先がない場合も何もしない
     if (currentPhaseVisits.length === 0) {
       autoAdvanceProcessedRef.current = false;
-      clearAutoAdvanceTimer();
-
-      if (currentPhase === 'normal') {
-        const postponedIds = new Set(
-          executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
-        );
-        const lateIds = new Set(
-          executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
-        );
-
-        if (postponedIds.size > 0) {
-          setPostponedPhaseItemIds(postponedIds);
-          setLatePhaseItemIds(lateIds);
-          setCurrentPhase('postponed');
-          setCurrentPhaseIndex(0);
-        } else if (lateIds.size > 0) {
-          setPostponedPhaseItemIds(postponedIds);
-          setLatePhaseItemIds(lateIds);
-          setCurrentPhase('late');
-          setCurrentPhaseIndex(0);
-        } else {
-          setIsCompleted(true);
-        }
-      } else if (currentPhase === 'postponed') {
-        const currentLateIds = new Set(
-          executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
-        );
-
-        if (currentLateIds.size > 0) {
-          setLatePhaseItemIds(currentLateIds);
-          setCurrentPhase('late');
-          setCurrentPhaseIndex(0);
-        } else {
-          setIsCompleted(true);
-        }
-      } else {
-        setIsCompleted(true);
-      }
       return;
     }
 
@@ -1244,9 +1194,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
       }
     } else if (currentPhase === 'postponed') {
       // 後回しフェーズ終了 → 遅参フェーズへ
-      const currentLateIds = new Set(
-        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
-      );
+      const currentLateIds = new Set(latePhaseItemIds);
+      executeItems.forEach((item) => {
+        if (item.purchaseStatus === 'Late') {
+          currentLateIds.add(item.id);
+        }
+      });
 
       if (currentLateIds.size > 0) {
         setLatePhaseItemIds(currentLateIds);
@@ -1398,17 +1351,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }
 
-  // 自動スキップ処理中はローディング表示（状態変更を待つ）
-  if (isAutoAdvancing) {
-    return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
-        <div className="text-4xl mb-4 animate-spin">⏳</div>
-        <p className="text-slate-500 dark:text-slate-400">次の訪問先を探しています...</p>
-      </div>
-    );
-  }
-
-  // 完了画面
+  // 完了画面（isAutoAdvancingより先にチェックして完了状態を確実に表示する）
   if (isCompleted) {
     // 購入結果サマリーを計算
     const summary = (() => {
@@ -1553,6 +1496,16 @@ const FocusMode: React.FC<FocusModeProps> = ({
             <span>実行モードへ</span>
           </button>
         </div>
+      </div>
+    );
+  }
+
+  // 自動スキップ処理中はローディング表示（状態変更を待つ）
+  if (isAutoAdvancing) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
+        <div className="text-4xl mb-4 animate-spin">⏳</div>
+        <p className="text-slate-500 dark:text-slate-400">次の訪問先を探しています...</p>
       </div>
     );
   }
