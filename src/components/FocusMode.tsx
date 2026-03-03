@@ -624,12 +624,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
       setLatePhaseItemIds(lateIds);
     } else if (currentPhase === 'postponed' && targetPhase === 'late') {
       // 後回しフェーズから遅参へ：遅参アイテムを更新
-      const currentLateIds = new Set(latePhaseItemIds);
-      executeItems.forEach((item) => {
-        if (item.purchaseStatus === 'Late') {
-          currentLateIds.add(item.id);
-        }
-      });
+      const currentLateIds = new Set(
+        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+      );
       setLatePhaseItemIds(currentLateIds);
     }
 
@@ -676,12 +673,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
       );
       setLatePhaseItemIds(lateIds);
     } else if (currentPhase === 'postponed' && targetPhase === 'late') {
-      const currentLateIds = new Set(latePhaseItemIds);
-      executeItems.forEach((item) => {
-        if (item.purchaseStatus === 'Late') {
-          currentLateIds.add(item.id);
-        }
-      });
+      const currentLateIds = new Set(
+        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+      );
       setLatePhaseItemIds(currentLateIds);
     }
 
@@ -843,12 +837,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
         }
       } else if (currentPhase === 'postponed') {
         // 後回しフェーズ終了 → 遅参アイテムIDを更新（後回しフェーズで遅参にしたものを追加）
-        const currentLateIds = new Set(latePhaseItemIds);
-        executeItems.forEach((item) => {
-          if (item.purchaseStatus === 'Late') {
-            currentLateIds.add(item.id);
-          }
-        });
+        const currentLateIds = new Set(
+        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+      );
         setLatePhaseItemIds(currentLateIds);
 
         if (currentLateIds.size > 0) {
@@ -1139,9 +1130,46 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return;
     }
 
-    // フェーズに訪問先がない場合も何もしない
+    // フェーズに訪問先がない場合は、現状態から次フェーズ/完了へ遷移を確定する。
     if (currentPhaseVisits.length === 0) {
       autoAdvanceProcessedRef.current = false;
+      clearAutoAdvanceTimer();
+
+      if (currentPhase === 'normal') {
+        const postponedIds = new Set(
+          executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
+        );
+        const lateIds = new Set(
+          executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+        );
+
+        if (postponedIds.size > 0) {
+          setPostponedPhaseItemIds(postponedIds);
+          setLatePhaseItemIds(lateIds);
+          setCurrentPhase('postponed');
+          setCurrentPhaseIndex(0);
+        } else if (lateIds.size > 0) {
+          setPostponedPhaseItemIds(postponedIds);
+          setLatePhaseItemIds(lateIds);
+          setCurrentPhase('late');
+          setCurrentPhaseIndex(0);
+        } else {
+          setIsCompleted(true);
+        }
+      } else if (currentPhase === 'postponed') {
+        const currentLateIds = new Set(
+          executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+        );
+        if (currentLateIds.size > 0) {
+          setLatePhaseItemIds(currentLateIds);
+          setCurrentPhase('late');
+          setCurrentPhaseIndex(0);
+        } else {
+          setIsCompleted(true);
+        }
+      } else {
+        setIsCompleted(true);
+      }
       return;
     }
 
@@ -1194,12 +1222,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
       }
     } else if (currentPhase === 'postponed') {
       // 後回しフェーズ終了 → 遅参フェーズへ
-      const currentLateIds = new Set(latePhaseItemIds);
-      executeItems.forEach((item) => {
-        if (item.purchaseStatus === 'Late') {
-          currentLateIds.add(item.id);
-        }
-      });
+      const currentLateIds = new Set(
+        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+      );
 
       if (currentLateIds.size > 0) {
         setLatePhaseItemIds(currentLateIds);
@@ -1520,6 +1545,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const currentVisitKey = currentVisit?.items[0]
     ? `${currentVisit.items[0].eventDate}-${currentVisit.items[0].block}-${extractBaseNumber(currentVisit.items[0].number)}`
     : null;
+
+  // 全スペースのvisitKeyをルート順に格納（マップのルート線描画用）
+  const allVisitKeys = useMemo(() => {
+    return currentPhaseVisits.map((visit) => visit.key);
+  }, [currentPhaseVisits]);
 
   // 次の訪問キー（マップ用）
   const nextVisitKey = nextVisit?.items[0]
@@ -1917,6 +1947,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
               hallDefinitions={hallDefinitions}
               rotationAngle={mapRotationAngle}
               onRotationAngleChange={onMapRotationAngleChange}
+              allVisitKeys={allVisitKeys}
+              currentPhaseIndex={currentPhaseIndex}
             />
           </div>
         </div>
@@ -2097,6 +2129,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
               hallDefinitions={hallDefinitions}
               rotationAngle={mapRotationAngle}
               onRotationAngleChange={onMapRotationAngleChange}
+              allVisitKeys={allVisitKeys}
+              currentPhaseIndex={currentPhaseIndex}
             />
           </div>
         </div>
