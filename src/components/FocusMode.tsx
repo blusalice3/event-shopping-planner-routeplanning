@@ -624,12 +624,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
       setLatePhaseItemIds(lateIds);
     } else if (currentPhase === 'postponed' && targetPhase === 'late') {
       // 後回しフェーズから遅参へ：遅参アイテムを更新
-      const currentLateIds = new Set(latePhaseItemIds);
-      executeItems.forEach((item) => {
-        if (item.purchaseStatus === 'Late') {
-          currentLateIds.add(item.id);
-        }
-      });
+      const currentLateIds = new Set(
+        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+      );
       setLatePhaseItemIds(currentLateIds);
     }
 
@@ -676,12 +673,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
       );
       setLatePhaseItemIds(lateIds);
     } else if (currentPhase === 'postponed' && targetPhase === 'late') {
-      const currentLateIds = new Set(latePhaseItemIds);
-      executeItems.forEach((item) => {
-        if (item.purchaseStatus === 'Late') {
-          currentLateIds.add(item.id);
-        }
-      });
+      const currentLateIds = new Set(
+        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+      );
       setLatePhaseItemIds(currentLateIds);
     }
 
@@ -843,12 +837,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
         }
       } else if (currentPhase === 'postponed') {
         // 後回しフェーズ終了 → 遅参アイテムIDを更新（後回しフェーズで遅参にしたものを追加）
-        const currentLateIds = new Set(latePhaseItemIds);
-        executeItems.forEach((item) => {
-          if (item.purchaseStatus === 'Late') {
-            currentLateIds.add(item.id);
-          }
-        });
+        const currentLateIds = new Set(
+        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+      );
         setLatePhaseItemIds(currentLateIds);
 
         if (currentLateIds.size > 0) {
@@ -1194,12 +1185,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
       }
     } else if (currentPhase === 'postponed') {
       // 後回しフェーズ終了 → 遅参フェーズへ
-      const currentLateIds = new Set(latePhaseItemIds);
-      executeItems.forEach((item) => {
-        if (item.purchaseStatus === 'Late') {
-          currentLateIds.add(item.id);
-        }
-      });
+      const currentLateIds = new Set(
+        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+      );
 
       if (currentLateIds.size > 0) {
         setLatePhaseItemIds(currentLateIds);
