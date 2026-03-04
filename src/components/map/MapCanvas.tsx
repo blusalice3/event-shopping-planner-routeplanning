@@ -2371,7 +2371,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         if (metrics) {
           handleTapAtViewPosition(metrics.viewX, metrics.viewY, e.pointerType);
           const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-          suppressClickUntilRef.current = now + 400;
+          suppressClickUntilRef.current = now + 450;
         }
       }
 
@@ -2414,6 +2414,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 };
 
 export default MapCanvas;
+
 
 
 
