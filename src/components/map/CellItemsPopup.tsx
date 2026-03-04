@@ -135,7 +135,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
       return;
     }
     const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
-    suppressPopupClickUntilRef.current = now + 350;
+    suppressPopupClickUntilRef.current = now + 400;
   }, [isOpen]);
 
   // 最適なポップアップ位置を計算
