@@ -2290,7 +2290,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const dx = e.clientX - dragStart.x;
       const dy = e.clientY - dragStart.y;
 
-      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      const dragThreshold = e.pointerType === 'touch' ? 10 : 5;
+      if (Math.abs(dx) > dragThreshold || Math.abs(dy) > dragThreshold) {
         setIsDragging(true);
       }
 
