@@ -45,9 +45,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   const [longPressItem, setLongPressItem] = useState<ShoppingItem | null>(null);
   const [editingItem, setEditingItem] = useState<ShoppingItem | null>(null);
   const longPressTimeout = useRef<number | null>(null);
-  const longPressTriggeredRef = useRef(false);
-  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
-  const suppressNextClickRef = useRef(false);
+  const isLongPress = useRef(false);
   const [popupSize, setPopupSize] = useState({ width: 320, height: 300 });
 
   // === アイテム追加ダイアログ ===
@@ -128,13 +126,6 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   // ダイアログが閉じたらサブ状態もリセット
   useEffect(() => {
     if (!isOpen) {
-      if (longPressTimeout.current) {
-        clearTimeout(longPressTimeout.current);
-        longPressTimeout.current = null;
-      }
-      longPressTriggeredRef.current = false;
-      pointerStartRef.current = null;
-      suppressNextClickRef.current = false;
       setAddDialogOpen(false);
       setLongPressItem(null);
       setEditingItem(null);
@@ -188,62 +179,29 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     };
   }, [isOpen, onClose, longPressItem, editingItem, addDialogOpen]);
 
-  const clearLongPressTimer = () => {
-    if (longPressTimeout.current) {
-      clearTimeout(longPressTimeout.current);
-      longPressTimeout.current = null;
-    }
-  };
-
-  const handleItemPointerDown = (item: ShoppingItem, e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-
-    clearLongPressTimer();
-    longPressTriggeredRef.current = false;
-    suppressNextClickRef.current = false;
-    pointerStartRef.current = { x: e.clientX, y: e.clientY };
-
+  const handleItemPointerDown = (item: ShoppingItem) => {
+    isLongPress.current = false;
     longPressTimeout.current = window.setTimeout(() => {
-      longPressTriggeredRef.current = true;
-      suppressNextClickRef.current = true;
+      isLongPress.current = true;
       setLongPressItem(item);
     }, 500);
   };
 
-  const handleItemPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!pointerStartRef.current) return;
-
-    const dx = Math.abs(e.clientX - pointerStartRef.current.x);
-    const dy = Math.abs(e.clientY - pointerStartRef.current.y);
-    if (dx > 8 || dy > 8) {
-      pointerStartRef.current = null;
-      suppressNextClickRef.current = true;
-      clearLongPressTimer();
+  const handleItemPointerUp = (item: ShoppingItem) => {
+    if (longPressTimeout.current) {
+      clearTimeout(longPressTimeout.current);
+      longPressTimeout.current = null;
     }
-  };
-
-  const handleItemPointerUp = () => {
-    pointerStartRef.current = null;
-    clearLongPressTimer();
+    if (!isLongPress.current) {
+      handleVisitToggle(item);
+    }
   };
 
   const handleItemPointerLeave = () => {
-    pointerStartRef.current = null;
-    clearLongPressTimer();
-  };
-
-  const handleItemPointerCancel = () => {
-    pointerStartRef.current = null;
-    clearLongPressTimer();
-  };
-
-  const handleItemClick = (item: ShoppingItem) => {
-    if (longPressTriggeredRef.current || suppressNextClickRef.current) {
-      longPressTriggeredRef.current = false;
-      suppressNextClickRef.current = false;
-      return;
+    if (longPressTimeout.current) {
+      clearTimeout(longPressTimeout.current);
+      longPressTimeout.current = null;
     }
-    handleVisitToggle(item);
   };
 
   const handleVisitToggle = (item: ShoppingItem) => {
@@ -354,13 +312,10 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   isInVisitList
                     ? 'bg-blue-50 dark:bg-blue-900/20'
                     : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                } touch-manipulation`}
-                onPointerDown={(e) => handleItemPointerDown(item, e)}
-                onPointerMove={handleItemPointerMove}
-                onPointerUp={handleItemPointerUp}
+                }`}
+                onPointerDown={() => handleItemPointerDown(item)}
+                onPointerUp={() => handleItemPointerUp(item)}
                 onPointerLeave={handleItemPointerLeave}
-                onPointerCancel={handleItemPointerCancel}
-                onClick={() => handleItemClick(item)}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
