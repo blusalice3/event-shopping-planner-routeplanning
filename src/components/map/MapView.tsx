@@ -16,7 +16,7 @@ import CellItemsPopup from './CellItemsPopup';
 import VisitListPanel from './VisitListPanel';
 import HallOrderPanel from './HallOrderPanel';
 import InsertPositionDialog, { InsertPosition, SmartInsertMode } from './InsertPositionDialog';
-import { extractNumberFromItemNumber, extractNumberAlphaPrefix } from '../../utils/xlsxMapParser';
+import { extractNumberFromItemNumber, extractNumberAlphaPrefix } from '../../utils/itemNumber';
 import { isPointInPolygon } from './HallDefinitionPanel';
 
 const normalizeDisplayText = (value: string | null | undefined): string => {
@@ -27,6 +27,27 @@ const extractDayNameFromMapName = (mapName: string): string => {
   const normalizedMapName = normalizeDisplayText(mapName);
   const dayMatch = normalizedMapName.match(/^(.+)マップ$/);
   return dayMatch ? normalizeDisplayText(dayMatch[1]) : '';
+};
+
+const normalizeComparableBlock = (value: string | null | undefined): string => {
+  return normalizeDisplayText(value).normalize('NFKC').toLowerCase();
+};
+
+const normalizeComparableItemNumber = (value: string | null | undefined): string => {
+  return normalizeDisplayText(value).normalize('NFKC');
+};
+
+const extractComparableNumber = (itemNumber: string | null | undefined): number | null => {
+  const normalized = normalizeComparableItemNumber(itemNumber);
+  const extracted = extractNumberFromItemNumber(normalized);
+  if (!extracted) return null;
+  const parsed = parseInt(extracted, 10);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+
+const extractComparableAlphaPrefix = (itemNumber: string | null | undefined): string | null => {
+  const normalized = normalizeComparableItemNumber(itemNumber);
+  return extractNumberAlphaPrefix(normalized);
 };
 
 interface MapViewProps {
@@ -599,17 +620,17 @@ const MapView: React.FC<MapViewProps> = ({
       if (!item) return;
 
       // 同ブロック+ナンバープレフィックス一致時の自動挿入（スマート挿入より優先）
-      const newItemPrefix = extractNumberAlphaPrefix(item.number);
+      const newItemPrefix = extractComparableAlphaPrefix(item.number);
       if (newItemPrefix && onAddToExecuteListAtPosition) {
-        const itemBlock = item.block?.trim() || '';
+        const itemBlock = normalizeComparableBlock(item.block);
         let lastMatchId: string | null = null;
 
         executeModeItemIds.forEach((eid) => {
           const existingItem = items.find((i) => i.id === eid);
           if (!existingItem) return;
-          const existingBlock = existingItem.block?.trim() || '';
+          const existingBlock = normalizeComparableBlock(existingItem.block);
           if (existingBlock !== itemBlock) return;
-          const existingPrefix = extractNumberAlphaPrefix(existingItem.number);
+          const existingPrefix = extractComparableAlphaPrefix(existingItem.number);
           if (existingPrefix === newItemPrefix) {
             lastMatchId = eid;
           }
@@ -622,25 +643,23 @@ const MapView: React.FC<MapViewProps> = ({
         }
       }
 
-      const itemNum = extractNumberFromItemNumber(item.number);
-      if (!itemNum) {
+      const numValue = extractComparableNumber(item.number);
+      if (numValue === null) {
         onAddToExecuteList(itemId);
         addToHallVisitList(itemId);
         return;
       }
 
-      const numValue = parseInt(itemNum, 10);
-      const itemBlock = item.block?.trim().toLowerCase() || '';
+      const itemBlock = normalizeComparableBlock(item.block);
 
       const nearbyVisitItems: { item: ShoppingItem; visitIndex: number }[] = [];
       executeModeItemIds.forEach((eid, idx) => {
         const existingItem = items.find((i) => i.id === eid);
         if (!existingItem) return;
-        const existingBlock = existingItem.block?.trim().toLowerCase() || '';
+        const existingBlock = normalizeComparableBlock(existingItem.block);
         if (existingBlock !== itemBlock) return;
-        const existingNum = extractNumberFromItemNumber(existingItem.number);
-        if (!existingNum) return;
-        const existingNumValue = parseInt(existingNum, 10);
+        const existingNumValue = extractComparableNumber(existingItem.number);
+        if (existingNumValue === null) return;
         if (Math.abs(existingNumValue - numValue) <= 3) {
           nearbyVisitItems.push({ item: existingItem, visitIndex: idx });
         }
@@ -708,21 +727,19 @@ const MapView: React.FC<MapViewProps> = ({
     const item = insertDialogState.item;
     if (!item) return [];
 
-    const itemNum = extractNumberFromItemNumber(item.number);
-    if (!itemNum) return [];
+    const numValue = extractComparableNumber(item.number);
+    if (numValue === null) return [];
 
-    const numValue = parseInt(itemNum, 10);
-    const itemBlock = item.block?.trim().toLowerCase() || '';
+    const itemBlock = normalizeComparableBlock(item.block);
 
     const result: { item: ShoppingItem; visitIndex: number }[] = [];
     executeModeItemIds.forEach((eid, idx) => {
       const existingItem = items.find((i) => i.id === eid);
       if (!existingItem) return;
-      const existingBlock = existingItem.block?.trim().toLowerCase() || '';
+      const existingBlock = normalizeComparableBlock(existingItem.block);
       if (existingBlock !== itemBlock) return;
-      const existingNum = extractNumberFromItemNumber(existingItem.number);
-      if (!existingNum) return;
-      const existingNumValue = parseInt(existingNum, 10);
+      const existingNumValue = extractComparableNumber(existingItem.number);
+      if (existingNumValue === null) return;
       if (Math.abs(existingNumValue - numValue) <= 3) {
         result.push({ item: existingItem, visitIndex: idx });
       }
@@ -904,5 +921,3 @@ const MapView: React.FC<MapViewProps> = ({
 };
 
 export default MapView;
-
-

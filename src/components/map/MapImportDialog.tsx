@@ -6,7 +6,14 @@ import {
   BlockDefinition,
   CellData,
 } from '../../types';
-import { parseMapFile } from '../../utils/xlsxMapParser';
+
+async function parseMapFileOnDemand(
+  file: File,
+  settings: BlockDetectionSettings,
+) {
+  const { parseMapFile } = await import('../../utils/xlsxMapParser');
+  return parseMapFile(file, settings);
+}
 
 interface MapImportDialogProps {
   isOpen: boolean;
@@ -316,7 +323,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     if (!file) return;
     setIsPreviewing(true);
     try {
-      const parsedResult = await parseMapFile(file, settings);
+      const parsedResult = await parseMapFileOnDemand(file, settings);
       if (parsedResult.error) {
         setPreviewData(null);
         setPreviewSkippedSheets([]);
@@ -352,7 +359,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
       let data = previewData;
       let skippedSheets = previewSkippedSheets;
       if (!data) {
-        const parsedResult = await parseMapFile(file, settings);
+        const parsedResult = await parseMapFileOnDemand(file, settings);
         if (parsedResult.error) {
           alert(`マップデータの取り込みに失敗しました: ${parsedResult.error}`);
           return;

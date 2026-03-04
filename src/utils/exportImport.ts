@@ -3,7 +3,6 @@
  * IndexedDBのデータをxlsxファイルにエクスポート/インポート
  */
 
-import ExcelJS from 'exceljs';
 import {
   ShoppingItem,
   EventMetadata,
@@ -61,6 +60,12 @@ export interface ItemFallbackWarning {
 
 const EXPORT_VERSION = '2.0';
 
+type ExcelJSImport = typeof import('exceljs');
+
+async function loadExcelJS(): Promise<ExcelJSImport> {
+  return import('exceljs');
+}
+
 /**
  * データをxlsxファイルにエクスポート
  */
@@ -78,6 +83,7 @@ export async function exportToXlsx(
     hallRouteSettings?: HallRouteSettingsStore;
   },
 ): Promise<Blob> {
+  const ExcelJS = await loadExcelJS();
   const workbook = new ExcelJS.Workbook();
   workbook.creator = 'Event Shopping Planner';
   workbook.created = new Date();
@@ -281,6 +287,7 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
   };
 
   try {
+    const ExcelJS = await loadExcelJS();
     const arrayBuffer = await file.arrayBuffer();
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(arrayBuffer);

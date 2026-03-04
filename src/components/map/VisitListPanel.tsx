@@ -1,6 +1,6 @@
 import React from 'react';
 import { ShoppingItem, BlockDefinition } from '../../types';
-import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
+import { extractNumberFromItemNumber } from '../../utils/itemNumber';
 
 interface VisitListPanelProps {
   isOpen: boolean;
