@@ -2286,6 +2286,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       lastPointerTypeRef.current = e.pointerType;
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+        e.preventDefault();
+      }
       if (activeTouchesRef.current.size >= 2) return;
       isDraggingRef.current = false;
       setIsDragging(false);
@@ -2359,6 +2362,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       lastPointerTypeRef.current = e.pointerType;
       const wasDragging = isDraggingRef.current;
       const isTouchPointer = e.pointerType === 'touch' || e.pointerType === 'pen';
+      if (isTouchPointer) {
+        e.preventDefault();
+      }
 
       if (!wasDragging && isTouchPointer && !isPinchGestureRef.current) {
         const metrics = getPointerViewMetrics(e.clientX, e.clientY);

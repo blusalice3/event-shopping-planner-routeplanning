@@ -47,6 +47,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   const longPressTimeout = useRef<number | null>(null);
   const isLongPress = useRef(false);
   const suppressNextClick = useRef(false);
+  const suppressPopupClickUntilRef = useRef(0);
   const [popupSize, setPopupSize] = useState({ width: 320, height: 300 });
 
   // === アイテム追加ダイアログ ===
@@ -130,7 +131,11 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
       setAddDialogOpen(false);
       setLongPressItem(null);
       setEditingItem(null);
+      suppressPopupClickUntilRef.current = 0;
+      return;
     }
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    suppressPopupClickUntilRef.current = now + 350;
   }, [isOpen]);
 
   // 最適なポップアップ位置を計算
@@ -222,12 +227,24 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   };
 
   const handleItemClick = (item: ShoppingItem) => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now < suppressPopupClickUntilRef.current) {
+      return;
+    }
     if (isLongPress.current || suppressNextClick.current) {
       isLongPress.current = false;
       suppressNextClick.current = false;
       return;
     }
     handleVisitToggle(item);
+  };
+
+  const handlePopupClickCapture = (e: React.SyntheticEvent) => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now < suppressPopupClickUntilRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
   };
 
   const handleVisitToggle = (item: ShoppingItem) => {
@@ -280,6 +297,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
         ref={popupRef}
         className="fixed z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 max-w-sm w-80 transition-all duration-150"
         style={{ left: computedPosition.x, top: computedPosition.y }}
+        onClickCapture={handlePopupClickCapture}
       >
         {/* ヘッダー */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
