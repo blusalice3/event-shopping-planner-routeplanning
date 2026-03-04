@@ -164,7 +164,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   }, [position, popupSize]);
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
+    const handleClickOutside = (e: PointerEvent) => {
       if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
         if (!longPressItem && !editingItem && !addDialogOpen) {
           onClose();
@@ -172,10 +172,10 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
       }
     };
     if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('pointerdown', handleClickOutside);
     }
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('pointerdown', handleClickOutside);
     };
   }, [isOpen, onClose, longPressItem, editingItem, addDialogOpen]);
 
