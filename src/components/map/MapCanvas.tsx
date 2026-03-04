@@ -230,6 +230,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const pinchStartZoomRef = useRef<number>(zoomLevel);
   const pinchStartOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const isPinchGestureRef = useRef(false);
+  const suppressClickUntilRef = useRef(0);
   const [isRotationInteracting, setIsRotationInteracting] = useState(false);
   const rotationInteractionTimerRef = useRef<number | null>(null);
 
@@ -469,6 +471,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
 
       if (activeTouchesRef.current.size === 2) {
+        isPinchGestureRef.current = true;
+        isDraggingRef.current = false;
+        setIsDragging(false);
         e.preventDefault();
         const touches = Array.from(activeTouchesRef.current.values());
         const dx = touches[1].x - touches[0].x;
@@ -489,6 +494,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
 
       if (activeTouchesRef.current.size === 2 && onZoomChange) {
+        isPinchGestureRef.current = true;
         e.preventDefault();
         const touches = Array.from(activeTouchesRef.current.values());
         const dx = touches[1].x - touches[0].x;
@@ -529,8 +535,19 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     for (let i = 0; i < e.changedTouches.length; i++) {
       activeTouchesRef.current.delete(e.changedTouches[i].identifier);
     }
+
     if (activeTouchesRef.current.size < 2) {
       pinchStartDistRef.current = 0;
+      isPinchGestureRef.current = false;
+      isDraggingRef.current = false;
+      setIsDragging(false);
+
+      // 2本指ピンチ終了後の1本指移動で座標ジャンプしないよう、ドラッグ起点を現在値へ再同期する。
+      if (activeTouchesRef.current.size === 1) {
+        const remainingTouch = Array.from(activeTouchesRef.current.values())[0];
+        setDragStart({ x: remainingTouch.x, y: remainingTouch.y });
+        setDragStartOffset({ ...offsetRef.current });
+      }
     }
   }, []);
 
@@ -2019,19 +2036,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     offset,
   ]);
 
-  const handleClick = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (isDraggingRef.current) return;
-
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / dpr / rect.width;
-      const scaleY = canvas.height / dpr / rect.height;
-
-      const viewX = (e.clientX - rect.left) * scaleX;
-      const viewY = (e.clientY - rect.top) * scaleY;
+  const handleTapAtViewPosition = useCallback(
+    (viewX: number, viewY: number, pointerType: string) => {
       const { x, y } = toMapCoordinates(viewX, viewY);
 
       if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
@@ -2106,7 +2112,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
       const shouldShowTapAssist =
         (vertexSelectionMode || cellSelectionMode) &&
-        (lastPointerTypeRef.current === 'touch' || lastPointerTypeRef.current === 'pen');
+        (pointerType === 'touch' || pointerType === 'pen');
       if (shouldShowTapAssist) {
         showTapAssist({
           row: resolvedRow,
@@ -2134,14 +2140,27 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       mapData.mergedCells,
       cellStates,
       onCellClick,
-      dpr,
       vertexSelectionMode,
       cellSelectionMode,
       showTapAssist,
       mergedCellsMap,
-      offset,
       toMapCoordinates,
     ],
+  );
+
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (isDraggingRef.current) return;
+
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now < suppressClickUntilRef.current) return;
+
+      const metrics = getPointerViewMetrics(e.clientX, e.clientY);
+      if (!metrics) return;
+
+      handleTapAtViewPosition(metrics.viewX, metrics.viewY, lastPointerTypeRef.current);
+    },
+    [getPointerViewMetrics, handleTapAtViewPosition],
   );
 
   const hallScrollBounds = useMemo(() => {
@@ -2285,6 +2304,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         setHoverGuide(null);
       }
 
+      if ((e.pointerType === 'touch' || e.pointerType === 'pen') && isPinchGestureRef.current) {
+        return;
+      }
       if (e.buttons !== 1) return;
       if (activeTouchesRef.current.size >= 2) return;
 
@@ -2325,20 +2347,49 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     ],
   );
 
-  const handlePointerUp = useCallback(() => {
+  const finishPointerInteraction = useCallback(() => {
     isDraggingRef.current = false;
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
   }, []);
 
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      lastPointerTypeRef.current = e.pointerType;
+      const wasDragging = isDraggingRef.current;
+      const isTouchPointer = e.pointerType === 'touch' || e.pointerType === 'pen';
+
+      if (!wasDragging && isTouchPointer && !isPinchGestureRef.current) {
+        const metrics = getPointerViewMetrics(e.clientX, e.clientY);
+        if (metrics) {
+          handleTapAtViewPosition(metrics.viewX, metrics.viewY, e.pointerType);
+          const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          suppressClickUntilRef.current = now + 400;
+        }
+      }
+
+      finishPointerInteraction();
+    },
+    [finishPointerInteraction, getPointerViewMetrics, handleTapAtViewPosition],
+  );
+
   const handlePointerLeave = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       lastPointerTypeRef.current = e.pointerType;
       setHoverGuide(null);
-      handlePointerUp();
+      finishPointerInteraction();
     },
-    [handlePointerUp],
+    [finishPointerInteraction],
+  );
+
+  const handlePointerCancel = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      lastPointerTypeRef.current = e.pointerType;
+      setHoverGuide(null);
+      finishPointerInteraction();
+    },
+    [finishPointerInteraction],
   );
 
   return (
@@ -2351,6 +2402,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerLeave}
+      onPointerCancel={handlePointerCancel}
     />
   );
 };

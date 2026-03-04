@@ -46,6 +46,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   const [editingItem, setEditingItem] = useState<ShoppingItem | null>(null);
   const longPressTimeout = useRef<number | null>(null);
   const isLongPress = useRef(false);
+  const suppressNextClick = useRef(false);
   const [popupSize, setPopupSize] = useState({ width: 320, height: 300 });
 
   // === アイテム追加ダイアログ ===
@@ -179,29 +180,54 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     };
   }, [isOpen, onClose, longPressItem, editingItem, addDialogOpen]);
 
-  const handleItemPointerDown = (item: ShoppingItem) => {
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimeout.current) {
+      clearTimeout(longPressTimeout.current);
+      longPressTimeout.current = null;
+    }
+  }, []);
+
+  const handleItemPointerDown = (
+    e: React.PointerEvent<HTMLDivElement>,
+    item: ShoppingItem,
+  ) => {
     isLongPress.current = false;
+    suppressNextClick.current = false;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // setPointerCapture はブラウザ依存のため利用不可環境はそのまま継続する。
+    }
+    clearLongPressTimer();
     longPressTimeout.current = window.setTimeout(() => {
       isLongPress.current = true;
+      suppressNextClick.current = true;
       setLongPressItem(item);
     }, 500);
   };
 
-  const handleItemPointerUp = (item: ShoppingItem) => {
-    if (longPressTimeout.current) {
-      clearTimeout(longPressTimeout.current);
-      longPressTimeout.current = null;
+  const handleItemPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // releasePointerCapture はブラウザ依存のため利用不可環境はそのまま継続する。
     }
-    if (!isLongPress.current) {
-      handleVisitToggle(item);
-    }
+    clearLongPressTimer();
   };
 
   const handleItemPointerLeave = () => {
-    if (longPressTimeout.current) {
-      clearTimeout(longPressTimeout.current);
-      longPressTimeout.current = null;
+    clearLongPressTimer();
+  };
+
+  const handleItemClick = (item: ShoppingItem) => {
+    if (isLongPress.current || suppressNextClick.current) {
+      isLongPress.current = false;
+      suppressNextClick.current = false;
+      return;
     }
+    handleVisitToggle(item);
   };
 
   const handleVisitToggle = (item: ShoppingItem) => {
@@ -313,10 +339,12 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                     ? 'bg-blue-50 dark:bg-blue-900/20'
                     : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
                 }`}
-                onPointerDown={() => handleItemPointerDown(item)}
-                onPointerUp={() => handleItemPointerUp(item)}
+                onPointerDown={(e) => handleItemPointerDown(e, item)}
+                onPointerUp={handleItemPointerUp}
                 onPointerLeave={handleItemPointerLeave}
                 onPointerCancel={handleItemPointerLeave}
+                onTouchMove={handleItemPointerLeave}
+                onClick={() => handleItemClick(item)}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">
