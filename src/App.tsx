@@ -347,14 +347,27 @@ const App: React.FC = () => {
     hallRouteSettings,
   });
 
+  const resolveDayNameFromMapTab = useCallback(
+    (mapTab: string): string => {
+      const matchedByExactTab = eventDates.find((eventDate) => getMapTabForDate(eventDate) === mapTab);
+      if (matchedByExactTab) return matchedByExactTab;
+
+      const normalizedMapTabToken = normalizeMapDayToken(mapTab);
+      const matchedByToken = eventDates.find(
+        (eventDate) => normalizeMapDayToken(eventDate) === normalizedMapTabToken,
+      );
+      return matchedByToken || '';
+    },
+    [eventDates, getMapTabForDate],
+  );
+
 
   const getHallExecuteCount = useCallback(
     (hallId: string): number => {
       if (!activeEventName || !isMapTab || !currentMapData) return 0;
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return 0;
-      const dayName = dayMatch[1];
+      const dayName = resolveDayNameFromMapTab(activeTab);
+      if (!dayName) return 0;
 
       const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
 
@@ -379,7 +392,16 @@ const App: React.FC = () => {
         return false;
       }).length;
     },
-    [activeEventName, isMapTab, activeTab, currentMapData, currentHalls, items, executeModeItems],
+    [
+      activeEventName,
+      isMapTab,
+      activeTab,
+      currentMapData,
+      currentHalls,
+      items,
+      executeModeItems,
+      resolveDayNameFromMapTab,
+    ],
   );
 
 
@@ -387,9 +409,8 @@ const App: React.FC = () => {
     (hallId: string): number => {
       if (!activeEventName || !isMapTab || !currentMapData) return 0;
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return 0;
-      const dayName = dayMatch[1];
+      const dayName = resolveDayNameFromMapTab(activeTab);
+      if (!dayName) return 0;
 
       const dayItems = items.filter((item) => item.eventDate === dayName);
 
@@ -410,7 +431,7 @@ const App: React.FC = () => {
         return false;
       }).length;
     },
-    [activeEventName, isMapTab, activeTab, currentMapData, currentHalls, items],
+    [activeEventName, isMapTab, activeTab, currentMapData, currentHalls, items, resolveDayNameFromMapTab],
   );
 
 
@@ -2832,9 +2853,8 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab) return;
 
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      const dayName = resolveDayNameFromMapTab(activeTab);
+      if (!dayName) return;
 
 
       const item = items.find((i) => i.id === itemId);
@@ -2956,7 +2976,16 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeTab, isMapTab, items, hallDefinitions, hallRouteSettings, mapData],
+    [
+      activeEventName,
+      activeTab,
+      isMapTab,
+      items,
+      hallDefinitions,
+      hallRouteSettings,
+      mapData,
+      resolveDayNameFromMapTab,
+    ],
   );
 
 
@@ -2964,9 +2993,8 @@ const App: React.FC = () => {
     (itemId: string, referenceItemId: string, position: 'before' | 'after') => {
       if (!activeEventName || !isMapTab) return;
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      const dayName = resolveDayNameFromMapTab(activeTab);
+      if (!dayName) return;
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -2993,7 +3021,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeTab, isMapTab],
+    [activeEventName, activeTab, isMapTab, resolveDayNameFromMapTab],
   );
 
 
@@ -3002,9 +3030,8 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab) return;
 
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      const dayName = resolveDayNameFromMapTab(activeTab);
+      if (!dayName) return;
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -3019,7 +3046,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeTab, isMapTab],
+    [activeEventName, activeTab, isMapTab, resolveDayNameFromMapTab],
   );
 
 
@@ -3196,9 +3223,8 @@ const App: React.FC = () => {
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      const dayName = resolveDayNameFromMapTab(activeTab);
+      if (!dayName) return;
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -3213,7 +3239,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeTab, isMapTab],
+    [activeEventName, activeTab, isMapTab, resolveDayNameFromMapTab],
   );
 
 
@@ -3221,9 +3247,8 @@ const App: React.FC = () => {
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      const dayName = resolveDayNameFromMapTab(activeTab);
+      if (!dayName) return;
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -3238,19 +3263,18 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeTab, isMapTab],
+    [activeEventName, activeTab, isMapTab, resolveDayNameFromMapTab],
   );
 
 
   const currentMapExecuteItemIds = useMemo(() => {
     if (!activeEventName || !isMapTab) return [];
 
-    const dayMatch = activeTab.match(/^(.+)マップ$/);
-    if (!dayMatch) return [];
-    const dayName = dayMatch[1];
+    const dayName = resolveDayNameFromMapTab(activeTab);
+    if (!dayName) return [];
 
     return executeModeItems[activeEventName]?.[dayName] || [];
-  }, [activeEventName, activeTab, isMapTab, executeModeItems]);
+  }, [activeEventName, activeTab, isMapTab, executeModeItems, resolveDayNameFromMapTab]);
 
 
   const currentTabItems = useMemo(() => {
@@ -3356,9 +3380,8 @@ const App: React.FC = () => {
       if (!activeEventName) return;
 
 
-      const dayMatch = mapTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      const dayName = resolveDayNameFromMapTab(mapTab);
+      if (!dayName) return;
 
 
       const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
@@ -3369,7 +3392,7 @@ const App: React.FC = () => {
       setVisitListHasUnsavedChanges(false);
       setVisitListPanelOpen(true);
     },
-    [activeEventName, executeModeItems],
+    [activeEventName, executeModeItems, resolveDayNameFromMapTab],
   );
 
 
@@ -3379,9 +3402,8 @@ const App: React.FC = () => {
       if (visitListHasUnsavedChanges) {
         setVisitListHasUnsavedChanges(false);
       }
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      const dayName = resolveDayNameFromMapTab(activeTab);
+      if (!dayName) return;
       const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
       setVisitListOriginalOrder([...executeIds]);
       setVisitListPanelMapTab(activeTab);
@@ -3395,6 +3417,7 @@ const App: React.FC = () => {
     visitListPanelMapTab,
     visitListHasUnsavedChanges,
     executeModeItems,
+    resolveDayNameFromMapTab,
   ]);
 
 
@@ -3402,9 +3425,8 @@ const App: React.FC = () => {
     (newOrderItems: ShoppingItem[]) => {
       if (!visitListPanelMapTab || !activeEventName) return;
 
-      const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      const dayName = resolveDayNameFromMapTab(visitListPanelMapTab);
+      if (!dayName) return;
 
 
       const newIds = newOrderItems.map((item) => item.id);
@@ -3419,7 +3441,7 @@ const App: React.FC = () => {
       }));
       setVisitListHasUnsavedChanges(true);
     },
-    [visitListPanelMapTab, activeEventName],
+    [visitListPanelMapTab, activeEventName, resolveDayNameFromMapTab],
   );
 
 
@@ -3432,9 +3454,8 @@ const App: React.FC = () => {
   const handleVisitListCancel = useCallback(() => {
     if (!visitListPanelMapTab || !activeEventName) return;
 
-    const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
-    if (!dayMatch) return;
-    const dayName = dayMatch[1];
+    const dayName = resolveDayNameFromMapTab(visitListPanelMapTab);
+    if (!dayName) return;
 
 
     if (visitListOriginalOrder.length > 0) {
@@ -3448,7 +3469,7 @@ const App: React.FC = () => {
     }
     setVisitListHasUnsavedChanges(false);
     setVisitListOriginalOrder([]);
-  }, [visitListOriginalOrder, visitListPanelMapTab, activeEventName]);
+  }, [visitListOriginalOrder, visitListPanelMapTab, activeEventName, resolveDayNameFromMapTab]);
 
 
   const handleVisitListClose = useCallback(() => {
@@ -3468,9 +3489,8 @@ const App: React.FC = () => {
   const visitListItems = useMemo(() => {
     if (!visitListPanelMapTab || !activeEventName) return [];
 
-    const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
-    if (!dayMatch) return [];
-    const dayName = dayMatch[1];
+    const dayName = resolveDayNameFromMapTab(visitListPanelMapTab);
+    if (!dayName) return [];
 
     const dayItems = items.filter((item) => item.eventDate === dayName);
     const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
@@ -3480,7 +3500,7 @@ const App: React.FC = () => {
       .filter((id: string) => dayItems.some((item) => item.id === id))
       .map((id: string) => dayItems.find((item) => item.id === id)!)
       .filter(Boolean);
-  }, [visitListPanelMapTab, activeEventName, items, executeModeItems]);
+  }, [visitListPanelMapTab, activeEventName, items, executeModeItems, resolveDayNameFromMapTab]);
 
 
   const visitListHallOrder = useMemo(() => {
@@ -3801,9 +3821,8 @@ const App: React.FC = () => {
     (hallOrder: string[]) => {
       if (!activeEventName || !isMapTab) return;
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      const dayName = resolveDayNameFromMapTab(activeTab);
+      if (!dayName) return;
 
       const currentMapData = mapData[activeEventName]?.[activeTab];
       const halls = hallDefinitions[activeEventName]?.[activeTab] || [];
@@ -3913,7 +3932,16 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, isMapTab, activeTab, mapData, hallDefinitions, hallRouteSettings, items],
+    [
+      activeEventName,
+      isMapTab,
+      activeTab,
+      mapData,
+      hallDefinitions,
+      hallRouteSettings,
+      items,
+      resolveDayNameFromMapTab,
+    ],
   );
 
 
