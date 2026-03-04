@@ -9,7 +9,7 @@ import {
   MIN_ZOOM,
   MAX_ZOOM,
 } from '../types';
-import { extractNumberFromItemNumber } from '../utils/itemNumber';
+import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
 import { findPath, simplifyPath } from '../utils/pathfinding';
 
 interface FocusModeMapCanvasProps {

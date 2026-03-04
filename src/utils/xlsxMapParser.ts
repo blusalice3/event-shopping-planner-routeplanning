@@ -3,7 +3,7 @@
  * 罫線、結合セル、背景色、ブロック定義を正確に抽出
  */
 
-import type ExcelJS from 'exceljs';
+import ExcelJS from 'exceljs';
 import {
   CellData,
   CellBorders,
@@ -16,8 +16,6 @@ import {
   BlockDetectionSettings,
   DEFAULT_BLOCK_DETECTION_SETTINGS,
 } from '../types';
-import { extractNumberAlphaPrefix, extractNumberFromItemNumber } from './itemNumber';
-export { extractNumberAlphaPrefix, extractNumberFromItemNumber } from './itemNumber';
 
 type BorderWeight = 'thin' | 'medium' | 'thick' | 'double';
 
@@ -1541,7 +1539,6 @@ export async function parseMapFile(
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
 ): Promise<ParseMapFileResult> {
   try {
-    const ExcelJS = await import('exceljs');
     const arrayBuffer = await file.arrayBuffer();
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(arrayBuffer);
@@ -1583,6 +1580,26 @@ export async function parseMapFile(
       error: error instanceof Error ? error.message : '不明なエラー',
     };
   }
+}
+
+/**
+ * アイテムの番号から数値部分を抽出
+ * 例: "26a" -> "26", "26b1" -> "26"
+ */
+export function extractNumberFromItemNumber(itemNumber: string): string | null {
+  const match = itemNumber.match(/^(\d+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * アイテムの番号から「数字+アルファベット」のプレフィックスを抽出
+ * 末尾の数字は無視する
+ * 例: "14b" -> "14b", "14b1" -> "14b", "26a3" -> "26a"
+ * 数字のみ（例: "14"）の場合は null を返す
+ */
+export function extractNumberAlphaPrefix(itemNumber: string): string | null {
+  const match = itemNumber.match(/^(\d+[a-zA-Z]+)/);
+  return match ? match[1].toLowerCase() : null;
 }
 
 /**
