@@ -316,6 +316,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                 onPointerDown={() => handleItemPointerDown(item)}
                 onPointerUp={() => handleItemPointerUp(item)}
                 onPointerLeave={handleItemPointerLeave}
+                onPointerCancel={handleItemPointerLeave}
               >
                 <div className="flex items-start justify-between">
                   <div className="flex-1">

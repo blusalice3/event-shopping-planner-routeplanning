@@ -204,6 +204,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   }, [offsetRef]);
   const zoomLevelRef = useRef(zoomLevel);
   const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
   const [hoverGuide, setHoverGuide] = useState<HoverGuideState | null>(null);
@@ -2020,7 +2021,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (isDragging) return;
+      if (isDraggingRef.current) return;
 
       const canvas = canvasRef.current;
       if (!canvas) return;
@@ -2133,7 +2134,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       mapData.mergedCells,
       cellStates,
       onCellClick,
-      isDragging,
       dpr,
       vertexSelectionMode,
       cellSelectionMode,
@@ -2268,6 +2268,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       lastPointerTypeRef.current = e.pointerType;
       if (activeTouchesRef.current.size >= 2) return;
+      isDraggingRef.current = false;
       setIsDragging(false);
       setDragStart({ x: e.clientX, y: e.clientY });
       setDragStartOffset({ ...offsetRef.current });
@@ -2290,7 +2291,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const dx = e.clientX - dragStart.x;
       const dy = e.clientY - dragStart.y;
 
-      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
+      const dragThreshold =
+        lastPointerTypeRef.current === 'touch' || lastPointerTypeRef.current === 'pen' ? 10 : 5;
+      if (Math.abs(dx) > dragThreshold || Math.abs(dy) > dragThreshold) {
+        isDraggingRef.current = true;
         setIsDragging(true);
       }
 
@@ -2322,6 +2326,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   );
 
   const handlePointerUp = useCallback(() => {
+    isDraggingRef.current = false;
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
