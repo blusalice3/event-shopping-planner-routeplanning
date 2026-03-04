@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- 青い角丸背景 -->
+  <rect width="512" height="512" rx="96" fill="#2563eb"/>
+
+  <!-- ショッピングバッグ ハンドル -->
+  <path d="M192 220 Q192 140 256 140 Q320 140 320 220"
+        fill="none" stroke="white" stroke-width="30" stroke-linecap="round"/>
+
+  <!-- バッグ本体 -->
+  <rect x="148" y="212" width="216" height="188" rx="20" fill="white"/>
+
+  <!-- リスト線（青） -->
+  <rect x="184" y="268" width="144" height="18" rx="9" fill="#2563eb"/>
+  <rect x="184" y="306" width="116" height="18" rx="9" fill="#2563eb"/>
+  <rect x="184" y="344" width="92"  height="18" rx="9" fill="#2563eb"/>
+</svg>
