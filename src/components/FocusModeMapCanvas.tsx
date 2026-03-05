@@ -161,8 +161,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [offset, setOffsetState] = useState({ x: 0, y: 0 });
+  const offsetRef = useRef(offset);
+  const zoomLevelRef = useRef(zoomLevel);
   const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
   const [isRotationInteracting, setIsRotationInteracting] = useState(false);
@@ -172,6 +175,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
   const pinchStartDistRef = useRef<number>(0);
   const pinchStartZoomRef = useRef<number>(zoomLevel);
+  const pinchStartOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
+  const isPinchGestureRef = useRef(false);
+  const suppressClickUntilRef = useRef(0);
+
+  const setOffset = useCallback((newOffset: { x: number; y: number }) => {
+    setOffsetState(newOffset);
+    offsetRef.current = newOffset;
+  }, []);
 
   const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
   const scale = zoomLevel / 100;
@@ -569,6 +580,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     [offset, rotationRadians, mapCenterX, mapCenterY],
   );
 
+  useEffect(() => {
+    offsetRef.current = offset;
+  }, [offset]);
+
+  useEffect(() => {
+    zoomLevelRef.current = zoomLevel;
+  }, [zoomLevel]);
+
   const calculateCenteredOffset = useCallback(
     (
       mapX: number,
@@ -593,6 +612,57 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       };
     },
     [mapData.maxCol, mapData.maxRow],
+  );
+
+  const calculateOffsetForZoomPoint = useCallback(
+    (
+      viewX: number,
+      viewY: number,
+      newZoom: number,
+      options?: {
+        baseZoom?: number;
+        baseOffset?: { x: number; y: number };
+      },
+    ) => {
+      const baseZoom = options?.baseZoom ?? zoomLevelRef.current;
+      const baseOffset = options?.baseOffset ?? offsetRef.current;
+      const currentCellSize = BASE_CELL_SIZE * (baseZoom / 100);
+      const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
+      const translatedX = viewX - baseOffset.x;
+      const translatedY = viewY - baseOffset.y;
+      let mapPointX = translatedX;
+      let mapPointY = translatedY;
+
+      if (rotationRadians !== 0) {
+        const currentMapCenterX = (mapData.maxCol * currentCellSize) / 2;
+        const currentMapCenterY = (mapData.maxRow * currentCellSize) / 2;
+        const dx = translatedX - currentMapCenterX;
+        const dy = translatedY - currentMapCenterY;
+        const cos = Math.cos(rotationRadians);
+        const sin = Math.sin(rotationRadians);
+        mapPointX = dx * cos + dy * sin + currentMapCenterX;
+        mapPointY = -dx * sin + dy * cos + currentMapCenterY;
+      }
+
+      const normalizedMapX = mapPointX / currentCellSize;
+      const normalizedMapY = mapPointY / currentCellSize;
+      const scaledMapX = normalizedMapX * newCellSize;
+      const scaledMapY = normalizedMapY * newCellSize;
+      const newMapCenterX = (mapData.maxCol * newCellSize) / 2;
+      const newMapCenterY = (mapData.maxRow * newCellSize) / 2;
+      const rotatedPoint = rotatePointAroundCenter(
+        scaledMapX,
+        scaledMapY,
+        newMapCenterX,
+        newMapCenterY,
+        rotationRadians,
+      );
+      return {
+        x: viewX - rotatedPoint.x,
+        y: viewY - rotatedPoint.y,
+      };
+    },
+    [mapData.maxCol, mapData.maxRow, rotationRadians],
   );
 
   useEffect(() => {
@@ -1434,29 +1504,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const container = containerRef.current;
     if (!container) return;
 
-    const calculateOffsetForZoomPoint = (viewX: number, viewY: number, newZoom: number) => {
-      const oldCellSize = BASE_CELL_SIZE * (zoomLevel / 100);
-      const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
-      const mapPoint = toMapCoordinates(viewX, viewY);
-      const normalizedMapX = mapPoint.x / oldCellSize;
-      const normalizedMapY = mapPoint.y / oldCellSize;
-      const scaledMapX = normalizedMapX * newCellSize;
-      const scaledMapY = normalizedMapY * newCellSize;
-      const newMapCenterX = (mapData.maxCol * newCellSize) / 2;
-      const newMapCenterY = (mapData.maxRow * newCellSize) / 2;
-      const rotatedPoint = rotatePointAroundCenter(
-        scaledMapX,
-        scaledMapY,
-        newMapCenterX,
-        newMapCenterY,
-        rotationRadians,
-      );
-      return {
-        x: viewX - rotatedPoint.x,
-        y: viewY - rotatedPoint.y,
-      };
-    };
-
     const handleWheel = (e: WheelEvent) => {
       e.preventDefault();
       if (e.shiftKey && onRotationAngleChange) {
@@ -1473,10 +1520,16 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       };
 
       const delta = -e.deltaY * 0.1;
-      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(zoomLevel + delta)));
-      if (newZoom === zoomLevel) return;
+      const currentZoom = zoomLevelRef.current;
+      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(currentZoom + delta)));
+      if (newZoom === currentZoom) return;
 
-      setOffset(calculateOffsetForZoomPoint(zoomCenter.x, zoomCenter.y, newZoom));
+      const newOffset = calculateOffsetForZoomPoint(zoomCenter.x, zoomCenter.y, newZoom, {
+        baseZoom: currentZoom,
+        baseOffset: offsetRef.current,
+      });
+      setOffset(newOffset);
+      zoomLevelRef.current = newZoom;
       onZoomChange(newZoom);
     };
 
@@ -1485,11 +1538,16 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         activeTouchesRef.current.set(t.identifier, { x: t.clientX, y: t.clientY });
       });
       if (activeTouchesRef.current.size === 2) {
+        isPinchGestureRef.current = true;
+        isDraggingRef.current = false;
+        setIsDragging(false);
+        e.preventDefault();
         const touches = Array.from(activeTouchesRef.current.values());
         pinchStartDistRef.current = Math.sqrt(
           Math.pow(touches[1].x - touches[0].x, 2) + Math.pow(touches[1].y - touches[0].y, 2),
         );
-        pinchStartZoomRef.current = zoomLevel;
+        pinchStartZoomRef.current = zoomLevelRef.current;
+        pinchStartOffsetRef.current = { ...offsetRef.current };
       }
     };
 
@@ -1498,6 +1556,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         activeTouchesRef.current.set(t.identifier, { x: t.clientX, y: t.clientY });
       });
       if (activeTouchesRef.current.size === 2 && onZoomChange) {
+        isPinchGestureRef.current = true;
         e.preventDefault();
         const touches = Array.from(activeTouchesRef.current.values());
         const currentDist = Math.sqrt(
@@ -1514,9 +1573,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           MIN_ZOOM,
           Math.min(MAX_ZOOM, Math.round(pinchStartZoomRef.current * scaleRatio)),
         );
-        if (newZoom === zoomLevel) return;
+        if (newZoom === zoomLevelRef.current) return;
 
-        setOffset(calculateOffsetForZoomPoint(midX, midY, newZoom));
+        const newOffset = calculateOffsetForZoomPoint(midX, midY, newZoom, {
+          baseZoom: pinchStartZoomRef.current,
+          baseOffset: pinchStartOffsetRef.current,
+        });
+        setOffset(newOffset);
+        zoomLevelRef.current = newZoom;
         onZoomChange(newZoom);
       }
     };
@@ -1525,10 +1589,23 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       Array.from(e.changedTouches).forEach((t) => {
         activeTouchesRef.current.delete(t.identifier);
       });
+
+      if (activeTouchesRef.current.size < 2) {
+        pinchStartDistRef.current = 0;
+        isPinchGestureRef.current = false;
+        isDraggingRef.current = false;
+        setIsDragging(false);
+
+        if (activeTouchesRef.current.size === 1) {
+          const remainingTouch = Array.from(activeTouchesRef.current.values())[0];
+          setDragStart({ x: remainingTouch.x, y: remainingTouch.y });
+          setDragStartOffset({ ...offsetRef.current });
+        }
+      }
     };
 
     container.addEventListener('wheel', handleWheel, { passive: false });
-    container.addEventListener('touchstart', handleTouchStart, { passive: true });
+    container.addEventListener('touchstart', handleTouchStart, { passive: false });
     container.addEventListener('touchmove', handleTouchMove, { passive: false });
     container.addEventListener('touchend', handleTouchEnd);
     container.addEventListener('touchcancel', handleTouchEnd);
@@ -1541,12 +1618,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       container.removeEventListener('touchcancel', handleTouchEnd);
     };
   }, [
-    zoomLevel,
     onZoomChange,
-    mapData.maxCol,
-    mapData.maxRow,
-    rotationRadians,
-    toMapCoordinates,
+    calculateOffsetForZoomPoint,
     onRotationAngleChange,
     rotationAngle,
   ]);
@@ -1644,45 +1717,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     };
   }, [activeScrollBounds, cellSize, mapCenterX, mapCenterY, rotationRadians]);
 
-  const handlePointerDown = useCallback(
-    (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (activeTouchesRef.current.size >= 2) return;
-      setIsDragging(false);
-      setDragStart({ x: e.clientX, y: e.clientY });
-      setDragStartOffset({ ...offset });
-    },
-    [offset],
-  );
-
-  const handlePointerMove = useCallback(
-    (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (e.buttons !== 1) return;
-      if (activeTouchesRef.current.size >= 2) return;
-
-      const dx = (e.clientX - dragStart.x) / appScale;
-      const dy = (e.clientY - dragStart.y) / appScale;
-
-      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) {
-        setIsDragging(true);
-      }
-
-      let newX = dragStartOffset.x + dx;
-      let newY = dragStartOffset.y + dy;
-
-      const limits = calculateScrollLimits();
-      if (limits) {
-        newX = Math.max(limits.minX, Math.min(limits.maxX, newX));
-        newY = Math.max(limits.minY, Math.min(limits.maxY, newY));
-      }
-
-      setOffset({
-        x: newX,
-        y: newY,
-      });
-    },
-    [dragStart, dragStartOffset, appScale, calculateScrollLimits],
-  );
-
   const isCellInBlock = useCallback((row: number, col: number, block: BlockDefinition): boolean => {
     if (block.cellGroups && block.cellGroups.length > 0) {
       return block.cellGroups.some((group) => {
@@ -1704,103 +1738,179 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     );
   }, []);
 
-  const handlePointerUp = useCallback(
-    (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if (!isDragging && onCellClick) {
-        const canvas = canvasRef.current;
-        if (!canvas) return;
+  const getPointerViewMetrics = useCallback(
+    (clientX: number, clientY: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return null;
+      const rect = canvas.getBoundingClientRect();
+      return {
+        viewX: (clientX - rect.left) / appScale,
+        viewY: (clientY - rect.top) / appScale,
+      };
+    },
+    [appScale],
+  );
 
-        const canvasRect = canvas.getBoundingClientRect();
+  const handleTapAtViewPosition = useCallback(
+    (viewX: number, viewY: number) => {
+      if (!onCellClick) return;
+      const { x: mapX, y: mapY } = toMapCoordinates(viewX, viewY);
+      const col = Math.floor(mapX / cellSize) + 1;
+      const row = Math.floor(mapY / cellSize) + 1;
 
-        const appScale = appZoomLevel / 100;
+      if (row < 1 || row > mapData.maxRow || col < 1 || col > mapData.maxCol) {
+        return;
+      }
 
-        const viewX = (e.clientX - canvasRect.left) / appScale;
-        const viewY = (e.clientY - canvasRect.top) / appScale;
-        const { x: mapX, y: mapY } = toMapCoordinates(viewX, viewY);
+      for (const block of mapData.blocks) {
+        if (!isCellInBlock(row, col, block)) continue;
+        if (block.nameCells && block.nameCells.some((nc) => nc.row === row && nc.col === col)) {
+          continue;
+        }
 
-        const col = Math.floor(mapX / cellSize) + 1;
-        const row = Math.floor(mapY / cellSize) + 1;
+        let foundNumber: number | null = null;
+        const numberCell = block.numberCells.find((nc) => nc.row === row && nc.col === col);
+        if (numberCell) {
+          foundNumber = numberCell.value;
+        }
 
-        if (row >= 1 && row <= mapData.maxRow && col >= 1 && col <= mapData.maxCol) {
-          for (const block of mapData.blocks) {
-            if (isCellInBlock(row, col, block)) {
+        if (foundNumber === null) {
+          let cell = cellsMap.get(`${row}-${col}`);
+
+          if (!cell) {
+            for (const merge of mapData.mergedCells) {
               if (
-                block.nameCells &&
-                block.nameCells.some((nc) => nc.row === row && nc.col === col)
+                row >= merge.startRow &&
+                row <= merge.endRow &&
+                col >= merge.startCol &&
+                col <= merge.endCol
               ) {
-                continue;
-              }
-
-              let foundNumber: number | null = null;
-              const numberCell = block.numberCells.find((nc) => nc.row === row && nc.col === col);
-              if (numberCell) {
-                foundNumber = numberCell.value;
-              }
-
-              if (foundNumber === null) {
-                let cell = cellsMap.get(`${row}-${col}`);
-
-                if (!cell) {
-                  for (const merge of mapData.mergedCells) {
-                    if (
-                      row >= merge.startRow &&
-                      row <= merge.endRow &&
-                      col >= merge.startCol &&
-                      col <= merge.endCol
-                    ) {
-                      cell = cellsMap.get(`${merge.startRow}-${merge.startCol}`);
-                      break;
-                    }
-                  }
-                }
-
-                if (cell && cell.value !== null && cell.value !== undefined) {
-                  const cellValue = String(cell.value).trim();
-                  const numMatch = cellValue.match(/^(\d+)/);
-                  if (numMatch) {
-                    foundNumber = parseInt(numMatch[1], 10);
-                  }
-                }
-              }
-
-              if (foundNumber !== null) {
-                const matchingItems = items.filter((item) => {
-                  if (item.block !== block.name) return false;
-                  const numStr = extractNumberFromItemNumber(item.number);
-                  const numValue = numStr ? parseInt(numStr, 10) : 0;
-                  return numValue === foundNumber;
-                });
-
-                onCellClick(block.name, foundNumber, matchingItems);
+                cell = cellsMap.get(`${merge.startRow}-${merge.startCol}`);
                 break;
               }
             }
           }
-        }
-      }
 
-      setTimeout(() => {
-        setIsDragging(false);
-      }, 100);
+          if (cell && cell.value !== null && cell.value !== undefined) {
+            const cellValue = String(cell.value).trim();
+            const numMatch = cellValue.match(/^(\d+)/);
+            if (numMatch) {
+              foundNumber = parseInt(numMatch[1], 10);
+            }
+          }
+        }
+
+        if (foundNumber !== null) {
+          const matchingItems = items.filter((item) => {
+            if (item.block !== block.name) return false;
+            const numStr = extractNumberFromItemNumber(item.number);
+            const numValue = numStr ? parseInt(numStr, 10) : 0;
+            return numValue === foundNumber;
+          });
+          onCellClick(block.name, foundNumber, matchingItems);
+        }
+        break;
+      }
     },
-    [
-      isDragging,
-      onCellClick,
-      cellSize,
-      mapData,
-      items,
-      cellsMap,
-      isCellInBlock,
-      appZoomLevel,
-      toMapCoordinates,
-    ],
+    [cellSize, mapData, onCellClick, isCellInBlock, cellsMap, items, toMapCoordinates],
   );
 
-  const handlePointerLeave = useCallback(() => {
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (isDraggingRef.current) return;
+
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now < suppressClickUntilRef.current) return;
+
+      const metrics = getPointerViewMetrics(e.clientX, e.clientY);
+      if (!metrics) return;
+      handleTapAtViewPosition(metrics.viewX, metrics.viewY);
+    },
+    [getPointerViewMetrics, handleTapAtViewPosition],
+  );
+
+  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+      e.preventDefault();
+    }
+    if (activeTouchesRef.current.size >= 2) return;
+    isDraggingRef.current = false;
+    setIsDragging(false);
+    setDragStart({ x: e.clientX, y: e.clientY });
+    setDragStartOffset({ ...offsetRef.current });
+  }, []);
+
+  const handlePointerMove = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if ((e.pointerType === 'touch' || e.pointerType === 'pen') && isPinchGestureRef.current) {
+        return;
+      }
+      if (e.buttons !== 1) return;
+      if (activeTouchesRef.current.size >= 2) return;
+
+      const dx = (e.clientX - dragStart.x) / appScale;
+      const dy = (e.clientY - dragStart.y) / appScale;
+      const dragThreshold =
+        e.pointerType === 'touch' || e.pointerType === 'pen' ? 10 : 5;
+
+      if (Math.abs(dx) > dragThreshold || Math.abs(dy) > dragThreshold) {
+        isDraggingRef.current = true;
+        setIsDragging(true);
+      }
+
+      let newX = dragStartOffset.x + dx;
+      let newY = dragStartOffset.y + dy;
+
+      const limits = calculateScrollLimits();
+      if (limits) {
+        newX = Math.max(limits.minX, Math.min(limits.maxX, newX));
+        newY = Math.max(limits.minY, Math.min(limits.maxY, newY));
+      }
+
+      setOffset({
+        x: newX,
+        y: newY,
+      });
+    },
+    [appScale, calculateScrollLimits, dragStart, dragStartOffset],
+  );
+
+  const finishPointerInteraction = useCallback(() => {
+    isDraggingRef.current = false;
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
   }, []);
+
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      const wasDragging = isDraggingRef.current;
+      const isTouchPointer = e.pointerType === 'touch' || e.pointerType === 'pen';
+      if (isTouchPointer) {
+        e.preventDefault();
+      }
+
+      if (!wasDragging && isTouchPointer && !isPinchGestureRef.current) {
+        const metrics = getPointerViewMetrics(e.clientX, e.clientY);
+        if (metrics) {
+          handleTapAtViewPosition(metrics.viewX, metrics.viewY);
+          const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          suppressClickUntilRef.current = now + 400;
+        }
+      }
+
+      finishPointerInteraction();
+    },
+    [finishPointerInteraction, getPointerViewMetrics, handleTapAtViewPosition],
+  );
+
+  const handlePointerLeave = useCallback(() => {
+    finishPointerInteraction();
+  }, [finishPointerInteraction]);
+
+  const handlePointerCancel = useCallback(() => {
+    finishPointerInteraction();
+  }, [finishPointerInteraction]);
 
   return (
     <div
@@ -1813,10 +1923,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     >
       <canvas
         ref={canvasRef}
+        onClick={handleClick}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={handlePointerLeave}
+        onPointerCancel={handlePointerCancel}
         style={{
           cursor: isDragging ? 'grabbing' : 'grab',
           touchAction: 'none',
