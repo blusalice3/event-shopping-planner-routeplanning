@@ -498,7 +498,15 @@ function extractNumericCellValue(value: ExcelJS.CellValue): number | null {
   const extracted = extractCellValue(value);
   if (extracted === null || extracted === undefined) return null;
 
-  const num = typeof extracted === 'number' ? extracted : parseFloat(String(extracted));
+  if (typeof extracted === 'number') {
+    if (Number.isNaN(extracted) || !Number.isFinite(extracted)) return null;
+    return extracted;
+  }
+
+  const str = String(extracted).trim();
+  if (str === '') return null;
+
+  const num = Number(str);
   if (Number.isNaN(num) || !Number.isFinite(num)) return null;
   return num;
 }
@@ -1273,9 +1281,13 @@ function detectBlocksWithExcelJS(
       }
     }
 
+    const nameCellKeys = new Set(
+      group.nameCells.map((nc) => `${nc.row}-${nc.col}`),
+    );
     const mergedNumberCells = [...uniqueNumberCells, ...colorExpandedNumberCells]
       .filter(
         (cell, index, self) =>
+          !nameCellKeys.has(`${cell.row}-${cell.col}`) &&
           index === self.findIndex((c) => c.row === cell.row && c.col === cell.col),
       )
       .sort((a, b) => a.value - b.value);
