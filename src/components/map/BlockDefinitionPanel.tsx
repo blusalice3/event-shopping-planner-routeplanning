@@ -96,7 +96,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
           const cell = cellsMap.get(`${r}-${c}`);
           if (cell && !cell.isMerged && cell.value !== null) {
             const num =
-              typeof cell.value === 'number' ? cell.value : parseFloat(String(cell.value));
+              typeof cell.value === 'number' ? cell.value : Number(String(cell.value).trim());
             if (!isNaN(num) && num > 0 && num <= 100) cells.push({ row: r, col: c, value: num });
           }
         }
@@ -285,7 +285,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
           const cell = cellsMap.get(`${c.row}-${c.col}`);
           if (cell && cell.value !== null) {
             const num =
-              typeof cell.value === 'number' ? cell.value : parseFloat(String(cell.value));
+              typeof cell.value === 'number' ? cell.value : Number(String(cell.value).trim());
             if (!isNaN(num) && num > 0 && num <= 100)
               all.push({ row: c.row, col: c.col, value: num });
           }

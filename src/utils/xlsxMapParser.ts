@@ -1667,7 +1667,7 @@ export function createBlockDefinition(
     for (let c = startCol; c <= endCol; c++) {
       const cell = cellsMap.get(`${r}-${c}`);
       if (cell && !cell.isMerged && cell.value !== null) {
-        const num = typeof cell.value === 'number' ? cell.value : parseFloat(String(cell.value));
+        const num = typeof cell.value === 'number' ? cell.value : Number(String(cell.value).trim());
         if (
           !isNaN(num) &&
           Number.isInteger(num) &&
