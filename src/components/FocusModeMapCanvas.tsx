@@ -1174,8 +1174,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
     const ncPad = cellSize * 0.1;
     const ncRadius = Math.max(2, cellSize * 0.18);
-    const ncBg = isDarkMode ? '#1B3A1E' : '#E8F5E9';
-    const ncBorder = isDarkMode ? '#4CAF50' : '#A5D6A7';
+    const ncBg = isDarkMode ? '#1E293B' : '#FFFFFF';
+    const ncBorder = isDarkMode ? '#475569' : '#CBD5E1';
     const ncBorderWidth = Math.max(1, cellSize * 0.055);
 
     const drawRoundedCellBg = (rx: number, ry: number, rw: number, rh: number, fillColor: string, strokeColor: string) => {
@@ -1441,7 +1441,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         } else if (state?.hasItems) {
           ctx.fillStyle = '#1565C0';
         } else if (numberCellSet.has(`${cell.row}-${cell.col}`)) {
-          ctx.fillStyle = isDarkMode ? '#81C784' : '#2E7D32';
+          ctx.fillStyle = isDarkMode ? '#E2E8F0' : '#334155';
         } else {
           ctx.fillStyle = resolveMapTextColorForTheme(cell.fontColor, isDarkMode);
         }
