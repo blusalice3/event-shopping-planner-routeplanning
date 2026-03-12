@@ -9,6 +9,7 @@ import type {
   RouteSettingsStore,
   ShoppingItem,
 } from '../../types';
+import { exportToXlsx } from '../../utils/exportImport';
 
 type ExportStores = {
   executeModeItems: Record<string, ExecuteModeItems>;
@@ -36,7 +37,6 @@ export async function buildEventExportFile(
   metadata: EventMetadata | undefined,
   stores: ExportStores,
 ): Promise<{ blob: Blob; filename: string }> {
-  const { exportToXlsx } = await import('../../utils/exportImport');
   const blob = await exportToXlsx(eventName, items, options, {
     metadata,
     executeModeItems: stores.executeModeItems,

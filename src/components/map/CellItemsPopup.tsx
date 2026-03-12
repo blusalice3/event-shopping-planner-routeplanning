@@ -45,9 +45,9 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   const [longPressItem, setLongPressItem] = useState<ShoppingItem | null>(null);
   const [editingItem, setEditingItem] = useState<ShoppingItem | null>(null);
   const longPressTimeout = useRef<number | null>(null);
-  const longPressTriggeredRef = useRef(false);
-  const pointerStartRef = useRef<{ x: number; y: number } | null>(null);
-  const suppressNextClickRef = useRef(false);
+  const isLongPress = useRef(false);
+  const suppressNextClick = useRef(false);
+  const suppressPopupClickUntilRef = useRef(0);
   const [popupSize, setPopupSize] = useState({ width: 320, height: 300 });
 
   // === アイテム追加ダイアログ ===
@@ -128,17 +128,14 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   // ダイアログが閉じたらサブ状態もリセット
   useEffect(() => {
     if (!isOpen) {
-      if (longPressTimeout.current) {
-        clearTimeout(longPressTimeout.current);
-        longPressTimeout.current = null;
-      }
-      longPressTriggeredRef.current = false;
-      pointerStartRef.current = null;
-      suppressNextClickRef.current = false;
       setAddDialogOpen(false);
       setLongPressItem(null);
       setEditingItem(null);
+      suppressPopupClickUntilRef.current = 0;
+      return;
     }
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    suppressPopupClickUntilRef.current = now + 400;
   }, [isOpen]);
 
   // 最適なポップアップ位置を計算
@@ -173,7 +170,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   }, [position, popupSize]);
 
   useEffect(() => {
-    const handleClickOutside = (e: MouseEvent) => {
+    const handleClickOutside = (e: PointerEvent) => {
       if (popupRef.current && !popupRef.current.contains(e.target as Node)) {
         if (!longPressItem && !editingItem && !addDialogOpen) {
           onClose();
@@ -181,69 +178,73 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
       }
     };
     if (isOpen) {
-      document.addEventListener('mousedown', handleClickOutside);
+      document.addEventListener('pointerdown', handleClickOutside);
     }
     return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('pointerdown', handleClickOutside);
     };
   }, [isOpen, onClose, longPressItem, editingItem, addDialogOpen]);
 
-  const clearLongPressTimer = () => {
+  const clearLongPressTimer = useCallback(() => {
     if (longPressTimeout.current) {
       clearTimeout(longPressTimeout.current);
       longPressTimeout.current = null;
     }
-  };
+  }, []);
 
-  const handleItemPointerDown = (item: ShoppingItem, e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.button !== 0) return;
-
+  const handleItemPointerDown = (
+    e: React.PointerEvent<HTMLDivElement>,
+    item: ShoppingItem,
+  ) => {
+    isLongPress.current = false;
+    suppressNextClick.current = false;
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // setPointerCapture はブラウザ依存のため利用不可環境はそのまま継続する。
+    }
     clearLongPressTimer();
-    longPressTriggeredRef.current = false;
-    suppressNextClickRef.current = false;
-    pointerStartRef.current = { x: e.clientX, y: e.clientY };
-
     longPressTimeout.current = window.setTimeout(() => {
-      longPressTriggeredRef.current = true;
-      suppressNextClickRef.current = true;
+      isLongPress.current = true;
+      suppressNextClick.current = true;
       setLongPressItem(item);
     }, 500);
   };
 
-  const handleItemPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!pointerStartRef.current) return;
-
-    const dx = Math.abs(e.clientX - pointerStartRef.current.x);
-    const dy = Math.abs(e.clientY - pointerStartRef.current.y);
-    if (dx > 8 || dy > 8) {
-      pointerStartRef.current = null;
-      suppressNextClickRef.current = true;
-      clearLongPressTimer();
+  const handleItemPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    try {
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    } catch {
+      // releasePointerCapture はブラウザ依存のため利用不可環境はそのまま継続する。
     }
-  };
-
-  const handleItemPointerUp = () => {
-    pointerStartRef.current = null;
     clearLongPressTimer();
   };
 
   const handleItemPointerLeave = () => {
-    pointerStartRef.current = null;
-    clearLongPressTimer();
-  };
-
-  const handleItemPointerCancel = () => {
-    pointerStartRef.current = null;
     clearLongPressTimer();
   };
 
   const handleItemClick = (item: ShoppingItem) => {
-    if (longPressTriggeredRef.current || suppressNextClickRef.current) {
-      longPressTriggeredRef.current = false;
-      suppressNextClickRef.current = false;
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now < suppressPopupClickUntilRef.current) {
+      return;
+    }
+    if (isLongPress.current || suppressNextClick.current) {
+      isLongPress.current = false;
+      suppressNextClick.current = false;
       return;
     }
     handleVisitToggle(item);
+  };
+
+  const handlePopupClickCapture = (e: React.SyntheticEvent) => {
+    const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+    if (now < suppressPopupClickUntilRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+    }
   };
 
   const handleVisitToggle = (item: ShoppingItem) => {
@@ -296,6 +297,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
         ref={popupRef}
         className="fixed z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 max-w-sm w-80 transition-all duration-150"
         style={{ left: computedPosition.x, top: computedPosition.y }}
+        onClickCapture={handlePopupClickCapture}
       >
         {/* ヘッダー */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
@@ -354,12 +356,12 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   isInVisitList
                     ? 'bg-blue-50 dark:bg-blue-900/20'
                     : 'hover:bg-slate-50 dark:hover:bg-slate-700/50'
-                } touch-manipulation`}
-                onPointerDown={(e) => handleItemPointerDown(item, e)}
-                onPointerMove={handleItemPointerMove}
+                }`}
+                onPointerDown={(e) => handleItemPointerDown(e, item)}
                 onPointerUp={handleItemPointerUp}
                 onPointerLeave={handleItemPointerLeave}
-                onPointerCancel={handleItemPointerCancel}
+                onPointerCancel={handleItemPointerLeave}
+                onTouchMove={handleItemPointerLeave}
                 onClick={() => handleItemClick(item)}
               >
                 <div className="flex items-start justify-between">

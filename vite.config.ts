@@ -7,13 +7,11 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      injectRegister: false,
-      includeAssets: ['favicon.ico'],
+      includeAssets: ['icons/*.png', 'icons/*.svg'],
       manifest: {
         name: '即売会 購入巡回表',
         short_name: '巡回表',
         description: '同人誌即売会の購入リスト管理アプリ',
-        id: '/',
         theme_color: '#2563eb',
         background_color: '#f8fafc',
         display: 'standalone',
@@ -21,17 +19,22 @@ export default defineConfig({
         start_url: '/',
         icons: [
           {
-            src: '/pwa-192.png',
+            src: 'icons/pwa-64x64.png',
+            sizes: '64x64',
+            type: 'image/png',
+          },
+          {
+            src: 'icons/pwa-192x192.png',
             sizes: '192x192',
             type: 'image/png',
           },
           {
-            src: '/pwa-512.png',
+            src: 'icons/pwa-512x512.png',
             sizes: '512x512',
             type: 'image/png',
           },
           {
-            src: '/pwa-512.png',
+            src: 'icons/maskable-icon-512x512.png',
             sizes: '512x512',
             type: 'image/png',
             purpose: 'maskable',

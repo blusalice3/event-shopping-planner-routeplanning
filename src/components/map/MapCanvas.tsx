@@ -10,7 +10,7 @@ import {
   MIN_ZOOM,
   MAX_ZOOM,
 } from '../../types';
-import { extractNumberFromItemNumber } from '../../utils/itemNumber';
+import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { generateRouteSegments, simplifyPath } from '../../utils/pathfinding';
 import MapCanvasPresentation from './MapCanvasPresentation';
 
@@ -204,6 +204,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   }, [offsetRef]);
   const zoomLevelRef = useRef(zoomLevel);
   const [isDragging, setIsDragging] = useState(false);
+  const isDraggingRef = useRef(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
   const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
   const [hoverGuide, setHoverGuide] = useState<HoverGuideState | null>(null);
@@ -229,6 +230,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const pinchStartZoomRef = useRef<number>(zoomLevel);
   const pinchStartOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
+  const isPinchGestureRef = useRef(false);
+  const suppressClickUntilRef = useRef(0);
   const [isRotationInteracting, setIsRotationInteracting] = useState(false);
   const rotationInteractionTimerRef = useRef<number | null>(null);
 
@@ -468,6 +471,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
 
       if (activeTouchesRef.current.size === 2) {
+        isPinchGestureRef.current = true;
+        isDraggingRef.current = false;
+        setIsDragging(false);
         e.preventDefault();
         const touches = Array.from(activeTouchesRef.current.values());
         const dx = touches[1].x - touches[0].x;
@@ -488,6 +494,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
 
       if (activeTouchesRef.current.size === 2 && onZoomChange) {
+        isPinchGestureRef.current = true;
         e.preventDefault();
         const touches = Array.from(activeTouchesRef.current.values());
         const dx = touches[1].x - touches[0].x;
@@ -528,8 +535,19 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     for (let i = 0; i < e.changedTouches.length; i++) {
       activeTouchesRef.current.delete(e.changedTouches[i].identifier);
     }
+
     if (activeTouchesRef.current.size < 2) {
       pinchStartDistRef.current = 0;
+      isPinchGestureRef.current = false;
+      isDraggingRef.current = false;
+      setIsDragging(false);
+
+      // 2本指ピンチ終了後の1本指移動で座標ジャンプしないよう、ドラッグ起点を現在値へ再同期する。
+      if (activeTouchesRef.current.size === 1) {
+        const remainingTouch = Array.from(activeTouchesRef.current.values())[0];
+        setDragStart({ x: remainingTouch.x, y: remainingTouch.y });
+        setDragStartOffset({ ...offsetRef.current });
+      }
     }
   }, []);
 
@@ -1167,6 +1185,45 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     }
 
+    // 数値セル判定用Set構築
+    const numberCellSet = new Set<string>();
+    mapData.blocks.forEach((block) => {
+      block.numberCells.forEach((nc) => numberCellSet.add(`${nc.row}-${nc.col}`));
+    });
+
+    const ncPad = cellSize * 0.1;
+    const ncRadius = Math.max(2, cellSize * 0.18);
+    const ncBg = isDarkMode ? '#1B3A1E' : '#E8F5E9';
+    const ncBorder = isDarkMode ? '#4CAF50' : '#A5D6A7';
+    const ncBorderWidth = Math.max(1, cellSize * 0.055);
+
+    const drawRoundedCellBg = (rx: number, ry: number, rw: number, rh: number, fillColor: string, strokeColor: string) => {
+      ctx.beginPath();
+      ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+      ctx.fillStyle = fillColor;
+      ctx.fill();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = ncBorderWidth;
+      ctx.stroke();
+    };
+
+    const fillRoundedOverlay = (rx: number, ry: number, rw: number, rh: number, overlayColor: string | CanvasPattern) => {
+      if (overlayColor instanceof CanvasPattern) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+        ctx.clip();
+        ctx.fillStyle = overlayColor;
+        ctx.fillRect(rx, ry, rw, rh);
+        ctx.restore();
+      } else {
+        ctx.beginPath();
+        ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+        ctx.fillStyle = overlayColor;
+        ctx.fill();
+      }
+    };
+
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
 
@@ -1181,29 +1238,53 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const width = spanCols * cellSize;
       const height = spanRows * cellSize;
 
-      // 繧ｻ繝ｫ閭梧勹濶ｲ
-      if (cell.backgroundColor) {
+      const cellKey = `${cell.row}-${cell.col}`;
+      const isNumberCell = numberCellSet.has(cellKey);
+
+      if (isNumberCell) {
+        drawRoundedCellBg(x, y, width, height, ncBg, ncBorder);
+      } else if (cell.backgroundColor) {
         ctx.fillStyle = cell.backgroundColor;
         ctx.fillRect(x, y, width, height);
       }
 
-      const state = cellStates.get(`${cell.row}-${cell.col}`);
+      const state = cellStates.get(cellKey);
       if (state) {
         if (state.isFullyVisited) {
-          ctx.fillStyle = 'rgba(239, 83, 80, 0.5)';
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, 'rgba(239, 83, 80, 0.5)');
+          } else {
+            ctx.fillStyle = 'rgba(239, 83, 80, 0.5)';
+            ctx.fillRect(x, y, width, height);
+          }
         } else if (state.hasPriorityUnvisited && warningPattern) {
-          ctx.fillStyle = warningPattern;
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, warningPattern);
+          } else {
+            ctx.fillStyle = warningPattern;
+            ctx.fillRect(x, y, width, height);
+          }
         } else if (state.hasPriorityUnvisited) {
-          ctx.fillStyle = 'rgba(255, 214, 0, 0.45)';
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, 'rgba(255, 214, 0, 0.45)');
+          } else {
+            ctx.fillStyle = 'rgba(255, 214, 0, 0.45)';
+            ctx.fillRect(x, y, width, height);
+          }
         } else if (state.isVisited) {
-          ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, 'rgba(255, 238, 88, 0.5)');
+          } else {
+            ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';
+            ctx.fillRect(x, y, width, height);
+          }
         } else if (state.hasItems) {
-          ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, 'rgba(66, 165, 245, 0.3)');
+          } else {
+            ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';
+            ctx.fillRect(x, y, width, height);
+          }
         }
       }
     });
@@ -1264,6 +1345,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       };
 
       mapData.cells.forEach((cell) => {
+        // 数値セルは角丸ボーダーで描画済みなので罫線収集をスキップ
+        if (numberCellSet.has(`${cell.row}-${cell.col}`)) return;
+
         const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
         if (!isCellVisible(cell.row, cell.col, 1, 1)) return;
 
@@ -1302,6 +1386,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       });
 
+      const softBorderColor = (color: string | undefined): string => {
+        const c = color || '#000000';
+        if (c === '#000000') return isDarkMode ? '#666666' : '#555555';
+        return c;
+      };
+
       edgeMap.forEach(({ orientation, gridX, gridY, border }) => {
         let lineWidth = 1;
         switch (border.style) {
@@ -1324,9 +1414,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const endY = orientation === 'v' ? (gridY + 1) * cellSize : startY;
 
         ctx.beginPath();
-        ctx.strokeStyle = border.color || '#000000';
-        ctx.lineCap = 'butt';
-        ctx.lineJoin = 'miter';
+        ctx.strokeStyle = softBorderColor(border.color);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         ctx.lineWidth = lineWidth;
         ctx.moveTo(startX, startY);
         ctx.lineTo(endX, endY);
@@ -1411,6 +1501,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           ctx.fillStyle = '#F57F17';
         } else if (state?.hasItems) {
           ctx.fillStyle = '#1565C0';
+        } else if (numberCellSet.has(`${cell.row}-${cell.col}`)) {
+          ctx.fillStyle = isDarkMode ? '#81C784' : '#2E7D32';
         } else {
           ctx.fillStyle = resolveMapTextColorForTheme(cell.fontColor, isDarkMode);
         }
@@ -2018,19 +2110,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     offset,
   ]);
 
-  const handleClick = useCallback(
-    (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (isDragging) return;
-
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / dpr / rect.width;
-      const scaleY = canvas.height / dpr / rect.height;
-
-      const viewX = (e.clientX - rect.left) * scaleX;
-      const viewY = (e.clientY - rect.top) * scaleY;
+  const handleTapAtViewPosition = useCallback(
+    (viewX: number, viewY: number, pointerType: string) => {
       const { x, y } = toMapCoordinates(viewX, viewY);
 
       if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
@@ -2105,7 +2186,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
       const shouldShowTapAssist =
         (vertexSelectionMode || cellSelectionMode) &&
-        (lastPointerTypeRef.current === 'touch' || lastPointerTypeRef.current === 'pen');
+        (pointerType === 'touch' || pointerType === 'pen');
       if (shouldShowTapAssist) {
         showTapAssist({
           row: resolvedRow,
@@ -2133,15 +2214,27 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       mapData.mergedCells,
       cellStates,
       onCellClick,
-      isDragging,
-      dpr,
       vertexSelectionMode,
       cellSelectionMode,
       showTapAssist,
       mergedCellsMap,
-      offset,
       toMapCoordinates,
     ],
+  );
+
+  const handleClick = useCallback(
+    (e: React.MouseEvent<HTMLCanvasElement>) => {
+      if (isDraggingRef.current) return;
+
+      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      if (now < suppressClickUntilRef.current) return;
+
+      const metrics = getPointerViewMetrics(e.clientX, e.clientY);
+      if (!metrics) return;
+
+      handleTapAtViewPosition(metrics.viewX, metrics.viewY, lastPointerTypeRef.current);
+    },
+    [getPointerViewMetrics, handleTapAtViewPosition],
   );
 
   const hallScrollBounds = useMemo(() => {
@@ -2267,7 +2360,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       lastPointerTypeRef.current = e.pointerType;
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+        e.preventDefault();
+      }
       if (activeTouchesRef.current.size >= 2) return;
+      isDraggingRef.current = false;
       setIsDragging(false);
       setDragStart({ x: e.clientX, y: e.clientY });
       setDragStartOffset({ ...offsetRef.current });
@@ -2284,14 +2381,19 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         setHoverGuide(null);
       }
 
+      if ((e.pointerType === 'touch' || e.pointerType === 'pen') && isPinchGestureRef.current) {
+        return;
+      }
       if (e.buttons !== 1) return;
       if (activeTouchesRef.current.size >= 2) return;
 
       const dx = e.clientX - dragStart.x;
       const dy = e.clientY - dragStart.y;
 
-      const dragThreshold = e.pointerType === 'touch' ? 10 : 5;
+      const dragThreshold =
+        lastPointerTypeRef.current === 'touch' || lastPointerTypeRef.current === 'pen' ? 10 : 5;
       if (Math.abs(dx) > dragThreshold || Math.abs(dy) > dragThreshold) {
+        isDraggingRef.current = true;
         setIsDragging(true);
       }
 
@@ -2322,19 +2424,52 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     ],
   );
 
-  const handlePointerUp = useCallback(() => {
+  const finishPointerInteraction = useCallback(() => {
+    isDraggingRef.current = false;
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
   }, []);
 
+  const handlePointerUp = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      lastPointerTypeRef.current = e.pointerType;
+      const wasDragging = isDraggingRef.current;
+      const isTouchPointer = e.pointerType === 'touch' || e.pointerType === 'pen';
+      if (isTouchPointer) {
+        e.preventDefault();
+      }
+
+      if (!wasDragging && isTouchPointer && !isPinchGestureRef.current) {
+        const metrics = getPointerViewMetrics(e.clientX, e.clientY);
+        if (metrics) {
+          handleTapAtViewPosition(metrics.viewX, metrics.viewY, e.pointerType);
+          const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          suppressClickUntilRef.current = now + 450;
+        }
+      }
+
+      finishPointerInteraction();
+    },
+    [finishPointerInteraction, getPointerViewMetrics, handleTapAtViewPosition],
+  );
+
   const handlePointerLeave = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       lastPointerTypeRef.current = e.pointerType;
       setHoverGuide(null);
-      handlePointerUp();
+      finishPointerInteraction();
     },
-    [handlePointerUp],
+    [finishPointerInteraction],
+  );
+
+  const handlePointerCancel = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      lastPointerTypeRef.current = e.pointerType;
+      setHoverGuide(null);
+      finishPointerInteraction();
+    },
+    [finishPointerInteraction],
   );
 
   return (
@@ -2347,11 +2482,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerLeave}
+      onPointerCancel={handlePointerCancel}
     />
   );
 };
 
 export default MapCanvas;
+
 
 
 
