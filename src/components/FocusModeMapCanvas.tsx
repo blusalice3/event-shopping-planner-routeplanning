@@ -1166,6 +1166,45 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.textBaseline = 'middle';
     };
 
+    // 数値セル判定用Set構築
+    const numberCellSet = new Set<string>();
+    mapData.blocks.forEach((block) => {
+      block.numberCells.forEach((nc) => numberCellSet.add(`${nc.row}-${nc.col}`));
+    });
+
+    const ncPad = cellSize * 0.1;
+    const ncRadius = Math.max(2, cellSize * 0.18);
+    const ncBg = isDarkMode ? '#1E293B' : '#FFFFFF';
+    const ncBorder = isDarkMode ? '#475569' : '#CBD5E1';
+    const ncBorderWidth = Math.max(1, cellSize * 0.055);
+
+    const drawRoundedCellBg = (rx: number, ry: number, rw: number, rh: number, fillColor: string, strokeColor: string) => {
+      ctx.beginPath();
+      ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+      ctx.fillStyle = fillColor;
+      ctx.fill();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = ncBorderWidth;
+      ctx.stroke();
+    };
+
+    const fillRoundedOverlay = (rx: number, ry: number, rw: number, rh: number, overlayColor: string | CanvasPattern) => {
+      if (overlayColor instanceof CanvasPattern) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+        ctx.clip();
+        ctx.fillStyle = overlayColor;
+        ctx.fillRect(rx, ry, rw, rh);
+        ctx.restore();
+      } else {
+        ctx.beginPath();
+        ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+        ctx.fillStyle = overlayColor;
+        ctx.fill();
+      }
+    };
+
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
 
@@ -1179,27 +1218,47 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const width = spanCols * cellSize;
       const height = spanRows * cellSize;
 
-      if (cell.backgroundColor) {
+      const cellKey = `${cell.row}-${cell.col}`;
+      const isNumberCell = numberCellSet.has(cellKey);
+
+      if (isNumberCell) {
+        drawRoundedCellBg(x, y, width, height, ncBg, ncBorder);
+      } else if (cell.backgroundColor) {
         ctx.fillStyle = cell.backgroundColor;
         ctx.fillRect(x, y, width, height);
       }
 
-      const cellKey = `${cell.row}-${cell.col}`;
       const state = cellStates.get(cellKey);
       if (state && state.hasItems) {
         const label = cellLabels.get(cellKey);
         if (label) {
-          ctx.fillStyle = label.bgColor;
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, label.bgColor);
+          } else {
+            ctx.fillStyle = label.bgColor;
+            ctx.fillRect(x, y, width, height);
+          }
         } else if (state.isVisited) {
-          ctx.fillStyle = 'rgba(158, 158, 158, 0.5)';
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, 'rgba(158, 158, 158, 0.5)');
+          } else {
+            ctx.fillStyle = 'rgba(158, 158, 158, 0.5)';
+            ctx.fillRect(x, y, width, height);
+          }
         } else if (state.hasPostponed && currentPhase !== 'postponed') {
-          ctx.fillStyle = 'rgba(156, 39, 176, 0.4)';
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, 'rgba(156, 39, 176, 0.4)');
+          } else {
+            ctx.fillStyle = 'rgba(156, 39, 176, 0.4)';
+            ctx.fillRect(x, y, width, height);
+          }
         } else if (state.hasLate && currentPhase !== 'late') {
-          ctx.fillStyle = 'rgba(33, 150, 243, 0.4)';
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, 'rgba(33, 150, 243, 0.4)');
+          } else {
+            ctx.fillStyle = 'rgba(33, 150, 243, 0.4)';
+            ctx.fillRect(x, y, width, height);
+          }
         }
       }
     });
@@ -1297,6 +1356,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         }
       });
 
+      const softBorderColor = (color: string | undefined): string => {
+        const c = color || '#000000';
+        if (c === '#000000') return isDarkMode ? '#666666' : '#555555';
+        return c;
+      };
+
       edgeMap.forEach(({ orientation, gridX, gridY, border }) => {
         let lineWidth = 1;
         switch (border.style) {
@@ -1319,9 +1384,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         const endY = orientation === 'v' ? (gridY + 1) * cellSize : startY;
 
         ctx.beginPath();
-        ctx.strokeStyle = border.color || '#000000';
-        ctx.lineCap = 'butt';
-        ctx.lineJoin = 'miter';
+        ctx.strokeStyle = softBorderColor(border.color);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         ctx.lineWidth = lineWidth;
         ctx.moveTo(startX, startY);
         ctx.lineTo(endX, endY);
@@ -1375,6 +1440,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           ctx.fillStyle = resolveMapTextColorForTheme('#616161', isDarkMode);
         } else if (state?.hasItems) {
           ctx.fillStyle = '#1565C0';
+        } else if (numberCellSet.has(`${cell.row}-${cell.col}`)) {
+          ctx.fillStyle = isDarkMode ? '#E2E8F0' : '#334155';
         } else {
           ctx.fillStyle = resolveMapTextColorForTheme(cell.fontColor, isDarkMode);
         }
@@ -1897,6 +1964,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
           suppressClickUntilRef.current = now + 400;
         }
+      } else if (wasDragging) {
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        suppressClickUntilRef.current = now + 400;
       }
 
       finishPointerInteraction();

@@ -1185,6 +1185,45 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     }
 
+    // 数値セル判定用Set構築
+    const numberCellSet = new Set<string>();
+    mapData.blocks.forEach((block) => {
+      block.numberCells.forEach((nc) => numberCellSet.add(`${nc.row}-${nc.col}`));
+    });
+
+    const ncPad = cellSize * 0.1;
+    const ncRadius = Math.max(2, cellSize * 0.18);
+    const ncBg = isDarkMode ? '#1E293B' : '#FFFFFF';
+    const ncBorder = isDarkMode ? '#475569' : '#CBD5E1';
+    const ncBorderWidth = Math.max(1, cellSize * 0.055);
+
+    const drawRoundedCellBg = (rx: number, ry: number, rw: number, rh: number, fillColor: string, strokeColor: string) => {
+      ctx.beginPath();
+      ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+      ctx.fillStyle = fillColor;
+      ctx.fill();
+      ctx.strokeStyle = strokeColor;
+      ctx.lineWidth = ncBorderWidth;
+      ctx.stroke();
+    };
+
+    const fillRoundedOverlay = (rx: number, ry: number, rw: number, rh: number, overlayColor: string | CanvasPattern) => {
+      if (overlayColor instanceof CanvasPattern) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+        ctx.clip();
+        ctx.fillStyle = overlayColor;
+        ctx.fillRect(rx, ry, rw, rh);
+        ctx.restore();
+      } else {
+        ctx.beginPath();
+        ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+        ctx.fillStyle = overlayColor;
+        ctx.fill();
+      }
+    };
+
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
 
@@ -1199,29 +1238,53 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const width = spanCols * cellSize;
       const height = spanRows * cellSize;
 
-      // 繧ｻ繝ｫ閭梧勹濶ｲ
-      if (cell.backgroundColor) {
+      const cellKey = `${cell.row}-${cell.col}`;
+      const isNumberCell = numberCellSet.has(cellKey);
+
+      if (isNumberCell) {
+        drawRoundedCellBg(x, y, width, height, ncBg, ncBorder);
+      } else if (cell.backgroundColor) {
         ctx.fillStyle = cell.backgroundColor;
         ctx.fillRect(x, y, width, height);
       }
 
-      const state = cellStates.get(`${cell.row}-${cell.col}`);
+      const state = cellStates.get(cellKey);
       if (state) {
         if (state.isFullyVisited) {
-          ctx.fillStyle = 'rgba(239, 83, 80, 0.5)';
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, 'rgba(239, 83, 80, 0.5)');
+          } else {
+            ctx.fillStyle = 'rgba(239, 83, 80, 0.5)';
+            ctx.fillRect(x, y, width, height);
+          }
         } else if (state.hasPriorityUnvisited && warningPattern) {
-          ctx.fillStyle = warningPattern;
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, warningPattern);
+          } else {
+            ctx.fillStyle = warningPattern;
+            ctx.fillRect(x, y, width, height);
+          }
         } else if (state.hasPriorityUnvisited) {
-          ctx.fillStyle = 'rgba(255, 214, 0, 0.45)';
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, 'rgba(255, 214, 0, 0.45)');
+          } else {
+            ctx.fillStyle = 'rgba(255, 214, 0, 0.45)';
+            ctx.fillRect(x, y, width, height);
+          }
         } else if (state.isVisited) {
-          ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, 'rgba(255, 238, 88, 0.5)');
+          } else {
+            ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';
+            ctx.fillRect(x, y, width, height);
+          }
         } else if (state.hasItems) {
-          ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';
-          ctx.fillRect(x, y, width, height);
+          if (isNumberCell) {
+            fillRoundedOverlay(x, y, width, height, 'rgba(66, 165, 245, 0.3)');
+          } else {
+            ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';
+            ctx.fillRect(x, y, width, height);
+          }
         }
       }
     });
@@ -1320,6 +1383,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       });
 
+      const softBorderColor = (color: string | undefined): string => {
+        const c = color || '#000000';
+        if (c === '#000000') return isDarkMode ? '#666666' : '#555555';
+        return c;
+      };
+
       edgeMap.forEach(({ orientation, gridX, gridY, border }) => {
         let lineWidth = 1;
         switch (border.style) {
@@ -1342,9 +1411,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const endY = orientation === 'v' ? (gridY + 1) * cellSize : startY;
 
         ctx.beginPath();
-        ctx.strokeStyle = border.color || '#000000';
-        ctx.lineCap = 'butt';
-        ctx.lineJoin = 'miter';
+        ctx.strokeStyle = softBorderColor(border.color);
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
         ctx.lineWidth = lineWidth;
         ctx.moveTo(startX, startY);
         ctx.lineTo(endX, endY);
@@ -1429,6 +1498,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           ctx.fillStyle = '#F57F17';
         } else if (state?.hasItems) {
           ctx.fillStyle = '#1565C0';
+        } else if (numberCellSet.has(`${cell.row}-${cell.col}`)) {
+          ctx.fillStyle = isDarkMode ? '#E2E8F0' : '#334155';
         } else {
           ctx.fillStyle = resolveMapTextColorForTheme(cell.fontColor, isDarkMode);
         }
@@ -2373,6 +2444,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
           suppressClickUntilRef.current = now + 450;
         }
+      } else if (wasDragging) {
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        suppressClickUntilRef.current = now + 450;
       }
 
       finishPointerInteraction();
