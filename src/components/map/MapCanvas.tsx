@@ -1345,9 +1345,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       };
 
       mapData.cells.forEach((cell) => {
-        // 数値セルは角丸ボーダーで描画済みなので罫線収集をスキップ
-        if (numberCellSet.has(`${cell.row}-${cell.col}`)) return;
-
         const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
         if (!isCellVisible(cell.row, cell.col, 1, 1)) return;
 
@@ -2447,6 +2444,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
           suppressClickUntilRef.current = now + 450;
         }
+      } else if (wasDragging) {
+        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        suppressClickUntilRef.current = now + 450;
       }
 
       finishPointerInteraction();
