@@ -283,7 +283,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       } else if (g.type === 'individual' && g.cells) {
         g.cells.forEach((c) => {
           const cell = cellsMap.get(`${c.row}-${c.col}`);
-          if (cell && !cell.isMerged && cell.value !== null) {
+          if (cell && cell.value !== null) {
             const num =
               typeof cell.value === 'number' ? cell.value : Number(String(cell.value).trim());
             if (!isNaN(num) && num > 0 && num <= 100)
