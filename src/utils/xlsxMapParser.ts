@@ -1680,7 +1680,21 @@ export function createBlockDefinition(
     }
   }
 
-  return {
+  // ブロック名と一致するセルをnameCellsとして検出
+  const nameCells: { row: number; col: number }[] = [];
+  for (let r = startRow; r <= endRow; r++) {
+    for (let c = startCol; c <= endCol; c++) {
+      const cell = cellsMap.get(`${r}-${c}`);
+      if (cell && cell.value !== null) {
+        const cellValue = String(cell.value).trim();
+        if (cellValue === name) {
+          nameCells.push({ row: r, col: c });
+        }
+      }
+    }
+  }
+
+  const blockDef: BlockDefinition = {
     name,
     startRow,
     startCol,
@@ -1689,4 +1703,10 @@ export function createBlockDefinition(
     numberCells: numberCells.sort((a, b) => a.value - b.value),
     color: '#E3F2FD',
   };
+
+  if (nameCells.length > 0) {
+    blockDef.nameCells = nameCells;
+  }
+
+  return blockDef;
 }

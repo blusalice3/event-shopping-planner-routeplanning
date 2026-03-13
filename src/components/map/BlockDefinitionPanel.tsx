@@ -283,7 +283,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       } else if (g.type === 'individual' && g.cells) {
         g.cells.forEach((c) => {
           const cell = cellsMap.get(`${c.row}-${c.col}`);
-          if (cell && cell.value !== null) {
+          if (cell && !cell.isMerged && cell.value !== null) {
             const num =
               typeof cell.value === 'number' ? cell.value : Number(String(cell.value).trim());
             if (!isNaN(num) && num > 0 && num <= 100)
@@ -424,6 +424,23 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
         isAutoDetected: false,
         isWallBlock: false,
       };
+    }
+
+    // ブロック名と一致するセルをnameCellsとして検出
+    const nameCells: { row: number; col: number }[] = [];
+    for (let r = saved.startRow; r <= saved.endRow; r++) {
+      for (let c = saved.startCol; c <= saved.endCol; c++) {
+        const cell = cellsMap.get(`${r}-${c}`);
+        if (cell && cell.value !== null) {
+          const cellValue = String(cell.value).trim();
+          if (cellValue === name) {
+            nameCells.push({ row: r, col: c });
+          }
+        }
+      }
+    }
+    if (nameCells.length > 0) {
+      saved.nameCells = nameCells;
     }
 
     if (isAddingNew) setBlocks((prev) => [...prev, saved]);

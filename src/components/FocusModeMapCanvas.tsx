@@ -1829,37 +1829,39 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         return;
       }
 
+      // マージセルの子セルがタップされた場合、親セル座標に解決
+      let resolvedRow = row;
+      let resolvedCol = col;
+      for (const merge of mapData.mergedCells) {
+        if (
+          row >= merge.startRow && row <= merge.endRow &&
+          col >= merge.startCol && col <= merge.endCol
+        ) {
+          resolvedRow = merge.startRow;
+          resolvedCol = merge.startCol;
+          break;
+        }
+      }
+
       for (const block of mapData.blocks) {
-        if (!isCellInBlock(row, col, block)) continue;
-        if (block.nameCells && block.nameCells.some((nc) => nc.row === row && nc.col === col)) {
+        if (!isCellInBlock(resolvedRow, resolvedCol, block)) continue;
+
+        if (block.nameCells && block.nameCells.some((nc) => nc.row === resolvedRow && nc.col === resolvedCol)) {
           continue;
         }
 
         let foundNumber: number | null = null;
-        const numberCell = block.numberCells.find((nc) => nc.row === row && nc.col === col);
+        const numberCell = block.numberCells.find((nc) => nc.row === resolvedRow && nc.col === resolvedCol);
         if (numberCell) {
           foundNumber = numberCell.value;
         }
 
         if (foundNumber === null) {
-          let cell = cellsMap.get(`${row}-${col}`);
-
-          if (!cell) {
-            for (const merge of mapData.mergedCells) {
-              if (
-                row >= merge.startRow &&
-                row <= merge.endRow &&
-                col >= merge.startCol &&
-                col <= merge.endCol
-              ) {
-                cell = cellsMap.get(`${merge.startRow}-${merge.startCol}`);
-                break;
-              }
-            }
-          }
+          const cell = cellsMap.get(`${resolvedRow}-${resolvedCol}`);
 
           if (cell && cell.value !== null && cell.value !== undefined) {
             const cellValue = String(cell.value).trim();
+            if (cellValue === block.name) break;
             const numMatch = cellValue.match(/^(\d+)/);
             if (numMatch) {
               foundNumber = parseInt(numMatch[1], 10);

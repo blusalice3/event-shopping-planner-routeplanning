@@ -468,14 +468,28 @@ const MapView: React.FC<MapViewProps> = ({
 
       let foundBlock: { name: string; number: number } | null = null;
 
-      for (const block of mapData.blocks) {
-        if (isCellInBlock(row, col, block)) {
+      // マージセルの子セルがクリックされた場合、親セル座標に解決
+      let resolvedRow = row;
+      let resolvedCol = col;
+      for (const merge of mapData.mergedCells) {
+        if (
+          row >= merge.startRow && row <= merge.endRow &&
+          col >= merge.startCol && col <= merge.endCol
+        ) {
+          resolvedRow = merge.startRow;
+          resolvedCol = merge.startCol;
+          break;
+        }
+      }
 
-          if (block.nameCells && block.nameCells.some((nc) => nc.row === row && nc.col === col)) {
+      for (const block of mapData.blocks) {
+        if (isCellInBlock(resolvedRow, resolvedCol, block)) {
+
+          if (block.nameCells && block.nameCells.some((nc) => nc.row === resolvedRow && nc.col === resolvedCol)) {
             continue;
           }
 
-          const numberCell = block.numberCells.find((nc) => nc.row === row && nc.col === col);
+          const numberCell = block.numberCells.find((nc) => nc.row === resolvedRow && nc.col === resolvedCol);
           if (numberCell) {
             foundBlock = { name: block.name, number: numberCell.value };
             break;
@@ -483,27 +497,13 @@ const MapView: React.FC<MapViewProps> = ({
 
           if (!foundBlock) {
 
-            let cell = mapData.cells.find((c) => c.row === row && c.col === col);
-
-            if (!cell) {
-
-              for (const merge of mapData.mergedCells) {
-                if (
-                  row >= merge.startRow &&
-                  row <= merge.endRow &&
-                  col >= merge.startCol &&
-                  col <= merge.endCol
-                ) {
-                  cell = mapData.cells.find(
-                    (c) => c.row === merge.startRow && c.col === merge.startCol,
-                  );
-                  break;
-                }
-              }
-            }
+            const cell = mapData.cells.find(
+              (c) => c.row === resolvedRow && c.col === resolvedCol,
+            );
 
             if (cell && cell.value !== null && cell.value !== undefined) {
               const cellValue = String(cell.value).trim();
+              if (cellValue === block.name) continue;
               const numMatch = cellValue.match(/^(\d+)/);
               if (numMatch) {
                 foundBlock = { name: block.name, number: parseInt(numMatch[1], 10) };
