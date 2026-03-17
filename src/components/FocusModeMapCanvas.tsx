@@ -11,6 +11,13 @@ import {
 } from '../types';
 import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
 import { findPath, simplifyPath } from '../utils/pathfinding';
+import {
+  findAllCrossings,
+  buildCrossingLookup,
+  getBridgeParams,
+  drawEdgeWithBridges,
+  PixelEdge,
+} from '../utils/routeRendering';
 
 interface FocusModeMapCanvasProps {
   mapData: DayMapData;
@@ -1475,40 +1482,64 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
     }
 
-    // ルート線描画: 全スペースをA*経路で接続（セグメントごとに色分け）
+    // ルート線描画: 全スペースをA*経路で接続（セグメントごとに色分け、飛び越し線対応）
     if (!isRotationInteracting && routeSegments.length > 0) {
-      routeSegments.forEach((segment) => {
+      const lineWidth = Math.max(2, cellSize * 0.08);
+
+      // 交差検出
+      const allPixelEdges: PixelEdge[][] = routeSegments.map((segment) => {
+        if (segment.path.length < 2) return [];
+        const edges: PixelEdge[] = [];
+        for (let i = 0; i < segment.path.length - 1; i++) {
+          const p1 = segment.path[i];
+          const p2 = segment.path[i + 1];
+          edges.push({
+            x1: (p1.col - 0.5) * cellSize,
+            y1: (p1.row - 0.5) * cellSize,
+            x2: (p2.col - 0.5) * cellSize,
+            y2: (p2.row - 0.5) * cellSize,
+          });
+        }
+        return edges;
+      });
+
+      const crossings = findAllCrossings(allPixelEdges);
+      const crossingLookup = buildCrossingLookup(crossings);
+      const bridgeParams = getBridgeParams(cellSize);
+
+      routeSegments.forEach((segment, segIdx) => {
         if (segment.path.length < 2) return;
 
-        const lineWidth = Math.max(2, cellSize * 0.08);
-        ctx.beginPath();
-        ctx.lineWidth = lineWidth;
-        ctx.lineCap = 'round';
-        ctx.setLineDash([]);
+        let currentLineWidth = lineWidth;
+        let strokeStyle: string;
 
         // セグメントの色を決定
         if (segment.segmentIndex < currentPhaseIndex - 1) {
-          // 通過済み区間: 灰色
-          ctx.strokeStyle = 'rgba(156, 163, 175, 0.4)';
+          strokeStyle = 'rgba(156, 163, 175, 0.4)';
         } else if (segment.segmentIndex === currentPhaseIndex - 1) {
-          // 直前→現在地の区間: 橙
-          ctx.strokeStyle = 'rgba(255, 109, 0, 0.6)';
-          ctx.lineWidth = Math.max(3, cellSize * 0.1);
+          strokeStyle = 'rgba(255, 109, 0, 0.6)';
+          currentLineWidth = Math.max(3, cellSize * 0.1);
         } else {
-          // 未来の区間: 薄青
-          ctx.strokeStyle = 'rgba(66, 165, 245, 0.4)';
+          strokeStyle = 'rgba(66, 165, 245, 0.4)';
         }
 
-        segment.path.forEach((point, i) => {
-          const px = (point.col - 0.5) * cellSize;
-          const py = (point.row - 0.5) * cellSize;
-          if (i === 0) {
-            ctx.moveTo(px, py);
-          } else {
-            ctx.lineTo(px, py);
-          }
-        });
-        ctx.stroke();
+        for (let i = 0; i < segment.path.length - 1; i++) {
+          const p1 = segment.path[i];
+          const p2 = segment.path[i + 1];
+
+          const px1 = (p1.col - 0.5) * cellSize;
+          const py1 = (p1.row - 0.5) * cellSize;
+          const px2 = (p2.col - 0.5) * cellSize;
+          const py2 = (p2.row - 0.5) * cellSize;
+
+          // 飛び越し線付きで描画
+          drawEdgeWithBridges(
+            ctx, px1, py1, px2, py2,
+            segIdx, i,
+            crossingLookup, bridgeParams,
+            strokeStyle, currentLineWidth,
+          );
+        }
       });
     }
 

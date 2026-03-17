@@ -12,6 +12,13 @@ import {
 } from '../../types';
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { generateRouteSegments, simplifyPath } from '../../utils/pathfinding';
+import {
+  findAllCrossings,
+  buildCrossingLookup,
+  getBridgeParams,
+  drawEdgeWithBridges,
+  PixelEdge,
+} from '../../utils/routeRendering';
 import MapCanvasPresentation from './MapCanvasPresentation';
 
 interface MapCanvasProps {
@@ -1573,10 +1580,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
         switch (priority) {
           case 'highest':
-            return '#EF4444'; // 譛蜆ｪ蜈・          case 'priority':
+            return '#EF4444';
+          case 'priority':
             return '#F97316';
           default:
-            return '#1976D2'; // 騾壼ｸｸ
+            return '#1976D2';
         }
       };
 
@@ -1643,12 +1651,32 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         };
       };
 
-      routeSegments.forEach((segment) => {
+      // 全セグメントのピクセル座標エッジを構築して交差検出
+      const allPixelEdges: PixelEdge[][] = routeSegments.map((segment) => {
+        if (segment.path.length < 2) return [];
+        const edges: PixelEdge[] = [];
+        for (let i = 0; i < segment.path.length - 1; i++) {
+          const p1 = segment.path[i];
+          const p2 = segment.path[i + 1];
+          edges.push({
+            x1: (p1.col - 0.5) * cellSize,
+            y1: (p1.row - 0.5) * cellSize,
+            x2: (p2.col - 0.5) * cellSize,
+            y2: (p2.row - 0.5) * cellSize,
+          });
+        }
+        return edges;
+      });
+
+      const crossings = findAllCrossings(allPixelEdges);
+      const crossingLookup = buildCrossingLookup(crossings);
+      const bridgeParams = getBridgeParams(cellSize);
+
+      routeSegments.forEach((segment, segIdx) => {
         if (segment.path.length < 2) return;
 
         const isTransition = isGroupTransition(segment.fromPriority, segment.toPriority);
         const segmentPriority = segment.fromPriority || 'none';
-
         const baseColor = isTransition ? '#9CA3AF' : getPriorityColor(segment.fromPriority);
 
         for (let i = 0; i < segment.path.length - 1; i++) {
@@ -1656,61 +1684,46 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const p2 = segment.path[i + 1];
           const edgeKey = getEdgeKey(p1.row, p1.col, p2.row, p2.col);
 
-          const px1 = (p1.col - 0.5) * cellSize;
-          const py1 = (p1.row - 0.5) * cellSize;
-          const px2 = (p2.col - 0.5) * cellSize;
-          const py2 = (p2.row - 0.5) * cellSize;
+          let px1 = (p1.col - 0.5) * cellSize;
+          let py1 = (p1.row - 0.5) * cellSize;
+          let px2 = (p2.col - 0.5) * cellSize;
+          let py2 = (p2.row - 0.5) * cellSize;
 
-          if (isTransition) {
-            ctx.beginPath();
-            ctx.strokeStyle = baseColor;
-            ctx.lineWidth = lineWidth;
-            ctx.lineCap = 'round';
-            ctx.setLineDash([]);
-            ctx.moveTo(px1, py1);
-            ctx.lineTo(px2, py2);
-            ctx.stroke();
-            continue;
+          if (!isTransition) {
+            const usedPriorities = edgeUsage.get(edgeKey);
+            const isOverlapping = usedPriorities && usedPriorities.size > 1;
+
+            if (isOverlapping) {
+              const priorities = Array.from(usedPriorities!).sort((a, b) => {
+                const order = { highest: 0, priority: 1, none: 2 };
+                return order[a] - order[b];
+              });
+
+              const priorityIndex = priorities.indexOf(segmentPriority);
+              if (priorityIndex === -1) continue;
+
+              const totalLines = priorities.length;
+              const offsetIndex = priorityIndex - (totalLines - 1) / 2;
+              const offset = offsetIndex * parallelOffset;
+
+              const offsetted = getOffsetPoints(px1, py1, px2, py2, offset);
+              px1 = offsetted.x1;
+              py1 = offsetted.y1;
+              px2 = offsetted.x2;
+              py2 = offsetted.y2;
+            }
           }
 
-          const usedPriorities = edgeUsage.get(edgeKey);
-          const isOverlapping = usedPriorities && usedPriorities.size > 1;
-
-          if (isOverlapping) {
-            const priorities = Array.from(usedPriorities!).sort((a, b) => {
-              const order = { highest: 0, priority: 1, none: 2 };
-              return order[a] - order[b];
-            });
-
-            const priorityIndex = priorities.indexOf(segmentPriority);
-            if (priorityIndex === -1) continue;
-
-            const totalLines = priorities.length;
-            const offsetIndex = priorityIndex - (totalLines - 1) / 2;
-            const offset = offsetIndex * parallelOffset;
-
-            const offsetted = getOffsetPoints(px1, py1, px2, py2, offset);
-
-            ctx.beginPath();
-            ctx.strokeStyle = baseColor;
-            ctx.lineWidth = lineWidth;
-            ctx.lineCap = 'round';
-            ctx.setLineDash([]);
-            ctx.moveTo(offsetted.x1, offsetted.y1);
-            ctx.lineTo(offsetted.x2, offsetted.y2);
-            ctx.stroke();
-          } else {
-            ctx.beginPath();
-            ctx.strokeStyle = baseColor;
-            ctx.lineWidth = lineWidth;
-            ctx.lineCap = 'round';
-            ctx.setLineDash([]);
-            ctx.moveTo(px1, py1);
-            ctx.lineTo(px2, py2);
-            ctx.stroke();
-          }
+          // 飛び越し線付きで描画
+          drawEdgeWithBridges(
+            ctx, px1, py1, px2, py2,
+            segIdx, i,
+            crossingLookup, bridgeParams,
+            baseColor, lineWidth,
+          );
         }
 
+        // 矢印描画
         if (segment.path.length >= 2) {
           const last = segment.path[segment.path.length - 1];
           const prev = segment.path[segment.path.length - 2];

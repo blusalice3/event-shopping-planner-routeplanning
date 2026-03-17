@@ -70,6 +70,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
   const [editMode, setEditMode] = useState<EditMode>('normal');
   const [wallCellGroups, setWallCellGroups] = useState<CellGroup[]>([]);
   const [multiRanges, setMultiRanges] = useState<MultiRange[]>([]);
+  const [activeTab, setActiveTab] = useState<'list' | 'edit'>('list');
 
   const cellsMap = useMemo(() => {
     const map = new Map<string, CellData>();
@@ -122,6 +123,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       setEditMode(data.editMode);
       setWallCellGroups(data.wallCellGroups);
       setMultiRanges(data.multiRanges || []);
+      setActiveTab('edit');
     }
 
     // キャンセルの場合はデータ復元のみで終了
@@ -453,6 +455,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
     setIsAddingNew(false);
     setWallCellGroups([]);
     setMultiRanges([]);
+    setActiveTab('list');
   }, [
     editingBlock,
     isAddingNew,
@@ -474,6 +477,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
     setWallCellGroups([]);
     setMultiRanges([]);
     setEditMode('normal');
+    setActiveTab('list');
   }, []);
 
   // モード切り替え
@@ -493,7 +497,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] overflow-hidden flex flex-col">
+      <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
           <h2 className="text-lg font-bold text-slate-900 dark:text-white">ブロック定義</h2>
           <button
@@ -508,12 +512,34 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
         </div>
 
         <div className="flex-1 overflow-auto p-6">
-          <div className="grid grid-cols-2 gap-6">
-            {/* 左: ブロック一覧 */}
+          <div className="mb-4 flex gap-2">
+            <button
+              onClick={() => setActiveTab('list')}
+              className={`px-3 py-1.5 text-sm rounded ${
+                activeTab === 'list'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+              }`}
+            >
+              一覧
+            </button>
+            <button
+              onClick={() => setActiveTab('edit')}
+              className={`px-3 py-1.5 text-sm rounded ${
+                activeTab === 'edit'
+                  ? 'bg-blue-600 text-white'
+                  : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+              }`}
+            >
+              編集
+            </button>
+          </div>
+
+          {activeTab === 'list' && (
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                  定義済み ({blocks.length}件)
+                  定義済みブロック ({blocks.length}件)
                 </h3>
                 <div className="flex gap-2">
                   <button
@@ -538,6 +564,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                       });
                       setWallCellGroups([]);
                       setMultiRanges([]);
+                      setActiveTab('edit');
                     }}
                     className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700"
                   >
@@ -545,53 +572,62 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                   </button>
                   <button
                     onClick={() => confirm('全て削除？') && setBlocks([])}
-                    className="px-3 py-1.5 text-xs rounded bg-red-100 text-red-700 hover:bg-red-200"
+                    className="px-3 py-1.5 text-xs rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400"
                   >
                     全削除
                   </button>
                 </div>
               </div>
-              <div className="space-y-2 max-h-[50vh] overflow-y-auto">
+
+              <div className="space-y-2">
                 {sortedBlocks.length === 0 ? (
-                  <p className="text-sm text-slate-500 text-center py-8">ブロックなし</p>
+                  <p className="text-sm text-slate-500 dark:text-slate-400 text-center py-8">
+                    ブロックが定義されていません。
+                  </p>
                 ) : (
                   sortedBlocks.map((b, i) => (
                     <div
                       key={`${b.name}-${i}`}
-                      className={`p-3 rounded-lg border cursor-pointer ${selectedBlockIndex === i ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20' : 'border-slate-200 dark:border-slate-700 hover:bg-slate-50 dark:hover:bg-slate-700/50'}`}
-                      onClick={() => {
-                        setSelectedBlockIndex(i);
-                        setEditingBlock({ ...b });
-                        setIsAddingNew(false);
-                        // モード判定
-                        if (b.isWallBlock) {
-                          setEditMode('wall');
-                          setWallCellGroups(b.cellGroups ? [...b.cellGroups] : []);
-                          setMultiRanges([]);
-                        } else if (b.cellGroups && b.cellGroups.length > 0) {
-                          setEditMode('multi');
-                          setWallCellGroups([]);
-                          setMultiRanges(
-                            b.cellGroups
-                              .filter((g) => g.type === 'range')
-                              .map((g) => ({
-                                startRow: g.startRow || 0,
-                                startCol: g.startCol || 0,
-                                endRow: g.endRow || 0,
-                                endCol: g.endCol || 0,
-                              })),
-                          );
-                        } else {
-                          setEditMode('normal');
-                          setWallCellGroups([]);
-                          setMultiRanges([]);
-                        }
-                      }}
+                      className={`p-3 rounded-lg border transition-colors ${
+                        selectedBlockIndex === i
+                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                          : 'border-slate-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700/50'
+                      }`}
                     >
                       <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => {
+                            setSelectedBlockIndex(i);
+                            setEditingBlock({ ...b });
+                            setIsAddingNew(false);
+                            if (b.isWallBlock) {
+                              setEditMode('wall');
+                              setWallCellGroups(b.cellGroups ? [...b.cellGroups] : []);
+                              setMultiRanges([]);
+                            } else if (b.cellGroups && b.cellGroups.length > 0) {
+                              setEditMode('multi');
+                              setWallCellGroups([]);
+                              setMultiRanges(
+                                b.cellGroups
+                                  .filter((g) => g.type === 'range')
+                                  .map((g) => ({
+                                    startRow: g.startRow || 0,
+                                    startCol: g.startCol || 0,
+                                    endRow: g.endRow || 0,
+                                    endCol: g.endCol || 0,
+                                  })),
+                              );
+                            } else {
+                              setEditMode('normal');
+                              setWallCellGroups([]);
+                              setMultiRanges([]);
+                            }
+                            setActiveTab('edit');
+                          }}
+                          className="flex flex-1 items-center gap-2 text-left"
+                        >
                           <div
-                            className="w-8 h-8 rounded flex items-center justify-center text-sm font-bold"
+                            className="flex h-8 w-8 items-center justify-center rounded text-xs font-bold"
                             style={{ backgroundColor: b.color || '#E3F2FD' }}
                           >
                             {b.name}
@@ -612,41 +648,45 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                             </div>
                             <div className="text-xs text-slate-500 dark:text-slate-400">
                               {b.numberCells.length}セル
+                              {b.isAutoDetected && (
+                                <span className="ml-2 text-blue-600 dark:text-blue-400">
+                                  自動検出
+                                </span>
+                              )}
                             </div>
                           </div>
-                        </div>
+                        </button>
                         <button
-                          onClick={(e) => {
-                            e.stopPropagation();
+                          onClick={() => {
                             if (confirm(`「${b.name}」を削除？`)) {
                               setBlocks((prev) => prev.filter((x) => x.name !== b.name));
-                              setSelectedBlockIndex(null);
-                              setEditingBlock(null);
+                              if (selectedBlockIndex === i) {
+                                setSelectedBlockIndex(null);
+                                setEditingBlock(null);
+                                setIsAddingNew(false);
+                                setActiveTab('list');
+                              }
                             }
                           }}
                           className="p-1 text-red-500 hover:text-red-700"
                         >
-                          🗑️
+                          削除
                         </button>
                       </div>
-                      {b.isAutoDetected && (
-                        <div className="mt-1 text-xs text-blue-600 dark:text-blue-400">
-                          ⚡自動検出
-                        </div>
-                      )}
                     </div>
                   ))
                 )}
               </div>
             </div>
+          )}
 
-            {/* 右: 編集 */}
-            <div>
+          {activeTab === 'edit' && (
+            <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-900">
               {editingBlock ? (
-                <div className="p-4 bg-slate-50 dark:bg-slate-900 rounded-lg">
-                  <div className="flex items-center justify-between mb-4">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                      {isAddingNew ? '新規追加' : '編集'}
+                      {isAddingNew ? '新規ブロック追加' : 'ブロック編集'}
                     </h3>
                     <div className="flex gap-1">
                       <button
@@ -669,198 +709,204 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                       </button>
                     </div>
                   </div>
-                  <div className="space-y-4">
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                        ブロック名
-                      </label>
-                      <input
-                        type="text"
-                        value={editingBlock.name || ''}
-                        onChange={(e) => setEditingBlock((eb) => ({ ...eb, name: e.target.value }))}
-                        placeholder="例: ア, め, N"
-                        className="w-full px-3 py-2 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-800 text-slate-900 dark:text-white"
-                      />
-                    </div>
 
-                    {editMode === 'normal' && (
-                      <div>
-                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                          範囲指定
-                        </label>
-                        <button
-                          onClick={handleStartCornerSelection}
-                          className="w-full px-3 py-2 text-sm rounded bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400"
-                        >
-                          📍 4つの角をクリックして選択
-                        </button>
-                        {editingBlock.startRow !== undefined &&
-                          editingBlock.startRow > 0 &&
-                          editingBlock.endRow !== undefined &&
-                          editingBlock.endRow > 0 && (
-                            <div className="mt-2 p-2 bg-green-50 dark:bg-green-900/20 rounded text-xs text-green-700 dark:text-green-400">
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+                      ブロック名
+                    </label>
+                    <input
+                      type="text"
+                      value={editingBlock.name || ''}
+                      onChange={(e) => setEditingBlock((eb) => ({ ...eb, name: e.target.value }))}
+                      placeholder="例: ア, め, N"
+                      className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+
+                  {editMode === 'normal' && (
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+                        範囲指定
+                      </label>
+                      <button
+                        onClick={handleStartCornerSelection}
+                        className="w-full rounded bg-blue-100 px-3 py-2 text-sm text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400"
+                      >
+                        マップ上で4つの角をクリックして選択
+                      </button>
+                      {editingBlock.startRow !== undefined &&
+                        editingBlock.startRow > 0 &&
+                        editingBlock.endRow !== undefined &&
+                        editingBlock.endRow > 0 && (
+                          <div className="mt-2 rounded bg-green-50 p-2 dark:bg-green-900/20">
+                            <div className="text-xs text-green-700 dark:text-green-400">
                               範囲: 行{editingBlock.startRow}-{editingBlock.endRow}, 列
                               {editingBlock.startCol}-{editingBlock.endCol}
                             </div>
-                          )}
-                      </div>
-                    )}
-
-                    {editMode === 'multi' && (
-                      <div>
-                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                          複数範囲指定（Nブロックなど）
-                        </label>
-                        {multiRanges.length > 0 && (
-                          <div className="mb-2 space-y-1">
-                            {multiRanges.map((r, i) => (
-                              <div
-                                key={i}
-                                className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700"
-                              >
-                                <span className="text-xs text-slate-600 dark:text-slate-400">
-                                  範囲{i + 1}: 行{r.startRow}-{r.endRow}, 列{r.startCol}-{r.endCol}
-                                </span>
-                                <button
-                                  onClick={() =>
-                                    setMultiRanges((prev) => prev.filter((_, j) => j !== i))
-                                  }
-                                  className="text-red-500 text-sm"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            ))}
                           </div>
                         )}
-                        <button
-                          onClick={handleStartMultiCornerSelection}
-                          className="w-full px-3 py-2 text-sm rounded bg-purple-100 text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400"
-                        >
-                          📍 4つの角をクリックして範囲を追加
-                        </button>
-                      </div>
-                    )}
-
-                    {editMode === 'wall' && (
-                      <div>
-                        <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                          セル群 (最大6)
-                        </label>
-                        {wallCellGroups.length > 0 && (
-                          <div className="mb-2 space-y-1">
-                            {wallCellGroups.map((g, i) => (
-                              <div
-                                key={i}
-                                className="flex items-center justify-between p-2 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700"
-                              >
-                                <span className="text-xs text-slate-600 dark:text-slate-400">
-                                  {g.type === 'range'
-                                    ? `範囲(${g.startRow},${g.startCol})-(${g.endRow},${g.endCol})`
-                                    : `個別${g.cells?.length}セル`}
-                                </span>
-                                <button
-                                  onClick={() =>
-                                    setWallCellGroups((prev) => prev.filter((_, j) => j !== i))
-                                  }
-                                  className="text-red-500 text-sm"
-                                >
-                                  ✕
-                                </button>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        <div className="flex gap-2">
-                          <button
-                            onClick={handleStartRangeSelection}
-                            disabled={wallCellGroups.length >= 6}
-                            className="flex-1 px-3 py-2 text-xs rounded bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-50 dark:bg-blue-900/30 dark:text-blue-400"
-                          >
-                            + 範囲追加
-                          </button>
-                          <button
-                            onClick={handleStartIndividualSelection}
-                            disabled={wallCellGroups.length >= 6}
-                            className="flex-1 px-3 py-2 text-xs rounded bg-orange-100 text-orange-700 hover:bg-orange-200 disabled:opacity-50 dark:bg-orange-900/30 dark:text-orange-400"
-                          >
-                            + 個別追加
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    <div>
-                      <label className="block text-xs font-medium text-slate-600 dark:text-slate-400 mb-1">
-                        色
-                      </label>
-                      <div className="flex flex-wrap gap-2">
-                        {BLOCK_COLORS.map((c) => (
-                          <button
-                            key={c}
-                            onClick={() => setEditingBlock((eb) => ({ ...eb, color: c }))}
-                            className={`w-8 h-8 rounded border-2 ${editingBlock.color === c ? 'border-blue-500' : 'border-transparent'}`}
-                            style={{ backgroundColor: c }}
-                          />
-                        ))}
-                      </div>
                     </div>
+                  )}
 
-                    <div className="p-3 bg-white dark:bg-slate-800 rounded border border-slate-200 dark:border-slate-700">
-                      <div className="text-xs font-medium text-slate-600 dark:text-slate-400 mb-2">
-                        検出セル: {previewNumberCells.length}個
-                      </div>
-                      {previewNumberCells.length > 0 ? (
-                        <div className="flex flex-wrap gap-1 max-h-24 overflow-y-auto">
-                          {previewNumberCells.map((c, i) => (
-                            <span
+                  {editMode === 'multi' && (
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+                        複数範囲指定（Nブロックなど）
+                      </label>
+                      {multiRanges.length > 0 && (
+                        <div className="mb-2 space-y-1">
+                          {multiRanges.map((r, i) => (
+                            <div
                               key={i}
-                              className="px-2 py-0.5 text-xs bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400 rounded"
+                              className="flex items-center justify-between rounded border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-800"
                             >
-                              {c.value}
-                            </span>
+                              <span className="text-xs text-slate-600 dark:text-slate-400">
+                                範囲{i + 1}: 行{r.startRow}-{r.endRow}, 列{r.startCol}-{r.endCol}
+                              </span>
+                              <button
+                                onClick={() =>
+                                  setMultiRanges((prev) => prev.filter((_, j) => j !== i))
+                                }
+                                className="text-sm text-red-500"
+                              >
+                                ✕
+                              </button>
+                            </div>
                           ))}
                         </div>
-                      ) : (
-                        <p className="text-xs text-slate-500 dark:text-slate-400">
-                          範囲を指定してください
-                        </p>
                       )}
+                      <button
+                        onClick={handleStartMultiCornerSelection}
+                        className="w-full rounded bg-purple-100 px-3 py-2 text-sm text-purple-700 hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400"
+                      >
+                        マップ上で4つの角をクリックして範囲を追加
+                      </button>
                     </div>
+                  )}
 
-                    <div className="flex gap-2 pt-2">
-                      <button
-                        onClick={handleSaveBlock}
-                        className="flex-1 px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
-                      >
-                        {isAddingNew ? '追加' : '保存'}
-                      </button>
-                      <button
-                        onClick={handleCancelEdit}
-                        className="px-4 py-2 text-sm rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
-                      >
-                        キャンセル
-                      </button>
+                  {editMode === 'wall' && (
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+                        セル群 (最大6)
+                      </label>
+                      {wallCellGroups.length > 0 && (
+                        <div className="mb-2 space-y-1">
+                          {wallCellGroups.map((g, i) => (
+                            <div
+                              key={i}
+                              className="flex items-center justify-between rounded border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-800"
+                            >
+                              <span className="text-xs text-slate-600 dark:text-slate-400">
+                                {g.type === 'range'
+                                  ? `範囲(${g.startRow},${g.startCol})-(${g.endRow},${g.endCol})`
+                                  : `個別${g.cells?.length}セル`}
+                              </span>
+                              <button
+                                onClick={() =>
+                                  setWallCellGroups((prev) => prev.filter((_, j) => j !== i))
+                                }
+                                className="text-sm text-red-500"
+                              >
+                                ✕
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleStartRangeSelection}
+                          disabled={wallCellGroups.length >= 6}
+                          className="flex-1 rounded bg-blue-100 px-3 py-2 text-xs text-blue-700 hover:bg-blue-200 disabled:opacity-50 dark:bg-blue-900/30 dark:text-blue-400"
+                        >
+                          + 範囲追加
+                        </button>
+                        <button
+                          onClick={handleStartIndividualSelection}
+                          disabled={wallCellGroups.length >= 6}
+                          className="flex-1 rounded bg-orange-100 px-3 py-2 text-xs text-orange-700 hover:bg-orange-200 disabled:opacity-50 dark:bg-orange-900/30 dark:text-orange-400"
+                        >
+                          + 個別追加
+                        </button>
+                      </div>
                     </div>
+                  )}
+
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
+                      色
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {BLOCK_COLORS.map((c) => (
+                        <button
+                          key={c}
+                          onClick={() => setEditingBlock((eb) => ({ ...eb, color: c }))}
+                          className={`h-8 w-8 rounded border-2 ${editingBlock.color === c ? 'border-blue-500' : 'border-transparent'}`}
+                          style={{ backgroundColor: c }}
+                        />
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="rounded border border-slate-200 bg-white p-3 dark:border-slate-700 dark:bg-slate-800">
+                    <div className="mb-2 text-xs font-medium text-slate-600 dark:text-slate-400">
+                      検出セル: {previewNumberCells.length}個
+                    </div>
+                    {previewNumberCells.length > 0 ? (
+                      <div className="flex max-h-24 flex-wrap gap-1 overflow-y-auto">
+                        {previewNumberCells.map((c, i) => (
+                          <span
+                            key={i}
+                            className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700 dark:bg-green-900/30 dark:text-green-400"
+                          >
+                            {c.value}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        範囲を指定してください
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="flex gap-2 pt-2">
+                    <button
+                      onClick={handleSaveBlock}
+                      className="flex-1 rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+                    >
+                      {isAddingNew ? '追加' : '保存'}
+                    </button>
+                    <button
+                      onClick={handleCancelEdit}
+                      className="rounded bg-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+                    >
+                      キャンセル
+                    </button>
                   </div>
                 </div>
               ) : (
-                <div className="p-8 text-center text-slate-500 dark:text-slate-400">
-                  <p className="mb-2">左から選択して編集</p>
-                  <p className="text-sm">または「新規」で追加</p>
+                <div className="py-10 text-center text-slate-500 dark:text-slate-400">
+                  <p className="mb-2">編集するブロックを一覧から選択してください。</p>
+                  <button
+                    onClick={() => setActiveTab('list')}
+                    className="rounded bg-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+                  >
+                    一覧へ戻る
+                  </button>
                 </div>
               )}
             </div>
-          </div>
+          )}
         </div>
 
-        <div className="px-6 py-4 border-t border-slate-200 dark:border-slate-700 flex justify-end gap-3">
+        <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4 dark:border-slate-700">
           <button
             onClick={() => {
               setBlocks(mapData.blocks);
               onClose();
             }}
-            className="px-4 py-2 text-sm rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
+            className="rounded bg-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
           >
             キャンセル
           </button>
@@ -869,7 +915,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
               onUpdateBlocks(blocks);
               onClose();
             }}
-            className="px-4 py-2 text-sm rounded bg-blue-600 text-white hover:bg-blue-700"
+            className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
           >
             適用
           </button>

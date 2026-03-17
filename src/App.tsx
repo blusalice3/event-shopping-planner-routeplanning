@@ -5667,6 +5667,13 @@ const App: React.FC = () => {
       {cellSelectionMode && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-4 min-w-80">
           <div className="text-center mb-3">
+            <div className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-1">
+              {(() => {
+                const data = cellSelectionMode.editingBlockData as { block?: { name?: string } } | undefined;
+                const name = data?.block?.name?.trim();
+                return name ? `「${name}」設定中` : '「名称不明ブロック」設定中';
+              })()}
+            </div>
             <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
               {cellSelectionMode.type === 'corner' &&
                 `セルをクリックして角を選択 (${cellSelectionMode.clickedCells.length}/4)`}
@@ -5781,6 +5788,13 @@ const App: React.FC = () => {
       {vertexSelectionMode && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-4 min-w-80">
           <div className="text-center mb-3">
+            <div className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-1">
+              {(() => {
+                const data = vertexSelectionMode.editingData as { hall?: { name?: string } } | undefined;
+                const name = data?.hall?.name?.trim();
+                return name ? `「${name}」設定中` : '「名称不明ホール」設定中';
+              })()}
+            </div>
             <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
               ホールの頂点をクリック ({vertexSelectionMode.clickedVertices.length}
               /6)

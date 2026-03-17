@@ -346,7 +346,19 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               このセルにはアイテムがありません
             </div>
           )}
-          {items.map((item) => {
+          {[...items].sort((a, b) => {
+            const suffixA = a.number.replace(/^\d+/, '');
+            const suffixB = b.number.replace(/^\d+/, '');
+            // サフィックスをアルファベット部分と数字部分に分解
+            const parseA = suffixA.match(/^([a-zA-Z]*)(\d*)$/);
+            const parseB = suffixB.match(/^([a-zA-Z]*)(\d*)$/);
+            const alphaA = parseA ? parseA[1].toLowerCase() : '';
+            const alphaB = parseB ? parseB[1].toLowerCase() : '';
+            if (alphaA !== alphaB) return alphaA.localeCompare(alphaB);
+            const numA = parseA && parseA[2] ? parseInt(parseA[2], 10) : 0;
+            const numB = parseB && parseB[2] ? parseInt(parseB[2], 10) : 0;
+            return numA - numB;
+          }).map((item) => {
             const isInVisitList = executeModeItemIds.has(item.id);
             const numberSuffix = item.number.replace(/^\d+/, '');
             return (
