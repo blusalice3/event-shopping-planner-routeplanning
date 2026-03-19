@@ -6,6 +6,7 @@ import {
   MergedCellInfo,
   HallDefinition,
   BlockDefinition,
+  NumberCellOutlineStyle,
   MIN_ZOOM,
   MAX_ZOOM,
 } from '../types';
@@ -39,6 +40,11 @@ interface FocusModeMapCanvasProps {
   onRotationAngleChange?: (angle: number) => void;
   allVisitKeys?: string[];
   currentPhaseIndex?: number;
+  numberCellOutlineStyle?: NumberCellOutlineStyle;
+  // 事前計算データ（FocusMode.tsxで保持しマウント時の計算を省略）
+  precomputedVisitKeyCellMap?: Map<string, { row: number; col: number; key: string }>;
+  precomputedAllVisitCellCoords?: { row: number; col: number; key: string }[];
+  precomputedRouteSegments?: { path: { row: number; col: number }[]; segmentIndex: number }[];
 }
 
 const BASE_CELL_SIZE = 28;
@@ -165,6 +171,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   onRotationAngleChange,
   allVisitKeys = [],
   currentPhaseIndex = 0,
+  numberCellOutlineStyle = 'rounded',
+  precomputedVisitKeyCellMap,
+  precomputedAllVisitCellCoords,
+  precomputedRouteSegments,
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -418,36 +428,18 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return labels;
   }, [cellStates, currentPhaseIndex, currentPhase]);
 
-  // 全スペースのセル座標をルート順に取得
-  const allVisitCellCoords = useMemo(() => {
-    const coords: { row: number; col: number; key: string }[] = [];
-    for (const visitKey of allVisitKeys) {
-      for (const [cellKey, state] of cellStates.entries()) {
-        if (state.visitKeys.has(visitKey)) {
-          const [row, col] = cellKey.split('-').map(Number);
-          coords.push({ row, col, key: cellKey });
-          break;
-        }
-      }
-    }
-    return coords;
-  }, [allVisitKeys, cellStates]);
+  // 数値セル判定用Set（ブロック定義が変わらない限りキャッシュ）
+  const numberCellSet = useMemo(() => {
+    const set = new Set<string>();
+    mapData.blocks.forEach((block) => {
+      block.numberCells.forEach((nc) => set.add(`${nc.row}-${nc.col}`));
+    });
+    return set;
+  }, [mapData.blocks]);
 
-  // A*経路キャッシュ: 全スペース間のルート線を事前計算
-  const routeSegments = useMemo(() => {
-    const segments: { path: { row: number; col: number }[]; segmentIndex: number }[] = [];
-    for (let i = 0; i < allVisitCellCoords.length - 1; i++) {
-      const from = allVisitCellCoords[i];
-      const to = allVisitCellCoords[i + 1];
-      if (from.row === to.row && from.col === to.col) {
-        segments.push({ path: [], segmentIndex: i });
-        continue;
-      }
-      const path = findPath(mapData, from.row, from.col, to.row, to.col);
-      segments.push({ path: simplifyPath(path), segmentIndex: i });
-    }
-    return segments;
-  }, [allVisitCellCoords, mapData]);
+  // 事前計算データを使用（FocusMode.tsxで保持されマウント時の計算を省略）
+  const allVisitCellCoords = precomputedAllVisitCellCoords || [];
+  const routeSegments = precomputedRouteSegments || [];
 
   const findHallForCell = useCallback(
     (row: number, col: number): HallDefinition | null => {
@@ -888,11 +880,22 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
+    // ビューポート座標変換をインライン化（toMapCoordinatesの依存を排除）
+    const viewToMap = (viewX: number, viewY: number) => {
+      const tx = viewX - offset.x;
+      const ty = viewY - offset.y;
+      if (rotationRadians === 0) return { x: tx, y: ty };
+      const dx = tx - mapCenterX;
+      const dy = ty - mapCenterY;
+      const cos = Math.cos(rotationRadians);
+      const sin = Math.sin(rotationRadians);
+      return { x: dx * cos + dy * sin + mapCenterX, y: -dx * sin + dy * cos + mapCenterY };
+    };
     const viewportCorners = [
-      toMapCoordinates(0, 0),
-      toMapCoordinates(containerWidth, 0),
-      toMapCoordinates(0, containerHeight),
-      toMapCoordinates(containerWidth, containerHeight),
+      viewToMap(0, 0),
+      viewToMap(containerWidth, 0),
+      viewToMap(0, containerHeight),
+      viewToMap(containerWidth, containerHeight),
     ];
     const visibleMinX = Math.min(...viewportCorners.map((point) => point.x)) - cellSize * 2;
     const visibleMaxX = Math.max(...viewportCorners.map((point) => point.x)) + cellSize * 2;
@@ -1173,40 +1176,56 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.textBaseline = 'middle';
     };
 
-    // 数値セル判定用Set構築
-    const numberCellSet = new Set<string>();
-    mapData.blocks.forEach((block) => {
-      block.numberCells.forEach((nc) => numberCellSet.add(`${nc.row}-${nc.col}`));
-    });
-
-    const ncPad = cellSize * 0.1;
-    const ncRadius = Math.max(2, cellSize * 0.18);
+    // 数値セルスタイル設定（分岐をループ外で解決）
+    const outlineStyle = numberCellOutlineStyle;
+    const useInset = outlineStyle !== 'none';
+    const ncPad = useInset ? cellSize * 0.1 : 0;
+    const ncRadius = outlineStyle === 'rounded' ? Math.max(2, cellSize * 0.18) : 0;
     const ncBg = isDarkMode ? '#1E293B' : '#FFFFFF';
     const ncBorder = isDarkMode ? '#475569' : '#CBD5E1';
     const ncBorderWidth = Math.max(1, cellSize * 0.055);
+    const drawStroke = outlineStyle !== 'none';
 
-    const drawRoundedCellBg = (rx: number, ry: number, rw: number, rh: number, fillColor: string, strokeColor: string) => {
-      ctx.beginPath();
-      ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
-      ctx.fillStyle = fillColor;
-      ctx.fill();
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = ncBorderWidth;
-      ctx.stroke();
-    };
+    // パス描画ヘルパー（スタイルに応じて1回だけ選択）
+    const drawCellPath = ncRadius > 0
+      ? (rx: number, ry: number, rw: number, rh: number) => ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius)
+      : (rx: number, ry: number, rw: number, rh: number) => ctx.rect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2);
+
+    // dashed スタイル用の破線設定（ループ前に1回設定、描画後にリセット）
+    if (outlineStyle === 'dashed') {
+      const dashLen = Math.max(2, cellSize * 0.12);
+      ctx.setLineDash([dashLen, dashLen]);
+    }
+
+    const drawRoundedCellBg = drawStroke
+      ? (rx: number, ry: number, rw: number, rh: number, fillColor: string, strokeColor: string) => {
+          ctx.beginPath();
+          drawCellPath(rx, ry, rw, rh);
+          ctx.fillStyle = fillColor;
+          ctx.fill();
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = ncBorderWidth;
+          ctx.stroke();
+        }
+      : (rx: number, ry: number, rw: number, rh: number, fillColor: string, _strokeColor: string) => {
+          ctx.beginPath();
+          drawCellPath(rx, ry, rw, rh);
+          ctx.fillStyle = fillColor;
+          ctx.fill();
+        };
 
     const fillRoundedOverlay = (rx: number, ry: number, rw: number, rh: number, overlayColor: string | CanvasPattern) => {
       if (overlayColor instanceof CanvasPattern) {
         ctx.save();
         ctx.beginPath();
-        ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+        drawCellPath(rx, ry, rw, rh);
         ctx.clip();
         ctx.fillStyle = overlayColor;
         ctx.fillRect(rx, ry, rw, rh);
         ctx.restore();
       } else {
         ctx.beginPath();
-        ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+        drawCellPath(rx, ry, rw, rh);
         ctx.fillStyle = overlayColor;
         ctx.fill();
       }
@@ -1269,6 +1288,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         }
       }
     });
+
+    // dashed スタイルの破線設定をリセット
+    if (outlineStyle === 'dashed') {
+      ctx.setLineDash([]);
+    }
 
     // 2. セルの罫線を描画する。
     if (showBorders && !isRotationInteracting) {
@@ -1580,6 +1604,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     cellSize,
     cellStates,
     cellLabels,
+    numberCellSet,
     mergedCellsMap,
     routeSegments,
     currentPhaseIndex,
@@ -1594,8 +1619,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     rotationRadians,
     mapCenterX,
     mapCenterY,
-    toMapCoordinates,
     offset,
+    numberCellOutlineStyle,
   ]);
 
   useEffect(() => {
@@ -2041,6 +2066,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   );
 };
 
-export default FocusModeMapCanvas;
+export default React.memo(FocusModeMapCanvas);
 
 

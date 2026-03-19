@@ -7,6 +7,7 @@ import {
   MergedCellInfo,
   MapCellStateDetail,
   HallDefinition,
+  NumberCellOutlineStyle,
   MIN_ZOOM,
   MAX_ZOOM,
 } from '../../types';
@@ -47,6 +48,7 @@ interface MapCanvasProps {
   };
   initialOffset?: { x: number; y: number };
   offsetRef?: React.MutableRefObject<{ x: number; y: number }>;
+  numberCellOutlineStyle?: NumberCellOutlineStyle;
 }
 
 const BASE_CELL_SIZE = 28; // 蝓ｺ譛ｬ繧ｻ繝ｫ繧ｵ繧､繧ｺ
@@ -199,6 +201,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   selectionGuideOptions,
   initialOffset,
   offsetRef: externalOffsetRef,
+  numberCellOutlineStyle = 'rounded',
 }) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -786,6 +789,15 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }));
   }, [isRouteVisible, routePoints, mapData]);
 
+  // 数値セル判定用Set（ブロック定義が変わらない限りキャッシュ）
+  const numberCellSet = useMemo(() => {
+    const set = new Set<string>();
+    mapData.blocks.forEach((block) => {
+      block.numberCells.forEach((nc) => set.add(`${nc.row}-${nc.col}`));
+    });
+    return set;
+  }, [mapData.blocks]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -814,11 +826,22 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.translate(-mapCenterX, -mapCenterY);
     }
 
+    // ビューポート座標変換をインライン化（toMapCoordinatesの依存を排除）
+    const viewToMap = (viewX: number, viewY: number) => {
+      const tx = viewX - offset.x;
+      const ty = viewY - offset.y;
+      if (rotationRadians === 0) return { x: tx, y: ty };
+      const dx = tx - mapCenterX;
+      const dy = ty - mapCenterY;
+      const cos = Math.cos(rotationRadians);
+      const sin = Math.sin(rotationRadians);
+      return { x: dx * cos + dy * sin + mapCenterX, y: -dx * sin + dy * cos + mapCenterY };
+    };
     const viewportCorners = [
-      toMapCoordinates(0, 0),
-      toMapCoordinates(containerWidth, 0),
-      toMapCoordinates(0, containerHeight),
-      toMapCoordinates(containerWidth, containerHeight),
+      viewToMap(0, 0),
+      viewToMap(containerWidth, 0),
+      viewToMap(0, containerHeight),
+      viewToMap(containerWidth, containerHeight),
     ];
     const visibleMinX = Math.min(...viewportCorners.map((p) => p.x)) - cellSize * 2;
     const visibleMaxX = Math.max(...viewportCorners.map((p) => p.x)) + cellSize * 2;
@@ -1192,40 +1215,56 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     }
 
-    // 数値セル判定用Set構築
-    const numberCellSet = new Set<string>();
-    mapData.blocks.forEach((block) => {
-      block.numberCells.forEach((nc) => numberCellSet.add(`${nc.row}-${nc.col}`));
-    });
-
-    const ncPad = cellSize * 0.1;
-    const ncRadius = Math.max(2, cellSize * 0.18);
+    // 数値セルスタイル設定（分岐をループ外で解決）
+    const outlineStyle = numberCellOutlineStyle;
+    const useInset = outlineStyle !== 'none';
+    const ncPad = useInset ? cellSize * 0.1 : 0;
+    const ncRadius = outlineStyle === 'rounded' ? Math.max(2, cellSize * 0.18) : 0;
     const ncBg = isDarkMode ? '#1E293B' : '#FFFFFF';
     const ncBorder = isDarkMode ? '#475569' : '#CBD5E1';
     const ncBorderWidth = Math.max(1, cellSize * 0.055);
+    const drawStroke = outlineStyle !== 'none';
 
-    const drawRoundedCellBg = (rx: number, ry: number, rw: number, rh: number, fillColor: string, strokeColor: string) => {
-      ctx.beginPath();
-      ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
-      ctx.fillStyle = fillColor;
-      ctx.fill();
-      ctx.strokeStyle = strokeColor;
-      ctx.lineWidth = ncBorderWidth;
-      ctx.stroke();
-    };
+    // パス描画ヘルパー（スタイルに応じて1回だけ選択）
+    const drawCellPath = ncRadius > 0
+      ? (rx: number, ry: number, rw: number, rh: number) => ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius)
+      : (rx: number, ry: number, rw: number, rh: number) => ctx.rect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2);
+
+    // dashed スタイル用の破線設定（ループ前に1回設定、描画後にリセット）
+    if (outlineStyle === 'dashed') {
+      const dashLen = Math.max(2, cellSize * 0.12);
+      ctx.setLineDash([dashLen, dashLen]);
+    }
+
+    const drawRoundedCellBg = drawStroke
+      ? (rx: number, ry: number, rw: number, rh: number, fillColor: string, strokeColor: string) => {
+          ctx.beginPath();
+          drawCellPath(rx, ry, rw, rh);
+          ctx.fillStyle = fillColor;
+          ctx.fill();
+          ctx.strokeStyle = strokeColor;
+          ctx.lineWidth = ncBorderWidth;
+          ctx.stroke();
+        }
+      : (rx: number, ry: number, rw: number, rh: number, fillColor: string, _strokeColor: string) => {
+          ctx.beginPath();
+          drawCellPath(rx, ry, rw, rh);
+          ctx.fillStyle = fillColor;
+          ctx.fill();
+        };
 
     const fillRoundedOverlay = (rx: number, ry: number, rw: number, rh: number, overlayColor: string | CanvasPattern) => {
       if (overlayColor instanceof CanvasPattern) {
         ctx.save();
         ctx.beginPath();
-        ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+        drawCellPath(rx, ry, rw, rh);
         ctx.clip();
         ctx.fillStyle = overlayColor;
         ctx.fillRect(rx, ry, rw, rh);
         ctx.restore();
       } else {
         ctx.beginPath();
-        ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius);
+        drawCellPath(rx, ry, rw, rh);
         ctx.fillStyle = overlayColor;
         ctx.fill();
       }
@@ -1295,6 +1334,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       }
     });
+
+    // dashed スタイルの破線設定をリセット
+    if (outlineStyle === 'dashed') {
+      ctx.setLineDash([]);
+    }
 
     if (showBorders && !isRotationInteracting) {
       type DrawnBorder = NonNullable<CellData['borders']['top']>;
@@ -1599,11 +1643,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
       const edgeUsage = new Map<string, Set<'none' | 'priority' | 'highest'>>();
 
+      // エッジキー生成: 小数座標はセル単位に丸めて比較（元の整数座標互換）
+      const roundToCell = (v: number): number => Math.round(v);
       const getEdgeKey = (r1: number, c1: number, r2: number, c2: number): string => {
-        if (r1 < r2 || (r1 === r2 && c1 < c2)) {
-          return `${r1},${c1}-${r2},${c2}`;
+        const rr1 = roundToCell(r1);
+        const rc1 = roundToCell(c1);
+        const rr2 = roundToCell(r2);
+        const rc2 = roundToCell(c2);
+        if (rr1 < rr2 || (rr1 === rr2 && rc1 < rc2)) {
+          return `${rr1},${rc1}-${rr2},${rc2}`;
         }
-        return `${r2},${c2}-${r1},${c1}`;
+        return `${rr2},${rc2}-${rr1},${rc1}`;
       };
 
       routeSegments.forEach((segment) => {
@@ -2096,6 +2146,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     mapData,
     cellSize,
     cellStates,
+    numberCellSet,
     mergedCellsMap,
     isRouteVisible,
     routeSegments,
@@ -2116,8 +2167,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     rotationRadians,
     mapCenterX,
     mapCenterY,
-    toMapCoordinates,
     offset,
+    numberCellOutlineStyle,
   ]);
 
   const handleTapAtViewPosition = useCallback(

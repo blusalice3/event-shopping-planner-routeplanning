@@ -88,6 +88,7 @@ interface MapViewProps {
   };
   initialViewport?: MapViewportState;
   onViewportChange?: (viewport: MapViewportState) => void;
+  numberCellOutlineStyle?: import('../../types').NumberCellOutlineStyle;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -125,6 +126,7 @@ const MapView: React.FC<MapViewProps> = ({
   selectionGuideOptions,
   initialViewport,
   onViewportChange,
+  numberCellOutlineStyle = 'rounded',
 }) => {
   void _onMoveToFirst;
   void _onMoveToLast;
@@ -850,6 +852,7 @@ const MapView: React.FC<MapViewProps> = ({
           initialViewport ? { x: initialViewport.offsetX, y: initialViewport.offsetY } : undefined
         }
         offsetRef={canvasOffsetRef}
+        numberCellOutlineStyle={numberCellOutlineStyle}
       />
       {/* セル詳細ポップアップ */}
       <CellItemsPopup

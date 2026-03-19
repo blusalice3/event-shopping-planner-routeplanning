@@ -49,7 +49,7 @@ interface FocusModeMapControlsProps {
   onMapRotationAngleChange: (angle: number) => void;
 }
 
-export const FocusModeItemList: React.FC<FocusModeItemListProps> = ({
+export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
   itemListRef,
   layoutMode,
   isMapVisible,
@@ -92,9 +92,9 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = ({
       </div>
     ))}
   </div>
-);
+));
 
-export const FocusModeHeader: React.FC<FocusModeHeaderProps> = ({
+export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(({
   layoutMode,
   isMapVisible,
   containerClassName,
@@ -187,9 +187,9 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = ({
       </div>
     </div>
   );
-};
+});
 
-export const FocusModeMapControls: React.FC<FocusModeMapControlsProps> = ({
+export const FocusModeMapControls: React.FC<FocusModeMapControlsProps> = React.memo(({
   selectedHallId,
   onSelectedHallIdChange,
   hallDefinitions,
@@ -222,4 +222,4 @@ export const FocusModeMapControls: React.FC<FocusModeMapControlsProps> = ({
       showHint={true}
     />
   </div>
-);
+));

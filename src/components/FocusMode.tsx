@@ -7,9 +7,12 @@ import {
   PurchaseStatus,
   FocusModeSessionState,
   FocusPhase,
+  NumberCellOutlineStyle,
 } from '../types';
 import FocusModeMapCanvas from './FocusModeMapCanvas';
 import { FocusModeHeader, FocusModeItemList, FocusModeMapControls } from './focus/FocusModePanels';
+import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
+import { findPath, simplifyPath } from '../utils/pathfinding';
 
 // フェーズの定義
 
@@ -36,6 +39,7 @@ interface FocusModeProps {
   mapRotationAngle?: number;
   mapInitialRotationAngle?: number;
   onMapRotationAngleChange?: (angle: number) => void;
+  numberCellOutlineStyle?: NumberCellOutlineStyle;
 }
 
 // スワイプ判定の閾値
@@ -75,7 +79,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
   mapRotationAngle = 0,
   mapInitialRotationAngle = 0,
   onMapRotationAngleChange,
+  numberCellOutlineStyle = 'rounded',
 }) => {
+  // onMapRotationAngleChange の安定フォールバック（React.memo 対策）
+  const noopRotationHandler = useCallback(() => {}, []);
+  const stableMapRotationHandler = onMapRotationAngleChange || noopRotationHandler;
+
   // 現在のフェーズ（ユーザー操作でのみ変更）
   const [currentPhase, setCurrentPhase] = useState<FocusPhase>(
     () => resumeState?.phase || 'normal',
@@ -174,6 +183,26 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const hasMapData = useMemo(() => {
     return mapData && Object.keys(mapData).length > 0;
   }, [mapData]);
+
+  // メモ化された className（React.memo 対策）
+  const headerContainerClass = useMemo(
+    () => (layoutMode === 'smartphone' ? 'p-4 mb-4 mx-2' : 'p-4 mb-4 mx-16'),
+    [layoutMode],
+  );
+  const itemListContainerClass = useMemo(
+    () => `space-y-4 pb-24 ${layoutMode === 'smartphone' ? 'mx-2' : 'mx-16'}`,
+    [layoutMode],
+  );
+
+  // ナビゲーションボタンの style オブジェクト安定化
+  const navPrevStyle = useMemo(
+    () => ({ left: `${16 + navButtonOffset.left}px`, transition: 'left 0.2s ease-out' }),
+    [navButtonOffset.left],
+  );
+  const navNextStyle = useMemo(
+    () => ({ right: `${16 + navButtonOffset.right}px`, transition: 'right 0.2s ease-out' }),
+    [navButtonOffset.right],
+  );
 
   useEffect(() => {
     const fallbackHeight = layoutMode === 'smartphone' ? FOOTER_HEIGHT_SP : FOOTER_HEIGHT_PC;
@@ -296,6 +325,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const currentPhaseVisits = useMemo(() => {
     return visitsByPhase[currentPhase];
   }, [visitsByPhase, currentPhase]);
+
+  // 全スペースのvisitKeyをルート順に格納（マップのルート線描画用）
+  const allVisitKeys = useMemo(() => currentPhaseVisits.map((visit) => visit.key), [currentPhaseVisits]);
 
   // 現在表示すべき訪問先
   const currentVisit = useMemo(() => {
@@ -473,6 +505,87 @@ const FocusMode: React.FC<FocusModeProps> = ({
     if (!currentMapName || !mapData) return null;
     return mapData[currentMapName] || null;
   }, [currentMapName, mapData]);
+
+  // マップ用のdayName（マップ名からサフィックスを除去）
+  const mapDayName = useMemo(() => {
+    if (!currentMapName) return '';
+    const dayMatch = currentMapName.match(/^(.+)マップ$/);
+    return dayMatch ? dayMatch[1].trim() : '';
+  }, [currentMapName]);
+
+  // visitKey→セル座標のマッピング（FocusModeMapCanvasがアンマウントされても保持）
+  const visitKeyCellMap = useMemo(() => {
+    const map = new Map<string, { row: number; col: number; key: string }>();
+    if (!mapDayName || !currentMapData) return map;
+
+    items.forEach((item) => {
+      const itemEventDate = item.eventDate?.trim() || '';
+      if (itemEventDate !== mapDayName) return;
+
+      const itemBlockName = item.block?.trim() || '';
+      let block = currentMapData.blocks.find((b) => b.name === itemBlockName);
+      if (!block) {
+        const candidates = currentMapData.blocks.filter(
+          (b) => b.name.toLowerCase() === itemBlockName.toLowerCase(),
+        );
+        if (candidates.length === 1) block = candidates[0];
+      }
+      if (!block) return;
+
+      const numStr = extractNumberFromItemNumber(item.number);
+      if (!numStr) return;
+      const num = parseInt(numStr, 10);
+      const cell = block.numberCells.find((nc) => nc.value === num);
+      if (!cell) return;
+
+      const visitKey = getVisitKey(item);
+      if (!map.has(visitKey)) {
+        map.set(visitKey, { row: cell.row, col: cell.col, key: `${cell.row}-${cell.col}` });
+      }
+    });
+
+    return map;
+  }, [items, currentMapData, mapDayName]);
+
+  // 全スペースのセル座標をルート順に取得
+  const precomputedAllVisitCellCoords = useMemo(() => {
+    const coords: { row: number; col: number; key: string }[] = [];
+    for (const visitKey of allVisitKeys) {
+      const coord = visitKeyCellMap.get(visitKey);
+      if (coord) {
+        coords.push(coord);
+      }
+    }
+    return coords;
+  }, [allVisitKeys, visitKeyCellMap]);
+
+  // A* 経路計算（FocusModeMapCanvasがアンマウントされても保持）
+  const routeCacheRef = useRef<Map<string, { row: number; col: number }[]>>(new Map());
+
+  const precomputedRouteSegments = useMemo(() => {
+    if (!currentMapData) return [];
+    const segments: { path: { row: number; col: number }[]; segmentIndex: number }[] = [];
+    const newCache = new Map<string, { row: number; col: number }[]>();
+
+    for (let i = 0; i < precomputedAllVisitCellCoords.length - 1; i++) {
+      const from = precomputedAllVisitCellCoords[i];
+      const to = precomputedAllVisitCellCoords[i + 1];
+      if (from.row === to.row && from.col === to.col) {
+        segments.push({ path: [], segmentIndex: i });
+        continue;
+      }
+      const cacheKey = `${from.row},${from.col}-${to.row},${to.col}`;
+      let path = routeCacheRef.current.get(cacheKey);
+      if (!path) {
+        path = simplifyPath(findPath(currentMapData, from.row, from.col, to.row, to.col));
+      }
+      newCache.set(cacheKey, path);
+      segments.push({ path, segmentIndex: i });
+    }
+
+    routeCacheRef.current = newCache;
+    return segments;
+  }, [precomputedAllVisitCellCoords, currentMapData]);
 
   // 追随モード用ホール特定
   const followHall = useMemo(() => {
@@ -1521,9 +1634,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     ? `${currentVisit.items[0].eventDate}-${currentVisit.items[0].block}-${extractBaseNumber(currentVisit.items[0].number)}`
     : null;
 
-  // 全スペースのvisitKeyをルート順に格納（マップのルート線描画用）
-  const allVisitKeys = currentPhaseVisits.map((visit) => visit.key);
-
   // 次の訪問キー（マップ用）
   const nextVisitKey = nextVisit?.items[0]
     ? `${nextVisit.items[0].eventDate}-${nextVisit.items[0].block}-${extractBaseNumber(nextVisit.items[0].number)}`
@@ -1899,7 +2009,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
             mapZoomLevel={mapZoomLevel}
             mapRotationAngle={mapRotationAngle}
             mapInitialRotationAngle={mapInitialRotationAngle}
-            onMapRotationAngleChange={onMapRotationAngleChange || (() => {})}
+            onMapRotationAngleChange={stableMapRotationHandler}
           />
           <div className="flex-grow relative overflow-hidden">
             <FocusModeMapCanvas
@@ -1922,6 +2032,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
               onRotationAngleChange={onMapRotationAngleChange}
               allVisitKeys={allVisitKeys}
               currentPhaseIndex={currentPhaseIndex}
+              numberCellOutlineStyle={numberCellOutlineStyle}
+              precomputedVisitKeyCellMap={visitKeyCellMap}
+              precomputedAllVisitCellCoords={precomputedAllVisitCellCoords}
+              precomputedRouteSegments={precomputedRouteSegments}
             />
           </div>
         </div>
@@ -2081,7 +2195,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
             mapZoomLevel={mapZoomLevel}
             mapRotationAngle={mapRotationAngle}
             mapInitialRotationAngle={mapInitialRotationAngle}
-            onMapRotationAngleChange={onMapRotationAngleChange || (() => {})}
+            onMapRotationAngleChange={stableMapRotationHandler}
           />
           <div className="flex-grow relative overflow-hidden">
             <FocusModeMapCanvas
@@ -2104,6 +2218,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
               onRotationAngleChange={onMapRotationAngleChange}
               allVisitKeys={allVisitKeys}
               currentPhaseIndex={currentPhaseIndex}
+              numberCellOutlineStyle={numberCellOutlineStyle}
+              precomputedVisitKeyCellMap={visitKeyCellMap}
+              precomputedAllVisitCellCoords={precomputedAllVisitCellCoords}
+              precomputedRouteSegments={precomputedRouteSegments}
             />
           </div>
         </div>
@@ -2267,7 +2385,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       <FocusModeHeader
         layoutMode={layoutMode}
         isMapVisible={isMapVisible}
-        containerClassName={layoutMode === 'smartphone' ? 'p-4 mb-4 mx-2' : 'p-4 mb-4 mx-16'}
+        containerClassName={headerContainerClass}
         size="expanded"
         spaceInfo={spaceInfo}
         circleName={circleName}
@@ -2283,7 +2401,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         itemListRef={itemListRef}
         layoutMode={layoutMode}
         isMapVisible={isMapVisible}
-        containerClassName={`space-y-4 pb-24 ${layoutMode === 'smartphone' ? 'mx-2' : 'mx-16'}`}
+        containerClassName={itemListContainerClass}
         currentVisitDisplayItems={currentVisitDisplayItems}
         blinkingPriceItemIds={blinkingPriceItemIds}
         onUpdateItem={handleUpdateItem}
@@ -2297,10 +2415,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
           {/* 戻るボタン（左側） */}
           <button
             onClick={handlePrev}
-            style={{
-              left: `${16 + navButtonOffset.left}px`,
-              transition: 'left 0.2s ease-out',
-            }}
+            style={navPrevStyle}
             className="fixed top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl z-40"
             title="前の訪問先"
           >
@@ -2310,10 +2425,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
           {/* 次へボタン（右側） */}
           <button
             onClick={handleNext}
-            style={{
-              right: `${16 + navButtonOffset.right}px`,
-              transition: 'right 0.2s ease-out',
-            }}
+            style={navNextStyle}
             className={`fixed top-1/2 transform -translate-y-1/2 w-14 h-14 rounded-full shadow-lg flex items-center justify-center text-2xl z-40 ${
               hasUndefinedPricePurchased
                 ? 'bg-red-500 hover:bg-red-600 text-white'

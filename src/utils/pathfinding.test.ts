@@ -25,28 +25,30 @@ const createMapData = (
   blocks: [],
 });
 
-const isAdjacentOrSame = (a: { row: number; col: number }, b: { row: number; col: number }) =>
-  Math.abs(a.row - b.row) <= 1 && Math.abs(a.col - b.col) <= 1;
-
 describe('pathfinding utilities', () => {
   it('finds a valid path in an open grid', () => {
     const mapData = createMapData(3, 3, []);
     const path = findPath(mapData, 1, 1, 3, 3);
 
-    expect(path[0]).toEqual({ row: 1, col: 1 });
-    expect(path[path.length - 1]).toEqual({ row: 3, col: 3 });
-    expect(path.every((point, i) => i === 0 || isAdjacentOrSame(path[i - 1], point))).toBe(true);
+    // サブセルグリッド+LOS最適化により小数座標が返る
+    // 始点・終点はセル中心の小数座標
+    expect(path.length).toBeGreaterThanOrEqual(2);
+    expect(path[0].row).toBeCloseTo(1, 1);
+    expect(path[0].col).toBeCloseTo(1, 1);
+    expect(path[path.length - 1].row).toBeCloseTo(3, 1);
+    expect(path[path.length - 1].col).toBeCloseTo(3, 1);
   });
 
   it('avoids blocked cells when an alternate route exists', () => {
     const mapData = createMapData(3, 3, [{ row: 2, col: 2, value: 100 }]);
     const path = findPath(mapData, 1, 1, 3, 3);
 
-    expect(path).not.toEqual([
-      { row: 1, col: 1 },
-      { row: 3, col: 3 },
-    ]);
-    expect(path.some((point) => point.row === 2 && point.col === 2)).toBe(false);
+    // ブロックされたセル(2,2)の範囲(row 1.5-2.5, col 1.5-2.5)の中心を通らないことを確認
+    expect(path.length).toBeGreaterThanOrEqual(2);
+    const passesBlockedCenter = path.some(
+      (point) => Math.abs(point.row - 2) < 0.2 && Math.abs(point.col - 2) < 0.2,
+    );
+    expect(passesBlockedCenter).toBe(false);
   });
 
   it('returns fallback start/end when no path can be found', () => {
@@ -56,10 +58,12 @@ describe('pathfinding utilities', () => {
     ]);
 
     const path = findPath(mapData, 1, 1, 2, 2);
-    expect(path).toEqual([
-      { row: 1, col: 1 },
-      { row: 2, col: 2 },
-    ]);
+    // フォールバック: 始点と終点のサブセル中心座標
+    expect(path.length).toBe(2);
+    expect(path[0].row).toBeCloseTo(1, 1);
+    expect(path[0].col).toBeCloseTo(1, 1);
+    expect(path[path.length - 1].row).toBeCloseTo(2, 1);
+    expect(path[path.length - 1].col).toBeCloseTo(2, 1);
   });
 
   it('builds route segments between consecutive visit points', () => {

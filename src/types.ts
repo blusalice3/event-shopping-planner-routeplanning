@@ -113,6 +113,8 @@ export interface CellGroup {
   cells?: { row: number; col: number }[];
 }
 
+export type NumberCellOutlineStyle = 'rounded' | 'square' | 'none' | 'dashed';
+
 export interface BlockDefinition {
   name: string;
   // 通常ブロック用（4セル指定）

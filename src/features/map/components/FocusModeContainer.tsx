@@ -6,6 +6,7 @@ import type {
   HallDefinitionsStore,
   FocusModeSessionState,
   MapDataStore,
+  NumberCellOutlineStyle,
   PurchaseStatus,
   ShoppingItem,
 } from '../../../types';
@@ -32,6 +33,7 @@ type FocusModeContainerProps = {
   mapRotationAngle?: number;
   mapInitialRotationAngle?: number;
   onMapRotationAngleChange?: (angle: number) => void;
+  numberCellOutlineStyle?: NumberCellOutlineStyle;
 };
 
 const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
@@ -56,6 +58,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   mapRotationAngle = 0,
   mapInitialRotationAngle = 0,
   onMapRotationAngleChange,
+  numberCellOutlineStyle,
 }) => {
   const currentDay = useMemo(
     () => (eventDates.includes(activeTab) ? activeTab : eventDates[0] || ''),
@@ -89,6 +92,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       mapRotationAngle={mapRotationAngle}
       mapInitialRotationAngle={mapInitialRotationAngle}
       onMapRotationAngleChange={onMapRotationAngleChange}
+      numberCellOutlineStyle={numberCellOutlineStyle}
     />
   );
 };
