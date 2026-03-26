@@ -12,7 +12,7 @@ import {
 import FocusModeMapCanvas from './FocusModeMapCanvas';
 import { FocusModeHeader, FocusModeItemList, FocusModeMapControls } from './focus/FocusModePanels';
 import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
-import { findPath, simplifyPath } from '../utils/pathfinding';
+import { generateRouteSegments, simplifyPath } from '../utils/pathfinding';
 
 // フェーズの定義
 
@@ -559,32 +559,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return coords;
   }, [allVisitKeys, visitKeyCellMap]);
 
-  // A* 経路計算（FocusModeMapCanvasがアンマウントされても保持）
-  const routeCacheRef = useRef<Map<string, { row: number; col: number }[]>>(new Map());
-
+  // A* 経路計算（重複回避付き直交ルーティング）
   const precomputedRouteSegments = useMemo(() => {
-    if (!currentMapData) return [];
-    const segments: { path: { row: number; col: number }[]; segmentIndex: number }[] = [];
-    const newCache = new Map<string, { row: number; col: number }[]>();
+    if (!currentMapData || precomputedAllVisitCellCoords.length < 2) return [];
 
-    for (let i = 0; i < precomputedAllVisitCellCoords.length - 1; i++) {
-      const from = precomputedAllVisitCellCoords[i];
-      const to = precomputedAllVisitCellCoords[i + 1];
-      if (from.row === to.row && from.col === to.col) {
-        segments.push({ path: [], segmentIndex: i });
-        continue;
-      }
-      const cacheKey = `${from.row},${from.col}-${to.row},${to.col}`;
-      let path = routeCacheRef.current.get(cacheKey);
-      if (!path) {
-        path = simplifyPath(findPath(currentMapData, from.row, from.col, to.row, to.col));
-      }
-      newCache.set(cacheKey, path);
-      segments.push({ path, segmentIndex: i });
-    }
-
-    routeCacheRef.current = newCache;
-    return segments;
+    const segments = generateRouteSegments(currentMapData, precomputedAllVisitCellCoords);
+    return segments.map((seg, i) => ({
+      path: simplifyPath(seg.path),
+      segmentIndex: i,
+    }));
   }, [precomputedAllVisitCellCoords, currentMapData]);
 
   // 追随モード用ホール特定

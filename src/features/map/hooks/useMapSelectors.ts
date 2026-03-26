@@ -11,6 +11,8 @@ import type {
 type UseMapSelectorsParams = {
   activeEventName: string | null;
   activeTab: string;
+  activeEventDate: string | null;
+  mapViewActive: boolean;
   mapData: MapDataStore;
   hallDefinitions: HallDefinitionsStore;
   hallRouteSettings: HallRouteSettingsStore;
@@ -27,6 +29,7 @@ const normalizeMapDayToken = (value: string): string =>
 type UseMapSelectorsResult = {
   mapTabs: string[];
   isMapTab: boolean;
+  currentMapTabName: string | null;
   currentMapData: DayMapData | null;
   currentHalls: HallDefinition[];
   currentHallRouteSettings: HallRouteSettings;
@@ -39,6 +42,8 @@ type UseMapSelectorsResult = {
 export function useMapSelectors({
   activeEventName,
   activeTab,
+  activeEventDate,
+  mapViewActive,
   mapData,
   hallDefinitions,
   hallRouteSettings,
@@ -52,30 +57,6 @@ export function useMapSelectors({
     });
   }, [activeEventName, mapData]);
 
-  const isMapTab = useMemo(() => activeTab.endsWith('マップ'), [activeTab]);
-
-  const currentMapData = useMemo(() => {
-    if (!activeEventName || !isMapTab) return null;
-    return mapData[activeEventName]?.[activeTab] || null;
-  }, [activeEventName, activeTab, isMapTab, mapData]);
-
-  const currentHalls = useMemo((): HallDefinition[] => {
-    if (!activeEventName || !isMapTab) return [];
-    return hallDefinitions[activeEventName]?.[activeTab] || [];
-  }, [activeEventName, activeTab, isMapTab, hallDefinitions]);
-
-  const currentHallRouteSettings = useMemo((): HallRouteSettings => {
-    if (!activeEventName || !isMapTab) {
-      return { hallOrder: [], hallVisitLists: [] };
-    }
-    return (
-      hallRouteSettings[activeEventName]?.[activeTab] || {
-        hallOrder: currentHalls.map((h) => h.id),
-        hallVisitLists: [],
-      }
-    );
-  }, [activeEventName, activeTab, isMapTab, hallRouteSettings, currentHalls]);
-
   const getMapTabForDate = useCallback(
     (eventDate: string): string | null => {
       const normalizedEventDate = normalizeMapDayToken(eventDate);
@@ -86,6 +67,36 @@ export function useMapSelectors({
     },
     [mapTabs],
   );
+
+  // マップビューがアクティブな場合、現在の日付タブに対応するマップタブ名を導出
+  const currentMapTabName = useMemo(() => {
+    if (!mapViewActive || !activeEventDate) return null;
+    return getMapTabForDate(activeEventDate);
+  }, [mapViewActive, activeEventDate, getMapTabForDate]);
+
+  const isMapTab = currentMapTabName != null;
+
+  const currentMapData = useMemo(() => {
+    if (!activeEventName || !currentMapTabName) return null;
+    return mapData[activeEventName]?.[currentMapTabName] || null;
+  }, [activeEventName, currentMapTabName, mapData]);
+
+  const currentHalls = useMemo((): HallDefinition[] => {
+    if (!activeEventName || !currentMapTabName) return [];
+    return hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+  }, [activeEventName, currentMapTabName, hallDefinitions]);
+
+  const currentHallRouteSettings = useMemo((): HallRouteSettings => {
+    if (!activeEventName || !currentMapTabName) {
+      return { hallOrder: [], hallVisitLists: [] };
+    }
+    return (
+      hallRouteSettings[activeEventName]?.[currentMapTabName] || {
+        hallOrder: currentHalls.map((h) => h.id),
+        hallVisitLists: [],
+      }
+    );
+  }, [activeEventName, currentMapTabName, hallRouteSettings, currentHalls]);
 
   const getHallsForDate = useCallback(
     (eventDate: string): HallDefinition[] => {
@@ -127,6 +138,7 @@ export function useMapSelectors({
   return {
     mapTabs,
     isMapTab,
+    currentMapTabName,
     currentMapData,
     currentHalls,
     currentHallRouteSettings,

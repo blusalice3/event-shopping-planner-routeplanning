@@ -10,6 +10,9 @@ const OVERLAP_PENALTY = 4;
 // ルートの線が数値セルに視覚的に被るのを防ぐためのバッファゾーン
 const BUFFER_PENALTY = 3;
 
+// 方向転換時のペナルティ（不要なジグザグを防止）
+const TURN_PENALTY = 0.5;
+
 // セルが通過可能かどうかを判定（元のセル単位）
 function isPassableCell(
   cellsMap: Map<string, CellData>,
@@ -167,6 +170,17 @@ interface HeapNode {
   f: number;
   parentSr: number;
   parentSc: number;
+  dirDr: number;  // この地点に到達した方向 (-1, 0, 1)
+  dirDc: number;  // この地点に到達した方向 (-1, 0, 1)
+}
+
+// 方向インデックス: up=0, down=1, left=2, right=3, start=4(方向なし)
+function dirIndex(dr: number, dc: number): number {
+  if (dr === -1) return 0;
+  if (dr === 1) return 1;
+  if (dc === -1) return 2;
+  if (dc === 1) return 3;
+  return 4; // start (方向なし)
 }
 
 class BinaryHeap {
@@ -221,16 +235,12 @@ function heuristic(r1: number, c1: number, r2: number, c2: number): number {
   return Math.abs(r1 - r2) + Math.abs(c1 - c2);
 }
 
-// 方向（上下左右 + 斜め）
+// 方向（上下左右のみ：直交ルーティング）
 const DIRECTIONS = [
   { dr: -1, dc: 0, cost: 1 },   // 上
   { dr: 1, dc: 0, cost: 1 },    // 下
   { dr: 0, dc: -1, cost: 1 },   // 左
   { dr: 0, dc: 1, cost: 1 },    // 右
-  { dr: -1, dc: -1, cost: 1.4 }, // 左上
-  { dr: -1, dc: 1, cost: 1.4 },  // 右上
-  { dr: 1, dc: -1, cost: 1.4 },  // 左下
-  { dr: 1, dc: 1, cost: 1.4 },   // 右下
 ];
 
 // サブセルが特定セル内にあるかを判定
@@ -284,15 +294,26 @@ function findSubCellPath(
 
   const subKey = (sr: number, sc: number) => sr * maxSubCol + sc;
 
-  // g値マップとparentマップ
+  // 方向対応のstateKey: 同じ地点でも到達方向が異なれば別状態として扱う
+  const stateKey = (sr: number, sc: number, di: number) =>
+    (sr * maxSubCol + sc) * 5 + di;
+
+  // stateKeyから(sr, sc)を逆算
+  const stateKeyToPos = (key: number) => {
+    const posKey = Math.floor(key / 5);
+    return { sr: Math.floor(posKey / maxSubCol), sc: posKey % maxSubCol };
+  };
+
+  // g値マップとparentマップ（方向対応）
   const gMap = new Map<number, number>();
-  const parentMap = new Map<number, number>(); // key → parentKey
+  const parentMap = new Map<number, number>(); // stateKey → parentStateKey
   const closedSet = new Set<number>();
 
-  const startKey = subKey(start.sr, start.sc);
+  const startDi = dirIndex(0, 0); // start: 方向なし
+  const startStateKey = stateKey(start.sr, start.sc, startDi);
 
-  gMap.set(startKey, 0);
-  parentMap.set(startKey, -1); // スタートは親なし
+  gMap.set(startStateKey, 0);
+  parentMap.set(startStateKey, -1); // スタートは親なし
 
   const openHeap = new BinaryHeap();
   const h0 = heuristic(start.sr, start.sc, goalSr, goalSc);
@@ -300,39 +321,36 @@ function findSubCellPath(
     sr: start.sr, sc: start.sc,
     g: 0, h: h0, f: h0,
     parentSr: -1, parentSc: -1,
+    dirDr: 0, dirDc: 0,
   });
 
-  const maxIterations = maxSubRow * maxSubCol;
+  const maxIterations = maxSubRow * maxSubCol * 5;
   let iterations = 0;
 
   while (openHeap.size > 0 && iterations < maxIterations) {
     iterations++;
 
     const current = openHeap.pop()!;
-    const currentKey = subKey(current.sr, current.sc);
+    const currentDi = dirIndex(current.dirDr, current.dirDc);
+    const currentStateKey = stateKey(current.sr, current.sc, currentDi);
 
     // 既に処理済みならスキップ
-    if (closedSet.has(currentKey)) continue;
-    closedSet.add(currentKey);
+    if (closedSet.has(currentStateKey)) continue;
+    closedSet.add(currentStateKey);
 
     // ゴール到達
     if (current.sr === goalSr && current.sc === goalSc) {
-      // パスを再構築（サブセル座標 → 小数row/col座標）
+      // パスを再構築（stateKey → サブセル座標）
       const subPath: { sr: number; sc: number }[] = [];
-      let key = currentKey;
+      let key = currentStateKey;
       while (key !== -1) {
-        const sr = Math.floor(key / maxSubCol);
-        const sc = key % maxSubCol;
-        subPath.unshift({ sr, sc });
+        const pos = stateKeyToPos(key);
+        subPath.unshift(pos);
         key = parentMap.get(key) ?? -1;
       }
 
-      // Theta*ライクなline-of-sight最適化: 不要な中間点を除去
-      // スタートセル・ゴールセルも考慮した見通し判定
-      const optimized = optimizePathWithLineOfSight(
-        subPath, cellsMap, maxSubRow, maxSubCol, maxRow, maxCol,
-        startCellRow, startCellCol, goalCellRow, goalCellCol,
-      );
+      // 直交コリニアマージ: 同一方向の連続点を除去
+      const optimized = mergeCollinearPoints(subPath);
 
       // 小数row/col座標に変換
       return optimized.map((p) => subCellToFractional(p.sr, p.sc));
@@ -342,25 +360,25 @@ function findSubCellPath(
     for (const dir of DIRECTIONS) {
       const newSr = current.sr + dir.dr;
       const newSc = current.sc + dir.dc;
-      const newKey = subKey(newSr, newSc);
+      const newDi = dirIndex(dir.dr, dir.dc);
+      const newStateKey = stateKey(newSr, newSc, newDi);
 
-      if (closedSet.has(newKey)) continue;
+      if (closedSet.has(newStateKey)) continue;
 
       // 通過可否判定（スタートセル・ゴールセルは例外で通過可能）
       if (!isPassableOrException(newSr, newSc)) {
         continue;
       }
 
-      // 斜め移動の場合、両隣のサブセルが通過可能かチェック
-      if (Math.abs(dir.dr) === 1 && Math.abs(dir.dc) === 1) {
-        if (!isPassableOrException(current.sr + dir.dr, current.sc) ||
-            !isPassableOrException(current.sr, current.sc + dir.dc)) {
-          continue;
-        }
-      }
-
       // 移動コスト計算
       let moveCost = dir.cost;
+
+      // ターンペナルティ（スタート地点以外で方向が変わった場合）
+      const isTurn = (current.dirDr !== 0 || current.dirDc !== 0) &&
+                     (dir.dr !== current.dirDr || dir.dc !== current.dirDc);
+      if (isTurn) {
+        moveCost += TURN_PENALTY;
+      }
 
       // バッファゾーンペナルティ（スタートセル・ゴールセルは除外）
       if (!isSubCellInCell(newSr, newSc, startCellRow, startCellCol) &&
@@ -377,131 +395,89 @@ function findSubCellPath(
       }
 
       const newG = current.g + moveCost;
-      const existingG = gMap.get(newKey);
+      const existingG = gMap.get(newStateKey);
 
       if (existingG === undefined || newG < existingG) {
-        gMap.set(newKey, newG);
-        parentMap.set(newKey, currentKey);
+        gMap.set(newStateKey, newG);
+        parentMap.set(newStateKey, currentStateKey);
 
         const newH = heuristic(newSr, newSc, goalSr, goalSc);
         openHeap.push({
           sr: newSr, sc: newSc,
           g: newG, h: newH, f: newG + newH,
           parentSr: current.sr, parentSc: current.sc,
+          dirDr: dir.dr, dirDc: dir.dc,
         });
       }
     }
   }
 
-  // 経路が見つからない場合は直線で結ぶ（小数座標）
+  // 経路が見つからない場合はL字で結ぶ（小数座標、直交ルーティング維持）
   return [
     subCellToFractional(start.sr, start.sc),
+    subCellToFractional(start.sr, goalSc),
     subCellToFractional(goalSr, goalSc),
   ];
 }
 
-// Line-of-Sight判定（スタートセル・ゴールセル例外付き）
-// 2つのサブセル間の直線上にある全セルが通過可能かチェック
-function lineOfSightWithExceptions(
-  cellsMap: Map<string, CellData>,
-  sr1: number, sc1: number,
-  sr2: number, sc2: number,
-  maxSubRow: number, maxSubCol: number,
-  maxRow: number, maxCol: number,
-  startCellRow: number, startCellCol: number,
-  goalCellRow: number, goalCellCol: number,
-): boolean {
-  let x0 = sc1;
-  let y0 = sr1;
-  const x1 = sc2;
-  const y1 = sr2;
-
-  let dx = Math.abs(x1 - x0);
-  let dy = Math.abs(y1 - y0);
-  const sx = x0 < x1 ? 1 : -1;
-  const sy = y0 < y1 ? 1 : -1;
-  let err = dx - dy;
-
-  while (true) {
-    // スタートセル・ゴールセル内は通過可能として扱う
-    if (!isSubCellInCell(y0, x0, startCellRow, startCellCol) &&
-        !isSubCellInCell(y0, x0, goalCellRow, goalCellCol)) {
-      if (!isPassableSubCell(cellsMap, y0, x0, maxSubRow, maxSubCol, maxRow, maxCol)) {
-        return false;
-      }
-    }
-    if (x0 === x1 && y0 === y1) break;
-
-    const e2 = 2 * err;
-    if (e2 > -dy) {
-      err -= dy;
-      x0 += sx;
-    }
-    if (e2 < dx) {
-      err += dx;
-      y0 += sy;
-    }
-  }
-  return true;
-}
-
-// Line-of-Sightベースの経路最適化
-// 直線で到達可能な中間点を除去して滑らかな経路にする
-function optimizePathWithLineOfSight(
-  subPath: { sr: number; sc: number }[],
-  cellsMap: Map<string, CellData>,
-  maxSubRow: number,
-  maxSubCol: number,
-  maxRow: number,
-  maxCol: number,
-  startCellRow: number,
-  startCellCol: number,
-  goalCellRow: number,
-  goalCellCol: number,
+// 直交コリニアマージ: 同一方向の連続ポイントを除去し、曲がり角のみ残す
+function mergeCollinearPoints(
+  subPath: { sr: number; sc: number }[]
 ): { sr: number; sc: number }[] {
   if (subPath.length <= 2) return subPath;
 
   const result: { sr: number; sc: number }[] = [subPath[0]];
-  let current = 0;
 
-  while (current < subPath.length - 1) {
-    // 現在地から最も遠い直接見通せるポイントを探す
-    let farthest = current + 1;
-    for (let i = subPath.length - 1; i > current + 1; i--) {
-      if (lineOfSightWithExceptions(
-        cellsMap,
-        subPath[current].sr, subPath[current].sc,
-        subPath[i].sr, subPath[i].sc,
-        maxSubRow, maxSubCol, maxRow, maxCol,
-        startCellRow, startCellCol, goalCellRow, goalCellCol,
-      )) {
-        farthest = i;
-        break;
-      }
+  for (let i = 1; i < subPath.length - 1; i++) {
+    const prev = result[result.length - 1];
+    const curr = subPath[i];
+    const next = subPath[i + 1];
+
+    // 前後の方向が変わる場合のみポイントを残す（90°曲がり角）
+    const dr1 = Math.sign(curr.sr - prev.sr);
+    const dc1 = Math.sign(curr.sc - prev.sc);
+    const dr2 = Math.sign(next.sr - curr.sr);
+    const dc2 = Math.sign(next.sc - curr.sc);
+
+    if (dr1 !== dr2 || dc1 !== dc2) {
+      result.push(curr);
     }
-    result.push(subPath[farthest]);
-    current = farthest;
   }
 
+  result.push(subPath[subPath.length - 1]);
   return result;
 }
 
 // 経路上のサブセルを使用済みとしてマーク
+// コーナーポイントだけでなく、直線セグメント上の全中間サブセルも補間してマークする
 function markPathSubCells(
   path: { row: number; col: number }[],
   usedSubCells: Map<string, number>,
 ): void {
   const N = SUB_CELL_RESOLUTION;
-  for (const point of path) {
-    // 小数座標 → サブセル座標に逆変換
-    const sr = Math.round((point.row - 0.5) * N - 0.5);
-    const sc = Math.round((point.col - 0.5) * N - 0.5);
 
-    // 周辺のサブセルもマーク（経路幅を持たせる）
-    for (let dr = -1; dr <= 1; dr++) {
-      for (let dc = -1; dc <= 1; dc++) {
-        const key = `${sr + dr}-${sc + dc}`;
-        usedSubCells.set(key, (usedSubCells.get(key) ?? 0) + 1);
+  const markPoint = (sr: number, sc: number) => {
+    const key = `${sr}-${sc}`;
+    usedSubCells.set(key, (usedSubCells.get(key) ?? 0) + 1);
+  };
+
+  for (let i = 0; i < path.length; i++) {
+    const sr = Math.round((path[i].row - 0.5) * N - 0.5);
+    const sc = Math.round((path[i].col - 0.5) * N - 0.5);
+    markPoint(sr, sc);
+
+    // 次のポイントまでの直線セグメント上の中間サブセルもマーク
+    if (i < path.length - 1) {
+      const nextSr = Math.round((path[i + 1].row - 0.5) * N - 0.5);
+      const nextSc = Math.round((path[i + 1].col - 0.5) * N - 0.5);
+      const dsr = Math.sign(nextSr - sr);
+      const dsc = Math.sign(nextSc - sc);
+      let curSr = sr + dsr;
+      let curSc = sc + dsc;
+      while (curSr !== nextSr || curSc !== nextSc) {
+        markPoint(curSr, curSc);
+        curSr += dsr;
+        curSc += dsc;
       }
     }
   }
@@ -576,6 +552,31 @@ export function simplifyPath(
   tolerance: number = 0.5,
 ): { row: number; col: number }[] {
   if (path.length <= 2) return path;
+
+  // 直交パスの場合はコリニアマージのみ適用（Douglas-Peuckerが90°曲がりを斜めに潰すのを防止）
+  const isOrthogonal = path.every((p, i) => {
+    if (i === 0) return true;
+    const prev = path[i - 1];
+    return Math.abs(p.row - prev.row) < 0.01 || Math.abs(p.col - prev.col) < 0.01;
+  });
+  if (isOrthogonal) {
+    // 同一方向の連続ポイントを除去（曲がり角は保持）
+    const merged: { row: number; col: number }[] = [path[0]];
+    for (let i = 1; i < path.length - 1; i++) {
+      const prev = merged[merged.length - 1];
+      const curr = path[i];
+      const next = path[i + 1];
+      const dr1 = Math.sign(curr.row - prev.row);
+      const dc1 = Math.sign(curr.col - prev.col);
+      const dr2 = Math.sign(next.row - curr.row);
+      const dc2 = Math.sign(next.col - curr.col);
+      if (dr1 !== dr2 || dc1 !== dc2) {
+        merged.push(curr);
+      }
+    }
+    merged.push(path[path.length - 1]);
+    return merged;
+  }
 
   // 最も遠い点を見つける
   let maxDistance = 0;
