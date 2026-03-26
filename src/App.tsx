@@ -221,6 +221,11 @@ const App: React.FC = () => {
   // 画面表示と選択状態。
   const [activeEventName, setActiveEventName] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>('eventList');
+  const [mapViewActive, setMapViewActive] = useState(false);
+  const mapToggleLongPressRef = React.useRef<number | null>(null);
+  const mapToggleLongPressFiredRef = React.useRef(false);
+  const mapToggleButtonRef = React.useRef<HTMLButtonElement>(null);
+  const mapToggleMenuRef = React.useRef<HTMLDivElement>(null);
   const [sortState, setSortState] = useState<SortState>('Manual');
   const [blockSortDirection, setBlockSortDirection] = useState<BlockSortDirection | null>(null);
   const [itemToEdit, setItemToEdit] = useState<ShoppingItem | null>(null);
@@ -332,6 +337,7 @@ const App: React.FC = () => {
   const {
     mapTabs,
     isMapTab,
+    currentMapTabName,
     currentMapData,
     currentHalls,
     currentHallRouteSettings,
@@ -342,6 +348,8 @@ const App: React.FC = () => {
   } = useMapSelectors({
     activeEventName,
     activeTab,
+    activeEventDate: activeEventDate || null,
+    mapViewActive,
     mapData,
     hallDefinitions,
     hallRouteSettings,
@@ -352,9 +360,8 @@ const App: React.FC = () => {
     (hallId: string): number => {
       if (!activeEventName || !isMapTab || !currentMapData) return 0;
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return 0;
-      const dayName = dayMatch[1];
+      if (!activeEventDate) return 0;
+      const dayName = activeEventDate;
 
       const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
 
@@ -379,7 +386,7 @@ const App: React.FC = () => {
         return false;
       }).length;
     },
-    [activeEventName, isMapTab, activeTab, currentMapData, currentHalls, items, executeModeItems],
+    [activeEventName, isMapTab, activeEventDate, currentMapData, currentHalls, items, executeModeItems],
   );
 
 
@@ -387,9 +394,8 @@ const App: React.FC = () => {
     (hallId: string): number => {
       if (!activeEventName || !isMapTab || !currentMapData) return 0;
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return 0;
-      const dayName = dayMatch[1];
+      if (!activeEventDate) return 0;
+      const dayName = activeEventDate;
 
       const dayItems = items.filter((item) => item.eventDate === dayName);
 
@@ -410,7 +416,7 @@ const App: React.FC = () => {
         return false;
       }).length;
     },
-    [activeEventName, isMapTab, activeTab, currentMapData, currentHalls, items],
+    [activeEventName, isMapTab, activeEventDate, currentMapData, currentHalls, items],
   );
 
 
@@ -459,7 +465,6 @@ const App: React.FC = () => {
 
   const currentMode = useMemo(() => {
     if (!activeEventName) return 'execute';
-    if (isMapTab) return 'edit';
     const modes = dayModes[activeEventName];
     if (!modes) return 'edit';
     if (activeEventDate) {
@@ -470,7 +475,7 @@ const App: React.FC = () => {
       return 'edit';
     }
     return 'edit';
-  }, [activeEventName, dayModes, activeEventDate, isMapTab]);
+  }, [activeEventName, dayModes, activeEventDate]);
 
 
   const currentFocusSessionKey = useMemo(() => {
@@ -543,11 +548,11 @@ const App: React.FC = () => {
   );
 
   const currentMapTabRotationState = useMemo(() => {
-    if (!activeEventName || !isMapTab) {
+    if (!activeEventName || !isMapTab || !currentMapTabName) {
       return resolveDayMapRotationState(undefined);
     }
-    return getDayMapRotationState(activeEventName, activeTab);
-  }, [activeEventName, isMapTab, activeTab, getDayMapRotationState]);
+    return getDayMapRotationState(activeEventName, currentMapTabName);
+  }, [activeEventName, isMapTab, currentMapTabName, getDayMapRotationState]);
 
   const currentFocusMapRotationState = useMemo(() => {
     if (!activeEventName || !currentFocusMapName) {
@@ -558,10 +563,10 @@ const App: React.FC = () => {
 
   const handleMapTabRotationAngleChange = useCallback(
     (angle: number) => {
-      if (!activeEventName || !isMapTab) return;
-      updateMapRotationAngle(activeEventName, activeTab, 'mapTab', angle);
+      if (!activeEventName || !isMapTab || !currentMapTabName) return;
+      updateMapRotationAngle(activeEventName, currentMapTabName, 'mapTab', angle);
     },
-    [activeEventName, isMapTab, activeTab, updateMapRotationAngle],
+    [activeEventName, isMapTab, currentMapTabName, updateMapRotationAngle],
   );
 
   const handleFocusMapRotationAngleChange = useCallback(
@@ -574,16 +579,16 @@ const App: React.FC = () => {
 
   // マップビューポート状態の取得・更新
   const currentMapTabViewport = useMemo((): MapViewportState | undefined => {
-    if (!activeEventName || !isMapTab) return undefined;
-    return mapViewportSettings[activeEventName]?.[activeTab];
-  }, [activeEventName, isMapTab, activeTab, mapViewportSettings]);
+    if (!activeEventName || !isMapTab || !currentMapTabName) return undefined;
+    return mapViewportSettings[activeEventName]?.[currentMapTabName];
+  }, [activeEventName, isMapTab, currentMapTabName, mapViewportSettings]);
 
   const handleMapViewportChange = useCallback(
     (viewport: MapViewportState) => {
-      if (!activeEventName || !isMapTab) return;
+      if (!activeEventName || !isMapTab || !currentMapTabName) return;
       setMapViewportSettings((prev: MapViewportSettingsStore) => {
         const eventSettings = prev[activeEventName] || {};
-        const current = eventSettings[activeTab];
+        const current = eventSettings[currentMapTabName];
         if (
           current &&
           current.zoomLevel === viewport.zoomLevel &&
@@ -596,12 +601,12 @@ const App: React.FC = () => {
           ...prev,
           [activeEventName]: {
             ...eventSettings,
-            [activeTab]: viewport,
+            [currentMapTabName]: viewport,
           },
         };
       });
     },
-    [activeEventName, isMapTab, activeTab],
+    [activeEventName, isMapTab, currentMapTabName],
   );
 
   const { showHeaderBar, showTabBar, rawHideSomething } = useMemo(() => {
@@ -2823,26 +2828,23 @@ const App: React.FC = () => {
 
   const handleAddToExecuteListFromMap = useCallback(
     (itemId: string) => {
-      if (!activeEventName || !isMapTab) return;
+      if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return;
 
-
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      const dayName = activeEventDate;
 
 
       const item = items.find((i) => i.id === itemId);
       if (!item) return;
 
 
-      const halls = hallDefinitions[activeEventName]?.[activeTab] || [];
-      const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[activeTab] || {
+      const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+      const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
         hallOrder: [],
         hallVisitLists: [],
       };
 
 
-      const currentMapData = mapData[activeEventName]?.[activeTab];
+      const currentMapData = mapData[activeEventName]?.[currentMapTabName];
       let itemHallId: string | null = null;
 
       if (currentMapData && halls.length > 0) {
@@ -2950,17 +2952,15 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeTab, isMapTab, items, hallDefinitions, hallRouteSettings, mapData],
+    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData],
   );
 
 
   const handleAddToExecuteListFromMapAtPosition = useCallback(
     (itemId: string, referenceItemId: string, position: 'before' | 'after') => {
-      if (!activeEventName || !isMapTab) return;
+      if (!activeEventName || !isMapTab || !activeEventDate) return;
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      const dayName = activeEventDate;
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -2987,7 +2987,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeTab, isMapTab],
+    [activeEventName, activeEventDate, isMapTab],
   );
 
 
@@ -2996,9 +2996,8 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab) return;
 
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      if (!activeEventDate) return;
+      const dayName = activeEventDate;
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -3013,7 +3012,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeTab, isMapTab],
+    [activeEventName, activeEventDate, isMapTab],
   );
 
 
@@ -3058,9 +3057,8 @@ const App: React.FC = () => {
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      if (!activeEventDate) return;
+      const dayName = activeEventDate;
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -3075,7 +3073,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeTab, isMapTab],
+    [activeEventName, activeEventDate, isMapTab],
   );
 
 
@@ -3083,9 +3081,8 @@ const App: React.FC = () => {
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      if (!activeEventDate) return;
+      const dayName = activeEventDate;
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -3100,19 +3097,17 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeTab, isMapTab],
+    [activeEventName, activeEventDate, isMapTab],
   );
 
 
   const currentMapExecuteItemIds = useMemo(() => {
-    if (!activeEventName || !isMapTab) return [];
+    if (!activeEventName || !isMapTab || !activeEventDate) return [];
 
-    const dayMatch = activeTab.match(/^(.+)マップ$/);
-    if (!dayMatch) return [];
-    const dayName = dayMatch[1];
+    const dayName = activeEventDate;
 
     return executeModeItems[activeEventName]?.[dayName] || [];
-  }, [activeEventName, activeTab, isMapTab, executeModeItems]);
+  }, [activeEventName, activeEventDate, isMapTab, executeModeItems]);
 
 
   const currentTabItems = useMemo(() => {
@@ -3126,6 +3121,24 @@ const App: React.FC = () => {
     left: 0,
     top: 0,
   });
+
+  // ヘッダーマップトグルボタンの長押しメニュー外クリックで閉じる
+  React.useEffect(() => {
+    if (mapTabMenuOpen !== 'mapToggle') return;
+    const handleClickOutside = (e: MouseEvent) => {
+      if (
+        mapToggleMenuRef.current &&
+        !mapToggleMenuRef.current.contains(e.target as Node) &&
+        mapToggleButtonRef.current &&
+        !mapToggleButtonRef.current.contains(e.target as Node)
+      ) {
+        setMapTabMenuOpen(null);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [mapTabMenuOpen]);
+
   const [visitListPanelOpen, setVisitListPanelOpen] = useState(false);
   const [visitListPanelMapTab, setVisitListPanelMapTab] = useState<string | null>(null);
   const [visitListHasUnsavedChanges, setVisitListHasUnsavedChanges] = useState(false);
@@ -3236,21 +3249,20 @@ const App: React.FC = () => {
 
 
   React.useEffect(() => {
-    if (!visitListPanelOpen || !isMapTab || !activeEventName) return;
-    if (visitListPanelMapTab !== activeTab) {
+    if (!visitListPanelOpen || !isMapTab || !activeEventName || !currentMapTabName) return;
+    if (visitListPanelMapTab !== currentMapTabName) {
       if (visitListHasUnsavedChanges) {
         setVisitListHasUnsavedChanges(false);
       }
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      if (!activeEventDate) return;
+      const dayName = activeEventDate;
       const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
       setVisitListOriginalOrder([...executeIds]);
-      setVisitListPanelMapTab(activeTab);
+      setVisitListPanelMapTab(currentMapTabName);
       setVisitListHasUnsavedChanges(false);
     }
   }, [
-    activeTab,
+    currentMapTabName,
     isMapTab,
     activeEventName,
     visitListPanelOpen,
@@ -3591,32 +3603,32 @@ const App: React.FC = () => {
 
   const handleUpdateBlocks = useCallback(
     (blocks: BlockDefinition[]) => {
-      if (!activeEventName || !isMapTab || !currentMapData) return;
+      if (!activeEventName || !isMapTab || !currentMapData || !currentMapTabName) return;
 
       setMapData((prev) => ({
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
-          [activeTab]: {
+          [currentMapTabName]: {
             ...currentMapData,
             blocks,
           },
         },
       }));
     },
-    [activeEventName, isMapTab, activeTab, currentMapData],
+    [activeEventName, isMapTab, currentMapTabName, currentMapData],
   );
 
 
   const handleUpdateHalls = useCallback(
     (halls: HallDefinition[]) => {
-      if (!activeEventName || !isMapTab) return;
+      if (!activeEventName || !isMapTab || !currentMapTabName) return;
 
       setHallDefinitions((prev) => ({
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
-          [activeTab]: halls,
+          [currentMapTabName]: halls,
         },
       }));
 
@@ -3632,44 +3644,43 @@ const App: React.FC = () => {
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
-          [activeTab]: {
+          [currentMapTabName]: {
             ...currentHallRouteSettings,
             hallOrder: updatedOrder,
           },
         },
       }));
     },
-    [activeEventName, isMapTab, activeTab, currentHallRouteSettings],
+    [activeEventName, isMapTab, currentMapTabName, currentHallRouteSettings],
   );
 
 
   const handleUpdateHallRouteSettings = useCallback(
     (settings: HallRouteSettings) => {
-      if (!activeEventName || !isMapTab) return;
+      if (!activeEventName || !isMapTab || !currentMapTabName) return;
 
       setHallRouteSettings((prev) => ({
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
-          [activeTab]: settings,
+          [currentMapTabName]: settings,
         },
       }));
     },
-    [activeEventName, isMapTab, activeTab],
+    [activeEventName, isMapTab, currentMapTabName],
   );
 
 
   const handleReorderExecuteListByHallOrder = useCallback(
     (hallOrder: string[]) => {
-      if (!activeEventName || !isMapTab) return;
+      if (!activeEventName || !isMapTab || !currentMapTabName) return;
 
-      const dayMatch = activeTab.match(/^(.+)マップ$/);
-      if (!dayMatch) return;
-      const dayName = dayMatch[1];
+      if (!activeEventDate) return;
+      const dayName = activeEventDate;
 
-      const currentMapData = mapData[activeEventName]?.[activeTab];
-      const halls = hallDefinitions[activeEventName]?.[activeTab] || [];
-      const currentHallRouteSettings = hallRouteSettings[activeEventName]?.[activeTab] || {
+      const currentMapData = mapData[activeEventName]?.[currentMapTabName];
+      const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+      const currentHallRouteSettings = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
         hallOrder: [],
         hallVisitLists: [],
       };
@@ -3775,7 +3786,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, isMapTab, activeTab, mapData, hallDefinitions, hallRouteSettings, items],
+    [activeEventName, isMapTab, currentMapTabName, activeEventDate, mapData, hallDefinitions, hallRouteSettings, items],
   );
 
 
@@ -3957,26 +3968,14 @@ const App: React.FC = () => {
     label: string;
     count?: number;
     onClick?: () => void;
-    isMapTab?: boolean;
-  }> = ({ tab, label, count, onClick, isMapTab: isMapTabProp }) => {
+  }> = ({ tab, label, count, onClick }) => {
     const longPressTimeout = React.useRef<number | null>(null);
-    const menuRef = React.useRef<HTMLDivElement>(null);
-    const buttonRef = React.useRef<HTMLButtonElement>(null);
 
-    const handlePointerDown = (e: React.PointerEvent) => {
+    const handlePointerDown = () => {
       if (!activeEventName) return;
 
-
-      const target = e.currentTarget as HTMLButtonElement;
-      const rect = target.getBoundingClientRect();
-      const menuLeft = rect.left + rect.width / 2;
-      const menuTop = rect.bottom + 4;
-
       longPressTimeout.current = window.setTimeout(() => {
-        if (isMapTabProp) {
-          setMapTabMenuPosition({ left: menuLeft, top: menuTop });
-          setMapTabMenuOpen(tab);
-        } else if (eventDates.includes(tab)) {
+        if (eventDates.includes(tab)) {
           handleToggleMode();
         }
         longPressTimeout.current = null;
@@ -3992,10 +3991,6 @@ const App: React.FC = () => {
 
     const handleClick = () => {
       if (mapTabMenuOpen) {
-        if (mapTabMenuOpen === tab) {
-          setMapTabMenuOpen(null);
-          return;
-        }
         setMapTabMenuOpen(null);
       }
       if (onClick) {
@@ -4009,112 +4004,25 @@ const App: React.FC = () => {
       }
     };
 
-
-    React.useEffect(() => {
-      const handleClickOutside = (e: MouseEvent) => {
-        if (
-          menuRef.current &&
-          !menuRef.current.contains(e.target as Node) &&
-          buttonRef.current &&
-          !buttonRef.current.contains(e.target as Node)
-        ) {
-          setMapTabMenuOpen(null);
-        }
-      };
-      if (mapTabMenuOpen === tab) {
-        document.addEventListener('mousedown', handleClickOutside);
-        return () => document.removeEventListener('mousedown', handleClickOutside);
-      }
-    }, [tab]);
-
-
-    const handleMenuItemClick = (action: 'visitList' | 'blockDefinition' | 'hallDefinition') => {
-      setMapTabMenuOpen(null);
-
-
-      setItemToEdit(null);
-      setSelectedItemIds(new Set());
-      setSelectedBlockFilters(new Set());
-      setCandidateNumberSortDirection(null);
-      setActiveTab(tab);
-
-
-      setTimeout(() => {
-        switch (action) {
-          case 'visitList':
-            openVisitListPanel(tab);
-            break;
-          case 'blockDefinition':
-            setBlockDefinitionMode(true);
-            break;
-          case 'hallDefinition':
-            setHallDefinitionMode(true);
-            break;
-        }
-      }, 0);
-    };
-
     return (
-      <div className="relative">
-        <button
-          ref={buttonRef}
-          onClick={handleClick}
-          onPointerDown={handlePointerDown}
-          onPointerUp={handlePointerUp}
-          onPointerLeave={handlePointerUp}
-          className={`px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 whitespace-nowrap ${
-            activeTab === tab
-              ? 'bg-blue-600 text-white'
-              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-          }`}
-        >
-          {label}{' '}
-          {typeof count !== 'undefined' && (
-            <span className="text-xs bg-slate-200 dark:text-slate-700 rounded-full px-2 py-0.5 ml-1">
-              {count}
-            </span>
-          )}
-        </button>
-
-        {/* 表示処理の補足 */}
-        {mapTabMenuOpen === tab && isMapTabProp && (
-          <div
-            ref={menuRef}
-            className="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 min-w-[180px]"
-            style={{
-              left: `${mapTabMenuPosition.left}px`,
-              top: `${mapTabMenuPosition.top}px`,
-              transform: 'translateX(-50%)',
-              zIndex: 9999,
-            }}
-          >
-            {/* 表示処理の補足 */}
-            <div className="absolute left-1/2 -translate-x-1/2 -top-2">
-              <div className="w-3 h-3 bg-white dark:bg-slate-800 border-l border-t border-slate-200 dark:border-slate-700 transform rotate-45" />
-            </div>
-            <div className="py-1">
-              <button
-                onClick={() => handleMenuItemClick('visitList')}
-                className="w-full px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-t-lg flex items-center gap-2"
-              >
-                <span>📍</span> 訪問リスト
-              </button>
-              <button
-                onClick={() => handleMenuItemClick('blockDefinition')}
-                className="w-full px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
-              >
-                <span>🔲</span> ブロック定義
-              </button>
-              <button
-                onClick={() => handleMenuItemClick('hallDefinition')}
-                className="w-full px-4 py-3 text-left text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-b-lg flex items-center gap-2"
-              >
-                <span>🏛️</span> ホール定義
-              </button>
-            </div>
-          </div>
+      <button
+        onClick={handleClick}
+        onPointerDown={handlePointerDown}
+        onPointerUp={handlePointerUp}
+        onPointerLeave={handlePointerUp}
+        className={`px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 whitespace-nowrap ${
+          activeTab === tab
+            ? 'bg-blue-600 text-white'
+            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+        }`}
+      >
+        {label}{' '}
+        {typeof count !== 'undefined' && (
+          <span className="text-xs bg-slate-200 dark:text-slate-700 rounded-full px-2 py-0.5 ml-1">
+            {count}
+          </span>
         )}
-      </div>
+      </button>
     );
   };
 
@@ -4457,6 +4365,98 @@ const App: React.FC = () => {
                           <SortAscendingIcon className="w-5 h-5" />
                         )}
                       </button>
+                    )}
+                  {activeEventName &&
+                    mainContentVisible &&
+                    getMapTabForDate(activeEventDate || '') && (
+                        <div className="relative">
+                          <button
+                            ref={mapToggleButtonRef}
+                            onClick={() => {
+                              if (mapToggleLongPressFiredRef.current) {
+                                mapToggleLongPressFiredRef.current = false;
+                                return;
+                              }
+                              setMapViewActive((prev) => !prev);
+                            }}
+                            onPointerDown={(e) => {
+                              if (!mapViewActive) return;
+                              const target = e.currentTarget as HTMLButtonElement;
+                              const rect = target.getBoundingClientRect();
+                              const menuLeft = rect.left + rect.width / 2;
+                              const menuTop = rect.bottom + 4;
+                              mapToggleLongPressRef.current = window.setTimeout(() => {
+                                mapToggleLongPressFiredRef.current = true;
+                                setMapTabMenuPosition({ left: menuLeft, top: menuTop });
+                                setMapTabMenuOpen('mapToggle');
+                                mapToggleLongPressRef.current = null;
+                              }, 500);
+                            }}
+                            onPointerUp={() => {
+                              if (mapToggleLongPressRef.current) {
+                                clearTimeout(mapToggleLongPressRef.current);
+                                mapToggleLongPressRef.current = null;
+                              }
+                            }}
+                            onPointerCancel={() => {
+                              if (mapToggleLongPressRef.current) {
+                                clearTimeout(mapToggleLongPressRef.current);
+                                mapToggleLongPressRef.current = null;
+                              }
+                            }}
+                            className={`p-2 rounded-md transition-colors duration-200 ${
+                              mapViewActive
+                                ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
+                                : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400'
+                            }`}
+                            title={mapViewActive ? 'リスト表示に切り替え' : 'マップ表示に切り替え'}
+                          >
+                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l5.447 2.724A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
+                            </svg>
+                          </button>
+                          {mapTabMenuOpen === 'mapToggle' && (
+                            <div
+                              ref={mapToggleMenuRef}
+                              className="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 min-w-[160px]"
+                              style={{
+                                left: `${mapTabMenuPosition.left}px`,
+                                top: `${mapTabMenuPosition.top}px`,
+                                transform: 'translateX(-50%)',
+                              }}
+                            >
+                              <div className="py-1">
+                                <button
+                                  onClick={() => {
+                                    setMapTabMenuOpen(null);
+                                    if (currentMapTabName) openVisitListPanel(currentMapTabName);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                                >
+                                  <span>📍</span> 訪問リスト
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setMapTabMenuOpen(null);
+                                    setBlockDefinitionMode(true);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                                >
+                                  <span>🔲</span> ブロック定義
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    setMapTabMenuOpen(null);
+                                    setHallDefinitionMode(true);
+                                  }}
+                                  className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
+                                >
+                                  <span>🏛️</span> ホール定義
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
                     )}
                 </div>
                 <div className="flex items-center gap-2 mt-1">
@@ -5092,14 +5092,9 @@ const App: React.FC = () => {
                   <>
                     {eventDates.map((eventDate) => {
                       const count = items.filter((item) => item.eventDate === eventDate).length;
-                      const mapTabName = getMapTabForDate(eventDate);
-                      const hasMapData = mapTabName ? mapTabs.includes(mapTabName) : false;
                       return (
                         <React.Fragment key={eventDate}>
                           <TabButton tab={eventDate} label={eventDate} count={count} />
-                          {hasMapData && mapTabName && (
-                            <TabButton tab={mapTabName} label={mapTabName} isMapTab={true} />
-                          )}
                         </React.Fragment>
                       );
                     })}
@@ -5219,10 +5214,10 @@ const App: React.FC = () => {
           />
         )}
         {/* 表示処理の補足 */}
-        {activeEventName && isMapTab && currentMapData && (
+        {activeEventName && isMapTab && currentMapData && currentMapTabName && (
           <MapView
             mapData={currentMapData}
-            mapName={activeTab}
+            mapName={currentMapTabName}
             items={items}
             executeModeItemIds={currentMapExecuteItemIds}
             onAddToExecuteList={handleAddToExecuteListFromMap}
@@ -5261,7 +5256,7 @@ const App: React.FC = () => {
             numberCellOutlineStyle={numberCellOutlineStyle}
           />
         )}
-        {activeEventName && mainContentVisible && (
+        {activeEventName && mainContentVisible && !isMapTab && (
           <div
             style={{
               transform: `scale(${zoomLevel / 100})`,
