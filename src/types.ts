@@ -38,6 +38,8 @@ export type ViewMode = 'edit' | 'execute' | 'focus';
 
 export type FocusPhase = 'normal' | 'postponed' | 'late';
 
+export type FocusMapCenteringMode = 'prevToCurrent' | 'currentOnly';
+
 export interface FocusModeSessionState {
   phase: FocusPhase;
   phaseIndex: number;

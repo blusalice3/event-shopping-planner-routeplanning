@@ -215,8 +215,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const zoomLevelRef = useRef(zoomLevel);
   const [isDragging, setIsDragging] = useState(false);
   const isDraggingRef = useRef(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const [dragStartOffset, setDragStartOffset] = useState({ x: 0, y: 0 });
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const dragStartOffsetRef = useRef({ x: 0, y: 0 });
+  const rafPendingRef = useRef(false);
+  const drawCanvasRef = useRef<(() => void) | null>(null);
   const [hoverGuide, setHoverGuide] = useState<HoverGuideState | null>(null);
   const [tapAssist, setTapAssist] = useState<TapAssistState | null>(null);
   const lastPointerTypeRef = useRef<string>('mouse');
@@ -259,9 +261,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const showSelectionRuler = selectionGuideOptions?.showRuler ?? false;
 
   const toMapCoordinates = useCallback(
-    (viewX: number, viewY: number, currentOffset = offset) => {
-      const translatedX = viewX - currentOffset.x;
-      const translatedY = viewY - currentOffset.y;
+    (viewX: number, viewY: number, currentOffset?: { x: number; y: number }) => {
+      const ofs = currentOffset ?? offsetRef.current;
+      const translatedX = viewX - ofs.x;
+      const translatedY = viewY - ofs.y;
       if (rotationRadians === 0) return { x: translatedX, y: translatedY };
 
       const dx = translatedX - mapCenterX;
@@ -274,7 +277,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         y: -dx * sin + dy * cos + mapCenterY,
       };
     },
-    [offset, rotationRadians, mapCenterX, mapCenterY],
+    [rotationRadians, mapCenterX, mapCenterY],
   );
 
   const rotateAroundMapCenter = useCallback(
@@ -303,7 +306,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       },
     ) => {
       const baseZoom = options?.baseZoom ?? zoomLevel;
-      const baseOffset = options?.baseOffset ?? offset;
+      const baseOffset = options?.baseOffset ?? offsetRef.current;
       const currentCellSize = BASE_CELL_SIZE * (baseZoom / 100);
       const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
       const translatedX = viewX - baseOffset.x;
@@ -340,7 +343,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         y: viewY - rotatedPoint.y,
       };
     },
-    [offset, zoomLevel, mapData.maxCol, mapData.maxRow, rotationRadians],
+    [zoomLevel, mapData.maxCol, mapData.maxRow, rotationRadians],
   );
 
   const getPointerViewMetrics = useCallback(
@@ -420,15 +423,16 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const centerX = containerWidth / 2;
     const centerY = containerHeight / 2;
 
-    const mapCenterX = (centerX - offset.x) / prevCellSize;
-    const mapCenterY = (centerY - offset.y) / prevCellSize;
+    const currentOffset = offsetRef.current;
+    const mapCenterX = (centerX - currentOffset.x) / prevCellSize;
+    const mapCenterY = (centerY - currentOffset.y) / prevCellSize;
 
     const newOffsetX = centerX - mapCenterX * cellSize;
     const newOffsetY = centerY - mapCenterY * cellSize;
 
     setOffset({ x: newOffsetX, y: newOffsetY });
     prevCellSizeRef.current = cellSize;
-  }, [cellSize, offset.x, offset.y]);
+  }, [cellSize]);
 
   const handleWheel = useCallback(
     (e: WheelEvent) => {
@@ -555,8 +559,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       // 2本指ピンチ終了後の1本指移動で座標ジャンプしないよう、ドラッグ起点を現在値へ再同期する。
       if (activeTouchesRef.current.size === 1) {
         const remainingTouch = Array.from(activeTouchesRef.current.values())[0];
-        setDragStart({ x: remainingTouch.x, y: remainingTouch.y });
-        setDragStartOffset({ ...offsetRef.current });
+        dragStartRef.current = { x: remainingTouch.x, y: remainingTouch.y };
+        dragStartOffsetRef.current = { ...offsetRef.current };
       }
     }
   }, []);
@@ -798,7 +802,61 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return set;
   }, [mapData.blocks]);
 
-  useEffect(() => {
+  // ルート交差検出結果をキャッシュ（ドラッグ中に毎フレーム再計算するのを回避）
+  const routeCrossingData = useMemo(() => {
+    if (!isRouteVisible || routeSegments.length === 0) return null;
+
+    const allPixelEdges: PixelEdge[][] = routeSegments.map((segment) => {
+      if (segment.path.length < 2) return [];
+      const edges: PixelEdge[] = [];
+      for (let i = 0; i < segment.path.length - 1; i++) {
+        const p1 = segment.path[i];
+        const p2 = segment.path[i + 1];
+        edges.push({
+          x1: (p1.col - 0.5) * cellSize,
+          y1: (p1.row - 0.5) * cellSize,
+          x2: (p2.col - 0.5) * cellSize,
+          y2: (p2.row - 0.5) * cellSize,
+        });
+      }
+      return edges;
+    });
+
+    const crossings = findAllCrossings(allPixelEdges);
+    const crossingLookup = buildCrossingLookup(crossings);
+    const bridgeParams = getBridgeParams(cellSize);
+
+    // エッジ使用マップ（並行ルート描画用）
+    const roundToCell = (v: number): number => Math.round(v);
+    const getEdgeKeyLocal = (r1: number, c1: number, r2: number, c2: number): string => {
+      const rr1 = roundToCell(r1); const rc1 = roundToCell(c1);
+      const rr2 = roundToCell(r2); const rc2 = roundToCell(c2);
+      if (rr1 < rr2 || (rr1 === rr2 && rc1 < rc2)) return `${rr1},${rc1}-${rr2},${rc2}`;
+      return `${rr2},${rc2}-${rr1},${rc1}`;
+    };
+
+    const isGroupTransition = (fromPriority: string | undefined, toPriority: string | undefined): boolean => {
+      return (fromPriority || 'none') !== (toPriority || 'none');
+    };
+
+    const edgeUsage = new Map<string, Set<'none' | 'priority' | 'highest'>>();
+    routeSegments.forEach((segment) => {
+      if (segment.path.length < 2) return;
+      if (isGroupTransition(segment.fromPriority, segment.toPriority)) return;
+      const priority = (segment.fromPriority || 'none') as 'none' | 'priority' | 'highest';
+      for (let i = 0; i < segment.path.length - 1; i++) {
+        const p1 = segment.path[i];
+        const p2 = segment.path[i + 1];
+        const key = getEdgeKeyLocal(p1.row, p1.col, p2.row, p2.col);
+        if (!edgeUsage.has(key)) edgeUsage.set(key, new Set());
+        edgeUsage.get(key)!.add(priority);
+      }
+    });
+
+    return { crossingLookup, bridgeParams, edgeUsage };
+  }, [isRouteVisible, routeSegments, cellSize]);
+
+  const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!canvas || !container) return;
@@ -818,8 +876,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     ctx.clearRect(0, 0, containerWidth, containerHeight);
 
+    // ドラッグ中もリアルタイムで反映するためrefから読む
+    const currentOffset = offsetRef.current;
+
     ctx.save();
-    ctx.translate(offset.x, offset.y);
+    ctx.translate(currentOffset.x, currentOffset.y);
     if (rotationRadians !== 0) {
       ctx.translate(mapCenterX, mapCenterY);
       ctx.rotate(rotationRadians);
@@ -828,8 +889,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     // ビューポート座標変換をインライン化（toMapCoordinatesの依存を排除）
     const viewToMap = (viewX: number, viewY: number) => {
-      const tx = viewX - offset.x;
-      const ty = viewY - offset.y;
+      const tx = viewX - currentOffset.x;
+      const ty = viewY - currentOffset.y;
       if (rotationRadians === 0) return { x: tx, y: ty };
       const dx = tx - mapCenterX;
       const dy = ty - mapCenterY;
@@ -1620,7 +1681,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
 
-    if (!isRotationInteracting && isRouteVisible && routeSegments.length > 0) {
+    if (!isRotationInteracting && isRouteVisible && routeSegments.length > 0 && routeCrossingData) {
       const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
         switch (priority) {
           case 'highest':
@@ -1641,9 +1702,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         return from !== to;
       };
 
-      const edgeUsage = new Map<string, Set<'none' | 'priority' | 'highest'>>();
+      const { crossingLookup, bridgeParams, edgeUsage } = routeCrossingData;
 
-      // エッジキー生成: 小数座標はセル単位に丸めて比較（元の整数座標互換）
+      const lineWidth = Math.max(2, cellSize * 0.08);
+      const parallelOffset = Math.max(3, cellSize * 0.12);
+
+      // エッジキー生成: 小数座標はセル単位に丸めて比較
       const roundToCell = (v: number): number => Math.round(v);
       const getEdgeKey = (r1: number, c1: number, r2: number, c2: number): string => {
         const rr1 = roundToCell(r1);
@@ -1655,28 +1719,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
         return `${rr2},${rc2}-${rr1},${rc1}`;
       };
-
-      routeSegments.forEach((segment) => {
-        if (segment.path.length < 2) return;
-
-        if (isGroupTransition(segment.fromPriority, segment.toPriority)) return;
-
-        const priority = segment.fromPriority || 'none';
-
-        for (let i = 0; i < segment.path.length - 1; i++) {
-          const p1 = segment.path[i];
-          const p2 = segment.path[i + 1];
-          const key = getEdgeKey(p1.row, p1.col, p2.row, p2.col);
-
-          if (!edgeUsage.has(key)) {
-            edgeUsage.set(key, new Set());
-          }
-          edgeUsage.get(key)!.add(priority);
-        }
-      });
-
-      const lineWidth = Math.max(2, cellSize * 0.08);
-      const parallelOffset = Math.max(3, cellSize * 0.12);
 
       const getOffsetPoints = (
         px1: number,
@@ -1700,27 +1742,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           y2: py2 + ny * offset,
         };
       };
-
-      // 全セグメントのピクセル座標エッジを構築して交差検出
-      const allPixelEdges: PixelEdge[][] = routeSegments.map((segment) => {
-        if (segment.path.length < 2) return [];
-        const edges: PixelEdge[] = [];
-        for (let i = 0; i < segment.path.length - 1; i++) {
-          const p1 = segment.path[i];
-          const p2 = segment.path[i + 1];
-          edges.push({
-            x1: (p1.col - 0.5) * cellSize,
-            y1: (p1.row - 0.5) * cellSize,
-            x2: (p2.col - 0.5) * cellSize,
-            y2: (p2.row - 0.5) * cellSize,
-          });
-        }
-        return edges;
-      });
-
-      const crossings = findAllCrossings(allPixelEdges);
-      const crossingLookup = buildCrossingLookup(crossings);
-      const bridgeParams = getBridgeParams(cellSize);
 
       routeSegments.forEach((segment, segIdx) => {
         if (segment.path.length < 2) return;
@@ -2167,9 +2188,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     rotationRadians,
     mapCenterX,
     mapCenterY,
-    offset,
     numberCellOutlineStyle,
+    routeCrossingData,
   ]);
+
+  // drawCanvasRefを更新してrAFから呼べるようにする
+  drawCanvasRef.current = drawCanvas;
+
+  // 依存値が変わったら描画を実行（ドラッグ中以外の状態変更に対応）
+  useEffect(() => {
+    drawCanvas();
+  }, [drawCanvas]);
 
   const handleTapAtViewPosition = useCallback(
     (viewX: number, viewY: number, pointerType: string) => {
@@ -2427,8 +2456,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (activeTouchesRef.current.size >= 2) return;
       isDraggingRef.current = false;
       setIsDragging(false);
-      setDragStart({ x: e.clientX, y: e.clientY });
-      setDragStartOffset({ ...offsetRef.current });
+      dragStartRef.current = { x: e.clientX, y: e.clientY };
+      dragStartOffsetRef.current = { ...offsetRef.current };
     },
     [],
   );
@@ -2448,8 +2477,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (e.buttons !== 1) return;
       if (activeTouchesRef.current.size >= 2) return;
 
-      const dx = e.clientX - dragStart.x;
-      const dy = e.clientY - dragStart.y;
+      const dx = e.clientX - dragStartRef.current.x;
+      const dy = e.clientY - dragStartRef.current.y;
 
       const dragThreshold =
         lastPointerTypeRef.current === 'touch' || lastPointerTypeRef.current === 'pen' ? 10 : 5;
@@ -2459,8 +2488,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
 
       const dragPanMultiplier = getDragPanMultiplier(zoomLevelRef.current);
-      let newX = dragStartOffset.x + dx * dragPanMultiplier;
-      let newY = dragStartOffset.y + dy * dragPanMultiplier;
+      let newX = dragStartOffsetRef.current.x + dx * dragPanMultiplier;
+      let newY = dragStartOffsetRef.current.y + dy * dragPanMultiplier;
 
       const limits = calculateScrollLimits();
       if (limits) {
@@ -2472,12 +2501,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         x: newX,
         y: newY,
       };
-      setOffset(nextOffset);
+      // ドラッグ中はrefのみ更新し、rAFで描画（React再レンダリングを回避）
       offsetRef.current = nextOffset;
+      if (!rafPendingRef.current) {
+        rafPendingRef.current = true;
+        requestAnimationFrame(() => {
+          rafPendingRef.current = false;
+          drawCanvasRef.current?.();
+        });
+      }
     },
     [
-      dragStart,
-      dragStartOffset,
       calculateScrollLimits,
       hoverGuide,
       updateHoverGuideFromPointer,
@@ -2487,6 +2521,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
   const finishPointerInteraction = useCallback(() => {
     isDraggingRef.current = false;
+    // ドラッグ終了時にrefの最終値をReact stateに同期
+    setOffsetState(offsetRef.current);
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
@@ -2551,7 +2587,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   );
 };
 
-export default MapCanvas;
+export default React.memo(MapCanvas);
 
 
 

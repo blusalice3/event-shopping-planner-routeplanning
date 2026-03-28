@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+﻿import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
 import {
   ShoppingItem,
   PurchaseStatus,
@@ -21,7 +21,7 @@ import {
   MapViewportSettingsStore,
   MapViewportState,
 } from './types';
-import ImportScreen from './components/ImportScreen';
+const ImportScreen = React.lazy(() => import('./components/ImportScreen'));
 import ShoppingList from './components/ShoppingList';
 import SummaryBar from './components/SummaryBar';
 import EventListScreen from './components/EventListScreen';
@@ -45,7 +45,7 @@ import {
   saveBlockDetectionSettings,
 } from './components/map';
 import VisitListPanel from './components/VisitListPanel';
-import FocusModeContainer from './features/map/components/FocusModeContainer';
+const FocusModeContainer = React.lazy(() => import('./features/map/components/FocusModeContainer'));
 import { extractEventDates } from './utils/eventDates';
 import { getSpaceKey } from './utils/spaceGrouping';
 import { importFromXlsx, downloadBlob, type ItemFallbackWarning } from './utils/exportImport';
@@ -1872,9 +1872,23 @@ const App: React.FC = () => {
     setActiveTab('import');
   };
 
-  const handleDeleteRequest = (item: ShoppingItem) => {
+  const handleDeleteRequest = useCallback((item: ShoppingItem) => {
     setItemToDelete(item);
-  };
+  }, []);
+
+  const handleDeleteItemFromMap = useCallback((itemId: string) => {
+    const item = items.find((i) => i.id === itemId);
+    if (item) setItemToDelete(item);
+  }, [items]);
+
+  const handleClearNewItemDefaults = useCallback(() => {
+    setNewItemDefaults(null);
+  }, []);
+
+  const handleModeChangeFromFocus = useCallback(
+    (mode: 'edit' | 'execute', lastItemId?: string) => handleSetViewMode(mode, lastItemId),
+    [handleSetViewMode],
+  );
 
   const handleConfirmDelete = () => {
     if (!itemToDelete || !activeEventName) return;
@@ -5418,15 +5432,17 @@ const App: React.FC = () => {
           />
         )}
         {activeTab === 'import' && (
-          <ImportScreen
-            onBulkAdd={handleBulkAdd}
-            activeEventName={activeEventName}
-            itemToEdit={itemToEdit}
-            onUpdateItem={handleUpdateItem}
-            onDoneEditing={handleDoneEditing}
-            newItemDefaults={newItemDefaults}
-            onClearNewItemDefaults={() => setNewItemDefaults(null)}
-          />
+          <Suspense fallback={<div className="flex justify-center p-8"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}>
+            <ImportScreen
+              onBulkAdd={handleBulkAdd}
+              activeEventName={activeEventName}
+              itemToEdit={itemToEdit}
+              onUpdateItem={handleUpdateItem}
+              onDoneEditing={handleDoneEditing}
+              newItemDefaults={newItemDefaults}
+              onClearNewItemDefaults={handleClearNewItemDefaults}
+            />
+          </Suspense>
         )}
         {/* 表示処理の補足 */}
         {activeEventName && isMapTab && currentMapData && currentMapTabName && (
@@ -5441,10 +5457,7 @@ const App: React.FC = () => {
             onMoveToFirst={handleMoveToFirstFromMap}
             onMoveToLast={handleMoveToLastFromMap}
             onUpdateItem={handleUpdateItem}
-            onDeleteItem={(itemId) => {
-              const item = items.find((i) => i.id === itemId);
-              if (item) handleDeleteRequest(item);
-            }}
+            onDeleteItem={handleDeleteItemFromMap}
             onAddNewItem={handleAddNewItemFromMap}
             onAddItem={handleAddItemFromFocusMode}
             halls={currentHalls}
@@ -5509,12 +5522,7 @@ const App: React.FC = () => {
                   <ShoppingList
                     items={executeColumnItems}
                     onUpdateItem={handleUpdateItem}
-                    onMoveItem={(
-                      dragId: string,
-                      hoverId: string,
-                      targetColumn?: 'execute' | 'candidate',
-                      sourceColumn?: 'execute' | 'candidate',
-                    ) => handleMoveItem(dragId, hoverId, targetColumn, sourceColumn)}
+                    onMoveItem={handleMoveItem}
                     onEditRequest={handleEditRequest}
                     onDeleteRequest={handleDeleteRequest}
                     selectedItemIds={selectedItemIds}
@@ -5628,12 +5636,7 @@ const App: React.FC = () => {
                   <ShoppingList
                     items={candidateColumnItems}
                     onUpdateItem={handleUpdateItem}
-                    onMoveItem={(
-                      dragId: string,
-                      hoverId: string,
-                      targetColumn?: 'execute' | 'candidate',
-                      sourceColumn?: 'execute' | 'candidate',
-                    ) => handleMoveItem(dragId, hoverId, targetColumn, sourceColumn)}
+                    onMoveItem={handleMoveItem}
                     onEditRequest={handleEditRequest}
                     onDeleteRequest={handleDeleteRequest}
                     selectedItemIds={selectedItemIds}
@@ -5661,40 +5664,38 @@ const App: React.FC = () => {
                 </div>
               </div>
             ) : currentMode === 'focus' ? (
-              <FocusModeContainer
-                key={currentFocusSessionKey || 'focus-mode'}
-                activeEventName={activeEventName}
-                activeTab={activeTab}
-                eventDates={eventDates}
-                items={items}
-                executeModeItems={executeModeItems}
-                mapData={mapData}
-                hallDefinitions={hallDefinitions}
-                onUpdateItem={handleUpdateItem}
-                onModeChange={(mode, lastItemId) => handleSetViewMode(mode, lastItemId)}
-                layoutMode={layoutMode}
-                onLayoutModeChange={setLayoutMode}
-                onMapVisibilityChange={setFocusModeMapVisible}
-                onAddItem={handleAddItemFromFocusMode}
-                onEditRequest={handleEditRequest}
-                onDeleteRequest={handleDeleteRequest}
-                appZoomLevel={zoomLevel}
-                resumeState={currentFocusResumeState}
-                onSessionStateChange={handleFocusSessionStateChange}
-                mapRotationAngle={currentFocusMapRotationState.focusModeAngle}
-                mapInitialRotationAngle={currentFocusMapRotationState.initialAngle}
-                onMapRotationAngleChange={handleFocusMapRotationAngleChange}
-                numberCellOutlineStyle={numberCellOutlineStyle}
-              />
+              <Suspense fallback={<div className="flex justify-center p-8"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}>
+                <FocusModeContainer
+                  key={currentFocusSessionKey || 'focus-mode'}
+                  activeEventName={activeEventName}
+                  activeTab={activeTab}
+                  eventDates={eventDates}
+                  items={items}
+                  executeModeItems={executeModeItems}
+                  mapData={mapData}
+                  hallDefinitions={hallDefinitions}
+                  onUpdateItem={handleUpdateItem}
+                  onModeChange={handleModeChangeFromFocus}
+                  layoutMode={layoutMode}
+                  onLayoutModeChange={setLayoutMode}
+                  onMapVisibilityChange={setFocusModeMapVisible}
+                  onAddItem={handleAddItemFromFocusMode}
+                  onEditRequest={handleEditRequest}
+                  onDeleteRequest={handleDeleteRequest}
+                  appZoomLevel={zoomLevel}
+                  resumeState={currentFocusResumeState}
+                  onSessionStateChange={handleFocusSessionStateChange}
+                  mapRotationAngle={currentFocusMapRotationState.focusModeAngle}
+                  mapInitialRotationAngle={currentFocusMapRotationState.initialAngle}
+                  onMapRotationAngleChange={handleFocusMapRotationAngleChange}
+                  numberCellOutlineStyle={numberCellOutlineStyle}
+                />
+              </Suspense>
             ) : (
               <ShoppingList
                 items={visibleItems}
                 onUpdateItem={handleUpdateItem}
-                onMoveItem={(
-                  dragId: string,
-                  hoverId: string,
-                  targetColumn?: 'execute' | 'candidate',
-                ) => handleMoveItem(dragId, hoverId, targetColumn)}
+                onMoveItem={handleMoveItem}
                 onEditRequest={handleEditRequest}
                 onDeleteRequest={handleDeleteRequest}
                 selectedItemIds={selectedItemIds}

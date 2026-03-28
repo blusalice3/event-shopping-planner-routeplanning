@@ -906,6 +906,6 @@ const MapView: React.FC<MapViewProps> = ({
   );
 };
 
-export default MapView;
+export default React.memo(MapView);
 
 

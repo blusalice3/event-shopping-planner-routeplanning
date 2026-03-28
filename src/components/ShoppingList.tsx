@@ -2233,4 +2233,4 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   );
 };
 
-export default ShoppingList;
+export default React.memo(ShoppingList);

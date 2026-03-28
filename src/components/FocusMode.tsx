@@ -8,6 +8,7 @@ import {
   FocusModeSessionState,
   FocusPhase,
   NumberCellOutlineStyle,
+  FocusMapCenteringMode,
 } from '../types';
 import FocusModeMapCanvas from './FocusModeMapCanvas';
 import { FocusModeHeader, FocusModeItemList, FocusModeMapControls } from './focus/FocusModePanels';
@@ -148,6 +149,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const [isMapVisible, setIsMapVisible] = useState(false);
   const [mapZoomLevel, setMapZoomLevel] = useState<number>(100);
   const [selectedHallId, setSelectedHallId] = useState<string | 'follow'>('follow');
+  const [mapCenteringMode, setMapCenteringMode] = useState<FocusMapCenteringMode>('prevToCurrent');
   const [splitRatio, setSplitRatio] = useState(50);
   const splitDragRef = useRef<{ startY: number; startRatio: number } | null>(null);
   const [measuredFooterHeight, setMeasuredFooterHeight] = useState<number>(FOOTER_HEIGHT_SP);
@@ -2025,6 +2027,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
             mapRotationAngle={mapRotationAngle}
             mapInitialRotationAngle={mapInitialRotationAngle}
             onMapRotationAngleChange={stableMapRotationHandler}
+            mapCenteringMode={mapCenteringMode}
+            onMapCenteringModeChange={setMapCenteringMode}
           />
           <div className="flex-grow relative overflow-hidden">
             <FocusModeMapCanvas
@@ -2048,6 +2052,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               allVisitKeys={allVisitKeys}
               currentPhaseIndex={currentPhaseIndex}
               numberCellOutlineStyle={numberCellOutlineStyle}
+              mapCenteringMode={mapCenteringMode}
               precomputedVisitKeyCellMap={visitKeyCellMap}
               precomputedAllVisitCellCoords={precomputedAllVisitCellCoords}
               precomputedRouteSegments={precomputedRouteSegments}
@@ -2212,6 +2217,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
             mapRotationAngle={mapRotationAngle}
             mapInitialRotationAngle={mapInitialRotationAngle}
             onMapRotationAngleChange={stableMapRotationHandler}
+            mapCenteringMode={mapCenteringMode}
+            onMapCenteringModeChange={setMapCenteringMode}
           />
           <div className="flex-grow relative overflow-hidden">
             <FocusModeMapCanvas
@@ -2235,6 +2242,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               allVisitKeys={allVisitKeys}
               currentPhaseIndex={currentPhaseIndex}
               numberCellOutlineStyle={numberCellOutlineStyle}
+              mapCenteringMode={mapCenteringMode}
               precomputedVisitKeyCellMap={visitKeyCellMap}
               precomputedAllVisitCellCoords={precomputedAllVisitCellCoords}
               precomputedRouteSegments={precomputedRouteSegments}
@@ -2555,4 +2563,4 @@ const FocusMode: React.FC<FocusModeProps> = ({
   );
 };
 
-export default FocusMode;
+export default React.memo(FocusMode);

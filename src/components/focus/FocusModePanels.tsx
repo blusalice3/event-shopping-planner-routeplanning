@@ -1,5 +1,5 @@
 import React from 'react';
-import { HallDefinition, ShoppingItem } from '../../types';
+import { HallDefinition, ShoppingItem, FocusMapCenteringMode } from '../../types';
 import ShoppingItemCard from '../ShoppingItemCard';
 import MapRotationControls from '../map/MapRotationControls';
 
@@ -48,6 +48,8 @@ interface FocusModeMapControlsProps {
   mapRotationAngle: number;
   mapInitialRotationAngle: number;
   onMapRotationAngleChange: (angle: number) => void;
+  mapCenteringMode: FocusMapCenteringMode;
+  onMapCenteringModeChange: (mode: FocusMapCenteringMode) => void;
 }
 
 export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
@@ -210,6 +212,8 @@ export const FocusModeMapControls: React.FC<FocusModeMapControlsProps> = React.m
   mapRotationAngle,
   mapInitialRotationAngle,
   onMapRotationAngleChange,
+  mapCenteringMode,
+  onMapCenteringModeChange,
 }) => (
   <div className="flex items-center gap-2 p-2 bg-white/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 flex-wrap">
     <select
@@ -224,6 +228,29 @@ export const FocusModeMapControls: React.FC<FocusModeMapControlsProps> = React.m
         </option>
       ))}
     </select>
+
+    <div className="flex rounded-md overflow-hidden border border-slate-300 dark:border-slate-600">
+      <button
+        onClick={() => onMapCenteringModeChange('prevToCurrent')}
+        className={`text-xs px-2 py-1 ${
+          mapCenteringMode === 'prevToCurrent'
+            ? 'bg-blue-500 text-white'
+            : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+        }`}
+      >
+        前→現ルート
+      </button>
+      <button
+        onClick={() => onMapCenteringModeChange('currentOnly')}
+        className={`text-xs px-2 py-1 ${
+          mapCenteringMode === 'currentOnly'
+            ? 'bg-blue-500 text-white'
+            : 'bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+        }`}
+      >
+        現在地
+      </button>
+    </div>
 
     <div className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-3 text-slate-700 dark:text-slate-300">
       {Math.round(mapZoomLevel)}%
