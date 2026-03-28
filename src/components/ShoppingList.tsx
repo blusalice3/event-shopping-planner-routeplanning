@@ -1,6 +1,11 @@
-import React, { useRef, useState, useMemo } from 'react';
-import { ShoppingItem, HallDefinition, DayMapData, BlockDefinition } from '../types';
+import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react';
+import ReactDOM from 'react-dom';
+import { ShoppingItem, HallDefinition, DayMapData, BlockDefinition, PurchaseStatus } from '../types';
+import { getSpaceKey, getBaseNumber } from '../utils/spaceGrouping';
 import ShoppingItemCard from './ShoppingItemCard';
+import GripVerticalIcon from './icons/GripVerticalIcon';
+import ChevronUpIcon from './icons/ChevronUpIcon';
+import ChevronDownIcon from './icons/ChevronDownIcon';
 
 // 優先度レベルの型
 type PriorityLevel = 'none' | 'priority' | 'highest';
@@ -12,6 +17,13 @@ interface HallGroup {
   hallColor?: string;
   priority: PriorityLevel;
   items: ShoppingItem[];
+}
+
+interface SpaceGroup {
+  spaceKey: string;
+  displayName: string;
+  items: ShoppingItem[];
+  isCollapsed: boolean;
 }
 
 interface ShoppingListProps {
@@ -44,6 +56,14 @@ interface ShoppingListProps {
   hallDefinitions?: HallDefinition[];
   hallOrder?: string[];
   mapData?: DayMapData | null;
+  // スペースグループ化用のprops
+  showSpaceGroups?: boolean;
+  collapsedSpaces?: Set<string>;
+  onToggleSpaceCollapse?: (spaceKey: string) => void;
+  onToggleAllSpaceCollapse?: (collapse: boolean) => void;
+  onSetSpaceGroupDragItemIds?: (itemIds: string[] | null) => void;
+  onSelectSpaceGroupForRange?: (firstItemId: string, allItemIds: string[], columnType: 'execute' | 'candidate') => void;
+  onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
 }
 
 // グループIDからホールIDと優先度を分離するヘルパー
@@ -200,7 +220,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onMoveToColumn: _onMoveToColumn,
   onRemoveFromColumn: _onRemoveFromColumn,
   columnType,
-  currentDay: _currentDay,
+  currentDay,
   onMoveItemUp,
   onMoveItemDown,
   rangeStart,
@@ -213,6 +233,13 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   hallDefinitions = [],
   hallOrder = [],
   mapData = null,
+  showSpaceGroups = false,
+  collapsedSpaces,
+  onToggleSpaceCollapse,
+  onToggleAllSpaceCollapse,
+  onSetSpaceGroupDragItemIds,
+  onSelectSpaceGroupForRange,
+  onAddItem,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
@@ -222,6 +249,83 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     id: string;
     position: 'top' | 'bottom';
   } | null>(null);
+
+  // 備考展開管理（折りたたみヘッダー用）
+  const [expandedRemarks, setExpandedRemarks] = useState<Set<string>>(new Set());
+
+  // === アイテム追加ダイアログ ===
+  const [addDialogOpen, setAddDialogOpen] = useState(false);
+  const [addDialogDefaults, setAddDialogDefaults] = useState({ block: '', number: '' });
+  const [addDialogCircleSuggestions, setAddDialogCircleSuggestions] = useState<string[]>([]);
+  const [newItemForm, setNewItemForm] = useState({
+    circle: '',
+    title: '',
+    price: '',
+    quantity: '1',
+    remarks: '',
+    url: '',
+    block: '',
+    number: '',
+    purchaseStatus: 'None' as 'None' | 'Purchased' | 'Postpone' | 'Late',
+  });
+
+  const addFormPriceOptions = useMemo(() => {
+    const options: number[] = [0];
+    for (let i = 100; i <= 15000; i += 100) {
+      options.push(i);
+    }
+    return options;
+  }, []);
+
+  const openAddDialog = (block: string, number: string, circleSuggestions: string[] = []) => {
+    setAddDialogDefaults({ block, number });
+    setAddDialogCircleSuggestions(circleSuggestions);
+    setNewItemForm({
+      circle: '',
+      title: '',
+      price: '',
+      quantity: '1',
+      remarks: '',
+      url: '',
+      block,
+      number,
+      purchaseStatus: 'None',
+    });
+    setAddDialogOpen(true);
+  };
+
+  const closeAddDialog = () => {
+    setAddDialogOpen(false);
+  };
+
+  const handleAddItemSubmit = () => {
+    if (!onAddItem || !newItemForm.circle.trim()) return;
+    const price = newItemForm.price === '' ? null : parseInt(newItemForm.price, 10) || 0;
+    onAddItem({
+      eventDate: currentDay || '',
+      block: newItemForm.block,
+      number: newItemForm.number,
+      circle: newItemForm.circle,
+      title: newItemForm.title,
+      price,
+      quantity: parseInt(newItemForm.quantity, 10) || 1,
+      remarks: newItemForm.remarks,
+      url: newItemForm.url || undefined,
+      purchaseStatus: newItemForm.purchaseStatus,
+    });
+    closeAddDialog();
+  };
+
+  const addDialogInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (addDialogOpen && addDialogInputRef.current) {
+      addDialogInputRef.current.focus({ preventScroll: true });
+    }
+  }, [addDialogOpen]);
+
+  const formInputClass = 'w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white';
+  const labelClass = 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1';
 
   // ホールごとにアイテムをグループ化（優先度対応版）
   const hallGroups = useMemo((): HallGroup[] => {
@@ -365,6 +469,45 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
 
+  // スペースグループ化
+  const spaceGroups = useMemo((): SpaceGroup[] => {
+    if (!showSpaceGroups) return [];
+    const groupMap = new Map<string, ShoppingItem[]>();
+    const groupOrder: string[] = [];
+    items.forEach((item) => {
+      const key = getSpaceKey(item.block, item.number);
+      if (!groupMap.has(key)) {
+        groupMap.set(key, []);
+        groupOrder.push(key);
+      }
+      groupMap.get(key)!.push(item);
+    });
+    return groupOrder.map((key) => ({
+      spaceKey: key,
+      displayName: key,
+      items: groupMap.get(key)!,
+      isCollapsed: collapsedSpaces?.has(key) ?? false,
+    }));
+  }, [items, showSpaceGroups, collapsedSpaces]);
+
+  // スペースグループのブロック色マップ（グループヘッダー用）
+  const spaceGroupBlockColorMap = useMemo(() => {
+    if (!showSpaceGroups) return new Map<string, { light: string; dark: string }>();
+    const uniqueBlocks = new Set<string>();
+    items.forEach((item) => uniqueBlocks.add(item.block));
+    const sortedBlocks = Array.from(uniqueBlocks).sort((a, b) => {
+      const numA = Number(a);
+      const numB = Number(b);
+      if (!isNaN(numA) && !isNaN(numB)) return numA - numB;
+      return a.localeCompare(b);
+    });
+    const blockColorMapResult = new Map<string, { light: string; dark: string }>();
+    sortedBlocks.forEach((block, index) => {
+      blockColorMapResult.set(block, colorPalette[index % colorPalette.length]);
+    });
+    return blockColorMapResult;
+  }, [items, showSpaceGroups]);
+
   // グループ化表示時の範囲選択情報を計算（同一グループ内のみ）
   const groupRangeInfo = useMemo(() => {
     if (
@@ -425,6 +568,111 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       onlyStartEndSelected,
     };
   }, [showHallGroups, rangeStart, rangeEnd, columnType, hallGroups, selectedItemIds]);
+
+  // スペースグループ化表示時の範囲選択情報を計算（同一スペースグループ内のみ）
+  const spaceGroupRangeInfo = useMemo(() => {
+    if (
+      !showSpaceGroups ||
+      !rangeStart ||
+      !rangeEnd ||
+      !columnType ||
+      rangeStart.columnType !== columnType ||
+      rangeEnd.columnType !== columnType
+    ) {
+      return null;
+    }
+
+    let startSpaceKey: string | null = null;
+    let endSpaceKey: string | null = null;
+    let startIdx = -1;
+    let endIdx = -1;
+
+    for (const group of spaceGroups) {
+      const si = group.items.findIndex((item) => item.id === rangeStart.itemId);
+      if (si !== -1) {
+        startSpaceKey = group.spaceKey;
+        startIdx = si;
+      }
+      const ei = group.items.findIndex((item) => item.id === rangeEnd.itemId);
+      if (ei !== -1) {
+        endSpaceKey = group.spaceKey;
+        endIdx = ei;
+      }
+    }
+
+    // 異なるスペースグループ間では範囲選択を無効化
+    if (startSpaceKey !== endSpaceKey || startIdx === -1 || endIdx === -1) {
+      return null;
+    }
+
+    const group = spaceGroups.find((g) => g.spaceKey === startSpaceKey);
+    if (!group) return null;
+
+    const minIndex = Math.min(startIdx, endIdx);
+    const maxIndex = Math.max(startIdx, endIdx);
+    const rangeItems = group.items.slice(minIndex, maxIndex + 1);
+    const allSelected = rangeItems.every((item) => selectedItemIds.has(item.id));
+
+    const onlyStartEndSelected =
+      rangeItems.length > 2 &&
+      selectedItemIds.has(rangeItems[0].id) &&
+      selectedItemIds.has(rangeItems[rangeItems.length - 1].id) &&
+      rangeItems.slice(1, -1).every((item) => !selectedItemIds.has(item.id));
+
+    return {
+      spaceKey: startSpaceKey,
+      startIndex: minIndex,
+      endIndex: maxIndex,
+      rangeItems,
+      allSelected,
+      onlyStartEndSelected,
+    };
+  }, [showSpaceGroups, rangeStart, rangeEnd, columnType, spaceGroups, selectedItemIds]);
+
+  // クロスグループ範囲選択情報（折りたたみヘッダー間のチェーン表示用）
+  const crossSpaceGroupRangeInfo = useMemo(() => {
+    if (
+      !showSpaceGroups ||
+      !rangeStart ||
+      !rangeEnd ||
+      !columnType ||
+      rangeStart.columnType !== columnType ||
+      rangeEnd.columnType !== columnType
+    ) {
+      return null;
+    }
+
+    let startGroupIdx = -1;
+    let endGroupIdx = -1;
+
+    for (let i = 0; i < spaceGroups.length; i++) {
+      if (spaceGroups[i].items.some((item) => item.id === rangeStart.itemId)) startGroupIdx = i;
+      if (spaceGroups[i].items.some((item) => item.id === rangeEnd.itemId)) endGroupIdx = i;
+    }
+
+    if (startGroupIdx === -1 || endGroupIdx === -1) return null;
+    if (startGroupIdx === endGroupIdx) return null; // 同一グループはspaceGroupRangeInfoで処理
+
+    const minIdx = Math.min(startGroupIdx, endGroupIdx);
+    const maxIdx = Math.max(startGroupIdx, endGroupIdx);
+
+    // 範囲内の全アイテムが選択済みか
+    const rangeGroupItems = spaceGroups
+      .slice(minIdx, maxIdx + 1)
+      .flatMap((g) => g.items);
+    const onlyStartEndSelected =
+      rangeGroupItems.length > 2 &&
+      selectedItemIds.has(rangeGroupItems[0].id) &&
+      selectedItemIds.has(rangeGroupItems[rangeGroupItems.length - 1].id) &&
+      rangeGroupItems.slice(1, -1).every((item) => !selectedItemIds.has(item.id));
+
+    return {
+      startGroupIndex: minIdx,
+      endGroupIndex: maxIdx,
+      rangeGroupIndices: Array.from({ length: maxIdx - minIdx + 1 }, (_, i) => minIdx + i),
+      onlyStartEndSelected,
+    };
+  }, [showSpaceGroups, rangeStart, rangeEnd, columnType, spaceGroups, selectedItemIds]);
 
   // 通常表示時の範囲選択の状態を計算
   const rangeInfo = useMemo(() => {
@@ -598,6 +846,831 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         onDrop={handleDrop}
       >
         この日のアイテムはありません。
+      </div>
+    );
+  }
+
+  // スペースグループ化表示
+  if (showSpaceGroups && spaceGroups.length > 0) {
+    // チェーン選択済みの全アイテムIDを収集（折りたたみグループのドラッグ・移動用）
+    const getEffectiveDragIds = (group: SpaceGroup): string[] => {
+      const groupIds = new Set(group.items.map((item) => item.id));
+      const isGroupInSelection = group.items.some((item) => selectedItemIds.has(item.id));
+      if (isGroupInSelection && selectedItemIds.size > groupIds.size) {
+        // 選択中のアイテムがこのグループ以外にもある→チェーン選択されたアイテム全て含める
+        return Array.from(selectedItemIds);
+      }
+      return group.items.map((item) => item.id);
+    };
+
+    const handleSpaceGroupDragStart = (
+      e: React.DragEvent<HTMLDivElement>,
+      group: SpaceGroup,
+    ) => {
+      const firstItemId = group.items[0]?.id;
+      if (!firstItemId) return;
+      dragItem.current = firstItemId;
+      dragSourceColumn.current = columnType || null;
+      if (columnType) {
+        e.dataTransfer.setData('sourceColumn', columnType);
+      }
+      if (onSetSpaceGroupDragItemIds) {
+        onSetSpaceGroupDragItemIds(getEffectiveDragIds(group));
+      }
+      const target = e.currentTarget;
+      setTimeout(() => {
+        if (target) target.classList.add('opacity-40');
+      }, 0);
+    };
+
+    const handleSpaceGroupDragEnd = () => {
+      if (onSetSpaceGroupDragItemIds) {
+        onSetSpaceGroupDragItemIds(null);
+      }
+      cleanUp();
+    };
+
+    const allCollapsed = spaceGroups.length > 0 && spaceGroups.every((g) => g.isCollapsed);
+
+    return (
+      <div
+        ref={containerRef}
+        className="space-y-1 pb-24 relative"
+        onDragOver={handleContainerDragOver}
+        onDrop={handleDrop}
+        onDragLeave={() => setActiveDropTarget(null)}
+      >
+        {/* 全スペース開閉ボタン */}
+        {onToggleAllSpaceCollapse && (
+          <div className="flex justify-end mb-1">
+            <button
+              onClick={() => onToggleAllSpaceCollapse(!allCollapsed)}
+              className="text-xs px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
+            >
+              {allCollapsed ? '全て展開' : '全て折りたたむ'}
+            </button>
+          </div>
+        )}
+
+        {spaceGroups.map((group, groupIndex) => {
+          const block = group.spaceKey.split('-')[0];
+          const blockColor = spaceGroupBlockColorMap.get(block);
+
+          // このスペースの全アイテムがチェックされているか
+          const allItemsSelected =
+            group.items.length > 0 && group.items.every((item) => selectedItemIds.has(item.id));
+          const someItemsSelected =
+            !allItemsSelected && group.items.some((item) => selectedItemIds.has(item.id));
+
+          // 合計金額
+          const totalPrice = group.items.reduce(
+            (sum, item) => sum + (item.price ?? 0) * (item.quantity || 1),
+            0,
+          );
+
+          // 上下移動の可否
+          const canMoveGroupUp = groupIndex > 0;
+          const canMoveGroupDown = groupIndex < spaceGroups.length - 1;
+
+          // スペースグループのチェックボックスクリック
+          const handleSpaceCheckbox = (e: React.MouseEvent | React.ChangeEvent) => {
+            e.stopPropagation();
+            const groupItemIds = group.items.map((item) => item.id);
+            // 折りたたみ時は範囲選択対応のハンドラーを使用
+            if (group.isCollapsed && onSelectSpaceGroupForRange && columnType) {
+              onSelectSpaceGroupForRange(group.items[0].id, groupItemIds, columnType);
+              return;
+            }
+            if (allItemsSelected) {
+              // 全解除
+              groupItemIds.forEach((id) => onSelectItem(id, columnType));
+            } else {
+              // 未選択のものを全て選択
+              groupItemIds.forEach((id) => {
+                if (!selectedItemIds.has(id)) {
+                  onSelectItem(id, columnType);
+                }
+              });
+            }
+          };
+
+          // スペースグループ上移動
+          const handleSpaceGroupMoveUp = (e: React.MouseEvent) => {
+            e.stopPropagation();
+            if (!canMoveGroupUp || !onMoveItemUp) return;
+            const effectiveIds = getEffectiveDragIds(group);
+            if (onSetSpaceGroupDragItemIds) {
+              onSetSpaceGroupDragItemIds(effectiveIds);
+            }
+            // 先頭アイテムを上に移動（グループ全体が移動する）
+            onMoveItemUp(group.items[0].id, columnType);
+            if (onSetSpaceGroupDragItemIds) {
+              onSetSpaceGroupDragItemIds(null);
+            }
+          };
+
+          // スペースグループ下移動
+          const handleSpaceGroupMoveDown = (e: React.MouseEvent) => {
+            e.stopPropagation();
+            if (!canMoveGroupDown || !onMoveItemDown) return;
+            const effectiveIds = getEffectiveDragIds(group);
+            if (onSetSpaceGroupDragItemIds) {
+              onSetSpaceGroupDragItemIds(effectiveIds);
+            }
+            // 末尾アイテムを下に移動（グループ全体が移動する）
+            onMoveItemDown(group.items[group.items.length - 1].id, columnType);
+            if (onSetSpaceGroupDragItemIds) {
+              onSetSpaceGroupDragItemIds(null);
+            }
+          };
+
+          // クロスグループチェーン表示情報
+          const crossRangeInGroup = crossSpaceGroupRangeInfo &&
+            crossSpaceGroupRangeInfo.rangeGroupIndices.includes(groupIndex);
+          const isCrossStart = crossSpaceGroupRangeInfo &&
+            groupIndex === crossSpaceGroupRangeInfo.startGroupIndex;
+          const isCrossEnd = crossSpaceGroupRangeInfo &&
+            groupIndex === crossSpaceGroupRangeInfo.endGroupIndex;
+          const isCrossMiddle = crossRangeInGroup && !isCrossStart && !isCrossEnd;
+
+          // ドロップガイド表示判定
+          const showDropGuide = group.isCollapsed &&
+            activeDropTarget?.id === group.items[0]?.id &&
+            activeDropTarget?.position === 'top';
+
+          return (
+            <div key={group.spaceKey} className="mb-1 relative">
+              {/* ドロップ位置ガイド */}
+              {showDropGuide && (
+                <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                  <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                  <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                  <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+                </div>
+              )}
+              {/* スペースグループヘッダー */}
+              <div
+                className={`sticky top-0 z-20 flex items-center rounded-lg select-none ${
+                  blockColor?.light || 'bg-slate-100 dark:bg-slate-800'
+                } hover:brightness-95 dark:hover:brightness-110 transition-all`}
+                style={{ borderLeft: '4px solid #9CA3AF' }}
+                draggable={group.isCollapsed}
+                onDragStart={
+                  group.isCollapsed
+                    ? (e) => handleSpaceGroupDragStart(e, group)
+                    : undefined
+                }
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  const firstItem = group.items[0];
+                  if (firstItem) {
+                    setActiveDropTarget({ id: firstItem.id, position: 'top' });
+                  }
+                }}
+                onDrop={handleDrop}
+                onDragEnd={group.isCollapsed ? handleSpaceGroupDragEnd : undefined}
+              >
+                {/* 折りたたみ時：チェックボックス + ドラッグハンドル + 上下ボタン */}
+                {group.isCollapsed && (
+                  <div
+                    data-drag-handle
+                    className="px-1.5 py-1 flex flex-row items-center cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 gap-1"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={allItemsSelected}
+                      ref={(el) => {
+                        if (el) el.indeterminate = someItemsSelected;
+                      }}
+                      onChange={handleSpaceCheckbox}
+                      onClick={(e) => e.stopPropagation()}
+                      data-no-long-press
+                      className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
+                    />
+                    {onMoveItemUp && (
+                      <button
+                        onClick={handleSpaceGroupMoveUp}
+                        disabled={!canMoveGroupUp}
+                        data-no-long-press
+                        className={`p-0.5 rounded-md transition-colors ${canMoveGroupUp ? 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer' : 'text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50'}`}
+                        aria-label="グループを上に移動"
+                      >
+                        <ChevronUpIcon className="w-4 h-4" />
+                      </button>
+                    )}
+                    <GripVerticalIcon className="w-5 h-5" />
+                    {onMoveItemDown && (
+                      <button
+                        onClick={handleSpaceGroupMoveDown}
+                        disabled={!canMoveGroupDown}
+                        data-no-long-press
+                        className={`p-0.5 rounded-md transition-colors ${canMoveGroupDown ? 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer' : 'text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50'}`}
+                        aria-label="グループを下に移動"
+                      >
+                        <ChevronDownIcon className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* メインのクリック可能エリア */}
+                <div
+                  className="flex-1 flex flex-col px-3 py-1.5 cursor-pointer min-w-0"
+                  onClick={() => onToggleSpaceCollapse?.(group.spaceKey)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-xs transition-transform duration-200 ${
+                          group.isCollapsed ? '' : 'rotate-90'
+                        }`}
+                      >
+                        &#9654;
+                      </span>
+                      <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
+                        {group.displayName}
+                      </span>
+                      {(() => {
+                        const uniqueCircles = [...new Set(group.items.map((item) => item.circle).filter(Boolean))];
+                        return uniqueCircles.length > 0 ? (
+                          <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
+                            {uniqueCircles.join(' & ')}
+                          </span>
+                        ) : null;
+                      })()}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        {group.items.length}件
+                      </span>
+                      {group.isCollapsed && (() => {
+                        const allPriceNull = group.items.every((item) => item.price == null);
+                        if (allPriceNull) {
+                          return (
+                            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                              価格未定
+                            </span>
+                          );
+                        }
+                        return (
+                          <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                            {totalPrice.toLocaleString()}円
+                          </span>
+                        );
+                      })()}
+                    </div>
+                  </div>
+                  {/* 折りたたみ時の備考表示 */}
+                  {group.isCollapsed && (() => {
+                    const remarksItems = group.items.filter((item) => item.remarks);
+                    if (remarksItems.length === 0) return null;
+                    return (
+                      <div className="flex flex-wrap gap-1 mt-0.5 ml-4">
+                        {remarksItems.map((item) => {
+                          const isExpanded = expandedRemarks.has(item.id);
+                          const text = item.remarks;
+                          const needsTruncate = text.length >= 5;
+                          const displayText = needsTruncate && !isExpanded
+                            ? text.slice(0, 4) + '...'
+                            : text;
+                          return (
+                            <span
+                              key={item.id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (needsTruncate) {
+                                  setExpandedRemarks((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(item.id)) {
+                                      next.delete(item.id);
+                                    } else {
+                                      next.add(item.id);
+                                    }
+                                    return next;
+                                  });
+                                }
+                              }}
+                              className={`text-xs px-1 py-0.5 rounded bg-slate-200/60 dark:bg-slate-700/60 text-slate-600 dark:text-slate-400 ${needsTruncate ? 'cursor-pointer hover:bg-slate-300 dark:hover:bg-slate-600' : ''}`}
+                            >
+                              {displayText}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </div>
+                {/* アイテム追加ボタン */}
+                {onAddItem && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const spaceBlock = group.spaceKey.split('-')[0];
+                      const spaceNumber = group.spaceKey.split('-').slice(1).join('-');
+                      const circles = [...new Set(group.items.map((item) => item.circle).filter(Boolean))];
+                      openAddDialog(spaceBlock, spaceNumber, circles);
+                    }}
+                    className="px-2 py-1 mr-2 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors"
+                    title="このスペースにアイテムを追加"
+                  >
+                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+
+              {/* クロスグループチェーンUI（折りたたみヘッダー間） */}
+              {crossRangeInGroup && onToggleRangeSelection && (
+                <div
+                  className={`absolute top-0 bottom-0 z-40 ${
+                    columnType === 'candidate' ? 'left-0' : 'right-0'
+                  } cursor-pointer ${
+                    crossSpaceGroupRangeInfo!.onlyStartEndSelected
+                      ? 'opacity-50 hover:opacity-100'
+                      : 'opacity-100'
+                  }`}
+                  style={{ width: '40px' }}
+                  onClick={() => onToggleRangeSelection(columnType!)}
+                >
+                  <svg
+                    className="absolute w-full h-full"
+                    style={{
+                      [columnType === 'candidate' ? 'left' : 'right']: '-42px',
+                    }}
+                    preserveAspectRatio="none"
+                  >
+                    <defs>
+                      <linearGradient
+                        id={`chainMetal-cross-${group.spaceKey}`}
+                        x1="0%" y1="0%" x2="100%" y2="0%"
+                      >
+                        <stop offset="0%" stopColor="#9CA3AF" />
+                        <stop offset="50%" stopColor="#D1D5DB" />
+                        <stop offset="100%" stopColor="#9CA3AF" />
+                      </linearGradient>
+                      <pattern
+                        id={`chainPattern-cross-${group.spaceKey}`}
+                        x="0" y="0" width="40" height="20"
+                        patternUnits="userSpaceOnUse"
+                      >
+                        <rect x="14" y="-2" width="12" height="18" rx="6"
+                          fill="none"
+                          stroke={`url(#chainMetal-cross-${group.spaceKey})`}
+                          strokeWidth="3"
+                        />
+                        <rect x="17" y="13" width="6" height="8" rx="2"
+                          fill={`url(#chainMetal-cross-${group.spaceKey})`}
+                          stroke="#4B5563" strokeWidth="0.5"
+                        />
+                      </pattern>
+                    </defs>
+
+                    {isCrossStart && (
+                      <rect x="0" y="50%" width="40" height="50%"
+                        fill={`url(#chainPattern-cross-${group.spaceKey})`}
+                      />
+                    )}
+                    {isCrossEnd && (
+                      <rect x="0" y="0" width="40" height="50%"
+                        fill={`url(#chainPattern-cross-${group.spaceKey})`}
+                      />
+                    )}
+                    {isCrossMiddle && (
+                      <rect x="0" y="0" width="40" height="100%"
+                        fill={`url(#chainPattern-cross-${group.spaceKey})`}
+                      />
+                    )}
+
+                    {isCrossStart && (
+                      <ellipse cx="20" cy="100%" rx="10" ry="5"
+                        fill="none"
+                        stroke={`url(#chainMetal-cross-${group.spaceKey})`}
+                        strokeWidth="3"
+                      />
+                    )}
+                    {isCrossEnd && (
+                      <ellipse cx="20" cy="0" rx="10" ry="5"
+                        fill="none"
+                        stroke={`url(#chainMetal-cross-${group.spaceKey})`}
+                        strokeWidth="3"
+                      />
+                    )}
+                  </svg>
+                </div>
+              )}
+
+              {/* グループ内アイテム（展開時のみ表示） */}
+              {!group.isCollapsed && (
+                <div className="space-y-4 mt-1">
+                  {group.items.map((item, spaceItemIndex) => {
+                    const globalIndex = items.findIndex((i) => i.id === item.id);
+
+                    // スペースグループ内での範囲選択状態
+                    const isThisGroupInRange =
+                      spaceGroupRangeInfo && spaceGroupRangeInfo.spaceKey === group.spaceKey;
+                    const isInRange =
+                      isThisGroupInRange &&
+                      spaceItemIndex >= spaceGroupRangeInfo!.startIndex &&
+                      spaceItemIndex <= spaceGroupRangeInfo!.endIndex;
+                    const isStart =
+                      isThisGroupInRange && spaceItemIndex === spaceGroupRangeInfo!.startIndex;
+                    const isEnd =
+                      isThisGroupInRange && spaceItemIndex === spaceGroupRangeInfo!.endIndex;
+                    const isMiddle =
+                      isThisGroupInRange &&
+                      spaceItemIndex > spaceGroupRangeInfo!.startIndex &&
+                      spaceItemIndex < spaceGroupRangeInfo!.endIndex;
+
+                    return (
+                      <div
+                        key={item.id}
+                        data-item-id={item.id}
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, item)}
+                        onDragOver={(e) => handleDragOver(e, item)}
+                        onDrop={handleDrop}
+                        onDragEnd={cleanUp}
+                        className="transition-opacity duration-200 relative"
+                        data-is-selected={selectedItemIds.has(item.id)}
+                      >
+                        {activeDropTarget?.id === item.id &&
+                          activeDropTarget.position === 'top' && (
+                            <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                              <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                              <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                              <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+                            </div>
+                          )}
+
+                        <ShoppingItemCard
+                          item={item}
+                          onUpdate={onUpdateItem}
+                          isStriped={globalIndex % 2 !== 0}
+                          onEditRequest={onEditRequest}
+                          onDeleteRequest={onDeleteRequest}
+                          isSelected={selectedItemIds.has(item.id)}
+                          onSelectItem={(itemId) => onSelectItem(itemId, columnType)}
+                          blockBackgroundColor={blockColorMap.get(item.id)}
+                          onMoveUp={
+                            onMoveItemUp
+                              ? () => onMoveItemUp(item.id, columnType)
+                              : undefined
+                          }
+                          onMoveDown={
+                            onMoveItemDown
+                              ? () => onMoveItemDown(item.id, columnType)
+                              : undefined
+                          }
+                          canMoveUp={globalIndex > 0}
+                          canMoveDown={globalIndex < items.length - 1}
+                          isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
+                          isSearchMatch={highlightedItemId === item.id}
+                          layoutMode={layoutMode}
+                        />
+
+                        {activeDropTarget?.id === item.id &&
+                          activeDropTarget.position === 'bottom' && (
+                            <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+                              <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+                              <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+                              <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+                            </div>
+                          )}
+
+                        {/* チェーン範囲選択UI（スペースグループ内） */}
+                        {isInRange && onToggleRangeSelection && (
+                          <div
+                            className={`absolute top-0 bottom-0 z-40 ${
+                              columnType === 'candidate' ? 'left-0' : 'right-0'
+                            } cursor-pointer ${
+                              spaceGroupRangeInfo!.onlyStartEndSelected
+                                ? 'opacity-50 hover:opacity-100'
+                                : 'opacity-100'
+                            }`}
+                            style={{ width: '40px' }}
+                            onClick={() => onToggleRangeSelection(columnType!)}
+                          >
+                            <svg
+                              className="absolute w-full h-full"
+                              style={{
+                                [columnType === 'candidate' ? 'left' : 'right']: '-42px',
+                              }}
+                              preserveAspectRatio="none"
+                            >
+                              <defs>
+                                <linearGradient
+                                  id={`chainMetal-space-${item.id}`}
+                                  x1="0%"
+                                  y1="0%"
+                                  x2="100%"
+                                  y2="0%"
+                                >
+                                  <stop offset="0%" stopColor="#9CA3AF" />
+                                  <stop offset="50%" stopColor="#D1D5DB" />
+                                  <stop offset="100%" stopColor="#9CA3AF" />
+                                </linearGradient>
+                                <pattern
+                                  id={`chainPattern-space-${item.id}`}
+                                  x="0"
+                                  y="0"
+                                  width="40"
+                                  height="20"
+                                  patternUnits="userSpaceOnUse"
+                                >
+                                  <rect
+                                    x="14"
+                                    y="-2"
+                                    width="12"
+                                    height="18"
+                                    rx="6"
+                                    fill="none"
+                                    stroke={`url(#chainMetal-space-${item.id})`}
+                                    strokeWidth="3"
+                                  />
+                                  <rect
+                                    x="17"
+                                    y="13"
+                                    width="6"
+                                    height="8"
+                                    rx="2"
+                                    fill={`url(#chainMetal-space-${item.id})`}
+                                    stroke="#4B5563"
+                                    strokeWidth="0.5"
+                                  />
+                                </pattern>
+                              </defs>
+
+                              {isStart && (
+                                <rect
+                                  x="0"
+                                  y="50%"
+                                  width="40"
+                                  height="50%"
+                                  fill={`url(#chainPattern-space-${item.id})`}
+                                />
+                              )}
+                              {isEnd && (
+                                <rect
+                                  x="0"
+                                  y="0"
+                                  width="40"
+                                  height="50%"
+                                  fill={`url(#chainPattern-space-${item.id})`}
+                                />
+                              )}
+                              {isMiddle && (
+                                <rect
+                                  x="0"
+                                  y="0"
+                                  width="40"
+                                  height="100%"
+                                  fill={`url(#chainPattern-space-${item.id})`}
+                                />
+                              )}
+
+                              {isStart && (
+                                <ellipse
+                                  cx="20"
+                                  cy="100%"
+                                  rx="10"
+                                  ry="5"
+                                  fill="none"
+                                  stroke={`url(#chainMetal-space-${item.id})`}
+                                  strokeWidth="3"
+                                />
+                              )}
+                              {isEnd && (
+                                <ellipse
+                                  cx="20"
+                                  cy="0"
+                                  rx="10"
+                                  ry="5"
+                                  fill="none"
+                                  stroke={`url(#chainMetal-space-${item.id})`}
+                                  strokeWidth="3"
+                                />
+                              )}
+                            </svg>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {/* 新規アイテム追加ダイアログ（Portalでbody直下にレンダリング） */}
+        {addDialogOpen && ReactDOM.createPortal(
+          <div
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+            onClick={closeAddDialog}
+          >
+            <div
+              className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4">
+                <h2 className="text-lg font-bold">新規アイテム追加</h2>
+                <p className="text-sm opacity-80 mt-1">
+                  {currentDay} {addDialogDefaults.block}-{addDialogDefaults.number}
+                </p>
+              </div>
+              <div className="p-4 space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>
+                      サークル名 <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={newItemForm.circle}
+                      onChange={(e) =>
+                        setNewItemForm((prev) => ({ ...prev, circle: e.target.value }))
+                      }
+                      className={formInputClass}
+                      placeholder="サークル名"
+                      ref={addDialogInputRef}
+                      list="add-dialog-circle-suggestions"
+                    />
+                    {addDialogCircleSuggestions.length > 0 && (
+                      <datalist id="add-dialog-circle-suggestions">
+                        {addDialogCircleSuggestions.map((c) => (
+                          <option key={c} value={c} />
+                        ))}
+                      </datalist>
+                    )}
+                  </div>
+                  <div>
+                    <label className={labelClass}>タイトル</label>
+                    <input
+                      type="text"
+                      value={newItemForm.title}
+                      onChange={(e) => setNewItemForm((prev) => ({ ...prev, title: e.target.value }))}
+                      className={formInputClass}
+                      placeholder="新刊セット"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-4">
+                  <div>
+                    <label className={labelClass}>参加日</label>
+                    <input
+                      type="text"
+                      value={currentDay || ''}
+                      readOnly
+                      className={`${formInputClass} bg-slate-100 dark:bg-slate-700`}
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>ブロック</label>
+                    <input
+                      type="text"
+                      value={newItemForm.block}
+                      onChange={(e) =>
+                        setNewItemForm((prev) => ({ ...prev, block: e.target.value }))
+                      }
+                      className={formInputClass}
+                      placeholder="A"
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>ナンバー</label>
+                    <input
+                      type="text"
+                      value={newItemForm.number}
+                      onChange={(e) =>
+                        setNewItemForm((prev) => ({ ...prev, number: e.target.value }))
+                      }
+                      className={formInputClass}
+                      placeholder="01a"
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
+                  <div className="relative">
+                    <label className={labelClass}>頒布価格</label>
+                    <input
+                      type="text"
+                      value={newItemForm.price}
+                      onChange={(e) => {
+                        const value = e.target.value.replace(/[^0-9]/g, '');
+                        setNewItemForm((prev) => ({ ...prev, price: value }));
+                      }}
+                      className={`${formInputClass} pr-12`}
+                      placeholder="0"
+                      inputMode="numeric"
+                    />
+                    <span className="absolute right-3 top-9 text-slate-500 dark:text-slate-400">
+                      円
+                    </span>
+                  </div>
+                  <div>
+                    <label className={labelClass}>クイック選択</label>
+                    <select
+                      onChange={(e) => {
+                        setNewItemForm((prev) => ({ ...prev, price: e.target.value }));
+                      }}
+                      className={formInputClass}
+                      value={
+                        addFormPriceOptions.includes(Number(newItemForm.price)) ? newItemForm.price : ''
+                      }
+                    >
+                      <option value="" disabled>
+                        金額を選択...
+                      </option>
+                      {addFormPriceOptions.map((p) => (
+                        <option key={p} value={p}>
+                          {p.toLocaleString()}円
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>数量</label>
+                    <select
+                      value={newItemForm.quantity}
+                      onChange={(e) =>
+                        setNewItemForm((prev) => ({ ...prev, quantity: e.target.value }))
+                      }
+                      className={formInputClass}
+                    >
+                      {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                        <option key={num} value={num}>
+                          {num}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className={labelClass}>購入状態</label>
+                    <select
+                      value={newItemForm.purchaseStatus}
+                      onChange={(e) =>
+                        setNewItemForm((prev) => ({
+                          ...prev,
+                          purchaseStatus: e.target.value as typeof newItemForm.purchaseStatus,
+                        }))
+                      }
+                      className={formInputClass}
+                    >
+                      <option value="None">未購入</option>
+                      <option value="Purchased">購入済</option>
+                      <option value="Postpone">後回し</option>
+                      <option value="Late">遅参</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className={labelClass}>備考</label>
+                    <input
+                      type="text"
+                      value={newItemForm.remarks}
+                      onChange={(e) =>
+                        setNewItemForm((prev) => ({ ...prev, remarks: e.target.value }))
+                      }
+                      className={formInputClass}
+                      placeholder="スケブお願い"
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClass}>URL</label>
+                    <input
+                      type="text"
+                      value={newItemForm.url}
+                      onChange={(e) => setNewItemForm((prev) => ({ ...prev, url: e.target.value }))}
+                      className={formInputClass}
+                      placeholder="https://example.com"
+                    />
+                  </div>
+                </div>
+              </div>
+              <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
+                <button
+                  onClick={closeAddDialog}
+                  className="flex-1 py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
+                >
+                  キャンセル
+                </button>
+                <button
+                  onClick={handleAddItemSubmit}
+                  disabled={!newItemForm.circle.trim()}
+                  className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors"
+                >
+                  リストに追加
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
       </div>
     );
   }

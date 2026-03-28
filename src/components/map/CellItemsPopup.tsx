@@ -716,7 +716,15 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                     className={formInputClass}
                     placeholder="サークル名"
                     autoFocus
+                    list="cell-circle-suggestions"
                   />
+                  {items.length > 0 && (
+                    <datalist id="cell-circle-suggestions">
+                      {[...new Set(items.map((item) => item.circle).filter(Boolean))].map((c) => (
+                        <option key={c} value={c} />
+                      ))}
+                    </datalist>
+                  )}
                 </div>
                 <div>
                   <label className={labelClass}>タイトル</label>

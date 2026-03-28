@@ -1371,6 +1371,30 @@ const FocusMode: React.FC<FocusModeProps> = ({
     closeCellPopup();
   }, [currentVisit, cellPopupState, closeCellPopup]);
 
+  // アイテムリスト末尾の「+」ボタンからアイテム追加ダイアログを開く
+  const openAddItemDialogFromList = useCallback(() => {
+    if (!currentVisit) return;
+    const firstItem = currentVisit.items[0];
+    // サークル名が1種類ならデフォルト値、複数種類なら空欄（サジェスト表示）
+    const uniqueCircles = [...new Set(currentVisit.items.map((item) => item.circle).filter(Boolean))];
+    const defaultCircle = uniqueCircles.length === 1 ? uniqueCircles[0] : '';
+    setAddItemDialog({
+      isOpen: true,
+      eventDate: firstItem?.eventDate || '',
+      block: firstItem?.block || '',
+      number: firstItem?.number || '',
+    });
+    setNewItemForm({
+      circle: defaultCircle,
+      title: '',
+      price: '',
+      quantity: '1',
+      remarks: '',
+      url: '',
+      purchaseStatus: 'Purchased',
+    });
+  }, [currentVisit]);
+
   // アイテム追加ダイアログを閉じる
   const closeAddItemDialog = useCallback(() => {
     setAddItemDialog((prev) => ({ ...prev, isOpen: false }));
@@ -1806,7 +1830,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
                 onChange={(e) => setNewItemForm((prev) => ({ ...prev, circle: e.target.value }))}
                 className={formInputClass}
                 placeholder="サークル名"
+                list="focus-add-circle-suggestions"
               />
+              {currentVisit && currentVisit.items.length > 0 && (
+                <datalist id="focus-add-circle-suggestions">
+                  {[...new Set(currentVisit.items.map((item) => item.circle).filter(Boolean))].map((c) => (
+                    <option key={c} value={c} />
+                  ))}
+                </datalist>
+              )}
             </div>
             <div>
               <label className={labelClass}>タイトル</label>
@@ -2066,6 +2098,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onUpdateItem={handleUpdateItem}
             onEditRequest={onEditRequest}
             onDeleteRequest={onDeleteRequest}
+            onAddItem={onAddItem ? openAddItemDialogFromList : undefined}
           />
         </div>
 
@@ -2232,6 +2265,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onUpdateItem={handleUpdateItem}
             onEditRequest={onEditRequest}
             onDeleteRequest={onDeleteRequest}
+            onAddItem={onAddItem ? openAddItemDialogFromList : undefined}
           />
         </div>
 
@@ -2390,6 +2424,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         onUpdateItem={handleUpdateItem}
         onEditRequest={onEditRequest}
         onDeleteRequest={onDeleteRequest}
+        onAddItem={onAddItem ? openAddItemDialogFromList : undefined}
       />
 
       {/* ナビゲーションボタン（PCモードのみ表示） */}

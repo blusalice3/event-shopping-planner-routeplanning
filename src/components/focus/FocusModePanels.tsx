@@ -15,6 +15,7 @@ interface FocusModeItemListProps {
   onUpdateItem: (item: ShoppingItem) => void;
   onEditRequest?: (item: ShoppingItem) => void;
   onDeleteRequest?: (item: ShoppingItem) => void;
+  onAddItem?: () => void;
 }
 
 interface FocusModeHeaderProps {
@@ -59,6 +60,7 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
   onUpdateItem,
   onEditRequest,
   onDeleteRequest,
+  onAddItem,
 }) => (
   <div
     ref={itemListRef}
@@ -91,6 +93,17 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
         />
       </div>
     ))}
+    {onAddItem && (
+      <div className="flex justify-center py-4">
+        <button
+          onClick={onAddItem}
+          className="w-12 h-12 bg-green-600 hover:bg-green-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl transition-colors"
+          title="新規アイテム追加"
+        >
+          +
+        </button>
+      </div>
+    )}
   </div>
 ));
 

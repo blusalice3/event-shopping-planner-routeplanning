@@ -3,16 +3,12 @@ import { ShoppingItem } from '../types';
 
 interface SummaryBarProps {
   items: ShoppingItem[];
-  layoutMode: 'pc' | 'smartphone';
-  onLayoutModeChange: (mode: 'pc' | 'smartphone') => void;
   filterLabel?: string;
   onFilterToggle?: () => void;
 }
 
 const SummaryBar: React.FC<SummaryBarProps> = ({
   items,
-  layoutMode,
-  onLayoutModeChange,
   filterLabel,
   onFilterToggle,
 }) => {
@@ -52,47 +48,11 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
               {filterLabel}
             </button>
           )}
-          <div className="flex items-center gap-3">
-            <div>
-              <span className="text-sm text-slate-500 dark:text-slate-400">残りの合計: </span>
-              <span className="font-bold text-xl text-blue-600 dark:text-blue-400">
-                ¥{summary.remainingCost.toLocaleString()}
-              </span>
-            </div>
-            <button
-              onClick={() => onLayoutModeChange(layoutMode === 'pc' ? 'smartphone' : 'pc')}
-              className={`p-2 rounded-md transition-colors ${
-                layoutMode === 'smartphone'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-              }`}
-              title={
-                layoutMode === 'pc' ? 'スマートフォンモードに切替' : 'タブレット/PCモードに切替'
-              }
-              aria-label={
-                layoutMode === 'pc' ? 'スマートフォンモードに切替' : 'タブレット/PCモードに切替'
-              }
-            >
-              {layoutMode === 'smartphone' ? (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"
-                  />
-                </svg>
-              ) : (
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                  />
-                </svg>
-              )}
-            </button>
+          <div>
+            <span className="text-sm text-slate-500 dark:text-slate-400">残りの合計: </span>
+            <span className="font-bold text-xl text-blue-600 dark:text-blue-400">
+              ¥{summary.remainingCost.toLocaleString()}
+            </span>
           </div>
         </div>
       </div>

@@ -47,6 +47,7 @@ import {
 import VisitListPanel from './components/VisitListPanel';
 import FocusModeContainer from './features/map/components/FocusModeContainer';
 import { extractEventDates } from './utils/eventDates';
+import { getSpaceKey } from './utils/spaceGrouping';
 import { importFromXlsx, downloadBlob, type ItemFallbackWarning } from './utils/exportImport';
 import {
   buildBulkAddUiPlan,
@@ -237,10 +238,12 @@ const App: React.FC = () => {
   const [rangeStart, setRangeStart] = useState<{
     itemId: string;
     columnType: 'execute' | 'candidate';
+    sourceType?: 'item' | 'spaceHeader';
   } | null>(null);
   const [rangeEnd, setRangeEnd] = useState<{
     itemId: string;
     columnType: 'execute' | 'candidate';
+    sourceType?: 'item' | 'spaceHeader';
   } | null>(null);
 
   // 新規追加フォームに引き継ぐ既定値。
@@ -789,6 +792,14 @@ const App: React.FC = () => {
       const currentEventDate = activeEventDate;
       const mode = dayModes[activeEventName]?.[currentEventDate];
 
+      // スペースグループドラッグ時は、グループ内全アイテムIDを選択扱いにする
+      const spaceGroupIds = spaceGroupDragItemIdsRef.current;
+      const effectiveSelectedIds = spaceGroupIds
+        ? new Set(spaceGroupIds)
+        : selectedItemIds;
+      const isDragInEffectiveSelection = effectiveSelectedIds.has(dragId);
+      // ドラッグ終了後にリセット
+      spaceGroupDragItemIdsRef.current = null;
 
       const isAppendToEnd = hoverId === '__END_OF_LIST__';
 
@@ -807,8 +818,8 @@ const App: React.FC = () => {
 
 
           let itemsToMove: ShoppingItem[] = [];
-          if (selectedItemIds.has(dragId)) {
-            itemsToMove = candidateItems.filter((item) => selectedItemIds.has(item.id));
+          if (isDragInEffectiveSelection) {
+            itemsToMove = candidateItems.filter((item) => effectiveSelectedIds.has(item.id));
           } else {
             const item = candidateItems.find((item) => item.id === dragId);
             if (item) itemsToMove = [item];
@@ -862,8 +873,8 @@ const App: React.FC = () => {
 
 
             let itemsToMove: ShoppingItem[] = [];
-            if (selectedItemIds.has(dragId)) {
-              itemsToMove = executeItems.filter((item) => selectedItemIds.has(item.id));
+            if (isDragInEffectiveSelection) {
+              itemsToMove = executeItems.filter((item) => effectiveSelectedIds.has(item.id));
             } else {
               const item = executeItems.find((item) => item.id === dragId);
               if (item) itemsToMove = [item];
@@ -930,9 +941,9 @@ const App: React.FC = () => {
           const eventItems = prev[activeEventName] || {};
           const dayItems = [...(eventItems[currentEventDate] || [])];
 
-          if (selectedItemIds.has(dragId)) {
-            const selectedBlock = dayItems.filter((id) => selectedItemIds.has(id));
-            const listWithoutSelection = dayItems.filter((id) => !selectedItemIds.has(id));
+          if (isDragInEffectiveSelection) {
+            const selectedBlock = dayItems.filter((id) => effectiveSelectedIds.has(id));
+            const listWithoutSelection = dayItems.filter((id) => !effectiveSelectedIds.has(id));
 
             if (isAppendToEnd) {
               return {
@@ -983,10 +994,10 @@ const App: React.FC = () => {
             (item) => item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id),
           );
 
-          if (selectedItemIds.has(dragId)) {
-            const selectedBlock = candidateItems.filter((item) => selectedItemIds.has(item.id));
+          if (isDragInEffectiveSelection) {
+            const selectedBlock = candidateItems.filter((item) => effectiveSelectedIds.has(item.id));
             const listWithoutSelection = candidateItems.filter(
-              (item) => !selectedItemIds.has(item.id),
+              (item) => !effectiveSelectedIds.has(item.id),
             );
 
             let newCandidateList: ShoppingItem[] = [];
@@ -1054,9 +1065,9 @@ const App: React.FC = () => {
         setEventLists((prev) => {
           const newItems = [...(prev[activeEventName] || [])];
 
-          if (selectedItemIds.has(dragId)) {
-            const selectedBlock = newItems.filter((item) => selectedItemIds.has(item.id));
-            const listWithoutSelection = newItems.filter((item) => !selectedItemIds.has(item.id));
+          if (isDragInEffectiveSelection) {
+            const selectedBlock = newItems.filter((item) => effectiveSelectedIds.has(item.id));
+            const listWithoutSelection = newItems.filter((item) => !effectiveSelectedIds.has(item.id));
 
             if (isAppendToEnd) {
               return { ...prev, [activeEventName]: [...listWithoutSelection, ...selectedBlock] };
@@ -1105,29 +1116,36 @@ const App: React.FC = () => {
       const currentEventDate = activeEventDate;
       const mode = dayModes[activeEventName]?.[currentEventDate];
 
+      // スペースグループドラッグ時の一括選択対応
+      const spaceGroupIds = spaceGroupDragItemIdsRef.current;
+      const effectiveSelectedIds = spaceGroupIds
+        ? new Set(spaceGroupIds)
+        : selectedItemIds;
+      const isDragInEffectiveSelection = effectiveSelectedIds.has(itemId);
+
       if (mode === 'edit' && targetColumn === 'execute') {
         setExecuteModeItems((prev) => {
           const eventItems = prev[activeEventName] || {};
           const dayItems = [...(eventItems[currentEventDate] || [])];
           const currentIndex = dayItems.findIndex((id) => id === itemId);
 
-          if (currentIndex <= 0) return prev; // 移動できない条件では現在の状態をそのまま返す。
+          if (currentIndex <= 0) return prev;
           const targetId = dayItems[currentIndex - 1];
           if (!areItemsInSameHall(itemId, targetId, currentEventDate)) {
-            return prev; // 移動できない条件では現在の状態をそのまま返す。
+            return prev;
           }
 
 
-          if (selectedItemIds.has(itemId)) {
-            const selectedIds = dayItems.filter((id) => selectedItemIds.has(id));
-            const listWithoutSelection = dayItems.filter((id) => !selectedItemIds.has(id));
+          if (isDragInEffectiveSelection) {
+            const selectedIds = dayItems.filter((id) => effectiveSelectedIds.has(id));
+            const listWithoutSelection = dayItems.filter((id) => !effectiveSelectedIds.has(id));
 
 
-            const firstSelectedIndex = dayItems.findIndex((id) => selectedItemIds.has(id));
+            const firstSelectedIndex = dayItems.findIndex((id) => effectiveSelectedIds.has(id));
             if (firstSelectedIndex > 0) {
               const targetIdForGroup = dayItems[firstSelectedIndex - 1];
               if (!areItemsInSameHall(selectedIds[0], targetIdForGroup, currentEventDate)) {
-                return prev; // 移動できない条件では現在の状態をそのまま返す。
+                return prev;
               }
               const newTargetIndex = firstSelectedIndex - 1;
               listWithoutSelection.splice(newTargetIndex, 0, ...selectedIds);
@@ -1162,14 +1180,14 @@ const App: React.FC = () => {
           );
 
           const currentIndex = candidateItems.findIndex((item) => item.id === itemId);
-          if (currentIndex <= 0) return prev; // 移動できない条件では現在の状態をそのまま返す。
-          if (selectedItemIds.has(itemId)) {
-            const selectedBlock = candidateItems.filter((item) => selectedItemIds.has(item.id));
+          if (currentIndex <= 0) return prev;
+          if (isDragInEffectiveSelection) {
+            const selectedBlock = candidateItems.filter((item) => effectiveSelectedIds.has(item.id));
             const listWithoutSelection = candidateItems.filter(
-              (item) => !selectedItemIds.has(item.id),
+              (item) => !effectiveSelectedIds.has(item.id),
             );
             const firstSelectedIndex = candidateItems.findIndex((item) =>
-              selectedItemIds.has(item.id),
+              effectiveSelectedIds.has(item.id),
             );
 
             if (firstSelectedIndex > 0) {
@@ -1225,11 +1243,11 @@ const App: React.FC = () => {
           const newItems = [...(prev[activeEventName] || [])];
           const currentIndex = newItems.findIndex((item) => item.id === itemId);
 
-          if (currentIndex <= 0) return prev; // 移動できない条件では現在の状態をそのまま返す。
-          if (selectedItemIds.has(itemId)) {
-            const selectedBlock = newItems.filter((item) => selectedItemIds.has(item.id));
-            const listWithoutSelection = newItems.filter((item) => !selectedItemIds.has(item.id));
-            const firstSelectedIndex = newItems.findIndex((item) => selectedItemIds.has(item.id));
+          if (currentIndex <= 0) return prev;
+          if (isDragInEffectiveSelection) {
+            const selectedBlock = newItems.filter((item) => effectiveSelectedIds.has(item.id));
+            const listWithoutSelection = newItems.filter((item) => !effectiveSelectedIds.has(item.id));
+            const firstSelectedIndex = newItems.findIndex((item) => effectiveSelectedIds.has(item.id));
 
             if (firstSelectedIndex > 0) {
               const newTargetIndex = firstSelectedIndex - 1;
@@ -1267,27 +1285,34 @@ const App: React.FC = () => {
       const currentEventDate = activeEventDate;
       const mode = dayModes[activeEventName]?.[currentEventDate];
 
+      // スペースグループドラッグ時の一括選択対応
+      const spaceGroupIds = spaceGroupDragItemIdsRef.current;
+      const effectiveSelectedIds = spaceGroupIds
+        ? new Set(spaceGroupIds)
+        : selectedItemIds;
+      const isDragInEffectiveSelection = effectiveSelectedIds.has(itemId);
+
       if (mode === 'edit' && targetColumn === 'execute') {
         setExecuteModeItems((prev) => {
           const eventItems = prev[activeEventName] || {};
           const dayItems = [...(eventItems[currentEventDate] || [])];
           const currentIndex = dayItems.findIndex((id) => id === itemId);
 
-          if (currentIndex < 0 || currentIndex >= dayItems.length - 1) return prev; // 移動できない条件では現在の状態をそのまま返す。
+          if (currentIndex < 0 || currentIndex >= dayItems.length - 1) return prev;
           const targetId = dayItems[currentIndex + 1];
           if (!areItemsInSameHall(itemId, targetId, currentEventDate)) {
-            return prev; // 移動できない条件では現在の状態をそのまま返す。
+            return prev;
           }
 
 
-          if (selectedItemIds.has(itemId)) {
-            const selectedIds = dayItems.filter((id) => selectedItemIds.has(id));
-            const listWithoutSelection = dayItems.filter((id) => !selectedItemIds.has(id));
+          if (isDragInEffectiveSelection) {
+            const selectedIds = dayItems.filter((id) => effectiveSelectedIds.has(id));
+            const listWithoutSelection = dayItems.filter((id) => !effectiveSelectedIds.has(id));
 
 
             let lastSelectedIndex = -1;
             dayItems.forEach((id, index) => {
-              if (selectedItemIds.has(id)) lastSelectedIndex = index;
+              if (effectiveSelectedIds.has(id)) lastSelectedIndex = index;
             });
 
 
@@ -1344,17 +1369,17 @@ const App: React.FC = () => {
           );
 
           const currentIndex = candidateItems.findIndex((item) => item.id === itemId);
-          if (currentIndex < 0 || currentIndex >= candidateItems.length - 1) return prev; // 移動できない条件では現在の状態をそのまま返す。
-          if (selectedItemIds.has(itemId)) {
-            const selectedBlock = candidateItems.filter((item) => selectedItemIds.has(item.id));
+          if (currentIndex < 0 || currentIndex >= candidateItems.length - 1) return prev;
+          if (isDragInEffectiveSelection) {
+            const selectedBlock = candidateItems.filter((item) => effectiveSelectedIds.has(item.id));
             const listWithoutSelection = candidateItems.filter(
-              (item) => !selectedItemIds.has(item.id),
+              (item) => !effectiveSelectedIds.has(item.id),
             );
 
 
             let lastSelectedIndex = -1;
             candidateItems.forEach((item, index) => {
-              if (selectedItemIds.has(item.id)) lastSelectedIndex = index;
+              if (effectiveSelectedIds.has(item.id)) lastSelectedIndex = index;
             });
 
 
@@ -1417,15 +1442,15 @@ const App: React.FC = () => {
           const newItems = [...(prev[activeEventName] || [])];
           const currentIndex = newItems.findIndex((item) => item.id === itemId);
 
-          if (currentIndex < 0 || currentIndex >= newItems.length - 1) return prev; // 移動できない条件では現在の状態をそのまま返す。
-          if (selectedItemIds.has(itemId)) {
-            const selectedBlock = newItems.filter((item) => selectedItemIds.has(item.id));
-            const listWithoutSelection = newItems.filter((item) => !selectedItemIds.has(item.id));
+          if (currentIndex < 0 || currentIndex >= newItems.length - 1) return prev;
+          if (isDragInEffectiveSelection) {
+            const selectedBlock = newItems.filter((item) => effectiveSelectedIds.has(item.id));
+            const listWithoutSelection = newItems.filter((item) => !effectiveSelectedIds.has(item.id));
 
 
             let lastSelectedIndex = -1;
             newItems.forEach((item, index) => {
-              if (selectedItemIds.has(item.id)) lastSelectedIndex = index;
+              if (effectiveSelectedIds.has(item.id)) lastSelectedIndex = index;
             });
 
 
@@ -1940,8 +1965,8 @@ const App: React.FC = () => {
           newSet.add(itemId);
 
 
-          if (!rangeStart || rangeStart.columnType !== currentColumnType) {
-            setRangeStart({ itemId, columnType: currentColumnType });
+          if (!rangeStart || rangeStart.columnType !== currentColumnType || rangeStart.sourceType === 'spaceHeader') {
+            setRangeStart({ itemId, columnType: currentColumnType, sourceType: 'item' });
             setRangeEnd(null);
           } else {
             const startIndex = currentItems.findIndex((item) => item.id === rangeStart.itemId);
@@ -1951,7 +1976,7 @@ const App: React.FC = () => {
             if (startIndex !== -1 && currentIndex !== -1) {
               const isAdjacent = Math.abs(startIndex - currentIndex) === 1;
               if (!isAdjacent) {
-                setRangeEnd({ itemId, columnType: currentColumnType });
+                setRangeEnd({ itemId, columnType: currentColumnType, sourceType: 'item' });
               } else {
                 setRangeEnd(null);
               }
@@ -1974,6 +1999,96 @@ const App: React.FC = () => {
     ],
   );
 
+  // 折りたたみスペースグループのチェックボックス用：範囲選択対応
+  const handleSelectSpaceGroupForRange = useCallback(
+    (firstItemId: string, allItemIds: string[], columnType: 'execute' | 'candidate') => {
+      setSortState('Manual');
+      setBlockSortDirection(null);
+
+      // 隣接グループ判定用：現在のカラムのアイテムからスペースグループ順を算出
+      const currentEventDate = activeEventDate;
+      let currentItems: ShoppingItem[] = [];
+      if (activeEventName) {
+        if (columnType === 'execute') {
+          const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+          const itemsMap = new Map(items.map((item) => [item.id, item]));
+          currentItems = executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+        } else {
+          const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+          let filtered = items.filter(
+            (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
+          );
+          if (selectedBlockFilters.size > 0) {
+            filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
+          }
+          currentItems = filtered;
+        }
+      }
+
+      // スペースグループ順序を構築
+      const groupOrder: string[] = [];
+      const groupFirstItemMap = new Map<string, string>();
+      for (const item of currentItems) {
+        const key = getSpaceKey(item.block, item.number);
+        if (!groupFirstItemMap.has(key)) {
+          groupOrder.push(key);
+          groupFirstItemMap.set(key, item.id);
+        }
+      }
+
+      setSelectedItemIds((prev) => {
+        const newSet = new Set(prev);
+        const allSelected = allItemIds.every((id) => newSet.has(id));
+
+        if (allSelected) {
+          // 全解除
+          allItemIds.forEach((id) => newSet.delete(id));
+          if (rangeStart && allItemIds.includes(rangeStart.itemId)) {
+            setRangeStart(null);
+            setRangeEnd(null);
+          } else if (rangeEnd && allItemIds.includes(rangeEnd.itemId)) {
+            setRangeEnd(null);
+          }
+        } else {
+          // 全選択
+          allItemIds.forEach((id) => newSet.add(id));
+          // rangeStart/rangeEndは先頭アイテムIDで設定
+          // rangeStartがアイテムカード由来の場合はスペースヘッダーとの混在を防ぐ
+          if (!rangeStart || rangeStart.columnType !== columnType || rangeStart.sourceType === 'item') {
+            setRangeStart({ itemId: firstItemId, columnType, sourceType: 'spaceHeader' });
+            setRangeEnd(null);
+          } else {
+            // 隣接グループチェック：隣接なら rangeEnd を設定しない
+            const startKey = (() => {
+              const startItem = currentItems.find((item) => item.id === rangeStart.itemId);
+              return startItem ? getSpaceKey(startItem.block, startItem.number) : null;
+            })();
+            const currentKey = (() => {
+              const currentItem = currentItems.find((item) => item.id === firstItemId);
+              return currentItem ? getSpaceKey(currentItem.block, currentItem.number) : null;
+            })();
+
+            if (startKey && currentKey) {
+              const startGroupIdx = groupOrder.indexOf(startKey);
+              const currentGroupIdx = groupOrder.indexOf(currentKey);
+              const isAdjacent = startGroupIdx !== -1 && currentGroupIdx !== -1 &&
+                Math.abs(startGroupIdx - currentGroupIdx) === 1;
+              if (!isAdjacent) {
+                setRangeEnd({ itemId: firstItemId, columnType, sourceType: 'spaceHeader' });
+              } else {
+                setRangeEnd(null);
+              }
+            } else {
+              setRangeEnd({ itemId: firstItemId, columnType, sourceType: 'spaceHeader' });
+            }
+          }
+        }
+        return newSet;
+      });
+    },
+    [rangeStart, rangeEnd, activeEventDate, activeEventName, executeModeItems, items, selectedBlockFilters],
+  );
+
   const handleToggleBlockFilter = useCallback((block: string) => {
     setSelectedBlockFilters((prev) => {
       const newSet = new Set(prev);
@@ -1989,6 +2104,11 @@ const App: React.FC = () => {
   const handleClearBlockFilters = useCallback(() => {
     setSelectedBlockFilters(new Set());
   }, []);
+
+  // スペース別グループ化の状態。
+  const [spaceGroupingEnabled, setSpaceGroupingEnabled] = useState(false);
+  const [collapsedSpaces, setCollapsedSpaces] = useState<Set<string>>(new Set());
+  const spaceGroupDragItemIdsRef = useRef<string[] | null>(null);
 
   const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
     'asc' | 'desc' | null
@@ -2096,6 +2216,35 @@ const App: React.FC = () => {
     setRangeEnd(null);
   }, []);
 
+  const handleToggleSpaceCollapse = useCallback((spaceKey: string) => {
+    setCollapsedSpaces((prev) => {
+      const next = new Set(prev);
+      if (next.has(spaceKey)) {
+        next.delete(spaceKey);
+      } else {
+        next.add(spaceKey);
+      }
+      return next;
+    });
+  }, []);
+
+  const handleToggleAllSpaceCollapse = useCallback((collapse: boolean) => {
+    if (!collapse) {
+      setCollapsedSpaces(new Set());
+    } else {
+      const allSpaceKeys = new Set<string>();
+      items
+        .filter((item) => item.eventDate === activeEventDate)
+        .forEach((item) => {
+          allSpaceKeys.add(getSpaceKey(item.block, item.number));
+        });
+      setCollapsedSpaces(allSpaceKeys);
+    }
+  }, [items, activeEventDate]);
+
+  const handleSetSpaceGroupDragItemIds = useCallback((itemIds: string[] | null) => {
+    spaceGroupDragItemIdsRef.current = itemIds;
+  }, []);
 
   const handleToggleRangeSelection = useCallback(
     (columnType: 'execute' | 'candidate') => {
@@ -2129,6 +2278,64 @@ const App: React.FC = () => {
         currentItems = filtered;
       }
 
+
+      // スペースグループ化有効時の範囲選択
+      if (spaceGroupingEnabled) {
+        const startItem = currentItems.find((item) => item.id === rangeStart.itemId);
+        const endItem = currentItems.find((item) => item.id === rangeEnd.itemId);
+        if (!startItem || !endItem) return;
+
+        const startKey = getSpaceKey(startItem.block, startItem.number);
+        const endKey = getSpaceKey(endItem.block, endItem.number);
+
+        let rangeItems: ShoppingItem[];
+
+        if (startKey === endKey) {
+          // 同一スペース内の範囲選択
+          const groupItems = currentItems.filter(
+            (item) => getSpaceKey(item.block, item.number) === startKey,
+          );
+          const startIndex = groupItems.findIndex((item) => item.id === rangeStart.itemId);
+          const endIndex = groupItems.findIndex((item) => item.id === rangeEnd.itemId);
+          if (startIndex === -1 || endIndex === -1) return;
+          const minIndex = Math.min(startIndex, endIndex);
+          const maxIndex = Math.max(startIndex, endIndex);
+          rangeItems = groupItems.slice(minIndex, maxIndex + 1);
+        } else {
+          // クロスグループ範囲選択：開始・終了スペース間の全スペースの全アイテムを対象にする
+          // スペースグループの出現順を構築
+          const groupOrder: string[] = [];
+          for (const item of currentItems) {
+            const key = getSpaceKey(item.block, item.number);
+            if (!groupOrder.includes(key)) {
+              groupOrder.push(key);
+            }
+          }
+          const startGrpIdx = groupOrder.indexOf(startKey);
+          const endGrpIdx = groupOrder.indexOf(endKey);
+          if (startGrpIdx === -1 || endGrpIdx === -1) return;
+          const minGrpIdx = Math.min(startGrpIdx, endGrpIdx);
+          const maxGrpIdx = Math.max(startGrpIdx, endGrpIdx);
+          const rangeSpaceKeys = new Set(groupOrder.slice(minGrpIdx, maxGrpIdx + 1));
+          rangeItems = currentItems.filter((item) =>
+            rangeSpaceKeys.has(getSpaceKey(item.block, item.number)),
+          );
+        }
+
+        setSelectedItemIds((prev) => {
+          const allSelected = rangeItems.every((item) => prev.has(item.id));
+          const newSet = new Set(prev);
+          if (allSelected) {
+            rangeItems.forEach((item) => newSet.delete(item.id));
+            setRangeStart(null);
+            setRangeEnd(null);
+          } else {
+            rangeItems.forEach((item) => newSet.add(item.id));
+          }
+          return newSet;
+        });
+        return;
+      }
 
       const halls = getHallsForDate(currentEventDate);
       const currentMapData = getMapDataForDate(currentEventDate);
@@ -2277,6 +2484,7 @@ const App: React.FC = () => {
       executeModeItems,
       items,
       selectedBlockFilters,
+      spaceGroupingEnabled,
       getHallsForDate,
       getMapDataForDate,
     ],
@@ -3047,7 +3255,25 @@ const App: React.FC = () => {
         ...prev,
         [activeEventName]: [...(prev[activeEventName] || []), item],
       }));
-      // 候補リストにのみ追加し、実行リスト（訪問先リスト）には自動追加しない。
+
+      // 集中モードから追加されたアイテムは実行リストにも追加する
+      // （後回し/遅参フェーズで表示されるようにするため）
+      if (purchaseStatus === 'Purchased' || purchaseStatus === 'Postpone' || purchaseStatus === 'Late') {
+        const dayName = newItem.eventDate;
+        if (dayName) {
+          setExecuteModeItems((prev) => {
+            const eventItems = prev[activeEventName] || {};
+            const dayItems = eventItems[dayName] || [];
+            return {
+              ...prev,
+              [activeEventName]: {
+                ...eventItems,
+                [dayName]: [...dayItems, item.id],
+              },
+            };
+          });
+        }
+      }
     },
     [activeEventName],
   );
@@ -4000,6 +4226,7 @@ const App: React.FC = () => {
         setSelectedItemIds(new Set());
         setSelectedBlockFilters(new Set());
         setCandidateNumberSortDirection(null);
+        setCollapsedSpaces(new Set());
         setActiveTab(tab);
       }
     };
@@ -4308,11 +4535,11 @@ const App: React.FC = () => {
       {(showHeaderBar || showTabBar) && (
         <header className="bg-white dark:bg-slate-800 shadow-sm sticky top-0 z-10">
           {showHeaderBar && (
-            <div className="max-w-7xl mx-auto py-4 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
+            <div className="max-w-7xl mx-auto py-2 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
               <div>
-                <div className="flex items-center gap-3">
-                  <h1 className="text-2xl font-bold text-slate-900 dark:text-white">
-                    即売会購入巡回表
+                <div className="flex items-center gap-2 flex-wrap">
+                  <h1 className="text-lg font-bold text-slate-900 dark:text-white truncate max-w-[200px]">
+                    {activeEventName || '即売会購入巡回表'}
                   </h1>
                   {activeEventName &&
                     mainContentVisible &&
@@ -4458,84 +4685,6 @@ const App: React.FC = () => {
                           )}
                         </div>
                     )}
-                </div>
-                <div className="flex items-center gap-2 mt-1">
-                  {activeEventName && (
-                    <h2 className="text-sm text-blue-600 dark:text-blue-400 font-semibold">
-                      {activeEventName}
-                    </h2>
-                  )}
-                  {/* 表示処理の補足 */}
-                  <button
-                    onClick={(e) => {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      setThemeMode((prev) => {
-                        const next =
-                          prev === 'system' ? 'light' : prev === 'light' ? 'dark' : 'system';
-                        return next;
-                      });
-                    }}
-                    className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
-                    title={
-                      themeMode === 'system'
-                        ? 'システム設定 → ライトモードへ'
-                        : themeMode === 'light'
-                          ? 'ライトモード → ダークモードへ'
-                          : 'ダークモード → システム設定へ'
-                    }
-                    style={{
-                      WebkitTapHighlightColor: 'transparent',
-                      minWidth: '44px',
-                      minHeight: '44px',
-                    }}
-                    type="button"
-                  >
-                    {themeMode === 'system' ? (
-                      <svg
-                        className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                        />
-                      </svg>
-                    ) : themeMode === 'light' ? (
-                      <svg
-                        className="w-5 h-5 text-amber-500 pointer-events-none"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z"
-                        />
-                      </svg>
-                    ) : (
-                      <svg
-                        className="w-5 h-5 text-indigo-400 pointer-events-none"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z"
-                        />
-                      </svg>
-                    )}
-                  </button>
-
                   {/* 表示処理の補足 */}
                   <div className="relative">
                     <button
@@ -4586,6 +4735,72 @@ const App: React.FC = () => {
                           onClick={() => setUiSettingsPanelOpen(false)}
                         />
                         <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-4 min-w-[320px] max-h-[70vh] overflow-y-auto">
+                          {/* テーマ切替 */}
+                          <div className="mb-3 flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">テーマ</span>
+                            <button
+                              onClick={(e) => {
+                                e.preventDefault();
+                                e.stopPropagation();
+                                setThemeMode((prev) => {
+                                  const next =
+                                    prev === 'system' ? 'light' : prev === 'light' ? 'dark' : 'system';
+                                  return next;
+                                });
+                              }}
+                              className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
+                              title={
+                                themeMode === 'system'
+                                  ? 'システム設定 → ライトモードへ'
+                                  : themeMode === 'light'
+                                    ? 'ライトモード → ダークモードへ'
+                                    : 'ダークモード → システム設定へ'
+                              }
+                              style={{ WebkitTapHighlightColor: 'transparent' }}
+                              type="button"
+                            >
+                              {themeMode === 'system' ? (
+                                <svg className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                </svg>
+                              ) : themeMode === 'light' ? (
+                                <svg className="w-5 h-5 text-amber-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
+                                </svg>
+                              ) : (
+                                <svg className="w-5 h-5 text-indigo-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+
+                          {/* レイアウト切替 */}
+                          <div className="mb-3 pb-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">レイアウト</span>
+                            <button
+                              onClick={() => setLayoutMode(layoutMode === 'pc' ? 'smartphone' : 'pc')}
+                              className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                                layoutMode === 'smartphone'
+                                  ? 'bg-blue-600 text-white'
+                                  : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
+                              }`}
+                              title={layoutMode === 'pc' ? 'スマートフォンモードに切替' : 'タブレット/PCモードに切替'}
+                              style={{ WebkitTapHighlightColor: 'transparent' }}
+                              type="button"
+                            >
+                              {layoutMode === 'smartphone' ? (
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
+                                </svg>
+                              ) : (
+                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+                                </svg>
+                              )}
+                            </button>
+                          </div>
+
                           <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3">
                             ヘッダー/タブバー表示設定
                           </h3>
@@ -4740,7 +4955,7 @@ const App: React.FC = () => {
                   </div>
 
                   {/* 表示処理の補足 */}
-                  {activeEventName && mainContentVisible && (
+                  {activeEventName && mainContentVisible && !mapViewActive && (
                     <div className="flex items-center gap-1 ml-2 border-l border-slate-300 dark:border-slate-600 pl-2">
                       {/* 表示処理の補足 */}
                       <button
@@ -5269,9 +5484,24 @@ const App: React.FC = () => {
                 {/* 表示処理の補足 */}
                 <div className="space-y-2">
                   <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg p-3">
-                    <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100 mb-2">
-                      実行リストアイテム
-                    </h3>
+                    <div className="flex items-center justify-between mb-2">
+                      <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                        実行リストアイテム
+                      </h3>
+                      <button
+                        onClick={() => {
+                          setSpaceGroupingEnabled((prev) => !prev);
+                          setCollapsedSpaces(new Set());
+                        }}
+                        className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
+                          spaceGroupingEnabled
+                            ? 'bg-blue-600 text-white dark:bg-blue-500'
+                            : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
+                        }`}
+                      >
+                        スペース別
+                      </button>
+                    </div>
                     <p className="text-xs text-blue-700 dark:text-blue-300 mb-3">
                       実行対象として選択中のアイテムを管理します。
                     </p>
@@ -5301,7 +5531,7 @@ const App: React.FC = () => {
                     duplicateCircleItemIds={duplicateCircleItemIds}
                     highlightedItemId={highlightedItemId}
                     layoutMode={layoutMode}
-                    showHallGroups={true}
+                    showHallGroups={!spaceGroupingEnabled}
                     hallDefinitions={getHallsForDate(
                       activeEventDate,
                     )}
@@ -5311,6 +5541,13 @@ const App: React.FC = () => {
                     mapData={getMapDataForDate(
                       activeEventDate,
                     )}
+                    showSpaceGroups={spaceGroupingEnabled}
+                    collapsedSpaces={collapsedSpaces}
+                    onToggleSpaceCollapse={handleToggleSpaceCollapse}
+                    onToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
+                    onSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
+                    onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
+                    onAddItem={handleAddItemFromFocusMode}
                   />
                 </div>
 
@@ -5413,6 +5650,13 @@ const App: React.FC = () => {
                     duplicateCircleItemIds={duplicateCircleItemIds}
                     highlightedItemId={highlightedItemId}
                     layoutMode={layoutMode}
+                    showSpaceGroups={spaceGroupingEnabled}
+                    collapsedSpaces={collapsedSpaces}
+                    onToggleSpaceCollapse={handleToggleSpaceCollapse}
+                    onToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
+                    onSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
+                    onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
+                    onAddItem={handleAddItemFromFocusMode}
                   />
                 </div>
               </div>
@@ -5783,8 +6027,6 @@ const App: React.FC = () => {
           {currentMode === 'execute' && (
             <SummaryBar
               items={visibleItems}
-              layoutMode={layoutMode}
-              onLayoutModeChange={setLayoutMode}
               filterLabel={!showHeaderBar ? sortLabels[sortState] : undefined}
               onFilterToggle={!showHeaderBar ? handleSortToggle : undefined}
             />
