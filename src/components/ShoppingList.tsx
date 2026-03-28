@@ -253,6 +253,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const touchDragClone = useRef<HTMLElement | null>(null);
   const touchScrollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const touchDragSpaceGroupIds = useRef<string[] | null>(null);
+  const touchDragSourceEl = useRef<HTMLElement | null>(null); // ドラッグ元要素（draggable復元用）
 
   const [activeDropTarget, setActiveDropTarget] = useState<{
     id: string;
@@ -864,6 +865,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       touchDragClone.current.remove();
       touchDragClone.current = null;
     }
+    // draggable属性を復元
+    if (touchDragSourceEl.current) {
+      touchDragSourceEl.current.setAttribute('draggable', 'true');
+      touchDragSourceEl.current = null;
+    }
     if (touchDragSpaceGroupIds.current && onSetSpaceGroupDragItemIds) {
       onSetSpaceGroupDragItemIds(null);
     }
@@ -879,6 +885,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       if (touchLongPressTimer.current) clearTimeout(touchLongPressTimer.current);
       if (touchScrollInterval.current) clearInterval(touchScrollInterval.current);
       if (touchDragClone.current) touchDragClone.current.remove();
+      if (touchDragSourceEl.current) touchDragSourceEl.current.setAttribute('draggable', 'true');
     };
   }, []);
 
@@ -904,6 +911,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     touchDragActive.current = true;
     dragItem.current = itemId;
     dragSourceColumn.current = columnType || null;
+
+    // ブラウザのネイティブドラッグゴーストを防止
+    sourceEl.setAttribute('draggable', 'false');
+    touchDragSourceEl.current = sourceEl;
 
     // 元の要素を半透明に
     sourceEl.classList.add('opacity-40');
@@ -1036,6 +1047,26 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
     touchCleanUp();
   }, [activeDropTarget, columnType, items, onMoveItem, touchCleanUp]);
+
+  // タッチキャンセル時（ブラウザがタッチを横取り、通知表示等）
+  const handleItemTouchCancel = useCallback(() => {
+    touchCleanUp();
+  }, [touchCleanUp]);
+
+  // グローバルなタッチ終了/キャンセル監視（要素外でタッチが離された場合の保険）
+  useEffect(() => {
+    const handleGlobalTouchEnd = () => {
+      if (touchDragActive.current) {
+        touchCleanUp();
+      }
+    };
+    document.addEventListener('touchend', handleGlobalTouchEnd);
+    document.addEventListener('touchcancel', handleGlobalTouchEnd);
+    return () => {
+      document.removeEventListener('touchend', handleGlobalTouchEnd);
+      document.removeEventListener('touchcancel', handleGlobalTouchEnd);
+    };
+  }, [touchCleanUp]);
 
   if (items.length === 0) {
     return (
@@ -1248,6 +1279,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 } : undefined}
                 onTouchMove={group.isCollapsed ? handleItemTouchMove : undefined}
                 onTouchEnd={group.isCollapsed ? handleItemTouchEnd : undefined}
+                onTouchCancel={group.isCollapsed ? handleItemTouchCancel : undefined}
               >
                 {/* 折りたたみ時：チェックボックス + ドラッグハンドル + 上下ボタン */}
                 {group.isCollapsed && (
@@ -1610,6 +1642,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         onTouchStart={(e) => handleItemTouchStart(e, item)}
                         onTouchMove={handleItemTouchMove}
                         onTouchEnd={handleItemTouchEnd}
+                        onTouchCancel={handleItemTouchCancel}
                         className="transition-opacity duration-200 relative"
                         data-is-selected={selectedItemIds.has(item.id)}
                       >
@@ -2052,6 +2085,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       onTouchStart={(e) => handleItemTouchStart(e, item)}
                       onTouchMove={handleItemTouchMove}
                       onTouchEnd={handleItemTouchEnd}
+                      onTouchCancel={handleItemTouchCancel}
                       className={`transition-opacity duration-200 relative ${
                         group.priority === 'highest'
                           ? 'bg-red-50/30 dark:bg-red-950/20'
@@ -2279,6 +2313,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             onTouchStart={(e) => handleItemTouchStart(e, item)}
             onTouchMove={handleItemTouchMove}
             onTouchEnd={handleItemTouchEnd}
+            onTouchCancel={handleItemTouchCancel}
             className="transition-opacity duration-200 relative"
             data-is-selected={selectedItemIds.has(item.id)}
           >
