@@ -245,6 +245,15 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  // タッチドラッグ用state/ref
+  const touchDragActive = useRef(false);
+  const touchLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchStartY = useRef(0);
+  const touchStartX = useRef(0);
+  const touchDragClone = useRef<HTMLElement | null>(null);
+  const touchScrollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
+  const touchDragSpaceGroupIds = useRef<string[] | null>(null);
+
   const [activeDropTarget, setActiveDropTarget] = useState<{
     id: string;
     position: 'top' | 'bottom';
@@ -838,6 +847,196 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     setActiveDropTarget(null);
   };
 
+  // === タッチドラッグ&ドロップ ===
+  const TOUCH_LONG_PRESS_MS = 200;
+  const TOUCH_MOVE_THRESHOLD = 5; // px — 指の微小な揺れを無視
+
+  const touchCleanUp = useCallback(() => {
+    if (touchLongPressTimer.current) {
+      clearTimeout(touchLongPressTimer.current);
+      touchLongPressTimer.current = null;
+    }
+    if (touchScrollInterval.current) {
+      clearInterval(touchScrollInterval.current);
+      touchScrollInterval.current = null;
+    }
+    if (touchDragClone.current) {
+      touchDragClone.current.remove();
+      touchDragClone.current = null;
+    }
+    if (touchDragSpaceGroupIds.current && onSetSpaceGroupDragItemIds) {
+      onSetSpaceGroupDragItemIds(null);
+    }
+    touchDragSpaceGroupIds.current = null;
+    touchDragActive.current = false;
+    document.body.style.overflow = '';
+    cleanUp();
+  }, [onSetSpaceGroupDragItemIds]);
+
+  // クリーンアップ: コンポーネントアンマウント時
+  useEffect(() => {
+    return () => {
+      if (touchLongPressTimer.current) clearTimeout(touchLongPressTimer.current);
+      if (touchScrollInterval.current) clearInterval(touchScrollInterval.current);
+      if (touchDragClone.current) touchDragClone.current.remove();
+    };
+  }, []);
+
+  const createDragClone = useCallback((sourceEl: HTMLElement, touchX: number, touchY: number) => {
+    const rect = sourceEl.getBoundingClientRect();
+    const clone = sourceEl.cloneNode(true) as HTMLElement;
+    clone.style.position = 'fixed';
+    clone.style.left = `${rect.left}px`;
+    clone.style.top = `${touchY - 20}px`;
+    clone.style.width = `${rect.width}px`;
+    clone.style.opacity = '0.8';
+    clone.style.zIndex = '9999';
+    clone.style.pointerEvents = 'none';
+    clone.style.transform = 'scale(0.95)';
+    clone.style.boxShadow = '0 8px 25px rgba(0,0,0,0.3)';
+    clone.style.borderRadius = '8px';
+    clone.style.transition = 'none';
+    document.body.appendChild(clone);
+    return clone;
+  }, []);
+
+  const handleTouchDragStart = useCallback((itemId: string, sourceEl: HTMLElement, touchX: number, touchY: number, spaceGroupItemIds?: string[]) => {
+    touchDragActive.current = true;
+    dragItem.current = itemId;
+    dragSourceColumn.current = columnType || null;
+
+    // 元の要素を半透明に
+    sourceEl.classList.add('opacity-40');
+    if (selectedItemIds.has(itemId)) {
+      document.querySelectorAll('[data-is-selected="true"]').forEach((el) => {
+        el.classList.add('opacity-40');
+      });
+    }
+
+    // スペースグループドラッグの場合
+    if (spaceGroupItemIds && onSetSpaceGroupDragItemIds) {
+      touchDragSpaceGroupIds.current = spaceGroupItemIds;
+      onSetSpaceGroupDragItemIds(spaceGroupItemIds);
+    }
+
+    // ドラッグクローン作成
+    touchDragClone.current = createDragClone(sourceEl, touchX, touchY);
+
+    // スクロール防止
+    document.body.style.overflow = 'hidden';
+
+    // 触覚フィードバック
+    if (navigator.vibrate) navigator.vibrate(30);
+  }, [columnType, selectedItemIds, createDragClone, onSetSpaceGroupDragItemIds]);
+
+  const handleItemTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>, item: ShoppingItem) => {
+    // data-no-long-press属性がある要素からのタッチは無視（チェックボックス、ボタン等）
+    const target = e.target as HTMLElement;
+    if (target.closest('[data-no-long-press]')) return;
+
+    const touch = e.touches[0];
+    touchStartX.current = touch.clientX;
+    touchStartY.current = touch.clientY;
+
+    const el = e.currentTarget;
+    touchLongPressTimer.current = setTimeout(() => {
+      handleTouchDragStart(item.id, el, touch.clientX, touch.clientY);
+    }, TOUCH_LONG_PRESS_MS);
+  }, [handleTouchDragStart]);
+
+  const handleItemTouchMove = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
+    const touch = e.touches[0];
+
+    // ロングプレス判定中に指が動いたらキャンセル（通常スクロール）
+    if (!touchDragActive.current) {
+      const dx = Math.abs(touch.clientX - touchStartX.current);
+      const dy = Math.abs(touch.clientY - touchStartY.current);
+      if (dx > TOUCH_MOVE_THRESHOLD || dy > TOUCH_MOVE_THRESHOLD) {
+        if (touchLongPressTimer.current) {
+          clearTimeout(touchLongPressTimer.current);
+          touchLongPressTimer.current = null;
+        }
+      }
+      return;
+    }
+
+    e.preventDefault(); // ドラッグ中はスクロール防止
+
+    // クローンを指の位置に追従
+    if (touchDragClone.current) {
+      touchDragClone.current.style.top = `${touch.clientY - 20}px`;
+    }
+
+    // 自動スクロール
+    const clientY = touch.clientY;
+    const windowHeight = window.innerHeight;
+    if (touchScrollInterval.current) {
+      clearInterval(touchScrollInterval.current);
+      touchScrollInterval.current = null;
+    }
+    if (clientY < TOP_SCROLL_TRIGGER_PX) {
+      touchScrollInterval.current = setInterval(() => window.scrollBy(0, -SCROLL_SPEED), 16);
+    } else if (clientY > windowHeight - BOTTOM_SCROLL_TRIGGER_PX) {
+      touchScrollInterval.current = setInterval(() => window.scrollBy(0, SCROLL_SPEED), 16);
+    }
+
+    // ドロップターゲット判定: 指の下にあるアイテムを探す
+    // クローンを一時的に非表示にしてelementFromPointを使う
+    if (touchDragClone.current) touchDragClone.current.style.display = 'none';
+    const elementUnder = document.elementFromPoint(touch.clientX, touch.clientY);
+    if (touchDragClone.current) touchDragClone.current.style.display = '';
+
+    if (elementUnder) {
+      const itemEl = elementUnder.closest('[data-item-id]') as HTMLElement | null;
+      if (itemEl) {
+        const targetId = itemEl.getAttribute('data-item-id');
+        if (targetId && targetId !== dragItem.current) {
+          const rect = itemEl.getBoundingClientRect();
+          const relativeY = touch.clientY - rect.top;
+          const position = relativeY < rect.height / 2 ? 'top' : 'bottom';
+          setActiveDropTarget({ id: targetId, position });
+        }
+      } else {
+        // アイテム上でない場合はドロップターゲットをクリア
+        setActiveDropTarget(null);
+      }
+    }
+  }, []);
+
+  const handleItemTouchEnd = useCallback(() => {
+    // ロングプレスタイマーをクリア
+    if (touchLongPressTimer.current) {
+      clearTimeout(touchLongPressTimer.current);
+      touchLongPressTimer.current = null;
+    }
+
+    if (!touchDragActive.current) return;
+
+    // ドロップ実行
+    if (activeDropTarget && dragItem.current && columnType) {
+      const sourceColumn = dragSourceColumn.current;
+      const { id: targetId, position } = activeDropTarget;
+
+      if (dragItem.current !== targetId || sourceColumn !== columnType) {
+        if (position === 'top') {
+          onMoveItem(dragItem.current, targetId, columnType, sourceColumn || undefined);
+        } else {
+          const targetIndex = items.findIndex((i) => i.id === targetId);
+          if (targetIndex !== -1) {
+            if (targetIndex === items.length - 1) {
+              onMoveItem(dragItem.current, '__END_OF_LIST__', columnType, sourceColumn || undefined);
+            } else {
+              const nextItem = items[targetIndex + 1];
+              onMoveItem(dragItem.current, nextItem.id, columnType, sourceColumn || undefined);
+            }
+          }
+        }
+      }
+    }
+
+    touchCleanUp();
+  }, [activeDropTarget, columnType, items, onMoveItem, touchCleanUp]);
+
   if (items.length === 0) {
     return (
       <div
@@ -1016,6 +1215,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   layoutMode === 'smartphone' && group.isCollapsed ? 'flex flex-col' : 'flex items-center'
                 }`}
                 style={{ borderLeft: '4px solid #9CA3AF' }}
+                data-item-id={group.isCollapsed ? group.items[0]?.id : undefined}
                 draggable={group.isCollapsed}
                 onDragStart={
                   group.isCollapsed
@@ -1032,6 +1232,22 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 }}
                 onDrop={handleDrop}
                 onDragEnd={group.isCollapsed ? handleSpaceGroupDragEnd : undefined}
+                onTouchStart={group.isCollapsed ? (e: React.TouchEvent<HTMLDivElement>) => {
+                  const target = e.target as HTMLElement;
+                  if (target.closest('[data-no-long-press]')) return;
+                  const touch = e.touches[0];
+                  touchStartX.current = touch.clientX;
+                  touchStartY.current = touch.clientY;
+                  const el = e.currentTarget;
+                  const firstItemId = group.items[0]?.id;
+                  if (!firstItemId) return;
+                  const effectiveIds = getEffectiveDragIds(group);
+                  touchLongPressTimer.current = setTimeout(() => {
+                    handleTouchDragStart(firstItemId, el, touch.clientX, touch.clientY, effectiveIds);
+                  }, TOUCH_LONG_PRESS_MS);
+                } : undefined}
+                onTouchMove={group.isCollapsed ? handleItemTouchMove : undefined}
+                onTouchEnd={group.isCollapsed ? handleItemTouchEnd : undefined}
               >
                 {/* 折りたたみ時：チェックボックス + ドラッグハンドル + 上下ボタン */}
                 {group.isCollapsed && (
@@ -1391,6 +1607,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         onDragOver={(e) => handleDragOver(e, item)}
                         onDrop={handleDrop}
                         onDragEnd={cleanUp}
+                        onTouchStart={(e) => handleItemTouchStart(e, item)}
+                        onTouchMove={handleItemTouchMove}
+                        onTouchEnd={handleItemTouchEnd}
                         className="transition-opacity duration-200 relative"
                         data-is-selected={selectedItemIds.has(item.id)}
                       >
@@ -1830,6 +2049,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       onDragOver={(e) => handleDragOver(e, item)}
                       onDrop={handleDrop}
                       onDragEnd={cleanUp}
+                      onTouchStart={(e) => handleItemTouchStart(e, item)}
+                      onTouchMove={handleItemTouchMove}
+                      onTouchEnd={handleItemTouchEnd}
                       className={`transition-opacity duration-200 relative ${
                         group.priority === 'highest'
                           ? 'bg-red-50/30 dark:bg-red-950/20'
@@ -2054,6 +2276,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             onDragOver={(e) => handleDragOver(e, item)}
             onDrop={handleDrop}
             onDragEnd={cleanUp}
+            onTouchStart={(e) => handleItemTouchStart(e, item)}
+            onTouchMove={handleItemTouchMove}
+            onTouchEnd={handleItemTouchEnd}
             className="transition-opacity duration-200 relative"
             data-is-selected={selectedItemIds.has(item.id)}
           >

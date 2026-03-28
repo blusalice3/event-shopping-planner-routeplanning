@@ -5268,7 +5268,8 @@ const App: React.FC = () => {
                 {activeEventName &&
                   mainContentVisible &&
                   items.length > 0 &&
-                  selectedItemIds.size > 0 && (
+                  selectedItemIds.size > 0 &&
+                  layoutMode !== 'smartphone' && (
                     <>
                       <BulkActionControls onSort={handleBulkSort} onClear={handleClearSelection} />
                       {showMoveButtons && hasCandidateSelection && (
@@ -6037,6 +6038,37 @@ const App: React.FC = () => {
       {activeEventName && items.length > 0 && mainContentVisible && (
         <ZoomControl zoomLevel={zoomLevel} onZoomChange={handleZoomChange} />
       )}
+
+      {/* スマホ時：選択アイテム操作の下部固定バー */}
+      {layoutMode === 'smartphone' &&
+        activeEventName &&
+        mainContentVisible &&
+        items.length > 0 &&
+        selectedItemIds.size > 0 && (
+          <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-lg px-3 py-2">
+            <div className="flex items-center justify-between gap-2">
+              <BulkActionControls onSort={handleBulkSort} onClear={handleClearSelection} />
+              <div className="flex items-center gap-2">
+                {showMoveButtons && hasCandidateSelection && (
+                  <button
+                    onClick={() => handleMoveToExecuteColumn(Array.from(selectedItemIds))}
+                    className="px-3 py-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors"
+                  >
+                    ⇦実行列へ ({selectedItemIds.size})
+                  </button>
+                )}
+                {showMoveButtons && hasExecuteSelection && (
+                  <button
+                    onClick={() => handleRemoveFromExecuteColumn(Array.from(selectedItemIds))}
+                    className="px-3 py-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors"
+                  >
+                    ⇨候補へ ({selectedItemIds.size})
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
 
       {/* 表示処理の補足 */}
       {smartInsertToast && (

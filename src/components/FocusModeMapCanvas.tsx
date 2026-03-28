@@ -410,14 +410,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         if (currentPhaseIndex === 0) {
           // フェーズの最初のスペース
           if (currentPhase === 'normal') {
-            labels.set(key, { text: '始', bgColor: 'rgba(255,109,0,0.5)', textColor: '#ff4500' });
+            labels.set(key, { text: '始', bgColor: 'rgba(255,109,0,0.5)', textColor: '#FFFFFF' });
           } else if (currentPhase === 'postponed') {
-            labels.set(key, { text: '後始', bgColor: 'rgba(156,39,176,0.5)', textColor: '#9932cc' });
+            labels.set(key, { text: '後始', bgColor: 'rgba(156,39,176,0.5)', textColor: '#FFFFFF' });
           } else {
-            labels.set(key, { text: '遅始', bgColor: 'rgba(33,150,243,0.5)', textColor: '#87ceeb' });
+            labels.set(key, { text: '遅始', bgColor: 'rgba(33,150,243,0.5)', textColor: '#FFFFFF' });
           }
         } else {
-          labels.set(key, { text: '次', bgColor: 'rgba(255,109,0,0.5)', textColor: '#ffa500' });
+          labels.set(key, { text: '次', bgColor: 'rgba(255,109,0,0.5)', textColor: '#FFFFFF' });
         }
       } else if (state.allProcessed && state.allPostponed) {
         labels.set(key, { text: '後', bgColor: 'rgba(156,39,176,0.4)', textColor: 'rgba(156,39,176,0.9)' });
