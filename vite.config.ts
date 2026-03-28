@@ -66,6 +66,13 @@ export default defineConfig({
     outDir: 'dist',
     sourcemap: false,
     minify: 'esbuild',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'xlsx-parser': ['./src/utils/xlsxMapParser.ts', './src/utils/exportImport.ts'],
+        },
+      },
+    },
   },
   server: {
     port: 3000,
