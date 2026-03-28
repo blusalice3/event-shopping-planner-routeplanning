@@ -1010,9 +1010,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               )}
               {/* スペースグループヘッダー */}
               <div
-                className={`sticky top-0 z-20 flex items-center rounded-lg select-none ${
+                className={`sticky top-0 z-20 rounded-lg select-none ${
                   blockColor?.light || 'bg-slate-100 dark:bg-slate-800'
-                } hover:brightness-95 dark:hover:brightness-110 transition-all`}
+                } hover:brightness-95 dark:hover:brightness-110 transition-all ${
+                  layoutMode === 'smartphone' && group.isCollapsed ? 'flex flex-col' : 'flex items-center'
+                }`}
                 style={{ borderLeft: '4px solid #9CA3AF' }}
                 draggable={group.isCollapsed}
                 onDragStart={
@@ -1035,7 +1037,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 {group.isCollapsed && (
                   <div
                     data-drag-handle
-                    className="px-1.5 py-1 flex flex-row items-center cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 gap-1"
+                    className={`flex flex-row items-center cursor-grab text-slate-400 dark:text-slate-500 ${
+                      layoutMode === 'smartphone'
+                        ? 'px-1 py-0.5 gap-0.5 border-b border-slate-200/80 dark:border-slate-700/80'
+                        : 'px-1.5 py-1 gap-1 border-r border-slate-200/80 dark:border-slate-700/80'
+                    }`}
                   >
                     <input
                       type="checkbox"
@@ -1046,7 +1052,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       onChange={handleSpaceCheckbox}
                       onClick={(e) => e.stopPropagation()}
                       data-no-long-press
-                      className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
+                      className={`rounded text-blue-600 focus:ring-blue-500 ${
+                        layoutMode === 'smartphone' ? 'w-4 h-4' : 'w-5 h-5'
+                      }`}
                     />
                     {onMoveItemUp && (
                       <button
@@ -1056,10 +1064,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         className={`p-0.5 rounded-md transition-colors ${canMoveGroupUp ? 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer' : 'text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50'}`}
                         aria-label="グループを上に移動"
                       >
-                        <ChevronUpIcon className="w-4 h-4" />
+                        <ChevronUpIcon className={layoutMode === 'smartphone' ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
                       </button>
                     )}
-                    <GripVerticalIcon className="w-5 h-5" />
+                    <GripVerticalIcon className={layoutMode === 'smartphone' ? 'w-4 h-4 mx-1' : 'w-5 h-5'} />
                     {onMoveItemDown && (
                       <button
                         onClick={handleSpaceGroupMoveDown}
@@ -1068,53 +1076,119 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         className={`p-0.5 rounded-md transition-colors ${canMoveGroupDown ? 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer' : 'text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50'}`}
                         aria-label="グループを下に移動"
                       >
-                        <ChevronDownIcon className="w-4 h-4" />
+                        <ChevronDownIcon className={layoutMode === 'smartphone' ? 'w-3.5 h-3.5' : 'w-4 h-4'} />
                       </button>
+                    )}
+                    {/* スマホ時：追加ボタンをコントロールバー右端に配置 */}
+                    {layoutMode === 'smartphone' && onAddItem && (
+                      <>
+                        <div className="flex-1" />
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            const spaceBlock = group.spaceKey.split('-')[0];
+                            const spaceNumber = group.spaceKey.split('-').slice(1).join('-');
+                            const circles = [...new Set(group.items.map((item) => item.circle).filter(Boolean))];
+                            openAddDialog(spaceBlock, spaceNumber, circles);
+                          }}
+                          className="px-1.5 py-0.5 mr-1 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors"
+                          title="このスペースにアイテムを追加"
+                        >
+                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
+                          </svg>
+                        </button>
+                      </>
                     )}
                   </div>
                 )}
 
                 {/* メインのクリック可能エリア */}
                 <div
-                  className="flex-1 flex flex-col px-3 py-1.5 cursor-pointer min-w-0"
+                  className={`flex-1 flex flex-col cursor-pointer min-w-0 ${
+                    layoutMode === 'smartphone' ? 'px-2 py-1' : 'px-3 py-1.5'
+                  }`}
                   onClick={() => onToggleSpaceCollapse?.(group.spaceKey)}
                 >
                   <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                    <div className={`flex items-center min-w-0 ${layoutMode === 'smartphone' ? 'gap-1' : 'gap-2'}`}>
                       <span
-                        className={`text-xs transition-transform duration-200 ${
+                        className={`text-xs transition-transform duration-200 flex-shrink-0 ${
                           group.isCollapsed ? '' : 'rotate-90'
                         }`}
                       >
                         &#9654;
                       </span>
-                      <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
+                      <span className={`font-bold text-slate-700 dark:text-slate-300 flex-shrink-0 ${
+                        layoutMode === 'smartphone' ? 'text-xs' : 'text-sm'
+                      }`}>
                         {group.displayName}
                       </span>
                       {(() => {
                         const uniqueCircles = [...new Set(group.items.map((item) => item.circle).filter(Boolean))];
-                        return uniqueCircles.length > 0 ? (
-                          <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
-                            {uniqueCircles.join(' & ')}
+                        if (uniqueCircles.length === 0) return null;
+                        const displayText = layoutMode === 'smartphone'
+                          ? uniqueCircles.map(c => c.length > 6 ? c.slice(0, 6) + '…' : c).join(' & ')
+                          : uniqueCircles.join(' & ');
+                        return (
+                          <span className={`font-bold text-slate-700 dark:text-slate-300 truncate ${
+                            layoutMode === 'smartphone' ? 'text-xs' : 'text-sm'
+                          }`} title={uniqueCircles.join(' & ')}>
+                            {displayText}
                           </span>
-                        ) : null;
+                        );
                       })()}
                     </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                    <div className={`flex items-center flex-shrink-0 ${layoutMode === 'smartphone' ? 'gap-1' : 'gap-2'}`}>
+                      {/* スマホ折りたたみ時：備考を💬/⚠️アイコンで表示 */}
+                      {layoutMode === 'smartphone' && group.isCollapsed && (() => {
+                        const remarksItems = group.items.filter((item) => item.remarks);
+                        if (remarksItems.length === 0) return null;
+                        const hasWarningRemarks = remarksItems.some((item) =>
+                          item.remarks.includes('委託無') || item.remarks.includes('優先')
+                        );
+                        const isExpanded = expandedRemarks.has(group.spaceKey);
+                        return (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setExpandedRemarks((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(group.spaceKey)) {
+                                  next.delete(group.spaceKey);
+                                } else {
+                                  next.add(group.spaceKey);
+                                }
+                                return next;
+                              });
+                            }}
+                            className={`text-sm leading-none p-0.5 rounded hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors ${isExpanded ? 'bg-slate-200 dark:bg-slate-700' : ''}`}
+                            title="備考を表示"
+                          >
+                            {hasWarningRemarks ? '⚠️' : '💬'}
+                          </button>
+                        );
+                      })()}
+                      <span className={`text-slate-500 dark:text-slate-400 ${
+                        layoutMode === 'smartphone' ? 'text-[10px]' : 'text-xs'
+                      }`}>
                         {group.items.length}件
                       </span>
                       {group.isCollapsed && (() => {
                         const allPriceNull = group.items.every((item) => item.price == null);
                         if (allPriceNull) {
                           return (
-                            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                            <span className={`font-medium text-slate-500 dark:text-slate-400 ${
+                              layoutMode === 'smartphone' ? 'text-[10px]' : 'text-xs'
+                            }`}>
                               価格未定
                             </span>
                           );
                         }
                         return (
-                          <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                          <span className={`font-medium text-slate-600 dark:text-slate-300 ${
+                            layoutMode === 'smartphone' ? 'text-[10px]' : 'text-xs'
+                          }`}>
                             {totalPrice.toLocaleString()}円
                           </span>
                         );
@@ -1123,6 +1197,29 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   </div>
                   {/* 折りたたみ時の備考表示 */}
                   {group.isCollapsed && (() => {
+                    // スマホ時：💬/⚠️クリックで展開表示
+                    if (layoutMode === 'smartphone') {
+                      if (!expandedRemarks.has(group.spaceKey)) return null;
+                      const remarksItems = group.items.filter((item) => item.remarks);
+                      if (remarksItems.length === 0) return null;
+                      return (
+                        <div className="flex flex-wrap gap-1 mt-0.5">
+                          {remarksItems.map((item) => (
+                            <span
+                              key={item.id}
+                              className={`text-[10px] px-1 py-0.5 rounded bg-slate-200/60 dark:bg-slate-700/60 ${
+                                item.remarks.includes('委託無') || item.remarks.includes('優先')
+                                  ? 'text-red-600 dark:text-red-400 font-medium'
+                                  : 'text-slate-600 dark:text-slate-400'
+                              }`}
+                            >
+                              {item.remarks}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    }
+                    // PC時：従来の備考表示
                     const remarksItems = group.items.filter((item) => item.remarks);
                     if (remarksItems.length === 0) return null;
                     return (
@@ -1161,8 +1258,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     );
                   })()}
                 </div>
-                {/* アイテム追加ボタン */}
-                {onAddItem && (
+                {/* アイテム追加ボタン（PC時のみここに配置、スマホ時はコントロールバーに移動済み） */}
+                {!(layoutMode === 'smartphone' && group.isCollapsed) && onAddItem && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
@@ -1171,10 +1268,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       const circles = [...new Set(group.items.map((item) => item.circle).filter(Boolean))];
                       openAddDialog(spaceBlock, spaceNumber, circles);
                     }}
-                    className="px-2 py-1 mr-2 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors"
+                    className={`text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors ${
+                      layoutMode === 'smartphone' ? 'px-1.5 py-0.5 mr-1' : 'px-2 py-1 mr-2'
+                    }`}
                     title="このスペースにアイテムを追加"
                   >
-                    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <svg className={layoutMode === 'smartphone' ? 'w-4 h-4' : 'w-5 h-5'} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v16m8-8H4" />
                     </svg>
                   </button>

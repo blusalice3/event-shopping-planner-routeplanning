@@ -358,16 +358,16 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           ></div>
         )}
 
-        <div className="flex">
-          {/* 左側：チェックボックス・移動ボタン */}
+        <div className="flex flex-col">
+          {/* 上部コントロールバー（横配置） */}
           <div
             data-drag-handle
-            className="relative p-2 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-1 z-10"
+            className="relative p-1 flex flex-row items-center cursor-grab text-slate-400 dark:text-slate-500 border-b border-slate-200/80 dark:border-slate-700/80 gap-0.5 z-10"
           >
             {/* ホール内番号表示 */}
             {hallIndex !== undefined && (
               <div
-                className={`w-7 h-7 flex items-center justify-center text-white rounded-full text-xs font-bold flex-shrink-0 ${
+                className={`w-5 h-5 flex items-center justify-center text-white rounded-full text-[10px] font-bold flex-shrink-0 ${
                   priorityLevel === 'highest'
                     ? 'bg-red-600'
                     : priorityLevel === 'priority'
@@ -384,7 +384,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
               onChange={() => onSelectItem(item.id)}
               onClick={(e) => e.stopPropagation()}
               data-no-long-press
-              className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
+              className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
               aria-label={`Select item ${item.circle} - ${item.title}`}
             />
             {onMoveUp && (
@@ -398,10 +398,10 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 className={`p-0.5 rounded-md transition-colors ${canMoveUp ? 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer' : 'text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50'}`}
                 aria-label="上に移動"
               >
-                <ChevronUpIcon className="w-4 h-4" />
+                <ChevronUpIcon className="w-3.5 h-3.5" />
               </button>
             )}
-            <GripVerticalIcon className="w-5 h-5" />
+            <GripVerticalIcon className="w-4 h-4 mx-1" />
             {onMoveDown && (
               <button
                 onClick={(e) => {
@@ -413,140 +413,109 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 className={`p-0.5 rounded-md transition-colors ${canMoveDown ? 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400 cursor-pointer' : 'text-slate-300 dark:text-slate-600 cursor-not-allowed opacity-50'}`}
                 aria-label="下に移動"
               >
-                <ChevronDownIcon className="w-4 h-4" />
-              </button>
-            )}
-            {/* 編集モード時：ドラッグハンドルの下にリンクアイコン */}
-            {onMoveUp && item.url && (
-              <button
-                onClick={handleOpenUrl}
-                data-no-long-press
-                className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors"
-                aria-label="URLを開く"
-                title="URLを開く"
-              >
-                <ExternalLinkIcon className="w-5 h-5" />
+                <ChevronDownIcon className="w-3.5 h-3.5" />
               </button>
             )}
           </div>
 
           {/* メインコンテンツエリア */}
           <div className="flex-grow flex flex-col min-w-0 relative z-10">
-            {/* 上段: 日付・ブロック・サークル名・警告タグ + 備考欄 */}
-            <div className={`p-2 pb-1 ${focusInfoAreaClassName}`}>
-              <div className="flex justify-between items-start gap-2">
-                <div className="flex-grow min-w-0">
-                  <p className="font-bold text-sm text-slate-900 dark:text-slate-100">{`${item.eventDate} ${locationString}`}</p>
-                  <div className="flex items-center gap-1 flex-wrap mt-0.5">
-                    <p
-                      className="text-sm text-slate-600 dark:text-slate-300 truncate"
-                      title={item.circle}
-                    >
-                      {item.circle}
-                    </p>
-                    {warningTags.map((tag, index) => (
-                      <img
-                        key={index}
-                        src={`/${tag}.png`}
-                        alt={tag}
-                        className="h-8 w-auto object-contain"
-                      />
-                    ))}
-                  </div>
-                </div>
+            {/* 上段: 場所・サークル名・警告タグ（日付省略） */}
+            <div className={`p-1.5 pb-0.5 ${focusInfoAreaClassName}`}>
+              <div className="flex items-center gap-1 flex-wrap min-w-0">
+                <span className="font-bold text-xs text-slate-900 dark:text-slate-100 flex-shrink-0">{locationString}</span>
+                <span
+                  className="text-xs text-slate-600 dark:text-slate-300 truncate"
+                  title={item.circle}
+                >
+                  {item.circle}
+                </span>
+                {warningTags.map((tag, index) => (
+                  <img
+                    key={index}
+                    src={`/${tag}.png`}
+                    alt={tag}
+                    className="h-5 w-auto object-contain"
+                  />
+                ))}
               </div>
-              {/* タイトル */}
-              <p
-                className={`text-sm font-semibold text-slate-700 dark:text-slate-200 truncate mt-1 ${currentStatus.dim ? 'line-through' : ''}`}
-                title={item.title}
-              >
-                {item.title || '（タイトルなし）'}
-              </p>
-            </div>
-
-            {/* 下段: 備考欄 + 購入状態・数量・価格 */}
-            <div className="p-2 pt-1 flex flex-col gap-1.5 border-t border-slate-200/50 dark:border-slate-700/50">
-              {/* 集中/実行モード時：備考欄の直上右側にリンクアイコン */}
-              {!onMoveUp && item.url && (
-                <div className="flex justify-end">
+              {/* タイトル + リンクアイコン */}
+              <div className="flex items-center gap-0.5 mt-0.5">
+                <p
+                  className={`text-xs font-semibold text-slate-700 dark:text-slate-200 truncate flex-1 ${currentStatus.dim ? 'line-through' : ''}`}
+                  title={item.title}
+                >
+                  {item.title || '（タイトルなし）'}
+                </p>
+                {item.url && (
                   <button
                     onClick={handleOpenUrl}
                     data-no-long-press
-                    className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center gap-1"
+                    className="p-0.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex-shrink-0"
                     aria-label="URLを開く"
                     title="URLを開く"
                   >
-                    <ExternalLinkIcon className="w-4 h-4" />
-                    <span className="text-xs">🔗</span>
+                    <ExternalLinkIcon className="w-3.5 h-3.5" />
                   </button>
-                </div>
+                )}
+              </div>
+            </div>
+
+            {/* 下段: 備考欄（条件表示） + 数量・価格・購入状態 */}
+            <div className="p-1.5 pt-0.5 flex flex-col gap-1 border-t border-slate-200/50 dark:border-slate-700/50">
+              {/* 備考欄（既に備考がある場合のみ表示） */}
+              {item.remarks && (
+                <input
+                  type="text"
+                  value={item.remarks}
+                  onChange={handleRemarksChange}
+                  placeholder="備考"
+                  className="text-xs bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-1.5 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+                />
               )}
 
-              {/* 備考欄（購入状態トグルの上） */}
-              <input
-                type="text"
-                value={item.remarks}
-                onChange={handleRemarksChange}
-                placeholder="備考"
-                className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
-              />
+              {/* 操作エリア: 数量・価格・購入状態（右寄せコンパクト） */}
+              <div className="flex items-center justify-end gap-1">
+                {/* 数量 */}
+                <select
+                  value={item.quantity}
+                  onChange={handleQuantityChange}
+                  className="text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-10"
+                >
+                  {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                    <option key={num} value={num}>
+                      {num}
+                    </option>
+                  ))}
+                </select>
 
-              {/* 操作エリア: 数量（中央）・価格（右）・購入状態（右端） */}
-              <div className="flex items-center justify-between">
-                {/* 左側スペーサー */}
-                <div className="flex-1"></div>
-
-                {/* 中央: 数量 */}
-                <div className="flex items-center gap-1">
-                  <span className="text-xs text-slate-600 dark:text-slate-400">数量</span>
+                {/* 価格 */}
+                <div className="flex items-center gap-0.5">
+                  {item.price !== null && (
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400">¥</span>
+                  )}
                   <select
-                    value={item.quantity}
-                    onChange={handleQuantityChange}
-                    className="text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-12"
+                    value={item.price === null ? '' : item.price}
+                    onChange={handlePriceChange}
+                    className={`text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-16 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''}`}
                   >
-                    {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
-                      <option key={num} value={num}>
-                        {num}
+                    {priceOptions.map((p) => (
+                      <option key={p === null ? '' : p} value={p === null ? '' : p}>
+                        {p === null ? '価格未定' : p === 0 ? '0' : p.toLocaleString()}
                       </option>
                     ))}
                   </select>
                 </div>
 
-                {/* 右側スペーサー */}
-                <div className="flex-1"></div>
-
-                {/* 右: 価格 + 購入状態 */}
-                <div className="flex items-center gap-2">
-                  {/* 価格 */}
-                  <div className="flex items-center gap-0.5">
-                    {item.price !== null && (
-                      <span className="text-xs text-slate-500 dark:text-slate-400">¥</span>
-                    )}
-                    <select
-                      value={item.price === null ? '' : item.price}
-                      onChange={handlePriceChange}
-                      className={`text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-20 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''}`}
-                    >
-                      {priceOptions.map((p) => (
-                        <option key={p === null ? '' : p} value={p === null ? '' : p}>
-                          {p === null ? '価格未定' : p === 0 ? '0' : p.toLocaleString()}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* 購入状態（右端） */}
-                  <button
-                    onClick={togglePurchaseStatus}
-                    className="flex items-center space-x-1 p-1.5 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-                    aria-label={`Current status: ${currentStatus.label}. Click to change.`}
-                  >
-                    <IconComponent className={`w-5 h-5 ${currentStatus.color}`} />
-                    <span className={`text-xs font-semibold ${currentStatus.color}`}>
-                      {currentStatus.label}
-                    </span>
-                  </button>
-                </div>
+                {/* 購入状態（アイコンのみ） */}
+                <button
+                  onClick={togglePurchaseStatus}
+                  className="p-1 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                  aria-label={`Current status: ${currentStatus.label}. Click to change.`}
+                  title={currentStatus.label}
+                >
+                  <IconComponent className={`w-4 h-4 ${currentStatus.color}`} />
+                </button>
               </div>
             </div>
           </div>
