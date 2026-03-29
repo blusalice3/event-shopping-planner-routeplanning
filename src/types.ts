@@ -33,6 +33,10 @@ export interface ShoppingItem {
   priorityLevel?: 'none' | 'priority' | 'highest'; // 優先度レベル
   protectionLevel?: ProtectionLevel; // 保護レベル（未設定の場合はsourceに基づくデフォルト）
   source?: ItemSource; // アイテムの追加元（未設定の場合は'spreadsheet'として扱う）
+  assignedTo?: string; // 共有ルームでの担当者ID
+  lastSyncedAt?: string; // 最終同期タイムスタンプ
+  orderIndex?: number; // 共有ルームでの巡回順インデックス
+  postponed?: boolean; // 後回しフラグ（共有同期用）
 }
 
 export type ViewMode = 'edit' | 'execute' | 'focus';
