@@ -165,6 +165,9 @@ const MapView: React.FC<MapViewProps> = ({
     item: ShoppingItem | null;
   }>({ isOpen: false, item: null });
 
+  // バッチ挿入時の保留アイテムID群（スマート挿入ダイアログ待ち）
+  const [batchInsertPendingIds, setBatchInsertPendingIds] = useState<string[] | null>(null);
+
   // 外部制御が渡されていればそれを優先し、未指定時は内部 state を使う
   const selectedHallId =
     externalSelectedHallId !== undefined ? externalSelectedHallId : internalSelectedHallId;
@@ -665,40 +668,62 @@ const MapView: React.FC<MapViewProps> = ({
     ],
   );
 
-  // スマート挿入ダイアログの選択結果を適用する
+  // スマート挿入ダイアログの選択結果を適用する（単体 & バッチ共通）
   const handleInsertPositionSelect = useCallback(
     (position: InsertPosition) => {
       const item = insertDialogState.item;
       if (!item) return;
 
+      // バッチ挿入か単体挿入かを判定
+      const isBatch = batchInsertPendingIds !== null && batchInsertPendingIds.length > 0;
+      const idsToInsert = isBatch ? batchInsertPendingIds : [item.id];
+
       if (position.type === 'before' || position.type === 'after') {
         if (onAddToExecuteListAtPosition) {
-          onAddToExecuteListAtPosition(item.id, position.referenceItemId, position.type);
-          addToHallVisitList(item.id);
+          // before: 参照アイテムの前に全て挿入、after: 参照アイテムの後に順次挿入
+          if (position.type === 'before') {
+            // 全アイテムを参照アイテムの前に挿入（順序維持のため逆順で挿入）
+            for (let i = idsToInsert.length - 1; i >= 0; i--) {
+              onAddToExecuteListAtPosition(idsToInsert[i], position.referenceItemId, 'before');
+              addToHallVisitList(idsToInsert[i]);
+            }
+          } else {
+            let insertAfter = position.referenceItemId;
+            for (const id of idsToInsert) {
+              onAddToExecuteListAtPosition(id, insertAfter, 'after');
+              addToHallVisitList(id);
+              insertAfter = id;
+            }
+          }
         }
       } else {
         if (position.type === 'listEnd' && onAddToExecuteListAtPosition) {
-
-          if (executeModeItemIds.length > 0) {
-            onAddToExecuteListAtPosition(
-              item.id,
-              executeModeItemIds[executeModeItemIds.length - 1],
-              'after',
-            );
-          } else {
-            onAddToExecuteList(item.id);
+          let insertAfter = executeModeItemIds.length > 0
+            ? executeModeItemIds[executeModeItemIds.length - 1]
+            : null;
+          for (const id of idsToInsert) {
+            if (insertAfter) {
+              onAddToExecuteListAtPosition(id, insertAfter, 'after');
+            } else {
+              onAddToExecuteList(id);
+            }
+            addToHallVisitList(id);
+            insertAfter = id;
           }
-          addToHallVisitList(item.id);
         } else {
-          onAddToExecuteList(item.id);
-          addToHallVisitList(item.id);
+          for (const id of idsToInsert) {
+            onAddToExecuteList(id);
+            addToHallVisitList(id);
+          }
         }
       }
 
+      setBatchInsertPendingIds(null);
       setInsertDialogState({ isOpen: false, item: null });
     },
     [
       insertDialogState.item,
+      batchInsertPendingIds,
       onAddToExecuteList,
       onAddToExecuteListAtPosition,
       executeModeItemIds,
@@ -761,6 +786,122 @@ const MapView: React.FC<MapViewProps> = ({
         itemIds: list.itemIds.filter((id) => id !== itemId),
       }));
 
+      onUpdateHallRouteSettings({
+        ...hallRouteSettings,
+        hallVisitLists: updatedHallVisitLists,
+      });
+    },
+    [onRemoveFromExecuteList, hallRouteSettings, onUpdateHallRouteSettings],
+  );
+
+  // スペースグループ一括追加: スマート挿入をグループ単位で実行
+  const handleBatchAddToVisitList = useCallback(
+    (itemIds: string[]) => {
+      if (itemIds.length === 0) return;
+
+      // アイテムを番号サフィックス順にソート
+      const sortedIds = [...itemIds].sort((aId, bId) => {
+        const a = items.find((i) => i.id === aId);
+        const b = items.find((i) => i.id === bId);
+        if (!a || !b) return 0;
+        const suffixA = a.number.replace(/^\d+/, '');
+        const suffixB = b.number.replace(/^\d+/, '');
+        const parseA = suffixA.match(/^([a-zA-Z]*)(\d*)$/);
+        const parseB = suffixB.match(/^([a-zA-Z]*)(\d*)$/);
+        const alphaA = parseA ? parseA[1].toLowerCase() : '';
+        const alphaB = parseB ? parseB[1].toLowerCase() : '';
+        if (alphaA !== alphaB) return alphaA.localeCompare(alphaB);
+        const numA = parseA && parseA[2] ? parseInt(parseA[2], 10) : 0;
+        const numB = parseB && parseB[2] ? parseInt(parseB[2], 10) : 0;
+        return numA - numB;
+      });
+
+      // 代表アイテムでプレフィックスマッチングを試みる
+      const firstItem = items.find((i) => i.id === sortedIds[0]);
+      if (!firstItem) return;
+
+      const newItemPrefix = extractNumberAlphaPrefix(firstItem.number);
+      const itemBlock = firstItem.block?.trim() || '';
+
+      // 1) プレフィックスマッチ: 同ブロック+同プレフィックスの既存アイテムの最後の直後に挿入
+      if (newItemPrefix && onAddToExecuteListAtPosition) {
+        let lastMatchId: string | null = null;
+        executeModeItemIds.forEach((eid) => {
+          const existingItem = items.find((i) => i.id === eid);
+          if (!existingItem) return;
+          const existingBlock = existingItem.block?.trim() || '';
+          if (existingBlock !== itemBlock) return;
+          const existingPrefix = extractNumberAlphaPrefix(existingItem.number);
+          if (existingPrefix === newItemPrefix) {
+            lastMatchId = eid;
+          }
+        });
+
+        if (lastMatchId) {
+          let insertAfter: string = lastMatchId;
+          for (const id of sortedIds) {
+            onAddToExecuteListAtPosition(id, insertAfter, 'after');
+            addToHallVisitList(id);
+            insertAfter = id;
+          }
+          return;
+        }
+      }
+
+      // 2) 近隣判定: 数値差3以内の訪問済みアイテムがあればスマート挿入ダイアログを表示
+      const itemNum = extractNumberFromItemNumber(firstItem.number);
+      if (itemNum && smartInsertEnabled && onAddToExecuteListAtPosition) {
+        const numValue = parseInt(itemNum, 10);
+        const itemBlockLower = itemBlock.toLowerCase();
+        const nearbyVisitItems: { item: ShoppingItem; visitIndex: number }[] = [];
+        executeModeItemIds.forEach((eid, idx) => {
+          const existingItem = items.find((i) => i.id === eid);
+          if (!existingItem) return;
+          const existingBlock = existingItem.block?.trim().toLowerCase() || '';
+          if (existingBlock !== itemBlockLower) return;
+          const existingNum = extractNumberFromItemNumber(existingItem.number);
+          if (!existingNum) return;
+          const existingNumValue = parseInt(existingNum, 10);
+          if (Math.abs(existingNumValue - numValue) <= 3) {
+            nearbyVisitItems.push({ item: existingItem, visitIndex: idx });
+          }
+        });
+
+        if (nearbyVisitItems.length > 0) {
+          // バッチ挿入用の状態を保持してダイアログを開く
+          setBatchInsertPendingIds(sortedIds);
+          setInsertDialogState({ isOpen: true, item: firstItem });
+          return;
+        }
+      }
+
+      // 3) マッチなし: 末尾に追加
+      for (const id of sortedIds) {
+        onAddToExecuteList(id);
+        addToHallVisitList(id);
+      }
+    },
+    [
+      items,
+      executeModeItemIds,
+      onAddToExecuteList,
+      onAddToExecuteListAtPosition,
+      addToHallVisitList,
+      smartInsertEnabled,
+    ],
+  );
+
+  // スペースグループ一括解除
+  const handleBatchRemoveFromVisitList = useCallback(
+    (itemIds: string[]) => {
+      for (const id of itemIds) {
+        onRemoveFromExecuteList(id);
+      }
+      const removedSet = new Set(itemIds);
+      const updatedHallVisitLists = hallRouteSettings.hallVisitLists.map((list) => ({
+        ...list,
+        itemIds: list.itemIds.filter((id) => !removedSet.has(id)),
+      }));
       onUpdateHallRouteSettings({
         ...hallRouteSettings,
         hallVisitLists: updatedHallVisitLists,
@@ -864,6 +1005,8 @@ const MapView: React.FC<MapViewProps> = ({
         executeModeItemIds={executeModeItemIdsSet}
         onAddToVisitList={handleAddToVisitList}
         onRemoveFromVisitList={handleRemoveFromVisitList}
+        onBatchAddToVisitList={handleBatchAddToVisitList}
+        onBatchRemoveFromVisitList={handleBatchRemoveFromVisitList}
         onUpdateItem={onUpdateItem}
         onDeleteItem={onDeleteItem}
         onAddItem={onAddItem}
@@ -899,7 +1042,7 @@ const MapView: React.FC<MapViewProps> = ({
           hasHallDefinition={insertDialogHasHall}
           mode={smartInsertMode}
           onSelect={handleInsertPositionSelect}
-          onCancel={() => setInsertDialogState({ isOpen: false, item: null })}
+          onCancel={() => { setBatchInsertPendingIds(null); setInsertDialogState({ isOpen: false, item: null }); }}
         />
       )}
     </div>

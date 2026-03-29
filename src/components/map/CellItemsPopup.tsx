@@ -1,5 +1,14 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ShoppingItem, PurchaseStatus, PurchaseStatuses } from '../../types';
+import { getBaseNumber } from '../../utils/spaceGrouping';
+
+interface SpaceGroup {
+  baseNumber: string;
+  label: string;
+  itemIds: string[];
+  addedCount: number;
+  totalCount: number;
+}
 
 interface CellItemsPopupProps {
   isOpen: boolean;
@@ -10,6 +19,8 @@ interface CellItemsPopupProps {
   executeModeItemIds: Set<string>;
   onAddToVisitList: (itemId: string) => void;
   onRemoveFromVisitList: (itemId: string) => void;
+  onBatchAddToVisitList?: (itemIds: string[]) => void;
+  onBatchRemoveFromVisitList?: (itemIds: string[]) => void;
   onUpdateItem?: (item: ShoppingItem) => void;
   onDeleteItem?: (itemId: string) => void;
   onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
@@ -35,6 +46,8 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   executeModeItemIds,
   onAddToVisitList,
   onRemoveFromVisitList,
+  onBatchAddToVisitList,
+  onBatchRemoveFromVisitList,
   onUpdateItem,
   onDeleteItem,
   onAddItem,
@@ -62,6 +75,58 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     numberOverride: '',
     purchaseStatus: 'None' as 'None' | 'Purchased' | 'Postpone' | 'Late',
   });
+
+  const spaceGroups: SpaceGroup[] = useMemo(() => {
+    const groupMap = new Map<string, { itemIds: string[]; addedCount: number }>();
+    const groupOrder: string[] = [];
+    for (const item of items) {
+      const base = getBaseNumber(item.number);
+      let group = groupMap.get(base);
+      if (!group) {
+        group = { itemIds: [], addedCount: 0 };
+        groupMap.set(base, group);
+        groupOrder.push(base);
+      }
+      group.itemIds.push(item.id);
+      if (executeModeItemIds.has(item.id)) {
+        group.addedCount++;
+      }
+    }
+    return groupOrder.map((base) => {
+      const g = groupMap.get(base)!;
+      const suffix = base.replace(/^\d+/, '');
+      return {
+        baseNumber: base,
+        label: suffix || base,
+        itemIds: g.itemIds,
+        addedCount: g.addedCount,
+        totalCount: g.itemIds.length,
+      };
+    });
+  }, [items, executeModeItemIds]);
+
+  const handleSpaceGroupClick = useCallback(
+    (group: SpaceGroup) => {
+      if (group.addedCount === group.totalCount) {
+        // 全追加済み → 全解除
+        const addedIds = group.itemIds.filter((id) => executeModeItemIds.has(id));
+        if (onBatchRemoveFromVisitList) {
+          onBatchRemoveFromVisitList(addedIds);
+        } else {
+          addedIds.forEach((id) => onRemoveFromVisitList(id));
+        }
+      } else {
+        // 未追加あり → 未追加分を追加
+        const notAddedIds = group.itemIds.filter((id) => !executeModeItemIds.has(id));
+        if (onBatchAddToVisitList) {
+          onBatchAddToVisitList(notAddedIds);
+        } else {
+          notAddedIds.forEach((id) => onAddToVisitList(id));
+        }
+      }
+    },
+    [executeModeItemIds, onBatchAddToVisitList, onBatchRemoveFromVisitList, onAddToVisitList, onRemoveFromVisitList],
+  );
 
   const priceOptions = useMemo(() => {
     const options: number[] = [0];
@@ -300,13 +365,45 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
         onClickCapture={handlePopupClickCapture}
       >
         {/* ヘッダー */}
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-          <h3 className="font-semibold text-slate-900 dark:text-white">
-            {blockName}-{number} {items.length > 0 ? `（${items.length}件）` : ''}
-          </h3>
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700 gap-2">
+          <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
+            <h3 className="font-semibold text-slate-900 dark:text-white whitespace-nowrap">
+              {blockName}-{number} {items.length > 0 ? `（${items.length}件）` : ''}
+            </h3>
+            {spaceGroups.length > 0 && (
+              <div className="flex items-center gap-1 flex-wrap">
+                {spaceGroups.map((group) => {
+                  const allAdded = group.addedCount === group.totalCount;
+                  const someAdded = group.addedCount > 0 && !allAdded;
+                  return (
+                    <button
+                      key={group.baseNumber}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSpaceGroupClick(group);
+                      }}
+                      className={`inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-medium border transition-colors ${
+                        allAdded
+                          ? 'bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700'
+                          : someAdded
+                            ? 'bg-amber-50 dark:bg-amber-900/30 text-amber-700 dark:text-amber-300 border-amber-300 dark:border-amber-600'
+                            : 'bg-slate-50 dark:bg-slate-700 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600'
+                      }`}
+                      title={`${group.baseNumber}: ${group.addedCount}/${group.totalCount}件追加済み`}
+                    >
+                      <span>{group.label}</span>
+                      <span className="text-[10px]">
+                        {allAdded ? '✓' : someAdded ? '─' : '○'}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 flex-shrink-0"
           >
             <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
