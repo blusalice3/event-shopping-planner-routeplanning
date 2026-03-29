@@ -4589,6 +4589,7 @@ const App: React.FC = () => {
                     duplicateCircleItemIds={duplicateCircleItemIds}
                     highlightedItemId={highlightedItemId}
                     layoutMode={layoutMode}
+                    viewMode="edit"
                     showHallGroups={!spaceGroupingEnabled}
                     hallDefinitions={getHallsForDate(
                       activeEventDate,
@@ -4703,6 +4704,7 @@ const App: React.FC = () => {
                     duplicateCircleItemIds={duplicateCircleItemIds}
                     highlightedItemId={highlightedItemId}
                     layoutMode={layoutMode}
+                    viewMode="edit"
                     showSpaceGroups={spaceGroupingEnabled}
                     collapsedSpaces={collapsedSpaces}
                     onToggleSpaceCollapse={handleToggleSpaceCollapse}
@@ -4760,6 +4762,7 @@ const App: React.FC = () => {
                 duplicateCircleItemIds={duplicateCircleItemIds}
                 highlightedItemId={highlightedItemId}
                 layoutMode={layoutMode}
+                viewMode="execute"
               />
             )}
           </div>

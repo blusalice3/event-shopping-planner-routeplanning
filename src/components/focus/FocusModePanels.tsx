@@ -92,6 +92,7 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
           isSelected={false}
           onSelectItem={() => {}}
           layoutMode={layoutMode}
+          viewMode="focus"
         />
       </div>
     ))}

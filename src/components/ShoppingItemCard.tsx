@@ -50,6 +50,7 @@ export interface ShoppingItemCardProps {
   isDuplicateCircle?: boolean;
   isSearchMatch?: boolean;
   layoutMode?: 'pc' | 'smartphone';
+  viewMode?: 'edit' | 'execute' | 'focus';
   hallIndex?: number; // ホール内での訪問順番号（0始まり）
   priorityLevel?: 'none' | 'priority' | 'highest'; // グループの優先度レベル
 }
@@ -153,6 +154,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   isDuplicateCircle = false,
   isSearchMatch = false,
   layoutMode = 'pc',
+  viewMode = 'edit',
   hallIndex,
   priorityLevel = 'none',
 }) => {
@@ -340,7 +342,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   // スマートフォンモード用レイアウト
   if (layoutMode === 'smartphone') {
     // 実行/集中モード：左サイドバー型レイアウト
-    if (!onMoveUp) {
+    if (viewMode !== 'edit') {
       return (
         <div
           className={cardClasses}

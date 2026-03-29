@@ -51,6 +51,7 @@ interface ShoppingListProps {
   duplicateCircleItemIds?: Set<string>;
   highlightedItemId?: string | null;
   layoutMode?: 'pc' | 'smartphone';
+  viewMode?: 'edit' | 'execute' | 'focus';
   // ホールグループ化用のprops
   showHallGroups?: boolean;
   hallDefinitions?: HallDefinition[];
@@ -229,6 +230,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   duplicateCircleItemIds = new Set(),
   highlightedItemId = null,
   layoutMode = 'pc',
+  viewMode = 'edit',
   showHallGroups = false,
   hallDefinitions = [],
   hallOrder = [],
@@ -1679,6 +1681,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
                           isSearchMatch={highlightedItemId === item.id}
                           layoutMode={layoutMode}
+                          viewMode={viewMode}
                         />
 
                         {activeDropTarget?.id === item.id &&
@@ -2123,6 +2126,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
                         isSearchMatch={highlightedItemId === item.id}
                         layoutMode={layoutMode}
+                        viewMode={viewMode}
                         hallIndex={hallIndex}
                         priorityLevel={group.priority}
                       />
@@ -2341,6 +2345,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
               isSearchMatch={highlightedItemId === item.id}
               layoutMode={layoutMode}
+              viewMode={viewMode}
             />
 
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (
