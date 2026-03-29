@@ -35,6 +35,7 @@ const statusLabels: Record<PurchaseStatus, string> = {
   Absent: '欠席',
   Postpone: '後回し',
   Late: '遅参',
+  LimitedPurchase: '限数',
 };
 
 const CellItemsPopup: React.FC<CellItemsPopupProps> = ({

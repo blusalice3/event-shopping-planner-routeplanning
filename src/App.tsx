@@ -72,6 +72,19 @@ import { buildEventExportFile, hasExportableItems } from './features/events/expo
 import { toImportedEventData } from './features/events/fileImport';
 import { removeRecordKey, renameRecordKey, upsertRecordKey } from './features/events/recordOps';
 import {
+  computeUpdateItem,
+  computeDeleteItem,
+  computeAddItemFromFocusMode,
+  computeAddToExecuteListFromMap,
+  computeAddToExecuteListFromMapAtPosition,
+  computeRemoveFromExecuteListFromMap,
+  computeMoveToExecuteColumn,
+  computeRemoveFromExecuteColumn,
+  computeMoveItem,
+  computeMoveItemVertical,
+  computeUpdateItemPriority,
+} from './features/events/itemOps';
+import {
   buildImportCompletionMessage,
   resolveEventListTab,
 } from './features/events/uiOrchestration';
@@ -741,41 +754,29 @@ const App: React.FC = () => {
     (updatedItem: ShoppingItem) => {
       if (!activeEventName) return;
 
-      setEventLists((prev) => {
-        const currentItem = prev[activeEventName]?.find((item) => item.id === updatedItem.id);
-        const purchaseStatusChanged =
-          currentItem && currentItem.purchaseStatus !== updatedItem.purchaseStatus;
-        const priceChanged = currentItem && currentItem.price !== updatedItem.price;
+      const currentItems = eventLists[activeEventName] || [];
+      const currentItem = currentItems.find((item) => item.id === updatedItem.id);
+      const currentEventDate = activeEventDate;
+      const currentMode = dayModes[activeEventName]?.[currentEventDate];
 
+      const result = computeUpdateItem(
+        currentItems,
+        updatedItem,
+        currentMode as ViewMode | undefined,
+        currentItem?.protectionLevel,
+        currentItem?.source,
+      );
 
-        if (purchaseStatusChanged) {
-          setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
-        }
+      if (result.purchaseStatusChanged) {
+        setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
+      }
 
-        const currentEventDate = activeEventDate;
-        const currentMode = dayModes[activeEventName]?.[currentEventDate];
-        let finalItem = updatedItem;
-
-        if (
-          (currentMode === 'execute' || currentMode === 'focus') &&
-          (purchaseStatusChanged || priceChanged)
-        ) {
-          const currentProtection =
-            currentItem?.protectionLevel ?? (currentItem?.source === 'app' ? 'full' : 'none');
-          if (currentProtection === 'none') {
-            finalItem = { ...updatedItem, protectionLevel: 'deletable' as const };
-          }
-        }
-
-        return {
-          ...prev,
-          [activeEventName]: prev[activeEventName].map((item) =>
-            item.id === updatedItem.id ? finalItem : item,
-          ),
-        };
-      });
+      setEventLists((prev) => ({
+        ...prev,
+        [activeEventName]: result.items,
+      }));
     },
-    [activeEventName, activeTab, eventDates, dayModes],
+    [activeEventName, activeTab, eventDates, dayModes, eventLists],
   );
 
   const handleMoveItem = useCallback(
@@ -792,308 +793,34 @@ const App: React.FC = () => {
       const currentEventDate = activeEventDate;
       const mode = dayModes[activeEventName]?.[currentEventDate];
 
-      // スペースグループドラッグ時は、グループ内全アイテムIDを選択扱いにする
       const spaceGroupIds = spaceGroupDragItemIdsRef.current;
       const effectiveSelectedIds = spaceGroupIds
         ? new Set(spaceGroupIds)
         : selectedItemIds;
-      const isDragInEffectiveSelection = effectiveSelectedIds.has(dragId);
-      // ドラッグ終了後にリセット
       spaceGroupDragItemIdsRef.current = null;
 
-      const isAppendToEnd = hoverId === '__END_OF_LIST__';
+      const currentExecuteItems = executeModeItems[activeEventName]?.[currentEventDate]
+        ? { ...executeModeItems[activeEventName], [currentEventDate]: [...(executeModeItems[activeEventName]?.[currentEventDate] || [])] }
+        : (executeModeItems[activeEventName] || {});
 
+      const result = computeMoveItem({
+        dragId,
+        hoverId,
+        targetColumn,
+        sourceColumn,
+        mode: mode as ViewMode | undefined,
+        effectiveSelectedIds,
+        allItems: eventLists[activeEventName] || [],
+        executeModeItems: currentExecuteItems,
+        dayName: currentEventDate,
+        selectedBlockFilters,
+      });
 
-      if (mode === 'edit' && sourceColumn && targetColumn && sourceColumn !== targetColumn) {
-        const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-
-        if (sourceColumn === 'candidate' && targetColumn === 'execute') {
-          const currentTabItemsForMove = items.filter((item) => item.eventDate === activeTab);
-          let candidateItems = currentTabItemsForMove.filter((item) => !executeIdsSet.has(item.id));
-
-
-          if (selectedBlockFilters.size > 0) {
-            candidateItems = candidateItems.filter((item) => selectedBlockFilters.has(item.block));
-          }
-
-
-          let itemsToMove: ShoppingItem[] = [];
-          if (isDragInEffectiveSelection) {
-            itemsToMove = candidateItems.filter((item) => effectiveSelectedIds.has(item.id));
-          } else {
-            const item = candidateItems.find((item) => item.id === dragId);
-            if (item) itemsToMove = [item];
-          }
-
-          if (itemsToMove.length === 0) return;
-
-          const itemIdsToMove = itemsToMove.map((item) => item.id);
-
-
-          setExecuteModeItems((prevExecute) => {
-            const eventItems = prevExecute[activeEventName] || {};
-            const dayItems = [...(eventItems[currentEventDate] || [])];
-
-            if (isAppendToEnd) {
-              return {
-                ...prevExecute,
-                [activeEventName]: {
-                  ...eventItems,
-                  [currentEventDate]: [...dayItems, ...itemIdsToMove],
-                },
-              };
-            } else {
-              const hoverIndex = dayItems.findIndex((id) => id === hoverId);
-              if (hoverIndex === -1) {
-                return {
-                  ...prevExecute,
-                  [activeEventName]: {
-                    ...eventItems,
-                    [currentEventDate]: [...dayItems, ...itemIdsToMove],
-                  },
-                };
-              }
-              dayItems.splice(hoverIndex, 0, ...itemIdsToMove);
-              return {
-                ...prevExecute,
-                [activeEventName]: { ...eventItems, [currentEventDate]: dayItems },
-              };
-            }
-          });
-          return;
-        } else if (sourceColumn === 'execute' && targetColumn === 'candidate') {
-          setEventLists((prev) => {
-            const allItems = [...(prev[activeEventName] || [])];
-            const executeItems = allItems.filter(
-              (item) => item.eventDate.includes(currentEventDate) && executeIdsSet.has(item.id),
-            );
-            const candidateItems = allItems.filter(
-              (item) => item.eventDate.includes(currentEventDate) && !executeIdsSet.has(item.id),
-            );
-
-
-            let itemsToMove: ShoppingItem[] = [];
-            if (isDragInEffectiveSelection) {
-              itemsToMove = executeItems.filter((item) => effectiveSelectedIds.has(item.id));
-            } else {
-              const item = executeItems.find((item) => item.id === dragId);
-              if (item) itemsToMove = [item];
-            }
-
-            if (itemsToMove.length === 0) return prev;
-
-            const itemIdsToMove = itemsToMove.map((item) => item.id);
-
-
-            setExecuteModeItems((prevExecute) => {
-              const eventItems = prevExecute[activeEventName] || {};
-              const dayItems = (eventItems[currentEventDate] || []).filter(
-                (id) => !itemIdsToMove.includes(id),
-              );
-              return {
-                ...prevExecute,
-                [activeEventName]: { ...eventItems, [currentEventDate]: dayItems },
-              };
-            });
-
-
-            let newCandidateList: ShoppingItem[] = [];
-            if (isAppendToEnd) {
-              newCandidateList = [...candidateItems, ...itemsToMove];
-            } else {
-              const hoverIndex = candidateItems.findIndex((item) => item.id === hoverId);
-              if (hoverIndex === -1) {
-                newCandidateList = [...candidateItems, ...itemsToMove];
-              } else {
-                const listWithoutMoved = candidateItems.filter(
-                  (item) => !itemIdsToMove.includes(item.id),
-                );
-                listWithoutMoved.splice(hoverIndex, 0, ...itemsToMove);
-                newCandidateList = listWithoutMoved;
-              }
-            }
-
-
-            const remainingExecuteItems = executeItems.filter(
-              (item) => !itemIdsToMove.includes(item.id),
-            );
-
-            const newItems = allItems.map((item) => {
-              if (!item.eventDate.includes(currentEventDate)) {
-                return item;
-              }
-              if (executeIdsSet.has(item.id) && !itemIdsToMove.includes(item.id)) {
-                return remainingExecuteItems.shift() || item;
-              } else if (!executeIdsSet.has(item.id) || itemIdsToMove.includes(item.id)) {
-                return newCandidateList.shift() || item;
-              }
-              return item;
-            });
-
-            return { ...prev, [activeEventName]: newItems };
-          });
-          return;
-        }
+      if (result.eventListItems) {
+        setEventLists((prev) => ({ ...prev, [activeEventName]: result.eventListItems! }));
       }
-
-      if (mode === 'edit' && targetColumn === 'execute') {
-        setExecuteModeItems((prev) => {
-          const eventItems = prev[activeEventName] || {};
-          const dayItems = [...(eventItems[currentEventDate] || [])];
-
-          if (isDragInEffectiveSelection) {
-            const selectedBlock = dayItems.filter((id) => effectiveSelectedIds.has(id));
-            const listWithoutSelection = dayItems.filter((id) => !effectiveSelectedIds.has(id));
-
-            if (isAppendToEnd) {
-              return {
-                ...prev,
-                [activeEventName]: {
-                  ...eventItems,
-                  [currentEventDate]: [...listWithoutSelection, ...selectedBlock],
-                },
-              };
-            }
-
-            const targetIndex = listWithoutSelection.findIndex((id) => id === hoverId);
-            if (targetIndex === -1) return prev;
-            listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
-
-            return {
-              ...prev,
-              [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection },
-            };
-          } else {
-            const dragIndex = dayItems.findIndex((id) => id === dragId);
-            if (dragIndex === -1) return prev; // 移動できない条件では現在の状態をそのまま返す。
-            const [draggedItem] = dayItems.splice(dragIndex, 1);
-
-            if (isAppendToEnd) {
-              dayItems.push(draggedItem);
-            } else {
-              const hoverIndex = dayItems.findIndex((id) => id === hoverId);
-              if (hoverIndex === -1) return prev;
-              dayItems.splice(hoverIndex, 0, draggedItem);
-            }
-
-            return {
-              ...prev,
-              [activeEventName]: { ...eventItems, [currentEventDate]: dayItems },
-            };
-          }
-        });
-      } else if (mode === 'edit' && targetColumn === 'candidate') {
-        setEventLists((prev) => {
-          const allItems = [...(prev[activeEventName] || [])];
-          const currentTabKey = currentEventDate;
-          const executeIdsSet = new Set(
-            executeModeItems[activeEventName]?.[currentEventDate] || [],
-          );
-
-          const candidateItems = allItems.filter(
-            (item) => item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id),
-          );
-
-          if (isDragInEffectiveSelection) {
-            const selectedBlock = candidateItems.filter((item) => effectiveSelectedIds.has(item.id));
-            const listWithoutSelection = candidateItems.filter(
-              (item) => !effectiveSelectedIds.has(item.id),
-            );
-
-            let newCandidateList: ShoppingItem[] = [];
-
-            if (isAppendToEnd) {
-              newCandidateList = [...listWithoutSelection, ...selectedBlock];
-            } else {
-              const targetIndex = listWithoutSelection.findIndex((item) => item.id === hoverId);
-              if (targetIndex === -1) return prev;
-              listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
-              newCandidateList = listWithoutSelection;
-            }
-
-
-            const executeItems = allItems.filter(
-              (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
-            );
-
-            const newItems = allItems.map((item) => {
-              if (!item.eventDate.includes(currentTabKey)) {
-                return item;
-              }
-              if (executeIdsSet.has(item.id)) {
-                return executeItems.shift() || item;
-              } else {
-                return newCandidateList.shift() || item;
-              }
-            });
-
-            return { ...prev, [activeEventName]: newItems };
-          } else {
-            const dragIndex = candidateItems.findIndex((item) => item.id === dragId);
-            if (dragIndex === -1) return prev;
-
-            const [draggedItem] = candidateItems.splice(dragIndex, 1);
-
-            if (isAppendToEnd) {
-              candidateItems.push(draggedItem);
-            } else {
-              const hoverIndex = candidateItems.findIndex((item) => item.id === hoverId);
-              if (hoverIndex === -1) return prev;
-              candidateItems.splice(hoverIndex, 0, draggedItem);
-            }
-
-
-            const executeItems = allItems.filter(
-              (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
-            );
-
-            const newItems = allItems.map((item) => {
-              if (!item.eventDate.includes(currentTabKey)) {
-                return item;
-              }
-              if (executeIdsSet.has(item.id)) {
-                return executeItems.shift() || item;
-              } else {
-                return candidateItems.shift() || item;
-              }
-            });
-
-            return { ...prev, [activeEventName]: newItems };
-          }
-        });
-      } else if (mode === 'execute') {
-        setEventLists((prev) => {
-          const newItems = [...(prev[activeEventName] || [])];
-
-          if (isDragInEffectiveSelection) {
-            const selectedBlock = newItems.filter((item) => effectiveSelectedIds.has(item.id));
-            const listWithoutSelection = newItems.filter((item) => !effectiveSelectedIds.has(item.id));
-
-            if (isAppendToEnd) {
-              return { ...prev, [activeEventName]: [...listWithoutSelection, ...selectedBlock] };
-            }
-
-            const targetIndex = listWithoutSelection.findIndex((item) => item.id === hoverId);
-            if (targetIndex === -1) return prev;
-            listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
-
-            return { ...prev, [activeEventName]: listWithoutSelection };
-          } else {
-            const dragIndex = newItems.findIndex((item) => item.id === dragId);
-            if (dragIndex === -1) return prev;
-
-            const [draggedItem] = newItems.splice(dragIndex, 1);
-
-            if (isAppendToEnd) {
-              newItems.push(draggedItem);
-            } else {
-              const hoverIndex = newItems.findIndex((item) => item.id === hoverId);
-              if (hoverIndex === -1) return prev;
-              newItems.splice(hoverIndex, 0, draggedItem);
-            }
-            return { ...prev, [activeEventName]: newItems };
-          }
-        });
+      if (result.executeModeItems) {
+        setExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems! }));
       }
     },
     [
@@ -1104,11 +831,11 @@ const App: React.FC = () => {
       executeModeItems,
       eventDates,
       selectedBlockFilters,
-      items,
+      eventLists,
     ],
   );
-  const handleMoveItemUp = useCallback(
-    (itemId: string, targetColumn?: 'execute' | 'candidate') => {
+  const handleMoveItemVerticalInternal = useCallback(
+    (direction: 'up' | 'down', itemId: string, targetColumn?: 'execute' | 'candidate') => {
       if (!activeEventName) return;
       setSortState('Manual');
       setBlockSortDirection(null);
@@ -1116,153 +843,28 @@ const App: React.FC = () => {
       const currentEventDate = activeEventDate;
       const mode = dayModes[activeEventName]?.[currentEventDate];
 
-      // スペースグループドラッグ時の一括選択対応
       const spaceGroupIds = spaceGroupDragItemIdsRef.current;
       const effectiveSelectedIds = spaceGroupIds
         ? new Set(spaceGroupIds)
         : selectedItemIds;
-      const isDragInEffectiveSelection = effectiveSelectedIds.has(itemId);
 
-      if (mode === 'edit' && targetColumn === 'execute') {
-        setExecuteModeItems((prev) => {
-          const eventItems = prev[activeEventName] || {};
-          const dayItems = [...(eventItems[currentEventDate] || [])];
-          const currentIndex = dayItems.findIndex((id) => id === itemId);
+      const result = computeMoveItemVertical(
+        direction,
+        itemId,
+        targetColumn,
+        mode as ViewMode | undefined,
+        effectiveSelectedIds,
+        eventLists[activeEventName] || [],
+        executeModeItems[activeEventName] || {},
+        currentEventDate,
+        (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate),
+      );
 
-          if (currentIndex <= 0) return prev;
-          const targetId = dayItems[currentIndex - 1];
-          if (!areItemsInSameHall(itemId, targetId, currentEventDate)) {
-            return prev;
-          }
-
-
-          if (isDragInEffectiveSelection) {
-            const selectedIds = dayItems.filter((id) => effectiveSelectedIds.has(id));
-            const listWithoutSelection = dayItems.filter((id) => !effectiveSelectedIds.has(id));
-
-
-            const firstSelectedIndex = dayItems.findIndex((id) => effectiveSelectedIds.has(id));
-            if (firstSelectedIndex > 0) {
-              const targetIdForGroup = dayItems[firstSelectedIndex - 1];
-              if (!areItemsInSameHall(selectedIds[0], targetIdForGroup, currentEventDate)) {
-                return prev;
-              }
-              const newTargetIndex = firstSelectedIndex - 1;
-              listWithoutSelection.splice(newTargetIndex, 0, ...selectedIds);
-              return {
-                ...prev,
-                [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection },
-              };
-            }
-            return prev;
-          } else {
-            [dayItems[currentIndex - 1], dayItems[currentIndex]] = [
-              dayItems[currentIndex],
-              dayItems[currentIndex - 1],
-            ];
-            return {
-              ...prev,
-              [activeEventName]: { ...eventItems, [currentEventDate]: dayItems },
-            };
-          }
-        });
-      } else if (mode === 'edit' && targetColumn === 'candidate') {
-        setEventLists((prev) => {
-          const allItems = [...(prev[activeEventName] || [])];
-          const currentTabKey = currentEventDate;
-          const executeIdsSet = new Set(
-            executeModeItems[activeEventName]?.[currentEventDate] || [],
-          );
-
-
-          const candidateItems = allItems.filter(
-            (item) => item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id),
-          );
-
-          const currentIndex = candidateItems.findIndex((item) => item.id === itemId);
-          if (currentIndex <= 0) return prev;
-          if (isDragInEffectiveSelection) {
-            const selectedBlock = candidateItems.filter((item) => effectiveSelectedIds.has(item.id));
-            const listWithoutSelection = candidateItems.filter(
-              (item) => !effectiveSelectedIds.has(item.id),
-            );
-            const firstSelectedIndex = candidateItems.findIndex((item) =>
-              effectiveSelectedIds.has(item.id),
-            );
-
-            if (firstSelectedIndex > 0) {
-              const newTargetIndex = firstSelectedIndex - 1;
-              listWithoutSelection.splice(newTargetIndex, 0, ...selectedBlock);
-
-
-              const executeItems = allItems.filter(
-                (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
-              );
-
-              const newItems = allItems.map((item) => {
-                if (!item.eventDate.includes(currentTabKey)) {
-                  return item;
-                }
-                if (executeIdsSet.has(item.id)) {
-                  return executeItems.shift() || item;
-                } else {
-                  return listWithoutSelection.shift() || item;
-                }
-              });
-
-              return { ...prev, [activeEventName]: newItems };
-            }
-            return prev;
-          } else {
-            [candidateItems[currentIndex - 1], candidateItems[currentIndex]] = [
-              candidateItems[currentIndex],
-              candidateItems[currentIndex - 1],
-            ];
-
-
-            const executeItems = allItems.filter(
-              (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
-            );
-
-            const newItems = allItems.map((item) => {
-              if (!item.eventDate.includes(currentTabKey)) {
-                return item;
-              }
-              if (executeIdsSet.has(item.id)) {
-                return executeItems.shift() || item;
-              } else {
-                return candidateItems.shift() || item;
-              }
-            });
-
-            return { ...prev, [activeEventName]: newItems };
-          }
-        });
-      } else if (mode === 'execute') {
-        setEventLists((prev) => {
-          const newItems = [...(prev[activeEventName] || [])];
-          const currentIndex = newItems.findIndex((item) => item.id === itemId);
-
-          if (currentIndex <= 0) return prev;
-          if (isDragInEffectiveSelection) {
-            const selectedBlock = newItems.filter((item) => effectiveSelectedIds.has(item.id));
-            const listWithoutSelection = newItems.filter((item) => !effectiveSelectedIds.has(item.id));
-            const firstSelectedIndex = newItems.findIndex((item) => effectiveSelectedIds.has(item.id));
-
-            if (firstSelectedIndex > 0) {
-              const newTargetIndex = firstSelectedIndex - 1;
-              listWithoutSelection.splice(newTargetIndex, 0, ...selectedBlock);
-              return { ...prev, [activeEventName]: listWithoutSelection };
-            }
-            return prev;
-          } else {
-            [newItems[currentIndex - 1], newItems[currentIndex]] = [
-              newItems[currentIndex],
-              newItems[currentIndex - 1],
-            ];
-            return { ...prev, [activeEventName]: newItems };
-          }
-        });
+      if (result.eventListItems) {
+        setEventLists((prev) => ({ ...prev, [activeEventName]: result.eventListItems! }));
+      }
+      if (result.executeModeItems) {
+        setExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems! }));
       }
     },
     [
@@ -1272,231 +874,28 @@ const App: React.FC = () => {
       dayModes,
       executeModeItems,
       eventDates,
+      eventLists,
       areItemsInSameHall,
     ],
+  );
+
+  const handleMoveItemUp = useCallback(
+    (itemId: string, targetColumn?: 'execute' | 'candidate') =>
+      handleMoveItemVerticalInternal('up', itemId, targetColumn),
+    [handleMoveItemVerticalInternal],
   );
 
   const handleMoveItemDown = useCallback(
-    (itemId: string, targetColumn?: 'execute' | 'candidate') => {
-      if (!activeEventName) return;
-      setSortState('Manual');
-      setBlockSortDirection(null);
-
-      const currentEventDate = activeEventDate;
-      const mode = dayModes[activeEventName]?.[currentEventDate];
-
-      // スペースグループドラッグ時の一括選択対応
-      const spaceGroupIds = spaceGroupDragItemIdsRef.current;
-      const effectiveSelectedIds = spaceGroupIds
-        ? new Set(spaceGroupIds)
-        : selectedItemIds;
-      const isDragInEffectiveSelection = effectiveSelectedIds.has(itemId);
-
-      if (mode === 'edit' && targetColumn === 'execute') {
-        setExecuteModeItems((prev) => {
-          const eventItems = prev[activeEventName] || {};
-          const dayItems = [...(eventItems[currentEventDate] || [])];
-          const currentIndex = dayItems.findIndex((id) => id === itemId);
-
-          if (currentIndex < 0 || currentIndex >= dayItems.length - 1) return prev;
-          const targetId = dayItems[currentIndex + 1];
-          if (!areItemsInSameHall(itemId, targetId, currentEventDate)) {
-            return prev;
-          }
-
-
-          if (isDragInEffectiveSelection) {
-            const selectedIds = dayItems.filter((id) => effectiveSelectedIds.has(id));
-            const listWithoutSelection = dayItems.filter((id) => !effectiveSelectedIds.has(id));
-
-
-            let lastSelectedIndex = -1;
-            dayItems.forEach((id, index) => {
-              if (effectiveSelectedIds.has(id)) lastSelectedIndex = index;
-            });
-
-
-            if (lastSelectedIndex >= 0 && lastSelectedIndex < dayItems.length - 1) {
-              const jumpOverItemId = dayItems[lastSelectedIndex + 1];
-
-
-              if (
-                !areItemsInSameHall(
-                  selectedIds[selectedIds.length - 1],
-                  jumpOverItemId,
-                  currentEventDate,
-                )
-              ) {
-                return prev; // 移動できない条件では現在の状態をそのまま返す。
-              }
-
-
-              const targetIndexInListWithout = listWithoutSelection.findIndex(
-                (id) => id === jumpOverItemId,
-              );
-
-              if (targetIndexInListWithout !== -1) {
-                listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedIds);
-                return {
-                  ...prev,
-                  [activeEventName]: { ...eventItems, [currentEventDate]: listWithoutSelection },
-                };
-              }
-            }
-            return prev;
-          } else {
-            [dayItems[currentIndex], dayItems[currentIndex + 1]] = [
-              dayItems[currentIndex + 1],
-              dayItems[currentIndex],
-            ];
-            return {
-              ...prev,
-              [activeEventName]: { ...eventItems, [currentEventDate]: dayItems },
-            };
-          }
-        });
-      } else if (mode === 'edit' && targetColumn === 'candidate') {
-        setEventLists((prev) => {
-          const allItems = [...(prev[activeEventName] || [])];
-          const currentTabKey = currentEventDate;
-          const executeIdsSet = new Set(
-            executeModeItems[activeEventName]?.[currentEventDate] || [],
-          );
-
-
-          const candidateItems = allItems.filter(
-            (item) => item.eventDate.includes(currentTabKey) && !executeIdsSet.has(item.id),
-          );
-
-          const currentIndex = candidateItems.findIndex((item) => item.id === itemId);
-          if (currentIndex < 0 || currentIndex >= candidateItems.length - 1) return prev;
-          if (isDragInEffectiveSelection) {
-            const selectedBlock = candidateItems.filter((item) => effectiveSelectedIds.has(item.id));
-            const listWithoutSelection = candidateItems.filter(
-              (item) => !effectiveSelectedIds.has(item.id),
-            );
-
-
-            let lastSelectedIndex = -1;
-            candidateItems.forEach((item, index) => {
-              if (effectiveSelectedIds.has(item.id)) lastSelectedIndex = index;
-            });
-
-
-            if (lastSelectedIndex >= 0 && lastSelectedIndex < candidateItems.length - 1) {
-              const jumpOverItemId = candidateItems[lastSelectedIndex + 1].id;
-              const targetIndexInListWithout = listWithoutSelection.findIndex(
-                (item) => item.id === jumpOverItemId,
-              );
-
-              if (targetIndexInListWithout !== -1) {
-                listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedBlock);
-
-
-                const executeItems = allItems.filter(
-                  (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
-                );
-
-                const newItems = allItems.map((item) => {
-                  if (!item.eventDate.includes(currentTabKey)) {
-                    return item;
-                  }
-                  if (executeIdsSet.has(item.id)) {
-                    return executeItems.shift() || item;
-                  } else {
-                    return listWithoutSelection.shift() || item;
-                  }
-                });
-
-                return { ...prev, [activeEventName]: newItems };
-              }
-            }
-            return prev;
-          } else {
-            [candidateItems[currentIndex], candidateItems[currentIndex + 1]] = [
-              candidateItems[currentIndex + 1],
-              candidateItems[currentIndex],
-            ];
-
-
-            const executeItems = allItems.filter(
-              (item) => item.eventDate.includes(currentTabKey) && executeIdsSet.has(item.id),
-            );
-
-            const newItems = allItems.map((item) => {
-              if (!item.eventDate.includes(currentTabKey)) {
-                return item;
-              }
-              if (executeIdsSet.has(item.id)) {
-                return executeItems.shift() || item;
-              } else {
-                return candidateItems.shift() || item;
-              }
-            });
-
-            return { ...prev, [activeEventName]: newItems };
-          }
-        });
-      } else if (mode === 'execute') {
-        setEventLists((prev) => {
-          const newItems = [...(prev[activeEventName] || [])];
-          const currentIndex = newItems.findIndex((item) => item.id === itemId);
-
-          if (currentIndex < 0 || currentIndex >= newItems.length - 1) return prev;
-          if (isDragInEffectiveSelection) {
-            const selectedBlock = newItems.filter((item) => effectiveSelectedIds.has(item.id));
-            const listWithoutSelection = newItems.filter((item) => !effectiveSelectedIds.has(item.id));
-
-
-            let lastSelectedIndex = -1;
-            newItems.forEach((item, index) => {
-              if (effectiveSelectedIds.has(item.id)) lastSelectedIndex = index;
-            });
-
-
-            if (lastSelectedIndex >= 0 && lastSelectedIndex < newItems.length - 1) {
-              const jumpOverItemId = newItems[lastSelectedIndex + 1].id;
-              const targetIndexInListWithout = listWithoutSelection.findIndex(
-                (item) => item.id === jumpOverItemId,
-              );
-
-              if (targetIndexInListWithout !== -1) {
-                listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedBlock);
-                return { ...prev, [activeEventName]: listWithoutSelection };
-              }
-            }
-            return prev;
-          } else {
-            [newItems[currentIndex], newItems[currentIndex + 1]] = [
-              newItems[currentIndex + 1],
-              newItems[currentIndex],
-            ];
-            return { ...prev, [activeEventName]: newItems };
-          }
-        });
-      }
-    },
-    [
-      activeEventName,
-      selectedItemIds,
-      activeTab,
-      dayModes,
-      executeModeItems,
-      eventDates,
-      areItemsInSameHall,
-    ],
+    (itemId: string, targetColumn?: 'execute' | 'candidate') =>
+      handleMoveItemVerticalInternal('down', itemId, targetColumn),
+    [handleMoveItemVerticalInternal],
   );
 
   const handleMoveToExecuteColumn = useCallback(
     (itemIds: string[]) => {
       if (!activeEventName) return;
 
-
       const currentEventDate = activeEventDate;
-
-
-      const executeIdsSet = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-
 
       if (
         rangeStart &&
@@ -1513,38 +912,18 @@ const App: React.FC = () => {
         setRangeEnd(null);
       }
 
+      const newExecuteItems = computeMoveToExecuteColumn(
+        itemIds,
+        currentEventDate,
+        items,
+        executeModeItems[activeEventName] || {},
+        selectedBlockFilters,
+      );
 
-      const currentTabItemsForMove = items.filter((item) => item.eventDate === currentEventDate);
-
-
-      let candidateItems = currentTabItemsForMove.filter((item) => !executeIdsSet.has(item.id));
-
-
-      if (selectedBlockFilters.size > 0) {
-        candidateItems = candidateItems.filter((item) => selectedBlockFilters.has(item.block));
-      }
-
-
-      const itemIdsSet = new Set(itemIds);
-      const itemsToMove = candidateItems.filter((item) => itemIdsSet.has(item.id));
-      const orderedItemIds = itemsToMove.map((item) => item.id);
-
-      setExecuteModeItems((prev) => {
-        const eventItems = prev[activeEventName] || {};
-        const currentDayItems = [...(eventItems[currentEventDate] || [])];
-
-
-        const existingIdsSet = new Set(currentDayItems);
-        const newItemIds = orderedItemIds.filter((id) => !existingIdsSet.has(id));
-
-        return {
-          ...prev,
-          [activeEventName]: {
-            ...eventItems,
-            [currentEventDate]: [...currentDayItems, ...newItemIds],
-          },
-        };
-      });
+      setExecuteModeItems((prev) => ({
+        ...prev,
+        [activeEventName]: newExecuteItems,
+      }));
 
       setSelectedItemIds(new Set());
     },
@@ -1565,7 +944,6 @@ const App: React.FC = () => {
 
       const currentEventDate = activeEventDate;
 
-
       if (
         rangeStart &&
         itemIds.includes(rangeStart.itemId) &&
@@ -1581,24 +959,20 @@ const App: React.FC = () => {
         setRangeEnd(null);
       }
 
-      setExecuteModeItems((prev) => {
-        const eventItems = prev[activeEventName] || {};
-        const currentDayItems = (eventItems[currentEventDate] || []).filter(
-          (id) => !itemIds.includes(id),
-        );
+      const newExecuteItems = computeRemoveFromExecuteColumn(
+        itemIds,
+        executeModeItems[activeEventName] || {},
+        currentEventDate,
+      );
 
-        return {
-          ...prev,
-          [activeEventName]: {
-            ...eventItems,
-            [currentEventDate]: currentDayItems,
-          },
-        };
-      });
+      setExecuteModeItems((prev) => ({
+        ...prev,
+        [activeEventName]: newExecuteItems,
+      }));
 
       setSelectedItemIds(new Set());
     },
-    [activeEventName, activeTab, eventDates, rangeStart, rangeEnd],
+    [activeEventName, activeTab, eventDates, rangeStart, rangeEnd, executeModeItems],
   );
 
   const handleToggleMode = useCallback(() => {
@@ -1893,29 +1267,14 @@ const App: React.FC = () => {
   const handleConfirmDelete = () => {
     if (!itemToDelete || !activeEventName) return;
 
-    const deletedId = itemToDelete.id;
+    const result = computeDeleteItem(
+      eventLists[activeEventName] || [],
+      itemToDelete.id,
+      executeModeItems[activeEventName] || {},
+    );
 
-    setEventLists((prev) => ({
-      ...prev,
-      [activeEventName]: prev[activeEventName].filter((item) => item.id !== deletedId),
-    }));
-
-
-    setExecuteModeItems((prev) => {
-      const eventItems = prev[activeEventName];
-      if (!eventItems) return prev;
-
-      const updatedEventItems: ExecuteModeItems = {};
-      Object.keys(eventItems).forEach((eventDate) => {
-        updatedEventItems[eventDate] = eventItems[eventDate].filter((id) => id !== deletedId);
-      });
-
-      return {
-        ...prev,
-        [activeEventName]: updatedEventItems,
-      };
-    });
-
+    setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
+    setExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
     setItemToDelete(null);
   };
 
@@ -3053,128 +2412,29 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return;
 
       const dayName = activeEventDate;
-
-
-      const item = items.find((i) => i.id === itemId);
-      if (!item) return;
-
-
       const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
       const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
         hallOrder: [],
         hallVisitLists: [],
       };
-
-
       const currentMapData = mapData[activeEventName]?.[currentMapTabName];
-      let itemHallId: string | null = null;
 
-      if (currentMapData && halls.length > 0) {
-        const itemBlockName = item.block?.trim() || '';
-        const block = currentMapData.blocks.find((b) => b.name === itemBlockName);
+      const newExecuteItems = computeAddToExecuteListFromMap(
+        itemId,
+        dayName,
+        items,
+        executeModeItems[activeEventName] || {},
+        halls,
+        hallRouteSettingsForMap,
+        currentMapData,
+      );
 
-        if (block) {
-          const centerRow = (block.startRow + block.endRow) / 2;
-          const centerCol = (block.startCol + block.endCol) / 2;
-
-          for (const hall of halls) {
-            if (
-              hall.vertices.length >= 4 &&
-              isPointInPolygon(centerRow, centerCol, hall.vertices)
-            ) {
-              itemHallId = hall.id;
-              break;
-            }
-          }
-        }
-      }
-
-      setExecuteModeItems((prev) => {
-        const eventItems = prev[activeEventName] || {};
-        const dayItems = [...(eventItems[dayName] || [])];
-
-
-        if (dayItems.includes(itemId)) return prev;
-
-
-        if (!itemHallId || halls.length === 0) {
-          dayItems.push(itemId);
-          return {
-            ...prev,
-            [activeEventName]: {
-              ...eventItems,
-              [dayName]: dayItems,
-            },
-          };
-        }
-
-
-        const hallOrder =
-          hallRouteSettingsForMap.hallOrder.length > 0
-            ? hallRouteSettingsForMap.hallOrder
-            : halls.map((h) => h.id);
-
-
-        const itemsMap = new Map(items.map((i) => [i.id, i]));
-        const getHallIdForItem = (id: string): string | null => {
-          const targetItem = itemsMap.get(id);
-          if (!targetItem || !currentMapData) return null;
-
-          const blockName = targetItem.block?.trim() || '';
-          const targetBlock = currentMapData.blocks.find((b) => b.name === blockName);
-          if (!targetBlock) return null;
-
-          const cRow = (targetBlock.startRow + targetBlock.endRow) / 2;
-          const cCol = (targetBlock.startCol + targetBlock.endCol) / 2;
-
-          for (const hall of halls) {
-            if (hall.vertices.length >= 4 && isPointInPolygon(cRow, cCol, hall.vertices)) {
-              return hall.id;
-            }
-          }
-          return null;
-        };
-
-        // 初期の挿入位置を当日アイテム配列の末尾に設定する。
-
-        let insertIndex = dayItems.length;
-        const itemHallIndex = hallOrder.indexOf(itemHallId);
-
-        if (itemHallIndex >= 0) {
-          let lastSameHallIndex = -1;
-          let firstLaterHallIndex = -1;
-
-          for (let i = 0; i < dayItems.length; i++) {
-            const existingItemHallId = getHallIdForItem(dayItems[i]);
-            if (existingItemHallId === itemHallId) {
-              lastSameHallIndex = i;
-            } else if (existingItemHallId) {
-              const existingHallIndex = hallOrder.indexOf(existingItemHallId);
-              if (existingHallIndex > itemHallIndex && firstLaterHallIndex === -1) {
-                firstLaterHallIndex = i;
-              }
-            }
-          }
-
-          if (lastSameHallIndex >= 0) {
-            insertIndex = lastSameHallIndex + 1;
-          } else if (firstLaterHallIndex >= 0) {
-            insertIndex = firstLaterHallIndex;
-          }
-        }
-
-        dayItems.splice(insertIndex, 0, itemId);
-
-        return {
-          ...prev,
-          [activeEventName]: {
-            ...eventItems,
-            [dayName]: dayItems,
-          },
-        };
-      });
+      setExecuteModeItems((prev) => ({
+        ...prev,
+        [activeEventName]: newExecuteItems,
+      }));
     },
-    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData],
+    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, executeModeItems],
   );
 
 
@@ -3183,58 +2443,40 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !activeEventDate) return;
 
       const dayName = activeEventDate;
+      const newExecuteItems = computeAddToExecuteListFromMapAtPosition(
+        itemId,
+        referenceItemId,
+        position,
+        executeModeItems[activeEventName] || {},
+        dayName,
+      );
 
-      setExecuteModeItems((prev) => {
-        const eventItems = prev[activeEventName] || {};
-        const dayItems = [...(eventItems[dayName] || [])];
-
-
-        if (dayItems.includes(itemId)) return prev;
-
-
-        const refIndex = dayItems.indexOf(referenceItemId);
-        if (refIndex < 0) {
-          dayItems.push(itemId);
-        } else {
-          const insertIndex = position === 'before' ? refIndex : refIndex + 1;
-          dayItems.splice(insertIndex, 0, itemId);
-        }
-
-        return {
-          ...prev,
-          [activeEventName]: {
-            ...eventItems,
-            [dayName]: dayItems,
-          },
-        };
-      });
+      setExecuteModeItems((prev) => ({
+        ...prev,
+        [activeEventName]: newExecuteItems,
+      }));
     },
-    [activeEventName, activeEventDate, isMapTab],
+    [activeEventName, activeEventDate, isMapTab, executeModeItems],
   );
 
 
   const handleRemoveFromExecuteListFromMap = useCallback(
     (itemId: string) => {
-      if (!activeEventName || !isMapTab) return;
+      if (!activeEventName || !isMapTab || !activeEventDate) return;
 
-
-      if (!activeEventDate) return;
       const dayName = activeEventDate;
+      const newExecuteItems = computeRemoveFromExecuteListFromMap(
+        itemId,
+        executeModeItems[activeEventName] || {},
+        dayName,
+      );
 
-      setExecuteModeItems((prev) => {
-        const eventItems = prev[activeEventName] || {};
-        const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
-
-        return {
-          ...prev,
-          [activeEventName]: {
-            ...eventItems,
-            [dayName]: dayItems,
-          },
-        };
-      });
+      setExecuteModeItems((prev) => ({
+        ...prev,
+        [activeEventName]: newExecuteItems,
+      }));
     },
-    [activeEventName, activeEventDate, isMapTab],
+    [activeEventName, activeEventDate, isMapTab, executeModeItems],
   );
 
 
@@ -3252,44 +2494,16 @@ const App: React.FC = () => {
     (newItem: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => {
       if (!activeEventName) return;
 
+      const result = computeAddItemFromFocusMode(
+        eventLists[activeEventName] || [],
+        newItem,
+        executeModeItems[activeEventName] || {},
+      );
 
-      const purchaseStatus = newItem.purchaseStatus || 'None';
-
-
-      const item: ShoppingItem = {
-        ...newItem,
-        id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-        purchaseStatus,
-        source: 'app' as const, // 手入力で追加したアイテムとして扱う。
-        protectionLevel: 'full' as const, // 追加直後の編集保護は full を適用する。
-      };
-
-
-      setEventLists((prev) => ({
-        ...prev,
-        [activeEventName]: [...(prev[activeEventName] || []), item],
-      }));
-
-      // 集中モードから追加されたアイテムは実行リストにも追加する
-      // （後回し/遅参フェーズで表示されるようにするため）
-      if (purchaseStatus === 'Purchased' || purchaseStatus === 'Postpone' || purchaseStatus === 'Late') {
-        const dayName = newItem.eventDate;
-        if (dayName) {
-          setExecuteModeItems((prev) => {
-            const eventItems = prev[activeEventName] || {};
-            const dayItems = eventItems[dayName] || [];
-            return {
-              ...prev,
-              [activeEventName]: {
-                ...eventItems,
-                [dayName]: [...dayItems, item.id],
-              },
-            };
-          });
-        }
-      }
+      setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
+      setExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
     },
-    [activeEventName],
+    [activeEventName, eventLists, executeModeItems],
   );
 
 
@@ -3616,197 +2830,32 @@ const App: React.FC = () => {
     (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
       if (!activeEventName || !visitListPanelMapTab) return;
 
-
-      setEventLists((prev) => ({
-        ...prev,
-        [activeEventName]: (prev[activeEventName] || []).map((item) =>
-          item.id === itemId ? { ...item, priorityLevel } : item,
-        ),
-      }));
-
-
-      const item = items.find((i) => i.id === itemId);
-      if (!item) return;
-
       const halls = hallDefinitions[activeEventName]?.[visitListPanelMapTab] || [];
       const mapDataForTab = mapData[activeEventName]?.[visitListPanelMapTab];
-
-
-      let itemHallId: string | null = null;
-      if (mapDataForTab) {
-        const block = mapDataForTab.blocks.find((b) => b.name === item.block);
-        if (block) {
-          const numMatch = item.number?.match(/\d+/);
-          if (numMatch) {
-            const num = parseInt(numMatch[0], 10);
-            const cell = block.numberCells.find((nc) => nc.value === num);
-            if (cell) {
-              for (const hall of halls) {
-                const isPointInPolygon = (
-                  row: number,
-                  col: number,
-                  vertices: { row: number; col: number }[],
-                ): boolean => {
-                  if (vertices.length < 3) return false;
-                  let inside = false;
-                  for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-                    const xi = vertices[i].col,
-                      yi = vertices[i].row;
-                    const xj = vertices[j].col,
-                      yj = vertices[j].row;
-                    if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
-                      inside = !inside;
-                    }
-                  }
-                  return inside;
-                };
-
-                if (isPointInPolygon(cell.row, cell.col, hall.vertices)) {
-                  itemHallId = hall.id;
-                  break;
-                }
-                for (const vertex of hall.vertices) {
-                  if (vertex.row === cell.row && vertex.col === cell.col) {
-                    itemHallId = hall.id;
-                    break;
-                  }
-                }
-                if (itemHallId) break;
-              }
-            }
-          }
-        }
-      }
-
-
-      const buildGroupId = (
-        hallId: string | null,
-        priority: 'none' | 'priority' | 'highest',
-      ): string => {
-        if (hallId === null) {
-          if (priority === 'highest') return 'undefined:highest';
-          if (priority === 'priority') return 'undefined:priority';
-          return 'undefined';
-        }
-        if (priority === 'highest') return `${hallId}:highest`;
-        if (priority === 'priority') return `${hallId}:priority`;
-        return hallId;
+      const currentSettings = hallRouteSettings[activeEventName]?.[visitListPanelMapTab] || {
+        hallOrder: [],
+        hallVisitLists: [],
       };
 
-      const newGroupId = buildGroupId(itemHallId, priorityLevel);
-      const oldPriority = item.priorityLevel || 'none';
-      const oldGroupId = buildGroupId(itemHallId, oldPriority);
-      const baseGroupId = buildGroupId(itemHallId, 'none');
+      const result = computeUpdateItemPriority(
+        itemId,
+        priorityLevel,
+        items,
+        halls,
+        mapDataForTab,
+        currentSettings,
+      );
 
-
-      setHallRouteSettings((prev) => {
-        const currentSettings = prev[activeEventName]?.[visitListPanelMapTab] || {
-          hallOrder: [],
-          hallVisitLists: [],
-        };
-        let newHallOrder = [...currentSettings.hallOrder];
-
-
-        if (!newHallOrder.includes(baseGroupId)) {
-          newHallOrder.push(baseGroupId);
-        }
-
-
-        if (priorityLevel !== 'none' && !newHallOrder.includes(newGroupId)) {
-          const priorityGroupId = buildGroupId(itemHallId, 'priority');
-
-
-          let insertIndex = newHallOrder.length;
-
-          if (priorityLevel === 'highest') {
-            const priorityIndex = newHallOrder.indexOf(priorityGroupId);
-            const baseIndex = newHallOrder.indexOf(baseGroupId);
-
-            if (priorityIndex !== -1) {
-              insertIndex = priorityIndex;
-            } else if (baseIndex !== -1) {
-              insertIndex = baseIndex;
-            }
-          } else if (priorityLevel === 'priority') {
-            const baseIndex = newHallOrder.indexOf(baseGroupId);
-            if (baseIndex !== -1) {
-              insertIndex = baseIndex;
-            }
-          }
-
-          newHallOrder.splice(insertIndex, 0, newGroupId);
-        }
-
-        if (oldPriority !== 'none' && oldGroupId !== newGroupId) {
-          const otherItemsInOldGroup = items.filter((i) => {
-            if (i.id === itemId) return false;
-            if ((i.priorityLevel || 'none') !== oldPriority) return false;
-
-
-            if (!mapDataForTab) return false;
-            const iBlock = mapDataForTab.blocks.find((b) => b.name === i.block);
-            if (!iBlock) return false;
-            const iNumMatch = i.number?.match(/\d+/);
-            if (!iNumMatch) return false;
-            const iNum = parseInt(iNumMatch[0], 10);
-            const iCell = iBlock.numberCells.find((nc) => nc.value === iNum);
-            if (!iCell) return false;
-
-
-            let iHallId: string | null = null;
-            for (const h of halls) {
-              const inPoly = (() => {
-                if (h.vertices.length < 3) return false;
-                let inside = false;
-                for (let ii = 0, j = h.vertices.length - 1; ii < h.vertices.length; j = ii++) {
-                  const xi = h.vertices[ii].col,
-                    yi = h.vertices[ii].row;
-                  const xj = h.vertices[j].col,
-                    yj = h.vertices[j].row;
-                  if (
-                    yi > iCell.row !== yj > iCell.row &&
-                    iCell.col < ((xj - xi) * (iCell.row - yi)) / (yj - yi) + xi
-                  ) {
-                    inside = !inside;
-                  }
-                }
-                return inside;
-              })();
-
-              if (inPoly) {
-                iHallId = h.id;
-                break;
-              }
-              for (const vertex of h.vertices) {
-                if (vertex.row === iCell.row && vertex.col === iCell.col) {
-                  iHallId = h.id;
-                  break;
-                }
-              }
-              if (iHallId) break;
-            }
-
-            return iHallId === itemHallId;
-          });
-
-          if (otherItemsInOldGroup.length === 0) {
-            newHallOrder = newHallOrder.filter((id) => id !== oldGroupId);
-          }
-        }
-
-        return {
-          ...prev,
-          [activeEventName]: {
-            ...prev[activeEventName],
-            [visitListPanelMapTab]: {
-              ...currentSettings,
-              hallOrder: newHallOrder,
-            },
-          },
-        };
-      });
+      setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
+      setHallRouteSettings((prev) => ({
+        ...prev,
+        [activeEventName]: {
+          ...prev[activeEventName],
+          [visitListPanelMapTab]: result.hallRouteSettings,
+        },
+      }));
     },
-    [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData],
+    [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData, hallRouteSettings],
   );
 
   const handleTabChangeWithVisitListCheck = (newTab: string): boolean => {

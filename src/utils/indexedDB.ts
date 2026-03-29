@@ -4,7 +4,7 @@
  */
 
 const DB_NAME = 'EventShoppingPlannerDB';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 // ストア名
 const STORES = {
@@ -18,6 +18,7 @@ const STORES = {
   HALL_DEFINITIONS: 'hallDefinitions',
   HALL_ROUTE_SETTINGS: 'hallRouteSettings',
   MAP_VIEWPORT_SETTINGS: 'mapViewportSettings',
+  SYNC_QUEUE: 'syncQueue',
 } as const;
 
 type StoreName = (typeof STORES)[keyof typeof STORES];
@@ -506,6 +507,14 @@ export const db = {
         mapViewportSettingsResult,
       ),
     };
+  },
+
+  // 同期キュー（共有機能用）
+  async saveSyncQueue(data: unknown[]): Promise<void> {
+    await saveData(STORES.SYNC_QUEUE, 'data', data);
+  },
+  async loadSyncQueue(): Promise<LoadResult<unknown[]>> {
+    return loadData(STORES.SYNC_QUEUE, 'data');
   },
 
   // localStorageからの移行
