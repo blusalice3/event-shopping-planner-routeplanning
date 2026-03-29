@@ -5,6 +5,7 @@ export const PurchaseStatuses = [
   'Absent',
   'Postpone',
   'Late',
+  'LimitedPurchase',
 ] as const;
 
 export type PurchaseStatus = (typeof PurchaseStatuses)[number];
