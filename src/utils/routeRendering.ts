@@ -1,5 +1,236 @@
 // ルート描画共通ユーティリティ
 
+// === バッチ描画API ===
+
+export interface PathCollector {
+  addLine(x1: number, y1: number, x2: number, y2: number): void;
+  addQuadratic(sx: number, sy: number, cpx: number, cpy: number, ex: number, ey: number): void;
+}
+
+interface StyleGroup {
+  lines: number[];   // [x1,y1,x2,y2, ...]
+  quads: number[];    // [sx,sy,cpx,cpy,ex,ey, ...]
+}
+
+export class BatchedPathRenderer {
+  private groups = new Map<string, StyleGroup & { strokeStyle: string; lineWidth: number }>();
+
+  beginGroup(strokeStyle: string, lineWidth: number): PathCollector {
+    const key = `${strokeStyle}|${lineWidth}`;
+    if (!this.groups.has(key)) {
+      this.groups.set(key, { lines: [], quads: [], strokeStyle, lineWidth });
+    }
+    const group = this.groups.get(key)!;
+    return {
+      addLine(x1: number, y1: number, x2: number, y2: number) {
+        group.lines.push(x1, y1, x2, y2);
+      },
+      addQuadratic(sx: number, sy: number, cpx: number, cpy: number, ex: number, ey: number) {
+        group.quads.push(sx, sy, cpx, cpy, ex, ey);
+      },
+    };
+  }
+
+  // 矢印（三角形fill）用の蓄積
+  private triangles = new Map<string, number[]>(); // fillStyle -> [x1,y1,x2,y2,x3,y3, ...]
+
+  addTriangle(fillStyle: string, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number): void {
+    if (!this.triangles.has(fillStyle)) this.triangles.set(fillStyle, []);
+    this.triangles.get(fillStyle)!.push(x1, y1, x2, y2, x3, y3);
+  }
+
+  flush(ctx: CanvasRenderingContext2D): void {
+    ctx.lineCap = 'round';
+    ctx.setLineDash([]);
+
+    for (const group of this.groups.values()) {
+      ctx.strokeStyle = group.strokeStyle;
+      ctx.lineWidth = group.lineWidth;
+
+      // 直線パス
+      if (group.lines.length > 0) {
+        ctx.beginPath();
+        const lines = group.lines;
+        for (let i = 0; i < lines.length; i += 4) {
+          ctx.moveTo(lines[i], lines[i + 1]);
+          ctx.lineTo(lines[i + 2], lines[i + 3]);
+        }
+        ctx.stroke();
+      }
+
+      // 二次曲線パス（アーチ）
+      if (group.quads.length > 0) {
+        ctx.beginPath();
+        const quads = group.quads;
+        for (let i = 0; i < quads.length; i += 6) {
+          ctx.moveTo(quads[i], quads[i + 1]);
+          ctx.quadraticCurveTo(quads[i + 2], quads[i + 3], quads[i + 4], quads[i + 5]);
+        }
+        ctx.stroke();
+      }
+    }
+
+    // 三角形（矢印）の描画
+    for (const [fillStyle, tris] of this.triangles) {
+      ctx.beginPath();
+      ctx.fillStyle = fillStyle;
+      for (let i = 0; i < tris.length; i += 6) {
+        ctx.moveTo(tris[i], tris[i + 1]);
+        ctx.lineTo(tris[i + 2], tris[i + 3]);
+        ctx.lineTo(tris[i + 4], tris[i + 5]);
+        ctx.closePath();
+      }
+      ctx.fill();
+    }
+  }
+}
+
+// collectEdgeWithBridges: drawEdgeWithBridgesと同一ロジックだがPathCollectorに蓄積
+export function collectEdgeWithBridges(
+  collector: PathCollector,
+  x1: number, y1: number, x2: number, y2: number,
+  segIdx: number,
+  edgeIdx: number,
+  crossingLookup: Map<string, CrossingInfo[]>,
+  bridgeParams: { gapRadius: number; archHeight: number },
+): void {
+  const key = `${segIdx}-${edgeIdx}`;
+  const crossingsOnThisEdge = crossingLookup.get(key);
+
+  if (!crossingsOnThisEdge || crossingsOnThisEdge.length === 0) {
+    collector.addLine(x1, y1, x2, y2);
+    return;
+  }
+
+  const asEarlier = crossingsOnThisEdge.filter(
+    (c) => c.earlierSegIdx === segIdx && c.earlierEdgeIdx === edgeIdx,
+  );
+  const asLater = crossingsOnThisEdge.filter(
+    (c) => c.laterSegIdx === segIdx && c.laterEdgeIdx === edgeIdx,
+  );
+
+  if (asEarlier.length > 0 && asLater.length === 0) {
+    const gaps = asEarlier.map((c) => ({ t: c.tA, gapRadius: bridgeParams.gapRadius }));
+    const subSegs = splitEdgeWithGaps(x1, y1, x2, y2, gaps);
+    for (const sub of subSegs) {
+      collector.addLine(sub.x1, sub.y1, sub.x2, sub.y2);
+    }
+  } else if (asLater.length > 0) {
+    const sortedCrossings = [...asLater].sort((a, b) => a.tB - b.tB);
+    const allGaps = asEarlier.map((c) => ({ t: c.tA, gapRadius: bridgeParams.gapRadius }));
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const gapT = len > 0 ? bridgeParams.gapRadius / len : 0;
+
+    let currentT = 0;
+
+    for (const crossing of sortedCrossings) {
+      const archStartT = Math.max(0, crossing.tB - gapT);
+      const archEndT = Math.min(1, crossing.tB + gapT);
+
+      if (currentT < archStartT) {
+        const lineX1 = x1 + dx * currentT;
+        const lineY1 = y1 + dy * currentT;
+        const lineX2 = x1 + dx * archStartT;
+        const lineY2 = y1 + dy * archStartT;
+
+        const relevantGaps = allGaps.filter((g) => g.t > currentT && g.t < archStartT);
+
+        if (relevantGaps.length > 0) {
+          const subSegs = splitEdgeWithGaps(lineX1, lineY1, lineX2, lineY2, relevantGaps.map((g) => ({
+            t: (g.t - currentT) / (archStartT - currentT),
+            gapRadius: g.gapRadius,
+          })));
+          for (const sub of subSegs) {
+            collector.addLine(sub.x1, sub.y1, sub.x2, sub.y2);
+          }
+        } else {
+          collector.addLine(lineX1, lineY1, lineX2, lineY2);
+        }
+      }
+
+      const archParams = computeArchParams(x1, y1, x2, y2, crossing.tB, bridgeParams.gapRadius, bridgeParams.archHeight);
+      collector.addQuadratic(archParams.archStartX, archParams.archStartY, archParams.cpX, archParams.cpY, archParams.archEndX, archParams.archEndY);
+
+      currentT = archEndT;
+    }
+
+    if (currentT < 1) {
+      const lineX1 = x1 + dx * currentT;
+      const lineY1 = y1 + dy * currentT;
+
+      const relevantGaps = allGaps.filter((g) => g.t > currentT && g.t < 1);
+
+      if (relevantGaps.length > 0) {
+        const subSegs = splitEdgeWithGaps(lineX1, lineY1, x2, y2, relevantGaps.map((g) => ({
+          t: (g.t - currentT) / (1 - currentT),
+          gapRadius: g.gapRadius,
+        })));
+        for (const sub of subSegs) {
+          collector.addLine(sub.x1, sub.y1, sub.x2, sub.y2);
+        }
+      } else {
+        collector.addLine(lineX1, lineY1, x2, y2);
+      }
+    }
+  } else {
+    // 両方の役割がある場合（先行かつ後行）- 後行のアーチ処理を優先
+    const sortedLater = [...asLater].sort((a, b) => a.tB - b.tB);
+    const earlierGaps = asEarlier.map((c) => ({ t: c.tA, gapRadius: bridgeParams.gapRadius }));
+
+    const dx = x2 - x1;
+    const dy = y2 - y1;
+    const len = Math.sqrt(dx * dx + dy * dy);
+    const gapT = len > 0 ? bridgeParams.gapRadius / len : 0;
+
+    let currentT = 0;
+
+    for (const crossing of sortedLater) {
+      const archStartT = Math.max(0, crossing.tB - gapT);
+      const archEndT = Math.min(1, crossing.tB + gapT);
+
+      if (currentT < archStartT) {
+        const subSegs = splitEdgeWithGaps(
+          x1 + dx * currentT, y1 + dy * currentT,
+          x1 + dx * archStartT, y1 + dy * archStartT,
+          earlierGaps
+            .filter((g) => g.t > currentT && g.t < archStartT)
+            .map((g) => ({
+              t: (g.t - currentT) / (archStartT - currentT),
+              gapRadius: g.gapRadius,
+            })),
+        );
+        for (const sub of subSegs) {
+          collector.addLine(sub.x1, sub.y1, sub.x2, sub.y2);
+        }
+      }
+
+      const archParams = computeArchParams(x1, y1, x2, y2, crossing.tB, bridgeParams.gapRadius, bridgeParams.archHeight);
+      collector.addQuadratic(archParams.archStartX, archParams.archStartY, archParams.cpX, archParams.cpY, archParams.archEndX, archParams.archEndY);
+
+      currentT = archEndT;
+    }
+
+    if (currentT < 1) {
+      const subSegs = splitEdgeWithGaps(
+        x1 + dx * currentT, y1 + dy * currentT,
+        x2, y2,
+        earlierGaps
+          .filter((g) => g.t > currentT && g.t < 1)
+          .map((g) => ({
+            t: (g.t - currentT) / (1 - currentT),
+            gapRadius: g.gapRadius,
+          })),
+      );
+      for (const sub of subSegs) {
+        collector.addLine(sub.x1, sub.y1, sub.x2, sub.y2);
+      }
+    }
+  }
+}
+
 export interface CrossingInfo {
   earlierSegIdx: number;
   earlierEdgeIdx: number;
@@ -472,4 +703,81 @@ export function drawEdgeWithBridges(
       }
     }
   }
+}
+
+// === 空間インデックスを用いた交差検出（O(n²) → O(n*k)） ===
+
+export function findAllCrossingsIndexed(
+  segments: PixelEdge[][],
+  cellSize: number,
+): CrossingInfo[] {
+  const gridSize = Math.max(cellSize * 4, 50);
+  const grid = new Map<string, { segIdx: number; edgeIdx: number; edge: PixelEdge }[]>();
+
+  // 各エッジをグリッドセルに登録
+  for (let si = 0; si < segments.length; si++) {
+    const edges = segments[si];
+    for (let ei = 0; ei < edges.length; ei++) {
+      const e = edges[ei];
+      const minX = Math.min(e.x1, e.x2);
+      const maxX = Math.max(e.x1, e.x2);
+      const minY = Math.min(e.y1, e.y2);
+      const maxY = Math.max(e.y1, e.y2);
+
+      const gx0 = Math.floor(minX / gridSize);
+      const gx1 = Math.floor(maxX / gridSize);
+      const gy0 = Math.floor(minY / gridSize);
+      const gy1 = Math.floor(maxY / gridSize);
+
+      for (let gx = gx0; gx <= gx1; gx++) {
+        for (let gy = gy0; gy <= gy1; gy++) {
+          const gkey = `${gx},${gy}`;
+          if (!grid.has(gkey)) grid.set(gkey, []);
+          grid.get(gkey)!.push({ segIdx: si, edgeIdx: ei, edge: e });
+        }
+      }
+    }
+  }
+
+  // 重複排除用Set
+  const seen = new Set<string>();
+  const crossings: CrossingInfo[] = [];
+
+  for (const entries of grid.values()) {
+    for (let a = 0; a < entries.length; a++) {
+      for (let b = a + 1; b < entries.length; b++) {
+        const ea = entries[a];
+        const eb = entries[b];
+
+        // 同一セグメント内のエッジは検査しない
+        if (ea.segIdx === eb.segIdx) continue;
+
+        // earlier/laterの順序を正規化（segIdx小 = earlier）
+        const [earlier, later] = ea.segIdx < eb.segIdx ? [ea, eb] : [eb, ea];
+        const pairKey = `${earlier.segIdx}-${earlier.edgeIdx}|${later.segIdx}-${later.edgeIdx}`;
+        if (seen.has(pairKey)) continue;
+        seen.add(pairKey);
+
+        const result = segmentIntersectionPoint(
+          earlier.edge.x1, earlier.edge.y1, earlier.edge.x2, earlier.edge.y2,
+          later.edge.x1, later.edge.y1, later.edge.x2, later.edge.y2,
+        );
+
+        if (result) {
+          crossings.push({
+            earlierSegIdx: earlier.segIdx,
+            earlierEdgeIdx: earlier.edgeIdx,
+            laterSegIdx: later.segIdx,
+            laterEdgeIdx: later.edgeIdx,
+            x: result.x,
+            y: result.y,
+            tA: result.tA,
+            tB: result.tB,
+          });
+        }
+      }
+    }
+  }
+
+  return crossings;
 }

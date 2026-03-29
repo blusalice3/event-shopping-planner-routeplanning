@@ -14,10 +14,11 @@ import {
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { generateRouteSegments, simplifyPath } from '../../utils/pathfinding';
 import {
-  findAllCrossings,
+  findAllCrossingsIndexed,
   buildCrossingLookup,
   getBridgeParams,
-  drawEdgeWithBridges,
+  collectEdgeWithBridges,
+  BatchedPathRenderer,
   PixelEdge,
 } from '../../utils/routeRendering';
 import MapCanvasPresentation from './MapCanvasPresentation';
@@ -822,7 +823,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       return edges;
     });
 
-    const crossings = findAllCrossings(allPixelEdges);
+    const crossings = findAllCrossingsIndexed(allPixelEdges, cellSize);
     const crossingLookup = buildCrossingLookup(crossings);
     const bridgeParams = getBridgeParams(cellSize);
 
@@ -1285,51 +1286,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const ncBorder = isDarkMode ? '#475569' : '#CBD5E1';
     const ncBorderWidth = Math.max(1, cellSize * 0.055);
     const drawStroke = outlineStyle !== 'none';
+    const isDashed = outlineStyle === 'dashed';
 
     // パス描画ヘルパー（スタイルに応じて1回だけ選択）
     const drawCellPath = ncRadius > 0
       ? (rx: number, ry: number, rw: number, rh: number) => ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius)
       : (rx: number, ry: number, rw: number, rh: number) => ctx.rect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2);
 
-    // dashed スタイル用の破線設定（ループ前に1回設定、描画後にリセット）
-    if (outlineStyle === 'dashed') {
-      const dashLen = Math.max(2, cellSize * 0.12);
-      ctx.setLineDash([dashLen, dashLen]);
-    }
-
-    const drawRoundedCellBg = drawStroke
-      ? (rx: number, ry: number, rw: number, rh: number, fillColor: string, strokeColor: string) => {
-          ctx.beginPath();
-          drawCellPath(rx, ry, rw, rh);
-          ctx.fillStyle = fillColor;
-          ctx.fill();
-          ctx.strokeStyle = strokeColor;
-          ctx.lineWidth = ncBorderWidth;
-          ctx.stroke();
-        }
-      : (rx: number, ry: number, rw: number, rh: number, fillColor: string, _strokeColor: string) => {
-          ctx.beginPath();
-          drawCellPath(rx, ry, rw, rh);
-          ctx.fillStyle = fillColor;
-          ctx.fill();
-        };
-
-    const fillRoundedOverlay = (rx: number, ry: number, rw: number, rh: number, overlayColor: string | CanvasPattern) => {
-      if (overlayColor instanceof CanvasPattern) {
-        ctx.save();
-        ctx.beginPath();
-        drawCellPath(rx, ry, rw, rh);
-        ctx.clip();
-        ctx.fillStyle = overlayColor;
-        ctx.fillRect(rx, ry, rw, rh);
-        ctx.restore();
-      } else {
-        ctx.beginPath();
-        drawCellPath(rx, ry, rw, rh);
-        ctx.fillStyle = overlayColor;
-        ctx.fill();
-      }
-    };
+    // バッチ描画用: ジオメトリ収集配列
+    const ncRects: { x: number; y: number; w: number; h: number }[] = [];
+    const overlayGroups = new Map<string, { x: number; y: number; w: number; h: number }[]>();
+    const patternOverlayCells: { x: number; y: number; w: number; h: number }[] = [];
 
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
@@ -1349,7 +1316,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const isNumberCell = numberCellSet.has(cellKey);
 
       if (isNumberCell) {
-        drawRoundedCellBg(x, y, width, height, ncBg, ncBorder);
+        ncRects.push({ x, y, w: width, h: height });
       } else if (cell.backgroundColor) {
         ctx.fillStyle = cell.backgroundColor;
         ctx.fillRect(x, y, width, height);
@@ -1359,35 +1326,43 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (state) {
         if (state.isFullyVisited) {
           if (isNumberCell) {
-            fillRoundedOverlay(x, y, width, height, 'rgba(239, 83, 80, 0.5)');
+            const color = 'rgba(239, 83, 80, 0.5)';
+            if (!overlayGroups.has(color)) overlayGroups.set(color, []);
+            overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
             ctx.fillStyle = 'rgba(239, 83, 80, 0.5)';
             ctx.fillRect(x, y, width, height);
           }
         } else if (state.hasPriorityUnvisited && warningPattern) {
           if (isNumberCell) {
-            fillRoundedOverlay(x, y, width, height, warningPattern);
+            patternOverlayCells.push({ x, y, w: width, h: height });
           } else {
             ctx.fillStyle = warningPattern;
             ctx.fillRect(x, y, width, height);
           }
         } else if (state.hasPriorityUnvisited) {
           if (isNumberCell) {
-            fillRoundedOverlay(x, y, width, height, 'rgba(255, 214, 0, 0.45)');
+            const color = 'rgba(255, 214, 0, 0.45)';
+            if (!overlayGroups.has(color)) overlayGroups.set(color, []);
+            overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
             ctx.fillStyle = 'rgba(255, 214, 0, 0.45)';
             ctx.fillRect(x, y, width, height);
           }
         } else if (state.isVisited) {
           if (isNumberCell) {
-            fillRoundedOverlay(x, y, width, height, 'rgba(255, 238, 88, 0.5)');
+            const color = 'rgba(255, 238, 88, 0.5)';
+            if (!overlayGroups.has(color)) overlayGroups.set(color, []);
+            overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
             ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';
             ctx.fillRect(x, y, width, height);
           }
         } else if (state.hasItems) {
           if (isNumberCell) {
-            fillRoundedOverlay(x, y, width, height, 'rgba(66, 165, 245, 0.3)');
+            const color = 'rgba(66, 165, 245, 0.3)';
+            if (!overlayGroups.has(color)) overlayGroups.set(color, []);
+            overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
             ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';
             ctx.fillRect(x, y, width, height);
@@ -1396,9 +1371,53 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     });
 
-    // dashed スタイルの破線設定をリセット
-    if (outlineStyle === 'dashed') {
-      ctx.setLineDash([]);
+    // バッチ描画: 数値セル背景
+    if (ncRects.length > 0) {
+      ctx.beginPath();
+      for (const r of ncRects) drawCellPath(r.x, r.y, r.w, r.h);
+      ctx.fillStyle = ncBg;
+      ctx.fill();
+
+      // ボーダー描画
+      if (drawStroke) {
+        ctx.strokeStyle = ncBorder;
+        ctx.lineWidth = ncBorderWidth;
+        if (isDashed) {
+          // dashed: セル毎にdash phaseをリセットするため個別stroke
+          const dashLen = Math.max(2, cellSize * 0.12);
+          ctx.setLineDash([dashLen, dashLen]);
+          for (const r of ncRects) {
+            ctx.beginPath();
+            drawCellPath(r.x, r.y, r.w, r.h);
+            ctx.stroke();
+          }
+          ctx.setLineDash([]);
+        } else {
+          // rounded/square: 蓄積済みパスで一括stroke
+          ctx.stroke();
+        }
+      }
+
+      // バッチ描画: オーバーレイ（色別）
+      for (const [color, rects] of overlayGroups) {
+        ctx.beginPath();
+        for (const r of rects) drawCellPath(r.x, r.y, r.w, r.h);
+        ctx.fillStyle = color;
+        ctx.fill();
+      }
+
+      // CanvasPatternオーバーレイ（個別clip必要）
+      if (warningPattern) {
+        for (const r of patternOverlayCells) {
+          ctx.save();
+          ctx.beginPath();
+          drawCellPath(r.x, r.y, r.w, r.h);
+          ctx.clip();
+          ctx.fillStyle = warningPattern;
+          ctx.fillRect(r.x, r.y, r.w, r.h);
+          ctx.restore();
+        }
+      }
     }
 
     if (showBorders && !isRotationInteracting) {
@@ -1707,6 +1726,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const lineWidth = Math.max(2, cellSize * 0.08);
       const parallelOffset = Math.max(3, cellSize * 0.12);
 
+      // ビューポートカリング用マージン
+      const routeMargin = cellSize * 2;
+      const visMinX = visibleMinX - routeMargin;
+      const visMaxX = visibleMaxX + routeMargin;
+      const visMinY = visibleMinY - routeMargin;
+      const visMaxY = visibleMaxY + routeMargin;
+
       // エッジキー生成: 小数座標はセル単位に丸めて比較
       const roundToCell = (v: number): number => Math.round(v);
       const getEdgeKey = (r1: number, c1: number, r2: number, c2: number): string => {
@@ -1743,12 +1769,15 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         };
       };
 
+      const batcher = new BatchedPathRenderer();
+
       routeSegments.forEach((segment, segIdx) => {
         if (segment.path.length < 2) return;
 
         const isTransition = isGroupTransition(segment.fromPriority, segment.toPriority);
         const segmentPriority = segment.fromPriority || 'none';
         const baseColor = isTransition ? '#9CA3AF' : getPriorityColor(segment.fromPriority);
+        const collector = batcher.beginGroup(baseColor, lineWidth);
 
         for (let i = 0; i < segment.path.length - 1; i++) {
           const p1 = segment.path[i];
@@ -1785,50 +1814,58 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             }
           }
 
-          // 飛び越し線付きで描画
-          drawEdgeWithBridges(
-            ctx, px1, py1, px2, py2,
+          // ビューポートカリング: 両端点が画面外ならスキップ
+          if (px1 < visMinX && px2 < visMinX) continue;
+          if (px1 > visMaxX && px2 > visMaxX) continue;
+          if (py1 < visMinY && py2 < visMinY) continue;
+          if (py1 > visMaxY && py2 > visMaxY) continue;
+
+          // 飛び越し線付きでバッチ蓄積
+          collectEdgeWithBridges(
+            collector, px1, py1, px2, py2,
             segIdx, i,
             crossingLookup, bridgeParams,
-            baseColor, lineWidth,
           );
         }
 
-        // 矢印描画
+        // 矢印描画（バッチ蓄積）
         if (segment.path.length >= 2) {
           const last = segment.path[segment.path.length - 1];
           const prev = segment.path[segment.path.length - 2];
 
           const endX = (last.col - 0.5) * cellSize;
           const endY = (last.row - 0.5) * cellSize;
-          const angle = Math.atan2(
-            (last.row - prev.row) * cellSize,
-            (last.col - prev.col) * cellSize,
-          );
 
-          const arrowSize = Math.max(6, cellSize * 0.25);
-          ctx.beginPath();
-          ctx.fillStyle = baseColor;
-          ctx.moveTo(endX, endY);
-          ctx.lineTo(
-            endX - arrowSize * Math.cos(angle - Math.PI / 6),
-            endY - arrowSize * Math.sin(angle - Math.PI / 6),
-          );
-          ctx.lineTo(
-            endX - arrowSize * Math.cos(angle + Math.PI / 6),
-            endY - arrowSize * Math.sin(angle + Math.PI / 6),
-          );
-          ctx.closePath();
-          ctx.fill();
+          // 矢印もビューポートカリング
+          if (endX >= visMinX && endX <= visMaxX && endY >= visMinY && endY <= visMaxY) {
+            const angle = Math.atan2(
+              (last.row - prev.row) * cellSize,
+              (last.col - prev.col) * cellSize,
+            );
+
+            const arrowSize = Math.max(6, cellSize * 0.25);
+            batcher.addTriangle(
+              baseColor,
+              endX, endY,
+              endX - arrowSize * Math.cos(angle - Math.PI / 6),
+              endY - arrowSize * Math.sin(angle - Math.PI / 6),
+              endX - arrowSize * Math.cos(angle + Math.PI / 6),
+              endY - arrowSize * Math.sin(angle + Math.PI / 6),
+            );
+          }
         }
       });
 
+      batcher.flush(ctx);
       ctx.setLineDash([]);
 
       if (isDetailedView) {
         routePoints.forEach((point) => {
           const px = (point.col - 0.5) * cellSize;
           const py = (point.row - 0.5) * cellSize;
+
+          // ビューポートカリング
+          if (px < visMinX || px > visMaxX || py < visMinY || py > visMaxY) return;
 
           const circleSize = Math.max(12, cellSize * 0.5);
           const pointColor = getPriorityColor(point.priorityLevel);

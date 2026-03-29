@@ -14,10 +14,11 @@ import {
 import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
 import { findPath, simplifyPath } from '../utils/pathfinding';
 import {
-  findAllCrossings,
+  findAllCrossingsIndexed,
   buildCrossingLookup,
   getBridgeParams,
-  drawEdgeWithBridges,
+  collectEdgeWithBridges,
+  BatchedPathRenderer,
   PixelEdge,
 } from '../utils/routeRendering';
 
@@ -938,7 +939,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       return edges;
     });
 
-    const crossings = findAllCrossings(allPixelEdges);
+    const crossings = findAllCrossingsIndexed(allPixelEdges, cellSize);
     const crossingLookup = buildCrossingLookup(crossings);
     const bridgeParams = getBridgeParams(cellSize);
 
@@ -1283,51 +1284,16 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const ncBorder = isDarkMode ? '#475569' : '#CBD5E1';
     const ncBorderWidth = Math.max(1, cellSize * 0.055);
     const drawStroke = outlineStyle !== 'none';
+    const isDashed = outlineStyle === 'dashed';
 
     // パス描画ヘルパー（スタイルに応じて1回だけ選択）
     const drawCellPath = ncRadius > 0
       ? (rx: number, ry: number, rw: number, rh: number) => ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius)
       : (rx: number, ry: number, rw: number, rh: number) => ctx.rect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2);
 
-    // dashed スタイル用の破線設定（ループ前に1回設定、描画後にリセット）
-    if (outlineStyle === 'dashed') {
-      const dashLen = Math.max(2, cellSize * 0.12);
-      ctx.setLineDash([dashLen, dashLen]);
-    }
-
-    const drawRoundedCellBg = drawStroke
-      ? (rx: number, ry: number, rw: number, rh: number, fillColor: string, strokeColor: string) => {
-          ctx.beginPath();
-          drawCellPath(rx, ry, rw, rh);
-          ctx.fillStyle = fillColor;
-          ctx.fill();
-          ctx.strokeStyle = strokeColor;
-          ctx.lineWidth = ncBorderWidth;
-          ctx.stroke();
-        }
-      : (rx: number, ry: number, rw: number, rh: number, fillColor: string, _strokeColor: string) => {
-          ctx.beginPath();
-          drawCellPath(rx, ry, rw, rh);
-          ctx.fillStyle = fillColor;
-          ctx.fill();
-        };
-
-    const fillRoundedOverlay = (rx: number, ry: number, rw: number, rh: number, overlayColor: string | CanvasPattern) => {
-      if (overlayColor instanceof CanvasPattern) {
-        ctx.save();
-        ctx.beginPath();
-        drawCellPath(rx, ry, rw, rh);
-        ctx.clip();
-        ctx.fillStyle = overlayColor;
-        ctx.fillRect(rx, ry, rw, rh);
-        ctx.restore();
-      } else {
-        ctx.beginPath();
-        drawCellPath(rx, ry, rw, rh);
-        ctx.fillStyle = overlayColor;
-        ctx.fill();
-      }
-    };
+    // バッチ描画用: ジオメトリ収集配列
+    const ncRects: { x: number; y: number; w: number; h: number }[] = [];
+    const overlayGroups = new Map<string, { x: number; y: number; w: number; h: number }[]>();
 
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
@@ -1346,7 +1312,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const isNumberCell = numberCellSet.has(cellKey);
 
       if (isNumberCell) {
-        drawRoundedCellBg(x, y, width, height, ncBg, ncBorder);
+        ncRects.push({ x, y, w: width, h: height });
       } else if (cell.backgroundColor) {
         ctx.fillStyle = cell.backgroundColor;
         ctx.fillRect(x, y, width, height);
@@ -1357,28 +1323,36 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         const label = cellLabels.get(cellKey);
         if (label) {
           if (isNumberCell) {
-            fillRoundedOverlay(x, y, width, height, label.bgColor);
+            const color = label.bgColor;
+            if (!overlayGroups.has(color)) overlayGroups.set(color, []);
+            overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
             ctx.fillStyle = label.bgColor;
             ctx.fillRect(x, y, width, height);
           }
         } else if (state.isVisited) {
           if (isNumberCell) {
-            fillRoundedOverlay(x, y, width, height, 'rgba(158, 158, 158, 0.5)');
+            const color = 'rgba(158, 158, 158, 0.5)';
+            if (!overlayGroups.has(color)) overlayGroups.set(color, []);
+            overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
             ctx.fillStyle = 'rgba(158, 158, 158, 0.5)';
             ctx.fillRect(x, y, width, height);
           }
         } else if (state.hasPostponed && currentPhase !== 'postponed') {
           if (isNumberCell) {
-            fillRoundedOverlay(x, y, width, height, 'rgba(156, 39, 176, 0.4)');
+            const color = 'rgba(156, 39, 176, 0.4)';
+            if (!overlayGroups.has(color)) overlayGroups.set(color, []);
+            overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
             ctx.fillStyle = 'rgba(156, 39, 176, 0.4)';
             ctx.fillRect(x, y, width, height);
           }
         } else if (state.hasLate && currentPhase !== 'late') {
           if (isNumberCell) {
-            fillRoundedOverlay(x, y, width, height, 'rgba(33, 150, 243, 0.4)');
+            const color = 'rgba(33, 150, 243, 0.4)';
+            if (!overlayGroups.has(color)) overlayGroups.set(color, []);
+            overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
             ctx.fillStyle = 'rgba(33, 150, 243, 0.4)';
             ctx.fillRect(x, y, width, height);
@@ -1387,9 +1361,40 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
     });
 
-    // dashed スタイルの破線設定をリセット
-    if (outlineStyle === 'dashed') {
-      ctx.setLineDash([]);
+    // バッチ描画: 数値セル背景
+    if (ncRects.length > 0) {
+      ctx.beginPath();
+      for (const r of ncRects) drawCellPath(r.x, r.y, r.w, r.h);
+      ctx.fillStyle = ncBg;
+      ctx.fill();
+
+      // ボーダー描画
+      if (drawStroke) {
+        ctx.strokeStyle = ncBorder;
+        ctx.lineWidth = ncBorderWidth;
+        if (isDashed) {
+          // dashed: セル毎にdash phaseをリセットするため個別stroke
+          const dashLen = Math.max(2, cellSize * 0.12);
+          ctx.setLineDash([dashLen, dashLen]);
+          for (const r of ncRects) {
+            ctx.beginPath();
+            drawCellPath(r.x, r.y, r.w, r.h);
+            ctx.stroke();
+          }
+          ctx.setLineDash([]);
+        } else {
+          // rounded/square: 蓄積済みパスで一括stroke
+          ctx.stroke();
+        }
+      }
+
+      // バッチ描画: オーバーレイ（色別）
+      for (const [color, rects] of overlayGroups) {
+        ctx.beginPath();
+        for (const r of rects) drawCellPath(r.x, r.y, r.w, r.h);
+        ctx.fillStyle = color;
+        ctx.fill();
+      }
     }
 
     // 2. セルの罫線を描画する。
@@ -1609,6 +1614,15 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const lineWidth = Math.max(2, cellSize * 0.08);
       const { crossingLookup, bridgeParams } = routeCrossingData;
 
+      // ビューポートカリング用マージン
+      const routeMargin = cellSize * 2;
+      const visMinX = visibleMinX - routeMargin;
+      const visMaxX = visibleMaxX + routeMargin;
+      const visMinY = visibleMinY - routeMargin;
+      const visMaxY = visibleMaxY + routeMargin;
+
+      const batcher = new BatchedPathRenderer();
+
       routeSegments.forEach((segment, segIdx) => {
         if (segment.path.length < 2) return;
 
@@ -1625,6 +1639,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           strokeStyle = 'rgba(66, 165, 245, 0.4)';
         }
 
+        const collector = batcher.beginGroup(strokeStyle, currentLineWidth);
+
         for (let i = 0; i < segment.path.length - 1; i++) {
           const p1 = segment.path[i];
           const p2 = segment.path[i + 1];
@@ -1634,15 +1650,22 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           const px2 = (p2.col - 0.5) * cellSize;
           const py2 = (p2.row - 0.5) * cellSize;
 
-          // 飛び越し線付きで描画
-          drawEdgeWithBridges(
-            ctx, px1, py1, px2, py2,
+          // ビューポートカリング: 両端点が画面外ならスキップ
+          if (px1 < visMinX && px2 < visMinX) continue;
+          if (px1 > visMaxX && px2 > visMaxX) continue;
+          if (py1 < visMinY && py2 < visMinY) continue;
+          if (py1 > visMaxY && py2 > visMaxY) continue;
+
+          // 飛び越し線付きでバッチ蓄積
+          collectEdgeWithBridges(
+            collector, px1, py1, px2, py2,
             segIdx, i,
             crossingLookup, bridgeParams,
-            strokeStyle, currentLineWidth,
           );
         }
       });
+
+      batcher.flush(ctx);
     }
 
     // ラベルテキスト描画: 各スペースに始/次/済/未/後/遅/後始/遅始を表示
