@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ShoppingItem, PurchaseStatus, PurchaseStatuses } from '../../types';
 import { getBaseNumber } from '../../utils/spaceGrouping';
+import { useSharing } from '../../features/sharing/components/SharingProvider';
 
 interface SpaceGroup {
   baseNumber: string;
@@ -55,6 +56,18 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   eventDate,
   position,
 }) => {
+  const sharing = useSharing();
+
+  // メンバーマップ（割当メンバー名表示用）
+  const memberMap = useMemo(() => {
+    if (!sharing?.activeRoom || !sharing.members.length) return null;
+    const map = new Map<string, { displayName: string; color: string }>();
+    for (const m of sharing.members) {
+      map.set(m.userId, { displayName: m.displayName, color: m.color });
+    }
+    return map;
+  }, [sharing?.activeRoom, sharing?.members]);
+
   const popupRef = useRef<HTMLDivElement>(null);
   const [longPressItem, setLongPressItem] = useState<ShoppingItem | null>(null);
   const [editingItem, setEditingItem] = useState<ShoppingItem | null>(null);
@@ -509,6 +522,14 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                         }`}
                       >
                         {statusLabels[item.purchaseStatus]}
+                      </span>
+                    )}
+                    {item.assignedTo && memberMap?.get(item.assignedTo) && (
+                      <span
+                        className="text-[10px] px-1.5 py-0.5 rounded-full text-white font-medium"
+                        style={{ backgroundColor: memberMap.get(item.assignedTo)!.color }}
+                      >
+                        {memberMap.get(item.assignedTo)!.displayName}割当済
                       </span>
                     )}
                   </div>

@@ -300,6 +300,7 @@ export interface MapCellStateDetail {
   items: ShoppingItem[];
   hasPriorityItem: boolean; // 「優先」「委託無」のアイテムがあるか
   hasPriorityUnvisited: boolean; // 未訪問の優先アイテムがあるか
+  hasOtherAssignedItems: boolean; // 他人に割り振られたアイテムがあるか（紫色表示用）
 }
 
 // マップセルの状態（シンプル版、後方互換用）

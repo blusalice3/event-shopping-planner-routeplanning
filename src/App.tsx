@@ -47,7 +47,7 @@ import {
 import VisitListPanel from './components/VisitListPanel';
 const FocusModeContainer = React.lazy(() => import('./features/map/components/FocusModeContainer'));
 import { extractEventDates } from './utils/eventDates';
-import { getSpaceKey } from './utils/spaceGrouping';
+import { getSpaceKey, getBaseNumber } from './utils/spaceGrouping';
 import { importFromXlsx, downloadBlob, type ItemFallbackWarning } from './utils/exportImport';
 import {
   buildBulkAddUiPlan,
@@ -88,6 +88,19 @@ import {
   buildImportCompletionMessage,
   resolveEventListTab,
 } from './features/events/uiOrchestration';
+import { useSharing } from './features/sharing/components/SharingProvider';
+import CreateRoomDialog from './features/sharing/components/CreateRoomDialog';
+import JoinRoomDialog from './features/sharing/components/JoinRoomDialog';
+import MemberListPanel from './features/sharing/components/MemberListPanel';
+import QRCodeDisplay from './features/sharing/components/QRCodeDisplay';
+import NotificationToast from './features/sharing/components/NotificationToast';
+import SyncStatusIndicator from './features/sharing/components/SyncStatusIndicator';
+import BulkTransferDialog from './features/sharing/components/BulkTransferDialog';
+import HelpRequestDialog from './features/sharing/components/HelpRequestDialog';
+import AutoAssignmentDialog from './features/sharing/components/AutoAssignmentDialog';
+import ItemTransferDialog from './features/sharing/components/ItemTransferDialog';
+import { supabase as supabaseClient } from './lib/supabase';
+import { getRoomItemsAsShoppingItems } from './features/sharing/services/roomService';
 import { useMapSelectors } from './features/map/hooks/useMapSelectors';
 import { useThemeMode } from './hooks/useThemeMode';
 import {
@@ -226,6 +239,8 @@ const resolveDayMapRotationState = (
 };
 
 const App: React.FC = () => {
+  const sharing = useSharing();
+
   // イベント単位で保持する主要データ。
   const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>({});
   const [eventMetadata, setEventMetadata] = useState<Record<string, EventMetadata>>({});
@@ -338,11 +353,83 @@ const App: React.FC = () => {
     },
   });
 
+  // 共有ルームからのリモート更新ハンドラ登録
+  useEffect(() => {
+    if (!sharing?.registerRemoteUpdateHandler) return;
+    sharing.registerRemoteUpdateHandler((update) => {
+      // activeEventNameに関係なく、全イベントのアイテムを検索してマージ
+      setEventLists((prev) => {
+        const newLists = { ...prev };
+        for (const eventName of Object.keys(newLists)) {
+          const items = newLists[eventName];
+          const idx = items.findIndex((item) => item.id === update.localItemId);
+          if (idx !== -1) {
+            const updatedItem = { ...items[idx] };
+            if (update.purchaseStatus !== undefined) updatedItem.purchaseStatus = update.purchaseStatus;
+            if (update.assignedTo !== undefined) updatedItem.assignedTo = update.assignedTo ?? undefined;
+            if (update.price !== undefined) updatedItem.price = update.price;
+            if (update.quantity !== undefined) updatedItem.quantity = update.quantity;
+            if (update.postponed !== undefined) updatedItem.postponed = update.postponed;
+            if (update.orderIndex !== undefined) updatedItem.orderIndex = update.orderIndex;
+            updatedItem.lastSyncedAt = new Date().toISOString();
+            newLists[eventName] = [...items.slice(0, idx), updatedItem, ...items.slice(idx + 1)];
+            break;
+          }
+        }
+        return newLists;
+      });
+    });
+  }, [sharing]);
+
+  // 共有ダイアログ状態
+  const [sharingDialog, setSharingDialog] = useState<
+    | { type: 'create'; eventName: string }
+    | { type: 'join'; initialCode?: string }
+    | { type: 'members' }
+    | { type: 'invite' }
+    | { type: 'bulkTransfer' }
+    | { type: 'helpRequest' }
+    | { type: 'autoAssign' }
+    | null
+  >(null);
+
+  // URLディープリンク検出 (/join/{roomCode})
+  useEffect(() => {
+    const match = window.location.pathname.match(/^\/join\/([A-Z0-9]{5})$/i);
+    if (match) {
+      const code = match[1].toUpperCase();
+      window.history.replaceState({}, '', '/');
+      setSharingDialog({ type: 'join', initialCode: code });
+    }
+  }, []);
+
+  // 集中モードからの共有ダイアログトリガー
+  // 投げつけダイアログstate（集中モード用）
+  const [focusTransferItem, setFocusTransferItem] = useState<ShoppingItem | null>(null);
+
+  useEffect(() => {
+    const handleBulkTransfer = () => setSharingDialog({ type: 'bulkTransfer' });
+    const handleHelpRequest = () => setSharingDialog({ type: 'helpRequest' });
+    const handleTransferRequest = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (detail?.item) {
+        setFocusTransferItem(detail.item as ShoppingItem);
+      }
+    };
+    window.addEventListener('sharing:bulkTransfer', handleBulkTransfer);
+    window.addEventListener('sharing:helpRequest', handleHelpRequest);
+    window.addEventListener('sharing:transferRequest', handleTransferRequest);
+    return () => {
+      window.removeEventListener('sharing:bulkTransfer', handleBulkTransfer);
+      window.removeEventListener('sharing:helpRequest', handleHelpRequest);
+      window.removeEventListener('sharing:transferRequest', handleTransferRequest);
+    };
+  }, []);
+
   const items = useMemo(
     () => (activeEventName ? eventLists[activeEventName] || [] : []),
     [activeEventName, eventLists],
   );
-
 
   const eventDates = useMemo(() => extractEventDates(items), [items]);
   const activeEventDate = useMemo(
@@ -775,8 +862,29 @@ const App: React.FC = () => {
         ...prev,
         [activeEventName]: result.items,
       }));
+
+      // 共有ルーム参加中かつステータス変更時はSupabaseに同期
+      if (sharing?.activeRoom && result.purchaseStatusChanged && currentItem) {
+        sharing.syncPurchaseStatus(
+          updatedItem.id,
+          updatedItem.purchaseStatus,
+          currentItem,
+          (rollbackItem) => {
+            setEventLists((prev) => ({
+              ...prev,
+              [activeEventName]: (prev[activeEventName] || []).map((item) =>
+                item.id === rollbackItem.id ? rollbackItem : item,
+              ),
+            }));
+          },
+        ).then((claimResult) => {
+          if (!claimResult.success && claimResult.claimedBy) {
+            alert(`${claimResult.claimedBy}さんが既に確保しました`);
+          }
+        });
+      }
     },
-    [activeEventName, activeTab, eventDates, dayModes, eventLists],
+    [activeEventName, activeTab, eventDates, dayModes, eventLists, sharing],
   );
 
   const handleMoveItem = useCallback(
@@ -2419,22 +2527,20 @@ const App: React.FC = () => {
       };
       const currentMapData = mapData[activeEventName]?.[currentMapTabName];
 
-      const newExecuteItems = computeAddToExecuteListFromMap(
-        itemId,
-        dayName,
-        items,
-        executeModeItems[activeEventName] || {},
-        halls,
-        hallRouteSettingsForMap,
-        currentMapData,
-      );
-
-      setExecuteModeItems((prev) => ({
-        ...prev,
-        [activeEventName]: newExecuteItems,
-      }));
+      setExecuteModeItems((prev) => {
+        const newExecuteItems = computeAddToExecuteListFromMap(
+          itemId,
+          dayName,
+          items,
+          prev[activeEventName] || {},
+          halls,
+          hallRouteSettingsForMap,
+          currentMapData,
+        );
+        return { ...prev, [activeEventName]: newExecuteItems };
+      });
     },
-    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, executeModeItems],
+    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData],
   );
 
 
@@ -2443,20 +2549,19 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !activeEventDate) return;
 
       const dayName = activeEventDate;
-      const newExecuteItems = computeAddToExecuteListFromMapAtPosition(
-        itemId,
-        referenceItemId,
-        position,
-        executeModeItems[activeEventName] || {},
-        dayName,
-      );
 
-      setExecuteModeItems((prev) => ({
-        ...prev,
-        [activeEventName]: newExecuteItems,
-      }));
+      setExecuteModeItems((prev) => {
+        const newExecuteItems = computeAddToExecuteListFromMapAtPosition(
+          itemId,
+          referenceItemId,
+          position,
+          prev[activeEventName] || {},
+          dayName,
+        );
+        return { ...prev, [activeEventName]: newExecuteItems };
+      });
     },
-    [activeEventName, activeEventDate, isMapTab, executeModeItems],
+    [activeEventName, activeEventDate, isMapTab],
   );
 
 
@@ -2465,18 +2570,17 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !activeEventDate) return;
 
       const dayName = activeEventDate;
-      const newExecuteItems = computeRemoveFromExecuteListFromMap(
-        itemId,
-        executeModeItems[activeEventName] || {},
-        dayName,
-      );
 
-      setExecuteModeItems((prev) => ({
-        ...prev,
-        [activeEventName]: newExecuteItems,
-      }));
+      setExecuteModeItems((prev) => {
+        const newExecuteItems = computeRemoveFromExecuteListFromMap(
+          itemId,
+          prev[activeEventName] || {},
+          dayName,
+        );
+        return { ...prev, [activeEventName]: newExecuteItems };
+      });
     },
-    [activeEventName, activeEventDate, isMapTab, executeModeItems],
+    [activeEventName, activeEventDate, isMapTab],
   );
 
 
@@ -3332,18 +3436,28 @@ const App: React.FC = () => {
 
     const mode = dayModes[activeEventName]?.[currentEventDate];
 
+    let result: ShoppingItem[];
     if (mode === 'execute') {
       if (sortState === 'Manual') {
-        return executeColumnItems;
+        result = executeColumnItems;
+      } else {
+        const filterStatus = sortState as Exclude<SortState, 'Manual'>;
+        result = executeColumnItems.filter(
+          (item) => item.purchaseStatus === filterStatus || recentlyChangedItemIds.has(item.id),
+        );
       }
-      const filterStatus = sortState as Exclude<SortState, 'Manual'>;
-      return executeColumnItems.filter(
-        (item) => item.purchaseStatus === filterStatus || recentlyChangedItemIds.has(item.id),
+    } else {
+      result = itemsForTab;
+    }
+
+    // 「自分のアイテムのみ」フィルタ（共有ルーム参加中 + フィルタON時）
+    if (sharing?.myItemsOnly && sharing.userId) {
+      result = result.filter(
+        (item) => !item.assignedTo || item.assignedTo === sharing.userId,
       );
     }
 
-
-    return itemsForTab;
+    return result;
   }, [
     activeTab,
     currentTabItems,
@@ -3353,6 +3467,8 @@ const App: React.FC = () => {
     executeColumnItems,
     eventDates,
     recentlyChangedItemIds,
+    sharing?.myItemsOnly,
+    sharing?.userId,
   ]);
 
 
@@ -4342,7 +4458,8 @@ const App: React.FC = () => {
                 {activeEventName &&
                   mainContentVisible &&
                   items.length > 0 &&
-                  currentMode === 'execute' && (
+                  currentMode === 'execute' &&
+                  !mapViewActive && (
                     <button
                       onClick={handleSortToggle}
                       className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 flex-shrink-0"
@@ -4479,6 +4596,16 @@ const App: React.FC = () => {
             onRename={(oldName) => handleRenameEvent(oldName)}
             onImportMap={handleImportMapData}
             onImportExportFile={() => exportFileInputRef.current?.click()}
+            onCreateRoom={sharing ? (name) => setSharingDialog({ type: 'create', eventName: name }) : undefined}
+            onJoinRoom={sharing ? () => setSharingDialog({ type: 'join' }) : undefined}
+            onShowMembers={sharing?.activeRoom ? () => setSharingDialog({ type: 'members' }) : undefined}
+            onInviteToRoom={sharing?.activeRoom ? () => setSharingDialog({ type: 'invite' }) : undefined}
+            onAutoAssign={sharing?.activeRoom ? (eventName: string) => {
+              setActiveEventName(eventName);
+              setSharingDialog({ type: 'autoAssign' });
+            } : undefined}
+            onLeaveRoom={sharing?.activeRoom ? () => { sharing.leaveRoom(); } : undefined}
+            activeRoomCode={sharing?.activeRoom?.roomCode ?? null}
           />
         )}
         {activeTab === 'import' && (
@@ -5083,6 +5210,10 @@ const App: React.FC = () => {
               items={visibleItems}
               filterLabel={!showHeaderBar ? sortLabels[sortState] : undefined}
               onFilterToggle={!showHeaderBar ? handleSortToggle : undefined}
+              isInRoom={!!sharing?.activeRoom}
+              onHelpRequest={sharing?.activeRoom ? () => setSharingDialog({ type: 'helpRequest' }) : undefined}
+              myItemsOnly={sharing?.myItemsOnly}
+              onToggleMyItems={sharing?.activeRoom ? sharing.toggleMyItemsFilter : undefined}
             />
           )}
         </>
@@ -5131,6 +5262,249 @@ const App: React.FC = () => {
         >
           {smartInsertToast}
         </div>
+      )}
+      {/* 共有ダイアログ */}
+      {sharingDialog?.type === 'create' && sharing && (
+        <CreateRoomDialog
+          eventName={sharingDialog.eventName}
+          onClose={() => setSharingDialog(null)}
+          onCreateRoom={async (displayName, expiresAt) => {
+            const room = await sharing.createRoom(sharingDialog.eventName, displayName, expiresAt);
+            return { roomCode: room.roomCode };
+          }}
+          onMigrateItems={async () => {
+            const currentItems = eventLists[sharingDialog.eventName] || [];
+            if (currentItems.length > 0) {
+              await sharing.uploadItemsToRoom(currentItems);
+            }
+          }}
+        />
+      )}
+      {sharingDialog?.type === 'join' && sharing && (
+        <JoinRoomDialog
+          onClose={() => setSharingDialog(null)}
+          onJoinRoom={async (roomCode, displayName) => {
+            const room = await sharing.joinRoom(roomCode, displayName);
+            // ルーム参加は成功。アイテムダウンロードは失敗してもダイアログを閉じる
+            try {
+              if (supabaseClient) {
+                const roomItems = await getRoomItemsAsShoppingItems(supabaseClient, room.id);
+                if (roomItems.length > 0) {
+                  setEventLists((prev) => ({
+                    ...prev,
+                    [room.eventName]: roomItems,
+                  }));
+                }
+              }
+            } catch (e) {
+              console.warn('アイテムダウンロードに失敗:', e);
+            }
+            setActiveEventName(room.eventName);
+            setSharingDialog(null);
+          }}
+          onRejoinRoom={async (roomCode, displayName) => {
+            const room = await sharing.rejoinRoom(roomCode, displayName);
+            try {
+              if (supabaseClient) {
+                const roomItems = await getRoomItemsAsShoppingItems(supabaseClient, room.id);
+                if (roomItems.length > 0) {
+                  setEventLists((prev) => ({
+                    ...prev,
+                    [room.eventName]: roomItems,
+                  }));
+                }
+              }
+            } catch (e) {
+              console.warn('アイテムダウンロードに失敗:', e);
+            }
+            setActiveEventName(room.eventName);
+            setSharingDialog(null);
+          }}
+          initialCode={sharingDialog.initialCode}
+        />
+      )}
+      {sharingDialog?.type === 'members' && sharing?.activeRoom && (
+        <MemberListPanel
+          members={sharing.members}
+          hostUserId={sharing.activeRoom.createdBy}
+          currentUserId={sharing.userId}
+          roomCode={sharing.activeRoom.roomCode}
+          onClose={() => setSharingDialog(null)}
+        />
+      )}
+      {sharingDialog?.type === 'invite' && sharing?.activeRoom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
+          <div
+            className="bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 w-[90vw] max-w-md overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+              <h3 className="text-sm font-semibold text-slate-800 dark:text-white">
+                ゲストを招待
+              </h3>
+            </div>
+            <div className="p-4">
+              <QRCodeDisplay roomCode={sharing.activeRoom.roomCode} />
+            </div>
+            <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
+              <button
+                onClick={() => setSharingDialog(null)}
+                className="w-full py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
+              >
+                閉じる
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* 投げつけダイアログ */}
+      {sharingDialog?.type === 'bulkTransfer' && sharing?.activeRoom && (
+        <BulkTransferDialog
+          items={items}
+          members={sharing.members}
+          currentUserId={sharing.userId}
+          onTransfer={async (itemIds, targetUserId) => {
+            await sharing.bulkAssignItems(itemIds, targetUserId);
+            // ローカルも更新
+            setEventLists((prev) => {
+              if (!activeEventName) return prev;
+              return {
+                ...prev,
+                [activeEventName]: (prev[activeEventName] || []).map((item) =>
+                  itemIds.includes(item.id) ? { ...item, assignedTo: targetUserId } : item,
+                ),
+              };
+            });
+          }}
+          onClose={() => setSharingDialog(null)}
+        />
+      )}
+      {/* ヘルプ要請ダイアログ */}
+      {sharingDialog?.type === 'helpRequest' && sharing?.activeRoom && (
+        <HelpRequestDialog
+          onRequestHelp={async (circleName) => {
+            const currentMember = sharing.members.find((m) => m.userId === sharing.userId);
+            if (!currentMember) return;
+            const remaining = items.filter(
+              (item) =>
+                (item.assignedTo === sharing.userId || !item.assignedTo) &&
+                item.purchaseStatus === 'None',
+            ).length;
+            // useMemberStatus経由の代わりに直接memberStatusServiceを呼ぶ
+            const { requestHelp } = await import('./features/sharing/services/memberStatusService');
+            if (supabaseClient) {
+              await requestHelp(
+                supabaseClient,
+                sharing.activeRoom!.id,
+                sharing.userId!,
+                currentMember.displayName,
+                circleName,
+                remaining,
+              );
+            }
+          }}
+          onClose={() => setSharingDialog(null)}
+          items={items}
+        />
+      )}
+      {/* 自動割り振りダイアログ */}
+      {sharingDialog?.type === 'autoAssign' && sharing?.activeRoom && (
+        <AutoAssignmentDialog
+          items={items}
+          members={sharing.members}
+          halls={(() => {
+            // マップタブ以外でもホール定義を取得
+            if (currentHalls && currentHalls.length > 0) return currentHalls;
+            if (!activeEventName) return [];
+            const eventHalls = hallDefinitions[activeEventName];
+            if (!eventHalls) return [];
+            // 最初に見つかったマップタブのホール定義を使用
+            const firstMapTab = Object.keys(eventHalls)[0];
+            return firstMapTab ? (eventHalls[firstMapTab] as HallDefinition[]) ?? [] : [];
+          })()}
+          mapData={(() => {
+            if (currentMapData) return currentMapData;
+            if (!activeEventName) return undefined;
+            const eventMaps = mapData[activeEventName];
+            if (!eventMaps) return undefined;
+            const firstMapTab = Object.keys(eventMaps)[0];
+            return firstMapTab ? eventMaps[firstMapTab] as DayMapData : undefined;
+          })()}
+          onApply={async (assignments, clearItemIds) => {
+            for (const { userId: targetUserId, itemIds } of assignments) {
+              await sharing.bulkAssignItems(itemIds, targetUserId);
+            }
+            // 未割当アイテムのassignedToをクリア
+            if (clearItemIds.length > 0) {
+              await sharing.bulkAssignItems(clearItemIds, null);
+            }
+            // ローカルも更新
+            setEventLists((prev) => {
+              if (!activeEventName) return prev;
+              const assignMap = new Map<string, string | null>();
+              for (const { userId: targetUserId, itemIds } of assignments) {
+                for (const id of itemIds) {
+                  assignMap.set(id, targetUserId);
+                }
+              }
+              for (const id of clearItemIds) {
+                assignMap.set(id, null);
+              }
+              return {
+                ...prev,
+                [activeEventName]: (prev[activeEventName] || []).map((item) => {
+                  const targetId = assignMap.get(item.id);
+                  if (targetId === undefined) return item;
+                  return targetId === null
+                    ? { ...item, assignedTo: undefined }
+                    : { ...item, assignedTo: targetId };
+                }),
+              };
+            });
+          }}
+          onClose={() => setSharingDialog(null)}
+        />
+      )}
+      {/* 同期ステータスインジケーター */}
+      {sharing?.activeRoom && (
+        <div className="fixed bottom-16 right-4 z-10">
+          <SyncStatusIndicator
+            status={sharing.syncStatus}
+            pendingCount={sharing.pendingQueueSize}
+          />
+        </div>
+      )}
+      {/* 集中モード投げつけダイアログ */}
+      {focusTransferItem && sharing?.activeRoom && (
+        <ItemTransferDialog
+          item={focusTransferItem}
+          spaceItems={items.filter(
+            (i) =>
+              i.block === focusTransferItem.block &&
+              getBaseNumber(i.number) === getBaseNumber(focusTransferItem.number) &&
+              (i.purchaseStatus === 'None' || i.purchaseStatus === 'Postpone'),
+          )}
+          members={sharing.members}
+          currentUserId={sharing.userId}
+          onTransfer={async (transferItems, targetUserId) => {
+            for (const { itemId, quantity } of transferItems) {
+              const item = items.find((i) => i.id === itemId);
+              if (item) {
+                handleUpdateItem({ ...item, assignedTo: targetUserId, quantity });
+                await sharing.assignItem(itemId, targetUserId);
+              }
+            }
+            setFocusTransferItem(null);
+          }}
+          onClose={() => setFocusTransferItem(null)}
+        />
+      )}
+      {/* 通知トースト */}
+      {sharing?.latestToast && (
+        <NotificationToast
+          notification={sharing.latestToast}
+          onDismiss={() => sharing.dismissToast()}
+        />
       )}
     </div>
   );

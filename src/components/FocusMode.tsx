@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import ReactDOM from 'react-dom';
+import { useSharing } from '../features/sharing/components/SharingProvider';
 import {
   ShoppingItem,
   DayMapData,
@@ -82,6 +83,23 @@ const FocusMode: React.FC<FocusModeProps> = ({
   onMapRotationAngleChange,
   numberCellOutlineStyle = 'rounded',
 }) => {
+  const sharing = useSharing();
+
+  // 担当者マップ（投げつけ・バッジ表示用）
+  const focusAssignedMemberMap = useMemo(() => {
+    if (!sharing?.activeRoom || !sharing.members.length) return null;
+    const map = new Map<string, { displayName: string; color: string }>();
+    for (const m of sharing.members) {
+      map.set(m.userId, { displayName: m.displayName, color: m.color });
+    }
+    return map;
+  }, [sharing?.activeRoom, sharing?.members]);
+
+  const handleFocusTransferRequest = useCallback((item: ShoppingItem) => {
+    // ShoppingList側と同様にカスタムイベントで投げつけダイアログを開く
+    window.dispatchEvent(new CustomEvent('sharing:transferRequest', { detail: { item } }));
+  }, []);
+
   // onMapRotationAngleChange の安定フォールバック（React.memo 対策）
   const noopRotationHandler = useCallback(() => {}, []);
   const stableMapRotationHandler = onMapRotationAngleChange || noopRotationHandler;
@@ -2093,6 +2111,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
             currentPhase={currentPhase}
             onPhaseChangeRequest={handlePhaseChangeRequest}
             nextVisitInfo={nextVisitInfo}
+            isInRoom={!!sharing?.activeRoom}
+            onBulkTransfer={() => window.dispatchEvent(new CustomEvent('sharing:bulkTransfer'))}
+            onHelpRequest={() => window.dispatchEvent(new CustomEvent('sharing:helpRequest'))}
           />
           <FocusModeItemList
             itemListRef={itemListRef}
@@ -2104,6 +2125,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onEditRequest={onEditRequest}
             onDeleteRequest={onDeleteRequest}
             onAddItem={onAddItem ? openAddItemDialogFromList : undefined}
+            onTransferRequest={sharing?.activeRoom ? handleFocusTransferRequest : undefined}
+            assignedMemberMap={focusAssignedMemberMap}
+            currentUserId={sharing?.userId}
           />
         </div>
 
@@ -2115,10 +2139,21 @@ const FocusMode: React.FC<FocusModeProps> = ({
           >
             <div className="px-4 py-2">
               <div className="flex justify-between items-center">
-                <div className="text-slate-700 dark:text-slate-300">
-                  <span className="font-bold text-lg text-indigo-600 dark:text-indigo-400">
-                    {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
-                  </span>
+                <div className="flex items-center gap-2">
+                  {sharing?.activeRoom && (
+                    <button
+                      onClick={() => window.dispatchEvent(new CustomEvent('sharing:helpRequest'))}
+                      className="px-2 py-1 text-xs font-medium rounded-md text-orange-600 bg-orange-100 hover:bg-orange-200 dark:text-orange-300 dark:bg-orange-900/50 dark:hover:bg-orange-900 transition-colors"
+                      title="ヘルプ要請"
+                    >
+                      🆘
+                    </button>
+                  )}
+                  <div className="text-slate-700 dark:text-slate-300">
+                    <span className="font-bold text-lg text-indigo-600 dark:text-indigo-400">
+                      {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
+                    </span>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <div className="text-sm text-slate-700 dark:text-slate-300">
@@ -2263,6 +2298,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
             currentPhase={currentPhase}
             onPhaseChangeRequest={handlePhaseChangeRequest}
             nextVisitInfo={nextVisitInfo}
+            isInRoom={!!sharing?.activeRoom}
+            onBulkTransfer={() => window.dispatchEvent(new CustomEvent('sharing:bulkTransfer'))}
+            onHelpRequest={() => window.dispatchEvent(new CustomEvent('sharing:helpRequest'))}
           />
           <FocusModeItemList
             itemListRef={itemListRef}
@@ -2274,6 +2312,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onEditRequest={onEditRequest}
             onDeleteRequest={onDeleteRequest}
             onAddItem={onAddItem ? openAddItemDialogFromList : undefined}
+            onTransferRequest={sharing?.activeRoom ? handleFocusTransferRequest : undefined}
+            assignedMemberMap={focusAssignedMemberMap}
+            currentUserId={sharing?.userId}
           />
         </div>
 
@@ -2433,6 +2474,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
         onEditRequest={onEditRequest}
         onDeleteRequest={onDeleteRequest}
         onAddItem={onAddItem ? openAddItemDialogFromList : undefined}
+        onTransferRequest={sharing?.activeRoom ? handleFocusTransferRequest : undefined}
+        assignedMemberMap={focusAssignedMemberMap}
+        currentUserId={sharing?.userId}
       />
 
       {/* ナビゲーションボタン（PCモードのみ表示） */}

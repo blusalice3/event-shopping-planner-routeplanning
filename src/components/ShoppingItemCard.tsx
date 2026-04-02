@@ -1,4 +1,5 @@
 import React, { useCallback, useMemo, useState, useRef, useEffect } from 'react';
+import ReactDOM from 'react-dom';
 import {
   ShoppingItem,
   PurchaseStatus,
@@ -53,6 +54,10 @@ export interface ShoppingItemCardProps {
   viewMode?: 'edit' | 'execute' | 'focus';
   hallIndex?: number; // ホール内での訪問順番号（0始まり）
   priorityLevel?: 'none' | 'priority' | 'highest'; // グループの優先度レベル
+  assignedMember?: { displayName: string; color: string } | null; // 共有ルームでの担当者
+  onAssignmentTap?: (itemId: string, event: React.MouseEvent) => void; // 担当者変更タップ
+  onTransferRequest?: (item: ShoppingItem) => void; // 投げつけ要求
+  isDimmedByAssignment?: boolean; // 他人に割り振られたアイテムの薄表示
 }
 
 const statusConfig: Record<
@@ -157,10 +162,16 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   viewMode = 'edit',
   hallIndex,
   priorityLevel = 'none',
+  assignedMember,
+  onAssignmentTap,
+  onTransferRequest,
+  isDimmedByAssignment = false,
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
   const longPressTimeout = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
@@ -233,7 +244,10 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       return;
     }
     clearLongPress();
+    const pointerX = e.clientX;
+    const pointerY = e.clientY;
     longPressTimeout.current = window.setTimeout(() => {
+      setMenuPosition({ x: pointerX, y: pointerY });
       setMenuVisible(true);
     }, 500); // 500ms for long press
   };
@@ -248,7 +262,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (menuVisible && cardRef.current && !cardRef.current.contains(event.target as Node)) {
+      if (menuVisible && menuRef.current && !menuRef.current.contains(event.target as Node)) {
         setMenuVisible(false);
       }
     };
@@ -257,6 +271,25 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [menuVisible]);
+
+  // メニュー表示時にビューポート内に収まるよう位置を補正
+  useEffect(() => {
+    if (menuVisible && menuRef.current && menuPosition) {
+      const menu = menuRef.current;
+      const rect = menu.getBoundingClientRect();
+      const margin = 8;
+      let x = menuPosition.x - rect.width / 2;
+      let y = menuPosition.y - rect.height / 2;
+
+      if (x + rect.width > window.innerWidth - margin) x = window.innerWidth - rect.width - margin;
+      if (x < margin) x = margin;
+      if (y + rect.height > window.innerHeight - margin) y = window.innerHeight - rect.height - margin;
+      if (y < margin) y = margin;
+
+      menu.style.left = `${x}px`;
+      menu.style.top = `${y}px`;
+    }
+  }, [menuVisible, menuPosition]);
 
   const priceOptions = useMemo(() => {
     const options = new Set<number | null>();
@@ -330,7 +363,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const cardClasses = `
     rounded-lg shadow-md transition-all duration-300 relative overflow-hidden
     ${baseBg}
-    ${currentStatus.dim ? 'opacity-60 dark:opacity-50' : 'opacity-100'}
+    ${currentStatus.dim ? 'opacity-60 dark:opacity-50' : isDimmedByAssignment ? 'opacity-40 dark:opacity-35' : 'opacity-100'}
     ${isSearchMatch ? 'ring-4 ring-red-500 ring-offset-2' : ''}
   `;
 
@@ -388,6 +421,18 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 >
                   {hallIndex + 1}
                 </div>
+              )}
+              {/* 担当者バッジ */}
+              {assignedMember && (
+                <button
+                  onClick={(e) => { e.stopPropagation(); onAssignmentTap?.(item.id, e); }}
+                  data-no-long-press
+                  className="w-6 h-6 rounded-full flex items-center justify-center text-white text-[10px] font-bold flex-shrink-0 cursor-pointer"
+                  style={{ backgroundColor: assignedMember.color }}
+                  title={assignedMember.displayName}
+                >
+                  {assignedMember.displayName.charAt(0)}
+                </button>
               )}
               <input
                 type="checkbox"
@@ -523,9 +568,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             </div>
           </div>
 
-          {menuVisible && (
+          {menuVisible && ReactDOM.createPortal(
             <div
-              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
+              ref={menuRef}
+              className="fixed z-[9999]"
+              style={{ left: 0, top: 0 }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex flex-col gap-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-lg shadow-2xl border border-slate-300 dark:border-slate-600 p-4">
@@ -547,8 +594,20 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 >
                   削除
                 </button>
+                {onTransferRequest && (
+                  <button
+                    onClick={() => {
+                      onTransferRequest(item);
+                      setMenuVisible(false);
+                    }}
+                    className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-purple-600 hover:bg-purple-700 transition-colors"
+                  >
+                    投げつけ
+                  </button>
+                )}
               </div>
-            </div>
+            </div>,
+            document.body,
           )}
         </div>
       );
@@ -600,6 +659,17 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
               >
                 {hallIndex + 1}
               </div>
+            )}
+            {assignedMember && (
+              <button
+                onClick={(e) => { e.stopPropagation(); onAssignmentTap?.(item.id, e); }}
+                data-no-long-press
+                className="w-5 h-5 rounded-full flex items-center justify-center text-white text-[8px] font-bold flex-shrink-0 cursor-pointer"
+                style={{ backgroundColor: assignedMember.color }}
+                title={assignedMember.displayName}
+              >
+                {assignedMember.displayName.charAt(0)}
+              </button>
             )}
             <input
               type="checkbox"
@@ -744,9 +814,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           </div>
         </div>
 
-        {menuVisible && (
+        {menuVisible && ReactDOM.createPortal(
           <div
-            className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
+            ref={menuRef}
+            className="fixed z-[9999]"
+            style={{ left: 0, top: 0 }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex flex-col gap-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-lg shadow-2xl border border-slate-300 dark:border-slate-600 p-4">
@@ -769,7 +841,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 削除
               </button>
             </div>
-          </div>
+          </div>,
+          document.body,
         )}
       </div>
     );
@@ -779,7 +852,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const pcCardClasses = `
     rounded-lg shadow-md transition-all duration-300 flex items-stretch relative overflow-hidden
     ${baseBg}
-    ${currentStatus.dim ? 'opacity-60 dark:opacity-50' : 'opacity-100'}
+    ${currentStatus.dim ? 'opacity-60 dark:opacity-50' : isDimmedByAssignment ? 'opacity-40 dark:opacity-35' : 'opacity-100'}
     ${isSearchMatch ? 'ring-4 ring-red-500 ring-offset-2' : ''}
   `;
 
@@ -812,6 +885,17 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           >
             {hallIndex + 1}
           </div>
+        )}
+        {assignedMember && (
+          <button
+            onClick={(e) => { e.stopPropagation(); onAssignmentTap?.(item.id, e); }}
+            data-no-long-press
+            className="w-7 h-7 rounded-full flex items-center justify-center text-white text-xs font-bold flex-shrink-0 cursor-pointer"
+            style={{ backgroundColor: assignedMember.color }}
+            title={assignedMember.displayName}
+          >
+            {assignedMember.displayName.charAt(0)}
+          </button>
         )}
         <input
           type="checkbox"
@@ -1000,9 +1084,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         </div>
       </div>
 
-      {menuVisible && (
+      {menuVisible && ReactDOM.createPortal(
         <div
-          className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
+          ref={menuRef}
+          className="fixed z-[9999]"
+          style={{ left: 0, top: 0 }}
           onClick={(e) => e.stopPropagation()}
         >
           <div className="flex flex-col gap-2 bg-white/80 dark:bg-slate-900/80 backdrop-blur-sm rounded-lg shadow-2xl border border-slate-300 dark:border-slate-600 p-4">
@@ -1024,8 +1110,20 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             >
               削除
             </button>
+            {onTransferRequest && viewMode !== 'edit' && (
+              <button
+                onClick={() => {
+                  onTransferRequest(item);
+                  setMenuVisible(false);
+                }}
+                className="px-4 py-2 text-sm font-semibold rounded-md text-white bg-purple-600 hover:bg-purple-700 transition-colors"
+              >
+                投げつけ
+              </button>
+            )}
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );

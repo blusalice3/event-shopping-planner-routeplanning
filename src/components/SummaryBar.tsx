@@ -5,16 +5,26 @@ interface SummaryBarProps {
   items: ShoppingItem[];
   filterLabel?: string;
   onFilterToggle?: () => void;
+  onHelpRequest?: () => void;
+  isInRoom?: boolean;
+  myItemsOnly?: boolean;
+  onToggleMyItems?: () => void;
 }
 
 const SummaryBar: React.FC<SummaryBarProps> = ({
   items,
   filterLabel,
   onFilterToggle,
+  onHelpRequest,
+  isInRoom = false,
+  myItemsOnly = false,
+  onToggleMyItems,
 }) => {
   const summary = useMemo(() => {
     const totalItems = items.length;
-    const purchasedItems = items.filter((item) => item.purchaseStatus === 'Purchased').length;
+    const purchasedItems = items.filter(
+      (item) => item.purchaseStatus === 'Purchased' || item.purchaseStatus === 'LimitedPurchase',
+    ).length;
 
     const remainingCost = items.reduce((sum, item) => {
       const isPurchasable =
@@ -22,7 +32,7 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
         item.purchaseStatus === 'Postpone' ||
         item.purchaseStatus === 'Late';
       if (!isPurchasable) return sum;
-      const price = item.price ?? 0; // nullの場合は0として扱う
+      const price = item.price ?? 0;
       return sum + price;
     }, 0);
 
@@ -33,9 +43,37 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
     <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
         <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
-          <div className="text-slate-700 dark:text-slate-300">
-            <span className="font-semibold">{summary.purchasedItems}</span> / {summary.totalItems}{' '}
-            件購入済み
+          <div className="flex items-center gap-2">
+            {isInRoom && onHelpRequest && (
+              <button
+                onClick={onHelpRequest}
+                className="px-2 py-1 text-xs font-medium rounded-md text-orange-600 bg-orange-100 hover:bg-orange-200 dark:text-orange-300 dark:bg-orange-900/50 dark:hover:bg-orange-900 transition-colors touch-manipulation select-none"
+                title="ヘルプ要請"
+                style={{ WebkitTapHighlightColor: 'transparent' }}
+                type="button"
+              >
+                🆘
+              </button>
+            )}
+            {isInRoom && onToggleMyItems && (
+              <button
+                onClick={onToggleMyItems}
+                className={`px-2 py-1 text-xs font-medium rounded-md transition-colors touch-manipulation select-none ${
+                  myItemsOnly
+                    ? 'text-white bg-indigo-600 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600'
+                    : 'text-indigo-600 bg-indigo-100 hover:bg-indigo-200 dark:text-indigo-300 dark:bg-indigo-900/50 dark:hover:bg-indigo-900'
+                }`}
+                title={myItemsOnly ? '全アイテム表示' : '自分のアイテムのみ'}
+                style={{ WebkitTapHighlightColor: 'transparent' }}
+                type="button"
+              >
+                👤
+              </button>
+            )}
+            <div className="text-slate-700 dark:text-slate-300">
+              <span className="font-semibold">{summary.purchasedItems}</span> / {summary.totalItems}{' '}
+              件購入済み
+            </div>
           </div>
           {filterLabel && onFilterToggle && (
             <button

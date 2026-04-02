@@ -13,6 +13,7 @@ import {
 } from '../../types';
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { generateRouteSegments, simplifyPath } from '../../utils/pathfinding';
+import { useSharing } from '../../features/sharing/components/SharingProvider';
 import {
   findAllCrossingsIndexed,
   buildCrossingLookup,
@@ -204,6 +205,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   offsetRef: externalOffsetRef,
   numberCellOutlineStyle = 'rounded',
 }) => {
+  const sharing = useSharing();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [offset, setOffsetState] = useState(initialOffset ?? { x: 0, y: 0 });
@@ -700,11 +702,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         items: [],
         hasPriorityItem: false,
         hasPriorityUnvisited: false,
+        hasOtherAssignedItems: false,
       };
 
       existing.hasItems = true;
       existing.itemCount++;
       existing.items.push(item);
+
+      // 他人に割り振られたアイテムかチェック（共有ルーム参加時）
+      if (sharing?.activeRoom && item.assignedTo && item.assignedTo !== sharing.userId) {
+        existing.hasOtherAssignedItems = true;
+      }
 
       if (isPriorityItem(item)) {
         existing.hasPriorityItem = true;
@@ -728,7 +736,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     });
 
     return states;
-  }, [mapData.blocks, items, mapName, executeModeItemIdsSet]);
+  }, [mapData.blocks, items, mapName, executeModeItemIdsSet, sharing?.activeRoom, sharing?.userId]);
 
   const routePoints = useMemo(() => {
     if (!isRouteVisible) return [];
@@ -1356,6 +1364,16 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
             ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';
+            ctx.fillRect(x, y, width, height);
+          }
+        } else if (state.hasOtherAssignedItems) {
+          // 他人に割り振られたアイテムのセルは紫色
+          if (isNumberCell) {
+            const color = 'rgba(139, 92, 246, 0.35)';
+            if (!overlayGroups.has(color)) overlayGroups.set(color, []);
+            overlayGroups.get(color)!.push({ x, y, w: width, h: height });
+          } else {
+            ctx.fillStyle = 'rgba(139, 92, 246, 0.35)';
             ctx.fillRect(x, y, width, height);
           }
         } else if (state.hasItems) {

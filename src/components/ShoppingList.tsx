@@ -6,6 +6,7 @@ import ShoppingItemCard from './ShoppingItemCard';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 import ChevronUpIcon from './icons/ChevronUpIcon';
 import ChevronDownIcon from './icons/ChevronDownIcon';
+import { useSharing } from '../features/sharing/components/SharingProvider';
 
 // 優先度レベルの型
 type PriorityLevel = 'none' | 'priority' | 'highest';
@@ -243,9 +244,97 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onSelectSpaceGroupForRange,
   onAddItem,
 }) => {
+  const sharing = useSharing();
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
+  // 担当者メンバー情報のルックアップマップ
+  const assignedMemberMap = useMemo(() => {
+    if (!sharing?.activeRoom || !sharing.members.length) return null;
+    const map = new Map<string, { displayName: string; color: string }>();
+    for (const m of sharing.members) {
+      map.set(m.userId, { displayName: m.displayName, color: m.color });
+    }
+    return map;
+  }, [sharing?.activeRoom, sharing?.members]);
+
+  // 担当者変更メニュー状態
+  const [assignmentMenuState, setAssignmentMenuState] = useState<{
+    itemId: string;
+    assignedTo: string | undefined;
+    position: { x: number; y: number };
+  } | null>(null);
+
+  const handleAssignmentTap = useCallback((itemId: string, event: React.MouseEvent) => {
+    const item = items.find((i) => i.id === itemId);
+    setAssignmentMenuState({
+      itemId,
+      assignedTo: item?.assignedTo,
+      position: { x: event.clientX, y: event.clientY },
+    });
+  }, [items]);
+
+  const handleAssign = useCallback(async (targetUserId: string | null) => {
+    if (!sharing || !assignmentMenuState) return;
+    const { itemId } = assignmentMenuState;
+
+    // ローカル楽観的更新
+    const item = items.find((i) => i.id === itemId);
+    if (item) {
+      onUpdateItem({ ...item, assignedTo: targetUserId ?? undefined });
+    }
+
+    try {
+      await sharing.assignItem(itemId, targetUserId);
+    } catch (err) {
+      console.error('Assignment failed:', err);
+    }
+    setAssignmentMenuState(null);
+  }, [sharing, assignmentMenuState, items, onUpdateItem]);
+
+  // 投げつけダイアログstate
+  const [transferDialogState, setTransferDialogState] = useState<{
+    item: ShoppingItem;
+    spaceItems: ShoppingItem[];
+  } | null>(null);
+
+  const handleTransferRequest = useCallback((item: ShoppingItem) => {
+    // 同スペース（同block + 同baseNumber）の未購入アイテムを収集
+    const baseNum = getBaseNumber(item.number);
+    const spaceItems = items.filter(
+      (i) =>
+        i.block === item.block &&
+        getBaseNumber(i.number) === baseNum &&
+        (i.purchaseStatus === 'None' || i.purchaseStatus === 'Postpone'),
+    );
+    setTransferDialogState({ item, spaceItems });
+  }, [items]);
+
+  const handleTransfer = useCallback(async (
+    transferItems: { itemId: string; quantity: number }[],
+    targetUserId: string,
+  ) => {
+    if (!sharing) return;
+    for (const { itemId, quantity } of transferItems) {
+      const item = items.find((i) => i.id === itemId);
+      if (item) {
+        onUpdateItem({ ...item, assignedTo: targetUserId, quantity });
+        await sharing.assignItem(itemId, targetUserId);
+        await sharing.syncItemUpdate(itemId, { quantity });
+      }
+    }
+    // 通知送信
+    const currentMember = sharing.members.find((m) => m.userId === sharing.userId);
+    if (sharing.broadcastNotification) {
+      await sharing.broadcastNotification('bulk_transfer', {
+        senderName: currentMember?.displayName ?? '',
+        itemCount: transferItems.length,
+        message: `${currentMember?.displayName ?? ''}さんから${transferItems.length}件のアイテムが転送されました`,
+      });
+    }
+    setTransferDialogState(null);
+  }, [sharing, items, onUpdateItem]);
 
   // タッチドラッグ用state/ref
   const touchDragActive = useRef(false);
@@ -1682,6 +1771,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           isSearchMatch={highlightedItemId === item.id}
                           layoutMode={layoutMode}
                           viewMode={viewMode}
+                          assignedMember={item.assignedTo && assignedMemberMap?.get(item.assignedTo) || null}
+                          onAssignmentTap={sharing?.activeRoom ? handleAssignmentTap : undefined}
+                          onTransferRequest={sharing?.activeRoom ? handleTransferRequest : undefined}
+                          isDimmedByAssignment={!!sharing?.activeRoom && !!item.assignedTo && item.assignedTo !== sharing.userId}
                         />
 
                         {activeDropTarget?.id === item.id &&
@@ -2129,6 +2222,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         viewMode={viewMode}
                         hallIndex={hallIndex}
                         priorityLevel={group.priority}
+                        assignedMember={item.assignedTo && assignedMemberMap?.get(item.assignedTo) || null}
+                        onAssignmentTap={sharing?.activeRoom ? handleAssignmentTap : undefined}
+                        onTransferRequest={sharing?.activeRoom ? handleTransferRequest : undefined}
+                        isDimmedByAssignment={!!sharing?.activeRoom && !!item.assignedTo && item.assignedTo !== sharing.userId}
                       />
 
                       {activeDropTarget?.id === item.id &&
@@ -2346,6 +2443,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               isSearchMatch={highlightedItemId === item.id}
               layoutMode={layoutMode}
               viewMode={viewMode}
+              assignedMember={item.assignedTo && assignedMemberMap?.get(item.assignedTo) || null}
+              onAssignmentTap={sharing?.activeRoom ? handleAssignmentTap : undefined}
+              onTransferRequest={sharing?.activeRoom ? handleTransferRequest : undefined}
+              isDimmedByAssignment={!!sharing?.activeRoom && !!item.assignedTo && item.assignedTo !== sharing.userId}
             />
 
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (
@@ -2593,8 +2694,73 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
           </div>
         );
       })}
+      {/* 担当者変更メニュー */}
+      {assignmentMenuState && sharing?.activeRoom && (
+        <AssignmentMenuPortal
+          members={sharing.members}
+          currentAssignedTo={assignmentMenuState.assignedTo}
+          currentUserId={sharing.userId}
+          onAssign={handleAssign}
+          onClose={() => setAssignmentMenuState(null)}
+          position={assignmentMenuState.position}
+        />
+      )}
+      {/* 投げつけダイアログ */}
+      {transferDialogState && sharing?.activeRoom && (
+        <ItemTransferPortal
+          item={transferDialogState.item}
+          spaceItems={transferDialogState.spaceItems}
+          members={sharing.members}
+          currentUserId={sharing.userId}
+          onTransfer={async (transferItems, targetUserId) => {
+            await handleTransfer(transferItems, targetUserId);
+          }}
+          onClose={() => setTransferDialogState(null)}
+        />
+      )}
     </div>
   );
 };
+
+// AssignmentMenuをlazy importで遅延読み込み（バンドルサイズ最適化）
+const AssignmentMenuPortal: React.FC<{
+  members: { userId: string; displayName: string; color: string; isOnline: boolean; lastSeenAt: string; joinedAt: string; id: string }[];
+  currentAssignedTo: string | undefined;
+  currentUserId: string | null;
+  onAssign: (targetUserId: string | null) => void;
+  onClose: () => void;
+  position: { x: number; y: number };
+}> = React.memo((props) => {
+  const [AssignmentMenu, setAssignmentMenu] = useState<React.ComponentType<typeof props> | null>(null);
+
+  useEffect(() => {
+    import('../features/sharing/components/AssignmentMenu').then((mod) => {
+      setAssignmentMenu(() => mod.default);
+    });
+  }, []);
+
+  if (!AssignmentMenu) return null;
+  return <AssignmentMenu {...props} />;
+});
+
+const ItemTransferPortal: React.FC<{
+  item: ShoppingItem;
+  spaceItems: ShoppingItem[];
+  members: { userId: string; displayName: string; color: string; isOnline: boolean; lastSeenAt: string; joinedAt: string; id: string }[];
+  currentUserId: string | null;
+  onTransfer: (transferItems: { itemId: string; quantity: number }[], targetUserId: string) => Promise<void>;
+  onClose: () => void;
+}> = React.memo((props) => {
+  const [ItemTransferDialog, setItemTransferDialog] = useState<React.ComponentType<any> | null>(null);
+
+  useEffect(() => {
+    import('../features/sharing/components/ItemTransferDialog').then((mod) => {
+      setItemTransferDialog(() => mod.default);
+    });
+  }, []);
+
+  if (!ItemTransferDialog) return null;
+  return <ItemTransferDialog {...props} />;
+});
 
 export default React.memo(ShoppingList);

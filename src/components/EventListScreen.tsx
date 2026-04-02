@@ -44,6 +44,13 @@ interface EventListScreenProps {
   onRename?: (oldName: string) => void;
   onImportMap?: (name: string) => void;
   onImportExportFile?: () => void;
+  onCreateRoom?: (name: string) => void;
+  onJoinRoom?: () => void;
+  onShowMembers?: () => void;
+  onLeaveRoom?: () => void;
+  onInviteToRoom?: () => void;
+  onAutoAssign?: (eventName: string) => void;
+  activeRoomCode?: string | null;
 }
 
 const EventListScreen: React.FC<EventListScreenProps> = ({
@@ -55,6 +62,13 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
   onRename,
   onImportMap,
   onImportExportFile,
+  onCreateRoom,
+  onJoinRoom,
+  onShowMembers,
+  onLeaveRoom,
+  onInviteToRoom,
+  onAutoAssign,
+  activeRoomCode,
 }) => {
   const [menuVisibleFor, setMenuVisibleFor] = useState<string | null>(null);
 
@@ -211,6 +225,87 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
                 >
                   <span className="text-lg">🗺️</span>
                   <span>マップデータ取り込み</span>
+                </button>
+              )}
+              {/* 共有機能 */}
+              {onCreateRoom && !activeRoomCode && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCreateRoom(menuVisibleFor);
+                    setMenuVisibleFor(null);
+                  }}
+                  className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <span className="text-lg">👥</span>
+                  <span>ルーム作成</span>
+                </button>
+              )}
+              {onJoinRoom && !activeRoomCode && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onJoinRoom();
+                    setMenuVisibleFor(null);
+                  }}
+                  className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <span className="text-lg">🔗</span>
+                  <span>ルーム参加</span>
+                </button>
+              )}
+              {onShowMembers && activeRoomCode && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onShowMembers();
+                    setMenuVisibleFor(null);
+                  }}
+                  className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <span className="text-lg">👥</span>
+                  <span>メンバー一覧 ({activeRoomCode})</span>
+                </button>
+              )}
+              {onInviteToRoom && activeRoomCode && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onInviteToRoom();
+                    setMenuVisibleFor(null);
+                  }}
+                  className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <span className="text-lg">📲</span>
+                  <span>ゲストを招待</span>
+                </button>
+              )}
+              {onAutoAssign && activeRoomCode && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAutoAssign(menuVisibleFor);
+                    setMenuVisibleFor(null);
+                  }}
+                  className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <span className="text-lg">🔄</span>
+                  <span>自動割り振り</span>
+                </button>
+              )}
+              {onLeaveRoom && activeRoomCode && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (window.confirm('ルームから退出しますか？')) {
+                      onLeaveRoom();
+                    }
+                    setMenuVisibleFor(null);
+                  }}
+                  className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/30 transition-colors"
+                >
+                  <span className="text-lg">🚪</span>
+                  <span>ルーム退出</span>
                 </button>
               )}
               <div className="border-t border-slate-200 dark:border-slate-700 my-2" />

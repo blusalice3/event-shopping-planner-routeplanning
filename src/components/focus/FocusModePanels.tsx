@@ -16,6 +16,9 @@ interface FocusModeItemListProps {
   onEditRequest?: (item: ShoppingItem) => void;
   onDeleteRequest?: (item: ShoppingItem) => void;
   onAddItem?: () => void;
+  onTransferRequest?: (item: ShoppingItem) => void;
+  assignedMemberMap?: Map<string, { displayName: string; color: string }> | null;
+  currentUserId?: string | null;
 }
 
 interface FocusModeHeaderProps {
@@ -38,6 +41,9 @@ interface FocusModeHeaderProps {
     spaceInfo: string;
     circleName: string;
   };
+  onBulkTransfer?: () => void;
+  onHelpRequest?: () => void;
+  isInRoom?: boolean;
 }
 
 interface FocusModeMapControlsProps {
@@ -63,6 +69,9 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
   onEditRequest,
   onDeleteRequest,
   onAddItem,
+  onTransferRequest,
+  assignedMemberMap,
+  currentUserId,
 }) => (
   <div
     ref={itemListRef}
@@ -93,6 +102,9 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
           onSelectItem={() => {}}
           layoutMode={layoutMode}
           viewMode="focus"
+          onTransferRequest={onTransferRequest}
+          assignedMember={item.assignedTo && assignedMemberMap?.get(item.assignedTo) || null}
+          isDimmedByAssignment={!!currentUserId && !!item.assignedTo && item.assignedTo !== currentUserId}
         />
       </div>
     ))}
@@ -123,6 +135,9 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(({
   currentPhase,
   onPhaseChangeRequest,
   nextVisitInfo,
+  onBulkTransfer,
+  onHelpRequest,
+  isInRoom = false,
 }) => {
   const rootClassName = containerClassName
     ? `bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg shadow-lg ${containerClassName}`
