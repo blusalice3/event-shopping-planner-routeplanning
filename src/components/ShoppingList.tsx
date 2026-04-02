@@ -7,6 +7,7 @@ import GripVerticalIcon from './icons/GripVerticalIcon';
 import ChevronUpIcon from './icons/ChevronUpIcon';
 import ChevronDownIcon from './icons/ChevronDownIcon';
 import { useSharing } from '../features/sharing/components/SharingProvider';
+import type { RoomMember } from '../features/sharing/types/room';
 
 // 優先度レベルの型
 type PriorityLevel = 'none' | 'priority' | 'highest';
@@ -2731,7 +2732,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
 // AssignmentMenuをlazy importで遅延読み込み（バンドルサイズ最適化）
 const AssignmentMenuPortal: React.FC<{
-  members: { userId: string; displayName: string; color: string; isOnline: boolean; lastSeenAt: string; joinedAt: string; id: string; jerseyNumber: number }[];
+  members: RoomMember[];
   currentAssignedTo: string | undefined;
   currentUserId: string | null;
   onAssign: (targetJerseyNumber: number | null) => void;
@@ -2753,7 +2754,7 @@ const AssignmentMenuPortal: React.FC<{
 const ItemTransferPortal: React.FC<{
   item: ShoppingItem;
   spaceItems: ShoppingItem[];
-  members: { userId: string; displayName: string; color: string; isOnline: boolean; lastSeenAt: string; joinedAt: string; id: string; jerseyNumber: number }[];
+  members: RoomMember[];
   currentUserId: string | null;
   onTransfer: (transferItems: { itemId: string; quantity: number }[], targetJerseyNumber: number) => Promise<void>;
   onClose: () => void;
