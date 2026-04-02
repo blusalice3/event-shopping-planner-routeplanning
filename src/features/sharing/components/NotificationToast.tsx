@@ -14,6 +14,16 @@ const typeConfig: Record<string, { icon: string; label: string; actionLabel?: st
   bulk_transfer: { icon: '📦', label: 'アイテム転送' },
   price_update: { icon: '💰', label: '価格更新' },
   item_added: { icon: '➕', label: 'アイテム追加' },
+  // 再参加系
+  rejoin_request: { icon: '🔄', label: '再参加リクエスト', actionLabel: '確認する' },
+  rejoin_approved: { icon: '✅', label: '再参加承認' },
+  rejoin_rejected: { icon: '❌', label: '再参加拒否' },
+  // ホスト移譲系
+  host_transfer_offer: { icon: '👑', label: 'ホスト権限の移譲提案', actionLabel: '確認する' },
+  host_transfer_veto: { icon: '⏳', label: '拒否権の通知', actionLabel: '確認する' },
+  host_transferred: { icon: '👑', label: 'ホスト変更' },
+  // メンバー引き継ぎ
+  member_inherited: { icon: '🔄', label: 'メンバー引き継ぎ' },
 };
 
 const NotificationToast: React.FC<NotificationToastProps> = ({
@@ -87,6 +97,37 @@ function formatDefaultMessage(notification: AppNotification): string {
       const circle = p.circleName ?? '';
       const price = p.price ?? 0;
       return `${circle}の価格が¥${price}に更新されました。`;
+    }
+    case 'rejoin_request': {
+      const name = p.requesterDisplayName ?? '誰か';
+      const jersey = p.targetJerseyNumber ?? '?';
+      const target = p.targetDisplayName ?? '';
+      return `${name}さんが #${jersey} ${target} として再参加をリクエストしています。`;
+    }
+    case 'rejoin_approved':
+      return '再参加が承認されました。';
+    case 'rejoin_rejected':
+      return '再参加が拒否されました。';
+    case 'host_transfer_offer': {
+      const candidate = p.candidateDisplayName ?? '誰か';
+      const reason = p.reason;
+      if (reason === 'inactivity') {
+        return `ホストが応答なしのため、${candidate}さんへの移譲が提案されています。`;
+      }
+      return `${candidate}さんへのホスト移譲が提案されています。`;
+    }
+    case 'host_transfer_veto': {
+      const candidate = p.candidateDisplayName ?? '誰か';
+      return `${candidate}さんがホスト権限を承諾しました。拒否する場合は通知を確認してください。`;
+    }
+    case 'host_transferred': {
+      const newHost = p.newHostDisplayName ?? '誰か';
+      return `${newHost}さんが新しいホストになりました。`;
+    }
+    case 'member_inherited': {
+      const name = p.displayName ?? '誰か';
+      const jersey = p.toJersey ?? '?';
+      return `${name}さんが #${jersey} を引き継ぎました。`;
     }
     default:
       return '新しい通知があります。';

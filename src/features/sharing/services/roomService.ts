@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { ShoppingItem } from '../../../types';
-import type { ActiveRoom, RoomMember, ClaimResult } from '../types/room';
+import type { ActiveRoom, RoomMember, ClaimResult, RejoinRequest } from '../types/room';
 import { generateRoomCode } from '../utils/roomCodeGenerator';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -139,6 +139,19 @@ export async function joinRoom(
     }
   }
 
+  // 2人目の参加者を自動的に副ホストに指定
+  const { count: memberCount } = await supabase
+    .from('room_members')
+    .select('*', { count: 'exact', head: true })
+    .eq('room_id', room.id);
+
+  if (memberCount === 2) {
+    await supabase.from('room_members')
+      .update({ role: 'sub_host' })
+      .eq('room_id', room.id)
+      .eq('user_id', userId);
+  }
+
   return {
     id: room.id,
     roomCode: room.room_code,
@@ -269,6 +282,174 @@ export async function leaveRoom(
 }
 
 // ────────────────────────────────────────────────
+// 再参加承認
+// ────────────────────────────────────────────────
+
+/** 再参加リクエスト検証: 承認者リスト取得 + 承認不要ケース判定 */
+export async function requestRejoin(
+  supabase: SupabaseDB,
+  roomCode: string,
+  requesterId: string,
+  displayName: string,
+  jerseyNumber: number,
+): Promise<{
+  roomId: string;
+  approverUserIds: string[];
+  targetDisplayName: string;
+}> {
+  // 1. ルーム検索
+  const { data: room } = await supabase
+    .from('rooms').select('id, created_by')
+    .eq('room_code', roomCode.toUpperCase())
+    .eq('is_active', true).single();
+  if (!room) throw new Error('ルームが見つかりません。');
+
+  // 2. 対象メンバーの存在確認
+  const { data: member } = await supabase
+    .from('room_members').select('display_name, user_id')
+    .eq('room_id', room.id).eq('jersey_number', jerseyNumber).single();
+  if (!member) throw new Error('指定されたメンバーが見つかりません。');
+
+  // 3. 承認不要ケース
+  if (member.user_id === requesterId) throw new Error('SELF_REJOIN');
+  if (room.created_by === requesterId) throw new Error('HOST_SELF_REJOIN');
+
+  // 4. 承認者リスト（ホスト + 副ホスト）を取得
+  const { data: approvers } = await supabase
+    .from('room_members').select('user_id, role')
+    .eq('room_id', room.id)
+    .or(`user_id.eq.${room.created_by},role.eq.sub_host`);
+
+  const approverUserIds = (approvers ?? []).map(a => a.user_id);
+
+  // 5. 重複リクエスト防止
+  const { data: existing } = await supabase
+    .from('notifications').select('id')
+    .eq('room_id', room.id).eq('type', 'rejoin_request').eq('is_read', false)
+    .contains('payload', { targetJerseyNumber: jerseyNumber });
+  if (existing && existing.length > 0) throw new Error('既にリクエスト中です。');
+
+  return { roomId: room.id, approverUserIds, targetDisplayName: member.display_name };
+}
+
+/** 再参加承認: user_id切り替え実行 + 他の未読rejoin_requestを一括既読化 */
+export async function approveRejoin(
+  supabase: SupabaseDB,
+  roomId: string,
+  request: RejoinRequest,
+): Promise<void> {
+  // user_id更新
+  const { error } = await supabase
+    .from('room_members')
+    .update({
+      user_id: request.requesterId,
+      is_online: true,
+      last_seen_at: new Date().toISOString(),
+    })
+    .eq('room_id', roomId)
+    .eq('jersey_number', request.targetJerseyNumber);
+
+  if (error) throw new Error(`再参加承認に失敗しました: ${error.message}`);
+
+  // 同一ターゲットの未読rejoin_requestを一括既読化
+  await supabase.from('notifications')
+    .update({ is_read: true })
+    .eq('room_id', roomId)
+    .eq('type', 'rejoin_request')
+    .eq('is_read', false)
+    .contains('payload', { targetJerseyNumber: request.targetJerseyNumber });
+}
+
+// ────────────────────────────────────────────────
+// ホスト移譲・副ホスト
+// ────────────────────────────────────────────────
+
+/** ホスト移譲（手動委任: DB関数経由でRLSバイパス） */
+export async function transferHost(
+  supabase: SupabaseDB,
+  roomId: string,
+  currentHostId: string,
+  newHostId: string,
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc('delegate_host', {
+    p_room_id: roomId,
+    p_current_host_id: currentHostId,
+    p_new_host_id: newHostId,
+  });
+  if (error) throw new Error(`ホスト移譲に失敗しました: ${error.message}`);
+  return data as boolean;
+}
+
+/** 副ホスト指定 */
+export async function setSubHost(
+  supabase: SupabaseDB,
+  roomId: string,
+  targetUserId: string,
+): Promise<void> {
+  // 既存の副ホストを解除
+  await supabase
+    .from('room_members')
+    .update({ role: 'member' })
+    .eq('room_id', roomId)
+    .eq('role', 'sub_host');
+
+  // 新しい副ホストを指定
+  const { error } = await supabase
+    .from('room_members')
+    .update({ role: 'sub_host' })
+    .eq('room_id', roomId)
+    .eq('user_id', targetUserId);
+
+  if (error) throw new Error(`副ホスト指定に失敗しました: ${error.message}`);
+}
+
+/** 副ホスト解除 */
+export async function removeSubHost(
+  supabase: SupabaseDB,
+  roomId: string,
+  targetUserId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from('room_members')
+    .update({ role: 'member' })
+    .eq('room_id', roomId)
+    .eq('user_id', targetUserId);
+
+  if (error) throw new Error(`副ホスト解除に失敗しました: ${error.message}`);
+}
+
+/** メンバー引き継ぎ（DB関数経由） */
+export async function inheritMember(
+  supabase: SupabaseDB,
+  roomId: string,
+  currentUserId: string,
+  targetJerseyNumber: number,
+): Promise<{
+  success: boolean;
+  fromJersey: number;
+  toJersey: number;
+  itemsMoved: number;
+  inheritedDisplayName: string;
+  error?: string;
+}> {
+  const { data, error } = await supabase.rpc('inherit_member', {
+    p_room_id: roomId,
+    p_current_user_id: currentUserId,
+    p_target_jersey_number: targetJerseyNumber,
+  });
+  if (error) throw new Error(error.message);
+  const result = data as Record<string, unknown>;
+  return {
+    success: result.success as boolean,
+    fromJersey: result.from_jersey as number,
+    toJersey: result.to_jersey as number,
+    itemsMoved: result.items_moved as number,
+    inheritedDisplayName: result.inherited_display_name as string,
+    error: result.error as string | undefined,
+  };
+}
+
+// ────────────────────────────────────────────────
 // メンバー操作
 // ────────────────────────────────────────────────
 
@@ -294,6 +475,7 @@ export async function getRoomMembers(
     lastSeenAt: m.last_seen_at,
     joinedAt: m.joined_at,
     jerseyNumber: m.jersey_number ?? 0,
+    role: m.role ?? 'member',
   }));
 }
 

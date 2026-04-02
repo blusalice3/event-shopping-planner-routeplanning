@@ -9,6 +9,9 @@ interface JoinRoomDialogProps {
   onClose: () => void;
   onJoinRoom: (roomCode: string, displayName: string) => Promise<void>;
   onRejoinRoom: (roomCode: string, displayName: string, jerseyNumber?: number) => Promise<void>;
+  onRequestRejoinWithApproval?: (roomCode: string, displayName: string, jerseyNumber: number) => Promise<void>;
+  onCancelPendingRejoin?: () => void;
+  pendingRejoin?: { targetDisplayName: string; jerseyNumber: number } | null;
   onMergeItems?: () => Promise<void>;
   onFetchExistingMembers?: (roomCode: string) => Promise<ExistingMember[]>;
   initialCode?: string;
@@ -18,11 +21,15 @@ const JoinRoomDialog: React.FC<JoinRoomDialogProps> = ({
   onClose,
   onJoinRoom,
   onRejoinRoom,
+  onRequestRejoinWithApproval,
+  onCancelPendingRejoin,
+  pendingRejoin,
   onMergeItems,
   onFetchExistingMembers,
   initialCode,
 }) => {
-  const [step, setStep] = useState<'input' | 'selectMember' | 'migrate' | 'joining'>('input');
+  const [step, setStep] = useState<'input' | 'selectMember' | 'waitingApproval' | 'migrate' | 'joining'>('input');
+  const [approvalCountdown, setApprovalCountdown] = useState(120);
   const [code, setCode] = useState(initialCode?.toUpperCase() ?? '');
   const [displayName, setDisplayName] = useState(
     localStorage.getItem('sharing:displayName') ?? '',
@@ -102,7 +109,7 @@ const JoinRoomDialog: React.FC<JoinRoomDialogProps> = ({
     }
   };
 
-  // 選択したメンバーで再参加
+  // 選択したメンバーで再参加（承認フロー付き）
   const handleRejoinWithMember = async () => {
     if (!selectedMember) return;
 
@@ -112,19 +119,67 @@ const JoinRoomDialog: React.FC<JoinRoomDialogProps> = ({
 
     try {
       localStorage.setItem('sharing:displayName', name);
-      await onRejoinRoom(code, name, selectedMember.jerseyNumber);
 
-      if (onMergeItems) {
-        setStep('migrate');
+      // 承認フロー対応: onRequestRejoinWithApprovalがあればそちらを使用
+      if (onRequestRejoinWithApproval) {
+        await onRequestRejoinWithApproval(code, name, selectedMember.jerseyNumber);
+        // SELF_REJOIN/HOST_SELF_REJOINの場合はuseRoom内で直接rejoinされる
+        // それ以外は承認待ちに遷移（pendingRejoinの変化で検出）
         setIsLoading(false);
       } else {
-        onClose();
+        await onRejoinRoom(code, name, selectedMember.jerseyNumber);
+        if (onMergeItems) {
+          setStep('migrate');
+          setIsLoading(false);
+        } else {
+          onClose();
+        }
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : '再参加に失敗しました');
       setIsLoading(false);
     }
   };
+
+  // pendingRejoin変化を監視: 承認待ちステップに遷移 or 承認完了でダイアログ閉じ
+  useEffect(() => {
+    if (pendingRejoin && step === 'selectMember') {
+      setStep('waitingApproval');
+      setApprovalCountdown(120);
+    }
+  }, [pendingRejoin, step]);
+
+  // pendingRejoinがnullに戻った = 承認完了 or タイムアウト or キャンセル
+  useEffect(() => {
+    if (!pendingRejoin && step === 'waitingApproval') {
+      // 承認完了でactiveRoomが設定されていればダイアログを閉じる
+      // （エラーがある場合はinputに戻る）
+      if (!error) {
+        if (onMergeItems) {
+          setStep('migrate');
+        } else {
+          onClose();
+        }
+      } else {
+        setStep('input');
+      }
+    }
+  }, [pendingRejoin, step, error]);
+
+  // 承認待ちカウントダウン
+  useEffect(() => {
+    if (step !== 'waitingApproval') return;
+    const timer = setInterval(() => {
+      setApprovalCountdown((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [step]);
 
   const handleMerge = async () => {
     setIsLoading(true);
@@ -273,6 +328,51 @@ const JoinRoomDialog: React.FC<JoinRoomDialogProps> = ({
                 >
                   {isLoading ? '再参加中...' : '再参加'}
                 </button>
+              </div>
+            </>
+          )}
+
+          {step === 'waitingApproval' && (
+            <>
+              <div className="flex flex-col items-center space-y-3 py-4">
+                <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
+                  ホストの承認を待っています...
+                </p>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  #{pendingRejoin?.jerseyNumber} {pendingRejoin?.targetDisplayName} として再参加リクエスト中
+                </p>
+                <p className="text-xs text-slate-400 dark:text-slate-500 tabular-nums">
+                  残り {Math.floor(approvalCountdown / 60)}:{String(approvalCountdown % 60).padStart(2, '0')}
+                </p>
+              </div>
+              {error && (
+                <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+              )}
+              <div className="flex justify-end space-x-3">
+                <button
+                  onClick={() => {
+                    onCancelPendingRejoin?.();
+                    setStep('input');
+                    setError('');
+                  }}
+                  className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200"
+                >
+                  キャンセル
+                </button>
+                {approvalCountdown === 0 && (
+                  <button
+                    onClick={async () => {
+                      onCancelPendingRejoin?.();
+                      setStep('input');
+                      setIsRejoin(false);
+                      setError('');
+                    }}
+                    className="px-4 py-2 text-sm font-medium rounded-lg bg-orange-500 text-white hover:bg-orange-600 transition-colors"
+                  >
+                    通常参加として再度試す
+                  </button>
+                )}
               </div>
             </>
           )}

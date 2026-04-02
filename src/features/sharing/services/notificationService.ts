@@ -9,7 +9,17 @@ export type NotificationType =
   | 'help_accepted'
   | 'bulk_transfer'
   | 'price_update'
-  | 'item_added';
+  | 'item_added'
+  // 再参加承認系
+  | 'rejoin_request'       // → ホスト/副ホスト宛
+  | 'rejoin_approved'      // → リクエスト者宛
+  | 'rejoin_rejected'      // → リクエスト者宛
+  // ホスト移譲系
+  | 'host_transfer_offer'  // → 最古参メンバー宛（承諾依頼）+ ホスト宛
+  | 'host_transfer_veto'   // → ホスト宛（拒否権の行使通知）
+  | 'host_transferred'     // → 全員宛（移譲確定通知）
+  // メンバー引き継ぎ
+  | 'member_inherited';    // → 全員宛（メンバー引き継ぎ通知）
 
 export interface AppNotification {
   id: string;

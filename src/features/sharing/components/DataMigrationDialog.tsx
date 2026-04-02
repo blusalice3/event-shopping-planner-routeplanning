@@ -1,11 +1,19 @@
 import React, { useState } from 'react';
 import type { MigrationMode, MigrationResult } from '../types/room';
 
+export interface RejoinSummary {
+  jerseyNumber: number;
+  displayName: string;
+  myItems: { unpurchased: number; purchased: number; soldOut: number };
+  teamSummary: { jerseyNumber: number; displayName: string; remaining: number; isMe: boolean }[];
+}
+
 interface DataMigrationDialogProps {
   mode: MigrationMode;
   onMigrate: () => Promise<MigrationResult | void>;
   onSkip: () => void;
   onClose: () => void;
+  rejoinSummary?: RejoinSummary | null;
 }
 
 const modeConfig: Record<
@@ -35,6 +43,12 @@ const modeConfig: Record<
     confirmLabel: '保存する',
     skipLabel: '保存しない',
   },
+  'rejoin-summary': {
+    title: '再参加完了',
+    message: '',
+    confirmLabel: 'OK',
+    skipLabel: '',
+  },
 };
 
 const DataMigrationDialog: React.FC<DataMigrationDialogProps> = ({
@@ -42,6 +56,7 @@ const DataMigrationDialog: React.FC<DataMigrationDialogProps> = ({
   onMigrate,
   onSkip,
   onClose,
+  rejoinSummary,
 }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [result, setResult] = useState<MigrationResult | null>(null);
@@ -78,7 +93,43 @@ const DataMigrationDialog: React.FC<DataMigrationDialogProps> = ({
         </div>
 
         <div className="p-4 space-y-4">
-          {result ? (
+          {mode === 'rejoin-summary' && rejoinSummary ? (
+            <>
+              <p className="text-sm font-medium text-green-700 dark:text-green-400">
+                ルームに再参加しました（#{rejoinSummary.jerseyNumber} {rejoinSummary.displayName}）
+              </p>
+              <div className="text-sm text-slate-700 dark:text-slate-300 space-y-2">
+                <p className="font-medium">あなたの担当アイテム:</p>
+                <div className="pl-2 space-y-0.5 text-xs">
+                  <p>未購入: {rejoinSummary.myItems.unpurchased}件</p>
+                  <p>購入済み: {rejoinSummary.myItems.purchased}件</p>
+                  {rejoinSummary.myItems.soldOut > 0 && (
+                    <p>完売/不在: {rejoinSummary.myItems.soldOut}件</p>
+                  )}
+                </div>
+              </div>
+              {rejoinSummary.teamSummary.length > 0 && (
+                <div className="text-sm text-slate-700 dark:text-slate-300 space-y-1">
+                  <p className="font-medium">チーム全体:</p>
+                  <div className="pl-2 space-y-0.5 text-xs">
+                    {rejoinSummary.teamSummary.map((m) => (
+                      <p key={m.jerseyNumber} className={m.isMe ? 'font-bold text-blue-600 dark:text-blue-400' : ''}>
+                        #{m.jerseyNumber} {m.displayName}{m.isMe ? '(あなた)' : ''}: 残り{m.remaining}件
+                      </p>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <div className="flex justify-end">
+                <button
+                  onClick={onClose}
+                  className="px-4 py-2 text-sm font-medium rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                >
+                  OK
+                </button>
+              </div>
+            </>
+          ) : result ? (
             <>
               <div className="text-sm text-slate-700 dark:text-slate-300 space-y-1">
                 <p>{result.added}件のアイテムを追加しました。</p>

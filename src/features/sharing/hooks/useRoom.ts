@@ -1,21 +1,36 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { supabase } from '../config/supabase';
 import type { ActiveRoom, RoomMember, StoredRoomInfo } from '../types/room';
 import * as roomService from '../services/roomService';
+import { createNotification } from '../services/notificationService';
 
 const STORAGE_KEY = 'sharing:activeRoom';
+const REJOIN_APPROVAL_TIMEOUT_MS = 120_000; // 2分
+
+/** 承認待ちの再参加リクエスト情報 */
+export interface PendingRejoin {
+  roomCode: string;
+  displayName: string;
+  jerseyNumber: number;
+  targetDisplayName: string;
+  roomId: string;
+}
 
 interface UseRoomReturn {
   activeRoom: ActiveRoom | null;
   members: RoomMember[];
   isRoomLoading: boolean;
   roomError: string | null;
+  pendingRejoin: PendingRejoin | null;
   createRoom: (eventName: string, displayName: string, expiresAt: string) => Promise<ActiveRoom>;
   joinRoom: (roomCode: string, displayName: string) => Promise<ActiveRoom>;
   rejoinRoom: (roomCode: string, displayName: string, jerseyNumber?: number) => Promise<ActiveRoom>;
+  requestRejoinWithApproval: (roomCode: string, displayName: string, jerseyNumber: number) => Promise<void>;
+  cancelPendingRejoin: () => void;
   getRoomMembersForRejoin: (roomCode: string) => Promise<{ jerseyNumber: number; displayName: string }[]>;
   leaveRoom: () => Promise<void>;
   refreshMembers: () => Promise<void>;
+  setActiveRoom: React.Dispatch<React.SetStateAction<ActiveRoom | null>>;
 }
 
 function loadStoredRoom(): StoredRoomInfo | null {
@@ -40,6 +55,9 @@ export function useRoom(userId: string | null): UseRoomReturn {
   const [members, setMembers] = useState<RoomMember[]>([]);
   const [isRoomLoading, setIsRoomLoading] = useState(false);
   const [roomError, setRoomError] = useState<string | null>(null);
+  const [pendingRejoin, setPendingRejoin] = useState<PendingRejoin | null>(null);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const rejoinChannelRef = useRef<any>(null);
 
   // ページリロード時の自動再参加
   useEffect(() => {
@@ -180,16 +198,114 @@ export function useRoom(userId: string | null): UseRoomReturn {
     [],
   );
 
+  // 承認付き再参加リクエスト
+  const requestRejoinWithApproval = useCallback(
+    async (roomCode: string, displayName: string, jerseyNumber: number) => {
+      if (!supabase || !userId) throw new Error('認証が完了していません');
+      setRoomError(null);
+
+      try {
+        const result = await roomService.requestRejoin(
+          supabase, roomCode, userId, displayName, jerseyNumber,
+        );
+
+        // 承認不要ケース: 直接rejoin
+        // requestRejoinがSELF_REJOINやHOST_SELF_REJOINをthrowするのでここには来ない
+        // （catchで処理）
+
+        // ホスト+副ホストに通知送信
+        for (const approverUserId of result.approverUserIds) {
+          await createNotification(supabase, result.roomId, 'rejoin_request', {
+            requesterId: userId,
+            requesterDisplayName: displayName,
+            targetJerseyNumber: jerseyNumber,
+            targetDisplayName: result.targetDisplayName,
+          }, approverUserId);
+        }
+
+        // 承認待ちステートに移行
+        setPendingRejoin({
+          roomCode,
+          displayName,
+          jerseyNumber,
+          targetDisplayName: result.targetDisplayName,
+          roomId: result.roomId,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : '';
+        // 承認不要ケース: 直接rejoin
+        if (msg === 'SELF_REJOIN' || msg === 'HOST_SELF_REJOIN') {
+          await rejoinRoomAction(roomCode, displayName, jerseyNumber);
+          return;
+        }
+        setRoomError(msg || '再参加リクエストに失敗しました');
+        throw err;
+      }
+    },
+    [userId],
+  );
+
+  const cancelPendingRejoin = useCallback(() => {
+    setPendingRejoin(null);
+    setRoomError(null);
+  }, []);
+
+  // 承認結果のリアルタイム監視
+  useEffect(() => {
+    if (!pendingRejoin || !supabase || !userId) return;
+
+    const timeout = setTimeout(() => {
+      setPendingRejoin(null);
+      setRoomError('承認がタイムアウトしました。再度お試しください。');
+    }, REJOIN_APPROVAL_TIMEOUT_MS);
+
+    const channel = supabase
+      .channel(`rejoin-watch:${userId}`)
+      .on('postgres_changes', {
+        event: 'INSERT', schema: 'public', table: 'notifications',
+        filter: `target_user_id=eq.${userId}`,
+      }, async (payload) => {
+        const n = payload.new as Record<string, unknown>;
+        if (n.type === 'rejoin_approved') {
+          try {
+            await rejoinRoomAction(
+              pendingRejoin.roomCode,
+              pendingRejoin.displayName,
+              pendingRejoin.jerseyNumber,
+            );
+          } catch {
+            setRoomError('再参加に失敗しました。');
+          }
+          setPendingRejoin(null);
+        } else if (n.type === 'rejoin_rejected') {
+          setRoomError('再参加が拒否されました。');
+          setPendingRejoin(null);
+        }
+      }).subscribe();
+
+    rejoinChannelRef.current = channel;
+
+    return () => {
+      clearTimeout(timeout);
+      supabase!.removeChannel(channel);
+      rejoinChannelRef.current = null;
+    };
+  }, [pendingRejoin, userId]);
+
   return {
     activeRoom,
     members,
     isRoomLoading,
     roomError,
+    pendingRejoin,
     createRoom,
     joinRoom,
     rejoinRoom: rejoinRoomAction,
+    requestRejoinWithApproval,
+    cancelPendingRejoin,
     leaveRoom: leaveRoomAction,
     refreshMembers,
     getRoomMembersForRejoin: getRoomMembersForRejoinAction,
+    setActiveRoom,
   };
 }

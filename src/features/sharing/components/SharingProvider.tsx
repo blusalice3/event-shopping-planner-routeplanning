@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useCallback, useRef, useMemo, useState } from 'react';
+import React, { createContext, useContext, useCallback, useRef, useMemo, useState, useEffect } from 'react';
 import { supabase, isSharingEnabled } from '../config/supabase';
 import type { ShoppingItem, PurchaseStatus } from '../../../types';
 import type {
@@ -10,7 +10,9 @@ import type {
   ClaimResult,
   SyncStatus,
   MigrationResult,
+  RejoinRequest,
 } from '../types/room';
+import type { AppNotification } from '../services/notificationService';
 import { useSupabaseAuth } from '../hooks/useSupabaseAuth';
 import { useRoom } from '../hooks/useRoom';
 import { useRoomSync } from '../hooks/useRoomSync';
@@ -22,6 +24,11 @@ import { useSyncQueue } from '../hooks/useSyncQueue';
 import { useAutoLeave } from '../hooks/useAutoLeave';
 import { useNotifications } from '../hooks/useNotifications';
 import * as roomService from '../services/roomService';
+import * as notificationService from '../services/notificationService';
+
+const HOST_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5分
+const TRANSFER_VETO_WINDOW_MS = 5 * 60 * 1000; // 5分（デフォルト拒否権ウィンドウ）
+const TRANSFER_CHECK_INTERVAL_MS = 60 * 1000; // 1分
 
 const SharingContext = createContext<SharingContextValue | null>(null);
 
@@ -48,13 +55,21 @@ const SharingProviderInner: React.FC<SharingProviderProps> = ({ children }) => {
     members,
     isRoomLoading,
     roomError,
+    pendingRejoin,
     createRoom,
     joinRoom,
     rejoinRoom,
+    requestRejoinWithApproval,
+    cancelPendingRejoin,
     leaveRoom,
     refreshMembers,
     getRoomMembersForRejoin,
+    setActiveRoom,
   } = useRoom(userId);
+
+  // justRejoined フラグ（再参加/引き継ぎ直後のパルスアニメーション用）
+  const [justRejoined, setJustRejoined] = useState(false);
+  const justRejoinedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { isOnline } = useConnectionStatus();
   const { queueSize, enqueue, drainQueue } = useSyncQueue(isOnline);
@@ -81,6 +96,13 @@ const SharingProviderInner: React.FC<SharingProviderProps> = ({ children }) => {
     mapDataUpdateHandlerRef.current?.(update);
   }, []);
 
+  // rooms テーブル更新時: isHost をリアルタイム更新
+  const onRoomUpdate = useCallback((updatedRoom: { createdBy: string }) => {
+    setActiveRoom((prev) =>
+      prev ? { ...prev, createdBy: updatedRoom.createdBy, isHost: updatedRoom.createdBy === userId } : null,
+    );
+  }, [userId, setActiveRoom]);
+
   const {
     latestToast,
     dismissToast,
@@ -96,6 +118,7 @@ const SharingProviderInner: React.FC<SharingProviderProps> = ({ children }) => {
     onMemberUpdate,
     onNotification: handleIncomingNotification,
     onMapDataUpdate,
+    onRoomUpdate,
   });
 
   // 現在のメンバー情報からdisplayName/colorを取得
@@ -121,7 +144,198 @@ const SharingProviderInner: React.FC<SharingProviderProps> = ({ children }) => {
     bulkAssignItems: bulkAssignItemsAction,
   } = useAssignment(activeRoom, userId, addPendingWrite, removePendingWrite);
 
-  // 自動退出（1時間操作なし）
+  // ── 再参加承認/拒否ハンドラ ──
+  const handleApproveRejoin = useCallback(async (notification: AppNotification) => {
+    if (!supabase || !activeRoom) return;
+    const payload = notification.payload as unknown as RejoinRequest;
+    await roomService.approveRejoin(supabase, activeRoom.id, payload);
+    // 承認通知を送信
+    await notificationService.createNotification(
+      supabase, activeRoom.id, 'rejoin_approved',
+      { message: '再参加が承認されました。' },
+      payload.requesterId,
+    );
+    await notificationService.markNotificationRead(supabase, notification.id);
+  }, [activeRoom]);
+
+  const handleRejectRejoin = useCallback(async (notification: AppNotification) => {
+    if (!supabase || !activeRoom) return;
+    const payload = notification.payload as unknown as RejoinRequest;
+    await notificationService.createNotification(
+      supabase, activeRoom.id, 'rejoin_rejected',
+      { message: '再参加が拒否されました。' },
+      payload.requesterId,
+    );
+    // 同一ターゲットの未読rejoin_requestを一括既読化
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any).from('notifications')
+      .update({ is_read: true })
+      .eq('room_id', activeRoom.id)
+      .eq('type', 'rejoin_request')
+      .eq('is_read', false)
+      .contains('payload', { targetJerseyNumber: payload.targetJerseyNumber });
+  }, [activeRoom]);
+
+  // ── ホスト移譲ハンドラ ──
+  const handleAcceptHostTransfer = useCallback(async (notification: AppNotification) => {
+    if (!supabase || !userId) return;
+    // 承諾記録をpayloadに書き込み
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any).from('notifications').update({
+      payload: { ...notification.payload, acceptedAt: new Date().toISOString(), acceptedBy: userId },
+    }).eq('id', notification.id);
+    await notificationService.markNotificationRead(supabase, notification.id);
+  }, [userId]);
+
+  const handleDeclineHostTransfer = useCallback(async (notification: AppNotification) => {
+    if (!supabase) return;
+    await notificationService.markNotificationRead(supabase, notification.id);
+    // 辞退 → 次の候補にオファーを再送（DB関数が次回チェック時に処理）
+  }, []);
+
+  const handleVetoHostTransfer = useCallback(async (notification: AppNotification) => {
+    if (!supabase || !activeRoom || !userId) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (supabase as any).rpc('veto_host_transfer', {
+      p_notification_id: notification.id,
+      p_room_id: activeRoom.id,
+      p_host_id: userId,
+    });
+    await notificationService.markNotificationRead(supabase, notification.id);
+  }, [activeRoom, userId]);
+
+  // ── ホスト委任/副ホスト操作 ──
+  const handleDelegateHost = useCallback(async (targetUserId: string) => {
+    if (!supabase || !activeRoom || !userId) return;
+    const success = await roomService.transferHost(supabase, activeRoom.id, userId, targetUserId);
+    if (success) {
+      const target = membersState.find((m) => m.userId === targetUserId);
+      await notificationService.broadcastNotification(supabase, activeRoom.id, 'host_transferred', {
+        senderId: userId,
+        message: `${target?.displayName ?? ''}さんが新しいホストになりました`,
+        senderName: 'システム',
+        newHostUserId: targetUserId,
+        newHostDisplayName: target?.displayName,
+        newHostJerseyNumber: target?.jerseyNumber,
+      });
+    }
+  }, [activeRoom, userId, membersState]);
+
+  const handleSetSubHost = useCallback(async (targetUserId: string) => {
+    if (!supabase || !activeRoom) return;
+    await roomService.setSubHost(supabase, activeRoom.id, targetUserId);
+    await refreshMembers();
+  }, [activeRoom, refreshMembers]);
+
+  const handleRemoveSubHost = useCallback(async (targetUserId: string) => {
+    if (!supabase || !activeRoom) return;
+    await roomService.removeSubHost(supabase, activeRoom.id, targetUserId);
+    await refreshMembers();
+  }, [activeRoom, refreshMembers]);
+
+  // ── メンバー引き継ぎ ──
+  const handleInheritMember = useCallback(async (targetJerseyNumber: number) => {
+    if (!supabase || !activeRoom || !userId) return;
+    const result = await roomService.inheritMember(supabase, activeRoom.id, userId, targetJerseyNumber);
+    if (result.success) {
+      // 全員に通知
+      await notificationService.broadcastNotification(supabase, activeRoom.id, 'member_inherited', {
+        senderId: userId,
+        displayName: currentMember?.displayName ?? '',
+        fromJersey: result.fromJersey,
+        toJersey: result.toJersey,
+        itemsMoved: result.itemsMoved,
+        message: `${currentMember?.displayName ?? ''}さんが #${result.toJersey} を引き継ぎました`,
+        senderName: 'システム',
+      });
+      // localStorage更新
+      const stored = localStorage.getItem('sharing:activeRoom');
+      if (stored) {
+        const info = JSON.parse(stored);
+        info.jerseyNumber = result.toJersey;
+        localStorage.setItem('sharing:activeRoom', JSON.stringify(info));
+      }
+      await refreshMembers();
+      // パルスアニメーション
+      setJustRejoined(true);
+      if (justRejoinedTimerRef.current) clearTimeout(justRejoinedTimerRef.current);
+      justRejoinedTimerRef.current = setTimeout(() => setJustRejoined(false), 5000);
+    } else {
+      throw new Error(result.error ?? '引き継ぎに失敗しました');
+    }
+  }, [activeRoom, userId, currentMember, refreshMembers]);
+
+  // ── 5分間隔: ホスト不在検出ポーリング ──
+  useEffect(() => {
+    if (!activeRoom || !userId || activeRoom.isHost) return;
+    if (!supabase) return;
+
+    const interval = setInterval(async () => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (supabase as any).rpc('initiate_host_transfer_offer', {
+          p_room_id: activeRoom.id,
+        });
+      } catch {
+        // ignore
+      }
+    }, HOST_CHECK_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [activeRoom?.id, userId, activeRoom?.isHost]);
+
+  // ── 1分間隔: 拒否権ウィンドウ経過チェック ──
+  useEffect(() => {
+    if (!activeRoom || !userId || !supabase) return;
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const sb = supabase as any;
+    const interval = setInterval(async () => {
+      try {
+        const { data } = await sb
+          .from('notifications')
+          .select('id, payload')
+          .eq('room_id', activeRoom.id)
+          .eq('type', 'host_transfer_offer')
+          .eq('is_read', false);
+
+        for (const n of (data ?? []) as { id: string; payload: Record<string, unknown> }[]) {
+          const payload = n.payload;
+          if (!payload.acceptedAt || payload.vetoed || payload.executed) continue;
+          const acceptedAt = new Date(payload.acceptedAt as string).getTime();
+
+          // 拒否権ウィンドウの動的計算
+          const { data: hostMember } = await sb
+            .from('room_members')
+            .select('last_seen_at')
+            .eq('room_id', activeRoom.id)
+            .eq('user_id', activeRoom.createdBy)
+            .single();
+
+          let vetoMs = TRANSFER_VETO_WINDOW_MS;
+          if (hostMember) {
+            const offlineMin = (Date.now() - new Date((hostMember as { last_seen_at: string }).last_seen_at).getTime()) / 60_000;
+            if (offlineMin >= 20) vetoMs = 0;
+            else if (offlineMin >= 15) vetoMs = 2 * 60_000;
+          }
+
+          if (Date.now() - acceptedAt >= vetoMs) {
+            await sb.rpc('execute_host_transfer', {
+              p_notification_id: n.id,
+              p_room_id: activeRoom.id,
+              p_new_host_id: payload.candidateUserId,
+            });
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }, TRANSFER_CHECK_INTERVAL_MS);
+
+    return () => clearInterval(interval);
+  }, [activeRoom?.id, activeRoom?.createdBy, userId]);
+
+  // 自動退出（10分操作なし）
   const handleAutoLeave = useCallback(async () => {
     if (!supabase || !activeRoom || !userId) return;
     try {
@@ -146,7 +360,7 @@ const SharingProviderInner: React.FC<SharingProviderProps> = ({ children }) => {
     }
     // 退出実行
     await leaveRoom();
-    alert('1時間以上操作がなかったため、ルームから自動退出しました。データはローカルに保存されています。');
+    alert('10分以上操作がなかったため、ルームから自動退出しました。データはローカルに保存されています。');
   }, [activeRoom, userId, leaveRoom]);
 
   useAutoLeave({ activeRoom, userId, onAutoLeave: handleAutoLeave });
@@ -287,7 +501,7 @@ const SharingProviderInner: React.FC<SharingProviderProps> = ({ children }) => {
     [uploadMapDataToRoom, userId],
   );
 
-  const contextValue: SharingContextValue = useMemo(
+  const contextValue = useMemo(
     () => ({
       userId,
       isAuthReady,
@@ -320,7 +534,25 @@ const SharingProviderInner: React.FC<SharingProviderProps> = ({ children }) => {
       broadcastNotification: broadcastNotificationAction,
       registerRemoteUpdateHandler,
       registerMapDataUpdateHandler,
-    }),
+      // 再参加承認
+      pendingRejoin,
+      requestRejoinWithApproval,
+      cancelPendingRejoin,
+      handleApproveRejoin,
+      handleRejectRejoin,
+      // ホスト移譲
+      handleAcceptHostTransfer,
+      handleDeclineHostTransfer,
+      handleVetoHostTransfer,
+      handleDelegateHost,
+      // 副ホスト
+      handleSetSubHost,
+      handleRemoveSubHost,
+      // メンバー引き継ぎ
+      handleInheritMember,
+      // パルスアニメーション
+      justRejoined,
+    } as SharingContextValue),
     [
       userId,
       isAuthReady,
@@ -353,6 +585,19 @@ const SharingProviderInner: React.FC<SharingProviderProps> = ({ children }) => {
       broadcastNotificationAction,
       registerRemoteUpdateHandler,
       registerMapDataUpdateHandler,
+      pendingRejoin,
+      requestRejoinWithApproval,
+      cancelPendingRejoin,
+      handleApproveRejoin,
+      handleRejectRejoin,
+      handleAcceptHostTransfer,
+      handleDeclineHostTransfer,
+      handleVetoHostTransfer,
+      handleDelegateHost,
+      handleSetSubHost,
+      handleRemoveSubHost,
+      handleInheritMember,
+      justRejoined,
     ],
   );
 

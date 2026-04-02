@@ -11,6 +11,7 @@ interface UseRoomSyncParams {
   onMemberUpdate: (members: RoomMember[]) => void;
   onNotification?: (notification: AppNotification) => void;
   onMapDataUpdate?: (update: RemoteMapDataUpdate) => void;
+  onRoomUpdate?: (updatedRoom: { createdBy: string }) => void;
 }
 
 interface UseRoomSyncReturn {
@@ -32,6 +33,7 @@ export function useRoomSync({
   onMemberUpdate,
   onNotification,
   onMapDataUpdate,
+  onRoomUpdate,
 }: UseRoomSyncParams): UseRoomSyncReturn {
   const channelRef = useRef<RealtimeChannel | null>(null);
   const pendingWritesRef = useRef(new Set<string>());
@@ -39,6 +41,7 @@ export function useRoomSync({
   const onMemberUpdateRef = useRef(onMemberUpdate);
   const onNotificationRef = useRef(onNotification);
   const onMapDataUpdateRef = useRef(onMapDataUpdate);
+  const onRoomUpdateRef = useRef(onRoomUpdate);
 
   // コールバックの最新版を保持
   useEffect(() => {
@@ -53,6 +56,9 @@ export function useRoomSync({
   useEffect(() => {
     onMapDataUpdateRef.current = onMapDataUpdate;
   }, [onMapDataUpdate]);
+  useEffect(() => {
+    onRoomUpdateRef.current = onRoomUpdate;
+  }, [onRoomUpdate]);
 
   // チャネル購読の確立・解除
   useEffect(() => {
@@ -85,7 +91,7 @@ export function useRoomSync({
             onRemoteItemUpdateRef.current?.({
               localItemId,
               purchaseStatus: newRow.purchase_status as RemoteItemUpdate['purchaseStatus'],
-              assignedTo: (newRow.assigned_to as string) ?? undefined,
+              assignedTo: (newRow.assigned_to as string | null) ?? null,
               price: newRow.price as number | null,
               quantity: newRow.quantity as number,
               postponed: newRow.postponed as boolean,
@@ -98,7 +104,7 @@ export function useRoomSync({
       .on(
         'postgres_changes',
         {
-          event: 'UPDATE',
+          event: '*',
           schema: 'public',
           table: 'room_members',
           filter: `room_id=eq.${activeRoom.id}`,
@@ -158,6 +164,21 @@ export function useRoomSync({
             payload: (row.payload ?? {}) as Record<string, unknown>,
             isRead: row.is_read as boolean,
             createdAt: row.created_at as string,
+          });
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'rooms',
+          filter: `id=eq.${activeRoom.id}`,
+        },
+        (payload) => {
+          const updatedRoom = payload.new as Record<string, unknown>;
+          onRoomUpdateRef.current?.({
+            createdBy: updatedRoom.created_by as string,
           });
         },
       )

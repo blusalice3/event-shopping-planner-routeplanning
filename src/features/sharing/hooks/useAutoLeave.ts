@@ -4,7 +4,7 @@ import type { ActiveRoom } from '../types/room';
 import * as roomService from '../services/roomService';
 import * as notificationService from '../services/notificationService';
 
-const AUTO_LEAVE_TIMEOUT_MS = 60 * 60 * 1000; // 1時間
+const AUTO_LEAVE_TIMEOUT_MS = 10 * 60 * 1000; // 10分
 const CHECK_INTERVAL_MS = 60 * 1000; // 1分ごとにチェック
 
 interface UseAutoLeaveParams {
@@ -14,10 +14,11 @@ interface UseAutoLeaveParams {
 }
 
 /**
- * 1時間以上操作がないユーザーを自動退出させるフック。
+ * 10分以上操作がないユーザーを自動退出させるフック。
  * - ユーザー操作（クリック/タッチ/キー入力）で最終操作時刻を更新
  * - 1分ごとに最終操作時刻をチェック
- * - 1時間超過で退出処理を実行（データ書き戻し → ホスト移譲 → 退出）
+ * - 10分超過で退出処理を実行（ホスト移譲 → 退出）
+ * - ホスト移譲はDB関数(delegate_host)経由でRLSを安全にバイパス
  */
 export function useAutoLeave({
   activeRoom,
@@ -47,10 +48,10 @@ export function useAutoLeave({
       if (elapsed < AUTO_LEAVE_TIMEOUT_MS) return;
       if (!supabase || !activeRoom || !userId) return;
 
-      console.log('Auto-leave: 1時間以上操作なし、自動退出を開始');
+      console.log('Auto-leave: 10分以上操作なし、自動退出を開始');
 
       try {
-        // ホストの場合、次のメンバーにホスト権限を移譲
+        // ホストの場合、次のメンバーにホスト権限を移譲（DB関数経由）
         if (activeRoom.isHost) {
           await transferHostRole(activeRoom.id, userId);
         }
@@ -75,7 +76,7 @@ export function useAutoLeave({
 }
 
 /**
- * ホスト権限を次のメンバーに移譲する。
+ * ホスト権限を次のメンバーに移譲する（DB関数経由）。
  * joined_atが2番目に古いメンバー（最初のゲスト）を新ホストにする。
  */
 async function transferHostRole(
@@ -93,28 +94,26 @@ async function transferHostRole(
   // joined_atが最も古いメンバーを新ホストに
   const newHost = otherMembers[0]; // getRoomMembersはjoined_at asc順
 
-  // rooms.created_byを新ホストに更新
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { error } = await (supabase as any)
-    .from('rooms')
-    .update({ created_by: newHost.userId })
-    .eq('id', roomId);
+  // DB関数経由でホスト移譲（RLSバイパス）
+  const success = await roomService.transferHost(supabase, roomId, currentHostId, newHost.userId);
 
-  if (error) {
-    console.error('Host transfer failed:', error.message);
+  if (!success) {
+    console.error('Host transfer failed via delegate_host');
     return;
   }
 
-  // 新ホストに通知
-  await notificationService.createNotification(
+  // 全員にホスト移譲通知
+  await notificationService.broadcastNotification(
     supabase,
     roomId,
-    'bulk_transfer', // 既存の通知タイプを流用
+    'host_transferred',
     {
       senderId: currentHostId,
-      message: `${newHost.displayName}さんがホストになりました`,
+      message: `${newHost.displayName}さんが新しいホストになりました`,
       senderName: 'システム',
+      newHostUserId: newHost.userId,
+      newHostDisplayName: newHost.displayName,
+      newHostJerseyNumber: newHost.jerseyNumber,
     },
-    newHost.userId,
   );
 }

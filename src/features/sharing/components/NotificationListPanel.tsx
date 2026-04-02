@@ -6,6 +6,11 @@ interface NotificationListPanelProps {
   onMarkRead: (id: string) => void;
   onMarkAllRead: () => void;
   onAction?: (notification: AppNotification) => void;
+  onApproveRejoin?: (notification: AppNotification) => void;
+  onRejectRejoin?: (notification: AppNotification) => void;
+  onAcceptHostTransfer?: (notification: AppNotification) => void;
+  onDeclineHostTransfer?: (notification: AppNotification) => void;
+  onVetoHostTransfer?: (notification: AppNotification) => void;
   onClose: () => void;
 }
 
@@ -16,6 +21,13 @@ const typeLabels: Record<string, { icon: string; label: string }> = {
   bulk_transfer: { icon: '📦', label: 'アイテム転送' },
   price_update: { icon: '💰', label: '価格更新' },
   item_added: { icon: '➕', label: 'アイテム追加' },
+  rejoin_request: { icon: '🔄', label: '再参加リクエスト' },
+  rejoin_approved: { icon: '✅', label: '再参加承認' },
+  rejoin_rejected: { icon: '❌', label: '再参加拒否' },
+  host_transfer_offer: { icon: '👑', label: 'ホスト移譲提案' },
+  host_transfer_veto: { icon: '⏳', label: '拒否権通知' },
+  host_transferred: { icon: '👑', label: 'ホスト変更' },
+  member_inherited: { icon: '🔄', label: 'メンバー引き継ぎ' },
 };
 
 const NotificationListPanel: React.FC<NotificationListPanelProps> = ({
@@ -23,6 +35,11 @@ const NotificationListPanel: React.FC<NotificationListPanelProps> = ({
   onMarkRead,
   onMarkAllRead,
   onAction,
+  onApproveRejoin,
+  onRejectRejoin,
+  onAcceptHostTransfer,
+  onDeclineHostTransfer,
+  onVetoHostTransfer,
   onClose,
 }) => {
   return (
@@ -69,8 +86,52 @@ const NotificationListPanel: React.FC<NotificationListPanelProps> = ({
                       <div className="flex-1 min-w-0">
                         <p className="text-sm text-slate-800 dark:text-white">{message}</p>
                         <p className="text-xs text-slate-400 dark:text-slate-500 mt-0.5">{time}</p>
-                        <div className="flex space-x-2 mt-1">
-                          {onAction && (
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          {/* 再参加リクエスト: 承認/拒否 */}
+                          {notification.type === 'rejoin_request' && onApproveRejoin && (
+                            <>
+                              <button
+                                onClick={() => onApproveRejoin(notification)}
+                                className="text-xs px-2 py-0.5 rounded bg-green-600 text-white hover:bg-green-700"
+                              >
+                                承認
+                              </button>
+                              <button
+                                onClick={() => onRejectRejoin?.(notification)}
+                                className="text-xs px-2 py-0.5 rounded bg-red-600 text-white hover:bg-red-700"
+                              >
+                                拒否
+                              </button>
+                            </>
+                          )}
+                          {/* ホスト移譲オファー: 承諾/辞退 */}
+                          {notification.type === 'host_transfer_offer' && onAcceptHostTransfer && (
+                            <>
+                              <button
+                                onClick={() => onAcceptHostTransfer(notification)}
+                                className="text-xs px-2 py-0.5 rounded bg-blue-600 text-white hover:bg-blue-700"
+                              >
+                                承諾
+                              </button>
+                              <button
+                                onClick={() => onDeclineHostTransfer?.(notification)}
+                                className="text-xs px-2 py-0.5 rounded bg-slate-500 text-white hover:bg-slate-600"
+                              >
+                                辞退
+                              </button>
+                            </>
+                          )}
+                          {/* 拒否権通知: 拒否する */}
+                          {notification.type === 'host_transfer_veto' && onVetoHostTransfer && (
+                            <button
+                              onClick={() => onVetoHostTransfer(notification)}
+                              className="text-xs px-2 py-0.5 rounded bg-red-600 text-white hover:bg-red-700"
+                            >
+                              拒否する
+                            </button>
+                          )}
+                          {/* 汎用アクション（既存タイプ用） */}
+                          {onAction && !['rejoin_request', 'host_transfer_offer', 'host_transfer_veto'].includes(notification.type) && (
                             <button
                               onClick={() => onAction(notification)}
                               className="text-xs text-blue-600 dark:text-blue-400 hover:underline"

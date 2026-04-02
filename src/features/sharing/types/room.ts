@@ -21,6 +21,23 @@ export interface RoomMember {
   lastSeenAt: string;
   joinedAt: string;
   jerseyNumber: number;
+  role: 'member' | 'sub_host';
+}
+
+/** 再参加リクエスト（通知payload用） */
+export interface RejoinRequest {
+  requesterId: string;
+  requesterDisplayName: string;
+  targetJerseyNumber: number;
+  targetDisplayName: string;
+}
+
+/** ホスト移譲リクエスト（通知payload用） */
+export interface HostTransferRequest {
+  candidateUserId: string;
+  candidateDisplayName: string;
+  candidateJerseyNumber: number;
+  reason: 'inactivity' | 'manual_leave' | 'manual_delegate';
 }
 
 /** claim_item RPCの結果 */
@@ -65,7 +82,7 @@ export interface RoomItemMapping {
 }
 
 /** データ移行モード */
-export type MigrationMode = 'host-create' | 'guest-join' | 'leave';
+export type MigrationMode = 'host-create' | 'guest-join' | 'leave' | 'rejoin-summary';
 
 /** データ移行結果 */
 export interface MigrationResult {
@@ -163,4 +180,27 @@ export interface SharingContextValue {
   registerMapDataUpdateHandler: (
     handler: (update: RemoteMapDataUpdate) => void,
   ) => void;
+
+  // 再参加承認
+  pendingRejoin: import('../hooks/useRoom').PendingRejoin | null;
+  requestRejoinWithApproval: (roomCode: string, displayName: string, jerseyNumber: number) => Promise<void>;
+  cancelPendingRejoin: () => void;
+  handleApproveRejoin: (notification: import('../services/notificationService').AppNotification) => Promise<void>;
+  handleRejectRejoin: (notification: import('../services/notificationService').AppNotification) => Promise<void>;
+
+  // ホスト移譲
+  handleAcceptHostTransfer: (notification: import('../services/notificationService').AppNotification) => Promise<void>;
+  handleDeclineHostTransfer: (notification: import('../services/notificationService').AppNotification) => Promise<void>;
+  handleVetoHostTransfer: (notification: import('../services/notificationService').AppNotification) => Promise<void>;
+  handleDelegateHost: (targetUserId: string) => Promise<void>;
+
+  // 副ホスト
+  handleSetSubHost: (targetUserId: string) => Promise<void>;
+  handleRemoveSubHost: (targetUserId: string) => Promise<void>;
+
+  // メンバー引き継ぎ
+  handleInheritMember: (targetJerseyNumber: number) => Promise<void>;
+
+  // パルスアニメーション
+  justRejoined: boolean;
 }
