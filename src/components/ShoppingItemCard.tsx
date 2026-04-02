@@ -58,6 +58,7 @@ export interface ShoppingItemCardProps {
   onAssignmentTap?: (itemId: string, event: React.MouseEvent) => void; // 担当者変更タップ
   onTransferRequest?: (item: ShoppingItem) => void; // 投げつけ要求
   isDimmedByAssignment?: boolean; // 他人に割り振られたアイテムの薄表示
+  highlightPrice?: boolean; // 価格未設定アラート表示
 }
 
 const statusConfig: Record<
@@ -166,6 +167,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   onAssignmentTap,
   onTransferRequest,
   isDimmedByAssignment = false,
+  highlightPrice = false,
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const [menuPosition, setMenuPosition] = useState<{ x: number; y: number } | null>(null);
@@ -541,7 +543,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                       <select
                         value={item.price === null ? '' : item.price}
                         onChange={handlePriceChange}
-                        className={`text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-20 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''}`}
+                        className={`text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-20 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''} ${highlightPrice ? 'ring-2 ring-red-500 dark:ring-red-400' : ''}`}
                       >
                         {priceOptions.map((p) => (
                           <option key={p === null ? '' : p} value={p === null ? '' : p}>
@@ -790,7 +792,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                   <select
                     value={item.price === null ? '' : item.price}
                     onChange={handlePriceChange}
-                    className={`text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-16 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''}`}
+                    className={`text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-16 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''} ${highlightPrice ? 'ring-2 ring-red-500 dark:ring-red-400' : ''}`}
                   >
                     {priceOptions.map((p) => (
                       <option key={p === null ? '' : p} value={p === null ? '' : p}>
@@ -1073,7 +1075,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             onChange={handlePriceChange}
             className={`flex-1 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none min-w-[100px] ${
               item.price === null ? 'text-red-600 dark:text-red-400' : ''
-            }`}
+            } ${highlightPrice ? 'ring-2 ring-red-500 dark:ring-red-400' : ''}`}
           >
             {priceOptions.map((p) => (
               <option key={p === null ? '' : p} value={p === null ? '' : p}>

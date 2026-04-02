@@ -252,6 +252,7 @@ const App: React.FC = () => {
   const [activeEventName, setActiveEventName] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>('eventList');
   const [mapViewActive, setMapViewActive] = useState(false);
+  const autoAdvanceTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapToggleLongPressRef = React.useRef<number | null>(null);
   const mapToggleLongPressFiredRef = React.useRef(false);
   const mapToggleButtonRef = React.useRef<HTMLButtonElement>(null);
@@ -264,6 +265,10 @@ const App: React.FC = () => {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [selectedBlockFilters, setSelectedBlockFilters] = useState<Set<string>>(new Set());
   const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
+  const [priceAlertItemIds, setPriceAlertItemIds] = useState<Set<string>>(new Set());
+  const [completionToast, setCompletionToast] = useState<{ countdown: number } | null>(null);
+  const completionToastTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const prevAllCompletedRef = React.useRef(false);
   const [rangeStart, setRangeStart] = useState<{
     itemId: string;
     columnType: 'execute' | 'candidate';
@@ -887,6 +892,15 @@ const App: React.FC = () => {
         setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
       }
 
+      // 価格が入力されたらpriceAlertから除去
+      if (currentItem && updatedItem.price != null && updatedItem.price > 0 && priceAlertItemIds.has(updatedItem.id)) {
+        setPriceAlertItemIds((prev) => {
+          const next = new Set(prev);
+          next.delete(updatedItem.id);
+          return next;
+        });
+      }
+
       setEventLists((prev) => ({
         ...prev,
         [activeEventName]: result.items,
@@ -913,7 +927,37 @@ const App: React.FC = () => {
         });
       }
     },
-    [activeEventName, activeTab, eventDates, dayModes, eventLists, sharing],
+    [activeEventName, activeTab, eventDates, dayModes, eventLists, sharing, priceAlertItemIds],
+  );
+
+  const handleBulkSetPurchaseStatus = useCallback(
+    (itemIds: string[], status: PurchaseStatus) => {
+      if (!activeEventName) return;
+      const currentItems = eventLists[activeEventName] || [];
+
+      // 価格チェック（Purchased時）
+      if (status === 'Purchased') {
+        const noPriceItems = itemIds
+          .map((id) => currentItems.find((i) => i.id === id))
+          .filter((item) => item && (item.price == null || item.price === 0));
+        if (noPriceItems.length > 0) {
+          setPriceAlertItemIds((prev) => {
+            const next = new Set(prev);
+            noPriceItems.forEach((item) => { if (item) next.add(item.id); });
+            return next;
+          });
+        }
+      }
+
+      // 全アイテムのステータスを一括更新
+      itemIds.forEach((id) => {
+        const item = currentItems.find((i) => i.id === id);
+        if (item) {
+          handleUpdateItem({ ...item, purchaseStatus: status });
+        }
+      });
+    },
+    [activeEventName, eventLists, handleUpdateItem],
   );
 
   const handleMoveItem = useCallback(
@@ -1280,6 +1324,12 @@ const App: React.FC = () => {
     setSelectedItemIds(new Set());
     setBlockSortDirection(null);
     setRecentlyChangedItemIds(new Set());
+    // 完了トーストが表示中ならキャンセル
+    if (completionToastTimerRef.current) {
+      clearInterval(completionToastTimerRef.current);
+      completionToastTimerRef.current = null;
+      setCompletionToast(null);
+    }
     const currentIndex = sortCycle.indexOf(sortState);
     const nextIndex = (currentIndex + 1) % sortCycle.length;
     setSortState(sortCycle[nextIndex]);
@@ -1727,6 +1777,11 @@ const App: React.FC = () => {
   }, []);
 
   const handleToggleSpaceCollapse = useCallback((spaceKey: string) => {
+    // 自動進行タイマーをキャンセル
+    if (autoAdvanceTimerRef.current) {
+      clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
     setCollapsedSpaces((prev) => {
       const next = new Set(prev);
       if (next.has(spaceKey)) {
@@ -1739,6 +1794,11 @@ const App: React.FC = () => {
   }, []);
 
   const handleToggleAllSpaceCollapse = useCallback((collapse: boolean) => {
+    // 自動進行タイマーをキャンセル
+    if (autoAdvanceTimerRef.current) {
+      clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
     if (!collapse) {
       setCollapsedSpaces(new Set());
     } else {
@@ -3505,6 +3565,100 @@ const App: React.FC = () => {
     sharing?.members,
   ]);
 
+  // Feature 3: スペース内全アイテム処理後の自動進行
+  React.useEffect(() => {
+    if (!spaceGroupingEnabled || currentMode !== 'execute') {
+      if (autoAdvanceTimerRef.current) {
+        clearTimeout(autoAdvanceTimerRef.current);
+        autoAdvanceTimerRef.current = null;
+      }
+      return;
+    }
+
+    // スペースグループを構築
+    const groupMap = new Map<string, ShoppingItem[]>();
+    const groupOrder: string[] = [];
+    executeColumnItems.forEach((item) => {
+      const key = getSpaceKey(item.block, item.number);
+      if (!groupMap.has(key)) {
+        groupMap.set(key, []);
+        groupOrder.push(key);
+      }
+      groupMap.get(key)!.push(item);
+    });
+
+    // 展開中スペースで全アイテム処理済のものを探す
+    let completedSpaceKey: string | null = null;
+    for (const key of groupOrder) {
+      if (collapsedSpaces.has(key)) continue;
+      const spaceItems = groupMap.get(key)!;
+      if (spaceItems.length === 0) continue;
+
+      const allProcessed = spaceItems.every((item) => {
+        if (item.purchaseStatus === 'None') return false;
+        if (item.purchaseStatus === 'Purchased' && (item.price == null || item.price === 0)) return false;
+        return true;
+      });
+
+      if (allProcessed) {
+        completedSpaceKey = key;
+        break;
+      }
+    }
+
+    if (completedSpaceKey) {
+      if (autoAdvanceTimerRef.current) return;
+      const targetKey = completedSpaceKey;
+      autoAdvanceTimerRef.current = setTimeout(() => {
+        autoAdvanceTimerRef.current = null;
+        setCollapsedSpaces((prev) => {
+          const next = new Set(prev);
+          next.add(targetKey);
+          const currentIndex = groupOrder.indexOf(targetKey);
+          if (currentIndex < groupOrder.length - 1) {
+            next.delete(groupOrder[currentIndex + 1]);
+          }
+          return next;
+        });
+      }, 5000);
+    } else {
+      if (autoAdvanceTimerRef.current) {
+        clearTimeout(autoAdvanceTimerRef.current);
+        autoAdvanceTimerRef.current = null;
+      }
+    }
+  }, [spaceGroupingEnabled, currentMode, executeColumnItems, collapsedSpaces]);
+
+  // Feature 4: 全アイテム処理完了検知 → トースト表示 → 自動フィルタ切替
+  React.useEffect(() => {
+    if (currentMode !== 'execute') {
+      prevAllCompletedRef.current = false;
+      return;
+    }
+
+    const allCompleted = executeColumnItems.length > 0 &&
+      executeColumnItems.every((item) => item.purchaseStatus !== 'None');
+
+    if (allCompleted && !prevAllCompletedRef.current) {
+      // 完了へ遷移 → カウントダウン開始
+      if (completionToastTimerRef.current) {
+        clearInterval(completionToastTimerRef.current);
+      }
+      setCompletionToast({ countdown: 6 });
+      completionToastTimerRef.current = setInterval(() => {
+        setCompletionToast((prev) => {
+          if (!prev || prev.countdown <= 1) {
+            clearInterval(completionToastTimerRef.current!);
+            completionToastTimerRef.current = null;
+            setSortState('Postpone');
+            return null;
+          }
+          return { countdown: prev.countdown - 1 };
+        });
+      }, 1000);
+    }
+    prevAllCompletedRef.current = allCompleted;
+  }, [currentMode, executeColumnItems]);
 
   const searchMatches = useMemo(() => {
     if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
@@ -4494,12 +4648,27 @@ const App: React.FC = () => {
                   items.length > 0 &&
                   currentMode === 'execute' &&
                   !mapViewActive && (
-                    <button
-                      onClick={handleSortToggle}
-                      className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 flex-shrink-0"
-                    >
-                      {sortLabels[sortState]}
-                    </button>
+                    <>
+                      <button
+                        onClick={() => {
+                          setSpaceGroupingEnabled((prev) => !prev);
+                          setCollapsedSpaces(new Set());
+                        }}
+                        className={`px-2 py-1 text-xs font-medium rounded transition-colors flex-shrink-0 ${
+                          spaceGroupingEnabled
+                            ? 'bg-blue-600 text-white dark:bg-blue-500'
+                            : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
+                        }`}
+                      >
+                        スペース別
+                      </button>
+                      <button
+                        onClick={handleSortToggle}
+                        className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 flex-shrink-0"
+                      >
+                        {sortLabels[sortState]}
+                      </button>
+                    </>
                   )}
               </div>
             </div>
@@ -4924,6 +5093,12 @@ const App: React.FC = () => {
                 highlightedItemId={highlightedItemId}
                 layoutMode={layoutMode}
                 viewMode="execute"
+                showSpaceGroups={spaceGroupingEnabled}
+                collapsedSpaces={collapsedSpaces}
+                onToggleSpaceCollapse={handleToggleSpaceCollapse}
+                onToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
+                onBulkSetPurchaseStatus={handleBulkSetPurchaseStatus}
+                priceAlertItemIds={priceAlertItemIds}
               />
             )}
           </div>
@@ -5295,6 +5470,11 @@ const App: React.FC = () => {
           }`}
         >
           {smartInsertToast}
+        </div>
+      )}
+      {completionToast && (
+        <div className="fixed top-16 left-1/2 transform -translate-x-1/2 z-[10000] text-white px-5 py-2.5 rounded-lg shadow-lg text-sm font-medium bg-blue-600">
+          {`全アイテム処理完了！残り${completionToast.countdown}秒後に後回しアイテムを表示します`}
         </div>
       )}
       {/* 共有ダイアログ */}

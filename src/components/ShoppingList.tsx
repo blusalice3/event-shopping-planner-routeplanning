@@ -67,6 +67,10 @@ interface ShoppingListProps {
   onSetSpaceGroupDragItemIds?: (itemIds: string[] | null) => void;
   onSelectSpaceGroupForRange?: (firstItemId: string, allItemIds: string[], columnType: 'execute' | 'candidate') => void;
   onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
+  // 実行モード：一括ステータス変更
+  onBulkSetPurchaseStatus?: (itemIds: string[], status: PurchaseStatus) => void;
+  // 価格アラート対象アイテムID
+  priceAlertItemIds?: Set<string>;
 }
 
 // グループIDからホールIDと優先度を分離するヘルパー
@@ -244,6 +248,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onSetSpaceGroupDragItemIds,
   onSelectSpaceGroupForRange,
   onAddItem,
+  onBulkSetPurchaseStatus,
+  priceAlertItemIds,
 }) => {
   const sharing = useSharing();
   const dragItem = useRef<string | null>(null);
@@ -1345,24 +1351,24 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   layoutMode === 'smartphone' && group.isCollapsed ? 'flex flex-col' : 'flex items-center'
                 }`}
                 style={{ borderLeft: '4px solid #9CA3AF' }}
-                data-item-id={group.isCollapsed ? group.items[0]?.id : undefined}
-                draggable={group.isCollapsed}
+                data-item-id={group.isCollapsed && viewMode !== 'execute' ? group.items[0]?.id : undefined}
+                draggable={group.isCollapsed && viewMode !== 'execute'}
                 onDragStart={
-                  group.isCollapsed
+                  group.isCollapsed && viewMode !== 'execute'
                     ? (e) => handleSpaceGroupDragStart(e, group)
                     : undefined
                 }
-                onDragOver={(e) => {
+                onDragOver={viewMode !== 'execute' ? (e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   const firstItem = group.items[0];
                   if (firstItem) {
                     setActiveDropTarget({ id: firstItem.id, position: 'top' });
                   }
-                }}
-                onDrop={handleDrop}
-                onDragEnd={group.isCollapsed ? handleSpaceGroupDragEnd : undefined}
-                onTouchStart={group.isCollapsed ? (e: React.TouchEvent<HTMLDivElement>) => {
+                } : undefined}
+                onDrop={viewMode !== 'execute' ? handleDrop : undefined}
+                onDragEnd={group.isCollapsed && viewMode !== 'execute' ? handleSpaceGroupDragEnd : undefined}
+                onTouchStart={group.isCollapsed && viewMode !== 'execute' ? (e: React.TouchEvent<HTMLDivElement>) => {
                   const target = e.target as HTMLElement;
                   if (target.closest('[data-no-long-press]')) return;
                   const touch = e.touches[0];
@@ -1376,12 +1382,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     handleTouchDragStart(firstItemId, el, touch.clientX, touch.clientY, effectiveIds);
                   }, TOUCH_LONG_PRESS_MS);
                 } : undefined}
-                onTouchMove={group.isCollapsed ? handleItemTouchMove : undefined}
-                onTouchEnd={group.isCollapsed ? handleItemTouchEnd : undefined}
-                onTouchCancel={group.isCollapsed ? handleItemTouchCancel : undefined}
+                onTouchMove={group.isCollapsed && viewMode !== 'execute' ? handleItemTouchMove : undefined}
+                onTouchEnd={group.isCollapsed && viewMode !== 'execute' ? handleItemTouchEnd : undefined}
+                onTouchCancel={group.isCollapsed && viewMode !== 'execute' ? handleItemTouchCancel : undefined}
               >
-                {/* 折りたたみ時：チェックボックス + ドラッグハンドル + 上下ボタン */}
-                {group.isCollapsed && (
+                {/* 折りたたみ時：チェックボックス + ドラッグハンドル + 上下ボタン（実行モードでは非表示） */}
+                {group.isCollapsed && viewMode !== 'execute' && (
                   <div
                     data-drag-handle
                     className={`flex flex-row items-center cursor-grab text-slate-400 dark:text-slate-500 ${
@@ -1540,6 +1546,29 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           </span>
                         );
                       })()}
+                      {/* 実行モード展開時：全購入・全売切ボタン */}
+                      {viewMode === 'execute' && !group.isCollapsed && onBulkSetPurchaseStatus && (
+                        <>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onBulkSetPurchaseStatus(group.items.map((i) => i.id), 'Purchased');
+                            }}
+                            className={`${layoutMode === 'smartphone' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'} font-medium rounded bg-green-600 text-white hover:bg-green-700 transition-colors`}
+                          >
+                            全購入
+                          </button>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onBulkSetPurchaseStatus(group.items.map((i) => i.id), 'SoldOut');
+                            }}
+                            className={`${layoutMode === 'smartphone' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'} font-medium rounded bg-red-600 text-white hover:bg-red-700 transition-colors`}
+                          >
+                            全売切
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                   {/* 折りたたみ時の備考表示 */}
@@ -1783,6 +1812,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           onAssignmentTap={sharing?.activeRoom ? handleAssignmentTap : undefined}
                           onTransferRequest={sharing?.activeRoom ? handleTransferRequest : undefined}
                           isDimmedByAssignment={!!sharing?.activeRoom && !!item.assignedTo && item.assignedTo !== myJerseyStr}
+                          highlightPrice={priceAlertItemIds?.has(item.id)}
                         />
 
                         {activeDropTarget?.id === item.id &&
@@ -2234,6 +2264,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         onAssignmentTap={sharing?.activeRoom ? handleAssignmentTap : undefined}
                         onTransferRequest={sharing?.activeRoom ? handleTransferRequest : undefined}
                         isDimmedByAssignment={!!sharing?.activeRoom && !!item.assignedTo && item.assignedTo !== myJerseyStr}
+                        highlightPrice={priceAlertItemIds?.has(item.id)}
                       />
 
                       {activeDropTarget?.id === item.id &&
@@ -2455,6 +2486,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               onAssignmentTap={sharing?.activeRoom ? handleAssignmentTap : undefined}
               onTransferRequest={sharing?.activeRoom ? handleTransferRequest : undefined}
               isDimmedByAssignment={!!sharing?.activeRoom && !!item.assignedTo && item.assignedTo !== myJerseyStr}
+              highlightPrice={priceAlertItemIds?.has(item.id)}
             />
 
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (
