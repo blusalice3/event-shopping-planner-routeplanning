@@ -243,23 +243,3 @@ CREATE POLICY "members_crud_map_data" ON room_map_data
   );
 
 ALTER PUBLICATION supabase_realtime ADD TABLE room_map_data;
-
--- ────────────────────────────────────────────────
--- 11. 期限切れルーム自動削除関数
--- ────────────────────────────────────────────────
-
-CREATE INDEX idx_rooms_expires_at ON rooms(expires_at);
-
-CREATE OR REPLACE FUNCTION cleanup_expired_rooms()
-RETURNS INTEGER AS $$
-DECLARE
-  v_deleted_count INTEGER;
-BEGIN
-  DELETE FROM rooms
-  WHERE expires_at + interval '72 hours' < now();
-
-  GET DIAGNOSTICS v_deleted_count = ROW_COUNT;
-
-  RETURN v_deleted_count;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
