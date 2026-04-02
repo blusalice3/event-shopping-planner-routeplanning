@@ -121,6 +121,9 @@ export interface SharingContextValue {
   isOnline: boolean;
   pendingQueueSize: number;
 
+  // リアルタイムチャネル（useBroadcast等で使用）
+  channel: import('@supabase/supabase-js').RealtimeChannel | null;
+
   // ルーム操作
   createRoom: (eventName: string, displayName: string, expiresAt: string) => Promise<ActiveRoom>;
   joinRoom: (roomCode: string, displayName: string) => Promise<ActiveRoom>;
