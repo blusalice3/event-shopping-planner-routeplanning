@@ -1546,6 +1546,36 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           </span>
                         );
                       })()}
+                      {/* 実行モード折りたたみ時：ステータス別件数表示 */}
+                      {viewMode === 'execute' && group.isCollapsed && (() => {
+                        const statusLabels: { status: PurchaseStatus; label: string; color: string }[] = [
+                          { status: 'Purchased', label: '購', color: 'text-green-600 dark:text-green-400' },
+                          { status: 'SoldOut', label: '売', color: 'text-red-600 dark:text-red-400' },
+                          { status: 'Absent', label: '欠', color: 'text-yellow-600 dark:text-yellow-400' },
+                          { status: 'Postpone', label: '後', color: 'text-purple-600 dark:text-purple-400' },
+                          { status: 'Late', label: '遅', color: 'text-blue-600 dark:text-blue-400' },
+                          { status: 'LimitedPurchase', label: '限', color: 'text-orange-600 dark:text-orange-400' },
+                          { status: 'None', label: '未', color: 'text-red-600 dark:text-red-400 font-bold' },
+                        ];
+                        const counts = new Map<PurchaseStatus, number>();
+                        group.items.forEach((item) => {
+                          counts.set(item.purchaseStatus, (counts.get(item.purchaseStatus) || 0) + 1);
+                        });
+                        const fontSize = layoutMode === 'smartphone' ? 'text-[9px]' : 'text-[11px]';
+                        return (
+                          <span className={`flex items-center gap-0.5 ${fontSize}`}>
+                            {statusLabels.map(({ status, label, color }) => {
+                              const count = counts.get(status) || 0;
+                              if (count === 0) return null;
+                              return (
+                                <span key={status} className={color}>
+                                  {label}{count}
+                                </span>
+                              );
+                            })}
+                          </span>
+                        );
+                      })()}
                       {/* 実行モード展開時：一括ステータスボタン（トグル式） */}
                       {viewMode === 'execute' && !group.isCollapsed && onBulkSetPurchaseStatus && (() => {
                         const ids = group.items.map((i) => i.id);
