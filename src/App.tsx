@@ -269,7 +269,6 @@ const App: React.FC = () => {
   const [userInteractedSpaces, setUserInteractedSpaces] = useState<Set<string>>(new Set());
   const [completionToast, setCompletionToast] = useState<{ countdown: number } | null>(null);
   const completionToastTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-  const prevAllCompletedRef = React.useRef(false);
   const [rangeStart, setRangeStart] = useState<{
     itemId: string;
     columnType: 'execute' | 'candidate';
@@ -3695,20 +3694,22 @@ const App: React.FC = () => {
   }, [spaceGroupingEnabled, currentMode, executeColumnItems, collapsedSpaces, userInteractedSpaces]);
 
   // Feature 4: 全アイテム処理完了検知 → トースト表示 → 自動フィルタ切替
+  // ユーザーが購入状態を変更した結果として全アイテムが完了した時のみ発火
   React.useEffect(() => {
     if (currentMode !== 'execute') {
-      prevAllCompletedRef.current = false;
+      return;
+    }
+
+    // ユーザーが操作していない場合はスキップ（モード切替・画面遷移で誤発火しない）
+    if (recentlyChangedItemIds.size === 0) {
       return;
     }
 
     const allCompleted = executeColumnItems.length > 0 &&
       executeColumnItems.every((item) => item.purchaseStatus !== 'None');
 
-    if (allCompleted && !prevAllCompletedRef.current) {
-      // 完了へ遷移 → カウントダウン開始
-      if (completionToastTimerRef.current) {
-        clearInterval(completionToastTimerRef.current);
-      }
+    if (allCompleted && !completionToastTimerRef.current) {
+      // カウントダウン開始
       setCompletionToast({ countdown: 6 });
       completionToastTimerRef.current = setInterval(() => {
         setCompletionToast((prev) => {
@@ -3723,8 +3724,7 @@ const App: React.FC = () => {
         });
       }, 1000);
     }
-    prevAllCompletedRef.current = allCompleted;
-  }, [currentMode, executeColumnItems]);
+  }, [currentMode, executeColumnItems, recentlyChangedItemIds]);
 
   const searchMatches = useMemo(() => {
     if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
