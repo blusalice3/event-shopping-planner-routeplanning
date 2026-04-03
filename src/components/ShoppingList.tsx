@@ -71,6 +71,10 @@ interface ShoppingListProps {
   onBulkSetPurchaseStatus?: (itemIds: string[], status: PurchaseStatus) => void;
   // 価格アラート対象アイテムID
   priceAlertItemIds?: Set<string>;
+  // ホール>スペース2階層表示用
+  collapsedHalls?: Set<string>;
+  onToggleHallCollapse?: (hallId: string) => void;
+  onToggleHallSpacesCollapse?: (spaceKeys: string[], collapse: boolean) => void;
 }
 
 // グループIDからホールIDと優先度を分離するヘルパー
@@ -250,6 +254,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onAddItem,
   onBulkSetPurchaseStatus,
   priceAlertItemIds,
+  collapsedHalls,
+  onToggleHallCollapse,
+  onToggleHallSpacesCollapse,
 }) => {
   const sharing = useSharing();
   const dragItem = useRef<string | null>(null);
@@ -622,6 +629,108 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     });
     return blockColorMapResult;
   }, [items, showSpaceGroups]);
+
+  // スペースグループ用：アイテムID→ホール情報マッピング（hallGroups方式と同一のアイテム単位判定）
+  const spaceItemHallMap = useMemo(() => {
+    const result = new Map<string, { hallId: string; hallName: string; hallColor: string }>();
+    if (!showSpaceGroups || !mapData || hallDefinitions.length === 0) return result;
+
+    const isPointInPoly = (row: number, col: number, vertices: { row: number; col: number }[]): boolean => {
+      if (vertices.length < 3) return false;
+      let inside = false;
+      for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+        const xi = vertices[i].col, yi = vertices[i].row;
+        const xj = vertices[j].col, yj = vertices[j].row;
+        if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
+          inside = !inside;
+        }
+      }
+      return inside;
+    };
+
+    items.forEach((item) => {
+      const block = mapData!.blocks.find((b: BlockDefinition) => b.name === item.block);
+      if (!block) return;
+      const numMatch = item.number?.match(/\d+/);
+      if (!numMatch) return;
+      const num = parseInt(numMatch[0], 10);
+      const cell = block.numberCells.find((nc) => nc.value === num);
+      if (!cell) return;
+      for (const hall of hallDefinitions) {
+        for (const v of hall.vertices) {
+          if (v.row === cell.row && v.col === cell.col) {
+            result.set(item.id, { hallId: hall.id, hallName: hall.name, hallColor: hall.color || '#9CA3AF' });
+            return;
+          }
+        }
+        if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
+          result.set(item.id, { hallId: hall.id, hallName: hall.name, hallColor: hall.color || '#9CA3AF' });
+          return;
+        }
+      }
+    });
+    return result;
+  }, [showSpaceGroups, items, mapData, hallDefinitions]);
+
+  // ホール>スペースの2階層セクション構築
+  interface HallSpaceSection {
+    hallId: string;
+    hallName: string;
+    hallColor: string;
+    isCollapsed: boolean;
+    spaceGroups: SpaceGroup[];
+  }
+
+  const hallSpaceSections = useMemo((): HallSpaceSection[] | null => {
+    if (!showSpaceGroups || spaceGroups.length === 0 || hallDefinitions.length === 0 || spaceItemHallMap.size === 0) {
+      return null;
+    }
+
+    const sectionMap = new Map<string, { hallName: string; hallColor: string; groups: SpaceGroup[] }>();
+    const sectionOrder: string[] = [];
+    const noHallGroups: SpaceGroup[] = [];
+
+    spaceGroups.forEach((group) => {
+      // スペース内最初のアイテムからホールを判定
+      const firstItem = group.items[0];
+      const hallInfo = firstItem ? spaceItemHallMap.get(firstItem.id) : undefined;
+
+      if (!hallInfo) {
+        noHallGroups.push(group);
+        return;
+      }
+
+      if (!sectionMap.has(hallInfo.hallId)) {
+        sectionMap.set(hallInfo.hallId, { hallName: hallInfo.hallName, hallColor: hallInfo.hallColor, groups: [] });
+        sectionOrder.push(hallInfo.hallId);
+      }
+      sectionMap.get(hallInfo.hallId)!.groups.push(group);
+    });
+
+    const sections: HallSpaceSection[] = sectionOrder.map((hallId) => {
+      const data = sectionMap.get(hallId)!;
+      return {
+        hallId,
+        hallName: data.hallName,
+        hallColor: data.hallColor,
+        isCollapsed: collapsedHalls?.has(hallId) ?? false,
+        spaceGroups: data.groups,
+      };
+    });
+
+    // ホール未定義のスペースがあれば末尾に追加
+    if (noHallGroups.length > 0) {
+      sections.push({
+        hallId: '__no_hall__',
+        hallName: 'ホール未定義',
+        hallColor: '#9CA3AF',
+        isCollapsed: collapsedHalls?.has('__no_hall__') ?? false,
+        spaceGroups: noHallGroups,
+      });
+    }
+
+    return sections;
+  }, [showSpaceGroups, spaceGroups, hallDefinitions, spaceItemHallMap, collapsedHalls]);
 
   // グループ化表示時の範囲選択情報を計算（同一グループ内のみ）
   const groupRangeInfo = useMemo(() => {
@@ -1226,6 +1335,20 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     };
 
     const allCollapsed = spaceGroups.length > 0 && spaceGroups.every((g) => g.isCollapsed);
+    const allHallsCollapsed = hallSpaceSections ? hallSpaceSections.every((s) => s.isCollapsed) : false;
+
+    // ホールセクションヘッダーを描画する際に、各スペースがどのホールに属するかのマップ
+    const spaceKeyToHallId = new Map<string, string>();
+    if (hallSpaceSections) {
+      hallSpaceSections.forEach((section) => {
+        section.spaceGroups.forEach((g) => {
+          spaceKeyToHallId.set(g.spaceKey, section.hallId);
+        });
+      });
+    }
+
+    // ホールセクションヘッダー挿入用: 前のスペースのホールIDを追跡
+    let prevHallId: string | null = null;
 
     return (
       <div
@@ -1239,10 +1362,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         {onToggleAllSpaceCollapse && (
           <div className="flex justify-end mb-1">
             <button
-              onClick={() => onToggleAllSpaceCollapse(!allCollapsed)}
+              onClick={() => onToggleAllSpaceCollapse(hallSpaceSections ? !allHallsCollapsed : !allCollapsed)}
               className="text-xs px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
             >
-              {allCollapsed ? '全て展開' : '全て折りたたむ'}
+              {(hallSpaceSections ? allHallsCollapsed : allCollapsed) ? '全て展開' : '全て折りたたむ'}
             </button>
           </div>
         )}
@@ -1250,6 +1373,40 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         {spaceGroups.map((group, groupIndex) => {
           const block = group.spaceKey.split('-')[0];
           const blockColor = spaceGroupBlockColorMap.get(block);
+
+          // ホール2階層：ホールセクションヘッダー挿入 & 折りたたみ制御
+          const currentHallId = spaceKeyToHallId.get(group.spaceKey) || null;
+          const hallSection = hallSpaceSections?.find((s) => s.hallId === currentHallId);
+          const showHallHeader = hallSpaceSections && currentHallId !== null && currentHallId !== prevHallId;
+          if (hallSpaceSections && currentHallId !== null) {
+            prevHallId = currentHallId;
+          }
+          // ホールが折りたたまれていればスペースを非表示
+          if (hallSection?.isCollapsed) {
+            // ホールヘッダーは最初のスペースの時だけ描画
+            if (showHallHeader) {
+              return (
+                <div key={`hall-header-${currentHallId}`}>
+                  <div
+                    className="sticky top-0 z-30 flex items-center justify-between px-4 py-2 rounded-lg cursor-pointer select-none bg-slate-100 dark:bg-slate-800 hover:brightness-95 dark:hover:brightness-110 transition-all"
+                    style={{ borderLeft: `4px solid ${hallSection.hallColor}` }}
+                    onClick={() => onToggleHallCollapse?.(hallSection.hallId)}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs">&#9654;</span>
+                      <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
+                        {hallSection.hallName}
+                      </span>
+                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                        {hallSection.spaceGroups.reduce((sum, g) => sum + g.items.length, 0)}件
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              );
+            }
+            return null;
+          }
 
           // このスペースの全アイテムがチェックされているか
           const allItemsSelected =
@@ -1333,8 +1490,44 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             activeDropTarget?.id === group.items[0]?.id &&
             activeDropTarget?.position === 'top';
 
+          // 展開中ホールのヘッダー（ホール境界で挿入）
+          const hallHeaderElement = showHallHeader && hallSection ? (
+            <div key={`hall-header-${currentHallId}`} className="mb-1">
+              <div
+                className={`sticky top-0 z-30 flex items-center justify-between px-4 py-2 rounded-lg select-none bg-slate-100 dark:bg-slate-800 hover:brightness-95 dark:hover:brightness-110 transition-all ${onToggleHallCollapse ? 'cursor-pointer' : ''}`}
+                style={{ borderLeft: `4px solid ${hallSection.hallColor}` }}
+                onClick={onToggleHallCollapse ? () => onToggleHallCollapse(hallSection.hallId) : undefined}
+              >
+                <div className="flex items-center gap-2">
+                  <span className="text-xs rotate-90">&#9654;</span>
+                  <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
+                    {hallSection.hallName}
+                  </span>
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    {hallSection.spaceGroups.reduce((sum, g) => sum + g.items.length, 0)}件
+                  </span>
+                </div>
+                {onToggleHallSpacesCollapse && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const keys = hallSection.spaceGroups.map((g) => g.spaceKey);
+                      const allExpanded = hallSection.spaceGroups.every((g) => !g.isCollapsed);
+                      onToggleHallSpacesCollapse(keys, allExpanded);
+                    }}
+                    className="text-xs px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
+                  >
+                    {hallSection.spaceGroups.every((g) => !g.isCollapsed) ? 'アイテム折りたたむ' : 'アイテム展開'}
+                  </button>
+                )}
+              </div>
+            </div>
+          ) : null;
+
           return (
-            <div key={group.spaceKey} className="mb-1 relative">
+            <React.Fragment key={group.spaceKey}>
+              {hallHeaderElement}
+              <div className="mb-1 relative">
               {/* ドロップ位置ガイド */}
               {showDropGuide && (
                 <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
@@ -1477,6 +1670,17 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       }`}>
                         {group.displayName}
                       </span>
+                      {(() => {
+                        const hallNames = [...new Set(group.items.map((i) => spaceItemHallMap.get(i.id)?.hallName).filter(Boolean))];
+                        if (hallNames.length === 0) return null;
+                        return (
+                          <span className={`text-slate-500 dark:text-slate-400 flex-shrink-0 ${
+                            layoutMode === 'smartphone' ? 'text-[10px]' : 'text-xs'
+                          }`}>
+                            {hallNames.join('/')}
+                          </span>
+                        );
+                      })()}
                       {(() => {
                         const uniqueCircles = [...new Set(group.items.map((item) => item.circle).filter(Boolean))];
                         if (uniqueCircles.length === 0) return null;
@@ -1978,7 +2182,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   })}
                 </div>
               )}
-            </div>
+              </div>
+            </React.Fragment>
           );
         })}
 

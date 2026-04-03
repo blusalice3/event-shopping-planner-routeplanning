@@ -1727,6 +1727,7 @@ const App: React.FC = () => {
   // スペース別グループ化の状態。
   const [spaceGroupingEnabled, setSpaceGroupingEnabled] = useState(false);
   const [collapsedSpaces, setCollapsedSpaces] = useState<Set<string>>(new Set());
+  const [collapsedHalls, setCollapsedHalls] = useState<Set<string>>(new Set());
   const spaceGroupDragItemIdsRef = useRef<string[] | null>(null);
 
   const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
@@ -1866,7 +1867,13 @@ const App: React.FC = () => {
     }
     if (!collapse) {
       setCollapsedSpaces(new Set());
+      setCollapsedHalls(new Set());
     } else {
+      // 全ホールを折りたたむ
+      const hallDefs = getHallsForDate(activeEventDate);
+      if (hallDefs.length > 0) {
+        setCollapsedHalls(new Set(hallDefs.map((h) => h.id)));
+      }
       const allSpaceKeys = new Set<string>();
       items
         .filter((item) => item.eventDate === activeEventDate)
@@ -1876,6 +1883,23 @@ const App: React.FC = () => {
       setCollapsedSpaces(allSpaceKeys);
     }
   }, [items, activeEventDate]);
+
+  const handleToggleHallCollapse = useCallback((hallId: string) => {
+    setCollapsedHalls((prev) => {
+      const next = new Set(prev);
+      if (next.has(hallId)) next.delete(hallId);
+      else next.add(hallId);
+      return next;
+    });
+  }, []);
+
+  const handleToggleHallSpacesCollapse = useCallback((spaceKeys: string[], collapse: boolean) => {
+    setCollapsedSpaces((prev) => {
+      const next = new Set(prev);
+      spaceKeys.forEach((key) => collapse ? next.add(key) : next.delete(key));
+      return next;
+    });
+  }, []);
 
   const handleSetSpaceGroupDragItemIds = useCallback((itemIds: string[] | null) => {
     spaceGroupDragItemIdsRef.current = itemIds;
@@ -4765,6 +4789,7 @@ const App: React.FC = () => {
                         onClick={() => {
                           setSpaceGroupingEnabled((prev) => !prev);
                           setCollapsedSpaces(new Set());
+                          setCollapsedHalls(new Set());
                           setUserInteractedSpaces(new Set());
                         }}
                         className={`px-2 py-1 text-xs font-medium rounded transition-colors flex-shrink-0 ${
@@ -4998,6 +5023,7 @@ const App: React.FC = () => {
                         onClick={() => {
                           setSpaceGroupingEnabled((prev) => !prev);
                           setCollapsedSpaces(new Set());
+                          setCollapsedHalls(new Set());
                           setUserInteractedSpaces(new Set());
                         }}
                         className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
@@ -5051,6 +5077,9 @@ const App: React.FC = () => {
                     onSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
                     onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
                     onAddItem={handleAddItemFromFocusMode}
+                    collapsedHalls={collapsedHalls}
+                    onToggleHallCollapse={handleToggleHallCollapse}
+                    onToggleHallSpacesCollapse={handleToggleHallSpacesCollapse}
                   />
                 </div>
 
@@ -5214,6 +5243,9 @@ const App: React.FC = () => {
                 onBulkSetPurchaseStatus={handleBulkSetPurchaseStatus}
                 priceAlertItemIds={priceAlertItemIds}
                 onAddItem={handleAddItemFromFocusMode}
+                hallDefinitions={getHallsForDate(activeEventDate)}
+                mapData={getMapDataForDate(activeEventDate)}
+                collapsedHalls={collapsedHalls}
               />
             )}
           </div>
@@ -5542,6 +5574,7 @@ const App: React.FC = () => {
               onToggleSpaceGrouping={layoutMode === 'smartphone' || !showHeaderBar ? () => {
                 setSpaceGroupingEnabled((prev) => !prev);
                 setCollapsedSpaces(new Set());
+                setCollapsedHalls(new Set());
                 setUserInteractedSpaces(new Set());
               } : undefined}
             />
