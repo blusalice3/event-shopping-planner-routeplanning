@@ -5213,6 +5213,7 @@ const App: React.FC = () => {
                 onToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
                 onBulkSetPurchaseStatus={handleBulkSetPurchaseStatus}
                 priceAlertItemIds={priceAlertItemIds}
+                onAddItem={handleAddItemFromFocusMode}
               />
             )}
           </div>
