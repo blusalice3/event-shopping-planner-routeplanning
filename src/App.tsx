@@ -269,6 +269,8 @@ const App: React.FC = () => {
   const [userInteractedSpaces, setUserInteractedSpaces] = useState<Set<string>>(new Set());
   const [completionToast, setCompletionToast] = useState<{ countdown: number } | null>(null);
   const completionToastTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
+  const completionCountdownRef = React.useRef(0);
+  const lastChangedItemIdRef = React.useRef<string | null>(null);
   const [rangeStart, setRangeStart] = useState<{
     itemId: string;
     columnType: 'execute' | 'candidate';
@@ -890,6 +892,7 @@ const App: React.FC = () => {
 
       if (result.purchaseStatusChanged) {
         setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
+        lastChangedItemIdRef.current = updatedItem.id;
         // 自動進行用: ユーザー操作フラグ設定（実行モード時）
         if (currentMode === 'execute') {
           const spaceKey = getSpaceKey(updatedItem.block, updatedItem.number);
@@ -970,6 +973,9 @@ const App: React.FC = () => {
         itemIds.forEach((id) => next.add(id));
         return next;
       });
+      if (itemIds.length > 0) {
+        lastChangedItemIdRef.current = itemIds[itemIds.length - 1];
+      }
 
       // 自動進行用: ユーザー操作フラグ設定
       {
@@ -1380,6 +1386,7 @@ const App: React.FC = () => {
     if (completionToastTimerRef.current) {
       clearInterval(completionToastTimerRef.current);
       completionToastTimerRef.current = null;
+      completionCountdownRef.current = 0;
       setCompletionToast(null);
     }
     const currentIndex = sortCycle.indexOf(sortState);
@@ -3697,7 +3704,14 @@ const App: React.FC = () => {
   // ユーザーが購入状態を変更した結果として全アイテムが完了した時のみ発火
   React.useEffect(() => {
     if (currentMode !== 'execute') {
-      return;
+      return () => {
+        if (completionToastTimerRef.current) {
+          clearInterval(completionToastTimerRef.current);
+          completionToastTimerRef.current = null;
+          completionCountdownRef.current = 0;
+          setCompletionToast(null);
+        }
+      };
     }
 
     // ユーザーが操作していない場合はスキップ（モード切替・画面遷移で誤発火しない）
@@ -3708,23 +3722,54 @@ const App: React.FC = () => {
     const allCompleted = executeColumnItems.length > 0 &&
       executeColumnItems.every((item) => item.purchaseStatus !== 'None');
 
-    if (allCompleted && !completionToastTimerRef.current) {
-      // カウントダウン開始
+    // 最下段アイテムの変更時のみカウントダウン開始
+    // スペース別表示: 最後のスペースの最後のアイテム、通常表示: リスト最後のアイテム
+    let isLastItemChanged = false;
+    if (lastChangedItemIdRef.current && executeColumnItems.length > 0) {
+      if (spaceGroupingEnabled) {
+        // スペース別: 最後のスペースの最後のアイテムかチェック
+        const lastItem = executeColumnItems[executeColumnItems.length - 1];
+        isLastItemChanged = lastItem != null && lastItem.id === lastChangedItemIdRef.current;
+      } else {
+        // 通常表示: リスト最後のアイテムかチェック
+        const lastItem = executeColumnItems[executeColumnItems.length - 1];
+        isLastItemChanged = lastItem.id === lastChangedItemIdRef.current;
+      }
+    }
+
+    if (allCompleted && isLastItemChanged && !completionToastTimerRef.current) {
+      // カウントダウン開始（refでカウント管理、setState呼び出しはcallback直下）
+      completionCountdownRef.current = 6;
       setCompletionToast({ countdown: 6 });
       completionToastTimerRef.current = setInterval(() => {
-        setCompletionToast((prev) => {
-          if (!prev || prev.countdown <= 1) {
-            clearInterval(completionToastTimerRef.current!);
-            completionToastTimerRef.current = null;
-            setRecentlyChangedItemIds(new Set());
-            setSortState('Postpone');
-            return null;
-          }
-          return { countdown: prev.countdown - 1 };
-        });
+        completionCountdownRef.current -= 1;
+        if (completionCountdownRef.current <= 0) {
+          clearInterval(completionToastTimerRef.current!);
+          completionToastTimerRef.current = null;
+          setCompletionToast(null);
+          setRecentlyChangedItemIds(new Set());
+          setSortState('Postpone');
+        } else {
+          setCompletionToast({ countdown: completionCountdownRef.current });
+        }
       }, 1000);
+    } else if (!allCompleted && completionToastTimerRef.current) {
+      // 未購入アイテムが出現したらタイマーキャンセル
+      clearInterval(completionToastTimerRef.current);
+      completionToastTimerRef.current = null;
+      completionCountdownRef.current = 0;
+      setCompletionToast(null);
     }
-  }, [currentMode, executeColumnItems, recentlyChangedItemIds]);
+
+    return () => {
+      if (completionToastTimerRef.current) {
+        clearInterval(completionToastTimerRef.current);
+        completionToastTimerRef.current = null;
+        completionCountdownRef.current = 0;
+        setCompletionToast(null);
+      }
+    };
+  }, [currentMode, executeColumnItems, recentlyChangedItemIds, spaceGroupingEnabled]);
 
   const searchMatches = useMemo(() => {
     if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
