@@ -266,6 +266,7 @@ const App: React.FC = () => {
   const [selectedBlockFilters, setSelectedBlockFilters] = useState<Set<string>>(new Set());
   const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
   const [priceAlertItemIds, setPriceAlertItemIds] = useState<Set<string>>(new Set());
+  const [userInteractedSpaces, setUserInteractedSpaces] = useState<Set<string>>(new Set());
   const [completionToast, setCompletionToast] = useState<{ countdown: number } | null>(null);
   const completionToastTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
   const prevAllCompletedRef = React.useRef(false);
@@ -890,6 +891,11 @@ const App: React.FC = () => {
 
       if (result.purchaseStatusChanged) {
         setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
+        // 自動進行用: ユーザー操作フラグ設定（実行モード時）
+        if (currentMode === 'execute') {
+          const spaceKey = getSpaceKey(updatedItem.block, updatedItem.number);
+          setUserInteractedSpaces((prev) => new Set(prev).add(spaceKey));
+        }
       }
 
       // 価格が入力されたらpriceAlertから除去
@@ -965,6 +971,21 @@ const App: React.FC = () => {
         itemIds.forEach((id) => next.add(id));
         return next;
       });
+
+      // 自動進行用: ユーザー操作フラグ設定
+      {
+        const currentItemsForSpace = eventLists[activeEventName] || [];
+        const spaceKeys = new Set<string>();
+        itemIds.forEach((id) => {
+          const item = currentItemsForSpace.find((i) => i.id === id);
+          if (item) spaceKeys.add(getSpaceKey(item.block, item.number));
+        });
+        setUserInteractedSpaces((prev) => {
+          const next = new Set(prev);
+          spaceKeys.forEach((key) => next.add(key));
+          return next;
+        });
+      }
 
       // 共有ルーム参加中はSupabaseに同期
       if (sharing?.activeRoom) {
@@ -1820,6 +1841,12 @@ const App: React.FC = () => {
         next.delete(spaceKey);
       } else {
         next.add(spaceKey);
+        // 折りたたんだスペースの操作フラグをクリア
+        setUserInteractedSpaces((p) => {
+          const n = new Set(p);
+          n.delete(spaceKey);
+          return n;
+        });
       }
       return next;
     });
@@ -3632,7 +3659,7 @@ const App: React.FC = () => {
         return true;
       });
 
-      if (allProcessed) {
+      if (allProcessed && userInteractedSpaces.has(key)) {
         completedSpaceKey = key;
         break;
       }
@@ -3643,6 +3670,12 @@ const App: React.FC = () => {
       const targetKey = completedSpaceKey;
       autoAdvanceTimerRef.current = setTimeout(() => {
         autoAdvanceTimerRef.current = null;
+        // フラグクリア
+        setUserInteractedSpaces((prev) => {
+          const next = new Set(prev);
+          next.delete(targetKey);
+          return next;
+        });
         setCollapsedSpaces((prev) => {
           const next = new Set(prev);
           next.add(targetKey);
@@ -3659,7 +3692,7 @@ const App: React.FC = () => {
         autoAdvanceTimerRef.current = null;
       }
     }
-  }, [spaceGroupingEnabled, currentMode, executeColumnItems, collapsedSpaces]);
+  }, [spaceGroupingEnabled, currentMode, executeColumnItems, collapsedSpaces, userInteractedSpaces]);
 
   // Feature 4: 全アイテム処理完了検知 → トースト表示 → 自動フィルタ切替
   React.useEffect(() => {
@@ -4687,6 +4720,7 @@ const App: React.FC = () => {
                         onClick={() => {
                           setSpaceGroupingEnabled((prev) => !prev);
                           setCollapsedSpaces(new Set());
+                          setUserInteractedSpaces(new Set());
                         }}
                         className={`px-2 py-1 text-xs font-medium rounded transition-colors flex-shrink-0 ${
                           spaceGroupingEnabled
@@ -4919,6 +4953,7 @@ const App: React.FC = () => {
                         onClick={() => {
                           setSpaceGroupingEnabled((prev) => !prev);
                           setCollapsedSpaces(new Set());
+                          setUserInteractedSpaces(new Set());
                         }}
                         className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
                           spaceGroupingEnabled
@@ -5461,6 +5496,7 @@ const App: React.FC = () => {
               onToggleSpaceGrouping={layoutMode === 'smartphone' || !showHeaderBar ? () => {
                 setSpaceGroupingEnabled((prev) => !prev);
                 setCollapsedSpaces(new Set());
+                setUserInteractedSpaces(new Set());
               } : undefined}
             />
           )}

@@ -1546,29 +1546,32 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           </span>
                         );
                       })()}
-                      {/* 実行モード展開時：全購入・全売切ボタン */}
-                      {viewMode === 'execute' && !group.isCollapsed && onBulkSetPurchaseStatus && (
-                        <>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onBulkSetPurchaseStatus(group.items.map((i) => i.id), 'Purchased');
-                            }}
-                            className={`${layoutMode === 'smartphone' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'} font-medium rounded bg-green-600 text-white hover:bg-green-700 transition-colors`}
-                          >
-                            全購入
-                          </button>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onBulkSetPurchaseStatus(group.items.map((i) => i.id), 'SoldOut');
-                            }}
-                            className={`${layoutMode === 'smartphone' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'} font-medium rounded bg-red-600 text-white hover:bg-red-700 transition-colors`}
-                          >
-                            全売切
-                          </button>
-                        </>
-                      )}
+                      {/* 実行モード展開時：一括ステータスボタン（トグル式） */}
+                      {viewMode === 'execute' && !group.isCollapsed && onBulkSetPurchaseStatus && (() => {
+                        const ids = group.items.map((i) => i.id);
+                        const btnSize = layoutMode === 'smartphone' ? 'px-1 py-0.5 text-[9px]' : 'px-2 py-0.5 text-xs';
+                        const buttons: { label: string; status: PurchaseStatus; activeBg: string; inactiveBg: string }[] = [
+                          { label: '全購入', status: 'Purchased', activeBg: 'bg-green-700 text-white', inactiveBg: 'bg-green-600 text-white hover:bg-green-700' },
+                          { label: '全売切', status: 'SoldOut', activeBg: 'bg-red-700 text-white', inactiveBg: 'bg-red-600 text-white hover:bg-red-700' },
+                          { label: '全後回', status: 'Postpone', activeBg: 'bg-purple-700 text-white', inactiveBg: 'bg-purple-600 text-white hover:bg-purple-700' },
+                          { label: '全遅参', status: 'Late', activeBg: 'bg-blue-700 text-white', inactiveBg: 'bg-blue-600 text-white hover:bg-blue-700' },
+                        ];
+                        return buttons.map(({ label, status, activeBg, inactiveBg }) => {
+                          const allMatch = group.items.length > 0 && group.items.every((i) => i.purchaseStatus === status);
+                          return (
+                            <button
+                              key={status}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onBulkSetPurchaseStatus(ids, allMatch ? 'None' : status);
+                              }}
+                              className={`${btnSize} font-medium rounded transition-colors ${allMatch ? `${activeBg} ring-2 ring-white/50` : inactiveBg}`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        });
+                      })()}
                     </div>
                   </div>
                   {/* 折りたたみ時の備考表示 */}
