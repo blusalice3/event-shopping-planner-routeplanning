@@ -9,6 +9,8 @@ interface SummaryBarProps {
   isInRoom?: boolean;
   myItemsOnly?: boolean;
   onToggleMyItems?: () => void;
+  spaceGroupingEnabled?: boolean;
+  onToggleSpaceGrouping?: () => void;
 }
 
 const SummaryBar: React.FC<SummaryBarProps> = ({
@@ -19,6 +21,8 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
   isInRoom = false,
   myItemsOnly = false,
   onToggleMyItems,
+  spaceGroupingEnabled,
+  onToggleSpaceGrouping,
 }) => {
   const summary = useMemo(() => {
     const totalItems = items.length;
@@ -75,17 +79,33 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
               件購入済み
             </div>
           </div>
-          {filterLabel && onFilterToggle && (
-            <button
-              onClick={onFilterToggle}
-              className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 touch-manipulation select-none"
-              title="購入状態フィルタ切替"
-              style={{ WebkitTapHighlightColor: 'transparent' }}
-              type="button"
-            >
-              {filterLabel}
-            </button>
-          )}
+          <div className="flex items-center gap-2">
+            {onToggleSpaceGrouping && (
+              <button
+                onClick={onToggleSpaceGrouping}
+                className={`px-2 py-1 text-xs font-medium rounded transition-colors touch-manipulation select-none ${
+                  spaceGroupingEnabled
+                    ? 'bg-blue-600 text-white dark:bg-blue-500'
+                    : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
+                }`}
+                style={{ WebkitTapHighlightColor: 'transparent' }}
+                type="button"
+              >
+                スペース別
+              </button>
+            )}
+            {filterLabel && onFilterToggle && (
+              <button
+                onClick={onFilterToggle}
+                className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 touch-manipulation select-none"
+                title="購入状態フィルタ切替"
+                style={{ WebkitTapHighlightColor: 'transparent' }}
+                type="button"
+              >
+                {filterLabel}
+              </button>
+            )}
+          </div>
           <div>
             <span className="text-sm text-slate-500 dark:text-slate-400">残りの合計: </span>
             <span className="font-bold text-xl text-blue-600 dark:text-blue-400">

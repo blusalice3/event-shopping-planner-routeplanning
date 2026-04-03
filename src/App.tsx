@@ -933,10 +933,11 @@ const App: React.FC = () => {
   const handleBulkSetPurchaseStatus = useCallback(
     (itemIds: string[], status: PurchaseStatus) => {
       if (!activeEventName) return;
-      const currentItems = eventLists[activeEventName] || [];
+      const targetIdSet = new Set(itemIds);
 
       // 価格チェック（Purchased時）
       if (status === 'Purchased') {
+        const currentItems = eventLists[activeEventName] || [];
         const noPriceItems = itemIds
           .map((id) => currentItems.find((i) => i.id === id))
           .filter((item) => item && (item.price == null || item.price === 0));
@@ -949,15 +950,46 @@ const App: React.FC = () => {
         }
       }
 
-      // 全アイテムのステータスを一括更新
-      itemIds.forEach((id) => {
-        const item = currentItems.find((i) => i.id === id);
-        if (item) {
-          handleUpdateItem({ ...item, purchaseStatus: status });
-        }
+      // 全アイテムのステータスを一括更新（setEventListsで直接更新）
+      setEventLists((prev) => {
+        const currentItems = prev[activeEventName] || [];
+        const updatedItems = currentItems.map((item) =>
+          targetIdSet.has(item.id) ? { ...item, purchaseStatus: status } : item,
+        );
+        return { ...prev, [activeEventName]: updatedItems };
       });
+
+      // recentlyChangedItemIdsに追加
+      setRecentlyChangedItemIds((prev) => {
+        const next = new Set(prev);
+        itemIds.forEach((id) => next.add(id));
+        return next;
+      });
+
+      // 共有ルーム参加中はSupabaseに同期
+      if (sharing?.activeRoom) {
+        const currentItems = eventLists[activeEventName] || [];
+        itemIds.forEach((id) => {
+          const item = currentItems.find((i) => i.id === id);
+          if (item) {
+            sharing.syncPurchaseStatus(
+              id,
+              status,
+              item,
+              (rollbackItem) => {
+                setEventLists((prev) => ({
+                  ...prev,
+                  [activeEventName]: (prev[activeEventName] || []).map((i) =>
+                    i.id === rollbackItem.id ? rollbackItem : i,
+                  ),
+                }));
+              },
+            );
+          }
+        });
+      }
     },
-    [activeEventName, eventLists, handleUpdateItem],
+    [activeEventName, eventLists, sharing],
   );
 
   const handleMoveItem = useCallback(
@@ -3650,6 +3682,7 @@ const App: React.FC = () => {
           if (!prev || prev.countdown <= 1) {
             clearInterval(completionToastTimerRef.current!);
             completionToastTimerRef.current = null;
+            setRecentlyChangedItemIds(new Set());
             setSortState('Postpone');
             return null;
           }
@@ -4647,7 +4680,8 @@ const App: React.FC = () => {
                   mainContentVisible &&
                   items.length > 0 &&
                   currentMode === 'execute' &&
-                  !mapViewActive && (
+                  !mapViewActive &&
+                  layoutMode !== 'smartphone' && (
                     <>
                       <button
                         onClick={() => {
@@ -5417,12 +5451,17 @@ const App: React.FC = () => {
           {currentMode === 'execute' && (
             <SummaryBar
               items={visibleItems}
-              filterLabel={!showHeaderBar ? sortLabels[sortState] : undefined}
-              onFilterToggle={!showHeaderBar ? handleSortToggle : undefined}
+              filterLabel={layoutMode === 'smartphone' || !showHeaderBar ? sortLabels[sortState] : undefined}
+              onFilterToggle={layoutMode === 'smartphone' || !showHeaderBar ? handleSortToggle : undefined}
               isInRoom={!!sharing?.activeRoom}
               onHelpRequest={sharing?.activeRoom ? () => setSharingDialog({ type: 'helpRequest' }) : undefined}
               myItemsOnly={sharing?.myItemsOnly}
               onToggleMyItems={sharing?.activeRoom ? sharing.toggleMyItemsFilter : undefined}
+              spaceGroupingEnabled={spaceGroupingEnabled}
+              onToggleSpaceGrouping={layoutMode === 'smartphone' || !showHeaderBar ? () => {
+                setSpaceGroupingEnabled((prev) => !prev);
+                setCollapsedSpaces(new Set());
+              } : undefined}
             />
           )}
         </>
