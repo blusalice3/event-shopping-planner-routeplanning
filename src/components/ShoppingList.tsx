@@ -630,9 +630,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     return blockColorMapResult;
   }, [items, showSpaceGroups]);
 
-  // スペースグループ用：アイテムID→ホール情報マッピング（hallGroups方式と同一のアイテム単位判定）
+  // スペースグループ用：アイテムID→ホール情報マッピング（優先度によるgroupId付き）
   const spaceItemHallMap = useMemo(() => {
-    const result = new Map<string, { hallId: string; hallName: string; hallColor: string }>();
+    const result = new Map<string, { groupId: string; hallId: string; hallName: string; hallColor: string }>();
     if (!showSpaceGroups || !mapData || hallDefinitions.length === 0) return result;
 
     const isPointInPoly = (row: number, col: number, vertices: { row: number; col: number }[]): boolean => {
@@ -657,14 +657,17 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       const cell = block.numberCells.find((nc) => nc.value === num);
       if (!cell) return;
       for (const hall of hallDefinitions) {
+        let found = false;
         for (const v of hall.vertices) {
-          if (v.row === cell.row && v.col === cell.col) {
-            result.set(item.id, { hallId: hall.id, hallName: hall.name, hallColor: hall.color || '#9CA3AF' });
-            return;
-          }
+          if (v.row === cell.row && v.col === cell.col) { found = true; break; }
         }
-        if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
-          result.set(item.id, { hallId: hall.id, hallName: hall.name, hallColor: hall.color || '#9CA3AF' });
+        if (!found) found = isPointInPoly(cell.row, cell.col, hall.vertices);
+        if (found) {
+          const priority: PriorityLevel = item.priorityLevel || 'none';
+          const groupId = buildGroupId(hall.id, priority) || hall.id;
+          const displayName = getGroupDisplayName(groupId, hallDefinitions);
+          const hallColor = priority === 'highest' ? '#EF4444' : priority === 'priority' ? '#F97316' : (hall.color || '#9CA3AF');
+          result.set(item.id, { groupId, hallId: hall.id, hallName: displayName, hallColor });
           return;
         }
       }
@@ -691,7 +694,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     const noHallGroups: SpaceGroup[] = [];
 
     spaceGroups.forEach((group) => {
-      // スペース内最初のアイテムからホールを判定
+      // スペース内最初のアイテムからホール(groupId = 優先度付き)を判定
       const firstItem = group.items[0];
       const hallInfo = firstItem ? spaceItemHallMap.get(firstItem.id) : undefined;
 
@@ -700,20 +703,31 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         return;
       }
 
-      if (!sectionMap.has(hallInfo.hallId)) {
-        sectionMap.set(hallInfo.hallId, { hallName: hallInfo.hallName, hallColor: hallInfo.hallColor, groups: [] });
-        sectionOrder.push(hallInfo.hallId);
+      const key = hallInfo.groupId; // 優先度付きgroupId（例: "456:highest", "456"）
+      if (!sectionMap.has(key)) {
+        sectionMap.set(key, { hallName: hallInfo.hallName, hallColor: hallInfo.hallColor, groups: [] });
+        sectionOrder.push(key);
       }
-      sectionMap.get(hallInfo.hallId)!.groups.push(group);
+      sectionMap.get(key)!.groups.push(group);
     });
 
-    const sections: HallSpaceSection[] = sectionOrder.map((hallId) => {
-      const data = sectionMap.get(hallId)!;
+    // hallOrderによるセクション順序ソート
+    if (hallOrder && hallOrder.length > 0) {
+      const orderMap = new Map(hallOrder.map((id, idx) => [id, idx]));
+      sectionOrder.sort((a, b) => {
+        const ai = orderMap.get(a) ?? Infinity;
+        const bi = orderMap.get(b) ?? Infinity;
+        return ai - bi;
+      });
+    }
+
+    const sections: HallSpaceSection[] = sectionOrder.map((groupId) => {
+      const data = sectionMap.get(groupId)!;
       return {
-        hallId,
+        hallId: groupId, // groupId（優先度付き）をhallIdとして使用
         hallName: data.hallName,
         hallColor: data.hallColor,
-        isCollapsed: collapsedHalls?.has(hallId) ?? false,
+        isCollapsed: collapsedHalls?.has(groupId) ?? false,
         spaceGroups: data.groups,
       };
     });
@@ -730,7 +744,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     }
 
     return sections;
-  }, [showSpaceGroups, spaceGroups, hallDefinitions, spaceItemHallMap, collapsedHalls]);
+  }, [showSpaceGroups, spaceGroups, hallDefinitions, spaceItemHallMap, collapsedHalls, hallOrder]);
 
   // グループ化表示時の範囲選択情報を計算（同一グループ内のみ）
   const groupRangeInfo = useMemo(() => {
@@ -1337,7 +1351,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     const allCollapsed = spaceGroups.length > 0 && spaceGroups.every((g) => g.isCollapsed);
     const allHallsCollapsed = hallSpaceSections ? hallSpaceSections.every((s) => s.isCollapsed) : false;
 
-    // ホールセクションヘッダーを描画する際に、各スペースがどのホールに属するかのマップ
+    // ホール境界の事前計算（render中の副作用を避けるため .map() の外で計算）
+    const hallHeaderIndices = new Set<number>();
+    const groupIndexToHallId = new Map<number, string>();
     const spaceKeyToHallId = new Map<string, string>();
     if (hallSpaceSections) {
       hallSpaceSections.forEach((section) => {
@@ -1345,10 +1361,18 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
           spaceKeyToHallId.set(g.spaceKey, section.hallId);
         });
       });
+      let lastHallId: string | null = null;
+      spaceGroups.forEach((group, idx) => {
+        const hallId = spaceKeyToHallId.get(group.spaceKey) || null;
+        if (hallId !== null) {
+          groupIndexToHallId.set(idx, hallId);
+          if (hallId !== lastHallId) {
+            hallHeaderIndices.add(idx);
+            lastHallId = hallId;
+          }
+        }
+      });
     }
-
-    // ホールセクションヘッダー挿入用: 前のスペースのホールIDを追跡
-    let prevHallId: string | null = null;
 
     return (
       <div
@@ -1375,14 +1399,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
           const blockColor = spaceGroupBlockColorMap.get(block);
 
           // ホール2階層：ホールセクションヘッダー挿入 & 折りたたみ制御
-          const currentHallId = spaceKeyToHallId.get(group.spaceKey) || null;
+          const currentHallId = groupIndexToHallId.get(groupIndex) || null;
           const hallSection = hallSpaceSections?.find((s) => s.hallId === currentHallId);
-          const showHallHeader = hallSpaceSections && currentHallId !== null && currentHallId !== prevHallId;
-          if (hallSpaceSections && currentHallId !== null) {
-            prevHallId = currentHallId;
-          }
-          // ホールが折りたたまれていればスペースを非表示
-          if (hallSection?.isCollapsed) {
+          const showHallHeader = hallHeaderIndices.has(groupIndex);
+          // ホールが折りたたまれていればスペースを非表示（実行モードでは折りたたみ無効）
+          if (hallSection?.isCollapsed && viewMode !== 'execute') {
             // ホールヘッダーは最初のスペースの時だけ描画
             if (showHallHeader) {
               return (

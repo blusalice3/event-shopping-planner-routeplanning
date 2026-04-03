@@ -1728,6 +1728,12 @@ const App: React.FC = () => {
   const [spaceGroupingEnabled, setSpaceGroupingEnabled] = useState(false);
   const [collapsedSpaces, setCollapsedSpaces] = useState<Set<string>>(new Set());
   const [collapsedHalls, setCollapsedHalls] = useState<Set<string>>(new Set());
+
+  // 日付切替時にホール折りたたみ状態をリセット
+  React.useEffect(() => {
+    setCollapsedHalls(new Set());
+  }, [activeEventDate]);
+
   const spaceGroupDragItemIdsRef = useRef<string[] | null>(null);
 
   const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
@@ -5244,6 +5250,7 @@ const App: React.FC = () => {
                 priceAlertItemIds={priceAlertItemIds}
                 onAddItem={handleAddItemFromFocusMode}
                 hallDefinitions={getHallsForDate(activeEventDate)}
+                hallOrder={getHallOrderForDate(activeEventDate)}
                 mapData={getMapDataForDate(activeEventDate)}
                 collapsedHalls={collapsedHalls}
               />
