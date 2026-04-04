@@ -1609,13 +1609,16 @@ const App: React.FC = () => {
     if (!collapse) {
       setCollapsedSpaces(new Set());
     } else {
-      const allSpaceKeys = new Set<string>();
+      const allGroupKeys = new Set<string>();
       items
         .filter((item) => item.eventDate === activeEventDate)
         .forEach((item) => {
-          allSpaceKeys.add(getSpaceKey(item.block, item.number));
+          const spaceKey = getSpaceKey(item.block, item.number);
+          const priority = item.priorityLevel || 'none';
+          const groupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
+          allGroupKeys.add(groupKey);
         });
-      setCollapsedSpaces(allSpaceKeys);
+      setCollapsedSpaces(allGroupKeys);
     }
   }, [items, activeEventDate]);
 

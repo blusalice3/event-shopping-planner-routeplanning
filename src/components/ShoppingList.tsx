@@ -20,11 +20,13 @@ interface HallGroup {
 }
 
 interface SpaceGroup {
+  groupKey: string;
   spaceKey: string;
   displayName: string;
   items: ShoppingItem[];
   isCollapsed: boolean;
   priority: PriorityLevel;
+  hallGroupId: string | null;
 }
 
 interface ShoppingListProps {
@@ -509,35 +511,36 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       sortedItems = itemsWithOrder.map((io) => io.item);
     }
 
-    // 並べ替え済みアイテムをスペースでグループ化
-    const groupMap = new Map<string, ShoppingItem[]>();
+    // 並べ替え済みアイテムをスペース+優先度でグループ化
+    const groupMap = new Map<string, { spaceKey: string; priority: PriorityLevel; hallGroupId: string | null; items: ShoppingItem[] }>();
     const groupOrder: string[] = [];
     sortedItems.forEach((item) => {
-      const key = getSpaceKey(item.block, item.number);
-      if (!groupMap.has(key)) {
-        groupMap.set(key, []);
-        groupOrder.push(key);
+      const spaceKey = getSpaceKey(item.block, item.number);
+      const priority = (item.priorityLevel || 'none') as PriorityLevel;
+      // 優先度別にグループ化（アイテム単独表示のセクション分割と一致）
+      const groupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
+      if (!groupMap.has(groupKey)) {
+        // 先頭アイテムのhallGroupIdを算出
+        const hallId = hallDefinitions.length > 0 && mapData
+          ? getHallIdForItemHelper(item, mapData, hallDefinitions)
+          : null;
+        const hallGroupId = buildGroupId(hallId, priority);
+        groupMap.set(groupKey, { spaceKey, priority, hallGroupId, items: [] });
+        groupOrder.push(groupKey);
       }
-      groupMap.get(key)!.push(item);
+      groupMap.get(groupKey)!.items.push(item);
     });
 
-    // 優先度ランク（小さいほど高優先度）
-    const priorityRank: Record<PriorityLevel, number> = { highest: 0, priority: 1, none: 2 };
-
-    return groupOrder.map((key) => {
-      const groupItems = groupMap.get(key)!;
-      // グループ内の最高優先度を計算
-      const effectivePriority = groupItems.reduce<PriorityLevel>((best, item) => {
-        const level = (item.priorityLevel || 'none') as PriorityLevel;
-        return priorityRank[level] < priorityRank[best] ? level : best;
-      }, 'none');
-
+    return groupOrder.map((groupKey) => {
+      const { spaceKey, priority, hallGroupId, items: groupItems } = groupMap.get(groupKey)!;
       return {
-        spaceKey: key,
-        displayName: key,
+        groupKey,
+        spaceKey,
+        displayName: spaceKey,
         items: groupItems,
-        isCollapsed: collapsedSpaces?.has(key) ?? false,
-        priority: effectivePriority,
+        isCollapsed: collapsedSpaces?.has(groupKey) ?? false,
+        priority,
+        hallGroupId,
       };
     });
   }, [items, showSpaceGroups, collapsedSpaces, hallDefinitions, hallOrder, mapData]);
@@ -634,30 +637,30 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       return null;
     }
 
-    let startSpaceKey: string | null = null;
-    let endSpaceKey: string | null = null;
+    let startGroupKey: string | null = null;
+    let endGroupKey: string | null = null;
     let startIdx = -1;
     let endIdx = -1;
 
     for (const group of spaceGroups) {
       const si = group.items.findIndex((item) => item.id === rangeStart.itemId);
       if (si !== -1) {
-        startSpaceKey = group.spaceKey;
+        startGroupKey = group.groupKey;
         startIdx = si;
       }
       const ei = group.items.findIndex((item) => item.id === rangeEnd.itemId);
       if (ei !== -1) {
-        endSpaceKey = group.spaceKey;
+        endGroupKey = group.groupKey;
         endIdx = ei;
       }
     }
 
     // 異なるスペースグループ間では範囲選択を無効化
-    if (startSpaceKey !== endSpaceKey || startIdx === -1 || endIdx === -1) {
+    if (startGroupKey !== endGroupKey || startIdx === -1 || endIdx === -1) {
       return null;
     }
 
-    const group = spaceGroups.find((g) => g.spaceKey === startSpaceKey);
+    const group = spaceGroups.find((g) => g.groupKey === startGroupKey);
     if (!group) return null;
 
     const minIndex = Math.min(startIdx, endIdx);
@@ -672,7 +675,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       rangeItems.slice(1, -1).every((item) => !selectedItemIds.has(item.id));
 
     return {
-      spaceKey: startSpaceKey,
+      groupKey: startGroupKey,
       startIndex: minIndex,
       endIndex: maxIndex,
       rangeItems,
@@ -1185,6 +1188,33 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         )}
 
         {spaceGroups.map((group, groupIndex) => {
+          // ホール+優先度セクションヘッダー（アイテム単独表示のセクションヘッダーと同等）
+          const prevHallGroupId = groupIndex > 0 ? spaceGroups[groupIndex - 1].hallGroupId : undefined;
+          const showHallSectionHeader = hallDefinitions.length > 0 && group.hallGroupId !== prevHallGroupId;
+          const hallSectionHeader = showHallSectionHeader ? (() => {
+            const headerStyle = getGroupHeaderStyle(group.hallGroupId, hallDefinitions);
+            const displayName = getGroupDisplayName(group.hallGroupId, hallDefinitions);
+            // このセクション内のアイテム数を算出
+            let sectionItemCount = 0;
+            for (let i = groupIndex; i < spaceGroups.length; i++) {
+              if (i > groupIndex && spaceGroups[i].hallGroupId !== group.hallGroupId) break;
+              sectionItemCount += spaceGroups[i].items.length;
+            }
+            return (
+              <div
+                className={`sticky top-0 z-30 flex items-center justify-between px-4 py-2 rounded-t-lg ${headerStyle.bgClass} ${groupIndex > 0 ? 'mt-3' : ''}`}
+                style={{ borderLeft: `4px solid ${headerStyle.borderColor}` }}
+              >
+                <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
+                  {displayName}
+                </span>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {sectionItemCount}件
+                </span>
+              </div>
+            );
+          })() : null;
+
           const block = group.spaceKey.split('-')[0];
           const blockColor = spaceGroupBlockColorMap.get(block);
 
@@ -1271,7 +1301,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             activeDropTarget?.position === 'top';
 
           return (
-            <div key={group.spaceKey} className="mb-1 relative">
+            <React.Fragment key={group.groupKey}>
+              {hallSectionHeader}
+            <div className="mb-1 relative">
               {/* ドロップ位置ガイド */}
               {showDropGuide && (
                 <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
@@ -1287,10 +1319,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 } hover:brightness-95 dark:hover:brightness-110 transition-all ${
                   layoutMode === 'smartphone' && group.isCollapsed ? 'flex flex-col' : 'flex items-center'
                 }`}
-                style={{ borderLeft: `4px solid ${
-                  group.priority === 'highest' ? '#EF4444' :
-                  group.priority === 'priority' ? '#F97316' : '#9CA3AF'
-                }` }}
+                style={{ borderLeft: '4px solid #9CA3AF' }}
                 data-item-id={group.isCollapsed ? group.items[0]?.id : undefined}
                 draggable={group.isCollapsed}
                 onDragStart={
@@ -1401,7 +1430,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   className={`flex-1 flex flex-col cursor-pointer min-w-0 ${
                     layoutMode === 'smartphone' ? 'px-2 py-1' : 'px-3 py-1.5'
                   }`}
-                  onClick={() => onToggleSpaceCollapse?.(group.spaceKey)}
+                  onClick={() => onToggleSpaceCollapse?.(group.groupKey)}
                 >
                   <div className="flex items-center justify-between">
                     <div className={`flex items-center min-w-0 ${layoutMode === 'smartphone' ? 'gap-1' : 'gap-2'}`}>
@@ -1417,15 +1446,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       }`}>
                         {group.displayName}
                       </span>
-                      {group.priority !== 'none' && (
-                        <span className={`text-[10px] px-1 py-0.5 rounded font-medium flex-shrink-0 ${
-                          group.priority === 'highest'
-                            ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
-                            : 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300'
-                        }`}>
-                          {group.priority === 'highest' ? '最優先' : '優先'}
-                        </span>
-                      )}
                       {(() => {
                         const uniqueCircles = [...new Set(group.items.map((item) => item.circle).filter(Boolean))];
                         if (uniqueCircles.length === 0) return null;
@@ -1449,17 +1469,17 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         const hasWarningRemarks = remarksItems.some((item) =>
                           item.remarks.includes('委託無') || item.remarks.includes('優先')
                         );
-                        const isExpanded = expandedRemarks.has(group.spaceKey);
+                        const isExpanded = expandedRemarks.has(group.groupKey);
                         return (
                           <button
                             onClick={(e) => {
                               e.stopPropagation();
                               setExpandedRemarks((prev) => {
                                 const next = new Set(prev);
-                                if (next.has(group.spaceKey)) {
-                                  next.delete(group.spaceKey);
+                                if (next.has(group.groupKey)) {
+                                  next.delete(group.groupKey);
                                 } else {
-                                  next.add(group.spaceKey);
+                                  next.add(group.groupKey);
                                 }
                                 return next;
                               });
@@ -1501,7 +1521,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   {group.isCollapsed && (() => {
                     // スマホ時：💬/⚠️クリックで展開表示
                     if (layoutMode === 'smartphone') {
-                      if (!expandedRemarks.has(group.spaceKey)) return null;
+                      if (!expandedRemarks.has(group.groupKey)) return null;
                       const remarksItems = group.items.filter((item) => item.remarks);
                       if (remarksItems.length === 0) return null;
                       return (
@@ -1604,7 +1624,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   >
                     <defs>
                       <linearGradient
-                        id={`chainMetal-cross-${group.spaceKey}`}
+                        id={`chainMetal-cross-${group.groupKey}`}
                         x1="0%" y1="0%" x2="100%" y2="0%"
                       >
                         <stop offset="0%" stopColor="#9CA3AF" />
@@ -1612,17 +1632,17 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         <stop offset="100%" stopColor="#9CA3AF" />
                       </linearGradient>
                       <pattern
-                        id={`chainPattern-cross-${group.spaceKey}`}
+                        id={`chainPattern-cross-${group.groupKey}`}
                         x="0" y="0" width="40" height="20"
                         patternUnits="userSpaceOnUse"
                       >
                         <rect x="14" y="-2" width="12" height="18" rx="6"
                           fill="none"
-                          stroke={`url(#chainMetal-cross-${group.spaceKey})`}
+                          stroke={`url(#chainMetal-cross-${group.groupKey})`}
                           strokeWidth="3"
                         />
                         <rect x="17" y="13" width="6" height="8" rx="2"
-                          fill={`url(#chainMetal-cross-${group.spaceKey})`}
+                          fill={`url(#chainMetal-cross-${group.groupKey})`}
                           stroke="#4B5563" strokeWidth="0.5"
                         />
                       </pattern>
@@ -1630,31 +1650,31 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
                     {isCrossStart && (
                       <rect x="0" y="50%" width="40" height="50%"
-                        fill={`url(#chainPattern-cross-${group.spaceKey})`}
+                        fill={`url(#chainPattern-cross-${group.groupKey})`}
                       />
                     )}
                     {isCrossEnd && (
                       <rect x="0" y="0" width="40" height="50%"
-                        fill={`url(#chainPattern-cross-${group.spaceKey})`}
+                        fill={`url(#chainPattern-cross-${group.groupKey})`}
                       />
                     )}
                     {isCrossMiddle && (
                       <rect x="0" y="0" width="40" height="100%"
-                        fill={`url(#chainPattern-cross-${group.spaceKey})`}
+                        fill={`url(#chainPattern-cross-${group.groupKey})`}
                       />
                     )}
 
                     {isCrossStart && (
                       <ellipse cx="20" cy="100%" rx="10" ry="5"
                         fill="none"
-                        stroke={`url(#chainMetal-cross-${group.spaceKey})`}
+                        stroke={`url(#chainMetal-cross-${group.groupKey})`}
                         strokeWidth="3"
                       />
                     )}
                     {isCrossEnd && (
                       <ellipse cx="20" cy="0" rx="10" ry="5"
                         fill="none"
-                        stroke={`url(#chainMetal-cross-${group.spaceKey})`}
+                        stroke={`url(#chainMetal-cross-${group.groupKey})`}
                         strokeWidth="3"
                       />
                     )}
@@ -1670,7 +1690,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
                     // スペースグループ内での範囲選択状態
                     const isThisGroupInRange =
-                      spaceGroupRangeInfo && spaceGroupRangeInfo.spaceKey === group.spaceKey;
+                      spaceGroupRangeInfo && spaceGroupRangeInfo.groupKey === group.groupKey;
                     const isInRange =
                       isThisGroupInRange &&
                       spaceItemIndex >= spaceGroupRangeInfo!.startIndex &&
@@ -1867,6 +1887,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 </div>
               )}
             </div>
+            </React.Fragment>
           );
         })}
 
