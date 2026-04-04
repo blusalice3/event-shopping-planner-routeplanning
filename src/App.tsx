@@ -471,10 +471,12 @@ const App: React.FC = () => {
       const hallId1 = getItemHallId(item1, eventDate);
       const hallId2 = getItemHallId(item2, eventDate);
 
-
       if (hallId1 === null || hallId2 === null) return true;
 
-      return hallId1 === hallId2;
+      // 優先度グループも比較（訪問先リストと同じ制限）
+      const priority1 = item1.priorityLevel || 'none';
+      const priority2 = item2.priorityLevel || 'none';
+      return hallId1 === hallId2 && priority1 === priority2;
     },
     [items, getHallsForDate, getItemHallId],
   );

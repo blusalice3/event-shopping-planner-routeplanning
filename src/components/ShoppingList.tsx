@@ -24,6 +24,7 @@ interface SpaceGroup {
   displayName: string;
   items: ShoppingItem[];
   isCollapsed: boolean;
+  priority: PriorityLevel;
 }
 
 interface ShoppingListProps {
@@ -126,6 +127,59 @@ const getGroupHeaderStyle = (
     return { bgClass: 'bg-orange-100 dark:bg-orange-900/40', borderColor: '#F97316' };
   }
   return { bgClass: 'bg-slate-100 dark:bg-slate-800', borderColor: baseColor };
+};
+
+// アイテムのホールIDを取得するヘルパー（モジュールスコープ）
+const getHallIdForItemHelper = (
+  item: ShoppingItem,
+  mapData: DayMapData | null,
+  hallDefinitions: HallDefinition[],
+): string | null => {
+  if (!mapData) return null;
+
+  const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
+  if (!block) return null;
+
+  const numMatch = item.number?.match(/\d+/);
+  if (!numMatch) return null;
+  const num = parseInt(numMatch[0], 10);
+
+  const cell = block.numberCells.find(
+    (nc: { row: number; col: number; value: number }) => nc.value === num,
+  );
+  if (!cell) return null;
+
+  // 多角形内判定（レイキャスティング法）
+  const isPointInPoly = (
+    row: number,
+    col: number,
+    vertices: { row: number; col: number }[],
+  ): boolean => {
+    if (vertices.length < 3) return false;
+    let inside = false;
+    for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+      const xi = vertices[i].col,
+        yi = vertices[i].row;
+      const xj = vertices[j].col,
+        yj = vertices[j].row;
+      if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
+        inside = !inside;
+      }
+    }
+    return inside;
+  };
+
+  for (const hall of hallDefinitions) {
+    for (const vertex of hall.vertices) {
+      if (vertex.row === cell.row && vertex.col === cell.col) {
+        return hall.id;
+      }
+    }
+    if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
+      return hall.id;
+    }
+  }
+  return null;
 };
 
 // Constants for drag-and-drop auto-scrolling
@@ -345,58 +399,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       return [{ groupId: null, hallId: null, hallName: null, priority: 'none', items }];
     }
 
-    // アイテムのホールIDを取得するヘルパー（useMemo内で定義）
-    const getHallIdForItem = (item: ShoppingItem): string | null => {
-      if (!mapData) return null;
-
-      const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
-      if (!block) return null;
-
-      const numMatch = item.number?.match(/\d+/);
-      if (!numMatch) return null;
-      const num = parseInt(numMatch[0], 10);
-
-      const cell = block.numberCells.find(
-        (nc: { row: number; col: number; value: number }) => nc.value === num,
-      );
-      if (!cell) return null;
-
-      // 多角形内判定（レイキャスティング法）
-      const isPointInPoly = (
-        row: number,
-        col: number,
-        vertices: { row: number; col: number }[],
-      ): boolean => {
-        if (vertices.length < 3) return false;
-        let inside = false;
-        for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-          const xi = vertices[i].col,
-            yi = vertices[i].row;
-          const xj = vertices[j].col,
-            yj = vertices[j].row;
-          if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
-            inside = !inside;
-          }
-        }
-        return inside;
-      };
-
-      for (const hall of hallDefinitions) {
-        for (const vertex of hall.vertices) {
-          if (vertex.row === cell.row && vertex.col === cell.col) {
-            return hall.id;
-          }
-        }
-        if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
-          return hall.id;
-        }
-      }
-      return null;
-    };
-
     // アイテムのグループIDを取得
     const getItemGroupId = (item: ShoppingItem): string | null => {
-      const hallId = getHallIdForItem(item);
+      const hallId = getHallIdForItemHelper(item, mapData, hallDefinitions);
       const priority = item.priorityLevel || 'none';
       return buildGroupId(hallId, priority);
     };
@@ -481,12 +486,33 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
 
-  // スペースグループ化
+  // スペースグループ化（hallOrder + 優先度順に並べ替え後にグループ化）
   const spaceGroups = useMemo((): SpaceGroup[] => {
     if (!showSpaceGroups) return [];
+
+    // hallOrder + 優先度に基づいてアイテムを並べ替え
+    let sortedItems = items;
+    if (hallDefinitions.length > 0 && hallOrder.length > 0 && mapData) {
+      // 各アイテムのgroupIdを算出してhallOrder内のインデックスで並べ替え
+      const hallOrderIndex = new Map<string, number>();
+      hallOrder.forEach((groupId, idx) => hallOrderIndex.set(groupId, idx));
+
+      const itemsWithOrder = items.map((item) => {
+        const hallId = getHallIdForItemHelper(item, mapData, hallDefinitions);
+        const priority = item.priorityLevel || 'none';
+        const groupId = buildGroupId(hallId, priority);
+        const orderIdx = groupId !== null ? (hallOrderIndex.get(groupId) ?? hallOrder.length) : hallOrder.length + 1;
+        return { item, orderIdx };
+      });
+
+      itemsWithOrder.sort((a, b) => a.orderIdx - b.orderIdx);
+      sortedItems = itemsWithOrder.map((io) => io.item);
+    }
+
+    // 並べ替え済みアイテムをスペースでグループ化
     const groupMap = new Map<string, ShoppingItem[]>();
     const groupOrder: string[] = [];
-    items.forEach((item) => {
+    sortedItems.forEach((item) => {
       const key = getSpaceKey(item.block, item.number);
       if (!groupMap.has(key)) {
         groupMap.set(key, []);
@@ -494,13 +520,27 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       }
       groupMap.get(key)!.push(item);
     });
-    return groupOrder.map((key) => ({
-      spaceKey: key,
-      displayName: key,
-      items: groupMap.get(key)!,
-      isCollapsed: collapsedSpaces?.has(key) ?? false,
-    }));
-  }, [items, showSpaceGroups, collapsedSpaces]);
+
+    // 優先度ランク（小さいほど高優先度）
+    const priorityRank: Record<PriorityLevel, number> = { highest: 0, priority: 1, none: 2 };
+
+    return groupOrder.map((key) => {
+      const groupItems = groupMap.get(key)!;
+      // グループ内の最高優先度を計算
+      const effectivePriority = groupItems.reduce<PriorityLevel>((best, item) => {
+        const level = (item.priorityLevel || 'none') as PriorityLevel;
+        return priorityRank[level] < priorityRank[best] ? level : best;
+      }, 'none');
+
+      return {
+        spaceKey: key,
+        displayName: key,
+        items: groupItems,
+        isCollapsed: collapsedSpaces?.has(key) ?? false,
+        priority: effectivePriority,
+      };
+    });
+  }, [items, showSpaceGroups, collapsedSpaces, hallDefinitions, hallOrder, mapData]);
 
   // スペースグループのブロック色マップ（グループヘッダー用）
   const spaceGroupBlockColorMap = useMemo(() => {
@@ -1247,7 +1287,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 } hover:brightness-95 dark:hover:brightness-110 transition-all ${
                   layoutMode === 'smartphone' && group.isCollapsed ? 'flex flex-col' : 'flex items-center'
                 }`}
-                style={{ borderLeft: '4px solid #9CA3AF' }}
+                style={{ borderLeft: `4px solid ${
+                  group.priority === 'highest' ? '#EF4444' :
+                  group.priority === 'priority' ? '#F97316' : '#9CA3AF'
+                }` }}
                 data-item-id={group.isCollapsed ? group.items[0]?.id : undefined}
                 draggable={group.isCollapsed}
                 onDragStart={
@@ -1374,6 +1417,15 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       }`}>
                         {group.displayName}
                       </span>
+                      {group.priority !== 'none' && (
+                        <span className={`text-[10px] px-1 py-0.5 rounded font-medium flex-shrink-0 ${
+                          group.priority === 'highest'
+                            ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                            : 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300'
+                        }`}>
+                          {group.priority === 'highest' ? '最優先' : '優先'}
+                        </span>
+                      )}
                       {(() => {
                         const uniqueCircles = [...new Set(group.items.map((item) => item.circle).filter(Boolean))];
                         if (uniqueCircles.length === 0) return null;
