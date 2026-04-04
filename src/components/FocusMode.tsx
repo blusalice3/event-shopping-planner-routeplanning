@@ -56,10 +56,12 @@ const extractBaseNumber = (number: string): string => {
   return match ? match[1].toLowerCase() : number.toLowerCase();
 };
 
-// 訪問先キーを生成（参加日 + ブロック + ベースナンバー）
+// 訪問先キーを生成（参加日 + ブロック + ベースナンバー + 優先度）
+// 同一スペースでも優先度が異なれば別訪問として扱い、編集モードの実行列と同じ順序を維持
 const getVisitKey = (item: ShoppingItem): string => {
   const baseNumber = extractBaseNumber(item.number);
-  return `${item.eventDate}-${item.block}-${baseNumber}`;
+  const priority = item.priorityLevel || 'none';
+  return `${item.eventDate}-${item.block}-${baseNumber}-${priority}`;
 };
 
 const FocusMode: React.FC<FocusModeProps> = ({
