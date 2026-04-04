@@ -4770,6 +4770,16 @@ const App: React.FC = () => {
                 highlightedItemId={highlightedItemId}
                 layoutMode={layoutMode}
                 viewMode="execute"
+                showHallGroups={true}
+                hallDefinitions={getHallsForDate(
+                  activeEventDate,
+                )}
+                hallOrder={getHallOrderForDate(
+                  activeEventDate,
+                )}
+                mapData={getMapDataForDate(
+                  activeEventDate,
+                )}
               />
             )}
           </div>
