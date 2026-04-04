@@ -456,7 +456,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
         pushHistory(newItems);
         onUpdateOrder(newItems);
       } else {
-        // 異なるスペース間：スペースグループ丸ごと入れ替え
+        // 異なるスペース間：移動元スペースグループを抜き出してドロップ先に挿入
         const hallItems = [...group.items];
         const getItemSpace = (idx: number) => getSpaceKey(hallItems[idx].item.block, hallItems[idx].item.number);
 
@@ -466,31 +466,38 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
         while (movingStart > 0 && getItemSpace(movingStart - 1) === fromSpace) movingStart--;
         while (movingEnd < hallItems.length - 1 && getItemSpace(movingEnd + 1) === fromSpace) movingEnd++;
 
-        // 隣接スペースの連続ブロック範囲を検出
-        let adjStart = toHallIndex;
-        let adjEnd = toHallIndex;
-        while (adjStart > 0 && getItemSpace(adjStart - 1) === toSpace) adjStart--;
-        while (adjEnd < hallItems.length - 1 && getItemSpace(adjEnd + 1) === toSpace) adjEnd++;
-
-        // 2つのスペースグループを入れ替え
-        const before = hallItems.slice(0, Math.min(movingStart, adjStart));
-        const after = hallItems.slice(Math.max(movingEnd, adjEnd) + 1);
         const movingBlock = hallItems.slice(movingStart, movingEnd + 1);
-        const adjBlock = hallItems.slice(adjStart, adjEnd + 1);
+        // 移動元を除いた残りのリスト
+        const remaining = [...hallItems.slice(0, movingStart), ...hallItems.slice(movingEnd + 1)];
 
-        const direction = toHallIndex < fromHallIndex ? 'up' : 'down';
-        let newHallItems: typeof hallItems;
-        if (direction === 'up') {
-          newHallItems = [...before, ...movingBlock, ...adjBlock, ...after];
+        // ドロップ先アイテムが残りリストのどこにあるか探す
+        const targetItemInRemaining = remaining.findIndex(
+          (item) => item.item.id === toItem.item.id,
+        );
+        if (targetItemInRemaining === -1) return;
+
+        // ドロップ先のスペースグループの境界を検出して適切な挿入位置を決定
+        const targetSpace = getSpaceKey(remaining[targetItemInRemaining].item.block, remaining[targetItemInRemaining].item.number);
+        let insertIdx: number;
+        if (toHallIndex < fromHallIndex) {
+          // 上方向：ドロップ先スペースグループの先頭に挿入
+          let targetStart = targetItemInRemaining;
+          while (targetStart > 0 && getSpaceKey(remaining[targetStart - 1].item.block, remaining[targetStart - 1].item.number) === targetSpace) targetStart--;
+          insertIdx = targetStart;
         } else {
-          newHallItems = [...before, ...adjBlock, ...movingBlock, ...after];
+          // 下方向：ドロップ先スペースグループの末尾の次に挿入
+          let targetEnd = targetItemInRemaining;
+          while (targetEnd < remaining.length - 1 && getSpaceKey(remaining[targetEnd + 1].item.block, remaining[targetEnd + 1].item.number) === targetSpace) targetEnd++;
+          insertIdx = targetEnd + 1;
         }
+
+        remaining.splice(insertIdx, 0, ...movingBlock);
 
         const newGroups = groupedItems.map((g) => {
           if (g.groupId === groupId) {
             return {
               ...g,
-              items: newHallItems.map((item, idx) => ({ ...item, hallIndex: idx })),
+              items: remaining.map((item, idx) => ({ ...item, hallIndex: idx })),
             };
           }
           return g;
