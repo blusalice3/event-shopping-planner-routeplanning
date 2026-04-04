@@ -4,6 +4,7 @@ import type {
   ExecuteModeItems,
   HallDefinition,
   HallDefinitionsStore,
+  HallRouteSettingsStore,
   FocusModeSessionState,
   MapDataStore,
   NumberCellOutlineStyle,
@@ -19,6 +20,7 @@ type FocusModeContainerProps = {
   executeModeItems: Record<string, ExecuteModeItems>;
   mapData: MapDataStore;
   hallDefinitions: HallDefinitionsStore;
+  hallRouteSettings: HallRouteSettingsStore;
   onUpdateItem: (item: ShoppingItem) => void;
   onModeChange: (mode: 'edit' | 'execute', lastItemId?: string) => void;
   layoutMode: 'pc' | 'smartphone';
@@ -44,6 +46,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   executeModeItems,
   mapData,
   hallDefinitions,
+  hallRouteSettings,
   onUpdateItem,
   onModeChange,
   layoutMode,
@@ -69,8 +72,13 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
 
   const executeModeItemIds = executeModeItems[activeEventName]?.[currentDay] || [];
   const eventMapData = mapData[activeEventName];
+  const mapTabName = `${currentDay}マップ`;
   const focusHallDefinitions: HallDefinition[] | undefined =
-    hallDefinitions[activeEventName]?.[`${currentDay}マップ`];
+    hallDefinitions[activeEventName]?.[mapTabName];
+  const routeSettings = hallRouteSettings[activeEventName]?.[mapTabName];
+  const focusHallOrder: string[] = routeSettings?.hallOrder && routeSettings.hallOrder.length > 0
+    ? routeSettings.hallOrder
+    : (focusHallDefinitions || []).map((h) => h.id);
 
   return (
     <FocusMode
@@ -82,6 +90,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       onLayoutModeChange={onLayoutModeChange}
       mapData={eventMapData}
       hallDefinitions={focusHallDefinitions}
+      hallOrder={focusHallOrder}
       onMapVisibilityChange={onMapVisibilityChange}
       onAddItem={onAddItem}
       onEditRequest={onEditRequest}

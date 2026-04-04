@@ -4733,6 +4733,7 @@ const App: React.FC = () => {
                   executeModeItems={executeModeItems}
                   mapData={mapData}
                   hallDefinitions={hallDefinitions}
+                  hallRouteSettings={hallRouteSettings}
                   onUpdateItem={handleUpdateItem}
                   onModeChange={handleModeChangeFromFocus}
                   layoutMode={layoutMode}

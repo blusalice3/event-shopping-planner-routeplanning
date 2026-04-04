@@ -27,6 +27,7 @@ interface FocusModeProps {
   // マップ関連の追加props
   mapData?: { [dayMapName: string]: DayMapData };
   hallDefinitions?: HallDefinition[];
+  hallOrder?: string[];
   onMapVisibilityChange?: (isMapVisible: boolean) => void;
   // 新規アイテム追加（purchaseStatusを含めることが可能）
   onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
@@ -70,6 +71,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   onLayoutModeChange,
   mapData,
   hallDefinitions,
+  hallOrder = [],
   onMapVisibilityChange,
   onAddItem,
   onEditRequest,
@@ -239,12 +241,99 @@ const FocusMode: React.FC<FocusModeProps> = ({
     };
   }, [layoutMode, isMapVisible, isCompleted]);
 
-  // 実行列のアイテムを取得
+  // 実行列のアイテムを取得（hallOrder + 優先度で並べ替え）
   const executeItems = useMemo(() => {
-    return executeModeItemIds
+    const rawItems = executeModeItemIds
       .map((id) => items.find((item) => item.id === id))
       .filter((item): item is ShoppingItem => item !== undefined);
-  }, [items, executeModeItemIds]);
+
+    // hallGroupsと同じ4段階ロジックで並べ替え
+    if (!hallDefinitions || hallDefinitions.length === 0 || !mapData) return rawItems;
+
+    // mapDataからDayMapDataを取得（最初のアイテムのeventDateから特定）
+    const firstItem = rawItems[0];
+    if (!firstItem) return rawItems;
+    const dayMapData = mapData[`${firstItem.eventDate}マップ`] || null;
+    if (!dayMapData) return rawItems;
+
+    // アイテムのホールIDを取得するヘルパー
+    const getHallId = (item: ShoppingItem): string | null => {
+      const block = dayMapData.blocks.find((b) => b.name === item.block);
+      if (!block) return null;
+      const numMatch = item.number?.match(/\d+/);
+      if (!numMatch) return null;
+      const num = parseInt(numMatch[0], 10);
+      const cell = block.numberCells.find(
+        (nc: { row: number; col: number; value: number }) => nc.value === num,
+      );
+      if (!cell) return null;
+      for (const hall of hallDefinitions) {
+        for (const vertex of hall.vertices) {
+          if (vertex.row === cell.row && vertex.col === cell.col) return hall.id;
+        }
+        // 多角形内判定
+        let inside = false;
+        for (let i = 0, j = hall.vertices.length - 1; i < hall.vertices.length; j = i++) {
+          const xi = hall.vertices[i].col, yi = hall.vertices[i].row;
+          const xj = hall.vertices[j].col, yj = hall.vertices[j].row;
+          if (yi > cell.row !== yj > cell.row && cell.col < ((xj - xi) * (cell.row - yi)) / (yj - yi) + xi) {
+            inside = !inside;
+          }
+        }
+        if (inside) return hall.id;
+      }
+      return null;
+    };
+
+    const buildGroupId = (hallId: string | null, priority: string): string | null => {
+      if (hallId === null) {
+        if (priority === 'highest') return 'undefined:highest';
+        if (priority === 'priority') return 'undefined:priority';
+        return null;
+      }
+      if (priority === 'highest') return `${hallId}:highest`;
+      if (priority === 'priority') return `${hallId}:priority`;
+      return hallId;
+    };
+
+    // hallGroupsと同じ4段階のグループ化・順序決定
+    const groups = new Map<string | null, ShoppingItem[]>();
+    rawItems.forEach((item) => {
+      const hallId = getHallId(item);
+      const priority = item.priorityLevel || 'none';
+      const groupId = buildGroupId(hallId, priority);
+      if (!groups.has(groupId)) groups.set(groupId, []);
+      groups.get(groupId)!.push(item);
+    });
+
+    const orderedItems: ShoppingItem[] = [];
+
+    // 1. hallOrderに従ってグループを追加
+    hallOrder.forEach((groupId) => {
+      if (groups.has(groupId)) {
+        orderedItems.push(...groups.get(groupId)!);
+        groups.delete(groupId);
+      }
+    });
+
+    // 2. hallOrderに含まれないがhallDefinitionsに含まれるホール（通常グループ）
+    hallDefinitions.forEach((hall) => {
+      if (groups.has(hall.id)) {
+        orderedItems.push(...groups.get(hall.id)!);
+        groups.delete(hall.id);
+      }
+    });
+
+    // 3. 優先度付きグループで残っているもの
+    Array.from(groups.entries())
+      .filter(([gId]) => gId !== null)
+      .forEach(([, groupItems]) => orderedItems.push(...groupItems));
+
+    // 4. ホール未定義（null）
+    if (groups.has(null)) orderedItems.push(...groups.get(null)!);
+
+    return orderedItems;
+  }, [items, executeModeItemIds, hallDefinitions, hallOrder, mapData]);
 
   // 全訪問先リストを実行列順序で生成
   const allVisits = useMemo(() => {
