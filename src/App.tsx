@@ -461,19 +461,19 @@ const App: React.FC = () => {
   );
 
 
+  // ホール+優先度+スペースの境界チェック（個別アイテム移動用）
   const areItemsInSameHall = useCallback(
     (itemId1: string, itemId2: string, eventDate: string): boolean => {
       const item1 = items.find((i) => i.id === itemId1);
       const item2 = items.find((i) => i.id === itemId2);
-      if (!item1 || !item2) return true; // 判定材料が不足する場合は並び替えを妨げない。
+      if (!item1 || !item2) return true;
       const halls = getHallsForDate(eventDate);
-      if (!halls.length) return true; // 判定材料が不足する場合は並び替えを妨げない。
+      if (!halls.length) return true;
       const hallId1 = getItemHallId(item1, eventDate);
       const hallId2 = getItemHallId(item2, eventDate);
 
       if (hallId1 === null || hallId2 === null) return true;
 
-      // 優先度グループも比較（訪問先リストと同じ制限）
       const priority1 = item1.priorityLevel || 'none';
       const priority2 = item2.priorityLevel || 'none';
       if (hallId1 !== hallId2 || priority1 !== priority2) return false;
@@ -482,6 +482,26 @@ const App: React.FC = () => {
       const spaceKey1 = getSpaceKey(item1.block, item1.number);
       const spaceKey2 = getSpaceKey(item2.block, item2.number);
       return spaceKey1 === spaceKey2;
+    },
+    [items, getHallsForDate, getItemHallId],
+  );
+
+  // ホール+優先度の境界チェックのみ（スペースグループ移動用）
+  const areItemsInSameHallGroup = useCallback(
+    (itemId1: string, itemId2: string, eventDate: string): boolean => {
+      const item1 = items.find((i) => i.id === itemId1);
+      const item2 = items.find((i) => i.id === itemId2);
+      if (!item1 || !item2) return true;
+      const halls = getHallsForDate(eventDate);
+      if (!halls.length) return true;
+      const hallId1 = getItemHallId(item1, eventDate);
+      const hallId2 = getItemHallId(item2, eventDate);
+
+      if (hallId1 === null || hallId2 === null) return true;
+
+      const priority1 = item1.priorityLevel || 'none';
+      const priority2 = item2.priorityLevel || 'none';
+      return hallId1 === hallId2 && priority1 === priority2;
     },
     [items, getHallsForDate, getItemHallId],
   );
@@ -810,6 +830,11 @@ const App: React.FC = () => {
         ? { ...executeModeItems[activeEventName], [currentEventDate]: [...(executeModeItems[activeEventName]?.[currentEventDate] || [])] }
         : (executeModeItems[activeEventName] || {});
 
+      // スペースグループ移動時はホール+優先度のみチェック（スペース間移動を許可）
+      const hallCheck = spaceGroupIds
+        ? (id1: string, id2: string) => areItemsInSameHallGroup(id1, id2, currentEventDate)
+        : (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate);
+
       const result = computeMoveItem({
         dragId,
         hoverId,
@@ -821,7 +846,7 @@ const App: React.FC = () => {
         executeModeItems: currentExecuteItems,
         dayName: currentEventDate,
         selectedBlockFilters,
-        areItemsInSameHall: (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate),
+        areItemsInSameHall: hallCheck,
       });
 
       if (result.eventListItems) {
@@ -841,6 +866,7 @@ const App: React.FC = () => {
       selectedBlockFilters,
       eventLists,
       areItemsInSameHall,
+      areItemsInSameHallGroup,
     ],
   );
   const handleMoveItemVerticalInternal = useCallback(
@@ -853,9 +879,44 @@ const App: React.FC = () => {
       const mode = dayModes[activeEventName]?.[currentEventDate];
 
       const spaceGroupIds = spaceGroupDragItemIdsRef.current;
-      const effectiveSelectedIds = spaceGroupIds
+      let effectiveSelectedIds = spaceGroupIds
         ? new Set(spaceGroupIds)
         : selectedItemIds;
+
+      // スペースグループ移動時はホール+優先度のみチェック（スペース間移動を許可）
+      let hallCheck = spaceGroupIds
+        ? (id1: string, id2: string) => areItemsInSameHallGroup(id1, id2, currentEventDate)
+        : (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate);
+
+      // 個別アイテム移動でスペース境界に達した場合、同一スペースの全アイテムをまとめてスペースグループ移動に自動昇格
+      if (!spaceGroupIds && mode === 'edit' && targetColumn === 'execute') {
+        const dayItems = executeModeItems[activeEventName]?.[currentEventDate] || [];
+        const currentIndex = dayItems.findIndex((id) => id === itemId);
+        if (currentIndex >= 0) {
+          const adjacentIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+          if (adjacentIndex >= 0 && adjacentIndex < dayItems.length) {
+            const adjacentId = dayItems[adjacentIndex];
+            // 同一スペースでない（areItemsInSameHallが失敗する）が同一ホール+優先度（areItemsInSameHallGroupは成功する）場合
+            if (!areItemsInSameHall(itemId, adjacentId, currentEventDate) &&
+                areItemsInSameHallGroup(itemId, adjacentId, currentEventDate)) {
+              // 同一スペースの全アイテムIDを収集してグループ移動に昇格
+              const movingItem = items.find((i) => i.id === itemId);
+              if (movingItem) {
+                const movingSpaceKey = getSpaceKey(movingItem.block, movingItem.number);
+                const movingPriority = movingItem.priorityLevel || 'none';
+                const sameSpaceIds = dayItems.filter((id) => {
+                  const item = items.find((i) => i.id === id);
+                  if (!item) return false;
+                  return getSpaceKey(item.block, item.number) === movingSpaceKey &&
+                         (item.priorityLevel || 'none') === movingPriority;
+                });
+                effectiveSelectedIds = new Set(sameSpaceIds);
+                hallCheck = (id1: string, id2: string) => areItemsInSameHallGroup(id1, id2, currentEventDate);
+              }
+            }
+          }
+        }
+      }
 
       const result = computeMoveItemVertical(
         direction,
@@ -866,7 +927,7 @@ const App: React.FC = () => {
         eventLists[activeEventName] || [],
         executeModeItems[activeEventName] || {},
         currentEventDate,
-        (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate),
+        hallCheck,
       );
 
       if (result.eventListItems) {
@@ -884,7 +945,9 @@ const App: React.FC = () => {
       executeModeItems,
       eventDates,
       eventLists,
+      items,
       areItemsInSameHall,
+      areItemsInSameHallGroup,
     ],
   );
 
