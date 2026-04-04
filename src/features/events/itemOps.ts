@@ -17,6 +17,7 @@ import type {
   HallRouteSettings,
   DayMapData,
 } from '../../types';
+import { getSpaceKey } from '../../utils/spaceGrouping';
 
 // ────────────────────────────────────────────────
 // 共通ヘルパー
@@ -435,6 +436,25 @@ export function computeMoveItem(params: {
   const isAppendToEnd = hoverId === '__END_OF_LIST__';
   const executeIdsSet = new Set(executeModeItems[dayName] || []);
 
+  // 同一スペース+同一優先度の全アイテムIDに展開するヘルパー
+  const expandSpaceGroup = (itemIds: string[], sourceItems: ShoppingItem[]): string[] => {
+    const expandedSet = new Set(itemIds);
+    itemIds.forEach((id) => {
+      const item = sourceItems.find((i) => i.id === id);
+      if (!item) return;
+      const sk = getSpaceKey(item.block, item.number);
+      const pr = item.priorityLevel || 'none';
+      sourceItems.forEach((other) => {
+        if (expandedSet.has(other.id)) return;
+        if (other.eventDate !== item.eventDate) return;
+        if (getSpaceKey(other.block, other.number) === sk && (other.priorityLevel || 'none') === pr) {
+          expandedSet.add(other.id);
+        }
+      });
+    });
+    return Array.from(expandedSet);
+  };
+
   // ---- editモード列間移動 ----
   if (mode === 'edit' && sourceColumn && targetColumn && sourceColumn !== targetColumn) {
     if (sourceColumn === 'candidate' && targetColumn === 'execute') {
@@ -448,10 +468,19 @@ export function computeMoveItem(params: {
 
       let itemsToMove: ShoppingItem[] = [];
       if (isDragInEffectiveSelection) {
-        itemsToMove = candidateItems.filter((item) => effectiveSelectedIds.has(item.id));
+        // スペースグループ展開：選択アイテムの同一スペース+同一優先度を自動追加
+        const expandedIds = expandSpaceGroup(
+          Array.from(effectiveSelectedIds),
+          candidateItems,
+        );
+        itemsToMove = candidateItems.filter((item) => expandedIds.includes(item.id));
       } else {
         const item = candidateItems.find((item) => item.id === dragId);
-        if (item) itemsToMove = [item];
+        if (item) {
+          // 単一アイテムでもスペースグループ全体を移動
+          const expandedIds = expandSpaceGroup([dragId], candidateItems);
+          itemsToMove = candidateItems.filter((i) => expandedIds.includes(i.id));
+        }
       }
 
       if (itemsToMove.length === 0) return {};
@@ -486,10 +515,19 @@ export function computeMoveItem(params: {
 
       let itemsToMove: ShoppingItem[] = [];
       if (isDragInEffectiveSelection) {
-        itemsToMove = executeItems.filter((item) => effectiveSelectedIds.has(item.id));
+        // スペースグループ展開：選択アイテムの同一スペース+同一優先度を自動追加
+        const expandedIds = expandSpaceGroup(
+          Array.from(effectiveSelectedIds),
+          executeItems,
+        );
+        itemsToMove = executeItems.filter((item) => expandedIds.includes(item.id));
       } else {
         const item = executeItems.find((item) => item.id === dragId);
-        if (item) itemsToMove = [item];
+        if (item) {
+          // 単一アイテムでもスペースグループ全体を移動
+          const expandedIds = expandSpaceGroup([dragId], executeItems);
+          itemsToMove = executeItems.filter((i) => expandedIds.includes(i.id));
+        }
       }
 
       if (itemsToMove.length === 0) return {};
@@ -544,50 +582,90 @@ export function computeMoveItem(params: {
 
   // ---- editモード同列リオーダー: execute列内 ----
   if (mode === 'edit' && targetColumn === 'execute') {
-    // ホール・優先度境界チェック（訪問先リストと同じ制限）
+    // ホール・優先度境界チェック（isAppendToEndでもスキップしない）
     if (areItemsInSameHall && !isAppendToEnd && !areItemsInSameHall(dragId, hoverId)) {
       return {};
+    }
+    // 末尾追加時もチェック: ドラッグ元の末尾隣接アイテムと比較してスペース分断を防止
+    if (areItemsInSameHall && isAppendToEnd) {
+      const dayItemsCurrent = executeModeItems[dayName] || [];
+      if (dayItemsCurrent.length > 0) {
+        const lastId = dayItemsCurrent[dayItemsCurrent.length - 1];
+        if (lastId !== dragId && !areItemsInSameHall(dragId, lastId)) {
+          return {};
+        }
+      }
     }
 
     const dayItems = [...(executeModeItems[dayName] || [])];
 
+    // スペースキー取得ヘルパー
+    const getIdSpaceKey = (id: string): string => {
+      const item = allItems.find((i) => i.id === id);
+      return item ? getSpaceKey(item.block, item.number) : '';
+    };
+
+    // 選択をスペースグループ全体に展開
+    const expandedSelection = new Set(effectiveSelectedIds);
     if (isDragInEffectiveSelection) {
-      const selectedBlock = dayItems.filter((id) => effectiveSelectedIds.has(id));
-      const listWithoutSelection = dayItems.filter((id) => !effectiveSelectedIds.has(id));
-
-      if (isAppendToEnd) {
-        return {
-          executeModeItems: {
-            ...executeModeItems,
-            [dayName]: [...listWithoutSelection, ...selectedBlock],
-          },
-        };
-      }
-
-      const targetIndex = listWithoutSelection.findIndex((id) => id === hoverId);
-      if (targetIndex === -1) return {};
-      listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
-
-      return {
-        executeModeItems: { ...executeModeItems, [dayName]: listWithoutSelection },
-      };
+      effectiveSelectedIds.forEach((id) => {
+        const item = allItems.find((i) => i.id === id);
+        if (!item) return;
+        const sk = getSpaceKey(item.block, item.number);
+        const pr = item.priorityLevel || 'none';
+        dayItems.forEach((did) => {
+          if (expandedSelection.has(did)) return;
+          const ditem = allItems.find((i) => i.id === did);
+          if (!ditem) return;
+          if (getSpaceKey(ditem.block, ditem.number) === sk && (ditem.priorityLevel || 'none') === pr) {
+            expandedSelection.add(did);
+          }
+        });
+      });
     } else {
-      const dragIndex = dayItems.findIndex((id) => id === dragId);
-      if (dragIndex === -1) return {};
-      const [draggedItem] = dayItems.splice(dragIndex, 1);
-
-      if (isAppendToEnd) {
-        dayItems.push(draggedItem);
-      } else {
-        const hoverIndex = dayItems.findIndex((id) => id === hoverId);
-        if (hoverIndex === -1) return {};
-        dayItems.splice(hoverIndex, 0, draggedItem);
+      // 単一アイテムでもスペースグループ全体を展開
+      const dragItem = allItems.find((i) => i.id === dragId);
+      if (dragItem) {
+        const sk = getSpaceKey(dragItem.block, dragItem.number);
+        const pr = dragItem.priorityLevel || 'none';
+        dayItems.forEach((did) => {
+          if (expandedSelection.has(did)) return;
+          const ditem = allItems.find((i) => i.id === did);
+          if (!ditem) return;
+          if (getSpaceKey(ditem.block, ditem.number) === sk && (ditem.priorityLevel || 'none') === pr) {
+            expandedSelection.add(did);
+          }
+        });
       }
+    }
 
+    const selectedBlock = dayItems.filter((id) => expandedSelection.has(id));
+    const listWithoutSelection = dayItems.filter((id) => !expandedSelection.has(id));
+
+    if (isAppendToEnd) {
       return {
-        executeModeItems: { ...executeModeItems, [dayName]: dayItems },
+        executeModeItems: {
+          ...executeModeItems,
+          [dayName]: [...listWithoutSelection, ...selectedBlock],
+        },
       };
     }
+
+    // 挿入先をスペースグループ境界にスナップ
+    let targetIndex = listWithoutSelection.findIndex((id) => id === hoverId);
+    if (targetIndex === -1) return {};
+
+    // hoverIdのスペースグループの先頭にスナップ（途中に割り込まない）
+    const hoverSpaceKey = getIdSpaceKey(hoverId);
+    while (targetIndex > 0 && getIdSpaceKey(listWithoutSelection[targetIndex - 1]) === hoverSpaceKey) {
+      targetIndex--;
+    }
+
+    listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
+
+    return {
+      executeModeItems: { ...executeModeItems, [dayName]: listWithoutSelection },
+    };
   }
 
   // ---- editモード同列リオーダー: candidate列内 ----

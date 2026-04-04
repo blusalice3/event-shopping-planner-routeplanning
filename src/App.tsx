@@ -830,8 +830,17 @@ const App: React.FC = () => {
         ? { ...executeModeItems[activeEventName], [currentEventDate]: [...(executeModeItems[activeEventName]?.[currentEventDate] || [])] }
         : (executeModeItems[activeEventName] || {});
 
-      // スペースグループ移動時はホール+優先度のみチェック（スペース間移動を許可）
-      const hallCheck = spaceGroupIds
+      // スペースグループ移動 or 複数スペース選択時はスペースチェックを緩和
+      const selectionSpansMultipleSpaces = (() => {
+        if (effectiveSelectedIds.size <= 1) return false;
+        const spaceKeys = new Set<string>();
+        effectiveSelectedIds.forEach((id) => {
+          const item = (eventLists[activeEventName] || []).find((i) => i.id === id);
+          if (item) spaceKeys.add(getSpaceKey(item.block, item.number));
+        });
+        return spaceKeys.size > 1;
+      })();
+      const hallCheck = (spaceGroupIds || selectionSpansMultipleSpaces)
         ? (id1: string, id2: string) => areItemsInSameHallGroup(id1, id2, currentEventDate)
         : (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate);
 
@@ -882,62 +891,79 @@ const App: React.FC = () => {
       const isSpaceGroupMove = !!spaceGroupIds;
 
       // スペースグループ移動（スペース別表示の折りたたみグループ移動 or 個別アイテムのスペース境界越え）
-      // → スペースグループ同士を丸ごと入れ替える
+      // → 選択中の全スペースグループをまとめて入れ替え
       if (mode === 'edit' && targetColumn === 'execute') {
         const dayItems = [...(executeModeItems[activeEventName]?.[currentEventDate] || [])];
-        const currentIndex = dayItems.findIndex((id) => id === itemId);
-        if (currentIndex >= 0) {
-          const adjacentIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
+        const getItemSpaceKey = (id: string): string => {
+          const item = items.find((i) => i.id === id);
+          return item ? getSpaceKey(item.block, item.number) : '';
+        };
+
+        // 選択中のアイテム（spaceGroupIds or selectedItemIds）を考慮して移動ブロックを決定
+        const effectiveIds = spaceGroupIds ? new Set(spaceGroupIds) : selectedItemIds;
+        // 移動対象のスペースキー一覧（クリックしたアイテムのスペース＋選択中のアイテムのスペース）
+        const movingSpaceKeys = new Set<string>();
+        movingSpaceKeys.add(getItemSpaceKey(itemId));
+        effectiveIds.forEach((id) => {
+          if (dayItems.includes(id)) {
+            movingSpaceKeys.add(getItemSpaceKey(id));
+          }
+        });
+
+        // 移動ブロック：movingSpaceKeysに含まれるスペースの連続した範囲を検出
+        const movingIndices = dayItems
+          .map((id, idx) => movingSpaceKeys.has(getItemSpaceKey(id)) ? idx : -1)
+          .filter((idx) => idx >= 0);
+
+        if (movingIndices.length > 0) {
+          const movingStart = movingIndices[0];
+          const movingEnd = movingIndices[movingIndices.length - 1];
+
+          // 隣接アイテムの検出
+          const adjacentIndex = direction === 'up' ? movingStart - 1 : movingEnd + 1;
           if (adjacentIndex >= 0 && adjacentIndex < dayItems.length) {
             const adjacentId = dayItems[adjacentIndex];
-            const sameSpace = areItemsInSameHall(itemId, adjacentId, currentEventDate);
-            const sameHallGroup = areItemsInSameHallGroup(itemId, adjacentId, currentEventDate);
+            const adjacentSpaceKey = getItemSpaceKey(adjacentId);
 
-            // スペース境界を越える場合（同一ホール+優先度内の異スペース間）
-            if (!sameSpace && sameHallGroup && (isSpaceGroupMove || true)) {
-              // 移動元スペースの連続ブロックを特定
-              const getItemSpaceKey = (id: string): string => {
-                const item = items.find((i) => i.id === id);
-                return item ? getSpaceKey(item.block, item.number) : '';
-              };
-              const movingSpaceKey = getItemSpaceKey(itemId);
-              const adjacentSpaceKey = getItemSpaceKey(adjacentId);
-
-              // 移動元の連続ブロック範囲を検出
-              let movingStart = currentIndex;
-              let movingEnd = currentIndex;
-              while (movingStart > 0 && getItemSpaceKey(dayItems[movingStart - 1]) === movingSpaceKey) movingStart--;
-              while (movingEnd < dayItems.length - 1 && getItemSpaceKey(dayItems[movingEnd + 1]) === movingSpaceKey) movingEnd++;
-
+            // 隣接アイテムが移動ブロック外かつ異スペースの場合のみ入れ替え
+            if (!movingSpaceKeys.has(adjacentSpaceKey)) {
               // 隣接スペースの連続ブロック範囲を検出
               let adjStart = adjacentIndex;
               let adjEnd = adjacentIndex;
               while (adjStart > 0 && getItemSpaceKey(dayItems[adjStart - 1]) === adjacentSpaceKey) adjStart--;
               while (adjEnd < dayItems.length - 1 && getItemSpaceKey(dayItems[adjEnd + 1]) === adjacentSpaceKey) adjEnd++;
 
-              // 2つのスペースグループを入れ替え
-              const before = dayItems.slice(0, Math.min(movingStart, adjStart));
-              const after = dayItems.slice(Math.max(movingEnd, adjEnd) + 1);
+              // 移動ブロックを抜き出して隣接ブロックの前後に挿入
               const movingBlock = dayItems.slice(movingStart, movingEnd + 1);
-              const adjBlock = dayItems.slice(adjStart, adjEnd + 1);
+              const remaining = [...dayItems.slice(0, movingStart), ...dayItems.slice(movingEnd + 1)];
 
-              let newDayItems: string[];
-              if (direction === 'up') {
-                // 移動元を隣接ブロックの前に配置
-                newDayItems = [...before, ...movingBlock, ...adjBlock, ...after];
-              } else {
-                // 移動元を隣接ブロックの後に配置
-                newDayItems = [...before, ...adjBlock, ...movingBlock, ...after];
+              // 隣接ブロックの位置を残りリストから再検出
+              const adjItemIdx = remaining.findIndex((id) => id === adjacentId);
+              if (adjItemIdx >= 0) {
+                let insertIdx: number;
+                if (direction === 'up') {
+                  // 上方向：隣接スペースグループの先頭に挿入
+                  let targetStart = adjItemIdx;
+                  while (targetStart > 0 && getItemSpaceKey(remaining[targetStart - 1]) === adjacentSpaceKey) targetStart--;
+                  insertIdx = targetStart;
+                } else {
+                  // 下方向：隣接スペースグループの末尾の次に挿入
+                  let targetEnd = adjItemIdx;
+                  while (targetEnd < remaining.length - 1 && getItemSpaceKey(remaining[targetEnd + 1]) === adjacentSpaceKey) targetEnd++;
+                  insertIdx = targetEnd + 1;
+                }
+
+                remaining.splice(insertIdx, 0, ...movingBlock);
+
+                setExecuteModeItems((prev) => ({
+                  ...prev,
+                  [activeEventName]: {
+                    ...prev[activeEventName],
+                    [currentEventDate]: remaining,
+                  },
+                }));
+                return;
               }
-
-              setExecuteModeItems((prev) => ({
-                ...prev,
-                [activeEventName]: {
-                  ...prev[activeEventName],
-                  [currentEventDate]: newDayItems,
-                },
-              }));
-              return;
             }
           }
         }
