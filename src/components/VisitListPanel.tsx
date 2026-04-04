@@ -431,72 +431,86 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
       const group = groupedItems.find((g) => g.groupId === groupId);
       if (!group) return;
 
-      // 同一スペース内のアイテムのみ移動可能（分散配置防止）
       const fromItem = group.items[fromHallIndex];
       const toItem = group.items[toHallIndex];
-      if (fromItem && toItem) {
-        const fromSpace = getSpaceKey(fromItem.item.block, fromItem.item.number);
-        const toSpace = getSpaceKey(toItem.item.block, toItem.item.number);
-        if (fromSpace !== toSpace) return;
-      }
+      if (!fromItem || !toItem) return;
 
-      const newGroups = groupedItems.map((g) => {
-        if (g.groupId === groupId) {
-          const newHallItems = [...g.items];
-          const [movedItem] = newHallItems.splice(fromHallIndex, 1);
-          newHallItems.splice(toHallIndex, 0, movedItem);
-          return {
-            ...g,
-            items: newHallItems.map((item, idx) => ({ ...item, hallIndex: idx })),
-          };
+      const fromSpace = getSpaceKey(fromItem.item.block, fromItem.item.number);
+      const toSpace = getSpaceKey(toItem.item.block, toItem.item.number);
+
+      if (fromSpace === toSpace) {
+        // 同一スペース内：個別アイテム移動
+        const newGroups = groupedItems.map((g) => {
+          if (g.groupId === groupId) {
+            const newHallItems = [...g.items];
+            const [movedItem] = newHallItems.splice(fromHallIndex, 1);
+            newHallItems.splice(toHallIndex, 0, movedItem);
+            return {
+              ...g,
+              items: newHallItems.map((item, idx) => ({ ...item, hallIndex: idx })),
+            };
+          }
+          return g;
+        });
+        const newItems = rebuildItemsFromGroups(newGroups);
+        pushHistory(newItems);
+        onUpdateOrder(newItems);
+      } else {
+        // 異なるスペース間：スペースグループ丸ごと入れ替え
+        const hallItems = [...group.items];
+        const getItemSpace = (idx: number) => getSpaceKey(hallItems[idx].item.block, hallItems[idx].item.number);
+
+        // 移動元スペースの連続ブロック範囲を検出
+        let movingStart = fromHallIndex;
+        let movingEnd = fromHallIndex;
+        while (movingStart > 0 && getItemSpace(movingStart - 1) === fromSpace) movingStart--;
+        while (movingEnd < hallItems.length - 1 && getItemSpace(movingEnd + 1) === fromSpace) movingEnd++;
+
+        // 隣接スペースの連続ブロック範囲を検出
+        let adjStart = toHallIndex;
+        let adjEnd = toHallIndex;
+        while (adjStart > 0 && getItemSpace(adjStart - 1) === toSpace) adjStart--;
+        while (adjEnd < hallItems.length - 1 && getItemSpace(adjEnd + 1) === toSpace) adjEnd++;
+
+        // 2つのスペースグループを入れ替え
+        const before = hallItems.slice(0, Math.min(movingStart, adjStart));
+        const after = hallItems.slice(Math.max(movingEnd, adjEnd) + 1);
+        const movingBlock = hallItems.slice(movingStart, movingEnd + 1);
+        const adjBlock = hallItems.slice(adjStart, adjEnd + 1);
+
+        const direction = toHallIndex < fromHallIndex ? 'up' : 'down';
+        let newHallItems: typeof hallItems;
+        if (direction === 'up') {
+          newHallItems = [...before, ...movingBlock, ...adjBlock, ...after];
+        } else {
+          newHallItems = [...before, ...adjBlock, ...movingBlock, ...after];
         }
-        return g;
-      });
 
-      const newItems = rebuildItemsFromGroups(newGroups);
-      pushHistory(newItems);
-      onUpdateOrder(newItems);
+        const newGroups = groupedItems.map((g) => {
+          if (g.groupId === groupId) {
+            return {
+              ...g,
+              items: newHallItems.map((item, idx) => ({ ...item, hallIndex: idx })),
+            };
+          }
+          return g;
+        });
+        const newItems = rebuildItemsFromGroups(newGroups);
+        pushHistory(newItems);
+        onUpdateOrder(newItems);
+      }
     },
     [groupedItems, rebuildItemsFromGroups, pushHistory, onUpdateOrder],
   );
 
-  // グループ内で2つのアイテムを入れ替え
+  // グループ内で2つのアイテムを入れ替え（異スペース間はスペースグループ丸ごと入れ替え）
   const swapItemsInHall = useCallback(
     (groupId: string | null, index1: number, index2: number) => {
       if (index1 === index2) return;
-
-      const group = groupedItems.find((g) => g.groupId === groupId);
-      if (!group) return;
-
-      // 同一スペース内のアイテムのみ入れ替え可能（分散配置防止）
-      const item1 = group.items[index1];
-      const item2 = group.items[index2];
-      if (item1 && item2) {
-        const space1 = getSpaceKey(item1.item.block, item1.item.number);
-        const space2 = getSpaceKey(item2.item.block, item2.item.number);
-        if (space1 !== space2) return;
-      }
-
-      const newGroups = groupedItems.map((g) => {
-        if (g.groupId === groupId) {
-          const newHallItems = [...g.items];
-          [newHallItems[index1], newHallItems[index2]] = [
-            newHallItems[index2],
-            newHallItems[index1],
-          ];
-          return {
-            ...g,
-            items: newHallItems.map((item, idx) => ({ ...item, hallIndex: idx })),
-          };
-        }
-        return g;
-      });
-
-      const newItems = rebuildItemsFromGroups(newGroups);
-      pushHistory(newItems);
-      onUpdateOrder(newItems);
+      // moveItemInHallと同じロジックで処理（スペースグループ入れ替え対応）
+      moveItemInHall(groupId, index1, index2);
     },
-    [groupedItems, rebuildItemsFromGroups, pushHistory, onUpdateOrder],
+    [moveItemInHall],
   );
 
   // グループ内で区間反転

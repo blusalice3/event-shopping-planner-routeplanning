@@ -879,44 +879,77 @@ const App: React.FC = () => {
       const mode = dayModes[activeEventName]?.[currentEventDate];
 
       const spaceGroupIds = spaceGroupDragItemIdsRef.current;
-      let effectiveSelectedIds = spaceGroupIds
-        ? new Set(spaceGroupIds)
-        : selectedItemIds;
+      const isSpaceGroupMove = !!spaceGroupIds;
 
-      // スペースグループ移動時はホール+優先度のみチェック（スペース間移動を許可）
-      let hallCheck = spaceGroupIds
-        ? (id1: string, id2: string) => areItemsInSameHallGroup(id1, id2, currentEventDate)
-        : (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate);
-
-      // 個別アイテム移動でスペース境界に達した場合、同一スペースの全アイテムをまとめてスペースグループ移動に自動昇格
-      if (!spaceGroupIds && mode === 'edit' && targetColumn === 'execute') {
-        const dayItems = executeModeItems[activeEventName]?.[currentEventDate] || [];
+      // スペースグループ移動（スペース別表示の折りたたみグループ移動 or 個別アイテムのスペース境界越え）
+      // → スペースグループ同士を丸ごと入れ替える
+      if (mode === 'edit' && targetColumn === 'execute') {
+        const dayItems = [...(executeModeItems[activeEventName]?.[currentEventDate] || [])];
         const currentIndex = dayItems.findIndex((id) => id === itemId);
         if (currentIndex >= 0) {
           const adjacentIndex = direction === 'up' ? currentIndex - 1 : currentIndex + 1;
           if (adjacentIndex >= 0 && adjacentIndex < dayItems.length) {
             const adjacentId = dayItems[adjacentIndex];
-            // 同一スペースでない（areItemsInSameHallが失敗する）が同一ホール+優先度（areItemsInSameHallGroupは成功する）場合
-            if (!areItemsInSameHall(itemId, adjacentId, currentEventDate) &&
-                areItemsInSameHallGroup(itemId, adjacentId, currentEventDate)) {
-              // 同一スペースの全アイテムIDを収集してグループ移動に昇格
-              const movingItem = items.find((i) => i.id === itemId);
-              if (movingItem) {
-                const movingSpaceKey = getSpaceKey(movingItem.block, movingItem.number);
-                const movingPriority = movingItem.priorityLevel || 'none';
-                const sameSpaceIds = dayItems.filter((id) => {
-                  const item = items.find((i) => i.id === id);
-                  if (!item) return false;
-                  return getSpaceKey(item.block, item.number) === movingSpaceKey &&
-                         (item.priorityLevel || 'none') === movingPriority;
-                });
-                effectiveSelectedIds = new Set(sameSpaceIds);
-                hallCheck = (id1: string, id2: string) => areItemsInSameHallGroup(id1, id2, currentEventDate);
+            const sameSpace = areItemsInSameHall(itemId, adjacentId, currentEventDate);
+            const sameHallGroup = areItemsInSameHallGroup(itemId, adjacentId, currentEventDate);
+
+            // スペース境界を越える場合（同一ホール+優先度内の異スペース間）
+            if (!sameSpace && sameHallGroup && (isSpaceGroupMove || true)) {
+              // 移動元スペースの連続ブロックを特定
+              const getItemSpaceKey = (id: string): string => {
+                const item = items.find((i) => i.id === id);
+                return item ? getSpaceKey(item.block, item.number) : '';
+              };
+              const movingSpaceKey = getItemSpaceKey(itemId);
+              const adjacentSpaceKey = getItemSpaceKey(adjacentId);
+
+              // 移動元の連続ブロック範囲を検出
+              let movingStart = currentIndex;
+              let movingEnd = currentIndex;
+              while (movingStart > 0 && getItemSpaceKey(dayItems[movingStart - 1]) === movingSpaceKey) movingStart--;
+              while (movingEnd < dayItems.length - 1 && getItemSpaceKey(dayItems[movingEnd + 1]) === movingSpaceKey) movingEnd++;
+
+              // 隣接スペースの連続ブロック範囲を検出
+              let adjStart = adjacentIndex;
+              let adjEnd = adjacentIndex;
+              while (adjStart > 0 && getItemSpaceKey(dayItems[adjStart - 1]) === adjacentSpaceKey) adjStart--;
+              while (adjEnd < dayItems.length - 1 && getItemSpaceKey(dayItems[adjEnd + 1]) === adjacentSpaceKey) adjEnd++;
+
+              // 2つのスペースグループを入れ替え
+              const before = dayItems.slice(0, Math.min(movingStart, adjStart));
+              const after = dayItems.slice(Math.max(movingEnd, adjEnd) + 1);
+              const movingBlock = dayItems.slice(movingStart, movingEnd + 1);
+              const adjBlock = dayItems.slice(adjStart, adjEnd + 1);
+
+              let newDayItems: string[];
+              if (direction === 'up') {
+                // 移動元を隣接ブロックの前に配置
+                newDayItems = [...before, ...movingBlock, ...adjBlock, ...after];
+              } else {
+                // 移動元を隣接ブロックの後に配置
+                newDayItems = [...before, ...adjBlock, ...movingBlock, ...after];
               }
+
+              setExecuteModeItems((prev) => ({
+                ...prev,
+                [activeEventName]: {
+                  ...prev[activeEventName],
+                  [currentEventDate]: newDayItems,
+                },
+              }));
+              return;
             }
           }
         }
       }
+
+      // 通常の個別アイテム移動（同一スペース内）
+      const effectiveSelectedIds = spaceGroupIds
+        ? new Set(spaceGroupIds)
+        : selectedItemIds;
+      const hallCheck = spaceGroupIds
+        ? (id1: string, id2: string) => areItemsInSameHallGroup(id1, id2, currentEventDate)
+        : (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate);
 
       const result = computeMoveItemVertical(
         direction,
