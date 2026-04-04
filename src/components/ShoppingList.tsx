@@ -492,23 +492,54 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const spaceGroups = useMemo((): SpaceGroup[] => {
     if (!showSpaceGroups) return [];
 
-    // hallOrder + 優先度に基づいてアイテムを並べ替え
+    // hallGroupsと同一の4段階ロジックでアイテムを並べ替え
     let sortedItems = items;
-    if (hallDefinitions.length > 0 && hallOrder.length > 0 && mapData) {
-      // 各アイテムのgroupIdを算出してhallOrder内のインデックスで並べ替え
-      const hallOrderIndex = new Map<string, number>();
-      hallOrder.forEach((groupId, idx) => hallOrderIndex.set(groupId, idx));
+    if (hallDefinitions.length > 0 && mapData) {
+      // hallGroupsと同じグループ化ロジック
+      const hallMap = new Map<string, HallDefinition>();
+      hallDefinitions.forEach((hall) => hallMap.set(hall.id, hall));
 
-      const itemsWithOrder = items.map((item) => {
+      const groups = new Map<string | null, ShoppingItem[]>();
+      items.forEach((item) => {
         const hallId = getHallIdForItemHelper(item, mapData, hallDefinitions);
         const priority = item.priorityLevel || 'none';
         const groupId = buildGroupId(hallId, priority);
-        const orderIdx = groupId !== null ? (hallOrderIndex.get(groupId) ?? hallOrder.length) : hallOrder.length + 1;
-        return { item, orderIdx };
+        if (!groups.has(groupId)) groups.set(groupId, []);
+        groups.get(groupId)!.push(item);
       });
 
-      itemsWithOrder.sort((a, b) => a.orderIdx - b.orderIdx);
-      sortedItems = itemsWithOrder.map((io) => io.item);
+      // hallGroupsと同じ4段階の順序でフラット化
+      const orderedItems: ShoppingItem[] = [];
+
+      // 1. hallOrderに従ってグループを追加
+      hallOrder.forEach((groupId) => {
+        if (groups.has(groupId)) {
+          orderedItems.push(...groups.get(groupId)!);
+          groups.delete(groupId);
+        }
+      });
+
+      // 2. hallOrderに含まれないがhallDefinitionsに含まれるホール（通常グループ）を追加
+      hallDefinitions.forEach((hall) => {
+        const groupId = hall.id;
+        if (groups.has(groupId)) {
+          orderedItems.push(...groups.get(groupId)!);
+          groups.delete(groupId);
+        }
+      });
+
+      // 3. 優先度付きグループで残っているものを追加
+      const remainingGroups = Array.from(groups.entries()).filter(([gId]) => gId !== null);
+      remainingGroups.forEach(([, groupItems]) => {
+        orderedItems.push(...groupItems);
+      });
+
+      // 4. ホール未定義のアイテム（null）を最後に追加
+      if (groups.has(null)) {
+        orderedItems.push(...groups.get(null)!);
+      }
+
+      sortedItems = orderedItems;
     }
 
     // 並べ替え済みアイテムをスペース+優先度でグループ化
