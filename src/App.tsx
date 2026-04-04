@@ -476,7 +476,12 @@ const App: React.FC = () => {
       // 優先度グループも比較（訪問先リストと同じ制限）
       const priority1 = item1.priorityLevel || 'none';
       const priority2 = item2.priorityLevel || 'none';
-      return hallId1 === hallId2 && priority1 === priority2;
+      if (hallId1 !== hallId2 || priority1 !== priority2) return false;
+
+      // 同一スペース+同一優先度のアイテムが分散配置されないよう、スペースも比較
+      const spaceKey1 = getSpaceKey(item1.block, item1.number);
+      const spaceKey2 = getSpaceKey(item2.block, item2.number);
+      return spaceKey1 === spaceKey2;
     },
     [items, getHallsForDate, getItemHallId],
   );
