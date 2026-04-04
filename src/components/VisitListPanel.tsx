@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import { ShoppingItem, DayMapData, HallDefinition, BlockDefinition } from '../types';
+import { getSpaceKey } from '../utils/spaceGrouping';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 
 // 優先度レベルの型
@@ -427,17 +428,29 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     (groupId: string | null, fromHallIndex: number, toHallIndex: number) => {
       if (fromHallIndex === toHallIndex) return;
 
-      const newGroups = groupedItems.map((group) => {
-        if (group.groupId === groupId) {
-          const newHallItems = [...group.items];
+      const group = groupedItems.find((g) => g.groupId === groupId);
+      if (!group) return;
+
+      // 同一スペース内のアイテムのみ移動可能（分散配置防止）
+      const fromItem = group.items[fromHallIndex];
+      const toItem = group.items[toHallIndex];
+      if (fromItem && toItem) {
+        const fromSpace = getSpaceKey(fromItem.item.block, fromItem.item.number);
+        const toSpace = getSpaceKey(toItem.item.block, toItem.item.number);
+        if (fromSpace !== toSpace) return;
+      }
+
+      const newGroups = groupedItems.map((g) => {
+        if (g.groupId === groupId) {
+          const newHallItems = [...g.items];
           const [movedItem] = newHallItems.splice(fromHallIndex, 1);
           newHallItems.splice(toHallIndex, 0, movedItem);
           return {
-            ...group,
+            ...g,
             items: newHallItems.map((item, idx) => ({ ...item, hallIndex: idx })),
           };
         }
-        return group;
+        return g;
       });
 
       const newItems = rebuildItemsFromGroups(newGroups);
@@ -452,19 +465,31 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     (groupId: string | null, index1: number, index2: number) => {
       if (index1 === index2) return;
 
-      const newGroups = groupedItems.map((group) => {
-        if (group.groupId === groupId) {
-          const newHallItems = [...group.items];
+      const group = groupedItems.find((g) => g.groupId === groupId);
+      if (!group) return;
+
+      // 同一スペース内のアイテムのみ入れ替え可能（分散配置防止）
+      const item1 = group.items[index1];
+      const item2 = group.items[index2];
+      if (item1 && item2) {
+        const space1 = getSpaceKey(item1.item.block, item1.item.number);
+        const space2 = getSpaceKey(item2.item.block, item2.item.number);
+        if (space1 !== space2) return;
+      }
+
+      const newGroups = groupedItems.map((g) => {
+        if (g.groupId === groupId) {
+          const newHallItems = [...g.items];
           [newHallItems[index1], newHallItems[index2]] = [
             newHallItems[index2],
             newHallItems[index1],
           ];
           return {
-            ...group,
+            ...g,
             items: newHallItems.map((item, idx) => ({ ...item, hallIndex: idx })),
           };
         }
-        return group;
+        return g;
       });
 
       const newItems = rebuildItemsFromGroups(newGroups);
@@ -479,17 +504,25 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     (groupId: string | null, start: number, end: number) => {
       const [minIndex, maxIndex] = start < end ? [start, end] : [end, start];
 
-      const newGroups = groupedItems.map((group) => {
-        if (group.groupId === groupId) {
-          const newHallItems = [...group.items];
+      // 区間内に複数スペースが含まれる場合は反転不可（分散配置防止）
+      const group = groupedItems.find((g) => g.groupId === groupId);
+      if (group) {
+        const rangeItems = group.items.slice(minIndex, maxIndex + 1);
+        const spaceKeys = new Set(rangeItems.map((item) => getSpaceKey(item.item.block, item.item.number)));
+        if (spaceKeys.size > 1) return;
+      }
+
+      const newGroups = groupedItems.map((g) => {
+        if (g.groupId === groupId) {
+          const newHallItems = [...g.items];
           const rangeItems = newHallItems.slice(minIndex, maxIndex + 1).reverse();
           newHallItems.splice(minIndex, maxIndex - minIndex + 1, ...rangeItems);
           return {
-            ...group,
+            ...g,
             items: newHallItems.map((item, idx) => ({ ...item, hallIndex: idx })),
           };
         }
-        return group;
+        return g;
       });
 
       const newItems = rebuildItemsFromGroups(newGroups);
