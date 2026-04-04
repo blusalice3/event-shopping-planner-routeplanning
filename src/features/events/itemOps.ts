@@ -415,6 +415,7 @@ export function computeMoveItem(params: {
   executeModeItems: ExecuteModeItems;
   dayName: string;
   selectedBlockFilters: Set<string>;
+  areItemsInSameHall?: (id1: string, id2: string) => boolean;
 }): MoveItemResult {
   const {
     dragId,
@@ -427,6 +428,7 @@ export function computeMoveItem(params: {
     executeModeItems,
     dayName,
     selectedBlockFilters,
+    areItemsInSameHall,
   } = params;
 
   const isDragInEffectiveSelection = effectiveSelectedIds.has(dragId);
@@ -542,6 +544,11 @@ export function computeMoveItem(params: {
 
   // ---- editモード同列リオーダー: execute列内 ----
   if (mode === 'edit' && targetColumn === 'execute') {
+    // ホール・優先度境界チェック（訪問先リストと同じ制限）
+    if (areItemsInSameHall && !isAppendToEnd && !areItemsInSameHall(dragId, hoverId)) {
+      return {};
+    }
+
     const dayItems = [...(executeModeItems[dayName] || [])];
 
     if (isDragInEffectiveSelection) {

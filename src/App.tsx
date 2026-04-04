@@ -816,6 +816,7 @@ const App: React.FC = () => {
         executeModeItems: currentExecuteItems,
         dayName: currentEventDate,
         selectedBlockFilters,
+        areItemsInSameHall: (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate),
       });
 
       if (result.eventListItems) {
@@ -834,6 +835,7 @@ const App: React.FC = () => {
       eventDates,
       selectedBlockFilters,
       eventLists,
+      areItemsInSameHall,
     ],
   );
   const handleMoveItemVerticalInternal = useCallback(
