@@ -996,29 +996,55 @@ const App: React.FC = () => {
     [handleMoveItemVerticalInternal],
   );
 
+  // 選択されたアイテムIDに同一スペース+同一優先度の全アイテムを自動追加
+  const expandToFullSpaceGroups = useCallback(
+    (itemIds: string[]): string[] => {
+      const expandedSet = new Set(itemIds);
+      itemIds.forEach((id) => {
+        const item = items.find((i) => i.id === id);
+        if (!item) return;
+        const spaceKey = getSpaceKey(item.block, item.number);
+        const priority = item.priorityLevel || 'none';
+        items.forEach((other) => {
+          if (expandedSet.has(other.id)) return;
+          if (other.eventDate !== item.eventDate) return;
+          if (getSpaceKey(other.block, other.number) === spaceKey &&
+              (other.priorityLevel || 'none') === priority) {
+            expandedSet.add(other.id);
+          }
+        });
+      });
+      return Array.from(expandedSet);
+    },
+    [items],
+  );
+
   const handleMoveToExecuteColumn = useCallback(
     (itemIds: string[]) => {
       if (!activeEventName) return;
 
       const currentEventDate = activeEventDate;
 
+      // 同一スペース+同一優先度の全アイテムを自動追加
+      const expandedIds = expandToFullSpaceGroups(itemIds);
+
       if (
         rangeStart &&
-        itemIds.includes(rangeStart.itemId) &&
+        expandedIds.includes(rangeStart.itemId) &&
         rangeStart.columnType === 'candidate'
       ) {
         setRangeStart(null);
         setRangeEnd(null);
       } else if (
         rangeEnd &&
-        itemIds.includes(rangeEnd.itemId) &&
+        expandedIds.includes(rangeEnd.itemId) &&
         rangeEnd.columnType === 'candidate'
       ) {
         setRangeEnd(null);
       }
 
       const newExecuteItems = computeMoveToExecuteColumn(
-        itemIds,
+        expandedIds,
         currentEventDate,
         items,
         executeModeItems[activeEventName] || {},
@@ -1041,6 +1067,7 @@ const App: React.FC = () => {
       items,
       executeModeItems,
       selectedBlockFilters,
+      expandToFullSpaceGroups,
     ],
   );
   const handleRemoveFromExecuteColumn = useCallback(
@@ -1049,23 +1076,26 @@ const App: React.FC = () => {
 
       const currentEventDate = activeEventDate;
 
+      // 同一スペース+同一優先度の全アイテムを自動追加
+      const expandedIds = expandToFullSpaceGroups(itemIds);
+
       if (
         rangeStart &&
-        itemIds.includes(rangeStart.itemId) &&
+        expandedIds.includes(rangeStart.itemId) &&
         rangeStart.columnType === 'execute'
       ) {
         setRangeStart(null);
         setRangeEnd(null);
       } else if (
         rangeEnd &&
-        itemIds.includes(rangeEnd.itemId) &&
+        expandedIds.includes(rangeEnd.itemId) &&
         rangeEnd.columnType === 'execute'
       ) {
         setRangeEnd(null);
       }
 
       const newExecuteItems = computeRemoveFromExecuteColumn(
-        itemIds,
+        expandedIds,
         executeModeItems[activeEventName] || {},
         currentEventDate,
       );
@@ -1077,7 +1107,7 @@ const App: React.FC = () => {
 
       setSelectedItemIds(new Set());
     },
-    [activeEventName, activeTab, eventDates, rangeStart, rangeEnd, executeModeItems],
+    [activeEventName, activeTab, eventDates, rangeStart, rangeEnd, executeModeItems, expandToFullSpaceGroups],
   );
 
   const handleToggleMode = useCallback(() => {
