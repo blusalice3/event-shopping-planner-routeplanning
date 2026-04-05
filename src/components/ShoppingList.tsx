@@ -1539,15 +1539,36 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           </button>
                         );
                       })()}
-                      {/* 実行モード折りたたみ時：購入状態サマリー */}
+                      {/* 実行モード折りたたみ時：購入状態サマリー（色付き） */}
                       {viewMode === 'execute' && group.isCollapsed && (() => {
-                        const summary = getStatusSummaryText(group.items);
-                        if (!summary) return null;
+                        const statusColorMap: Record<string, string> = {
+                          None: 'text-red-600 dark:text-red-400 font-bold',
+                          Purchased: 'text-green-600 dark:text-green-400',
+                          SoldOut: 'text-red-600 dark:text-red-400',
+                          Postpone: 'text-purple-600 dark:text-purple-400',
+                          Late: 'text-blue-600 dark:text-blue-400',
+                          LimitedPurchase: 'text-orange-600 dark:text-orange-400',
+                          Absent: 'text-yellow-600 dark:text-yellow-400',
+                        };
+                        const statusAbbrevMap: [string, string][] = [
+                          ['None', '未'], ['Purchased', '購'], ['SoldOut', '売'],
+                          ['Postpone', '後'], ['Late', '遅'], ['LimitedPurchase', '限'], ['Absent', '欠'],
+                        ];
+                        const counts = new Map<string, number>();
+                        group.items.forEach((item) => {
+                          counts.set(item.purchaseStatus, (counts.get(item.purchaseStatus) || 0) + 1);
+                        });
+                        const entries = statusAbbrevMap.filter(([s]) => (counts.get(s) || 0) > 0);
+                        if (entries.length === 0) return null;
                         return (
-                          <span className={`font-medium text-slate-600 dark:text-slate-300 ${
-                            layoutMode === 'smartphone' ? 'text-[10px]' : 'text-xs'
-                          }`}>
-                            {summary}
+                          <span className={`flex items-center ${layoutMode === 'smartphone' ? 'gap-0.5' : 'gap-1'}`}>
+                            {entries.map(([status, abbrev]) => (
+                              <span key={status} className={`font-medium ${statusColorMap[status]} ${
+                                layoutMode === 'smartphone' ? 'text-[10px]' : 'text-xs'
+                              }`}>
+                                {abbrev}{counts.get(status)}
+                              </span>
+                            ))}
                           </span>
                         );
                       })()}
@@ -1642,7 +1663,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   })()}
                   {/* 実行モード展開時：一括ステータス変更ボタン */}
                   {viewMode === 'execute' && !group.isCollapsed && onBulkStatusChange && (
-                    <div className={`flex flex-wrap gap-1 ${layoutMode === 'smartphone' ? 'mt-0.5' : 'mt-1 ml-4'}`} onClick={(e) => e.stopPropagation()}>
+                    <div className={`flex flex-wrap justify-end gap-1 ${layoutMode === 'smartphone' ? 'mt-0.5' : 'mt-1 ml-4'}`} onClick={(e) => e.stopPropagation()}>
                       {([
                         { status: 'Purchased' as PurchaseStatus, label: '全購入', activeColor: 'bg-green-600 text-white dark:bg-green-500', hoverColor: 'hover:bg-green-100 dark:hover:bg-green-900/30' },
                         { status: 'SoldOut' as PurchaseStatus, label: '全売切', activeColor: 'bg-red-600 text-white dark:bg-red-500', hoverColor: 'hover:bg-red-100 dark:hover:bg-red-900/30' },

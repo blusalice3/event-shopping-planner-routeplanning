@@ -1650,6 +1650,7 @@ const App: React.FC = () => {
   const [pricePendingItemIds, setPricePendingItemIds] = useState<Set<string>>(new Set());
   const autoCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [executeStatusChangeCount, setExecuteStatusChangeCount] = useState(0); // ユーザー操作カウンター
+  const executeStatusChangePendingRef = useRef(false); // ユーザー操作後の判定待ちフラグ
   const [executeSpaceGroupOrder, setExecuteSpaceGroupOrder] = useState<string[]>([]); // ShoppingListから通知される表示順序
 
   const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
@@ -1845,6 +1846,7 @@ const App: React.FC = () => {
         return next;
       });
       setExecuteStatusChangeCount((c) => c + 1);
+      executeStatusChangePendingRef.current = true;
     },
     [activeEventName],
   );
@@ -1854,6 +1856,7 @@ const App: React.FC = () => {
     (updatedItem: ShoppingItem) => {
       handleUpdateItem(updatedItem);
       setExecuteStatusChangeCount((c) => c + 1);
+      executeStatusChangePendingRef.current = true;
     },
     [handleUpdateItem],
   );
@@ -3608,6 +3611,9 @@ const App: React.FC = () => {
   useEffect(() => {
     if (currentMode !== 'execute' || !executeSpaceGroupingEnabled) return;
     if (executeStatusChangeCount === 0) return; // 初回レンダリング時はスキップ
+    // ユーザー操作フラグが立っていない場合はスキップ（自動折りたたみによるexecuteCollapsedSpaces変更等を除外）
+    if (!executeStatusChangePendingRef.current) return;
+    executeStatusChangePendingRef.current = false;
 
     // スペースグループを構築（アイテム参照用）
     const spaceGroupMap = new Map<string, ShoppingItem[]>();
@@ -3682,15 +3688,6 @@ const App: React.FC = () => {
         }
         return next;
       });
-      // 次のスペースヘッダーにスクロール
-      if (nextKey) {
-        setTimeout(() => {
-          const el = document.querySelector(`[data-space-group-key="${CSS.escape(nextKey)}"]`);
-          if (el) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }
-        }, 100);
-      }
     }, 4000);
 
     return () => {
