@@ -2048,8 +2048,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       );
                     }
 
-                    // それ以外: スペースを閉じて次のスペースを展開
-                    if (onCollapseAndOpenNext) {
+                    // 最下段以外: スペースを閉じて次のスペースを展開
+                    if (!isLastGroup && onCollapseAndOpenNext) {
                       return (
                         <button
                           onClick={() => {

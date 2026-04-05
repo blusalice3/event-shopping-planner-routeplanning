@@ -1843,8 +1843,21 @@ const App: React.FC = () => {
         groupItems.forEach((item) => next.add(item.id));
         return next;
       });
+
+      // 最下段グループの一括変更で全アイテム非未購入→後回しフィルタボタン表示
+      if (sortState === 'Manual' && newStatus !== 'None') {
+        const groupOrder = executeSpaceGroupOrderRef.current;
+        if (groupOrder.length > 0 && groupKey === groupOrder[groupOrder.length - 1]) {
+          const currentItems = executeColumnItemsRef.current;
+          const groupItemIds = new Set(groupItems.map((item) => item.id));
+          const allNonNone = currentItems.every(
+            (item) => groupItemIds.has(item.id) || item.purchaseStatus !== 'None',
+          );
+          if (allNonNone) setShowPostponeFilterButton(true);
+        }
+      }
     },
-    [activeEventName],
+    [activeEventName, sortState],
   );
 
   // 実行モード用アイテム更新ラッパー
@@ -1886,6 +1899,7 @@ const App: React.FC = () => {
 
   // 後回しフィルタボタンのクリックで後回しフィルタを有効化
   const handleActivatePostponeFilter = useCallback(() => {
+    setRecentlyChangedItemIds(new Set());
     setSortState('Postpone');
     setShowPostponeFilterButton(false);
   }, []);
