@@ -1649,9 +1649,9 @@ const App: React.FC = () => {
   const [executeCollapsedSpaces, setExecuteCollapsedSpaces] = useState<Set<string>>(new Set());
   const [pricePendingItemIds, setPricePendingItemIds] = useState<Set<string>>(new Set());
   const autoCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [executeStatusChangeCount, setExecuteStatusChangeCount] = useState(0); // ユーザー操作カウンター
-  const executeStatusChangePendingRef = useRef(false); // ユーザー操作後の判定待ちフラグ
-  const [executeSpaceGroupOrder, setExecuteSpaceGroupOrder] = useState<string[]>([]); // ShoppingListから通知される表示順序
+  const [executeStatusChangeCount, setExecuteStatusChangeCount] = useState(0); // ユーザー操作カウンター（自動フィルタ用）
+  const executeSpaceGroupOrderRef = useRef<string[]>([]); // ShoppingListから通知される表示順序
+  const checkAutoCollapseRef = useRef<() => void>(() => {}); // 自動折りたたみ判定関数のref
 
   const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
     'asc' | 'desc' | null
@@ -1846,24 +1846,24 @@ const App: React.FC = () => {
         return next;
       });
       setExecuteStatusChangeCount((c) => c + 1);
-      executeStatusChangePendingRef.current = true;
+      checkAutoCollapseRef.current();
     },
     [activeEventName],
   );
 
-  // 実行モード用アイテム更新ラッパー（自動折りたたみ判定を後続のuseEffectに委譲）
+  // 実行モード用アイテム更新ラッパー
   const handleExecuteItemUpdate = useCallback(
     (updatedItem: ShoppingItem) => {
       handleUpdateItem(updatedItem);
       setExecuteStatusChangeCount((c) => c + 1);
-      executeStatusChangePendingRef.current = true;
+      checkAutoCollapseRef.current();
     },
     [handleUpdateItem],
   );
 
   // ShoppingListからスペースグループの表示順序を受け取るコールバック
   const handleExecuteSpaceGroupOrderChange = useCallback((orderedGroupKeys: string[]) => {
-    setExecuteSpaceGroupOrder(orderedGroupKeys);
+    executeSpaceGroupOrderRef.current = orderedGroupKeys;
   }, []);
 
   const handleSetSpaceGroupDragItemIds = useCallback((itemIds: string[] | null) => {
@@ -3607,96 +3607,93 @@ const App: React.FC = () => {
   ]);
 
 
-  // 実行モード: 自動折りたたみ＋次スペース展開（ユーザー操作起因のみ）
-  useEffect(() => {
+  // 実行モード: ユーザーのステータス変更後に自動折りたたみ判定を実行する関数
+  const checkAutoCollapseAfterStatusChange = useCallback(() => {
     if (currentMode !== 'execute' || !executeSpaceGroupingEnabled) return;
-    if (executeStatusChangeCount === 0) return; // 初回レンダリング時はスキップ
-    // ユーザー操作フラグが立っていない場合はスキップ（自動折りたたみによるexecuteCollapsedSpaces変更等を除外）
-    if (!executeStatusChangePendingRef.current) return;
-    executeStatusChangePendingRef.current = false;
 
-    // スペースグループを構築（アイテム参照用）
-    const spaceGroupMap = new Map<string, ShoppingItem[]>();
-    for (const item of executeColumnItems) {
-      const spaceKey = getSpaceKey(item.block, item.number);
-      const priority = item.priorityLevel || 'none';
-      const groupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
-      if (!spaceGroupMap.has(groupKey)) {
-        spaceGroupMap.set(groupKey, []);
-      }
-      spaceGroupMap.get(groupKey)!.push(item);
-    }
-
-    // ShoppingListから通知された表示順序を使用（ホールグループ順を正確に反映）
-    const spaceGroupOrder = executeSpaceGroupOrder.length > 0
-      ? executeSpaceGroupOrder.filter((key) => spaceGroupMap.has(key))
-      : Array.from(spaceGroupMap.keys());
-
-    // 展開中のスペースを探す（executeCollapsedSpacesに含まれないもの）
-    const expandedKeys = spaceGroupOrder.filter((key) => !executeCollapsedSpaces.has(key));
-    if (expandedKeys.length === 0) return;
-
-    const currentExpandedKey = expandedKeys[0];
-    const currentGroupItems = spaceGroupMap.get(currentExpandedKey);
-    if (!currentGroupItems || currentGroupItems.length === 0) return;
-
-    const allNonNone = currentGroupItems.every((item) => item.purchaseStatus !== 'None');
-    if (!allNonNone) {
-      // まだ未購入アイテムがある→タイマークリア＆価格未定リセット
-      if (autoCollapseTimerRef.current) {
-        clearTimeout(autoCollapseTimerRef.current);
-        autoCollapseTimerRef.current = null;
-      }
-      setPricePendingItemIds(new Set());
-      return;
-    }
-
-    // 全アイテムがNone以外→購入済かつ価格未定のチェック
-    const purchasedNoPriceItems = currentGroupItems.filter(
-      (item) => item.purchaseStatus === 'Purchased' && item.price == null,
-    );
-
-    if (purchasedNoPriceItems.length > 0) {
-      // 価格未定あり→タイマー停止、赤枠強調
-      if (autoCollapseTimerRef.current) {
-        clearTimeout(autoCollapseTimerRef.current);
-        autoCollapseTimerRef.current = null;
-      }
-      setPricePendingItemIds(new Set(purchasedNoPriceItems.map((item) => item.id)));
-      return;
-    }
-
-    // 価格未定なし→4秒タイマー開始
-    setPricePendingItemIds(new Set());
+    // 既存タイマーをクリア（ユーザーが再操作した場合はリセット）
     if (autoCollapseTimerRef.current) {
       clearTimeout(autoCollapseTimerRef.current);
+      autoCollapseTimerRef.current = null;
     }
 
-    // 表示順序で次のスペースキーを特定
-    const currentIndex = spaceGroupOrder.indexOf(currentExpandedKey);
-    const nextKey = currentIndex < spaceGroupOrder.length - 1
-      ? spaceGroupOrder[currentIndex + 1]
-      : null;
+    // 最新のアイテム状態を取得するため遅延実行
+    setTimeout(() => {
+      if (!activeEventName) return;
+      const currentEventDate = activeEventDate;
+      const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+      const latestItems = eventLists[activeEventName] || [];
+      const itemsMap = new Map(latestItems.map((item) => [item.id, item]));
+      const currentItems = executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
 
-    autoCollapseTimerRef.current = setTimeout(() => {
-      autoCollapseTimerRef.current = null;
-      setExecuteCollapsedSpaces((prev) => {
-        const next = new Set(prev);
-        next.add(currentExpandedKey);
-        if (nextKey) {
-          next.delete(nextKey);
+      // スペースグループを構築
+      const spaceGroupMap = new Map<string, ShoppingItem[]>();
+      for (const item of currentItems) {
+        const spKey = getSpaceKey(item.block, item.number);
+        const priority = item.priorityLevel || 'none';
+        const groupKey = priority !== 'none' ? `${spKey}:${priority}` : spKey;
+        if (!spaceGroupMap.has(groupKey)) {
+          spaceGroupMap.set(groupKey, []);
         }
-        return next;
-      });
-    }, 4000);
-
-    return () => {
-      if (autoCollapseTimerRef.current) {
-        clearTimeout(autoCollapseTimerRef.current);
-        autoCollapseTimerRef.current = null;
+        spaceGroupMap.get(groupKey)!.push(item);
       }
-    };
-  }, [currentMode, executeSpaceGroupingEnabled, executeColumnItems, executeCollapsedSpaces, executeStatusChangeCount, executeSpaceGroupOrder]);
+
+      // 表示順序を使用
+      const orderRef = executeSpaceGroupOrderRef.current;
+      const spaceGroupOrder = orderRef.length > 0
+        ? orderRef.filter((key) => spaceGroupMap.has(key))
+        : Array.from(spaceGroupMap.keys());
+
+      // 現在のexecuteCollapsedSpacesを取得
+      setExecuteCollapsedSpaces((prevCollapsed) => {
+        const expandedKeys = spaceGroupOrder.filter((key) => !prevCollapsed.has(key));
+        if (expandedKeys.length === 0) return prevCollapsed;
+
+        const currentExpandedKey = expandedKeys[0];
+        const currentGroupItems = spaceGroupMap.get(currentExpandedKey);
+        if (!currentGroupItems || currentGroupItems.length === 0) return prevCollapsed;
+
+        const allNonNone = currentGroupItems.every((item) => item.purchaseStatus !== 'None');
+        if (!allNonNone) {
+          setPricePendingItemIds(new Set());
+          return prevCollapsed; // 変更なし
+        }
+
+        // 全アイテムがNone以外→購入済かつ価格未定のチェック
+        const purchasedNoPriceItems = currentGroupItems.filter(
+          (item) => item.purchaseStatus === 'Purchased' && item.price == null,
+        );
+        if (purchasedNoPriceItems.length > 0) {
+          setPricePendingItemIds(new Set(purchasedNoPriceItems.map((item) => item.id)));
+          return prevCollapsed; // 変更なし
+        }
+
+        // 価格未定なし→4秒タイマー開始
+        setPricePendingItemIds(new Set());
+        const currentIndex = spaceGroupOrder.indexOf(currentExpandedKey);
+        const nextKey = currentIndex < spaceGroupOrder.length - 1
+          ? spaceGroupOrder[currentIndex + 1]
+          : null;
+
+        autoCollapseTimerRef.current = setTimeout(() => {
+          autoCollapseTimerRef.current = null;
+          setExecuteCollapsedSpaces((prev) => {
+            const next = new Set(prev);
+            next.add(currentExpandedKey);
+            if (nextKey) {
+              next.delete(nextKey);
+            }
+            return next;
+          });
+        }, 4000);
+
+        return prevCollapsed; // 変更なし（タイマーで後から変更する）
+      });
+    }, 0);
+  }, [currentMode, executeSpaceGroupingEnabled, activeEventName, activeEventDate, executeModeItems, eventLists]);
+
+  // refに最新の関数を格納
+  checkAutoCollapseRef.current = checkAutoCollapseAfterStatusChange;
 
   // 実行モード: 自動フィルタ切替（ユーザー操作起因のみ）
   useEffect(() => {

@@ -1364,7 +1364,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 className={`sticky top-0 z-20 rounded-lg select-none ${
                   blockColor?.light || 'bg-slate-100 dark:bg-slate-800'
                 } hover:brightness-95 dark:hover:brightness-110 transition-all ${
-                  layoutMode === 'smartphone' && group.isCollapsed ? 'flex flex-col' : 'flex items-center'
+                  layoutMode === 'smartphone' && group.isCollapsed && viewMode !== 'execute' ? 'flex flex-col' : 'flex items-center'
                 }`}
                 style={{ borderLeft: '4px solid #9CA3AF' }}
                 data-item-id={group.isCollapsed ? group.items[0]?.id : undefined}
