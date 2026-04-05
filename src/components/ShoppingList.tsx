@@ -70,10 +70,10 @@ interface ShoppingListProps {
   onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
   // 実行モード用: スペース内一括ステータス変更
   onBulkStatusChange?: (groupKey: string, targetStatus: PurchaseStatus, items: ShoppingItem[]) => void;
-  // 実行モード用: 価格未定で自動折りたたみ停止中のアイテムID
-  pricePendingItemIds?: Set<string>;
   // 実行モード用: スペースグループの表示順序通知
   onSpaceGroupOrderChange?: (orderedGroupKeys: string[]) => void;
+  // 実行モード用: 現スペース折りたたみ＋次スペース展開
+  onCollapseAndOpenNext?: (currentGroupKey: string) => void;
 }
 
 // グループIDからホールIDと優先度を分離するヘルパー
@@ -305,8 +305,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onSelectSpaceGroupForRange,
   onAddItem,
   onBulkStatusChange,
-  pricePendingItemIds,
   onSpaceGroupOrderChange,
+  onCollapseAndOpenNext,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
@@ -1992,6 +1992,21 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       </div>
                     );
                   })}
+                  {/* 実行モード: 全アイテム非未購入時に「次のスペースへ」ボタン */}
+                  {viewMode === 'execute' && onCollapseAndOpenNext && (() => {
+                    const allNonNone = group.items.every((item) => item.purchaseStatus !== 'None');
+                    if (!allNonNone) return null;
+                    return (
+                      <button
+                        onClick={() => onCollapseAndOpenNext(group.groupKey)}
+                        className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 ${
+                          layoutMode === 'smartphone' ? 'text-sm' : 'text-sm'
+                        }`}
+                      >
+                        スペースを閉じて次のスペースを展開
+                      </button>
+                    );
+                  })()}
                 </div>
               )}
             </div>
