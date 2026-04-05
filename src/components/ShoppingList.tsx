@@ -72,6 +72,8 @@ interface ShoppingListProps {
   onBulkStatusChange?: (groupKey: string, targetStatus: PurchaseStatus, items: ShoppingItem[]) => void;
   // 実行モード用: 価格未定で自動折りたたみ停止中のアイテムID
   pricePendingItemIds?: Set<string>;
+  // 実行モード用: スペースグループの表示順序通知
+  onSpaceGroupOrderChange?: (orderedGroupKeys: string[]) => void;
 }
 
 // グループIDからホールIDと優先度を分離するヘルパー
@@ -304,6 +306,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onAddItem,
   onBulkStatusChange,
   pricePendingItemIds,
+  onSpaceGroupOrderChange,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
@@ -581,6 +584,13 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       };
     });
   }, [items, showSpaceGroups, collapsedSpaces, hallDefinitions, hallOrder, mapData]);
+
+  // スペースグループの表示順序をApp.tsxに通知
+  useEffect(() => {
+    if (onSpaceGroupOrderChange && spaceGroups.length > 0) {
+      onSpaceGroupOrderChange(spaceGroups.map((g) => g.groupKey));
+    }
+  }, [spaceGroups, onSpaceGroupOrderChange]);
 
   // スペースグループのブロック色マップ（グループヘッダー用）
   const spaceGroupBlockColorMap = useMemo(() => {

@@ -1650,6 +1650,7 @@ const App: React.FC = () => {
   const [pricePendingItemIds, setPricePendingItemIds] = useState<Set<string>>(new Set());
   const autoCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [executeStatusChangeCount, setExecuteStatusChangeCount] = useState(0); // ユーザー操作カウンター
+  const [executeSpaceGroupOrder, setExecuteSpaceGroupOrder] = useState<string[]>([]); // ShoppingListから通知される表示順序
 
   const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
     'asc' | 'desc' | null
@@ -1856,6 +1857,11 @@ const App: React.FC = () => {
     },
     [handleUpdateItem],
   );
+
+  // ShoppingListからスペースグループの表示順序を受け取るコールバック
+  const handleExecuteSpaceGroupOrderChange = useCallback((orderedGroupKeys: string[]) => {
+    setExecuteSpaceGroupOrder(orderedGroupKeys);
+  }, []);
 
   const handleSetSpaceGroupDragItemIds = useCallback((itemIds: string[] | null) => {
     spaceGroupDragItemIdsRef.current = itemIds;
@@ -3603,19 +3609,22 @@ const App: React.FC = () => {
     if (currentMode !== 'execute' || !executeSpaceGroupingEnabled) return;
     if (executeStatusChangeCount === 0) return; // 初回レンダリング時はスキップ
 
-    // スペースグループを構築
+    // スペースグループを構築（アイテム参照用）
     const spaceGroupMap = new Map<string, ShoppingItem[]>();
-    const spaceGroupOrder: string[] = [];
     for (const item of executeColumnItems) {
       const spaceKey = getSpaceKey(item.block, item.number);
       const priority = item.priorityLevel || 'none';
       const groupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
       if (!spaceGroupMap.has(groupKey)) {
         spaceGroupMap.set(groupKey, []);
-        spaceGroupOrder.push(groupKey);
       }
       spaceGroupMap.get(groupKey)!.push(item);
     }
+
+    // ShoppingListから通知された表示順序を使用（ホールグループ順を正確に反映）
+    const spaceGroupOrder = executeSpaceGroupOrder.length > 0
+      ? executeSpaceGroupOrder.filter((key) => spaceGroupMap.has(key))
+      : Array.from(spaceGroupMap.keys());
 
     // 展開中のスペースを探す（executeCollapsedSpacesに含まれないもの）
     const expandedKeys = spaceGroupOrder.filter((key) => !executeCollapsedSpaces.has(key));
@@ -3656,23 +3665,25 @@ const App: React.FC = () => {
     if (autoCollapseTimerRef.current) {
       clearTimeout(autoCollapseTimerRef.current);
     }
+
+    // 表示順序で次のスペースキーを特定
+    const currentIndex = spaceGroupOrder.indexOf(currentExpandedKey);
+    const nextKey = currentIndex < spaceGroupOrder.length - 1
+      ? spaceGroupOrder[currentIndex + 1]
+      : null;
+
     autoCollapseTimerRef.current = setTimeout(() => {
       autoCollapseTimerRef.current = null;
       setExecuteCollapsedSpaces((prev) => {
         const next = new Set(prev);
         next.add(currentExpandedKey);
-        // 次のスペースを展開
-        const currentIndex = spaceGroupOrder.indexOf(currentExpandedKey);
-        if (currentIndex < spaceGroupOrder.length - 1) {
-          const nextKey = spaceGroupOrder[currentIndex + 1];
+        if (nextKey) {
           next.delete(nextKey);
         }
         return next;
       });
       // 次のスペースヘッダーにスクロール
-      const currentIndex = spaceGroupOrder.indexOf(currentExpandedKey);
-      if (currentIndex < spaceGroupOrder.length - 1) {
-        const nextKey = spaceGroupOrder[currentIndex + 1];
+      if (nextKey) {
         setTimeout(() => {
           const el = document.querySelector(`[data-space-group-key="${CSS.escape(nextKey)}"]`);
           if (el) {
@@ -3688,7 +3699,7 @@ const App: React.FC = () => {
         autoCollapseTimerRef.current = null;
       }
     };
-  }, [currentMode, executeSpaceGroupingEnabled, executeColumnItems, executeCollapsedSpaces, executeStatusChangeCount]);
+  }, [currentMode, executeSpaceGroupingEnabled, executeColumnItems, executeCollapsedSpaces, executeStatusChangeCount, executeSpaceGroupOrder]);
 
   // 実行モード: 自動フィルタ切替（ユーザー操作起因のみ）
   useEffect(() => {
@@ -5170,6 +5181,7 @@ const App: React.FC = () => {
                 onAddItem={handleAddItemFromFocusMode}
                 onBulkStatusChange={handleBulkStatusChange}
                 pricePendingItemIds={pricePendingItemIds}
+                onSpaceGroupOrderChange={handleExecuteSpaceGroupOrderChange}
                 hallDefinitions={getHallsForDate(
                   activeEventDate,
                 )}
