@@ -1647,8 +1647,9 @@ const App: React.FC = () => {
   // 実行モード用スペース別グループ化の状態（編集モードとは独立）
   const [executeSpaceGroupingEnabled, setExecuteSpaceGroupingEnabled] = useState(true);
   const [executeCollapsedSpaces, setExecuteCollapsedSpaces] = useState<Set<string>>(new Set());
-  const [executeStatusChangeCount, setExecuteStatusChangeCount] = useState(0); // ユーザー操作カウンター（自動フィルタ用）
+  const [showPostponeFilterButton, setShowPostponeFilterButton] = useState(false);
   const executeSpaceGroupOrderRef = useRef<string[]>([]); // ShoppingListから通知される表示順序
+  const executeColumnItemsRef = useRef<ShoppingItem[]>([]); // handleExecuteItemUpdate用
 
   const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
     'asc' | 'desc' | null
@@ -1842,7 +1843,6 @@ const App: React.FC = () => {
         groupItems.forEach((item) => next.add(item.id));
         return next;
       });
-      setExecuteStatusChangeCount((c) => c + 1);
     },
     [activeEventName],
   );
@@ -1851,10 +1851,44 @@ const App: React.FC = () => {
   const handleExecuteItemUpdate = useCallback(
     (updatedItem: ShoppingItem) => {
       handleUpdateItem(updatedItem);
-      setExecuteStatusChangeCount((c) => c + 1);
+
+      // 最下段アイテムのステータス変更で全アイテム非未購入→後回しフ���ルタボタン表示
+      if (sortState !== 'Manual') return;
+      if (updatedItem.purchaseStatus === 'None') return;
+
+      const groupOrder = executeSpaceGroupOrderRef.current;
+      if (groupOrder.length === 0) return;
+      const lastGroupKey = groupOrder[groupOrder.length - 1];
+
+      // このアイテムのgroupKeyを計算
+      const spaceKey = getSpaceKey(updatedItem.block, updatedItem.number);
+      const priority = updatedItem.priorityLevel || 'none';
+      const itemGroupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
+      if (itemGroupKey !== lastGroupKey) return;
+
+      // 最後のグループ内の最後のアイテムか判定
+      const currentItems = executeColumnItemsRef.current;
+      const lastGroupItems = currentItems.filter((item) => {
+        const sk = getSpaceKey(item.block, item.number);
+        const p = item.priorityLevel || 'none';
+        return (p !== 'none' ? `${sk}:${p}` : sk) === lastGroupKey;
+      });
+      if (lastGroupItems[lastGroupItems.length - 1]?.id !== updatedItem.id) return;
+
+      // 全アイテムが非Noneになるか
+      const allNonNone = currentItems.every(
+        (item) => item.id === updatedItem.id || item.purchaseStatus !== 'None',
+      );
+      if (allNonNone) setShowPostponeFilterButton(true);
     },
-    [handleUpdateItem],
+    [handleUpdateItem, sortState],
   );
+
+  // 後回しフィルタボタンのクリックで後回しフィルタを有効化
+  const handleActivatePostponeFilter = useCallback(() => {
+    setSortState('Postpone');
+    setShowPostponeFilterButton(false);
+  }, []);
 
   // ShoppingListからスペースグループの表示順序を受け取るコールバック
   const handleExecuteSpaceGroupOrderChange = useCallback((orderedGroupKeys: string[]) => {
@@ -3587,6 +3621,16 @@ const App: React.FC = () => {
     return executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
   }, [activeEventName, activeTab, executeModeItems, items, eventDates]);
 
+  // handleExecuteItemUpdate用にrefを同期
+  useEffect(() => {
+    executeColumnItemsRef.current = executeColumnItems;
+  }, [executeColumnItems]);
+
+  // 後回しフィルタボタンのフラグリセット（モード変更・フィルタ変更時）
+  useEffect(() => {
+    setShowPostponeFilterButton(false);
+  }, [currentMode, sortState]);
+
   const visibleItems = useMemo(() => {
     const currentEventDate = activeEventDate;
     const itemsForTab = currentTabItems;
@@ -3619,30 +3663,6 @@ const App: React.FC = () => {
   ]);
 
 
-  // 実行モード: 自動フィルタ切替（ユーザー操作起因のみ）
-  useEffect(() => {
-    if (currentMode !== 'execute' || !executeSpaceGroupingEnabled) return;
-    if (executeStatusChangeCount === 0) return; // 初回レンダリング時はスキップ
-
-    // 全アイテムがNone以外→後回しフィルタ
-    if (sortState === 'Manual' && executeColumnItems.length > 0) {
-      const allProcessed = executeColumnItems.every((item) => item.purchaseStatus !== 'None');
-      if (allProcessed) {
-        setSortState('Postpone');
-        return;
-      }
-    }
-
-    // 後回しフィルタ中、表示アイテムが全てPostpone/None以外→遅参フィルタ
-    if (sortState === 'Postpone') {
-      const postponeItems = executeColumnItems.filter(
-        (item) => item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'None',
-      );
-      if (postponeItems.length === 0) {
-        setSortState('Late');
-      }
-    }
-  }, [currentMode, executeSpaceGroupingEnabled, sortState, executeColumnItems, executeStatusChangeCount]);
 
   const searchMatches = useMemo(() => {
     if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
@@ -5100,6 +5120,8 @@ const App: React.FC = () => {
                 onBulkStatusChange={handleBulkStatusChange}
                 onSpaceGroupOrderChange={handleExecuteSpaceGroupOrderChange}
                 onCollapseAndOpenNext={handleCollapseAndOpenNext}
+                showPostponeFilterButton={showPostponeFilterButton}
+                onActivatePostponeFilter={handleActivatePostponeFilter}
                 hallDefinitions={getHallsForDate(
                   activeEventDate,
                 )}

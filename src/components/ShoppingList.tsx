@@ -74,6 +74,9 @@ interface ShoppingListProps {
   onSpaceGroupOrderChange?: (orderedGroupKeys: string[]) => void;
   // 実行モード用: 現スペース折りたたみ＋次スペース展開
   onCollapseAndOpenNext?: (currentGroupKey: string) => void;
+  // 実行モード用: 最後のスペースグループで「後回しでフィルタ」ボタン表示
+  showPostponeFilterButton?: boolean;
+  onActivatePostponeFilter?: () => void;
 }
 
 // グループIDからホールIDと優先度を分離するヘルパー
@@ -307,6 +310,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onBulkStatusChange,
   onSpaceGroupOrderChange,
   onCollapseAndOpenNext,
+  showPostponeFilterButton,
+  onActivatePostponeFilter,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
@@ -2013,30 +2018,61 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       </div>
                     );
                   })}
-                  {/* 実行モード: 全アイテム非未購入時に「次のスペースへ」ボタン */}
-                  {viewMode === 'execute' && onCollapseAndOpenNext && (() => {
+                  {/* 実行モード: 全アイテム非未購入時のボタン */}
+                  {viewMode === 'execute' && (() => {
                     const allNonNone = group.items.every((item) => item.purchaseStatus !== 'None');
                     if (!allNonNone) return null;
-                    return (
-                      <button
-                        onClick={() => {
-                          const purchasedWithoutPrice = group.items.filter(
-                            (item) => item.purchaseStatus === 'Purchased' && item.price === null
-                          );
-                          if (purchasedWithoutPrice.length > 0) {
-                            setPriceHighlightItemIds(new Set(purchasedWithoutPrice.map(i => i.id)));
-                            return;
-                          }
-                          setPriceHighlightItemIds(new Set());
-                          onCollapseAndOpenNext(group.groupKey);
-                        }}
-                        className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 ${
-                          layoutMode === 'smartphone' ? 'text-sm' : 'text-sm'
-                        }`}
-                      >
-                        スペースを閉じて次のスペースを展開
-                      </button>
-                    );
+                    const isLastGroup = groupIndex === spaceGroups.length - 1;
+
+                    // 最後のグループ: 後回しフィルタボタン（フラグがtrueの場合のみ）
+                    if (isLastGroup && showPostponeFilterButton && onActivatePostponeFilter) {
+                      return (
+                        <button
+                          onClick={() => {
+                            const purchasedWithoutPrice = group.items.filter(
+                              (item) => item.purchaseStatus === 'Purchased' && item.price === null
+                            );
+                            if (purchasedWithoutPrice.length > 0) {
+                              setPriceHighlightItemIds(new Set(purchasedWithoutPrice.map(i => i.id)));
+                              return;
+                            }
+                            setPriceHighlightItemIds(new Set());
+                            onActivatePostponeFilter();
+                          }}
+                          className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-orange-600 hover:bg-orange-700 text-white dark:bg-orange-500 dark:hover:bg-orange-600 ${
+                            layoutMode === 'smartphone' ? 'text-sm' : 'text-sm'
+                          }`}
+                        >
+                          後回しでフィルタ
+                        </button>
+                      );
+                    }
+
+                    // それ以外: スペースを閉じて次のスペースを展開
+                    if (onCollapseAndOpenNext) {
+                      return (
+                        <button
+                          onClick={() => {
+                            const purchasedWithoutPrice = group.items.filter(
+                              (item) => item.purchaseStatus === 'Purchased' && item.price === null
+                            );
+                            if (purchasedWithoutPrice.length > 0) {
+                              setPriceHighlightItemIds(new Set(purchasedWithoutPrice.map(i => i.id)));
+                              return;
+                            }
+                            setPriceHighlightItemIds(new Set());
+                            onCollapseAndOpenNext(group.groupKey);
+                          }}
+                          className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 ${
+                            layoutMode === 'smartphone' ? 'text-sm' : 'text-sm'
+                          }`}
+                        >
+                          スペースを閉じて次のスペースを展開
+                        </button>
+                      );
+                    }
+
+                    return null;
                   })()}
                 </div>
               )}
