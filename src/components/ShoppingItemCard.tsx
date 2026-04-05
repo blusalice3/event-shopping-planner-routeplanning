@@ -53,6 +53,7 @@ export interface ShoppingItemCardProps {
   viewMode?: 'edit' | 'execute' | 'focus';
   hallIndex?: number; // ホール内での訪問順番号（0始まり）
   priorityLevel?: 'none' | 'priority' | 'highest'; // グループの優先度レベル
+  highlightPrice?: boolean; // 価格未定の購入済アイテムの価格欄を強調表示
 }
 
 const statusConfig: Record<
@@ -157,6 +158,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   viewMode = 'edit',
   hallIndex,
   priorityLevel = 'none',
+  highlightPrice = false,
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const longPressTimeout = useRef<number | null>(null);
@@ -496,7 +498,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                       <select
                         value={item.price === null ? '' : item.price}
                         onChange={handlePriceChange}
-                        className={`text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-20 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''}`}
+                        className={`text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-20 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''} ${highlightPrice && item.price === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
                       >
                         {priceOptions.map((p) => (
                           <option key={p === null ? '' : p} value={p === null ? '' : p}>
@@ -720,7 +722,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                   <select
                     value={item.price === null ? '' : item.price}
                     onChange={handlePriceChange}
-                    className={`text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-16 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''}`}
+                    className={`text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-16 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''} ${highlightPrice && item.price === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
                   >
                     {priceOptions.map((p) => (
                       <option key={p === null ? '' : p} value={p === null ? '' : p}>

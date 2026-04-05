@@ -330,6 +330,24 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   // 備考展開管理（折りたたみヘッダー用）
   const [expandedRemarks, setExpandedRemarks] = useState<Set<string>>(new Set());
 
+  // 価格未定の購入済アイテムの価格欄を強調表示するためのアイテムIDセット
+  const [priceHighlightItemIds, setPriceHighlightItemIds] = useState<Set<string>>(new Set());
+
+  // 価格が入力されたアイテムをハイライトセットから自動除外
+  useEffect(() => {
+    if (priceHighlightItemIds.size === 0) return;
+    const remaining = new Set<string>();
+    for (const id of priceHighlightItemIds) {
+      const item = items.find(i => i.id === id);
+      if (item && item.purchaseStatus === 'Purchased' && item.price === null) {
+        remaining.add(id);
+      }
+    }
+    if (remaining.size !== priceHighlightItemIds.size) {
+      setPriceHighlightItemIds(remaining);
+    }
+  }, [items, priceHighlightItemIds]);
+
   // === アイテム追加ダイアログ ===
   const [addDialogOpen, setAddDialogOpen] = useState(false);
   const [addDialogDefaults, setAddDialogDefaults] = useState({ block: '', number: '' });
@@ -1862,6 +1880,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           isSearchMatch={highlightedItemId === item.id}
                           layoutMode={layoutMode}
                           viewMode={viewMode}
+                          highlightPrice={priceHighlightItemIds.has(item.id)}
                         />
 
                         {activeDropTarget?.id === item.id &&
@@ -1998,7 +2017,17 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     if (!allNonNone) return null;
                     return (
                       <button
-                        onClick={() => onCollapseAndOpenNext(group.groupKey)}
+                        onClick={() => {
+                          const purchasedWithoutPrice = group.items.filter(
+                            (item) => item.purchaseStatus === 'Purchased' && item.price === null
+                          );
+                          if (purchasedWithoutPrice.length > 0) {
+                            setPriceHighlightItemIds(new Set(purchasedWithoutPrice.map(i => i.id)));
+                            return;
+                          }
+                          setPriceHighlightItemIds(new Set());
+                          onCollapseAndOpenNext(group.groupKey);
+                        }}
                         className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 ${
                           layoutMode === 'smartphone' ? 'text-sm' : 'text-sm'
                         }`}
