@@ -1644,6 +1644,12 @@ const App: React.FC = () => {
   const [collapsedSpaces, setCollapsedSpaces] = useState<Set<string>>(new Set());
   const spaceGroupDragItemIdsRef = useRef<string[] | null>(null);
 
+  // 実行モード用スペース別グループ化の状態（編集モードとは独立）
+  const [executeSpaceGroupingEnabled, setExecuteSpaceGroupingEnabled] = useState(true);
+  const [executeCollapsedSpaces, setExecuteCollapsedSpaces] = useState<Set<string>>(new Set());
+  const [pricePendingItemIds, setPricePendingItemIds] = useState<Set<string>>(new Set());
+  const autoCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
     'asc' | 'desc' | null
   >(null);
@@ -1778,6 +1784,75 @@ const App: React.FC = () => {
       setCollapsedSpaces(allGroupKeys);
     }
   }, [items, activeEventDate]);
+
+  // 実行モード用スペース折りたたみトグル
+  const handleExecuteToggleSpaceCollapse = useCallback((spaceKey: string) => {
+    setExecuteCollapsedSpaces((prev) => {
+      const next = new Set(prev);
+      if (next.has(spaceKey)) {
+        next.delete(spaceKey);
+      } else {
+        next.add(spaceKey);
+      }
+      return next;
+    });
+  }, []);
+
+  // 実行モード用全スペース折りたたみ/展開
+  const handleExecuteToggleAllSpaceCollapse = useCallback((collapse: boolean) => {
+    if (!collapse) {
+      setExecuteCollapsedSpaces(new Set());
+    } else {
+      if (!activeEventName) return;
+      const currentEventDate = activeEventDate;
+      const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+      const itemsMap = new Map(items.map((item) => [item.id, item]));
+      const allGroupKeys = new Set<string>();
+      executeIds.forEach((id) => {
+        const item = itemsMap.get(id);
+        if (!item) return;
+        const spaceKey = getSpaceKey(item.block, item.number);
+        const priority = item.priorityLevel || 'none';
+        const groupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
+        allGroupKeys.add(groupKey);
+      });
+      setExecuteCollapsedSpaces(allGroupKeys);
+    }
+  }, [activeEventName, activeEventDate, executeModeItems, items]);
+
+  // 実行モード用スペース内全アイテム一括ステータス変更（トグル動作）
+  const handleBulkStatusChange = useCallback(
+    (groupKey: string, targetStatus: PurchaseStatus, groupItems: ShoppingItem[]) => {
+      if (!activeEventName) return;
+      const allAlready = groupItems.every((item) => item.purchaseStatus === targetStatus);
+      const newStatus: PurchaseStatus = allAlready ? 'None' : targetStatus;
+      setEventLists((prev) => {
+        const allItems = [...(prev[activeEventName] || [])];
+        const groupItemIds = new Set(groupItems.map((item) => item.id));
+        return {
+          ...prev,
+          [activeEventName]: allItems.map((item) =>
+            groupItemIds.has(item.id) ? { ...item, purchaseStatus: newStatus } : item,
+          ),
+        };
+      });
+      // recentlyChangedItemIds に追加
+      setRecentlyChangedItemIds((prevIds) => {
+        const next = new Set(prevIds);
+        groupItems.forEach((item) => next.add(item.id));
+        return next;
+      });
+    },
+    [activeEventName],
+  );
+
+  // 実行モード用アイテム更新ラッパー（自動折りたたみ判定を後続のuseEffectに委譲）
+  const handleExecuteItemUpdate = useCallback(
+    (updatedItem: ShoppingItem) => {
+      handleUpdateItem(updatedItem);
+    },
+    [handleUpdateItem],
+  );
 
   const handleSetSpaceGroupDragItemIds = useCallback((itemIds: string[] | null) => {
     spaceGroupDragItemIdsRef.current = itemIds;
@@ -3520,6 +3595,121 @@ const App: React.FC = () => {
   ]);
 
 
+  // 実行モード: 自動折りたたみ＋次スペース展開
+  useEffect(() => {
+    if (currentMode !== 'execute' || !executeSpaceGroupingEnabled) return;
+
+    // スペースグループを構築
+    const spaceGroupMap = new Map<string, ShoppingItem[]>();
+    const spaceGroupOrder: string[] = [];
+    for (const item of executeColumnItems) {
+      const spaceKey = getSpaceKey(item.block, item.number);
+      const priority = item.priorityLevel || 'none';
+      const groupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
+      if (!spaceGroupMap.has(groupKey)) {
+        spaceGroupMap.set(groupKey, []);
+        spaceGroupOrder.push(groupKey);
+      }
+      spaceGroupMap.get(groupKey)!.push(item);
+    }
+
+    // 展開中のスペースを探す（executeCollapsedSpacesに含まれないもの）
+    const expandedKeys = spaceGroupOrder.filter((key) => !executeCollapsedSpaces.has(key));
+    if (expandedKeys.length === 0) return;
+
+    const currentExpandedKey = expandedKeys[0];
+    const currentGroupItems = spaceGroupMap.get(currentExpandedKey);
+    if (!currentGroupItems || currentGroupItems.length === 0) return;
+
+    const allNonNone = currentGroupItems.every((item) => item.purchaseStatus !== 'None');
+    if (!allNonNone) {
+      // まだ未購入アイテムがある→タイマークリア＆価格未定リセット
+      if (autoCollapseTimerRef.current) {
+        clearTimeout(autoCollapseTimerRef.current);
+        autoCollapseTimerRef.current = null;
+      }
+      setPricePendingItemIds(new Set());
+      return;
+    }
+
+    // 全アイテムがNone以外→購入済かつ価格未定のチェック
+    const purchasedNoPriceItems = currentGroupItems.filter(
+      (item) => item.purchaseStatus === 'Purchased' && item.price == null,
+    );
+
+    if (purchasedNoPriceItems.length > 0) {
+      // 価格未定あり→タイマー停止、赤枠強調
+      if (autoCollapseTimerRef.current) {
+        clearTimeout(autoCollapseTimerRef.current);
+        autoCollapseTimerRef.current = null;
+      }
+      setPricePendingItemIds(new Set(purchasedNoPriceItems.map((item) => item.id)));
+      return;
+    }
+
+    // 価格未定なし→4秒タイマー開始
+    setPricePendingItemIds(new Set());
+    if (autoCollapseTimerRef.current) {
+      clearTimeout(autoCollapseTimerRef.current);
+    }
+    autoCollapseTimerRef.current = setTimeout(() => {
+      autoCollapseTimerRef.current = null;
+      setExecuteCollapsedSpaces((prev) => {
+        const next = new Set(prev);
+        next.add(currentExpandedKey);
+        // 次のスペースを展開
+        const currentIndex = spaceGroupOrder.indexOf(currentExpandedKey);
+        if (currentIndex < spaceGroupOrder.length - 1) {
+          const nextKey = spaceGroupOrder[currentIndex + 1];
+          next.delete(nextKey);
+        }
+        return next;
+      });
+      // 次のスペースヘッダーにスクロール
+      const currentIndex = spaceGroupOrder.indexOf(currentExpandedKey);
+      if (currentIndex < spaceGroupOrder.length - 1) {
+        const nextKey = spaceGroupOrder[currentIndex + 1];
+        setTimeout(() => {
+          const el = document.querySelector(`[data-space-group-key="${CSS.escape(nextKey)}"]`);
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+          }
+        }, 100);
+      }
+    }, 4000);
+
+    return () => {
+      if (autoCollapseTimerRef.current) {
+        clearTimeout(autoCollapseTimerRef.current);
+        autoCollapseTimerRef.current = null;
+      }
+    };
+  }, [currentMode, executeSpaceGroupingEnabled, executeColumnItems, executeCollapsedSpaces]);
+
+  // 実行モード: 自動フィルタ切替
+  useEffect(() => {
+    if (currentMode !== 'execute' || !executeSpaceGroupingEnabled) return;
+
+    // 全アイテムがNone以外→後回しフィルタ
+    if (sortState === 'Manual' && executeColumnItems.length > 0) {
+      const allProcessed = executeColumnItems.every((item) => item.purchaseStatus !== 'None');
+      if (allProcessed) {
+        setSortState('Postpone');
+        return;
+      }
+    }
+
+    // 後回しフィルタ中、表示アイテムが全てPostpone/None以外→遅参フィルタ
+    if (sortState === 'Postpone') {
+      const postponeItems = executeColumnItems.filter(
+        (item) => item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'None',
+      );
+      if (postponeItems.length === 0) {
+        setSortState('Late');
+      }
+    }
+  }, [currentMode, executeSpaceGroupingEnabled, sortState, executeColumnItems]);
+
   const searchMatches = useMemo(() => {
     if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
       return [];
@@ -4514,6 +4704,26 @@ const App: React.FC = () => {
                       {sortLabels[sortState]}
                     </button>
                   )}
+                {/* PC: 実行モード スペース別切替ボタン */}
+                {activeEventName &&
+                  mainContentVisible &&
+                  items.length > 0 &&
+                  currentMode === 'execute' &&
+                  layoutMode !== 'smartphone' && (
+                    <button
+                      onClick={() => {
+                        setExecuteSpaceGroupingEnabled((prev) => !prev);
+                        setExecuteCollapsedSpaces(new Set());
+                      }}
+                      className={`px-2 py-1 text-xs font-medium rounded transition-colors flex-shrink-0 ${
+                        executeSpaceGroupingEnabled
+                          ? 'bg-blue-600 text-white dark:bg-blue-500'
+                          : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
+                      }`}
+                    >
+                      スペース別
+                    </button>
+                  )}
               </div>
             </div>
           )}
@@ -4554,6 +4764,25 @@ const App: React.FC = () => {
                         currentMatchIndex={currentSearchIndex}
                       />
                     )}
+                    {/* スマホ: 実行モード スペース別切替ボタン（フッターに表示） */}
+                    {activeEventName &&
+                      mainContentVisible &&
+                      currentMode === 'execute' &&
+                      layoutMode === 'smartphone' && (
+                        <button
+                          onClick={() => {
+                            setExecuteSpaceGroupingEnabled((prev) => !prev);
+                            setExecuteCollapsedSpaces(new Set());
+                          }}
+                          className={`px-2 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap flex-shrink-0 ${
+                            executeSpaceGroupingEnabled
+                              ? 'bg-blue-600 text-white dark:bg-blue-500'
+                              : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
+                          }`}
+                        >
+                          スペース別
+                        </button>
+                      )}
                   </>
                 ) : (
                   <button
@@ -4911,7 +5140,7 @@ const App: React.FC = () => {
             ) : (
               <ShoppingList
                 items={visibleItems}
-                onUpdateItem={handleUpdateItem}
+                onUpdateItem={handleExecuteItemUpdate}
                 onMoveItem={handleMoveItem}
                 onEditRequest={handleEditRequest}
                 onDeleteRequest={handleDeleteRequest}
@@ -4928,7 +5157,14 @@ const App: React.FC = () => {
                 highlightedItemId={highlightedItemId}
                 layoutMode={layoutMode}
                 viewMode="execute"
-                showHallGroups={true}
+                showSpaceGroups={executeSpaceGroupingEnabled}
+                showHallGroups={!executeSpaceGroupingEnabled}
+                collapsedSpaces={executeCollapsedSpaces}
+                onToggleSpaceCollapse={handleExecuteToggleSpaceCollapse}
+                onToggleAllSpaceCollapse={handleExecuteToggleAllSpaceCollapse}
+                onAddItem={handleAddItemFromFocusMode}
+                onBulkStatusChange={handleBulkStatusChange}
+                pricePendingItemIds={pricePendingItemIds}
                 hallDefinitions={getHallsForDate(
                   activeEventDate,
                 )}

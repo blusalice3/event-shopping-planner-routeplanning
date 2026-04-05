@@ -68,6 +68,10 @@ interface ShoppingListProps {
   onSetSpaceGroupDragItemIds?: (itemIds: string[] | null) => void;
   onSelectSpaceGroupForRange?: (firstItemId: string, allItemIds: string[], columnType: 'execute' | 'candidate') => void;
   onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
+  // 実行モード用: スペース内一括ステータス変更
+  onBulkStatusChange?: (groupKey: string, targetStatus: PurchaseStatus, items: ShoppingItem[]) => void;
+  // 実行モード用: 価格未定で自動折りたたみ停止中のアイテムID
+  pricePendingItemIds?: Set<string>;
 }
 
 // グループIDからホールIDと優先度を分離するヘルパー
@@ -298,6 +302,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onSetSpaceGroupDragItemIds,
   onSelectSpaceGroupForRange,
   onAddItem,
+  onBulkStatusChange,
+  pricePendingItemIds,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
