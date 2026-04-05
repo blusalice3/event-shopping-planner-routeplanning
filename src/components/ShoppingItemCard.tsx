@@ -991,7 +991,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             onChange={handlePriceChange}
             className={`flex-1 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none min-w-[100px] ${
               item.price === null ? 'text-red-600 dark:text-red-400' : ''
-            }`}
+            } ${highlightPrice && item.price === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
           >
             {priceOptions.map((p) => (
               <option key={p === null ? '' : p} value={p === null ? '' : p}>
