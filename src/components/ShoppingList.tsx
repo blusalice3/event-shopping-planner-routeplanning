@@ -1,7 +1,7 @@
 import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
 import { ShoppingItem, HallDefinition, DayMapData, BlockDefinition, PurchaseStatus } from '../types';
-import { getSpaceKey, getBaseNumber } from '../utils/spaceGrouping';
+import { getSpaceKey, getBaseNumber, getStatusSummaryText } from '../utils/spaceGrouping';
 import ShoppingItemCard from './ShoppingItemCard';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 import ChevronUpIcon from './icons/ChevronUpIcon';
@@ -1358,23 +1358,24 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 }`}
                 style={{ borderLeft: '4px solid #9CA3AF' }}
                 data-item-id={group.isCollapsed ? group.items[0]?.id : undefined}
-                draggable={group.isCollapsed}
+                data-space-group-key={group.groupKey}
+                draggable={viewMode !== 'execute' && group.isCollapsed}
                 onDragStart={
-                  group.isCollapsed
+                  viewMode !== 'execute' && group.isCollapsed
                     ? (e) => handleSpaceGroupDragStart(e, group)
                     : undefined
                 }
-                onDragOver={(e) => {
+                onDragOver={viewMode !== 'execute' ? (e) => {
                   e.preventDefault();
                   e.stopPropagation();
                   const firstItem = group.items[0];
                   if (firstItem) {
                     setActiveDropTarget({ id: firstItem.id, position: 'top' });
                   }
-                }}
-                onDrop={handleDrop}
-                onDragEnd={group.isCollapsed ? handleSpaceGroupDragEnd : undefined}
-                onTouchStart={group.isCollapsed ? (e: React.TouchEvent<HTMLDivElement>) => {
+                } : undefined}
+                onDrop={viewMode !== 'execute' ? handleDrop : undefined}
+                onDragEnd={viewMode !== 'execute' && group.isCollapsed ? handleSpaceGroupDragEnd : undefined}
+                onTouchStart={viewMode !== 'execute' && group.isCollapsed ? (e: React.TouchEvent<HTMLDivElement>) => {
                   const target = e.target as HTMLElement;
                   if (target.closest('[data-no-long-press]')) return;
                   const touch = e.touches[0];
@@ -1388,12 +1389,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     handleTouchDragStart(firstItemId, el, touch.clientX, touch.clientY, effectiveIds);
                   }, TOUCH_LONG_PRESS_MS);
                 } : undefined}
-                onTouchMove={group.isCollapsed ? handleItemTouchMove : undefined}
-                onTouchEnd={group.isCollapsed ? handleItemTouchEnd : undefined}
-                onTouchCancel={group.isCollapsed ? handleItemTouchCancel : undefined}
+                onTouchMove={viewMode !== 'execute' && group.isCollapsed ? handleItemTouchMove : undefined}
+                onTouchEnd={viewMode !== 'execute' && group.isCollapsed ? handleItemTouchEnd : undefined}
+                onTouchCancel={viewMode !== 'execute' && group.isCollapsed ? handleItemTouchCancel : undefined}
               >
-                {/* 折りたたみ時：チェックボックス + ドラッグハンドル + 上下ボタン */}
-                {group.isCollapsed && (
+                {/* 折りたたみ時：編集モード＝チェックボックス+ドラッグハンドル+上下ボタン / 実行モード＝なし（サマリーはメインエリア右側に表示） */}
+                {group.isCollapsed && viewMode !== 'execute' && (
                   <div
                     data-drag-handle
                     className={`flex flex-row items-center cursor-grab text-slate-400 dark:text-slate-500 ${
@@ -1528,12 +1529,25 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           </button>
                         );
                       })()}
+                      {/* 実行モード折りたたみ時：購入状態サマリー */}
+                      {viewMode === 'execute' && group.isCollapsed && (() => {
+                        const summary = getStatusSummaryText(group.items);
+                        if (!summary) return null;
+                        return (
+                          <span className={`font-medium text-slate-600 dark:text-slate-300 ${
+                            layoutMode === 'smartphone' ? 'text-[10px]' : 'text-xs'
+                          }`}>
+                            {summary}
+                          </span>
+                        );
+                      })()}
+                      {/* 件数表示（全モード共通） */}
                       <span className={`text-slate-500 dark:text-slate-400 ${
                         layoutMode === 'smartphone' ? 'text-[10px]' : 'text-xs'
                       }`}>
                         {group.items.length}件
                       </span>
-                      {group.isCollapsed && (() => {
+                      {group.isCollapsed && viewMode !== 'execute' && (() => {
                         const allPriceNull = group.items.every((item) => item.price == null);
                         if (allPriceNull) {
                           return (
@@ -1616,9 +1630,35 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       </div>
                     );
                   })()}
+                  {/* 実行モード展開時：一括ステータス変更ボタン */}
+                  {viewMode === 'execute' && !group.isCollapsed && onBulkStatusChange && (
+                    <div className={`flex flex-wrap gap-1 ${layoutMode === 'smartphone' ? 'mt-0.5' : 'mt-1 ml-4'}`} onClick={(e) => e.stopPropagation()}>
+                      {([
+                        { status: 'Purchased' as PurchaseStatus, label: '全購入', activeColor: 'bg-green-600 text-white dark:bg-green-500', hoverColor: 'hover:bg-green-100 dark:hover:bg-green-900/30' },
+                        { status: 'SoldOut' as PurchaseStatus, label: '全売切', activeColor: 'bg-red-600 text-white dark:bg-red-500', hoverColor: 'hover:bg-red-100 dark:hover:bg-red-900/30' },
+                        { status: 'Postpone' as PurchaseStatus, label: '全後回', activeColor: 'bg-purple-600 text-white dark:bg-purple-500', hoverColor: 'hover:bg-purple-100 dark:hover:bg-purple-900/30' },
+                        { status: 'Late' as PurchaseStatus, label: '全遅参', activeColor: 'bg-blue-600 text-white dark:bg-blue-500', hoverColor: 'hover:bg-blue-100 dark:hover:bg-blue-900/30' },
+                      ]).map(({ status, label, activeColor, hoverColor }) => {
+                        const allMatch = group.items.every((item) => item.purchaseStatus === status);
+                        return (
+                          <button
+                            key={status}
+                            onClick={() => onBulkStatusChange(group.groupKey, status, group.items)}
+                            className={`${layoutMode === 'smartphone' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'} font-medium rounded transition-colors ${
+                              allMatch
+                                ? activeColor
+                                : `bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-600 ${hoverColor}`
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-                {/* アイテム追加ボタン（PC時のみここに配置、スマホ時はコントロールバーに移動済み） */}
-                {!(layoutMode === 'smartphone' && group.isCollapsed) && onAddItem && (
+                {/* アイテム追加ボタン（編集モードPC時・実行モード時はここに配置、編集モードスマホ折りたたみ時はコントロールバーに移動済み） */}
+                {!(viewMode !== 'execute' && layoutMode === 'smartphone' && group.isCollapsed) && onAddItem && (
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
