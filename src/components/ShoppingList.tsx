@@ -1683,7 +1683,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   })()}
                   {/* 実行モード展開時：一括ステータス変更ボタン */}
                   {viewMode === 'execute' && !group.isCollapsed && onBulkStatusChange && (
-                    <div className={`flex flex-wrap justify-end gap-1 ${layoutMode === 'smartphone' ? 'mt-0.5' : 'mt-1 ml-4'}`} onClick={(e) => e.stopPropagation()}>
+                    <div className={`flex flex-wrap justify-end gap-1 ${layoutMode === 'smartphone' ? 'mt-0.5' : 'mt-1 ml-4'}`}>
                       {([
                         { status: 'Purchased' as PurchaseStatus, label: '全購入', activeColor: 'bg-green-600 text-white dark:bg-green-500', hoverColor: 'hover:bg-green-100 dark:hover:bg-green-900/30' },
                         { status: 'SoldOut' as PurchaseStatus, label: '全売切', activeColor: 'bg-red-600 text-white dark:bg-red-500', hoverColor: 'hover:bg-red-100 dark:hover:bg-red-900/30' },
@@ -1694,7 +1694,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         return (
                           <button
                             key={status}
-                            onClick={() => onBulkStatusChange(group.groupKey, status, group.items)}
+                            onClick={(e) => { e.stopPropagation(); onBulkStatusChange(group.groupKey, status, group.items); }}
                             className={`${layoutMode === 'smartphone' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'} font-medium rounded transition-colors ${
                               allMatch
                                 ? activeColor
