@@ -1380,12 +1380,13 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               )}
               {/* スペースグループヘッダー */}
               <div
-                className={`sticky top-0 z-20 rounded-lg select-none ${
+                className={`sticky top-0 z-20 rounded-lg select-none cursor-pointer ${
                   blockColor?.light || 'bg-slate-100 dark:bg-slate-800'
                 } hover:brightness-95 dark:hover:brightness-110 transition-all ${
                   layoutMode === 'smartphone' && group.isCollapsed && viewMode !== 'execute' ? 'flex flex-col' : 'flex items-center'
                 }`}
                 style={{ borderLeft: '4px solid #9CA3AF' }}
+                onClick={() => onToggleSpaceCollapse?.(group.groupKey)}
                 data-item-id={group.isCollapsed ? group.items[0]?.id : undefined}
                 data-space-group-key={group.groupKey}
                 draggable={viewMode !== 'execute' && group.isCollapsed}
@@ -1431,6 +1432,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         ? 'px-1 py-0.5 gap-0.5 border-b border-slate-200/80 dark:border-slate-700/80'
                         : 'px-1.5 py-1 gap-1 border-r border-slate-200/80 dark:border-slate-700/80'
                     }`}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     <input
                       type="checkbox"
@@ -1494,10 +1496,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
                 {/* メインのクリック可能エリア */}
                 <div
-                  className={`flex-1 flex flex-col cursor-pointer min-w-0 ${
+                  className={`flex-1 flex flex-col min-w-0 ${
                     layoutMode === 'smartphone' ? 'px-2 py-1' : 'px-3 py-1.5'
                   }`}
-                  onClick={() => onToggleSpaceCollapse?.(group.groupKey)}
                 >
                   <div className="flex items-center justify-between">
                     <div className={`flex items-center min-w-0 ${layoutMode === 'smartphone' ? 'gap-1' : 'gap-2'}`}>
