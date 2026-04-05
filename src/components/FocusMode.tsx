@@ -1739,6 +1739,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
     ? `${nextVisit.items[0].eventDate}-${nextVisit.items[0].block}-${extractBaseNumber(nextVisit.items[0].number)}`
     : null;
 
+  // 前の訪問キー（マップ用）
+  const prevVisitKey = prevVisit?.items[0]
+    ? `${prevVisit.items[0].eventDate}-${prevVisit.items[0].block}-${extractBaseNumber(prevVisit.items[0].number)}`
+    : null;
+
   // App.tsx側で scale されるため、高さは逆補正して実表示高さを安定させる
   const safeAppScale = Math.max(0.01, appZoomLevel / 100);
   // サブピクセル誤差でフッターに僅かに重なるのを防ぐ
@@ -2129,9 +2134,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
               executeModeItemIds={executeModeItemIds}
               zoomLevel={mapZoomLevel}
               selectedHall={selectedHall}
-              currentVisitKey={currentVisit?.key || null}
-              nextVisitKey={nextVisit?.key || null}
-              prevVisitKey={prevVisit?.key || null}
+              currentVisitKey={currentVisitKey}
+              nextVisitKey={nextVisitKey}
+              prevVisitKey={prevVisitKey}
               currentPhase={currentPhase}
               selectedHallMode={selectedHallId}
               onZoomChange={handleMapZoomChange}
@@ -2319,9 +2324,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
               executeModeItemIds={executeModeItemIds}
               zoomLevel={mapZoomLevel}
               selectedHall={selectedHall}
-              currentVisitKey={currentVisit?.key || null}
-              nextVisitKey={nextVisit?.key || null}
-              prevVisitKey={prevVisit?.key || null}
+              currentVisitKey={currentVisitKey}
+              nextVisitKey={nextVisitKey}
+              prevVisitKey={prevVisitKey}
               currentPhase={currentPhase}
               selectedHallMode={selectedHallId}
               onZoomChange={handleMapZoomChange}

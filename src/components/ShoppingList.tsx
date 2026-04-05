@@ -1235,7 +1235,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     return (
       <div
         ref={containerRef}
-        className="space-y-1 pb-24 relative"
+        className="space-y-1 relative"
+        style={{ paddingBottom: 'var(--footer-height, 96px)' }}
         onDragOver={handleContainerDragOver}
         onDrop={handleDrop}
         onDragLeave={() => setActiveDropTarget(null)}
@@ -2259,7 +2260,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     return (
       <div
         ref={containerRef}
-        className="space-y-2 pb-24 relative"
+        className="space-y-2 relative"
+        style={{ paddingBottom: 'var(--footer-height, 96px)' }}
         onDragLeave={() => setActiveDropTarget(null)}
       >
         {hallGroups.map((group, groupIndex) => {
@@ -2520,7 +2522,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   return (
     <div
       ref={containerRef}
-      className="space-y-4 pb-24 relative"
+      className="space-y-4 relative"
+      style={{ paddingBottom: 'var(--footer-height, 96px)' }}
       onDragLeave={() => setActiveDropTarget(null)}
     >
       {items.map((item, index) => {
