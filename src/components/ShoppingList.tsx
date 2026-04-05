@@ -77,6 +77,9 @@ interface ShoppingListProps {
   // 実行モード用: 最後のスペースグループで「後回しでフィルタ」ボタン表示
   showPostponeFilterButton?: boolean;
   onActivatePostponeFilter?: () => void;
+  // 実行モード用: 後回しフィルタ中、最後のスペースグループで「遅参でフィルタ」ボタン表示
+  showLateFilterButton?: boolean;
+  onActivateLateFilter?: () => void;
 }
 
 // グループIDからホールIDと優先度を分離するヘルパー
@@ -312,6 +315,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onCollapseAndOpenNext,
   showPostponeFilterButton,
   onActivatePostponeFilter,
+  showLateFilterButton,
+  onActivateLateFilter,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
@@ -2044,6 +2049,30 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           }`}
                         >
                           後回しでフィルタ
+                        </button>
+                      );
+                    }
+
+                    // 最後のグループ: 遅参フィルタボタン（後回しフィルタ中、フラグがtrueの場合のみ）
+                    if (isLastGroup && showLateFilterButton && onActivateLateFilter) {
+                      return (
+                        <button
+                          onClick={() => {
+                            const purchasedWithoutPrice = group.items.filter(
+                              (item) => item.purchaseStatus === 'Purchased' && item.price === null
+                            );
+                            if (purchasedWithoutPrice.length > 0) {
+                              setPriceHighlightItemIds(new Set(purchasedWithoutPrice.map(i => i.id)));
+                              return;
+                            }
+                            setPriceHighlightItemIds(new Set());
+                            onActivateLateFilter();
+                          }}
+                          className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-sky-600 hover:bg-sky-700 text-white dark:bg-sky-500 dark:hover:bg-sky-600 ${
+                            layoutMode === 'smartphone' ? 'text-sm' : 'text-sm'
+                          }`}
+                        >
+                          遅参でフィルタ
                         </button>
                       );
                     }

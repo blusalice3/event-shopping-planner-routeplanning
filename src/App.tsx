@@ -1648,8 +1648,10 @@ const App: React.FC = () => {
   const [executeSpaceGroupingEnabled, setExecuteSpaceGroupingEnabled] = useState(true);
   const [executeCollapsedSpaces, setExecuteCollapsedSpaces] = useState<Set<string>>(new Set());
   const [showPostponeFilterButton, setShowPostponeFilterButton] = useState(false);
+  const [showLateFilterButton, setShowLateFilterButton] = useState(false);
   const executeSpaceGroupOrderRef = useRef<string[]>([]); // ShoppingListから通知される表示順序
   const executeColumnItemsRef = useRef<ShoppingItem[]>([]); // handleExecuteItemUpdate用
+  const recentlyChangedItemIdsRef = useRef<Set<string>>(new Set()); // Postponeフィルタ内可視アイテム判定用
 
   const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
     'asc' | 'desc' | null
@@ -1856,6 +1858,24 @@ const App: React.FC = () => {
           if (allNonNone) setShowPostponeFilterButton(true);
         }
       }
+
+      // 後回しフィルタ中: 最下段グループの一括変更で全可視アイテム非未購入→遅参フィルタボタン表示
+      if (sortState === 'Postpone' && newStatus !== 'None') {
+        const groupOrder = executeSpaceGroupOrderRef.current;
+        if (groupOrder.length > 0 && groupKey === groupOrder[groupOrder.length - 1]) {
+          const currentItems = executeColumnItemsRef.current;
+          const groupItemIds = new Set(groupItems.map((item) => item.id));
+          const recentIds = recentlyChangedItemIdsRef.current;
+          // Postponeフィルタ内の可視アイテム（グループ外）が全て非Noneか判定
+          const allVisibleNonNone = currentItems.every((item) => {
+            if (groupItemIds.has(item.id)) return true; // グループ内はnewStatus(非None)になる
+            // 可視でないアイテムはスキップ
+            if (item.purchaseStatus !== 'Postpone' && !recentIds.has(item.id)) return true;
+            return item.purchaseStatus !== 'None';
+          });
+          if (allVisibleNonNone) setShowLateFilterButton(true);
+        }
+      }
     },
     [activeEventName, sortState],
   );
@@ -1865,8 +1885,8 @@ const App: React.FC = () => {
     (updatedItem: ShoppingItem) => {
       handleUpdateItem(updatedItem);
 
-      // 最下段アイテムのステータス変更で全アイテム非未購入→後回しフ���ルタボタン表示
-      if (sortState !== 'Manual') return;
+      // 最下段アイテムのステータス変更で全アイテム非未購入→フィルタボタン表示
+      if (sortState !== 'Manual' && sortState !== 'Postpone') return;
       if (updatedItem.purchaseStatus === 'None') return;
 
       const groupOrder = executeSpaceGroupOrderRef.current;
@@ -1879,20 +1899,42 @@ const App: React.FC = () => {
       const itemGroupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
       if (itemGroupKey !== lastGroupKey) return;
 
-      // 最後のグループ内の最後のアイテムか判定
       const currentItems = executeColumnItemsRef.current;
-      const lastGroupItems = currentItems.filter((item) => {
-        const sk = getSpaceKey(item.block, item.number);
-        const p = item.priorityLevel || 'none';
-        return (p !== 'none' ? `${sk}:${p}` : sk) === lastGroupKey;
-      });
-      if (lastGroupItems[lastGroupItems.length - 1]?.id !== updatedItem.id) return;
 
-      // 全アイテムが非Noneになるか
-      const allNonNone = currentItems.every(
-        (item) => item.id === updatedItem.id || item.purchaseStatus !== 'None',
-      );
-      if (allNonNone) setShowPostponeFilterButton(true);
+      if (sortState === 'Manual') {
+        // Manual: 最後のグループ内の最後のアイテムか判定
+        const lastGroupItems = currentItems.filter((item) => {
+          const sk = getSpaceKey(item.block, item.number);
+          const p = item.priorityLevel || 'none';
+          return (p !== 'none' ? `${sk}:${p}` : sk) === lastGroupKey;
+        });
+        if (lastGroupItems[lastGroupItems.length - 1]?.id !== updatedItem.id) return;
+
+        // 全アイテムが非Noneになるか
+        const allNonNone = currentItems.every(
+          (item) => item.id === updatedItem.id || item.purchaseStatus !== 'None',
+        );
+        if (allNonNone) setShowPostponeFilterButton(true);
+      } else {
+        // Postpone: 可視アイテム内の最後のグループの最後のアイテムか判定
+        const recentIds = recentlyChangedItemIdsRef.current;
+        const visibleLastGroupItems = currentItems.filter((item) => {
+          const sk = getSpaceKey(item.block, item.number);
+          const p = item.priorityLevel || 'none';
+          const gk = p !== 'none' ? `${sk}:${p}` : sk;
+          if (gk !== lastGroupKey) return false;
+          return item.purchaseStatus === 'Postpone' || recentIds.has(item.id);
+        });
+        if (visibleLastGroupItems[visibleLastGroupItems.length - 1]?.id !== updatedItem.id) return;
+
+        // 全可視アイテムが非Noneになるか
+        const allVisibleNonNone = currentItems.every((item) => {
+          if (item.id === updatedItem.id) return true; // 更新アイテムは非None確定
+          if (item.purchaseStatus !== 'Postpone' && !recentIds.has(item.id)) return true;
+          return item.purchaseStatus !== 'None';
+        });
+        if (allVisibleNonNone) setShowLateFilterButton(true);
+      }
     },
     [handleUpdateItem, sortState],
   );
@@ -1902,6 +1944,13 @@ const App: React.FC = () => {
     setRecentlyChangedItemIds(new Set());
     setSortState('Postpone');
     setShowPostponeFilterButton(false);
+  }, []);
+
+  // 遅参フィルタボタンのクリックで遅参フィルタを有効化
+  const handleActivateLateFilter = useCallback(() => {
+    setRecentlyChangedItemIds(new Set());
+    setSortState('Late');
+    setShowLateFilterButton(false);
   }, []);
 
   // ShoppingListからスペースグループの表示順序を受け取るコールバック
@@ -3640,9 +3689,15 @@ const App: React.FC = () => {
     executeColumnItemsRef.current = executeColumnItems;
   }, [executeColumnItems]);
 
-  // 後回しフィルタボタンのフラグリセット（モード変更・フィルタ変更時）
+  // recentlyChangedItemIdsのref同期（Postponeフィルタ内可視アイテム判定用）
+  useEffect(() => {
+    recentlyChangedItemIdsRef.current = recentlyChangedItemIds;
+  }, [recentlyChangedItemIds]);
+
+  // フィルタボタンのフラグリセット（モード変更・フィルタ変更時）
   useEffect(() => {
     setShowPostponeFilterButton(false);
+    setShowLateFilterButton(false);
   }, [currentMode, sortState]);
 
   const visibleItems = useMemo(() => {
@@ -5136,6 +5191,8 @@ const App: React.FC = () => {
                 onCollapseAndOpenNext={handleCollapseAndOpenNext}
                 showPostponeFilterButton={showPostponeFilterButton}
                 onActivatePostponeFilter={handleActivatePostponeFilter}
+                showLateFilterButton={showLateFilterButton}
+                onActivateLateFilter={handleActivateLateFilter}
                 hallDefinitions={getHallsForDate(
                   activeEventDate,
                 )}
