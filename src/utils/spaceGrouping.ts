@@ -7,6 +7,8 @@
  *     block="A", number="01b"  → spaceKey="A-01b" （別スペース）
  */
 
+import { PurchaseStatus } from '../types';
+
 /**
  * ブース番号から末尾の追加数字を除去してベース番号を返す。
  * "01a" → "01a", "01a2" → "01a", "15c3" → "15c"
@@ -23,4 +25,33 @@ export function getBaseNumber(number: string): string {
  */
 export function getSpaceKey(block: string, number: string): string {
   return `${block}-${getBaseNumber(number)}`;
+}
+
+/**
+ * 購入状態の略語マップ（表示順序も兼ねる）
+ */
+const statusAbbrevMap: [PurchaseStatus, string][] = [
+  ['None', '未'],
+  ['Purchased', '購'],
+  ['SoldOut', '売'],
+  ['Postpone', '後'],
+  ['Late', '遅'],
+  ['LimitedPurchase', '限'],
+  ['Absent', '欠'],
+];
+
+/**
+ * アイテム配列の購入状態を集計し、頭文字+件数の文字列を返す。
+ * 件数0のステータスは省略する。
+ * 例: "未2 購3 売1 後2 遅1"
+ */
+export function getStatusSummaryText(items: { purchaseStatus: PurchaseStatus }[]): string {
+  const counts = new Map<PurchaseStatus, number>();
+  for (const item of items) {
+    counts.set(item.purchaseStatus, (counts.get(item.purchaseStatus) || 0) + 1);
+  }
+  return statusAbbrevMap
+    .filter(([status]) => (counts.get(status) || 0) > 0)
+    .map(([status, abbrev]) => `${abbrev}${counts.get(status)}`)
+    .join(' ');
 }
