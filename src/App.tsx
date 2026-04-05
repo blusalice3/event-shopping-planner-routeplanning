@@ -1649,6 +1649,7 @@ const App: React.FC = () => {
   const [executeCollapsedSpaces, setExecuteCollapsedSpaces] = useState<Set<string>>(new Set());
   const [pricePendingItemIds, setPricePendingItemIds] = useState<Set<string>>(new Set());
   const autoCollapseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [executeStatusChangeCount, setExecuteStatusChangeCount] = useState(0); // ユーザー操作カウンター
 
   const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
     'asc' | 'desc' | null
@@ -1842,6 +1843,7 @@ const App: React.FC = () => {
         groupItems.forEach((item) => next.add(item.id));
         return next;
       });
+      setExecuteStatusChangeCount((c) => c + 1);
     },
     [activeEventName],
   );
@@ -1850,6 +1852,7 @@ const App: React.FC = () => {
   const handleExecuteItemUpdate = useCallback(
     (updatedItem: ShoppingItem) => {
       handleUpdateItem(updatedItem);
+      setExecuteStatusChangeCount((c) => c + 1);
     },
     [handleUpdateItem],
   );
@@ -3595,9 +3598,10 @@ const App: React.FC = () => {
   ]);
 
 
-  // 実行モード: 自動折りたたみ＋次スペース展開
+  // 実行モード: 自動折りたたみ＋次スペース展開（ユーザー操作起因のみ）
   useEffect(() => {
     if (currentMode !== 'execute' || !executeSpaceGroupingEnabled) return;
+    if (executeStatusChangeCount === 0) return; // 初回レンダリング時はスキップ
 
     // スペースグループを構築
     const spaceGroupMap = new Map<string, ShoppingItem[]>();
@@ -3684,11 +3688,12 @@ const App: React.FC = () => {
         autoCollapseTimerRef.current = null;
       }
     };
-  }, [currentMode, executeSpaceGroupingEnabled, executeColumnItems, executeCollapsedSpaces]);
+  }, [currentMode, executeSpaceGroupingEnabled, executeColumnItems, executeCollapsedSpaces, executeStatusChangeCount]);
 
-  // 実行モード: 自動フィルタ切替
+  // 実行モード: 自動フィルタ切替（ユーザー操作起因のみ）
   useEffect(() => {
     if (currentMode !== 'execute' || !executeSpaceGroupingEnabled) return;
+    if (executeStatusChangeCount === 0) return; // 初回レンダリング時はスキップ
 
     // 全アイテムがNone以外→後回しフィルタ
     if (sortState === 'Manual' && executeColumnItems.length > 0) {
@@ -3708,7 +3713,7 @@ const App: React.FC = () => {
         setSortState('Late');
       }
     }
-  }, [currentMode, executeSpaceGroupingEnabled, sortState, executeColumnItems]);
+  }, [currentMode, executeSpaceGroupingEnabled, sortState, executeColumnItems, executeStatusChangeCount]);
 
   const searchMatches = useMemo(() => {
     if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
