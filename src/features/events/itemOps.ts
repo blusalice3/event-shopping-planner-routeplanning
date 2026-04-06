@@ -202,7 +202,7 @@ export function computeAddItemFromFocusMode(
   const newItems = [...items, item];
   let newExecuteItems = executeModeItems;
 
-  if (purchaseStatus === 'Purchased' || purchaseStatus === 'Postpone' || purchaseStatus === 'Late') {
+  if (purchaseStatus === 'Postpone' || purchaseStatus === 'Late') {
     const dayName = newItem.eventDate;
     if (dayName) {
       const dayItems = executeModeItems[dayName] || [];
