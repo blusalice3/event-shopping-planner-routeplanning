@@ -26,6 +26,7 @@ import ShoppingList from './components/ShoppingList';
 import SummaryBar from './components/SummaryBar';
 import EventListScreen from './components/EventListScreen';
 import DeleteConfirmationModal from './components/DeleteConfirmationModal';
+import { ItemEditDialog } from './components/ItemEditDialog';
 import ZoomControl from './components/ZoomControl';
 import BulkActionControls from './components/BulkActionControls';
 import UpdateConfirmationModal from './components/UpdateConfirmationModal';
@@ -243,6 +244,7 @@ const App: React.FC = () => {
   const [sortState, setSortState] = useState<SortState>('Manual');
   const [blockSortDirection, setBlockSortDirection] = useState<BlockSortDirection | null>(null);
   const [itemToEdit, setItemToEdit] = useState<ShoppingItem | null>(null);
+  const [editDialogItem, setEditDialogItem] = useState<ShoppingItem | null>(null);
   const [itemToDelete, setItemToDelete] = useState<ShoppingItem | null>(null);
   const [zoomLevel, setZoomLevel] = useState(100);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
@@ -1403,8 +1405,7 @@ const App: React.FC = () => {
   };
 
   const handleEditRequest = (item: ShoppingItem) => {
-    setItemToEdit(item);
-    setActiveTab('import');
+    setEditDialogItem(item);
   };
 
   const handleDeleteRequest = useCallback((item: ShoppingItem) => {
@@ -4841,7 +4842,7 @@ const App: React.FC = () => {
                     })}
                     <TabButton
                       tab="import"
-                      label={itemToEdit ? 'アイテム編集' : 'アイテム追加'}
+                      label={'アイテム追加'}
                     />
                     {activeEventName && (mainContentVisible || isMapTab) && (
                       <SearchBar
@@ -5275,6 +5276,24 @@ const App: React.FC = () => {
           </div>
         )}
       </main>
+
+      {editDialogItem && (
+        <ItemEditDialog
+          item={editDialogItem}
+          allItems={items}
+          onSave={(updatedItem) => {
+            handleUpdateItem(updatedItem);
+            setEditDialogItem(null);
+            setTimeout(() => {
+              const element = document.querySelector(`[data-item-id="${updatedItem.id}"]`);
+              if (element) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }
+            }, 100);
+          }}
+          onClose={() => setEditDialogItem(null)}
+        />
+      )}
 
       {itemToDelete && (
         <DeleteConfirmationModal
