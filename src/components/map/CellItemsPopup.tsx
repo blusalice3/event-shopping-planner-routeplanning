@@ -24,6 +24,7 @@ interface CellItemsPopupProps {
   onUpdateItem?: (item: ShoppingItem) => void;
   onDeleteItem?: (itemId: string) => void;
   onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
+  onUpdateItemPriority?: (itemId: string, level: 'none' | 'priority' | 'highest') => void;
   eventDate?: string;
   position: { x: number; y: number };
 }
@@ -52,6 +53,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   onUpdateItem,
   onDeleteItem,
   onAddItem,
+  onUpdateItemPriority,
   eventDate,
   position,
 }) => {
@@ -346,7 +348,13 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
 
   const handleSaveEdit = () => {
     if (editingItem && onUpdateItem) {
+      const originalItem = items.find((i) => i.id === editingItem.id);
+      const originalPriority = originalItem?.priorityLevel || 'none';
+      const newPriority = editingItem.priorityLevel || 'none';
       onUpdateItem(editingItem);
+      if (newPriority !== originalPriority && onUpdateItemPriority) {
+        onUpdateItemPriority(editingItem.id, newPriority);
+      }
       setEditingItem(null);
     }
   };
@@ -729,6 +737,37 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   </select>
                 </div>
               </div>
+              {onUpdateItemPriority && (
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    優先度
+                  </label>
+                  <select
+                    value={editingItem.priorityLevel || 'none'}
+                    onChange={(e) =>
+                      setEditingItem({
+                        ...editingItem,
+                        priorityLevel: e.target.value as 'none' | 'priority' | 'highest',
+                      })
+                    }
+                    className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
+                  >
+                    <option value="none">なし（通常）</option>
+                    <option value="priority">優先</option>
+                    <option value="highest">最優先</option>
+                  </select>
+                  {(editingItem.priorityLevel === 'priority' || editingItem.priorityLevel === 'highest') && (
+                    <div className="flex items-center gap-1.5 mt-1">
+                      <span
+                        className={`inline-block w-2 h-2 rounded-full ${editingItem.priorityLevel === 'highest' ? 'bg-red-500' : 'bg-orange-500'}`}
+                      />
+                      <span className={`text-xs ${editingItem.priorityLevel === 'highest' ? 'text-red-600 dark:text-red-400' : 'text-orange-600 dark:text-orange-400'}`}>
+                        {editingItem.priorityLevel === 'highest' ? '最優先' : '優先'}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                   備考

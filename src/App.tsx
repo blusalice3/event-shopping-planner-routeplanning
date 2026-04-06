@@ -3284,6 +3284,38 @@ const App: React.FC = () => {
     [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData, hallRouteSettings],
   );
 
+  const handleUpdateItemPriorityFromEdit = useCallback(
+    (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
+      if (!activeEventName || !currentMapTabName) return;
+
+      const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+      const mapDataForTab = mapData[activeEventName]?.[currentMapTabName];
+      const currentSettings = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
+        hallOrder: [],
+        hallVisitLists: [],
+      };
+
+      const result = computeUpdateItemPriority(
+        itemId,
+        priorityLevel,
+        items,
+        halls,
+        mapDataForTab,
+        currentSettings,
+      );
+
+      setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
+      setHallRouteSettings((prev) => ({
+        ...prev,
+        [activeEventName]: {
+          ...prev[activeEventName],
+          [currentMapTabName]: result.hallRouteSettings,
+        },
+      }));
+    },
+    [activeEventName, currentMapTabName, items, hallDefinitions, mapData, hallRouteSettings],
+  );
+
   const handleTabChangeWithVisitListCheck = (newTab: string): boolean => {
     if (visitListPanelOpen && visitListHasUnsavedChanges) {
       setPendingTabChange(newTab);
@@ -4992,6 +5024,7 @@ const App: React.FC = () => {
             onMoveToFirst={handleMoveToFirstFromMap}
             onMoveToLast={handleMoveToLastFromMap}
             onUpdateItem={handleUpdateItem}
+            onUpdateItemPriority={handleUpdateItemPriorityFromEdit}
             onDeleteItem={handleDeleteItemFromMap}
             onAddNewItem={handleAddNewItemFromMap}
             onAddItem={handleAddItemFromFocusMode}
@@ -5291,6 +5324,7 @@ const App: React.FC = () => {
               }
             }, 100);
           }}
+          onPriorityChange={handleUpdateItemPriorityFromEdit}
           onClose={() => setEditDialogItem(null)}
         />
       )}

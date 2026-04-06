@@ -39,6 +39,7 @@ interface MapViewProps {
   onMoveToFirst: (itemId: string) => void;
   onMoveToLast: (itemId: string) => void;
   onUpdateItem?: (item: ShoppingItem) => void;
+  onUpdateItemPriority?: (itemId: string, level: 'none' | 'priority' | 'highest') => void;
   onDeleteItem?: (itemId: string) => void;
   onAddNewItem?: (eventDate: string, block: string, number: string) => void;
   onAddItem?: (
@@ -108,6 +109,7 @@ const MapView: React.FC<MapViewProps> = ({
   onMoveToFirst: _onMoveToFirst,
   onMoveToLast: _onMoveToLast,
   onUpdateItem,
+  onUpdateItemPriority,
   onDeleteItem,
   onAddNewItem,
   onAddItem,
@@ -1090,6 +1092,7 @@ const MapView: React.FC<MapViewProps> = ({
         onBatchAddToVisitList={handleBatchAddToVisitList}
         onBatchRemoveFromVisitList={handleBatchRemoveFromVisitList}
         onUpdateItem={onUpdateItem}
+        onUpdateItemPriority={onUpdateItemPriority}
         onDeleteItem={onDeleteItem}
         onAddItem={onAddItem}
         eventDate={mapDayName || normalizeDisplayText(mapName)}

@@ -6,6 +6,7 @@ interface ItemEditDialogProps {
   onSave: (updatedItem: ShoppingItem) => void;
   onClose: () => void;
   allItems?: ShoppingItem[];
+  onPriorityChange?: (itemId: string, level: 'none' | 'priority' | 'highest') => void;
 }
 
 export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
@@ -13,6 +14,7 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
   onSave,
   onClose,
   allItems = [],
+  onPriorityChange,
 }) => {
   const [form, setForm] = useState({
     circle: item.circle,
@@ -25,6 +27,7 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
     purchaseStatus: item.purchaseStatus as string,
     remarks: item.remarks,
     url: item.url || '',
+    priorityLevel: (item.priorityLevel || 'none') as 'none' | 'priority' | 'highest',
   });
 
   const formInputClass =
@@ -51,7 +54,7 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
   const handleSave = useCallback(() => {
     if (!form.circle.trim()) return;
     const price = form.price === '' ? null : parseInt(form.price, 10) || 0;
-    onSave({
+    const updatedItem: ShoppingItem = {
       ...item,
       circle: form.circle,
       title: form.title,
@@ -63,8 +66,14 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
       purchaseStatus: form.purchaseStatus as PurchaseStatus,
       remarks: form.remarks,
       url: form.url || undefined,
-    });
-  }, [form, item, onSave]);
+      priorityLevel: form.priorityLevel,
+    };
+    onSave(updatedItem);
+    const originalPriority = item.priorityLevel || 'none';
+    if (form.priorityLevel !== originalPriority && onPriorityChange) {
+      onPriorityChange(item.id, form.priorityLevel);
+    }
+  }, [form, item, onSave, onPriorityChange]);
 
   const circleSuggestions = useMemo(
     () => [...new Set(allItems.map((i) => i.circle).filter(Boolean))],
@@ -215,6 +224,35 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               </select>
             </div>
           </div>
+          {onPriorityChange && (
+            <div>
+              <label className={labelClass}>優先度</label>
+              <select
+                value={form.priorityLevel}
+                onChange={(e) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    priorityLevel: e.target.value as 'none' | 'priority' | 'highest',
+                  }))
+                }
+                className={formInputClass}
+              >
+                <option value="none">なし（通常）</option>
+                <option value="priority">優先</option>
+                <option value="highest">最優先</option>
+              </select>
+              {form.priorityLevel !== 'none' && (
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <span
+                    className={`inline-block w-2.5 h-2.5 rounded-full ${form.priorityLevel === 'highest' ? 'bg-red-500' : 'bg-orange-500'}`}
+                  />
+                  <span className={`text-xs ${form.priorityLevel === 'highest' ? 'text-red-600 dark:text-red-400' : 'text-orange-600 dark:text-orange-400'}`}>
+                    {form.priorityLevel === 'highest' ? '最優先アイテムとして設定されます' : '優先アイテムとして設定されます'}
+                  </span>
+                </div>
+              )}
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label className={labelClass}>備考</label>
