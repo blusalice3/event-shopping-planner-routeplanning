@@ -49,6 +49,13 @@ interface MapViewProps {
     referenceItemId: string,
     position: 'before' | 'after',
   ) => void;
+  onBatchAddToExecuteList?: (itemIds: string[]) => void;
+  onBatchAddToExecuteListAtPosition?: (
+    itemIds: string[],
+    referenceItemId: string,
+    position: 'before' | 'after',
+  ) => void;
+  onBatchRemoveFromExecuteList?: (itemIds: string[]) => void;
 
   // ホール定義と訪問順設定
   halls: HallDefinition[];
@@ -105,6 +112,9 @@ const MapView: React.FC<MapViewProps> = ({
   onAddNewItem,
   onAddItem,
   onAddToExecuteListAtPosition,
+  onBatchAddToExecuteList,
+  onBatchAddToExecuteListAtPosition,
+  onBatchRemoveFromExecuteList,
   halls,
   hallRouteSettings,
   onUpdateHallRouteSettings,
@@ -598,6 +608,34 @@ const MapView: React.FC<MapViewProps> = ({
     [items, getItemHallId, hallRouteSettings, onUpdateHallRouteSettings],
   );
 
+  const batchAddToHallVisitList = useCallback(
+    (itemIds: string[]) => {
+      let updatedHallVisitLists = [...hallRouteSettings.hallVisitLists];
+      for (const itemId of itemIds) {
+        const item = items.find((i) => i.id === itemId);
+        if (!item) continue;
+        const hallId = getItemHallId(item);
+        if (!hallId) continue;
+        const hallListIndex = updatedHallVisitLists.findIndex((l) => l.hallId === hallId);
+        if (hallListIndex >= 0) {
+          if (!updatedHallVisitLists[hallListIndex].itemIds.includes(itemId)) {
+            updatedHallVisitLists[hallListIndex] = {
+              ...updatedHallVisitLists[hallListIndex],
+              itemIds: [...updatedHallVisitLists[hallListIndex].itemIds, itemId],
+            };
+          }
+        } else {
+          updatedHallVisitLists.push({ hallId, itemIds: [itemId] });
+        }
+      }
+      onUpdateHallRouteSettings({
+        ...hallRouteSettings,
+        hallVisitLists: updatedHallVisitLists,
+      });
+    },
+    [items, getItemHallId, hallRouteSettings, onUpdateHallRouteSettings],
+  );
+
   const handleAddToVisitList = useCallback(
     (itemId: string) => {
       const item = items.find((i) => i.id === itemId);
@@ -679,10 +717,11 @@ const MapView: React.FC<MapViewProps> = ({
       const idsToInsert = isBatch ? batchInsertPendingIds : [item.id];
 
       if (position.type === 'before' || position.type === 'after') {
-        if (onAddToExecuteListAtPosition) {
-          // before: 参照アイテムの前に全て挿入、after: 参照アイテムの後に順次挿入
+        if (isBatch && onBatchAddToExecuteListAtPosition) {
+          onBatchAddToExecuteListAtPosition(idsToInsert, position.referenceItemId, position.type);
+          batchAddToHallVisitList(idsToInsert);
+        } else if (onAddToExecuteListAtPosition) {
           if (position.type === 'before') {
-            // 全アイテムを参照アイテムの前に挿入（順序維持のため逆順で挿入）
             for (let i = idsToInsert.length - 1; i >= 0; i--) {
               onAddToExecuteListAtPosition(idsToInsert[i], position.referenceItemId, 'before');
               addToHallVisitList(idsToInsert[i]);
@@ -697,23 +736,49 @@ const MapView: React.FC<MapViewProps> = ({
           }
         }
       } else {
-        if (position.type === 'listEnd' && onAddToExecuteListAtPosition) {
-          let insertAfter = executeModeItemIds.length > 0
-            ? executeModeItemIds[executeModeItemIds.length - 1]
-            : null;
-          for (const id of idsToInsert) {
-            if (insertAfter) {
-              onAddToExecuteListAtPosition(id, insertAfter, 'after');
+        if (position.type === 'listEnd') {
+          if (isBatch && onBatchAddToExecuteListAtPosition) {
+            const lastId = executeModeItemIds.length > 0
+              ? executeModeItemIds[executeModeItemIds.length - 1]
+              : null;
+            if (lastId) {
+              onBatchAddToExecuteListAtPosition(idsToInsert, lastId, 'after');
+            } else if (onBatchAddToExecuteList) {
+              onBatchAddToExecuteList(idsToInsert);
             } else {
-              onAddToExecuteList(id);
+              for (const id of idsToInsert) {
+                onAddToExecuteList(id);
+              }
             }
-            addToHallVisitList(id);
-            insertAfter = id;
+            batchAddToHallVisitList(idsToInsert);
+          } else if (onAddToExecuteListAtPosition) {
+            let insertAfter = executeModeItemIds.length > 0
+              ? executeModeItemIds[executeModeItemIds.length - 1]
+              : null;
+            for (const id of idsToInsert) {
+              if (insertAfter) {
+                onAddToExecuteListAtPosition(id, insertAfter, 'after');
+              } else {
+                onAddToExecuteList(id);
+              }
+              addToHallVisitList(id);
+              insertAfter = id;
+            }
+          } else {
+            for (const id of idsToInsert) {
+              onAddToExecuteList(id);
+              addToHallVisitList(id);
+            }
           }
         } else {
-          for (const id of idsToInsert) {
-            onAddToExecuteList(id);
-            addToHallVisitList(id);
+          if (isBatch && onBatchAddToExecuteList) {
+            onBatchAddToExecuteList(idsToInsert);
+            batchAddToHallVisitList(idsToInsert);
+          } else {
+            for (const id of idsToInsert) {
+              onAddToExecuteList(id);
+              addToHallVisitList(id);
+            }
           }
         }
       }
@@ -726,8 +791,11 @@ const MapView: React.FC<MapViewProps> = ({
       batchInsertPendingIds,
       onAddToExecuteList,
       onAddToExecuteListAtPosition,
+      onBatchAddToExecuteList,
+      onBatchAddToExecuteListAtPosition,
       executeModeItemIds,
       addToHallVisitList,
+      batchAddToHallVisitList,
     ],
   );
 
@@ -824,7 +892,7 @@ const MapView: React.FC<MapViewProps> = ({
       const itemBlock = firstItem.block?.trim() || '';
 
       // 1) プレフィックスマッチ: 同ブロック+同プレフィックスの既存アイテムの最後の直後に挿入
-      if (newItemPrefix && onAddToExecuteListAtPosition) {
+      if (newItemPrefix && (onBatchAddToExecuteListAtPosition || onAddToExecuteListAtPosition)) {
         let lastMatchId: string | null = null;
         executeModeItemIds.forEach((eid) => {
           const existingItem = items.find((i) => i.id === eid);
@@ -838,19 +906,23 @@ const MapView: React.FC<MapViewProps> = ({
         });
 
         if (lastMatchId) {
-          let insertAfter: string = lastMatchId;
-          for (const id of sortedIds) {
-            onAddToExecuteListAtPosition(id, insertAfter, 'after');
-            addToHallVisitList(id);
-            insertAfter = id;
+          if (onBatchAddToExecuteListAtPosition) {
+            onBatchAddToExecuteListAtPosition(sortedIds, lastMatchId, 'after');
+          } else {
+            let insertAfter: string = lastMatchId;
+            for (const id of sortedIds) {
+              onAddToExecuteListAtPosition!(id, insertAfter, 'after');
+              insertAfter = id;
+            }
           }
+          batchAddToHallVisitList(sortedIds);
           return;
         }
       }
 
       // 2) 近隣判定: 数値差3以内の訪問済みアイテムがあればスマート挿入ダイアログを表示
       const itemNum = extractNumberFromItemNumber(firstItem.number);
-      if (itemNum && smartInsertEnabled && onAddToExecuteListAtPosition) {
+      if (itemNum && smartInsertEnabled && (onBatchAddToExecuteListAtPosition || onAddToExecuteListAtPosition)) {
         const numValue = parseInt(itemNum, 10);
         const itemBlockLower = itemBlock.toLowerCase();
         const nearbyVisitItems: { item: ShoppingItem; visitIndex: number }[] = [];
@@ -876,17 +948,23 @@ const MapView: React.FC<MapViewProps> = ({
       }
 
       // 3) マッチなし: 末尾に追加
-      for (const id of sortedIds) {
-        onAddToExecuteList(id);
-        addToHallVisitList(id);
+      if (onBatchAddToExecuteList) {
+        onBatchAddToExecuteList(sortedIds);
+      } else {
+        for (const id of sortedIds) {
+          onAddToExecuteList(id);
+        }
       }
+      batchAddToHallVisitList(sortedIds);
     },
     [
       items,
       executeModeItemIds,
       onAddToExecuteList,
       onAddToExecuteListAtPosition,
-      addToHallVisitList,
+      onBatchAddToExecuteList,
+      onBatchAddToExecuteListAtPosition,
+      batchAddToHallVisitList,
       smartInsertEnabled,
     ],
   );
@@ -894,8 +972,12 @@ const MapView: React.FC<MapViewProps> = ({
   // スペースグループ一括解除
   const handleBatchRemoveFromVisitList = useCallback(
     (itemIds: string[]) => {
-      for (const id of itemIds) {
-        onRemoveFromExecuteList(id);
+      if (onBatchRemoveFromExecuteList) {
+        onBatchRemoveFromExecuteList(itemIds);
+      } else {
+        for (const id of itemIds) {
+          onRemoveFromExecuteList(id);
+        }
       }
       const removedSet = new Set(itemIds);
       const updatedHallVisitLists = hallRouteSettings.hallVisitLists.map((list) => ({
@@ -907,7 +989,7 @@ const MapView: React.FC<MapViewProps> = ({
         hallVisitLists: updatedHallVisitLists,
       });
     },
-    [onRemoveFromExecuteList, hallRouteSettings, onUpdateHallRouteSettings],
+    [onRemoveFromExecuteList, onBatchRemoveFromExecuteList, hallRouteSettings, onUpdateHallRouteSettings],
   );
 
   const handleJumpToCell = useCallback((_row: number, _col: number) => {

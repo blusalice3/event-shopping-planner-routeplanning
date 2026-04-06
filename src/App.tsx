@@ -2840,6 +2840,71 @@ const App: React.FC = () => {
   );
 
 
+  const handleBatchAddToExecuteListFromMap = useCallback(
+    (itemIds: string[]) => {
+      if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return;
+      const dayName = activeEventDate;
+      const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+      const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
+        hallOrder: [],
+        hallVisitLists: [],
+      };
+      const currentMap = mapData[activeEventName]?.[currentMapTabName];
+
+      setExecuteModeItems((prev) => {
+        let current = prev[activeEventName] || {};
+        for (const id of itemIds) {
+          current = computeAddToExecuteListFromMap(id, dayName, items, current, halls, hallRouteSettingsForMap, currentMap);
+        }
+        return { ...prev, [activeEventName]: current };
+      });
+    },
+    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData],
+  );
+
+
+  const handleBatchAddToExecuteListFromMapAtPosition = useCallback(
+    (itemIds: string[], referenceItemId: string, position: 'before' | 'after') => {
+      if (!activeEventName || !isMapTab || !activeEventDate) return;
+      const dayName = activeEventDate;
+
+      setExecuteModeItems((prev) => {
+        let current = prev[activeEventName] || {};
+        if (position === 'before') {
+          for (let i = itemIds.length - 1; i >= 0; i--) {
+            current = computeAddToExecuteListFromMapAtPosition(itemIds[i], referenceItemId, 'before', current, dayName);
+          }
+        } else {
+          let ref = referenceItemId;
+          for (const id of itemIds) {
+            current = computeAddToExecuteListFromMapAtPosition(id, ref, 'after', current, dayName);
+            ref = id;
+          }
+        }
+        return { ...prev, [activeEventName]: current };
+      });
+    },
+    [activeEventName, activeEventDate, isMapTab],
+  );
+
+
+  const handleBatchRemoveFromExecuteListFromMap = useCallback(
+    (itemIds: string[]) => {
+      if (!activeEventName || !isMapTab || !activeEventDate) return;
+      const dayName = activeEventDate;
+
+      setExecuteModeItems((prev) => {
+        let current = prev[activeEventName] || {};
+        for (const id of itemIds) {
+          current = computeRemoveFromExecuteListFromMap(id, current, dayName);
+        }
+        return { ...prev, [activeEventName]: current };
+      });
+    },
+    [activeEventName, activeEventDate, isMapTab],
+  );
+
+
   const handleAddNewItemFromMap = useCallback(
     (eventDate: string, block: string, number: string) => {
       setNewItemDefaults({ eventDate, block, number });
@@ -4920,6 +4985,9 @@ const App: React.FC = () => {
             onAddToExecuteList={handleAddToExecuteListFromMap}
             onAddToExecuteListAtPosition={handleAddToExecuteListFromMapAtPosition}
             onRemoveFromExecuteList={handleRemoveFromExecuteListFromMap}
+            onBatchAddToExecuteList={handleBatchAddToExecuteListFromMap}
+            onBatchAddToExecuteListAtPosition={handleBatchAddToExecuteListFromMapAtPosition}
+            onBatchRemoveFromExecuteList={handleBatchRemoveFromExecuteListFromMap}
             onMoveToFirst={handleMoveToFirstFromMap}
             onMoveToLast={handleMoveToLastFromMap}
             onUpdateItem={handleUpdateItem}
