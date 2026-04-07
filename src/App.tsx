@@ -43,6 +43,7 @@ import {
   BlockDefinitionPanel,
   HallDefinitionPanel,
   SimpleHallDefinitionPanel,
+  HallOrderPanel,
   isPointInPolygon,
   MapImportDialog,
   loadBlockDetectionSettings,
@@ -308,6 +309,7 @@ const App: React.FC = () => {
   const [hallDefinitions, setHallDefinitions] = useState<HallDefinitionsStore>({});
   const [hallRouteSettings, setHallRouteSettings] = useState<HallRouteSettingsStore>({});
   const [simpleHallDefinitionMode, setSimpleHallDefinitionMode] = useState(false);
+  const [globalHallOrderPanelOpen, setGlobalHallOrderPanelOpen] = useState(false);
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [exportEventName, setExportEventName] = useState<string | null>(null);
   const mapFileInputRef = useRef<HTMLInputElement>(null);
@@ -3473,21 +3475,198 @@ const App: React.FC = () => {
     [activeEventName, hallRouteSettings],
   );
 
+  // ===== ホール間移動順序パネル用: マップ/maplessの統合ビュー =====
+
+  // 現在日付のマップタブ名（mapViewActive問わず、その日付にマップがあるか）
+  const globalHallOrderMapTabName = useMemo(
+    () => (activeEventDate ? getMapTabForDate(activeEventDate) : null),
+    [activeEventDate, getMapTabForDate],
+  );
+
+  // マップ/maplessの両方を統合したホール一覧
+  const globalHallOrderHalls = useMemo((): HallDefinition[] => {
+    if (!activeEventName) return [];
+    const mapHalls = globalHallOrderMapTabName
+      ? hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []
+      : [];
+    const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+    return [...mapHalls, ...maplessHalls];
+  }, [activeEventName, globalHallOrderMapTabName, hallDefinitions]);
+
+  // マップ/mapless統合されたHallRouteSettings（hallOrderのマージ）
+  const globalHallOrderRouteSettings = useMemo((): HallRouteSettings => {
+    if (!activeEventName) return { hallOrder: [], hallVisitLists: [] };
+
+    const mapHalls = globalHallOrderMapTabName
+      ? hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []
+      : [];
+    const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+
+    const mapSettings = globalHallOrderMapTabName
+      ? hallRouteSettings[activeEventName]?.[globalHallOrderMapTabName]
+      : undefined;
+    const maplessSettings = hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY];
+
+    const mapOrder =
+      mapSettings?.hallOrder && mapSettings.hallOrder.length > 0
+        ? mapSettings.hallOrder
+        : mapHalls.map((h) => h.id);
+    const maplessOrder =
+      maplessSettings?.hallOrder && maplessSettings.hallOrder.length > 0
+        ? maplessSettings.hallOrder
+        : maplessHalls.map((h) => h.id);
+
+    return {
+      hallOrder: [...mapOrder, ...maplessOrder],
+      hallVisitLists: [
+        ...(mapSettings?.hallVisitLists || []),
+        ...(maplessSettings?.hallVisitLists || []),
+      ],
+    };
+  }, [activeEventName, globalHallOrderMapTabName, hallDefinitions, hallRouteSettings]);
+
+  // 統合順序の保存: hallIDごとにmap側/mapless側を判別して分離保存
+  const handleUpdateGlobalHallRouteSettings = useCallback(
+    (settings: HallRouteSettings) => {
+      if (!activeEventName) return;
+
+      const mapHallIds = new Set<string>(
+        globalHallOrderMapTabName
+          ? (hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []).map(
+              (h) => h.id,
+            )
+          : [],
+      );
+      const maplessHallIds = new Set<string>(
+        (hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || []).map((h) => h.id),
+      );
+
+      // groupId（hallId or hallId:priority）からhallIdを抽出するヘルパー
+      const extractHallId = (groupId: string): string => {
+        if (groupId.endsWith(':highest')) return groupId.replace(':highest', '');
+        if (groupId.endsWith(':priority')) return groupId.replace(':priority', '');
+        return groupId;
+      };
+
+      const mapOrder: string[] = [];
+      const maplessOrder: string[] = [];
+      settings.hallOrder.forEach((groupId) => {
+        const hallId = extractHallId(groupId);
+        if (mapHallIds.has(hallId)) {
+          mapOrder.push(groupId);
+        } else if (maplessHallIds.has(hallId)) {
+          maplessOrder.push(groupId);
+        } else {
+          // undefined:* などはmap側にもmapless側にも属さないが、map側があればmap側に
+          if (globalHallOrderMapTabName) {
+            mapOrder.push(groupId);
+          } else {
+            maplessOrder.push(groupId);
+          }
+        }
+      });
+
+      // visitListsも同様に振り分け
+      const mapVisitLists = settings.hallVisitLists.filter((vl) => {
+        const hid = extractHallId(vl.hallId);
+        return mapHallIds.has(hid);
+      });
+      const maplessVisitLists = settings.hallVisitLists.filter((vl) => {
+        const hid = extractHallId(vl.hallId);
+        return maplessHallIds.has(hid);
+      });
+
+      setHallRouteSettings((prev) => {
+        const eventSettings = { ...(prev[activeEventName] || {}) };
+        if (globalHallOrderMapTabName) {
+          eventSettings[globalHallOrderMapTabName] = {
+            hallOrder: mapOrder,
+            hallVisitLists: mapVisitLists,
+          };
+        }
+        eventSettings[MAPLESS_HALL_KEY] = {
+          hallOrder: maplessOrder,
+          hallVisitLists: maplessVisitLists,
+        };
+        return {
+          ...prev,
+          [activeEventName]: eventSettings,
+        };
+      });
+    },
+    [activeEventName, globalHallOrderMapTabName, hallDefinitions],
+  );
+
+  // 統合ホール用アイテム数集計（groupId対応）
+  const getGlobalHallItemCount = useCallback(
+    (groupId: string): number => {
+      if (!activeEventName || !activeEventDate) return 0;
+      const executeIds =
+        executeModeItems[activeEventName]?.[activeEventDate] || [];
+      if (executeIds.length === 0) return 0;
+
+      // groupId解析
+      let targetHallId: string | null;
+      let targetPriority: 'none' | 'priority' | 'highest';
+      if (groupId === 'undefined:highest') {
+        targetHallId = null;
+        targetPriority = 'highest';
+      } else if (groupId === 'undefined:priority') {
+        targetHallId = null;
+        targetPriority = 'priority';
+      } else if (groupId.endsWith(':highest')) {
+        targetHallId = groupId.replace(':highest', '');
+        targetPriority = 'highest';
+      } else if (groupId.endsWith(':priority')) {
+        targetHallId = groupId.replace(':priority', '');
+        targetPriority = 'priority';
+      } else {
+        targetHallId = groupId;
+        targetPriority = 'none';
+      }
+
+      return executeIds.filter((itemId) => {
+        const item = items.find((i) => i.id === itemId);
+        if (!item) return false;
+        const itemPriority = item.priorityLevel || 'none';
+        if (itemPriority !== targetPriority) return false;
+        const itemHallId = getItemHallId(item, item.eventDate);
+        return itemHallId === targetHallId;
+      }).length;
+    },
+    [activeEventName, activeEventDate, executeModeItems, items, getItemHallId],
+  );
+
 
   const handleReorderExecuteListByHallOrder = useCallback(
     (hallOrder: string[]) => {
-      if (!activeEventName || !isMapTab || !currentMapTabName) return;
+      if (!activeEventName) return;
 
       if (!activeEventDate) return;
       const dayName = activeEventDate;
 
-      const currentMapData = mapData[activeEventName]?.[currentMapTabName];
-      const mapHalls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+      const mapTabForDate = getMapTabForDate(dayName);
+      const currentMapData = mapTabForDate
+        ? mapData[activeEventName]?.[mapTabForDate]
+        : undefined;
+      const mapHalls = mapTabForDate
+        ? hallDefinitions[activeEventName]?.[mapTabForDate] || []
+        : [];
       const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
       const halls = [...mapHalls, ...maplessHalls];
-      const currentHallRouteSettings = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
-        hallOrder: [],
-        hallVisitLists: [],
+      const mapRouteSettings = mapTabForDate
+        ? hallRouteSettings[activeEventName]?.[mapTabForDate]
+        : undefined;
+      const maplessRouteSettings = hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY];
+      const currentHallRouteSettings: HallRouteSettings = {
+        hallOrder: [
+          ...(mapRouteSettings?.hallOrder || []),
+          ...(maplessRouteSettings?.hallOrder || []),
+        ],
+        hallVisitLists: [
+          ...(mapRouteSettings?.hallVisitLists || []),
+          ...(maplessRouteSettings?.hallVisitLists || []),
+        ],
       };
 
       if (halls.length === 0) return;
@@ -3599,7 +3778,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, isMapTab, currentMapTabName, activeEventDate, mapData, hallDefinitions, hallRouteSettings, items],
+    [activeEventName, activeEventDate, getMapTabForDate, mapData, hallDefinitions, hallRouteSettings, items],
   );
 
 
@@ -4239,6 +4418,30 @@ const App: React.FC = () => {
                       </svg>
                     </button>
                   )}
+                  {activeEventName &&
+                    mainContentVisible &&
+                    globalHallOrderHalls.length > 0 && (
+                      <button
+                        onClick={() => setGlobalHallOrderPanelOpen(true)}
+                        className="p-2 rounded-md bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400 transition-colors duration-200"
+                        title="ホール間移動順序"
+                      >
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          className="w-5 h-5"
+                          fill="none"
+                          viewBox="0 0 24 24"
+                          stroke="currentColor"
+                          strokeWidth={2}
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            d="M4 6h16M4 12h10M4 18h16M14 8l4-2-4-2M14 14l4-2-4-2"
+                          />
+                        </svg>
+                      </button>
+                    )}
                   {activeEventName &&
                     mainContentVisible &&
                     getMapTabForDate(activeEventDate || '') && (
@@ -5589,6 +5792,19 @@ const App: React.FC = () => {
           halls={currentMaplessHalls}
           onUpdateHalls={handleUpdateMaplessHalls}
           availableBlocks={allBlocksForHallDefinition}
+        />
+      )}
+
+      {/* ホール間移動順序パネル（map/mapless統合） */}
+      {globalHallOrderPanelOpen && (
+        <HallOrderPanel
+          isOpen={globalHallOrderPanelOpen}
+          onClose={() => setGlobalHallOrderPanelOpen(false)}
+          halls={globalHallOrderHalls}
+          hallRouteSettings={globalHallOrderRouteSettings}
+          onUpdateHallRouteSettings={handleUpdateGlobalHallRouteSettings}
+          getItemCountInHall={getGlobalHallItemCount}
+          onReorderExecuteList={handleReorderExecuteListByHallOrder}
         />
       )}
 
