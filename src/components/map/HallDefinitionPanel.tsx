@@ -142,31 +142,40 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
       alert('ホール名を入力してください。');
       return;
     }
-    if (!editingHall.vertices || editingHall.vertices.length < 4) {
+
+    // no-map 由来ホール: 頂点が未設定で blockNames を持つ場合は
+    // ポリゴン検証をスキップして名称/色の変更のみ許容する
+    const hasPolygon = !!editingHall.vertices && editingHall.vertices.length >= 4;
+    const isMaplessEdit =
+      !hasPolygon && !!editingHall.blockNames && editingHall.blockNames.length > 0;
+
+    if (!hasPolygon && !isMaplessEdit) {
       alert('4〜6個の頂点を選択してください。');
       return;
     }
 
-    const validation = validateHallPolygon({
-      vertices: editingHall.vertices,
-      existingHalls: localHalls,
-      currentHallId: editingHall.id,
-      mapBounds: {
-        maxRow: mapData.maxRow,
-        maxCol: mapData.maxCol,
-      },
-    });
-    const errors = validation.issues.filter((issue) => issue.level === 'error');
-    if (errors.length > 0) {
-      alert(`保存できません:\n${errors.map((issue) => `・${issue.message}`).join('\n')}`);
-      return;
-    }
-    const warnings = validation.issues.filter((issue) => issue.level === 'warning');
-    if (warnings.length > 0) {
-      const confirmed = confirm(
-        `以下の警告があります:\n${warnings.map((issue) => `・${issue.message}`).join('\n')}\n\nこのまま保存しますか？`,
-      );
-      if (!confirmed) return;
+    if (hasPolygon) {
+      const validation = validateHallPolygon({
+        vertices: editingHall.vertices!,
+        existingHalls: localHalls,
+        currentHallId: editingHall.id,
+        mapBounds: {
+          maxRow: mapData.maxRow,
+          maxCol: mapData.maxCol,
+        },
+      });
+      const errors = validation.issues.filter((issue) => issue.level === 'error');
+      if (errors.length > 0) {
+        alert(`保存できません:\n${errors.map((issue) => `・${issue.message}`).join('\n')}`);
+        return;
+      }
+      const warnings = validation.issues.filter((issue) => issue.level === 'warning');
+      if (warnings.length > 0) {
+        const confirmed = confirm(
+          `以下の警告があります:\n${warnings.map((issue) => `・${issue.message}`).join('\n')}\n\nこのまま保存しますか？`,
+        );
+        if (!confirmed) return;
+      }
     }
 
     const name = editingHall.name.trim();
@@ -179,8 +188,10 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
     const saved: HallDefinition = {
       id: editingHall.id || `hall-${Date.now()}`,
       name,
-      vertices: editingHall.vertices,
+      vertices: hasPolygon ? editingHall.vertices! : [],
       color: editingHall.color || HALL_COLORS[localHalls.length % HALL_COLORS.length],
+      // ポリゴンを設定した場合は blockNames を破棄してマップ側ホールへ移行
+      ...(isMaplessEdit ? { blockNames: editingHall.blockNames } : {}),
     };
 
     if (isAddingNew) {
@@ -307,7 +318,9 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                               className="flex h-8 w-8 items-center justify-center rounded text-xs font-bold"
                               style={{ backgroundColor: hall.color || '#FFE0B2' }}
                             >
-                              {hall.vertices.length}角
+                              {hall.vertices && hall.vertices.length >= 4
+                                ? `${hall.vertices.length}角`
+                                : 'ブロック'}
                             </div>
                             <div>
                               <div className="text-sm font-medium text-slate-900 dark:text-white">
@@ -340,6 +353,16 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                   <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
                     {isAddingNew ? '新規ホール追加' : 'ホール編集'}
                   </h3>
+
+                  {!isAddingNew &&
+                    (!editingHall.vertices || editingHall.vertices.length < 4) &&
+                    !!editingHall.blockNames?.length && (
+                      <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+                        このホールは現在ブロック指定のみで定義されています（{editingHall.blockNames.length}ブロック）。
+                        ポリゴンを設定するとマップ側ホールへ移行します（ブロック指定は破棄されます）。
+                        名称・色のみの変更であればそのまま保存できます。
+                      </div>
+                    )}
 
                   <div>
                     <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">

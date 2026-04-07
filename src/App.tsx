@@ -3465,13 +3465,18 @@ const App: React.FC = () => {
     (halls: HallDefinition[]) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
 
-      // vertices を持たず blockNames を持つホールは mapless 側の定義
-      // (従来パネルは両者をマージした配列を受け取るため、
-      //  永続化時にキーを振り分けて相互汚染を防ぐ)
-      const isMaplessHall = (h: HallDefinition) =>
-        (!h.vertices || h.vertices.length < 4) && !!h.blockNames?.length;
-      const polygonHalls = halls.filter((h) => !isMaplessHall(h));
-      const maplessHalls = halls.filter(isMaplessHall);
+      // 振り分けルール:
+      //  - vertices が 4 個以上あればポリゴンホール(現マップタブ配下)
+      //    → no-map ホールに頂点を設定して編集した場合もここに含まれ、
+      //      マップ側ホールへ移行する(blockNames は破棄)
+      //  - vertices が無く blockNames があれば no-map ホール(__mapless__ 配下)
+      //  - どちらにも該当しないものは破棄
+      const polygonHalls = halls
+        .filter((h) => h.vertices && h.vertices.length >= 4)
+        .map(({ blockNames: _ignored, ...rest }) => rest as HallDefinition);
+      const maplessHalls = halls.filter(
+        (h) => (!h.vertices || h.vertices.length < 4) && !!h.blockNames?.length,
+      );
 
       setHallDefinitions((prev) => ({
         ...prev,
