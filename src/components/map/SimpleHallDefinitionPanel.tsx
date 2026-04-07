@@ -61,7 +61,7 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
     const map = new Map<string, HallDefinition[]>();
     localHalls.forEach((h) => {
       h.blockNames?.forEach((b) => {
-        const key = b.trim().normalize('NFKC').toLowerCase();
+        const key = normalizeBlockName(b);
         if (!map.has(key)) map.set(key, []);
         map.get(key)!.push(h);
       });
