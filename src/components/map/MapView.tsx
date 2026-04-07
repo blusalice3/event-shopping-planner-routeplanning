@@ -17,6 +17,7 @@ import VisitListPanel from './VisitListPanel';
 import HallOrderPanel from './HallOrderPanel';
 import InsertPositionDialog, { InsertPosition, SmartInsertMode } from './InsertPositionDialog';
 import { extractNumberFromItemNumber, extractNumberAlphaPrefix } from '../../utils/xlsxMapParser';
+import { resolveHallByBlockName, resolveManualHallId } from '../../utils/hallFallback';
 import { isPointInPolygon } from './HallDefinitionPanel';
 
 const normalizeDisplayText = (value: string | null | undefined): string => {
@@ -247,9 +248,22 @@ const MapView: React.FC<MapViewProps> = ({
   const getHallCandidatesForItem = useCallback(
     (item: ShoppingItem): Set<string> => {
       const hallIds = new Set<string>();
+
+      // 1. 手動ホール設定が有効なら最優先
+      const manual = resolveManualHallId(item.manualHallId, halls);
+      if (manual) {
+        hallIds.add(manual);
+        return hallIds;
+      }
+
       const itemBlockName = item.block?.trim() || '';
       const candidateBlocks = getCandidateBlocksForItem(itemBlockName);
-      if (candidateBlocks.length === 0) return hallIds;
+      if (candidateBlocks.length === 0) {
+        // 2. ブロック情報がない場合もblockNamesフォールバックを試す
+        const fallback = resolveHallByBlockName(item.block, halls);
+        if (fallback) hallIds.add(fallback);
+        return hallIds;
+      }
 
       const numStr = extractNumberFromItemNumber(item.number);
       if (numStr) {
@@ -292,9 +306,15 @@ const MapView: React.FC<MapViewProps> = ({
         matchedHallIds.forEach((matchedHallId) => hallIds.add(matchedHallId));
       });
 
+      // 3. ポリゴン判定で何も取れなかった場合のみ blockNames フォールバック
+      if (hallIds.size === 0) {
+        const fallback = resolveHallByBlockName(item.block, halls);
+        if (fallback) hallIds.add(fallback);
+      }
+
       return hallIds;
     },
-    [getCandidateBlocksForItem, getHallIdsByCellPosition],
+    [getCandidateBlocksForItem, getHallIdsByCellPosition, halls],
   );
 
   // アイテムが指定ホールに属するか（候補が複数でも true を返す）

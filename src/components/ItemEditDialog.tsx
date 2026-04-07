@@ -1,11 +1,13 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import type { ShoppingItem, PurchaseStatus } from '../types';
+import type { ShoppingItem, PurchaseStatus, HallDefinition } from '../types';
+import { findHallsByBlockName } from '../utils/hallFallback';
 
 interface ItemEditDialogProps {
   item: ShoppingItem;
   onSave: (updatedItem: ShoppingItem) => void;
   onClose: () => void;
   allItems?: ShoppingItem[];
+  halls?: HallDefinition[];
   onPriorityChange?: (itemId: string, level: 'none' | 'priority' | 'highest') => void;
 }
 
@@ -14,6 +16,7 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
   onSave,
   onClose,
   allItems = [],
+  halls = [],
   onPriorityChange,
 }) => {
   const [form, setForm] = useState({
@@ -28,7 +31,16 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
     remarks: item.remarks,
     url: item.url || '',
     priorityLevel: (item.priorityLevel || 'none') as 'none' | 'priority' | 'highest',
+    manualHallId: item.manualHallId || '',
   });
+
+  // 現在のブロックが属するホール候補（blockNamesに含まれているホール）
+  const blockHallCandidates = useMemo(
+    () => findHallsByBlockName(form.block, halls),
+    [form.block, halls],
+  );
+  // 複数ホール所属ブロックの場合にホール選択UIを表示
+  const showHallSelector = blockHallCandidates.length > 1;
 
   const formInputClass =
     'w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white';
@@ -67,6 +79,7 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
       remarks: form.remarks,
       url: form.url || undefined,
       priorityLevel: form.priorityLevel,
+      manualHallId: form.manualHallId || undefined,
     };
     onSave(updatedItem);
     const originalPriority = item.priorityLevel || 'none';
@@ -224,6 +237,33 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               </select>
             </div>
           </div>
+          {showHallSelector && (
+            <div className="border border-amber-200 dark:border-amber-700/50 bg-amber-50/50 dark:bg-amber-900/20 rounded-lg p-3">
+              <label className={labelClass}>
+                ホール設定
+                <span className="ml-2 text-xs font-normal text-amber-700 dark:text-amber-400">
+                  （ブロック「{form.block}」は複数ホールに所属）
+                </span>
+              </label>
+              <select
+                value={form.manualHallId}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, manualHallId: e.target.value }))
+                }
+                className={formInputClass}
+              >
+                <option value="">自動判定（いずれか1つに決定できない場合は未割当）</option>
+                {blockHallCandidates.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.name}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-1.5">
+                このブロックが属するホールを選択してください
+              </p>
+            </div>
+          )}
           {onPriorityChange && (
             <div>
               <label className={labelClass}>優先度</label>

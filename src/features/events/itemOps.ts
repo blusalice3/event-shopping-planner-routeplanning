@@ -18,6 +18,7 @@ import type {
   DayMapData,
 } from '../../types';
 import { getSpaceKey } from '../../utils/spaceGrouping';
+import { resolveHallByBlockName, resolveManualHallId } from '../../utils/hallFallback';
 
 // ────────────────────────────────────────────────
 // 共通ヘルパー
@@ -52,21 +53,28 @@ export function findItemHallId(
   halls: HallDefinition[],
   mapData: DayMapData | undefined,
 ): string | null {
-  if (!mapData || halls.length === 0) return null;
+  // 1. 手動ホール設定が有効なら最優先
+  const manual = resolveManualHallId(item.manualHallId, halls);
+  if (manual) return manual;
 
-  const blockName = item.block?.trim() || '';
-  const block = mapData.blocks.find((b) => b.name === blockName);
-  if (!block) return null;
+  // 2. 既存のポリゴン判定
+  if (mapData && halls.length > 0) {
+    const blockName = item.block?.trim() || '';
+    const block = mapData.blocks.find((b) => b.name === blockName);
+    if (block) {
+      const centerRow = (block.startRow + block.endRow) / 2;
+      const centerCol = (block.startCol + block.endCol) / 2;
 
-  const centerRow = (block.startRow + block.endRow) / 2;
-  const centerCol = (block.startCol + block.endCol) / 2;
-
-  for (const hall of halls) {
-    if (hall.vertices.length >= 4 && isPointInPoly(centerRow, centerCol, hall.vertices)) {
-      return hall.id;
+      for (const hall of halls) {
+        if (hall.vertices.length >= 4 && isPointInPoly(centerRow, centerCol, hall.vertices)) {
+          return hall.id;
+        }
+      }
     }
   }
-  return null;
+
+  // 3. blockNames フォールバック
+  return resolveHallByBlockName(item.block, halls);
 }
 
 /**
@@ -78,28 +86,36 @@ function findItemHallIdByCell(
   halls: HallDefinition[],
   mapData: DayMapData | undefined,
 ): string | null {
-  if (!mapData || halls.length === 0) return null;
+  // 1. 手動ホール設定が有効なら最優先
+  const manual = resolveManualHallId(item.manualHallId, halls);
+  if (manual) return manual;
 
-  const block = mapData.blocks.find((b) => b.name === item.block);
-  if (!block) return null;
-
-  const numMatch = item.number?.match(/\d+/);
-  if (!numMatch) return null;
-  const num = parseInt(numMatch[0], 10);
-  const cell = block.numberCells.find((nc) => nc.value === num);
-  if (!cell) return null;
-
-  for (const hall of halls) {
-    if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
-      return hall.id;
-    }
-    for (const vertex of hall.vertices) {
-      if (vertex.row === cell.row && vertex.col === cell.col) {
-        return hall.id;
+  // 2. 既存のnumberセル位置によるポリゴン判定
+  if (mapData && halls.length > 0) {
+    const block = mapData.blocks.find((b) => b.name === item.block);
+    if (block) {
+      const numMatch = item.number?.match(/\d+/);
+      if (numMatch) {
+        const num = parseInt(numMatch[0], 10);
+        const cell = block.numberCells.find((nc) => nc.value === num);
+        if (cell) {
+          for (const hall of halls) {
+            if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
+              return hall.id;
+            }
+            for (const vertex of hall.vertices) {
+              if (vertex.row === cell.row && vertex.col === cell.col) {
+                return hall.id;
+              }
+            }
+          }
+        }
       }
     }
   }
-  return null;
+
+  // 3. blockNames フォールバック
+  return resolveHallByBlockName(item.block, halls);
 }
 
 // ────────────────────────────────────────────────

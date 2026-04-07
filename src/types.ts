@@ -37,6 +37,7 @@ export interface ShoppingItem {
   lastSyncedAt?: string; // 最終同期タイムスタンプ
   orderIndex?: number; // 共有ルームでの巡回順インデックス
   postponed?: boolean; // 後回しフラグ（共有同期用）
+  manualHallId?: string; // 手動ホール設定（複数ホール所属ブロック用）
 }
 
 export type ViewMode = 'edit' | 'execute' | 'focus';
@@ -358,13 +359,18 @@ export const MAX_ZOOM = 200;
 
 // ===== ホール（表示エリア）定義用の型 =====
 
+// マップ未登録時のホール定義用の特殊キー
+export const MAPLESS_HALL_KEY = '__mapless__';
+
 // ホール定義（多角形エリア）
 export interface HallDefinition {
   id: string;
   name: string;
-  // 頂点座標（クリック順に結ぶ、4-6個）
+  // 頂点座標（クリック順に結ぶ、4-6個）。マップなしホールでは空配列
   vertices: { row: number; col: number }[];
   color?: string;
+  // マップなしモード用：所属ブロック名リスト
+  blockNames?: string[];
 }
 
 // ホールごとの訪問先リスト

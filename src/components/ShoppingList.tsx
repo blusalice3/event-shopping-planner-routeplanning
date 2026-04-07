@@ -2,6 +2,7 @@ import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react'
 import ReactDOM from 'react-dom';
 import { ShoppingItem, HallDefinition, DayMapData, BlockDefinition, PurchaseStatus } from '../types';
 import { getSpaceKey, getBaseNumber, getStatusSummaryText } from '../utils/spaceGrouping';
+import { resolveHallByBlockName, resolveManualHallId } from '../utils/hallFallback';
 import ShoppingItemCard from './ShoppingItemCard';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 import ChevronUpIcon from './icons/ChevronUpIcon';
@@ -149,51 +150,59 @@ const getHallIdForItemHelper = (
   mapData: DayMapData | null,
   hallDefinitions: HallDefinition[],
 ): string | null => {
-  if (!mapData) return null;
+  // 1. 手動ホール設定が有効なら最優先
+  const manual = resolveManualHallId(item.manualHallId, hallDefinitions);
+  if (manual) return manual;
 
-  const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
-  if (!block) return null;
+  // 2. 既存のnumberセル位置によるポリゴン判定
+  if (mapData) {
+    const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
+    if (block) {
+      const numMatch = item.number?.match(/\d+/);
+      if (numMatch) {
+        const num = parseInt(numMatch[0], 10);
 
-  const numMatch = item.number?.match(/\d+/);
-  if (!numMatch) return null;
-  const num = parseInt(numMatch[0], 10);
+        const cell = block.numberCells.find(
+          (nc: { row: number; col: number; value: number }) => nc.value === num,
+        );
+        if (cell) {
+          // 多角形内判定（レイキャスティング法）
+          const isPointInPoly = (
+            row: number,
+            col: number,
+            vertices: { row: number; col: number }[],
+          ): boolean => {
+            if (vertices.length < 3) return false;
+            let inside = false;
+            for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+              const xi = vertices[i].col,
+                yi = vertices[i].row;
+              const xj = vertices[j].col,
+                yj = vertices[j].row;
+              if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
+                inside = !inside;
+              }
+            }
+            return inside;
+          };
 
-  const cell = block.numberCells.find(
-    (nc: { row: number; col: number; value: number }) => nc.value === num,
-  );
-  if (!cell) return null;
-
-  // 多角形内判定（レイキャスティング法）
-  const isPointInPoly = (
-    row: number,
-    col: number,
-    vertices: { row: number; col: number }[],
-  ): boolean => {
-    if (vertices.length < 3) return false;
-    let inside = false;
-    for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-      const xi = vertices[i].col,
-        yi = vertices[i].row;
-      const xj = vertices[j].col,
-        yj = vertices[j].row;
-      if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
-        inside = !inside;
+          for (const hall of hallDefinitions) {
+            for (const vertex of hall.vertices) {
+              if (vertex.row === cell.row && vertex.col === cell.col) {
+                return hall.id;
+              }
+            }
+            if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
+              return hall.id;
+            }
+          }
+        }
       }
-    }
-    return inside;
-  };
-
-  for (const hall of hallDefinitions) {
-    for (const vertex of hall.vertices) {
-      if (vertex.row === cell.row && vertex.col === cell.col) {
-        return hall.id;
-      }
-    }
-    if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
-      return hall.id;
     }
   }
-  return null;
+
+  // 3. blockNames フォールバック
+  return resolveHallByBlockName(item.block, hallDefinitions);
 };
 
 // Constants for drag-and-drop auto-scrolling

@@ -13,6 +13,7 @@ import {
 import FocusModeMapCanvas from './FocusModeMapCanvas';
 import { FocusModeHeader, FocusModeItemList, FocusModeMapControls } from './focus/FocusModePanels';
 import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
+import { resolveHallByBlockName, resolveManualHallId } from '../utils/hallFallback';
 import { generateRouteSegments, simplifyPath } from '../utils/pathfinding';
 
 // フェーズの定義
@@ -250,41 +251,52 @@ const FocusMode: React.FC<FocusModeProps> = ({
       .filter((item): item is ShoppingItem => item !== undefined);
 
     // hallGroupsと同じ4段階ロジックで並べ替え
-    if (!hallDefinitions || hallDefinitions.length === 0 || !mapData) return rawItems;
+    if (!hallDefinitions || hallDefinitions.length === 0) return rawItems;
 
     // mapDataからDayMapDataを取得（最初のアイテムのeventDateから特定）
     const firstItem = rawItems[0];
     if (!firstItem) return rawItems;
-    const dayMapData = mapData[`${firstItem.eventDate}マップ`] || null;
-    if (!dayMapData) return rawItems;
+    const dayMapData = mapData ? mapData[`${firstItem.eventDate}マップ`] || null : null;
 
     // アイテムのホールIDを取得するヘルパー
     const getHallId = (item: ShoppingItem): string | null => {
-      const block = dayMapData.blocks.find((b) => b.name === item.block);
-      if (!block) return null;
-      const numMatch = item.number?.match(/\d+/);
-      if (!numMatch) return null;
-      const num = parseInt(numMatch[0], 10);
-      const cell = block.numberCells.find(
-        (nc: { row: number; col: number; value: number }) => nc.value === num,
-      );
-      if (!cell) return null;
-      for (const hall of hallDefinitions) {
-        for (const vertex of hall.vertices) {
-          if (vertex.row === cell.row && vertex.col === cell.col) return hall.id;
-        }
-        // 多角形内判定
-        let inside = false;
-        for (let i = 0, j = hall.vertices.length - 1; i < hall.vertices.length; j = i++) {
-          const xi = hall.vertices[i].col, yi = hall.vertices[i].row;
-          const xj = hall.vertices[j].col, yj = hall.vertices[j].row;
-          if (yi > cell.row !== yj > cell.row && cell.col < ((xj - xi) * (cell.row - yi)) / (yj - yi) + xi) {
-            inside = !inside;
+      // 1. 手動ホール設定が有効なら最優先
+      const manual = resolveManualHallId(item.manualHallId, hallDefinitions);
+      if (manual) return manual;
+
+      // 2. 既存のnumberセル位置によるポリゴン判定
+      if (dayMapData) {
+        const block = dayMapData.blocks.find((b) => b.name === item.block);
+        if (block) {
+          const numMatch = item.number?.match(/\d+/);
+          if (numMatch) {
+            const num = parseInt(numMatch[0], 10);
+            const cell = block.numberCells.find(
+              (nc: { row: number; col: number; value: number }) => nc.value === num,
+            );
+            if (cell) {
+              for (const hall of hallDefinitions) {
+                for (const vertex of hall.vertices) {
+                  if (vertex.row === cell.row && vertex.col === cell.col) return hall.id;
+                }
+                // 多角形内判定
+                let inside = false;
+                for (let i = 0, j = hall.vertices.length - 1; i < hall.vertices.length; j = i++) {
+                  const xi = hall.vertices[i].col, yi = hall.vertices[i].row;
+                  const xj = hall.vertices[j].col, yj = hall.vertices[j].row;
+                  if (yi > cell.row !== yj > cell.row && cell.col < ((xj - xi) * (cell.row - yi)) / (yj - yi) + xi) {
+                    inside = !inside;
+                  }
+                }
+                if (inside) return hall.id;
+              }
+            }
           }
         }
-        if (inside) return hall.id;
       }
-      return null;
+
+      // 3. blockNames フォールバック
+      return resolveHallByBlockName(item.block, hallDefinitions);
     };
 
     const buildGroupId = (hallId: string | null, priority: string): string | null => {

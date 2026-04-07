@@ -21,6 +21,8 @@ import {
   MapViewportSettingsStore,
   MapViewportState,
 } from './types';
+import { MAPLESS_HALL_KEY } from './types';
+import { resolveHallByBlockName, resolveManualHallId, findHallsByBlockName } from './utils/hallFallback';
 const ImportScreen = React.lazy(() => import('./components/ImportScreen'));
 import ShoppingList from './components/ShoppingList';
 import SummaryBar from './components/SummaryBar';
@@ -40,6 +42,7 @@ import {
   MapView,
   BlockDefinitionPanel,
   HallDefinitionPanel,
+  SimpleHallDefinitionPanel,
   isPointInPolygon,
   MapImportDialog,
   loadBlockDetectionSettings,
@@ -304,6 +307,7 @@ const App: React.FC = () => {
   const [routeSettings, setRouteSettings] = useState<RouteSettingsStore>({});
   const [hallDefinitions, setHallDefinitions] = useState<HallDefinitionsStore>({});
   const [hallRouteSettings, setHallRouteSettings] = useState<HallRouteSettingsStore>({});
+  const [simpleHallDefinitionMode, setSimpleHallDefinitionMode] = useState(false);
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [exportEventName, setExportEventName] = useState<string | null>(null);
   const mapFileInputRef = useRef<HTMLInputElement>(null);
@@ -441,23 +445,29 @@ const App: React.FC = () => {
   const getItemHallId = useCallback(
     (item: ShoppingItem, eventDate: string): string | null => {
       const halls = getHallsForDate(eventDate);
+      if (!halls.length) return null;
+
+      // 1. 手動ホール設定が有効なら最優先
+      const manual = resolveManualHallId(item.manualHallId, halls);
+      if (manual) return manual;
+
+      // 2. 既存のポリゴン判定
       const mapDataForDate = getMapDataForDate(eventDate);
-      if (!halls.length || !mapDataForDate) return null;
-
-
-      const block = mapDataForDate.blocks.find((b) => b.name === item.block);
-      if (!block) return null;
-
-      const centerRow = (block.startRow + block.endRow) / 2;
-      const centerCol = (block.startCol + block.endCol) / 2;
-
-
-      for (const hall of halls) {
-        if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
-          return hall.id;
+      if (mapDataForDate) {
+        const block = mapDataForDate.blocks.find((b) => b.name === item.block);
+        if (block) {
+          const centerRow = (block.startRow + block.endRow) / 2;
+          const centerCol = (block.startCol + block.endCol) / 2;
+          for (const hall of halls) {
+            if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
+              return hall.id;
+            }
+          }
         }
       }
-      return null;
+
+      // 3. blockNames フォールバック
+      return resolveHallByBlockName(item.block, halls);
     },
     [getHallsForDate, getMapDataForDate],
   );
@@ -2075,51 +2085,59 @@ const App: React.FC = () => {
       const currentMapData = getMapDataForDate(currentEventDate);
 
 
-      if (halls.length > 0 && currentMapData) {
+      if (halls.length > 0) {
         const getHallIdForItem = (item: ShoppingItem): string | null => {
-          const block = currentMapData.blocks.find((b) => b.name === item.block);
-          if (!block) return null;
+          // 1. 手動ホール設定が有効なら最優先
+          const manual = resolveManualHallId(item.manualHallId, halls);
+          if (manual) return manual;
 
-          const numMatch = item.number?.match(/\d+/);
-          if (!numMatch) return null;
-          const num = parseInt(numMatch[0], 10);
+          // 2. 既存のnumberセル位置によるポリゴン判定（mapDataが存在する場合）
+          if (currentMapData) {
+            const block = currentMapData.blocks.find((b) => b.name === item.block);
+            if (block) {
+              const numMatch = item.number?.match(/\d+/);
+              if (numMatch) {
+                const num = parseInt(numMatch[0], 10);
+                const cell = block.numberCells.find(
+                  (nc: { row: number; col: number; value: number }) => nc.value === num,
+                );
+                if (cell) {
+                  const isPointInPoly = (
+                    row: number,
+                    col: number,
+                    vertices: { row: number; col: number }[],
+                  ): boolean => {
+                    if (vertices.length < 3) return false;
+                    let inside = false;
+                    for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
+                      const xi = vertices[i].col,
+                        yi = vertices[i].row;
+                      const xj = vertices[j].col,
+                        yj = vertices[j].row;
+                      if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
+                        inside = !inside;
+                      }
+                    }
+                    return inside;
+                  };
 
-          const cell = block.numberCells.find(
-            (nc: { row: number; col: number; value: number }) => nc.value === num,
-          );
-          if (!cell) return null;
-
-
-          const isPointInPoly = (
-            row: number,
-            col: number,
-            vertices: { row: number; col: number }[],
-          ): boolean => {
-            if (vertices.length < 3) return false;
-            let inside = false;
-            for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-              const xi = vertices[i].col,
-                yi = vertices[i].row;
-              const xj = vertices[j].col,
-                yj = vertices[j].row;
-              if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
-                inside = !inside;
+                  for (const hall of halls) {
+                    for (const vertex of hall.vertices) {
+                      if (vertex.row === cell.row && vertex.col === cell.col) {
+                        return hall.id;
+                      }
+                    }
+                    if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
+                      return hall.id;
+                    }
+                  }
+                }
               }
-            }
-            return inside;
-          };
-
-          for (const hall of halls) {
-            for (const vertex of hall.vertices) {
-              if (vertex.row === cell.row && vertex.col === cell.col) {
-                return hall.id;
-              }
-            }
-            if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
-              return hall.id;
             }
           }
-          return null;
+
+          // 3. blockNames フォールバック
+          return resolveHallByBlockName(item.block, halls);
         };
 
 
@@ -3417,6 +3435,44 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, currentMapTabName],
   );
 
+  // マップなしホール定義の更新ハンドラ
+  const handleUpdateMaplessHalls = useCallback(
+    (halls: HallDefinition[]) => {
+      if (!activeEventName) return;
+
+      setHallDefinitions((prev) => ({
+        ...prev,
+        [activeEventName]: {
+          ...prev[activeEventName],
+          [MAPLESS_HALL_KEY]: halls,
+        },
+      }));
+
+      // hallRouteSettingsのhallOrderも同期
+      const existingSettings = hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY] || {
+        hallOrder: [],
+        hallVisitLists: [],
+      };
+      const newHallIds = halls.map((h) => h.id);
+      const updatedOrder = [
+        ...existingSettings.hallOrder.filter((id) => newHallIds.includes(id)),
+        ...newHallIds.filter((id) => !existingSettings.hallOrder.includes(id)),
+      ];
+
+      setHallRouteSettings((prev) => ({
+        ...prev,
+        [activeEventName]: {
+          ...prev[activeEventName],
+          [MAPLESS_HALL_KEY]: {
+            ...existingSettings,
+            hallOrder: updatedOrder,
+          },
+        },
+      }));
+    },
+    [activeEventName, hallRouteSettings],
+  );
+
 
   const handleReorderExecuteListByHallOrder = useCallback(
     (hallOrder: string[]) => {
@@ -3426,13 +3482,15 @@ const App: React.FC = () => {
       const dayName = activeEventDate;
 
       const currentMapData = mapData[activeEventName]?.[currentMapTabName];
-      const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+      const mapHalls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+      const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+      const halls = [...mapHalls, ...maplessHalls];
       const currentHallRouteSettings = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
         hallOrder: [],
         hallVisitLists: [],
       };
 
-      if (!currentMapData || halls.length === 0) return;
+      if (halls.length === 0) return;
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -3444,32 +3502,40 @@ const App: React.FC = () => {
         const itemsMap = new Map(items.map((i) => [i.id, i]));
         const getHallIdForItem = (itemId: string): string | null => {
           const item = itemsMap.get(itemId);
-          if (!item || !currentMapData) return null;
+          if (!item) return null;
 
-          const blockName = item.block?.trim() || '';
-          let block = currentMapData.blocks.find((b) => b.name === blockName);
-          if (!block) {
-            const candidates = currentMapData.blocks.filter(
-              (b) => b.name.toLowerCase() === blockName.toLowerCase(),
-            );
-            if (candidates.length === 1) {
-              block = candidates[0];
+          // 1. 手動ホール設定が有効なら最優先
+          const manual = resolveManualHallId(item.manualHallId, halls);
+          if (manual) return manual;
+
+          // 2. 既存のポリゴン判定
+          if (currentMapData) {
+            const blockName = item.block?.trim() || '';
+            let block = currentMapData.blocks.find((b) => b.name === blockName);
+            if (!block) {
+              const candidates = currentMapData.blocks.filter(
+                (b) => b.name.toLowerCase() === blockName.toLowerCase(),
+              );
+              if (candidates.length === 1) {
+                block = candidates[0];
+              }
+            }
+            if (block) {
+              const centerRow = (block.startRow + block.endRow) / 2;
+              const centerCol = (block.startCol + block.endCol) / 2;
+              for (const hall of halls) {
+                if (
+                  hall.vertices.length >= 4 &&
+                  isPointInPolygon(centerRow, centerCol, hall.vertices)
+                ) {
+                  return hall.id;
+                }
+              }
             }
           }
-          if (!block) return null;
 
-          const centerRow = (block.startRow + block.endRow) / 2;
-          const centerCol = (block.startCol + block.endCol) / 2;
-
-          for (const hall of halls) {
-            if (
-              hall.vertices.length >= 4 &&
-              isPointInPolygon(centerRow, centerCol, hall.vertices)
-            ) {
-              return hall.id;
-            }
-          }
-          return null;
+          // 3. blockNames フォールバック
+          return resolveHallByBlockName(item.block, halls);
         };
 
 
@@ -3922,6 +3988,26 @@ const App: React.FC = () => {
     });
   }, [activeEventName, activeTab, executeModeItems, currentTabItems, eventDates]);
 
+  // ホール定義用: 当該日付の全アイテムからブロック名一覧を取得（実行列・候補列を問わず）
+  const allBlocksForHallDefinition = useMemo(() => {
+    if (!activeEventName) return [];
+    const blocks = new Set(currentTabItems.map((item) => item.block).filter(Boolean));
+    return Array.from(blocks).sort((a, b) => {
+      const numA = Number(a);
+      const numB = Number(b);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return numA - numB;
+      }
+      return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
+    });
+  }, [activeEventName, currentTabItems]);
+
+  // 現在のイベントのマップなしホール一覧
+  const currentMaplessHalls = useMemo(() => {
+    if (!activeEventName) return [];
+    return hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+  }, [activeEventName, hallDefinitions]);
+
   const candidateColumnItems = useMemo(() => {
     if (!activeEventName) return [];
     const currentEventDate = activeEventDate;
@@ -4131,6 +4217,28 @@ const App: React.FC = () => {
                         )}
                       </button>
                     )}
+                  {activeEventName && mainContentVisible && (
+                    <button
+                      onClick={() => setSimpleHallDefinitionMode(true)}
+                      className="p-2 rounded-md bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400 transition-colors duration-200"
+                      title="ホール定義（ブロック割当）"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        className="w-5 h-5"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"
+                        />
+                      </svg>
+                    </button>
+                  )}
                   {activeEventName &&
                     mainContentVisible &&
                     getMapTabForDate(activeEventDate || '') && (
@@ -5314,6 +5422,7 @@ const App: React.FC = () => {
         <ItemEditDialog
           item={editDialogItem}
           allItems={items}
+          halls={getHallsForDate(editDialogItem.eventDate)}
           onSave={(updatedItem) => {
             handleUpdateItem(updatedItem);
             setEditDialogItem(null);
@@ -5470,6 +5579,17 @@ const App: React.FC = () => {
             </button>
           </div>
         </div>
+      )}
+
+      {/* マップなしホール定義パネル */}
+      {simpleHallDefinitionMode && (
+        <SimpleHallDefinitionPanel
+          isOpen={simpleHallDefinitionMode}
+          onClose={() => setSimpleHallDefinitionMode(false)}
+          halls={currentMaplessHalls}
+          onUpdateHalls={handleUpdateMaplessHalls}
+          availableBlocks={allBlocksForHallDefinition}
+        />
       )}
 
       {/* 表示処理の補足 */}
