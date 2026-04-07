@@ -3306,11 +3306,33 @@ const App: React.FC = () => {
 
   const handleUpdateItemPriorityFromEdit = useCallback(
     (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
-      if (!activeEventName || !currentMapTabName) return;
+      if (!activeEventName) return;
 
-      const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
-      const mapDataForTab = mapData[activeEventName]?.[currentMapTabName];
-      const currentSettings = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
+      const item = items.find((i) => i.id === itemId);
+      if (!item) return;
+
+      // 統合ホール判定でアイテムの所属ホールを解決（manualHallId → polygon → blockNames）
+      const resolvedHallId = getItemHallId(item, item.eventDate);
+
+      // 解決されたホールが map タブ側か mapless 側かを判定して保存先を決定
+      const mapTabForItem = getMapTabForDate(item.eventDate);
+      const mapHallIds = new Set(
+        mapTabForItem
+          ? (hallDefinitions[activeEventName]?.[mapTabForItem] || []).map((h) => h.id)
+          : [],
+      );
+      const targetKey: string =
+        resolvedHallId && mapHallIds.has(resolvedHallId)
+          ? (mapTabForItem as string)
+          : MAPLESS_HALL_KEY;
+
+      // 対象ストアの halls / mapData / settings を取得
+      const targetHalls = hallDefinitions[activeEventName]?.[targetKey] || [];
+      const targetMapData =
+        targetKey === MAPLESS_HALL_KEY
+          ? undefined
+          : mapData[activeEventName]?.[targetKey];
+      const targetSettings = hallRouteSettings[activeEventName]?.[targetKey] || {
         hallOrder: [],
         hallVisitLists: [],
       };
@@ -3319,9 +3341,9 @@ const App: React.FC = () => {
         itemId,
         priorityLevel,
         items,
-        halls,
-        mapDataForTab,
-        currentSettings,
+        targetHalls,
+        targetMapData,
+        targetSettings,
       );
 
       setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
@@ -3329,11 +3351,19 @@ const App: React.FC = () => {
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
-          [currentMapTabName]: result.hallRouteSettings,
+          [targetKey]: result.hallRouteSettings,
         },
       }));
     },
-    [activeEventName, currentMapTabName, items, hallDefinitions, mapData, hallRouteSettings],
+    [
+      activeEventName,
+      items,
+      hallDefinitions,
+      mapData,
+      hallRouteSettings,
+      getItemHallId,
+      getMapTabForDate,
+    ],
   );
 
   const handleTabChangeWithVisitListCheck = (newTab: string): boolean => {
@@ -3516,14 +3546,67 @@ const App: React.FC = () => {
         ? maplessSettings.hallOrder
         : maplessHalls.map((h) => h.id);
 
+    const mergedOrder = [...mapOrder, ...maplessOrder];
+
+    // ===== 動的注入: ストアに無い優先度グループをアイテムから計算して補完 =====
+    // 現在日付の実行列アイテムから各アイテムの effective hallId + priority を取得し、
+    // 不足している "hallId:priority" / "hallId:highest" エントリをベース hallId 直後に挿入
+    if (activeEventDate) {
+      const executeIds = executeModeItems[activeEventName]?.[activeEventDate] || [];
+      // 優先度を持つアイテムを走査して必要な groupId 集合を生成
+      const neededGroups = new Map<string, 'priority' | 'highest'>();
+      executeIds.forEach((itemId) => {
+        const item = items.find((i) => i.id === itemId);
+        if (!item) return;
+        const priority = item.priorityLevel;
+        if (priority !== 'priority' && priority !== 'highest') return;
+        const hallId = getItemHallId(item, item.eventDate);
+        const groupId = hallId === null
+          ? (priority === 'highest' ? 'undefined:highest' : 'undefined:priority')
+          : `${hallId}:${priority}`;
+        // 'highest' は既存の 'priority' を上書きしないようにMap を使う
+        if (!neededGroups.has(groupId)) {
+          neededGroups.set(groupId, priority);
+        }
+      });
+
+      // 既存エントリに無いものだけ、ベース hallId の直後（または末尾）に挿入
+      neededGroups.forEach((_priority, groupId) => {
+        if (mergedOrder.includes(groupId)) return;
+        const baseHallId = groupId.replace(/:(highest|priority)$/, '');
+        const baseIndex = mergedOrder.indexOf(baseHallId);
+        if (baseIndex >= 0) {
+          // highest → priority → base の順になるよう、highest は baseIndex 直後、
+          // priority はその後ろに挿入
+          const insertAt = groupId.endsWith(':highest')
+            ? baseIndex + 1
+            : baseIndex + 1 +
+              (mergedOrder.includes(`${baseHallId}:highest`) ? 1 : 0);
+          mergedOrder.splice(insertAt, 0, groupId);
+        } else {
+          // ベース hallId が見つからない（null ホール等）場合は末尾に追加
+          mergedOrder.push(groupId);
+        }
+      });
+    }
+
     return {
-      hallOrder: [...mapOrder, ...maplessOrder],
+      hallOrder: mergedOrder,
       hallVisitLists: [
         ...(mapSettings?.hallVisitLists || []),
         ...(maplessSettings?.hallVisitLists || []),
       ],
     };
-  }, [activeEventName, globalHallOrderMapTabName, hallDefinitions, hallRouteSettings]);
+  }, [
+    activeEventName,
+    activeEventDate,
+    globalHallOrderMapTabName,
+    hallDefinitions,
+    hallRouteSettings,
+    executeModeItems,
+    items,
+    getItemHallId,
+  ]);
 
   // 統合順序の保存: hallIDごとにmap側/mapless側を判別して分離保存
   const handleUpdateGlobalHallRouteSettings = useCallback(
