@@ -3516,10 +3516,13 @@ const App: React.FC = () => {
   // マップ/maplessの両方を統合したホール一覧
   const globalHallOrderHalls = useMemo((): HallDefinition[] => {
     if (!activeEventName) return [];
-    const mapHalls = globalHallOrderMapTabName
+    const hasMap = !!globalHallOrderMapTabName;
+    const mapHalls = hasMap
       ? hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []
       : [];
-    const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+    const maplessHalls = hasMap
+      ? []
+      : hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
     return [...mapHalls, ...maplessHalls];
   }, [activeEventName, globalHallOrderMapTabName, hallDefinitions]);
 
@@ -3527,15 +3530,20 @@ const App: React.FC = () => {
   const globalHallOrderRouteSettings = useMemo((): HallRouteSettings => {
     if (!activeEventName) return { hallOrder: [], hallVisitLists: [] };
 
-    const mapHalls = globalHallOrderMapTabName
+    const hasMap = !!globalHallOrderMapTabName;
+    const mapHalls = hasMap
       ? hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []
       : [];
-    const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+    const maplessHalls = hasMap
+      ? []
+      : hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
 
-    const mapSettings = globalHallOrderMapTabName
+    const mapSettings = hasMap
       ? hallRouteSettings[activeEventName]?.[globalHallOrderMapTabName]
       : undefined;
-    const maplessSettings = hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY];
+    const maplessSettings = hasMap
+      ? undefined
+      : hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY];
 
     const mapOrder =
       mapSettings?.hallOrder && mapSettings.hallOrder.length > 0
@@ -4479,7 +4487,7 @@ const App: React.FC = () => {
                         )}
                       </button>
                     )}
-                  {activeEventName && mainContentVisible && (
+                  {activeEventName && mainContentVisible && !globalHallOrderMapTabName && (
                     <button
                       onClick={() => setSimpleHallDefinitionMode(true)}
                       className="p-2 rounded-md bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400 transition-colors duration-200"
