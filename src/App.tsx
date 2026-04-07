@@ -346,6 +346,50 @@ const App: React.FC = () => {
     },
   });
 
+  // 過去バグで mapTab 側に混入した mapless ホール (vertices 空 + blockNames 有) を
+  // MAPLESS_HALL_KEY 側に寄せ直す一度きりのマイグレーション。
+  const hallDefinitionsMigratedRef = useRef(false);
+  useEffect(() => {
+    if (!isInitialized || hallDefinitionsMigratedRef.current) return;
+    hallDefinitionsMigratedRef.current = true;
+
+    setHallDefinitions((prev) => {
+      let changed = false;
+      const next: HallDefinitionsStore = {};
+      for (const eventName of Object.keys(prev)) {
+        const byTab = { ...prev[eventName] };
+        const maplessById = new Map<string, HallDefinition>();
+        for (const h of byTab[MAPLESS_HALL_KEY] ?? []) {
+          maplessById.set(h.id, h);
+        }
+        for (const tabName of Object.keys(byTab)) {
+          if (tabName === MAPLESS_HALL_KEY) continue;
+          const original = byTab[tabName] || [];
+          const keep: HallDefinition[] = [];
+          for (const h of original) {
+            const isMapless =
+              (!h.vertices || h.vertices.length < 4) && !!h.blockNames?.length;
+            if (isMapless) {
+              if (!maplessById.has(h.id)) maplessById.set(h.id, h);
+              changed = true;
+            } else {
+              keep.push(h);
+            }
+          }
+          if (keep.length !== original.length) {
+            byTab[tabName] = keep;
+          }
+        }
+        const newMapless = Array.from(maplessById.values());
+        const prevMapless = byTab[MAPLESS_HALL_KEY] ?? [];
+        if (newMapless.length !== prevMapless.length) changed = true;
+        byTab[MAPLESS_HALL_KEY] = newMapless;
+        next[eventName] = byTab;
+      }
+      return changed ? next : prev;
+    });
+  }, [isInitialized]);
+
   const items = useMemo(
     () => (activeEventName ? eventLists[activeEventName] || [] : []),
     [activeEventName, eventLists],
@@ -3421,34 +3465,66 @@ const App: React.FC = () => {
     (halls: HallDefinition[]) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
 
+      // vertices を持たず blockNames を持つホールは mapless 側の定義
+      // (従来パネルは両者をマージした配列を受け取るため、
+      //  永続化時にキーを振り分けて相互汚染を防ぐ)
+      const isMaplessHall = (h: HallDefinition) =>
+        (!h.vertices || h.vertices.length < 4) && !!h.blockNames?.length;
+      const polygonHalls = halls.filter((h) => !isMaplessHall(h));
+      const maplessHalls = halls.filter(isMaplessHall);
+
       setHallDefinitions((prev) => ({
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
-          [currentMapTabName]: halls,
+          [currentMapTabName]: polygonHalls,
+          [MAPLESS_HALL_KEY]: maplessHalls,
         },
       }));
 
-
-      const existingOrder = currentHallRouteSettings.hallOrder;
-      const newHallIds = halls.map((h) => h.id);
-      const updatedOrder = [
-        ...existingOrder.filter((id) => newHallIds.includes(id)),
-        ...newHallIds.filter((id) => !existingOrder.includes(id)),
+      // polygon ホールの順序: mapタブ側の既存順序を維持
+      const existingPolygonOrder =
+        hallRouteSettings[activeEventName]?.[currentMapTabName]?.hallOrder || [];
+      const polygonIds = polygonHalls.map((h) => h.id);
+      const updatedPolygonOrder = [
+        ...existingPolygonOrder.filter((id) => polygonIds.includes(id)),
+        ...polygonIds.filter((id) => !existingPolygonOrder.includes(id)),
       ];
 
-      setHallRouteSettings((prev) => ({
-        ...prev,
-        [activeEventName]: {
-          ...prev[activeEventName],
-          [currentMapTabName]: {
-            ...currentHallRouteSettings,
-            hallOrder: updatedOrder,
+      // mapless ホールの順序: MAPLESS_HALL_KEY 側の既存順序を維持
+      const existingMaplessSettings = hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY] || {
+        hallOrder: [],
+        hallVisitLists: [],
+      };
+      const maplessIds = maplessHalls.map((h) => h.id);
+      const updatedMaplessOrder = [
+        ...existingMaplessSettings.hallOrder.filter((id) => maplessIds.includes(id)),
+        ...maplessIds.filter((id) => !existingMaplessSettings.hallOrder.includes(id)),
+      ];
+
+      setHallRouteSettings((prev) => {
+        const prevEvent = prev[activeEventName] || {};
+        const prevMapTab = prevEvent[currentMapTabName] || {
+          hallOrder: [],
+          hallVisitLists: [],
+        };
+        return {
+          ...prev,
+          [activeEventName]: {
+            ...prevEvent,
+            [currentMapTabName]: {
+              ...prevMapTab,
+              hallOrder: updatedPolygonOrder,
+            },
+            [MAPLESS_HALL_KEY]: {
+              ...existingMaplessSettings,
+              hallOrder: updatedMaplessOrder,
+            },
           },
-        },
-      }));
+        };
+      });
     },
-    [activeEventName, isMapTab, currentMapTabName, currentHallRouteSettings],
+    [activeEventName, isMapTab, currentMapTabName, hallRouteSettings],
   );
 
 

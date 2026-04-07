@@ -3,16 +3,31 @@ import type { HallDefinition } from '../types';
 /**
  * ブロック名を正規化（trim + NFKC + lowercase）
  */
-function normalizeBlockName(name: string): string {
+export function normalizeBlockName(name: string): string {
   return name.trim().normalize('NFKC').toLowerCase();
+}
+
+/**
+ * 同一 id のホールを排除（先に現れたものを優先）。
+ */
+function dedupeHallsById(halls: HallDefinition[]): HallDefinition[] {
+  const seen = new Set<string>();
+  const result: HallDefinition[] = [];
+  for (const h of halls) {
+    if (seen.has(h.id)) continue;
+    seen.add(h.id);
+    result.push(h);
+  }
+  return result;
 }
 
 /**
  * ブロック名によるホール判定フォールバック。
  * ホールの `blockNames` に `blockName` が含まれるホールを検索する。
- * - 1件一致 → そのホールID
- * - 複数一致 → null（曖昧のため手動設定が必要）
+ * - 1件以上一致 → 最初に見つかったホールID
  * - 0件 → null
+ * 入力ホールは id で dedupe するため、過去の不整合データで同一ホールが
+ * 複数キーに存在しても安全に解決できる。
  */
 export function resolveHallByBlockName(
   blockName: string | undefined,
@@ -20,10 +35,11 @@ export function resolveHallByBlockName(
 ): string | null {
   if (!blockName) return null;
   const normalized = normalizeBlockName(blockName);
-  const matches = halls.filter((h) =>
+  const deduped = dedupeHallsById(halls);
+  const matches = deduped.filter((h) =>
     h.blockNames?.some((b) => normalizeBlockName(b) === normalized),
   );
-  return matches.length === 1 ? matches[0].id : null;
+  return matches.length > 0 ? matches[0].id : null;
 }
 
 /**
@@ -35,7 +51,7 @@ export function findHallsByBlockName(
 ): HallDefinition[] {
   if (!blockName) return [];
   const normalized = normalizeBlockName(blockName);
-  return halls.filter((h) =>
+  return dedupeHallsById(halls).filter((h) =>
     h.blockNames?.some((b) => normalizeBlockName(b) === normalized),
   );
 }

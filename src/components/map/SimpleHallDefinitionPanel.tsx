@@ -1,5 +1,6 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import type { HallDefinition } from '../../types';
+import { normalizeBlockName } from '../../utils/hallFallback';
 
 const HALL_COLORS = [
   '#FFE0B2',
@@ -84,11 +85,12 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
   const handleToggleBlock = useCallback((block: string) => {
     setEditing((prev) => {
       if (!prev) return prev;
-      const exists = prev.blockNames.includes(block);
+      const norm = normalizeBlockName(block);
+      const exists = prev.blockNames.some((b) => normalizeBlockName(b) === norm);
       return {
         ...prev,
         blockNames: exists
-          ? prev.blockNames.filter((b) => b !== block)
+          ? prev.blockNames.filter((b) => normalizeBlockName(b) !== norm)
           : [...prev.blockNames, block],
       };
     });
@@ -210,12 +212,16 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
                   </div>
                 ) : (
                   <div className="border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-200 dark:divide-slate-700 max-h-56 overflow-y-auto">
-                    {availableBlocks.map((block) => {
-                      const key = block.trim().normalize('NFKC').toLowerCase();
+                    {(() => {
+                      const normalizedSelected = new Set(
+                        editing.blockNames.map(normalizeBlockName),
+                      );
+                      return availableBlocks.map((block) => {
+                      const key = normalizeBlockName(block);
                       const otherHalls = (blockToHallsMap.get(key) || []).filter(
                         (h) => h.id !== editing.id,
                       );
-                      const checked = editing.blockNames.includes(block);
+                      const checked = normalizedSelected.has(key);
                       return (
                         <label
                           key={block}
@@ -249,7 +255,8 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
                           )}
                         </label>
                       );
-                    })}
+                    });
+                    })()}
                   </div>
                 )}
                 <p className="text-xs text-slate-500 mt-1.5">
