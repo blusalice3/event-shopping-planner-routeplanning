@@ -85,12 +85,13 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
   const handleToggleBlock = useCallback((block: string) => {
     setEditing((prev) => {
       if (!prev) return prev;
-      const norm = normalizeBlockName(block);
-      const exists = prev.blockNames.some((b) => normalizeBlockName(b) === norm);
+      // ブロック名は availableBlocks から厳密一致で追加/削除する。
+      // 大小文字違いの "E" と "e" を区別したいため正規化はしない。
+      const exists = prev.blockNames.includes(block);
       return {
         ...prev,
         blockNames: exists
-          ? prev.blockNames.filter((b) => normalizeBlockName(b) !== norm)
+          ? prev.blockNames.filter((b) => b !== block)
           : [...prev.blockNames, block],
       };
     });
@@ -213,15 +214,14 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
                 ) : (
                   <div className="border border-slate-200 dark:border-slate-700 rounded-lg divide-y divide-slate-200 dark:divide-slate-700 max-h-56 overflow-y-auto">
                     {(() => {
-                      const normalizedSelected = new Set(
-                        editing.blockNames.map(normalizeBlockName),
-                      );
+                      const selectedSet = new Set(editing.blockNames);
                       return availableBlocks.map((block) => {
                       const key = normalizeBlockName(block);
                       const otherHalls = (blockToHallsMap.get(key) || []).filter(
                         (h) => h.id !== editing.id,
                       );
-                      const checked = normalizedSelected.has(key);
+                      // 厳密一致: "E" と "e" は別ブロックとして扱う
+                      const checked = selectedSet.has(block);
                       return (
                         <label
                           key={block}
