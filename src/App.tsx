@@ -4579,7 +4579,7 @@ const App: React.FC = () => {
                         <path
                           strokeLinecap="round"
                           strokeLinejoin="round"
-                          d="M4 6h16M4 12h10M4 18h16M14 8l4-2-4-2M14 14l4-2-4-2"
+                          d="M2 12L12 6l10 6M4 12v6h16v-6"
                         />
                       </svg>
                     </button>
