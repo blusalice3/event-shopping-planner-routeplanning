@@ -3601,9 +3601,7 @@ const App: React.FC = () => {
     const mapHalls = hasMap
       ? hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []
       : [];
-    const maplessHalls = hasMap
-      ? []
-      : hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+    const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
     return [...mapHalls, ...maplessHalls];
   }, [activeEventName, globalHallOrderMapTabName, hallDefinitions]);
 
@@ -3615,16 +3613,12 @@ const App: React.FC = () => {
     const mapHalls = hasMap
       ? hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []
       : [];
-    const maplessHalls = hasMap
-      ? []
-      : hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+    const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
 
     const mapSettings = hasMap
       ? hallRouteSettings[activeEventName]?.[globalHallOrderMapTabName]
       : undefined;
-    const maplessSettings = hasMap
-      ? undefined
-      : hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY];
+    const maplessSettings = hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY];
 
     const mapOrder =
       mapSettings?.hallOrder && mapSettings.hallOrder.length > 0
