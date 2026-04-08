@@ -4568,7 +4568,7 @@ const App: React.FC = () => {
                         )}
                       </button>
                     )}
-                  {activeEventName && mainContentVisible && !globalHallOrderMapTabName && globalHallOrderHalls.length === 0 && (
+                  {activeEventName && mainContentVisible && !globalHallOrderMapTabName && (
                     <button
                       onClick={() => setSimpleHallDefinitionMode(true)}
                       className="p-2 rounded-md bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400 transition-colors duration-200"
@@ -4593,7 +4593,7 @@ const App: React.FC = () => {
                   {activeEventName &&
                     mainContentVisible &&
                     !mapViewActive &&
-                    globalHallOrderHalls.length > 0 && (
+                    (globalHallOrderMapTabName || globalHallOrderHalls.length > 0) && (
                       <button
                         onClick={() => setGlobalHallOrderPanelOpen(true)}
                         className="p-2 rounded-md bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400 transition-colors duration-200"
