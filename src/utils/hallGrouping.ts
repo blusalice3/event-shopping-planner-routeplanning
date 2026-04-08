@@ -209,16 +209,59 @@ export function groupItemsByHallOrder(
   hallDefinitions: HallDefinition[],
   hallOrder: string[],
 ): HallGroupResult[] {
+  // ホール定義なしでも、priorityLevel でアイテムを 3 バケット (highest / priority / none) に分離する。
+  // null バケット(通常)はキーを `null` のままにして既存の消費側 (`groupId ?? fallback`) と後方互換を保つ。
   if (hallDefinitions.length === 0) {
-    return [
-      {
-        groupId: null,
+    const noneBucket: ShoppingItem[] = [];
+    const priorityBucket: ShoppingItem[] = [];
+    const highestBucket: ShoppingItem[] = [];
+    items.forEach((item) => {
+      const p = item.priorityLevel || 'none';
+      if (p === 'highest') highestBucket.push(item);
+      else if (p === 'priority') priorityBucket.push(item);
+      else noneBucket.push(item);
+    });
+
+    // hallOrder に従って未定義系グループの順序を決定する
+    const emit = (gId: 'undefined' | 'undefined:priority' | 'undefined:highest') => {
+      const bucket =
+        gId === 'undefined:highest' ? highestBucket
+          : gId === 'undefined:priority' ? priorityBucket
+          : noneBucket;
+      if (bucket.length === 0) return null;
+      return {
+        groupId: (gId === 'undefined' ? null : gId) as string | null,
         hallId: null,
         hallName: null,
-        priority: 'none',
-        items: items.slice(),
-      },
-    ];
+        priority: (gId === 'undefined:highest' ? 'highest'
+          : gId === 'undefined:priority' ? 'priority'
+          : 'none') as PriorityLevel,
+        items: bucket,
+      };
+    };
+
+    const result: HallGroupResult[] = [];
+    const emitted = new Set<string>();
+    hallOrder.forEach((gId) => {
+      if (gId === 'undefined' || gId === 'undefined:priority' || gId === 'undefined:highest') {
+        if (emitted.has(gId)) return;
+        const g = emit(gId);
+        if (g) {
+          result.push(g);
+          emitted.add(gId);
+        }
+      }
+    });
+    // hallOrder に無いものは highest → priority → none の順で末尾追加
+    (['undefined:highest', 'undefined:priority', 'undefined'] as const).forEach((gId) => {
+      if (emitted.has(gId)) return;
+      const g = emit(gId);
+      if (g) {
+        result.push(g);
+        emitted.add(gId);
+      }
+    });
+    return result;
   }
 
   const hallMap = new Map<string, HallDefinition>();
@@ -229,18 +272,20 @@ export function groupItemsByHallOrder(
 
   // 1. hallOrderに従ってグループを追加
   hallOrder.forEach((groupId) => {
-    if (groups.has(groupId)) {
-      const { hallId, priority } = parseGroupId(groupId);
+    // hallOrder 内の 'undefined' は内部バケットキー `null` にマップする
+    const bucketKey: string | null = groupId === 'undefined' ? null : groupId;
+    if (groups.has(bucketKey)) {
+      const { hallId, priority } = parseGroupId(bucketKey);
       const hall = hallMap.get(hallId || '');
       result.push({
-        groupId,
+        groupId: bucketKey,
         hallId,
         hallName: hall?.name || null,
         hallColor: hall?.color || '#6366f1',
         priority,
-        items: groups.get(groupId)!,
+        items: groups.get(bucketKey)!,
       });
-      groups.delete(groupId);
+      groups.delete(bucketKey);
     }
   });
 
@@ -276,16 +321,84 @@ export function groupItemsByHallOrder(
       });
     });
 
-  // 4. ホール未定義（null）
+  // 4. ホール未定義（null）— priority 別に分離して追加
+  const undefinedBuckets: Record<PriorityLevel, ShoppingItem[]> = {
+    none: [],
+    priority: [],
+    highest: [],
+  };
   if (groups.has(null)) {
+    groups.get(null)!.forEach((item) => {
+      const p = (item.priorityLevel || 'none') as PriorityLevel;
+      undefinedBuckets[p].push(item);
+    });
+    groups.delete(null);
+  }
+  // 既に hallOrder で 'undefined:priority' 等が result に出現していないかチェックし、
+  // 未出現分だけ最優先 → 優先 → 通常の順で末尾に追加
+  const hasGroupId = (gid: string | null): boolean =>
+    result.some((g) => g.groupId === gid);
+  if (undefinedBuckets.highest.length && !hasGroupId('undefined:highest')) {
+    result.push({
+      groupId: 'undefined:highest',
+      hallId: null,
+      hallName: null,
+      priority: 'highest',
+      items: undefinedBuckets.highest,
+    });
+  }
+  if (undefinedBuckets.priority.length && !hasGroupId('undefined:priority')) {
+    result.push({
+      groupId: 'undefined:priority',
+      hallId: null,
+      hallName: null,
+      priority: 'priority',
+      items: undefinedBuckets.priority,
+    });
+  }
+  if (undefinedBuckets.none.length && !hasGroupId(null)) {
     result.push({
       groupId: null,
       hallId: null,
       hallName: null,
       priority: 'none',
-      items: groups.get(null)!,
+      items: undefinedBuckets.none,
     });
   }
 
   return result;
+}
+
+/**
+ * アイテム配列から実際に存在するグループ ID を列挙する。
+ * 未定義系グループは `'undefined' / 'undefined:priority' / 'undefined:highest'` という文字列キーで返す
+ * （hallOrder に格納可能な形）。通常ホール側は `<hallId>` or `<hallId>:priority` 等。
+ * HallOrderPanel で `hallRouteSettings.hallOrder` に未登録のグループを可視化するために使用する。
+ */
+export function collectGroupIdsFromItems(
+  items: ShoppingItem[],
+  dayMapData: DayMapData | null,
+  hallDefinitions: HallDefinition[],
+): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  items.forEach((item) => {
+    const hallId = getHallIdForItem(item, dayMapData, hallDefinitions);
+    const priority = (item.priorityLevel || 'none') as PriorityLevel;
+    let key: string;
+    if (hallId === null) {
+      key = priority === 'highest' ? 'undefined:highest'
+        : priority === 'priority' ? 'undefined:priority'
+        : 'undefined';
+    } else {
+      key = priority === 'highest' ? `${hallId}:highest`
+        : priority === 'priority' ? `${hallId}:priority`
+        : hallId;
+    }
+    if (!seen.has(key)) {
+      seen.add(key);
+      ordered.push(key);
+    }
+  });
+  return ordered;
 }

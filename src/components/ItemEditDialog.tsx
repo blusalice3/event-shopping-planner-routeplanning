@@ -82,11 +82,9 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
       manualHallId: form.manualHallId || undefined,
     };
     onSave(updatedItem);
-    const originalPriority = item.priorityLevel || 'none';
-    if (form.priorityLevel !== originalPriority && onPriorityChange) {
-      onPriorityChange(item.id, form.priorityLevel);
-    }
-  }, [form, item, onSave, onPriorityChange]);
+    // priority 変更の反映は onSave 経由（handleUpdateItem + hallOrder 更新を App 側で統合）に一本化。
+    // 旧 onPriorityChange による二重 setEventLists は race condition の原因だったため廃止。
+  }, [form, item, onSave]);
 
   const circleSuggestions = useMemo(
     () => [...new Set(allItems.map((i) => i.circle).filter(Boolean))],

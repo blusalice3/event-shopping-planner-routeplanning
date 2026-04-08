@@ -88,6 +88,7 @@ import {
   computeMoveItem,
   computeMoveItemVertical,
   computeUpdateItemPriority,
+  computeHallOrderForPriorityChange,
 } from './features/events/itemOps';
 import {
   buildImportCompletionMessage,
@@ -839,29 +840,32 @@ const App: React.FC = () => {
     (updatedItem: ShoppingItem) => {
       if (!activeEventName) return;
 
-      const currentItems = eventLists[activeEventName] || [];
-      const currentItem = currentItems.find((item) => item.id === updatedItem.id);
       const currentEventDate = activeEventDate;
       const currentMode = dayModes[activeEventName]?.[currentEventDate];
 
-      const result = computeUpdateItem(
-        currentItems,
-        updatedItem,
-        currentMode as ViewMode | undefined,
-        currentItem?.protectionLevel,
-        currentItem?.source,
-      );
+      setEventLists((prev) => {
+        const currentItems = prev[activeEventName] || [];
+        const currentItem = currentItems.find((item) => item.id === updatedItem.id);
 
-      if (result.purchaseStatusChanged) {
-        setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
-      }
+        const result = computeUpdateItem(
+          currentItems,
+          updatedItem,
+          currentMode as ViewMode | undefined,
+          currentItem?.protectionLevel,
+          currentItem?.source,
+        );
 
-      setEventLists((prev) => ({
-        ...prev,
-        [activeEventName]: result.items,
-      }));
+        if (result.purchaseStatusChanged) {
+          setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
+        }
+
+        return {
+          ...prev,
+          [activeEventName]: result.items,
+        };
+      });
     },
-    [activeEventName, activeTab, eventDates, dayModes, eventLists],
+    [activeEventName, activeTab, eventDates, dayModes],
   );
 
   const handleMoveItem = useCallback(
@@ -3348,11 +3352,82 @@ const App: React.FC = () => {
     [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData, hallRouteSettings],
   );
 
+  // マップビュー等から直接呼び出される優先度変更（items + hallOrder の両方を更新）。
+  // 編集ダイアログ経由ではない単独呼び出しなので race condition は発生しない。
   const handleUpdateItemPriorityFromEdit = useCallback(
     (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
       if (!activeEventName) return;
 
-      const item = items.find((i) => i.id === itemId);
+      const currentItems = eventLists[activeEventName] || [];
+      const item = currentItems.find((i) => i.id === itemId);
+      if (!item) return;
+
+      const resolvedHallId = getItemHallId(item, item.eventDate);
+      const mapTabForItem = getMapTabForDate(item.eventDate);
+      const mapHallIds = new Set(
+        mapTabForItem
+          ? (hallDefinitions[activeEventName]?.[mapTabForItem] || []).map((h) => h.id)
+          : [],
+      );
+      const targetKey: string =
+        resolvedHallId && mapHallIds.has(resolvedHallId)
+          ? (mapTabForItem as string)
+          : MAPLESS_HALL_KEY;
+
+      const targetHalls = hallDefinitions[activeEventName]?.[targetKey] || [];
+      const targetMapData =
+        targetKey === MAPLESS_HALL_KEY
+          ? undefined
+          : mapData[activeEventName]?.[targetKey];
+      const targetSettings = hallRouteSettings[activeEventName]?.[targetKey] || {
+        hallOrder: [],
+        hallVisitLists: [],
+      };
+
+      const result = computeUpdateItemPriority(
+        itemId,
+        priorityLevel,
+        currentItems,
+        targetHalls,
+        targetMapData,
+        targetSettings,
+      );
+
+      setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
+      setHallRouteSettings((prev) => ({
+        ...prev,
+        [activeEventName]: {
+          ...prev[activeEventName],
+          [targetKey]: result.hallRouteSettings,
+        },
+      }));
+    },
+    [
+      activeEventName,
+      eventLists,
+      hallDefinitions,
+      mapData,
+      hallRouteSettings,
+      getItemHallId,
+      getMapTabForDate,
+    ],
+  );
+
+  // 編集ダイアログからの優先度変更に伴う hallRouteSettings.hallOrder の更新のみを行う。
+  // アイテム本体 (priorityLevel) の更新は handleUpdateItem 経由の onSave に統合済み。
+  // 旧 handleUpdateItemPriorityFromEdit は items と hallRouteSettings の両方に setEventLists を発行しており、
+  // 同期クロージャ由来の race condition で priority が巻き戻るバグの原因だったため、
+  // items 側を触らない形に縮退させた。
+  const handleUpdateHallOrderForPriorityChangeFromEdit = useCallback(
+    (
+      itemId: string,
+      newPriorityLevel: 'none' | 'priority' | 'highest',
+      oldPriorityLevel: 'none' | 'priority' | 'highest',
+    ) => {
+      if (!activeEventName) return;
+
+      const currentItems = eventLists[activeEventName] || [];
+      const item = currentItems.find((i) => i.id === itemId);
       if (!item) return;
 
       // 統合ホール判定でアイテムの所属ホールを解決（manualHallId → polygon → blockNames）
@@ -3370,7 +3445,6 @@ const App: React.FC = () => {
           ? (mapTabForItem as string)
           : MAPLESS_HALL_KEY;
 
-      // 対象ストアの halls / mapData / settings を取得
       const targetHalls = hallDefinitions[activeEventName]?.[targetKey] || [];
       const targetMapData =
         targetKey === MAPLESS_HALL_KEY
@@ -3381,27 +3455,32 @@ const App: React.FC = () => {
         hallVisitLists: [],
       };
 
-      const result = computeUpdateItemPriority(
+      // priority 変更後のアイテム状態を反映した allItems を渡す（hallOrder 計算のため）
+      const itemsAfter = currentItems.map((i) =>
+        i.id === itemId ? { ...i, priorityLevel: newPriorityLevel } : i,
+      );
+
+      const nextSettings = computeHallOrderForPriorityChange(
         itemId,
-        priorityLevel,
-        items,
+        newPriorityLevel,
+        oldPriorityLevel,
+        itemsAfter,
         targetHalls,
         targetMapData,
         targetSettings,
       );
 
-      setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
       setHallRouteSettings((prev) => ({
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
-          [targetKey]: result.hallRouteSettings,
+          [targetKey]: nextSettings,
         },
       }));
     },
     [
       activeEventName,
-      items,
+      eventLists,
       hallDefinitions,
       mapData,
       hallRouteSettings,
@@ -3636,18 +3715,24 @@ const App: React.FC = () => {
     // 不足している "hallId:priority" / "hallId:highest" エントリをベース hallId 直後に挿入
     if (activeEventDate) {
       const executeIds = executeModeItems[activeEventName]?.[activeEventDate] || [];
-      // 優先度を持つアイテムを走査して必要な groupId 集合を生成
-      const neededGroups = new Map<string, 'priority' | 'highest'>();
+      // 優先度を持つアイテム + ホール未定義通常アイテムを走査して必要な groupId 集合を生成
+      const neededGroups = new Map<string, 'none' | 'priority' | 'highest'>();
       executeIds.forEach((itemId) => {
         const item = items.find((i) => i.id === itemId);
         if (!item) return;
-        const priority = item.priorityLevel;
-        if (priority !== 'priority' && priority !== 'highest') return;
+        const priority = (item.priorityLevel || 'none') as 'none' | 'priority' | 'highest';
         const hallId = getItemHallId(item, item.eventDate);
-        const groupId = hallId === null
-          ? (priority === 'highest' ? 'undefined:highest' : 'undefined:priority')
-          : `${hallId}:${priority}`;
-        // 'highest' は既存の 'priority' を上書きしないようにMap を使う
+        // ホール定義済み + 通常優先度は既存のホールID順序に従うため注入不要
+        if (hallId !== null && priority === 'none') return;
+        let groupId: string;
+        if (hallId === null) {
+          groupId =
+            priority === 'highest' ? 'undefined:highest'
+              : priority === 'priority' ? 'undefined:priority'
+              : 'undefined';
+        } else {
+          groupId = `${hallId}:${priority}`;
+        }
         if (!neededGroups.has(groupId)) {
           neededGroups.set(groupId, priority);
         }
@@ -3774,7 +3859,10 @@ const App: React.FC = () => {
       // groupId解析
       let targetHallId: string | null;
       let targetPriority: 'none' | 'priority' | 'highest';
-      if (groupId === 'undefined:highest') {
+      if (groupId === 'undefined' || groupId === 'undefined:none') {
+        targetHallId = null;
+        targetPriority = 'none';
+      } else if (groupId === 'undefined:highest') {
         targetHallId = null;
         targetPriority = 'highest';
       } else if (groupId === 'undefined:priority') {
@@ -5794,7 +5882,22 @@ const App: React.FC = () => {
           allItems={items}
           halls={getHallsForDate(editDialogItem.eventDate)}
           onSave={(updatedItem) => {
+            const prevPriority = (editDialogItem.priorityLevel || 'none') as
+              | 'none'
+              | 'priority'
+              | 'highest';
+            const nextPriority = (updatedItem.priorityLevel || 'none') as
+              | 'none'
+              | 'priority'
+              | 'highest';
             handleUpdateItem(updatedItem);
+            if (prevPriority !== nextPriority) {
+              handleUpdateHallOrderForPriorityChangeFromEdit(
+                updatedItem.id,
+                nextPriority,
+                prevPriority,
+              );
+            }
             setEditDialogItem(null);
             setTimeout(() => {
               const element = document.querySelector(`[data-item-id="${updatedItem.id}"]`);
@@ -5803,7 +5906,9 @@ const App: React.FC = () => {
               }
             }, 100);
           }}
-          onPriorityChange={handleUpdateItemPriorityFromEdit}
+          onPriorityChange={() => {
+            /* no-op: priority 変更は onSave 内で統合処理済み */
+          }}
           onClose={() => setEditDialogItem(null)}
         />
       )}

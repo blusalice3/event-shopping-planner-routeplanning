@@ -92,8 +92,9 @@ interface ShoppingListProps {
 // グループの表示名を取得
 const getGroupDisplayName = (groupId: string | null, hallDefinitions: HallDefinition[]): string => {
   if (groupId === null) return 'ホール未定義';
-  if (groupId === 'undefined:highest') return '未定義最優先';
-  if (groupId === 'undefined:priority') return '未定義優先';
+  if (groupId === 'undefined' ) return 'ホール未定義';
+  if (groupId === 'undefined:highest') return 'ホール未定義最優先';
+  if (groupId === 'undefined:priority') return 'ホール未定義優先';
 
   const { hallId, priority } = parseGroupId(groupId);
   const hall = hallDefinitions.find((h) => h.id === hallId);
@@ -360,9 +361,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   // ホールごとにアイテムをグループ化（優先度対応版）
   const hallGroups = useMemo((): HallGroup[] => {
-    if (!showHallGroups || hallDefinitions.length === 0) {
+    if (!showHallGroups) {
       return [{ groupId: null, hallId: null, hallName: null, priority: 'none', items }];
     }
+    // ホール定義なしでも groupItemsByHallOrder 内で priority 別に 3 バケットに分けて返す
     return groupItemsByHallOrder(items, mapData, hallDefinitions, hallOrder);
   }, [items, showHallGroups, hallDefinitions, hallOrder, mapData]);
 
@@ -373,10 +375,35 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     if (!showSpaceGroups) return [];
 
     // hallGroupsと同一の4段階ロジックでアイテムを並べ替え
-    const sortedItems =
-      hallDefinitions.length > 0 && mapData
-        ? sortItemsByHallOrder(items, mapData, hallDefinitions, hallOrder)
-        : items;
+    let sortedItems: ShoppingItem[];
+    if (hallDefinitions.length > 0 && mapData) {
+      sortedItems = sortItemsByHallOrder(items, mapData, hallDefinitions, hallOrder);
+    } else if (hallDefinitions.length === 0) {
+      // ホール定義なしでも、hallOrder 内の 'undefined:*' キーに従って priority 別に並べる。
+      // hallOrder に登場しない未定義系バケットは highest → priority → none の順で末尾に流す。
+      const rank = (p: string): number => (p === 'highest' ? 0 : p === 'priority' ? 1 : 2);
+      const keyForItem = (it: ShoppingItem): string => {
+        const p = it.priorityLevel || 'none';
+        return p === 'highest' ? 'undefined:highest'
+          : p === 'priority' ? 'undefined:priority'
+          : 'undefined';
+      };
+      const orderIndex = (key: string): number => {
+        const idx = hallOrder.indexOf(key);
+        return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
+      };
+      sortedItems = items.slice().sort((a, b) => {
+        const ka = keyForItem(a);
+        const kb = keyForItem(b);
+        const oa = orderIndex(ka);
+        const ob = orderIndex(kb);
+        if (oa !== ob) return oa - ob;
+        // hallOrder に両方無い場合は priority ランクで決定（highest → priority → none）
+        return rank(a.priorityLevel || 'none') - rank(b.priorityLevel || 'none');
+      });
+    } else {
+      sortedItems = items;
+    }
 
     // 並べ替え済みアイテムをスペース+優先度でグループ化
     const groupMap = new Map<string, { spaceKey: string; priority: PriorityLevel; hallGroupId: string | null; items: ShoppingItem[] }>();
@@ -1065,7 +1092,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         {spaceGroups.map((group, groupIndex) => {
           // ホール+優先度セクションヘッダー（アイテム単独表示のセクションヘッダーと同等）
           const prevHallGroupId = groupIndex > 0 ? spaceGroups[groupIndex - 1].hallGroupId : undefined;
-          const showHallSectionHeader = hallDefinitions.length > 0 && group.hallGroupId !== prevHallGroupId;
+          const showHallSectionHeader =
+            group.hallGroupId !== prevHallGroupId &&
+            (hallDefinitions.length > 0 || group.priority !== 'none');
           const hallSectionHeader = showHallSectionHeader ? (() => {
             const headerStyle = getGroupHeaderStyle(group.hallGroupId, hallDefinitions);
             const displayName = getGroupDisplayName(group.hallGroupId, hallDefinitions);
