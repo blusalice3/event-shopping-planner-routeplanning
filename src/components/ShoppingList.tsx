@@ -1067,12 +1067,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
           </div>
         )}
 
-        {spaceGroups.map((group, groupIndex) => {
+        {(() => {
+          const hasPriorityGroups = spaceGroups.some(g => g.priority !== 'none');
+          return spaceGroups.map((group, groupIndex) => {
           // ホール+優先度セクションヘッダー（アイテム単独表示のセクションヘッダーと同等）
           const prevHallGroupId = groupIndex > 0 ? spaceGroups[groupIndex - 1].hallGroupId : undefined;
           const showHallSectionHeader =
             group.hallGroupId !== prevHallGroupId &&
-            (hallDefinitions.length > 0 || group.priority !== 'none');
+            (hallDefinitions.length > 0 || hasPriorityGroups);
           const hallSectionHeader = showHallSectionHeader ? (() => {
             const headerStyle = getGroupHeaderStyle(group.hallGroupId, hallDefinitions);
             const displayName = getGroupDisplayName(group.hallGroupId, hallDefinitions);
@@ -1914,7 +1916,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             </div>
             </React.Fragment>
           );
-        })}
+        });
+        })()}
 
         {/* 新規アイテム追加ダイアログ（Portalでbody直下にレンダリング） */}
         {addDialogOpen && ReactDOM.createPortal(
