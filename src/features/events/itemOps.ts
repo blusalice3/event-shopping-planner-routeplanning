@@ -379,9 +379,44 @@ export function computeMoveToExecuteColumn(
   const existingIdsSet = new Set(currentDayItems);
   const newItemIds = orderedItemIds.filter((id) => !existingIdsSet.has(id));
 
+  // 同一スペース+同一優先度の兄弟が既にいる場合、その直後に挿入する
+  const itemsMap = new Map(allItems.map((item) => [item.id, item]));
+  const resultIds = [...currentDayItems];
+
+  for (const newId of newItemIds) {
+    const newItem = itemsMap.get(newId);
+    if (!newItem) {
+      resultIds.push(newId);
+      continue;
+    }
+
+    const newSpaceKey = getSpaceKey(newItem.block, newItem.number);
+    const newPriority = newItem.priorityLevel || 'none';
+
+    // resultIds内で同一spaceKey+priorityLevelの最後の兄弟を検索
+    let lastSiblingIndex = -1;
+    for (let i = resultIds.length - 1; i >= 0; i--) {
+      const existingItem = itemsMap.get(resultIds[i]);
+      if (!existingItem) continue;
+      if (
+        getSpaceKey(existingItem.block, existingItem.number) === newSpaceKey &&
+        (existingItem.priorityLevel || 'none') === newPriority
+      ) {
+        lastSiblingIndex = i;
+        break;
+      }
+    }
+
+    if (lastSiblingIndex !== -1) {
+      resultIds.splice(lastSiblingIndex + 1, 0, newId);
+    } else {
+      resultIds.push(newId);
+    }
+  }
+
   return {
     ...executeModeItems,
-    [dayName]: [...currentDayItems, ...newItemIds],
+    [dayName]: resultIds,
   };
 }
 
@@ -403,6 +438,69 @@ export function computeRemoveFromExecuteColumn(
   return {
     ...executeModeItems,
     [dayName]: currentDayItems,
+  };
+}
+
+// ────────────────────────────────────────────────
+// 8b. reorderExecuteIdsForSpaceAdjacency
+// ────────────────────────────────────────────────
+
+/**
+ * 優先度変更後に、executeIds内で同一スペース+同一優先度の兄弟と隣接するようにアイテムを移動する。
+ */
+export function reorderExecuteIdsForSpaceAdjacency(
+  itemId: string,
+  allItems: ShoppingItem[],
+  executeModeItems: ExecuteModeItems,
+  dayName: string,
+): ExecuteModeItems {
+  const currentDayItems = executeModeItems[dayName] || [];
+  if (!currentDayItems.includes(itemId)) return executeModeItems;
+
+  const itemsMap = new Map(allItems.map((item) => [item.id, item]));
+  const targetItem = itemsMap.get(itemId);
+  if (!targetItem) return executeModeItems;
+
+  const targetSpaceKey = getSpaceKey(targetItem.block, targetItem.number);
+  const targetPriority = targetItem.priorityLevel || 'none';
+
+  // 同一spaceKey+priorityLevelの兄弟インデックスを収集
+  const siblingIndices: number[] = [];
+  const targetIndex = currentDayItems.indexOf(itemId);
+
+  for (let i = 0; i < currentDayItems.length; i++) {
+    if (i === targetIndex) continue;
+    const item = itemsMap.get(currentDayItems[i]);
+    if (!item) continue;
+    if (
+      getSpaceKey(item.block, item.number) === targetSpaceKey &&
+      (item.priorityLevel || 'none') === targetPriority
+    ) {
+      siblingIndices.push(i);
+    }
+  }
+
+  // 兄弟がいない場合は何もしない
+  if (siblingIndices.length === 0) return executeModeItems;
+
+  // 既に兄弟と隣接している場合は何もしない
+  const lastSiblingIndex = siblingIndices[siblingIndices.length - 1];
+  const firstSiblingIndex = siblingIndices[0];
+  if (targetIndex >= firstSiblingIndex - 1 && targetIndex <= lastSiblingIndex + 1) {
+    // 兄弟の範囲内または直接隣接している
+    return executeModeItems;
+  }
+
+  // 対象を現在位置から除去し、兄弟グループの最後の直後に挿入
+  const newDayItems = currentDayItems.filter((id) => id !== itemId);
+  // 除去後のインデックスを再計算（targetIndexが兄弟より前にあった場合、インデックスが1つずれる）
+  const adjustedLastSiblingIndex =
+    targetIndex < lastSiblingIndex ? lastSiblingIndex - 1 : lastSiblingIndex;
+  newDayItems.splice(adjustedLastSiblingIndex + 1, 0, itemId);
+
+  return {
+    ...executeModeItems,
+    [dayName]: newDayItems,
   };
 }
 

@@ -90,6 +90,7 @@ import {
   computeMoveItemVertical,
   computeUpdateItemPriority,
   computeHallOrderForPriorityChange,
+  reorderExecuteIdsForSpaceAdjacency,
 } from './features/events/itemOps';
 import {
   buildImportCompletionMessage,
@@ -3349,6 +3350,25 @@ const App: React.FC = () => {
           [visitListPanelMapTab]: result.hallRouteSettings,
         },
       }));
+
+      // 優先度変更後、同一スペースの兄弟と隣接するようにexecuteIds内の位置を調整
+      const item = items.find((i) => i.id === itemId);
+      if (item) {
+        const dayName = item.eventDate;
+        setExecuteModeItems((prev) => {
+          const currentExecItems = prev[activeEventName] || {};
+          const reordered = reorderExecuteIdsForSpaceAdjacency(
+            itemId,
+            result.items,
+            currentExecItems,
+            dayName,
+          );
+          return {
+            ...prev,
+            [activeEventName]: reordered,
+          };
+        });
+      }
     },
     [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData, hallRouteSettings],
   );
@@ -3402,6 +3422,22 @@ const App: React.FC = () => {
           [targetKey]: result.hallRouteSettings,
         },
       }));
+
+      // 優先度変更後、同一スペースの兄弟と隣接するようにexecuteIds内の位置を調整
+      const dayName = item.eventDate;
+      setExecuteModeItems((prev) => {
+        const currentExecItems = prev[activeEventName] || {};
+        const reordered = reorderExecuteIdsForSpaceAdjacency(
+          itemId,
+          result.items,
+          currentExecItems,
+          dayName,
+        );
+        return {
+          ...prev,
+          [activeEventName]: reordered,
+        };
+      });
     },
     [
       activeEventName,
@@ -3478,6 +3514,22 @@ const App: React.FC = () => {
           [targetKey]: nextSettings,
         },
       }));
+
+      // 優先度変更後、同一スペースの兄弟と隣接するようにexecuteIds内の位置を調整
+      const dayName = item.eventDate;
+      setExecuteModeItems((prev) => {
+        const currentExecItems = prev[activeEventName] || {};
+        const reordered = reorderExecuteIdsForSpaceAdjacency(
+          itemId,
+          itemsAfter,
+          currentExecItems,
+          dayName,
+        );
+        return {
+          ...prev,
+          [activeEventName]: reordered,
+        };
+      });
     },
     [
       activeEventName,
