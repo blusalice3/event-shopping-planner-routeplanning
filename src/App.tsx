@@ -23,7 +23,7 @@ import {
 } from './types';
 import { MAPLESS_HALL_KEY } from './types';
 import { resolveHallByBlockName, resolveManualHallId, findHallsByBlockName } from './utils/hallFallback';
-import { sortItemsByHallOrder } from './utils/hallGrouping';
+import { buildMergedHallRouteSettings } from './utils/mergedHallRouteSettings';
 const ImportScreen = React.lazy(() => import('./components/ImportScreen'));
 import ShoppingList from './components/ShoppingList';
 import SummaryBar from './components/SummaryBar';
@@ -3700,85 +3700,20 @@ const App: React.FC = () => {
 
   // マップ/mapless統合されたHallRouteSettings（hallOrderのマージ）
   const globalHallOrderRouteSettings = useMemo((): HallRouteSettings => {
-    if (!activeEventName) return { hallOrder: [], hallVisitLists: [] };
-
-    const hasMap = !!globalHallOrderMapTabName;
-    const mapHalls = hasMap
-      ? hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []
-      : [];
-    const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
-
-    const mapSettings = hasMap
-      ? hallRouteSettings[activeEventName]?.[globalHallOrderMapTabName]
-      : undefined;
-    const maplessSettings = hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY];
-
-    const mapOrder =
-      mapSettings?.hallOrder && mapSettings.hallOrder.length > 0
-        ? mapSettings.hallOrder
-        : mapHalls.map((h) => h.id);
-    const maplessOrder =
-      maplessSettings?.hallOrder && maplessSettings.hallOrder.length > 0
-        ? maplessSettings.hallOrder
-        : maplessHalls.map((h) => h.id);
-
-    const mergedOrder = [...mapOrder, ...maplessOrder];
-
-    // ===== 動的注入: ストアに無い優先度グループをアイテムから計算して補完 =====
-    // 現在日付の実行列アイテムから各アイテムの effective hallId + priority を取得し、
-    // 不足している "hallId:priority" / "hallId:highest" エントリをベース hallId 直後に挿入
-    if (activeEventDate) {
-      const executeIds = executeModeItems[activeEventName]?.[activeEventDate] || [];
-      // 優先度を持つアイテム + ホール未定義通常アイテムを走査して必要な groupId 集合を生成
-      const neededGroups = new Map<string, 'none' | 'priority' | 'highest'>();
-      executeIds.forEach((itemId) => {
-        const item = items.find((i) => i.id === itemId);
-        if (!item) return;
-        const priority = (item.priorityLevel || 'none') as 'none' | 'priority' | 'highest';
-        const hallId = getItemHallId(item, item.eventDate);
-        // ホール定義済み + 通常優先度は既存のホールID順序に従うため注入不要
-        if (hallId !== null && priority === 'none') return;
-        let groupId: string;
-        if (hallId === null) {
-          groupId =
-            priority === 'highest' ? 'undefined:highest'
-              : priority === 'priority' ? 'undefined:priority'
-              : 'undefined';
-        } else {
-          groupId = `${hallId}:${priority}`;
-        }
-        if (!neededGroups.has(groupId)) {
-          neededGroups.set(groupId, priority);
-        }
-      });
-
-      // 既存エントリに無いものだけ、ベース hallId の直後（または末尾）に挿入
-      neededGroups.forEach((_priority, groupId) => {
-        if (mergedOrder.includes(groupId)) return;
-        const baseHallId = groupId.replace(/:(highest|priority)$/, '');
-        const baseIndex = mergedOrder.indexOf(baseHallId);
-        if (baseIndex >= 0) {
-          // highest → priority → base の順になるよう、highest は baseIndex 直後、
-          // priority はその後ろに挿入
-          const insertAt = groupId.endsWith(':highest')
-            ? baseIndex + 1
-            : baseIndex + 1 +
-              (mergedOrder.includes(`${baseHallId}:highest`) ? 1 : 0);
-          mergedOrder.splice(insertAt, 0, groupId);
-        } else {
-          // ベース hallId が見つからない（null ホール等）場合は末尾に追加
-          mergedOrder.push(groupId);
-        }
-      });
-    }
-
-    return {
-      hallOrder: mergedOrder,
-      hallVisitLists: [
-        ...(mapSettings?.hallVisitLists || []),
-        ...(maplessSettings?.hallVisitLists || []),
-      ],
-    };
+    const executeIds =
+      activeEventName && activeEventDate
+        ? executeModeItems[activeEventName]?.[activeEventDate] || []
+        : [];
+    return buildMergedHallRouteSettings({
+      eventName: activeEventName,
+      dayName: activeEventDate,
+      mapTabName: globalHallOrderMapTabName,
+      hallDefinitionsStore: hallDefinitions,
+      hallRouteSettingsStore: hallRouteSettings,
+      executeIds,
+      items,
+      mapDataStore: mapData,
+    }).mergedSettings;
   }, [
     activeEventName,
     activeEventDate,
@@ -3787,7 +3722,7 @@ const App: React.FC = () => {
     hallRouteSettings,
     executeModeItems,
     items,
-    getItemHallId,
+    mapData,
   ]);
 
   // 統合順序の保存: hallIDごとにmap側/mapless側を判別して分離保存
@@ -3938,7 +3873,6 @@ const App: React.FC = () => {
       };
 
       // ホール定義 0 件でも未定義+優先度バケットで並べ替え可能にするため早期 return しない
-      void currentHallRouteSettings;
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -3946,24 +3880,108 @@ const App: React.FC = () => {
 
         if (dayItems.length === 0) return prev;
 
-        // 実行列アイテムを ShoppingItem に解決
         const itemsMap = new Map(items.map((i) => [i.id, i]));
-        const dayItemObjs = dayItems
-          .map((id) => itemsMap.get(id))
-          .filter((it): it is ShoppingItem => it !== undefined);
 
-        // sortItemsByHallOrder は未定義+優先度バケットを含む 4 段階ロジックで並べ替える
-        const sorted = sortItemsByHallOrder(
-          dayItemObjs,
-          currentMapData || null,
-          halls,
-          hallOrder,
-        );
-        const reorderedItems = sorted.map((it) => it.id);
-        // sort で取りこぼれたもの (itemsMap に無い等) を末尾に保持
-        const sortedSet = new Set(reorderedItems);
-        dayItems.forEach((id) => {
-          if (!sortedSet.has(id)) reorderedItems.push(id);
+        // アイテムから groupId (hallId or hallId:priority or 'undefined:*') を計算
+        const getGroupIdForItem = (itemId: string): string => {
+          const item = itemsMap.get(itemId);
+          if (!item) return 'undefined';
+
+          // 1. 手動ホール設定が有効なら最優先
+          let hallId: string | null = null;
+          const manual = resolveManualHallId(item.manualHallId, halls);
+          if (manual) {
+            hallId = manual;
+          } else if (currentMapData) {
+            // 2. 既存のポリゴン判定
+            const blockName = item.block?.trim() || '';
+            let block = currentMapData.blocks.find((b) => b.name === blockName);
+            if (!block) {
+              const candidates = currentMapData.blocks.filter(
+                (b) => b.name.toLowerCase() === blockName.toLowerCase(),
+              );
+              if (candidates.length === 1) {
+                block = candidates[0];
+              }
+            }
+            if (block) {
+              const centerRow = (block.startRow + block.endRow) / 2;
+              const centerCol = (block.startCol + block.endCol) / 2;
+              for (const hall of halls) {
+                if (
+                  hall.vertices.length >= 4 &&
+                  isPointInPolygon(centerRow, centerCol, hall.vertices)
+                ) {
+                  hallId = hall.id;
+                  break;
+                }
+              }
+            }
+          }
+          // 3. blockNames フォールバック
+          if (hallId === null) {
+            hallId = resolveHallByBlockName(item.block, halls);
+          }
+
+          const priority = (item.priorityLevel || 'none') as 'none' | 'priority' | 'highest';
+          if (hallId === null) {
+            return priority === 'highest' ? 'undefined:highest'
+              : priority === 'priority' ? 'undefined:priority'
+              : 'undefined';
+          }
+          return priority === 'highest' ? `${hallId}:highest`
+            : priority === 'priority' ? `${hallId}:priority`
+            : hallId;
+        };
+
+        // groupId ごとにアイテムをバケット
+        const itemsByGroup = new Map<string, Set<string>>();
+        dayItems.forEach((itemId) => {
+          const groupId = getGroupIdForItem(itemId);
+          if (!itemsByGroup.has(groupId)) {
+            itemsByGroup.set(groupId, new Set());
+          }
+          itemsByGroup.get(groupId)!.add(itemId);
+        });
+
+        // visitOrderMap: ユーザーが VisitListPanel で個別編集した順序を保持
+        const visitOrderMap = new Map<string, number>();
+        currentHallRouteSettings.hallVisitLists.forEach((list) => {
+          list.itemIds.forEach((itemId, index) => {
+            visitOrderMap.set(itemId, index);
+          });
+        });
+
+        const sortItemsInGroup = (itemIds: Set<string>): string[] => {
+          const itemsArray = Array.from(itemIds);
+          return itemsArray.sort((a, b) => {
+            const orderA = visitOrderMap.get(a);
+            const orderB = visitOrderMap.get(b);
+            if (orderA !== undefined && orderB !== undefined) {
+              return orderA - orderB;
+            }
+            if (orderA !== undefined) return -1;
+            if (orderB !== undefined) return 1;
+            return dayItems.indexOf(a) - dayItems.indexOf(b);
+          });
+        };
+
+        const reorderedItems: string[] = [];
+
+        // hallOrder (groupId 配列) に従って順番に追加
+        hallOrder.forEach((groupId) => {
+          const groupItems = itemsByGroup.get(groupId);
+          if (groupItems && groupItems.size > 0) {
+            reorderedItems.push(...sortItemsInGroup(groupItems));
+            itemsByGroup.delete(groupId);
+          }
+        });
+
+        // hallOrder に含まれないグループは末尾に追加
+        itemsByGroup.forEach((groupItems) => {
+          if (groupItems.size > 0) {
+            reorderedItems.push(...sortItemsInGroup(groupItems));
+          }
         });
 
         return {

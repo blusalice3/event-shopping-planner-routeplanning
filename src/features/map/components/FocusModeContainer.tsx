@@ -11,6 +11,7 @@ import type {
   PurchaseStatus,
   ShoppingItem,
 } from '../../../types';
+import { buildMergedHallRouteSettings } from '../../../utils/mergedHallRouteSettings';
 
 type FocusModeContainerProps = {
   activeEventName: string | null;
@@ -68,17 +69,49 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
     [activeTab, eventDates],
   );
 
+  const mapTabName = `${currentDay}マップ`;
+  const hasMapTab = !!(activeEventName && hallDefinitions[activeEventName]?.[mapTabName]);
+  const executeModeItemIds = activeEventName
+    ? executeModeItems[activeEventName]?.[currentDay] || []
+    : [];
+
+  // App.tsx の globalHallOrderRouteSettings と同じ実装で hallOrder を構築する
+  // (map+mapless ホール統合 + 未定義系優先度キーの動的注入)。
+  // これにより HallOrderPanel で並べ替えた順序が集中モードでも一致する。
+  const { mergedHalls: focusMergedHalls, mergedSettings: focusMergedSettings } = useMemo(
+    () =>
+      buildMergedHallRouteSettings({
+        eventName: activeEventName,
+        dayName: currentDay,
+        mapTabName: hasMapTab ? mapTabName : null,
+        hallDefinitionsStore: hallDefinitions,
+        hallRouteSettingsStore: hallRouteSettings,
+        executeIds: executeModeItemIds,
+        items,
+        mapDataStore: mapData,
+      }),
+    [
+      activeEventName,
+      currentDay,
+      mapTabName,
+      hasMapTab,
+      hallDefinitions,
+      hallRouteSettings,
+      executeModeItemIds,
+      items,
+      mapData,
+    ],
+  );
+
   if (!activeEventName) return null;
 
-  const executeModeItemIds = executeModeItems[activeEventName]?.[currentDay] || [];
   const eventMapData = mapData[activeEventName];
-  const mapTabName = `${currentDay}マップ`;
   const focusHallDefinitions: HallDefinition[] | undefined =
-    hallDefinitions[activeEventName]?.[mapTabName];
-  const routeSettings = hallRouteSettings[activeEventName]?.[mapTabName];
-  const focusHallOrder: string[] = routeSettings?.hallOrder && routeSettings.hallOrder.length > 0
-    ? routeSettings.hallOrder
-    : (focusHallDefinitions || []).map((h) => h.id);
+    focusMergedHalls.length > 0 ? focusMergedHalls : undefined;
+  const focusHallOrder: string[] =
+    focusMergedSettings.hallOrder.length > 0
+      ? focusMergedSettings.hallOrder
+      : (focusHallDefinitions || []).map((h) => h.id);
 
   return (
     <FocusMode
