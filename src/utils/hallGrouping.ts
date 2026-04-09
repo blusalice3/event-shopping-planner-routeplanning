@@ -154,35 +154,14 @@ export function sortItemsByHallOrder(
   hallDefinitions: HallDefinition[],
   hallOrder: string[],
 ): ShoppingItem[] {
-  if (!hallDefinitions || hallDefinitions.length === 0) return items.slice();
-
-  const groups = bucketItemsByGroupId(items, dayMapData, hallDefinitions);
+  // ホール定義 0 件でも、未定義系優先度バケットで分類して並べ替える。
+  // groupItemsByHallOrder と同じ 4 段階ロジックを再利用するため、内部で呼び出して
+  // フラット化するだけにする (グループ内のアイテム順は入力配列順を保持)。
+  const grouped = groupItemsByHallOrder(items, dayMapData, hallDefinitions || [], hallOrder);
   const orderedItems: ShoppingItem[] = [];
-
-  // 1. hallOrderに従ってグループを追加
-  hallOrder.forEach((groupId) => {
-    if (groups.has(groupId)) {
-      orderedItems.push(...groups.get(groupId)!);
-      groups.delete(groupId);
-    }
+  grouped.forEach((g) => {
+    orderedItems.push(...g.items);
   });
-
-  // 2. hallOrderに含まれないがhallDefinitionsに含まれるホール（通常グループ）
-  hallDefinitions.forEach((hall) => {
-    if (groups.has(hall.id)) {
-      orderedItems.push(...groups.get(hall.id)!);
-      groups.delete(hall.id);
-    }
-  });
-
-  // 3. 優先度付きグループで残っているもの
-  Array.from(groups.entries())
-    .filter(([gId]) => gId !== null)
-    .forEach(([, groupItems]) => orderedItems.push(...groupItems));
-
-  // 4. ホール未定義（null）
-  if (groups.has(null)) orderedItems.push(...groups.get(null)!);
-
   return orderedItems;
 }
 

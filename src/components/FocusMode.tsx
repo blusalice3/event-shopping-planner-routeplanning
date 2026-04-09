@@ -250,14 +250,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
       .map((id) => items.find((item) => item.id === id))
       .filter((item): item is ShoppingItem => item !== undefined);
 
-    if (!hallDefinitions || hallDefinitions.length === 0) return rawItems;
-
-    // mapDataからDayMapDataを取得（最初のアイテムのeventDateから特定）
+    // ホール定義 0 件でも sortItemsByHallOrder は未定義+優先度バケットで並べ替える
     const firstItem = rawItems[0];
     if (!firstItem) return rawItems;
     const dayMapData = mapData ? mapData[`${firstItem.eventDate}マップ`] || null : null;
 
-    return sortItemsByHallOrder(rawItems, dayMapData, hallDefinitions, hallOrder);
+    return sortItemsByHallOrder(rawItems, dayMapData, hallDefinitions || [], hallOrder);
   }, [items, executeModeItemIds, hallDefinitions, hallOrder, mapData]);
 
   // 全訪問先リストを実行列順序で生成

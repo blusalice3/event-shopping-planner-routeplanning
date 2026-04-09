@@ -375,35 +375,13 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     if (!showSpaceGroups) return [];
 
     // hallGroupsと同一の4段階ロジックでアイテムを並べ替え
-    let sortedItems: ShoppingItem[];
-    if (hallDefinitions.length > 0 && mapData) {
-      sortedItems = sortItemsByHallOrder(items, mapData, hallDefinitions, hallOrder);
-    } else if (hallDefinitions.length === 0) {
-      // ホール定義なしでも、hallOrder 内の 'undefined:*' キーに従って priority 別に並べる。
-      // hallOrder に登場しない未定義系バケットは highest → priority → none の順で末尾に流す。
-      const rank = (p: string): number => (p === 'highest' ? 0 : p === 'priority' ? 1 : 2);
-      const keyForItem = (it: ShoppingItem): string => {
-        const p = it.priorityLevel || 'none';
-        return p === 'highest' ? 'undefined:highest'
-          : p === 'priority' ? 'undefined:priority'
-          : 'undefined';
-      };
-      const orderIndex = (key: string): number => {
-        const idx = hallOrder.indexOf(key);
-        return idx === -1 ? Number.MAX_SAFE_INTEGER : idx;
-      };
-      sortedItems = items.slice().sort((a, b) => {
-        const ka = keyForItem(a);
-        const kb = keyForItem(b);
-        const oa = orderIndex(ka);
-        const ob = orderIndex(kb);
-        if (oa !== ob) return oa - ob;
-        // hallOrder に両方無い場合は priority ランクで決定（highest → priority → none）
-        return rank(a.priorityLevel || 'none') - rank(b.priorityLevel || 'none');
-      });
-    } else {
-      sortedItems = items;
-    }
+    // (sortItemsByHallOrder はホール定義 0 件でも未定義+優先度バケットで並べる)
+    const sortedItems: ShoppingItem[] = sortItemsByHallOrder(
+      items,
+      mapData,
+      hallDefinitions,
+      hallOrder,
+    );
 
     // 並べ替え済みアイテムをスペース+優先度でグループ化
     const groupMap = new Map<string, { spaceKey: string; priority: PriorityLevel; hallGroupId: string | null; items: ShoppingItem[] }>();
@@ -2150,7 +2128,15 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   }
 
   // ホールグループ化表示
-  if (showHallGroups && hallDefinitions.length > 0) {
+  // ホール定義 0 件でも、優先度別の未定義セクション (highest/priority/none) が
+  // 1 つでもあれば groupItemsByHallOrder が複数バケットを返すか、または
+  // 単一でも groupId が 'undefined:*' になるためグループ表示分岐に入れる。
+  const shouldShowHallGroups =
+    showHallGroups &&
+    (hallDefinitions.length > 0 ||
+      hallGroups.length > 1 ||
+      (hallGroups.length === 1 && hallGroups[0].groupId !== null));
+  if (shouldShowHallGroups) {
     return (
       <div
         ref={containerRef}

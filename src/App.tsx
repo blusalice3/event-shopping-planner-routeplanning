@@ -23,6 +23,7 @@ import {
 } from './types';
 import { MAPLESS_HALL_KEY } from './types';
 import { resolveHallByBlockName, resolveManualHallId, findHallsByBlockName } from './utils/hallFallback';
+import { sortItemsByHallOrder } from './utils/hallGrouping';
 const ImportScreen = React.lazy(() => import('./components/ImportScreen'));
 import ShoppingList from './components/ShoppingList';
 import SummaryBar from './components/SummaryBar';
@@ -3673,6 +3674,19 @@ const App: React.FC = () => {
     [activeEventDate, getMapTabForDate],
   );
 
+  // 現在日付の実行列に優先度付きアイテムが 1 件でもあるか
+  // (ホール定義 0 件でも「ホール間移動順序」アイコンを出すための条件)
+  const hasUndefinedPriorityItems = useMemo((): boolean => {
+    if (!activeEventName || !activeEventDate) return false;
+    const ids = executeModeItems[activeEventName]?.[activeEventDate] || [];
+    return ids.some((id) => {
+      const it = items.find((i) => i.id === id);
+      if (!it) return false;
+      const p = it.priorityLevel || 'none';
+      return p === 'priority' || p === 'highest';
+    });
+  }, [activeEventName, activeEventDate, executeModeItems, items]);
+
   // マップ/maplessの両方を統合したホール一覧
   const globalHallOrderHalls = useMemo((): HallDefinition[] => {
     if (!activeEventName) return [];
@@ -3923,7 +3937,8 @@ const App: React.FC = () => {
         ],
       };
 
-      if (halls.length === 0) return;
+      // ホール定義 0 件でも未定義+優先度バケットで並べ替え可能にするため早期 return しない
+      void currentHallRouteSettings;
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -3931,96 +3946,24 @@ const App: React.FC = () => {
 
         if (dayItems.length === 0) return prev;
 
-
+        // 実行列アイテムを ShoppingItem に解決
         const itemsMap = new Map(items.map((i) => [i.id, i]));
-        const getHallIdForItem = (itemId: string): string | null => {
-          const item = itemsMap.get(itemId);
-          if (!item) return null;
+        const dayItemObjs = dayItems
+          .map((id) => itemsMap.get(id))
+          .filter((it): it is ShoppingItem => it !== undefined);
 
-          // 1. 手動ホール設定が有効なら最優先
-          const manual = resolveManualHallId(item.manualHallId, halls);
-          if (manual) return manual;
-
-          // 2. 既存のポリゴン判定
-          if (currentMapData) {
-            const blockName = item.block?.trim() || '';
-            let block = currentMapData.blocks.find((b) => b.name === blockName);
-            if (!block) {
-              const candidates = currentMapData.blocks.filter(
-                (b) => b.name.toLowerCase() === blockName.toLowerCase(),
-              );
-              if (candidates.length === 1) {
-                block = candidates[0];
-              }
-            }
-            if (block) {
-              const centerRow = (block.startRow + block.endRow) / 2;
-              const centerCol = (block.startCol + block.endCol) / 2;
-              for (const hall of halls) {
-                if (
-                  hall.vertices.length >= 4 &&
-                  isPointInPolygon(centerRow, centerCol, hall.vertices)
-                ) {
-                  return hall.id;
-                }
-              }
-            }
-          }
-
-          // 3. blockNames フォールバック
-          return resolveHallByBlockName(item.block, halls);
-        };
-
-
-        const itemsByHall = new Map<string | null, Set<string>>();
-        dayItems.forEach((itemId) => {
-          const hallId = getHallIdForItem(itemId);
-          if (!itemsByHall.has(hallId)) {
-            itemsByHall.set(hallId, new Set());
-          }
-          itemsByHall.get(hallId)!.add(itemId);
-        });
-
-
-        const visitOrderMap = new Map<string, number>();
-        currentHallRouteSettings.hallVisitLists.forEach((list) => {
-          list.itemIds.forEach((itemId, index) => {
-            visitOrderMap.set(itemId, index);
-          });
-        });
-
-
-        const sortItemsInHall = (itemIds: Set<string>): string[] => {
-          const itemsArray = Array.from(itemIds);
-          return itemsArray.sort((a, b) => {
-            const orderA = visitOrderMap.get(a);
-            const orderB = visitOrderMap.get(b);
-
-
-            if (orderA !== undefined && orderB !== undefined) {
-              return orderA - orderB;
-            }
-            if (orderA !== undefined) return -1;
-            if (orderB !== undefined) return 1;
-            return dayItems.indexOf(a) - dayItems.indexOf(b);
-          });
-        };
-
-
-        const reorderedItems: string[] = [];
-
-        hallOrder.forEach((hallId) => {
-          const hallItems = itemsByHall.get(hallId);
-          if (hallItems && hallItems.size > 0) {
-            reorderedItems.push(...sortItemsInHall(hallItems));
-            itemsByHall.delete(hallId);
-          }
-        });
-
-        itemsByHall.forEach((hallItems) => {
-          if (hallItems.size > 0) {
-            reorderedItems.push(...sortItemsInHall(hallItems));
-          }
+        // sortItemsByHallOrder は未定義+優先度バケットを含む 4 段階ロジックで並べ替える
+        const sorted = sortItemsByHallOrder(
+          dayItemObjs,
+          currentMapData || null,
+          halls,
+          hallOrder,
+        );
+        const reorderedItems = sorted.map((it) => it.id);
+        // sort で取りこぼれたもの (itemsMap に無い等) を末尾に保持
+        const sortedSet = new Set(reorderedItems);
+        dayItems.forEach((id) => {
+          if (!sortedSet.has(id)) reorderedItems.push(id);
         });
 
         return {
@@ -4675,7 +4618,9 @@ const App: React.FC = () => {
                   {activeEventName &&
                     mainContentVisible &&
                     !mapViewActive &&
-                    (globalHallOrderMapTabName || globalHallOrderHalls.length > 0) && (
+                    (globalHallOrderMapTabName ||
+                      globalHallOrderHalls.length > 0 ||
+                      hasUndefinedPriorityItems) && (
                       <button
                         onClick={() => setGlobalHallOrderPanelOpen(true)}
                         className="p-2 rounded-md bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400 transition-colors duration-200"
