@@ -3784,6 +3784,112 @@ const App: React.FC = () => {
     [activeEventName, activeEventDate, hallRouteSettings],
   );
 
+  // マップタブが存在する日付一覧
+  const mapTabDates = useMemo(
+    () => eventDates.filter((date) => !!getMapTabForDate(date)),
+    [eventDates, getMapTabForDate],
+  );
+
+  // マップなしホール定義を他の日付に同期
+  const handleSyncMaplessHallsToOtherDates = useCallback(
+    (targetDates: string[]) => {
+      if (!activeEventName || !activeEventDate) return;
+
+      const sourceKey = getMaplessKey(activeEventDate);
+      const sourceHalls = hallDefinitions[activeEventName]?.[sourceKey] || [];
+      if (sourceHalls.length === 0) return;
+
+      // 各ターゲット日付ごとに1回だけcloneし、同じIDセットを両setterで共有する
+      const clonedByDate = new Map<string, { halls: HallDefinition[]; idMap: Map<string, string> }>();
+      for (const date of targetDates) {
+        const idMap = new Map<string, string>();
+        const halls = sourceHalls.map((h) => {
+          const newId = `hall-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          idMap.set(h.id, newId);
+          return { ...h, id: newId };
+        });
+        clonedByDate.set(date, { halls, idMap });
+      }
+
+      setHallDefinitions((prev) => {
+        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        for (const date of targetDates) {
+          const targetKey = getMaplessKey(date);
+          updated[activeEventName][targetKey] = clonedByDate.get(date)!.halls;
+        }
+        return updated;
+      });
+
+      setHallRouteSettings((prev) => {
+        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        for (const date of targetDates) {
+          const targetKey = getMaplessKey(date);
+          const { idMap } = clonedByDate.get(date)!;
+          const sourceSettings = prev[activeEventName]?.[sourceKey] || { hallOrder: [], hallVisitLists: [] };
+          updated[activeEventName][targetKey] = {
+            ...sourceSettings,
+            hallOrder: sourceSettings.hallOrder
+              .map((id) => idMap.get(id))
+              .filter((id): id is string => !!id),
+            hallVisitLists: sourceSettings.hallVisitLists || [],
+          };
+        }
+        return updated;
+      });
+    },
+    [activeEventName, activeEventDate, hallDefinitions, hallRouteSettings],
+  );
+
+  // ポリゴンホール定義を他の日付に同期
+  const handleSyncPolygonHallsToOtherDates = useCallback(
+    (targetDates: string[]) => {
+      if (!activeEventName || !isMapTab || !currentMapTabName) return;
+
+      const sourceHalls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+      if (sourceHalls.length === 0) return;
+
+      // 各ターゲット日付ごとに1回だけcloneし、同じIDセットを両setterで共有する
+      const clonedByDate = new Map<string, { halls: HallDefinition[]; idMap: Map<string, string> }>();
+      for (const date of targetDates) {
+        const targetMapTab = getMapTabForDate(date);
+        if (!targetMapTab) continue;
+        const idMap = new Map<string, string>();
+        const halls = sourceHalls.map((h) => {
+          const newId = `hall-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          idMap.set(h.id, newId);
+          return { ...h, id: newId };
+        });
+        clonedByDate.set(date, { halls, idMap });
+      }
+
+      setHallDefinitions((prev) => {
+        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        for (const [date, { halls }] of clonedByDate) {
+          const targetMapTab = getMapTabForDate(date)!;
+          updated[activeEventName][targetMapTab] = halls;
+        }
+        return updated;
+      });
+
+      setHallRouteSettings((prev) => {
+        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        for (const [date, { idMap }] of clonedByDate) {
+          const targetMapTab = getMapTabForDate(date)!;
+          const sourceSettings = prev[activeEventName]?.[currentMapTabName] || { hallOrder: [], hallVisitLists: [] };
+          updated[activeEventName][targetMapTab] = {
+            ...sourceSettings,
+            hallOrder: sourceSettings.hallOrder
+              .map((id) => idMap.get(id))
+              .filter((id): id is string => !!id),
+            hallVisitLists: sourceSettings.hallVisitLists || [],
+          };
+        }
+        return updated;
+      });
+    },
+    [activeEventName, isMapTab, currentMapTabName, hallDefinitions, hallRouteSettings, getMapTabForDate],
+  );
+
   // ===== ホール間移動順序パネル用: マップ/maplessの統合ビュー =====
 
   // 現在日付のマップタブ名（mapViewActive問わず、その日付にマップがあるか）
@@ -6148,6 +6254,9 @@ const App: React.FC = () => {
           halls={currentMaplessHalls}
           onUpdateHalls={handleUpdateMaplessHalls}
           availableBlocks={allBlocksForHallDefinition}
+          eventDates={eventDates}
+          activeEventDate={activeEventDate}
+          onSyncToOtherDates={handleSyncMaplessHallsToOtherDates}
         />
       )}
 
@@ -6178,6 +6287,10 @@ const App: React.FC = () => {
           onStartVertexSelection={handleStartVertexSelection}
           pendingVertexSelection={pendingVertexSelection}
           onClearPendingVertexSelection={() => setPendingVertexSelection(null)}
+          eventDates={eventDates}
+          activeEventDate={activeEventDate}
+          mapTabDates={mapTabDates}
+          onSyncToOtherDates={handleSyncPolygonHallsToOtherDates}
         />
       )}
 

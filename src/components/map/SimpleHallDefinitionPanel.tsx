@@ -23,6 +23,9 @@ interface SimpleHallDefinitionPanelProps {
   halls: HallDefinition[];
   onUpdateHalls: (halls: HallDefinition[]) => void;
   availableBlocks: string[];
+  eventDates?: string[];
+  activeEventDate?: string;
+  onSyncToOtherDates?: (targetDates: string[]) => void;
 }
 
 interface EditingHall {
@@ -45,14 +48,26 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
   halls,
   onUpdateHalls,
   availableBlocks,
+  eventDates = [],
+  activeEventDate = '',
+  onSyncToOtherDates,
 }) => {
   const [localHalls, setLocalHalls] = useState<HallDefinition[]>(halls);
   const [editing, setEditing] = useState<EditingHall | null>(null);
+  const [showSyncUI, setShowSyncUI] = useState(false);
+  const [syncTargetDates, setSyncTargetDates] = useState<Set<string>>(new Set());
+
+  const otherDates = useMemo(
+    () => eventDates.filter((d) => d !== activeEventDate),
+    [eventDates, activeEventDate],
+  );
 
   useEffect(() => {
     if (isOpen) {
       setLocalHalls(halls);
       setEditing(null);
+      setShowSyncUI(false);
+      setSyncTargetDates(new Set());
     }
   }, [isOpen, halls]);
 
@@ -137,6 +152,31 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
     onUpdateHalls(localHalls);
     onClose();
   }, [localHalls, onUpdateHalls, onClose]);
+
+  const handleToggleSyncDate = useCallback((date: string) => {
+    setSyncTargetDates((prev) => {
+      const next = new Set(prev);
+      if (next.has(date)) next.delete(date);
+      else next.add(date);
+      return next;
+    });
+  }, []);
+
+  const handleSyncExecute = useCallback(() => {
+    if (syncTargetDates.size === 0 || !onSyncToOtherDates) return;
+    if (!confirm(`選択した${syncTargetDates.size}日分のホール定義を上書きします。よろしいですか？`)) return;
+    onSyncToOtherDates(Array.from(syncTargetDates));
+    setShowSyncUI(false);
+    setSyncTargetDates(new Set());
+  }, [syncTargetDates, onSyncToOtherDates]);
+
+  const handleSyncAll = useCallback(() => {
+    if (!onSyncToOtherDates || otherDates.length === 0) return;
+    if (!confirm(`全ての他の日付（${otherDates.length}日分）のホール定義を上書きします。よろしいですか？`)) return;
+    onSyncToOtherDates(otherDates);
+    setShowSyncUI(false);
+    setSyncTargetDates(new Set());
+  }, [onSyncToOtherDates, otherDates]);
 
   if (!isOpen) return null;
 
@@ -340,19 +380,78 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
 
         {/* Footer */}
         {!editing && (
-          <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-3 flex gap-2">
-            <button
-              onClick={onClose}
-              className="flex-1 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600"
-            >
-              キャンセル
-            </button>
-            <button
-              onClick={handleConfirmAll}
-              className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
-            >
-              保存
-            </button>
+          <div className="border-t border-slate-200 dark:border-slate-700 px-4 py-3 space-y-3">
+            {/* 同期UI */}
+            {showSyncUI && (
+              <div className="rounded-lg border border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 p-3 space-y-2">
+                <div className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+                  同期先の日付を選択（現在: {activeEventDate}）
+                </div>
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {otherDates.map((date) => (
+                    <label
+                      key={date}
+                      className="flex items-center gap-2 px-2 py-1 rounded hover:bg-indigo-100 dark:hover:bg-indigo-800/30 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={syncTargetDates.has(date)}
+                        onChange={() => handleToggleSyncDate(date)}
+                        className="w-4 h-4 text-indigo-600 rounded"
+                      />
+                      <span className="text-sm text-slate-700 dark:text-slate-200">{date}</span>
+                    </label>
+                  ))}
+                </div>
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={handleSyncAll}
+                    className="flex-1 px-3 py-1.5 text-xs font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-800/40 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-800/60"
+                  >
+                    全日付に適用
+                  </button>
+                  <button
+                    onClick={handleSyncExecute}
+                    disabled={syncTargetDates.size === 0}
+                    className="flex-1 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    選択した日に同期 ({syncTargetDates.size})
+                  </button>
+                  <button
+                    onClick={() => { setShowSyncUI(false); setSyncTargetDates(new Set()); }}
+                    className="px-3 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                  >
+                    閉じる
+                  </button>
+                </div>
+              </div>
+            )}
+            <div className="flex gap-2">
+              <button
+                onClick={onClose}
+                className="flex-1 px-4 py-2 text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-slate-700 rounded-lg hover:bg-slate-200 dark:hover:bg-slate-600"
+              >
+                キャンセル
+              </button>
+              {onSyncToOtherDates && otherDates.length > 0 && localHalls.length > 0 && (
+                <button
+                  onClick={() => setShowSyncUI((v) => !v)}
+                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                    showSyncUI
+                      ? 'text-indigo-700 bg-indigo-100 dark:text-indigo-300 dark:bg-indigo-800/40'
+                      : 'text-indigo-600 bg-indigo-50 dark:text-indigo-400 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-800/40'
+                  }`}
+                >
+                  他の日に同期
+                </button>
+              )}
+              <button
+                onClick={handleConfirmAll}
+                className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"
+              >
+                保存
+              </button>
+            </div>
           </div>
         )}
       </div>
