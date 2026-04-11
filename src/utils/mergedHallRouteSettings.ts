@@ -7,7 +7,7 @@ import type {
   MapDataStore,
   DayMapData,
 } from '../types';
-import { MAPLESS_HALL_KEY } from '../types';
+import { getMaplessKey } from '../types';
 import { getHallIdForItem } from './hallGrouping';
 
 /**
@@ -33,7 +33,7 @@ export function buildMergedHallRouteSettings(params: {
 }): { mergedHalls: HallDefinition[]; mergedSettings: HallRouteSettings; dayMapData: DayMapData | null } {
   const {
     eventName,
-    dayName: _dayName,
+    dayName,
     mapTabName,
     hallDefinitionsStore,
     hallRouteSettingsStore,
@@ -52,13 +52,14 @@ export function buildMergedHallRouteSettings(params: {
 
   const hasMap = !!mapTabName;
   const mapHalls = hasMap ? hallDefinitionsStore[eventName]?.[mapTabName!] || [] : [];
-  const maplessHalls = hallDefinitionsStore[eventName]?.[MAPLESS_HALL_KEY] || [];
+  const maplessKey = dayName ? getMaplessKey(dayName) : null;
+  const maplessHalls = maplessKey ? hallDefinitionsStore[eventName]?.[maplessKey] || [] : [];
   const mergedHalls = [...mapHalls, ...maplessHalls];
 
   const dayMapData = hasMap ? mapDataStore[eventName]?.[mapTabName!] || null : null;
 
   const mapSettings = hasMap ? hallRouteSettingsStore[eventName]?.[mapTabName!] : undefined;
-  const maplessSettings = hallRouteSettingsStore[eventName]?.[MAPLESS_HALL_KEY];
+  const maplessSettings = maplessKey ? hallRouteSettingsStore[eventName]?.[maplessKey] : undefined;
 
   const mapOrder =
     mapSettings?.hallOrder && mapSettings.hallOrder.length > 0

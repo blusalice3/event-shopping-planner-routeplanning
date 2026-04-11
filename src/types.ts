@@ -359,8 +359,13 @@ export const MAX_ZOOM = 200;
 
 // ===== ホール（表示エリア）定義用の型 =====
 
-// マップ未登録時のホール定義用の特殊キー
+// マップ未登録時のホール定義用の特殊キー（マイグレーション判定用に残す）
 export const MAPLESS_HALL_KEY = '__mapless__';
+
+// 日付別マップなしホール定義キーを生成
+export function getMaplessKey(eventDate: string): string {
+  return `${MAPLESS_HALL_KEY}:${eventDate}`;
+}
 
 // ホール定義（多角形エリア）
 export interface HallDefinition {

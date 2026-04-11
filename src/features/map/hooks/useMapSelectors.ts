@@ -7,7 +7,7 @@ import type {
   HallRouteSettingsStore,
   MapDataStore,
 } from '../../../types';
-import { MAPLESS_HALL_KEY } from '../../../types';
+import { getMaplessKey } from '../../../types';
 
 type UseMapSelectorsParams = {
   activeEventName: string | null;
@@ -83,13 +83,13 @@ export function useMapSelectors({
   }, [activeEventName, currentMapTabName, mapData]);
 
   const currentHalls = useMemo((): HallDefinition[] => {
-    if (!activeEventName) return [];
+    if (!activeEventName || !activeEventDate) return [];
     const mapHalls = currentMapTabName
       ? hallDefinitions[activeEventName]?.[currentMapTabName] || []
       : [];
-    const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+    const maplessHalls = hallDefinitions[activeEventName]?.[getMaplessKey(activeEventDate)] || [];
     return [...mapHalls, ...maplessHalls];
-  }, [activeEventName, currentMapTabName, hallDefinitions]);
+  }, [activeEventName, activeEventDate, currentMapTabName, hallDefinitions]);
 
   const currentHallRouteSettings = useMemo((): HallRouteSettings => {
     if (!activeEventName || !currentMapTabName) {
@@ -108,7 +108,7 @@ export function useMapSelectors({
       if (!activeEventName) return [];
       const mapTab = getMapTabForDate(eventDate);
       const mapHalls = mapTab ? hallDefinitions[activeEventName]?.[mapTab] || [] : [];
-      const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+      const maplessHalls = hallDefinitions[activeEventName]?.[getMaplessKey(eventDate)] || [];
       return [...mapHalls, ...maplessHalls];
     },
     [activeEventName, hallDefinitions, getMapTabForDate],
@@ -129,9 +129,9 @@ export function useMapSelectors({
       if (!activeEventName) return [];
       const mapTab = getMapTabForDate(eventDate);
       const mapHalls = mapTab ? hallDefinitions[activeEventName]?.[mapTab] || [] : [];
-      const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+      const maplessHalls = hallDefinitions[activeEventName]?.[getMaplessKey(eventDate)] || [];
       const mapRouteSettings = mapTab ? hallRouteSettings[activeEventName]?.[mapTab] : undefined;
-      const maplessRouteSettings = hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY];
+      const maplessRouteSettings = hallRouteSettings[activeEventName]?.[getMaplessKey(eventDate)];
 
       const mapOrder =
         mapRouteSettings?.hallOrder && mapRouteSettings.hallOrder.length > 0

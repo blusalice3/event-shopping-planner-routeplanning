@@ -21,7 +21,7 @@ import {
   MapViewportSettingsStore,
   MapViewportState,
 } from './types';
-import { MAPLESS_HALL_KEY } from './types';
+import { MAPLESS_HALL_KEY, getMaplessKey } from './types';
 import { resolveHallByBlockName, resolveManualHallId, findHallsByBlockName } from './utils/hallFallback';
 import { buildMergedHallRouteSettings } from './utils/mergedHallRouteSettings';
 const ImportScreen = React.lazy(() => import('./components/ImportScreen'));
@@ -349,8 +349,9 @@ const App: React.FC = () => {
     },
   });
 
-  // 過去バグで mapTab 側に混入した mapless ホール (vertices 空 + blockNames 有) を
-  // MAPLESS_HALL_KEY 側に寄せ直す一度きりのマイグレーション。
+  // マイグレーション:
+  // 1. 過去バグで mapTab 側に混入した mapless ホール (vertices 空 + blockNames 有) を寄せ直す
+  // 2. 旧 MAPLESS_HALL_KEY ("__mapless__") を日付別キー ("__mapless__:<eventDate>") に分離
   const hallDefinitionsMigratedRef = useRef(false);
   useEffect(() => {
     if (!isInitialized || hallDefinitionsMigratedRef.current) return;
@@ -361,12 +362,14 @@ const App: React.FC = () => {
       const next: HallDefinitionsStore = {};
       for (const eventName of Object.keys(prev)) {
         const byTab = { ...prev[eventName] };
+
+        // Step 1: mapTab 側に混入した mapless ホールを収集
         const maplessById = new Map<string, HallDefinition>();
         for (const h of byTab[MAPLESS_HALL_KEY] ?? []) {
           maplessById.set(h.id, h);
         }
         for (const tabName of Object.keys(byTab)) {
-          if (tabName === MAPLESS_HALL_KEY) continue;
+          if (tabName === MAPLESS_HALL_KEY || tabName.startsWith(MAPLESS_HALL_KEY + ':')) continue;
           const original = byTab[tabName] || [];
           const keep: HallDefinition[] = [];
           for (const h of original) {
@@ -383,15 +386,66 @@ const App: React.FC = () => {
             byTab[tabName] = keep;
           }
         }
-        const newMapless = Array.from(maplessById.values());
-        const prevMapless = byTab[MAPLESS_HALL_KEY] ?? [];
-        if (newMapless.length !== prevMapless.length) changed = true;
-        byTab[MAPLESS_HALL_KEY] = newMapless;
+
+        // Step 2: 旧 MAPLESS_HALL_KEY を日付別キーに分離
+        const collectedMapless = Array.from(maplessById.values());
+        if (collectedMapless.length > 0) {
+          // イベントのアイテムから日付リストを取得
+          const eventItems = eventLists[eventName] || [];
+          const dates = extractEventDates(eventItems);
+          if (dates.length > 0) {
+            // 各日付のキーにコピー（既存の日付別キーがなければ）
+            for (const date of dates) {
+              const dateKey = getMaplessKey(date);
+              if (!byTab[dateKey] || byTab[dateKey].length === 0) {
+                byTab[dateKey] = collectedMapless.map((h) => ({ ...h }));
+                changed = true;
+              }
+            }
+          }
+        }
+        // 旧キーを削除
+        if (byTab[MAPLESS_HALL_KEY] != null) {
+          delete byTab[MAPLESS_HALL_KEY];
+          changed = true;
+        }
+
         next[eventName] = byTab;
       }
       return changed ? next : prev;
     });
-  }, [isInitialized]);
+
+    // hallRouteSettings も同様にマイグレーション
+    setHallRouteSettings((prev) => {
+      let changed = false;
+      const next: HallRouteSettingsStore = {};
+      for (const eventName of Object.keys(prev)) {
+        const byTab = { ...prev[eventName] };
+        const oldSettings = byTab[MAPLESS_HALL_KEY];
+        if (oldSettings != null) {
+          const eventItems = eventLists[eventName] || [];
+          const dates = extractEventDates(eventItems);
+          for (const date of dates) {
+            const dateKey = getMaplessKey(date);
+            if (!byTab[dateKey]) {
+              byTab[dateKey] = {
+                hallOrder: [...oldSettings.hallOrder],
+                hallVisitLists: oldSettings.hallVisitLists.map((vl) => ({
+                  hallId: vl.hallId,
+                  itemIds: [...vl.itemIds],
+                })),
+              };
+              changed = true;
+            }
+          }
+          delete byTab[MAPLESS_HALL_KEY];
+          changed = true;
+        }
+        next[eventName] = byTab;
+      }
+      return changed ? next : prev;
+    });
+  }, [isInitialized, eventLists]);
 
   const items = useMemo(
     () => (activeEventName ? eventLists[activeEventName] || [] : []),
@@ -3393,11 +3447,11 @@ const App: React.FC = () => {
       const targetKey: string =
         resolvedHallId && mapHallIds.has(resolvedHallId)
           ? (mapTabForItem as string)
-          : MAPLESS_HALL_KEY;
+          : getMaplessKey(item.eventDate);
 
       const targetHalls = hallDefinitions[activeEventName]?.[targetKey] || [];
       const targetMapData =
-        targetKey === MAPLESS_HALL_KEY
+        targetKey.startsWith(MAPLESS_HALL_KEY)
           ? undefined
           : mapData[activeEventName]?.[targetKey];
       const targetSettings = hallRouteSettings[activeEventName]?.[targetKey] || {
@@ -3480,11 +3534,11 @@ const App: React.FC = () => {
       const targetKey: string =
         resolvedHallId && mapHallIds.has(resolvedHallId)
           ? (mapTabForItem as string)
-          : MAPLESS_HALL_KEY;
+          : getMaplessKey(item.eventDate);
 
       const targetHalls = hallDefinitions[activeEventName]?.[targetKey] || [];
       const targetMapData =
-        targetKey === MAPLESS_HALL_KEY
+        targetKey.startsWith(MAPLESS_HALL_KEY)
           ? undefined
           : mapData[activeEventName]?.[targetKey];
       const targetSettings = hallRouteSettings[activeEventName]?.[targetKey] || {
@@ -3610,14 +3664,21 @@ const App: React.FC = () => {
         (h) => (!h.vertices || h.vertices.length < 4) && !!h.blockNames?.length,
       );
 
-      setHallDefinitions((prev) => ({
-        ...prev,
-        [activeEventName]: {
-          ...prev[activeEventName],
-          [currentMapTabName]: polygonHalls,
-          [MAPLESS_HALL_KEY]: maplessHalls,
-        },
-      }));
+      const maplessKey = activeEventDate ? getMaplessKey(activeEventDate) : null;
+
+      setHallDefinitions((prev) => {
+        const updated = {
+          ...prev,
+          [activeEventName]: {
+            ...prev[activeEventName],
+            [currentMapTabName]: polygonHalls,
+          },
+        };
+        if (maplessKey) {
+          updated[activeEventName][maplessKey] = maplessHalls;
+        }
+        return updated;
+      });
 
       // polygon ホールの順序: mapタブ側の既存順序を維持
       const existingPolygonOrder =
@@ -3628,8 +3689,8 @@ const App: React.FC = () => {
         ...polygonIds.filter((id) => !existingPolygonOrder.includes(id)),
       ];
 
-      // mapless ホールの順序: MAPLESS_HALL_KEY 側の既存順序を維持
-      const existingMaplessSettings = hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY] || {
+      // mapless ホールの順序: 日付別キー側の既存順序を維持
+      const existingMaplessSettings = (maplessKey && hallRouteSettings[activeEventName]?.[maplessKey]) || {
         hallOrder: [],
         hallVisitLists: [],
       };
@@ -3645,7 +3706,7 @@ const App: React.FC = () => {
           hallOrder: [],
           hallVisitLists: [],
         };
-        return {
+        const updated = {
           ...prev,
           [activeEventName]: {
             ...prevEvent,
@@ -3653,15 +3714,18 @@ const App: React.FC = () => {
               ...prevMapTab,
               hallOrder: updatedPolygonOrder,
             },
-            [MAPLESS_HALL_KEY]: {
-              ...existingMaplessSettings,
-              hallOrder: updatedMaplessOrder,
-            },
           },
         };
+        if (maplessKey) {
+          updated[activeEventName][maplessKey] = {
+            ...existingMaplessSettings,
+            hallOrder: updatedMaplessOrder,
+          };
+        }
+        return updated;
       });
     },
-    [activeEventName, isMapTab, currentMapTabName, hallRouteSettings],
+    [activeEventName, activeEventDate, isMapTab, currentMapTabName, hallRouteSettings],
   );
 
 
@@ -3683,18 +3747,20 @@ const App: React.FC = () => {
   // マップなしホール定義の更新ハンドラ
   const handleUpdateMaplessHalls = useCallback(
     (halls: HallDefinition[]) => {
-      if (!activeEventName) return;
+      if (!activeEventName || !activeEventDate) return;
+
+      const maplessKey = getMaplessKey(activeEventDate);
 
       setHallDefinitions((prev) => ({
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
-          [MAPLESS_HALL_KEY]: halls,
+          [maplessKey]: halls,
         },
       }));
 
       // hallRouteSettingsのhallOrderも同期
-      const existingSettings = hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY] || {
+      const existingSettings = hallRouteSettings[activeEventName]?.[maplessKey] || {
         hallOrder: [],
         hallVisitLists: [],
       };
@@ -3708,14 +3774,14 @@ const App: React.FC = () => {
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
-          [MAPLESS_HALL_KEY]: {
+          [maplessKey]: {
             ...existingSettings,
             hallOrder: updatedOrder,
           },
         },
       }));
     },
-    [activeEventName, hallRouteSettings],
+    [activeEventName, activeEventDate, hallRouteSettings],
   );
 
   // ===== ホール間移動順序パネル用: マップ/maplessの統合ビュー =====
@@ -3746,9 +3812,10 @@ const App: React.FC = () => {
     const mapHalls = hasMap
       ? hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []
       : [];
-    const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+    const maplessKey = activeEventDate ? getMaplessKey(activeEventDate) : null;
+    const maplessHalls = maplessKey ? hallDefinitions[activeEventName]?.[maplessKey] || [] : [];
     return [...mapHalls, ...maplessHalls];
-  }, [activeEventName, globalHallOrderMapTabName, hallDefinitions]);
+  }, [activeEventName, activeEventDate, globalHallOrderMapTabName, hallDefinitions]);
 
   // マップ/mapless統合されたHallRouteSettings（hallOrderのマージ）
   const globalHallOrderRouteSettings = useMemo((): HallRouteSettings => {
@@ -3789,8 +3856,9 @@ const App: React.FC = () => {
             )
           : [],
       );
+      const maplessKey = activeEventDate ? getMaplessKey(activeEventDate) : null;
       const maplessHallIds = new Set<string>(
-        (hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || []).map((h) => h.id),
+        (maplessKey ? hallDefinitions[activeEventName]?.[maplessKey] || [] : []).map((h) => h.id),
       );
 
       // groupId（hallId or hallId:priority）からhallIdを抽出するヘルパー
@@ -3836,7 +3904,7 @@ const App: React.FC = () => {
             hallVisitLists: mapVisitLists,
           };
         }
-        eventSettings[MAPLESS_HALL_KEY] = {
+        if (maplessKey) eventSettings[maplessKey] = {
           hallOrder: maplessOrder,
           hallVisitLists: maplessVisitLists,
         };
@@ -3846,7 +3914,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, globalHallOrderMapTabName, hallDefinitions],
+    [activeEventName, activeEventDate, globalHallOrderMapTabName, hallDefinitions],
   );
 
   // 統合ホール用アイテム数集計（groupId対応）
@@ -3907,12 +3975,13 @@ const App: React.FC = () => {
       const mapHalls = mapTabForDate
         ? hallDefinitions[activeEventName]?.[mapTabForDate] || []
         : [];
-      const maplessHalls = hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
+      const maplessKey = getMaplessKey(dayName);
+      const maplessHalls = hallDefinitions[activeEventName]?.[maplessKey] || [];
       const halls = [...mapHalls, ...maplessHalls];
       const mapRouteSettings = mapTabForDate
         ? hallRouteSettings[activeEventName]?.[mapTabForDate]
         : undefined;
-      const maplessRouteSettings = hallRouteSettings[activeEventName]?.[MAPLESS_HALL_KEY];
+      const maplessRouteSettings = hallRouteSettings[activeEventName]?.[maplessKey];
       const currentHallRouteSettings: HallRouteSettings = {
         hallOrder: [
           ...(mapRouteSettings?.hallOrder || []),
@@ -4448,11 +4517,11 @@ const App: React.FC = () => {
     });
   }, [activeEventName, currentTabItems]);
 
-  // 現在のイベントのマップなしホール一覧
+  // 現在のイベント・日付のマップなしホール一覧
   const currentMaplessHalls = useMemo(() => {
-    if (!activeEventName) return [];
-    return hallDefinitions[activeEventName]?.[MAPLESS_HALL_KEY] || [];
-  }, [activeEventName, hallDefinitions]);
+    if (!activeEventName || !activeEventDate) return [];
+    return hallDefinitions[activeEventName]?.[getMaplessKey(activeEventDate)] || [];
+  }, [activeEventName, activeEventDate, hallDefinitions]);
 
   const candidateColumnItems = useMemo(() => {
     if (!activeEventName) return [];
