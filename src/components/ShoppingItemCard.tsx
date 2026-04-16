@@ -167,8 +167,10 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   // 長文の展開状態管理（PC/タブレットモードのみ使用）
   // サークル名・タイトルが truncate されている時、タップで展開/折り畳みを切替
   const [expanded, setExpanded] = useState<Set<'circle' | 'title'>>(new Set());
-  const circleBtnRef = useRef<HTMLButtonElement>(null);
-  const titleBtnRef = useRef<HTMLButtonElement>(null);
+  // ref は truncate が実際に発生する <span> に付ける（button 側は inline-flex なので
+  // 内部で overflow が吸収されて scrollWidth === clientWidth になり検出不可）
+  const circleTextRef = useRef<HTMLSpanElement>(null);
+  const titleTextRef = useRef<HTMLSpanElement>(null);
   const [truncatedMap, setTruncatedMap] = useState<{ circle: boolean; title: boolean }>({
     circle: false,
     title: false,
@@ -186,8 +188,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   // truncate 判定: scrollWidth > clientWidth で実際にはみ出しているかを検出
   useLayoutEffect(() => {
     const update = () => {
-      const circleEl = circleBtnRef.current;
-      const titleEl = titleBtnRef.current;
+      const circleEl = circleTextRef.current;
+      const titleEl = titleTextRef.current;
       setTruncatedMap({
         circle:
           !!circleEl && !expanded.has('circle') && circleEl.scrollWidth > circleEl.clientWidth + 1,
@@ -197,8 +199,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     };
     update();
     const ro = new ResizeObserver(update);
-    if (circleBtnRef.current) ro.observe(circleBtnRef.current);
-    if (titleBtnRef.current) ro.observe(titleBtnRef.current);
+    if (circleTextRef.current) ro.observe(circleTextRef.current);
+    if (titleTextRef.current) ro.observe(titleTextRef.current);
     // 親の幅変化も捕捉するためカード全体も observe
     if (cardRef.current) ro.observe(cardRef.current);
     return () => ro.disconnect();
@@ -950,7 +952,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             {locationString}
           </span>
           <button
-            ref={circleBtnRef}
             type="button"
             onClick={(e) => {
               e.stopPropagation();
@@ -969,7 +970,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 : ''
             }`}
           >
-            <span className={expanded.has('circle') ? 'break-words flex-1' : 'truncate flex-1 min-w-0'}>
+            <span
+              ref={circleTextRef}
+              className={
+                expanded.has('circle') ? 'break-words flex-1' : 'truncate flex-1 min-w-0 block'
+              }
+            >
               {item.circle}
             </span>
             {(truncatedMap.circle || expanded.has('circle')) && (
@@ -996,7 +1002,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           className={`relative z-10 flex items-center justify-center min-w-0 text-center text-slate-700 dark:text-slate-200 ${currentStatus.dim ? 'line-through' : ''}`}
         >
           <button
-            ref={titleBtnRef}
             type="button"
             onClick={(e) => {
               e.stopPropagation();
@@ -1015,7 +1020,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 : ''
             }`}
           >
-            <span className={expanded.has('title') ? 'break-words' : 'truncate min-w-0'}>
+            <span
+              ref={titleTextRef}
+              className={
+                expanded.has('title') ? 'break-words' : 'truncate min-w-0 flex-1 block'
+              }
+            >
               {item.title || '（タイトルなし）'}
             </span>
             {(truncatedMap.title || expanded.has('title')) && (
