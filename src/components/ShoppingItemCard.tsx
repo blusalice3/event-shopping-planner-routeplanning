@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState, useRef, useEffect } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useState, useRef, useEffect } from 'react';
 import {
   ShoppingItem,
   PurchaseStatus,
@@ -163,6 +163,46 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const [menuVisible, setMenuVisible] = useState(false);
   const longPressTimeout = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+
+  // 長文の展開状態管理（PC/タブレットモードのみ使用）
+  // サークル名・タイトルが truncate されている時、タップで展開/折り畳みを切替
+  const [expanded, setExpanded] = useState<Set<'circle' | 'title'>>(new Set());
+  const circleBtnRef = useRef<HTMLButtonElement>(null);
+  const titleBtnRef = useRef<HTMLButtonElement>(null);
+  const [truncatedMap, setTruncatedMap] = useState<{ circle: boolean; title: boolean }>({
+    circle: false,
+    title: false,
+  });
+
+  const toggleExpand = useCallback((key: 'circle' | 'title') => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  // truncate 判定: scrollWidth > clientWidth で実際にはみ出しているかを検出
+  useLayoutEffect(() => {
+    const update = () => {
+      const circleEl = circleBtnRef.current;
+      const titleEl = titleBtnRef.current;
+      setTruncatedMap({
+        circle:
+          !!circleEl && !expanded.has('circle') && circleEl.scrollWidth > circleEl.clientWidth + 1,
+        title:
+          !!titleEl && !expanded.has('title') && titleEl.scrollWidth > titleEl.clientWidth + 1,
+      });
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    if (circleBtnRef.current) ro.observe(circleBtnRef.current);
+    if (titleBtnRef.current) ro.observe(titleBtnRef.current);
+    // 親の幅変化も捕捉するためカード全体も observe
+    if (cardRef.current) ro.observe(cardRef.current);
+    return () => ro.disconnect();
+  }, [item.circle, item.title, expanded]);
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
@@ -777,7 +817,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     );
   }
 
-  // PCモード（従来のレイアウト）
+  // PCモード（改良案A: CSS Grid 中央エリア + 長文タップ展開 + 左端警告ストライプ）
   const pcCardClasses = `
     rounded-lg shadow-md transition-all duration-300 flex items-stretch relative overflow-hidden
     ${baseBg}
@@ -795,11 +835,24 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       onTouchMove={handlePointerLeave} // Cancel on scroll
       data-search-match={isSearchMatch ? 'true' : undefined}
     >
-      {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>}
+      {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500 z-30"></div>}
       {statusBgOverlay && <div className={statusBgOverlay}></div>}
+
+      {/* 警告ストライプ: カード左端の縦バー（右側の可読性を阻害しない） */}
+      {hasWarningTags && !isSelected && (
+        <div
+          className="absolute left-0 top-0 bottom-0 w-1.5 pointer-events-none z-10"
+          style={{
+            backgroundImage:
+              'repeating-linear-gradient(45deg, #fef08a 0px, #fef08a 6px, #000 6px, #000 12px)',
+          }}
+        />
+      )}
+
+      {/* 左サイドバー */}
       <div
         data-drag-handle
-        className="relative p-3 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-2 z-10"
+        className="relative p-3 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-2 z-10 flex-shrink-0"
       >
         {/* ホール内番号表示 */}
         {hallIndex !== undefined && (
@@ -819,7 +872,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           type="checkbox"
           checked={isSelected}
           onChange={() => onSelectItem(item.id)}
-          onClick={(e) => e.stopPropagation()} // Prevent long press/drag from firing
+          onClick={(e) => e.stopPropagation()}
           data-no-long-press
           className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
           aria-label={`Select item ${item.circle} - ${item.title}`}
@@ -863,7 +916,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             <ChevronDownIcon className="w-4 h-4" />
           </button>
         )}
-        {/* 保護レベルトグルボタン */}
+        {/* 保護レベルトグルボタン（編集・実行・集中モード 全てで表示） */}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -878,104 +931,147 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         </button>
       </div>
 
-      <div className="relative flex-grow p-4 min-w-0 flex flex-col h-full z-20">
-        {/* 警告表示を隠すための背景レイヤー */}
+      {/* 中央エリア: CSS Grid 3行構造（情報 / タイトル / 備考） */}
+      <div
+        className="relative flex-grow p-4 min-w-0 z-20 grid gap-2"
+        style={{ gridTemplateRows: 'auto 1fr auto' }}
+      >
+        {/* 背景オーバーレイ */}
         <div
           className={`absolute inset-0 rounded-lg pointer-events-none ${textAreaOverlayClassName}`}
         ></div>
-        <div className="relative z-10 flex justify-between items-start gap-4">
-          <div>
-            <p className="font-bold text-md text-slate-900 dark:text-slate-100">{`${item.eventDate} ${locationString}`}</p>
-            <div className="mt-1 flex items-center gap-2 flex-wrap">
-              <p className="text-slate-600 dark:text-slate-300 truncate" title={item.circle}>
-                {item.circle}
-              </p>
-              {warningTags.map((tag, index) => (
-                <img
-                  key={index}
-                  src={`/${tag}.png`}
-                  alt={tag}
-                  className="h-12 w-auto object-contain"
-                  style={{ height: '3rem' }}
-                />
-              ))}
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            {/* 集中/実行モード時：備考欄の左横側にリンクアイコン */}
-            {!onMoveUp && item.url && (
-              <button
-                onClick={handleOpenUrl}
-                data-no-long-press
-                className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center gap-1"
-                aria-label="URLを開く"
-                title="URLを開く"
+
+        {/* Row 1: 日付バッジ + 配置バッジ + サークル名 + 警告バッジ列 */}
+        <div className="relative z-10 flex items-center gap-2 flex-wrap min-w-0">
+          <span className="inline-flex items-center whitespace-nowrap flex-shrink-0 px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-sm font-semibold">
+            {item.eventDate}
+          </span>
+          <span className="inline-flex items-center whitespace-nowrap flex-shrink-0 px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-sm font-bold">
+            {locationString}
+          </span>
+          <button
+            ref={circleBtnRef}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (truncatedMap.circle || expanded.has('circle')) toggleExpand('circle');
+            }}
+            data-no-long-press
+            title={item.circle}
+            aria-expanded={expanded.has('circle')}
+            className={`text-left text-slate-700 dark:text-slate-300 text-sm min-w-0 flex-1 rounded inline-flex items-center gap-1 transition-colors ${
+              expanded.has('circle')
+                ? 'whitespace-normal bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 ring-1 ring-blue-300 dark:ring-blue-700'
+                : ''
+            } ${
+              truncatedMap.circle && !expanded.has('circle')
+                ? 'border border-dashed border-blue-300 dark:border-blue-700 px-1.5 cursor-pointer hover:bg-blue-50/60 dark:hover:bg-blue-900/20'
+                : ''
+            }`}
+          >
+            <span className={expanded.has('circle') ? 'break-words flex-1' : 'truncate flex-1 min-w-0'}>
+              {item.circle}
+            </span>
+            {(truncatedMap.circle || expanded.has('circle')) && (
+              <span
+                className="flex-shrink-0 text-blue-500 dark:text-blue-400 text-xs"
+                aria-hidden="true"
               >
-                <ExternalLinkIcon className="w-5 h-5" />
-                <span className="text-xs">🔗</span>
-              </button>
+                {expanded.has('circle') ? '⌃' : '⌄'}
+              </span>
             )}
-            <div className="flex flex-col gap-1">
-              <input
-                type="text"
-                value={item.remarks}
-                onChange={handleRemarksChange}
-                placeholder="備考"
-                className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 w-32 sm:w-40 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
-              />
-              {/* 編集モード時：備考欄の直下にリンクアイコン */}
-              {onMoveUp && item.url && (
-                <button
-                  onClick={handleOpenUrl}
-                  data-no-long-press
-                  className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center gap-1 self-end"
-                  aria-label="URLを開く"
-                  title="URLを開く"
-                >
-                  <ExternalLinkIcon className="w-4 h-4" />
-                  <span className="text-xs">🔗</span>
-                </button>
-              )}
-            </div>
-          </div>
+          </button>
+          {warningTags.map((tag, index) => (
+            <img
+              key={index}
+              src={`/${tag}.png`}
+              alt={tag}
+              className="h-6 w-auto object-contain flex-shrink-0"
+            />
+          ))}
         </div>
+
+        {/* Row 2: タイトル（中央寄せ、truncate + タップ展開） */}
         <div
-          className={`relative z-10 flex-grow flex flex-col items-center justify-center text-center text-slate-700 dark:text-slate-200 ${currentStatus.dim ? 'line-through' : ''}`}
+          className={`relative z-10 flex items-center justify-center min-w-0 text-center text-slate-700 dark:text-slate-200 ${currentStatus.dim ? 'line-through' : ''}`}
         >
-          <p className="text-lg font-semibold truncate" title={item.title}>
-            {item.title || '（タイトルなし）'}
-          </p>
+          <button
+            ref={titleBtnRef}
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (truncatedMap.title || expanded.has('title')) toggleExpand('title');
+            }}
+            data-no-long-press
+            title={item.title}
+            aria-expanded={expanded.has('title')}
+            className={`text-lg font-semibold min-w-0 max-w-full rounded inline-flex items-center gap-1.5 transition-colors ${
+              expanded.has('title')
+                ? 'whitespace-normal bg-blue-50 dark:bg-blue-900/30 px-3 py-1 ring-1 ring-blue-300 dark:ring-blue-700'
+                : ''
+            } ${
+              truncatedMap.title && !expanded.has('title')
+                ? 'border border-dashed border-blue-300 dark:border-blue-700 px-2 cursor-pointer hover:bg-blue-50/60 dark:hover:bg-blue-900/20'
+                : ''
+            }`}
+          >
+            <span className={expanded.has('title') ? 'break-words' : 'truncate min-w-0'}>
+              {item.title || '（タイトルなし）'}
+            </span>
+            {(truncatedMap.title || expanded.has('title')) && (
+              <span
+                className="flex-shrink-0 text-blue-500 dark:text-blue-400 text-sm"
+                aria-hidden="true"
+              >
+                {expanded.has('title') ? '⌃' : '⌄'}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Row 3: 備考入力 + リンクアイコン（常に備考の右に統一） */}
+        <div className="relative z-10 flex items-center gap-2 min-w-0">
+          <input
+            type="text"
+            value={item.remarks}
+            onChange={handleRemarksChange}
+            placeholder="備考"
+            className="flex-1 min-w-0 text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+          />
+          {item.url && (
+            <button
+              onClick={handleOpenUrl}
+              data-no-long-press
+              className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center flex-shrink-0"
+              aria-label="URLを開く"
+              title="URLを開く"
+            >
+              <ExternalLinkIcon className="w-5 h-5" />
+            </button>
+          )}
         </div>
       </div>
 
-      <div className="relative flex flex-col items-end justify-between space-y-3 p-4 border-l border-slate-200/80 dark:border-slate-700/80 z-10">
-        {hasWarningTags && (
-          <div
-            className="absolute inset-0 pointer-events-none rounded-r-lg"
-            style={{
-              backgroundImage:
-                'repeating-linear-gradient(45deg, #fef08a 0px, #fef08a 10px, #000 10px, #000 20px)',
-              backgroundSize: '28.28px 28.28px',
-              opacity: 0.4,
-            }}
-          ></div>
-        )}
+      {/* 右サイドバー（購入トグル / 数量 / 価格） */}
+      <div className="relative flex flex-col items-stretch justify-between gap-3 px-3 py-3 border-l border-slate-200/80 dark:border-slate-700/80 z-10 flex-shrink-0">
         <button
           onClick={togglePurchaseStatus}
-          className="flex items-center space-x-2 p-2 -m-2 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors relative z-10 w-full justify-start"
+          className="flex items-center space-x-2 p-2 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors relative z-10 justify-start"
           aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         >
-          <IconComponent className={`w-7 h-7 ${currentStatus.color}`} />
-          <span className={`font-semibold w-16 text-left ${currentStatus.color}`}>
+          <IconComponent className={`w-7 h-7 flex-shrink-0 ${currentStatus.color}`} />
+          <span className={`font-semibold whitespace-nowrap ${currentStatus.color}`}>
             {currentStatus.label}
           </span>
         </button>
-        <div className="flex items-center gap-2 relative z-10 w-full">
-          <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">数量</span>
+        <div className="flex items-center gap-2 relative z-10">
+          <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+            数量
+          </span>
           <select
             value={item.quantity}
             onChange={handleQuantityChange}
-            className="flex-1 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none min-w-[60px]"
+            className="flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums"
           >
             {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
               <option key={num} value={num}>
@@ -984,12 +1080,17 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             ))}
           </select>
         </div>
-        <div className="flex items-center gap-1 relative z-10 w-full justify-end">
-          {item.price !== null && <span className="text-slate-500 dark:text-slate-400">¥</span>}
+        <div className="flex items-center gap-1 relative z-10">
+          <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+            価格
+          </span>
+          {item.price !== null && (
+            <span className="text-slate-500 dark:text-slate-400 text-sm">¥</span>
+          )}
           <select
             value={item.price === null ? '' : item.price}
             onChange={handlePriceChange}
-            className={`flex-1 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none min-w-[100px] ${
+            className={`flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums ${
               item.price === null ? 'text-red-600 dark:text-red-400' : ''
             } ${highlightPrice && item.price === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
           >
