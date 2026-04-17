@@ -142,4 +142,4 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   );
 };
 
-export default React.memo(FocusModeContainer);
+export default FocusModeContainer;

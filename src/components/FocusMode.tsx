@@ -43,6 +43,7 @@ interface FocusModeProps {
   mapInitialRotationAngle?: number;
   onMapRotationAngleChange?: (angle: number) => void;
   numberCellOutlineStyle?: NumberCellOutlineStyle;
+  disablePriceUndefinedCheck?: boolean;
 }
 
 // スワイプ判定の閾値
@@ -86,6 +87,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   mapInitialRotationAngle = 0,
   onMapRotationAngleChange,
   numberCellOutlineStyle = 'rounded',
+  disablePriceUndefinedCheck = false,
 }) => {
   // onMapRotationAngleChange の安定フォールバック（React.memo 対策）
   const noopRotationHandler = useCallback(() => {}, []);
@@ -1006,8 +1008,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // 次の訪問先へ（手動）
   const handleNext = useCallback(() => {
-    // 価格未定チェック
-    if (hasUndefinedPricePurchased) {
+    // 価格未定チェック（設定で無効化されていない場合のみ進行をブロック）
+    if (!disablePriceUndefinedCheck && hasUndefinedPricePurchased) {
       setNotification('価格未定のアイテムがあります。価格を入力してください。');
       const undefinedPriceIds = currentVisitDisplayItems
         .filter(
@@ -1033,7 +1035,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         setNotification('前のサークルでチェック漏れがあります');
       }, 100);
     }
-  }, [hasUndefinedPricePurchased, currentVisitDisplayItems, clearAutoAdvanceTimer, moveToNext]);
+  }, [disablePriceUndefinedCheck, hasUndefinedPricePurchased, currentVisitDisplayItems, clearAutoAdvanceTimer, moveToNext]);
 
   // 前の訪問先へ
   const handlePrev = useCallback(() => {
@@ -1092,6 +1094,23 @@ const FocusMode: React.FC<FocusModeProps> = ({
   ]);
 
   // アイテム更新ハンドラ
+  // currentVisitDisplayItems / currentPhase / startAutoAdvance は ref 経由で参照し、
+  // コールバック identity を items 更新で不変に保つ（FocusModeItemList の memo 効果を維持）
+  const currentVisitDisplayItemsRef = useRef(currentVisitDisplayItems);
+  useEffect(() => {
+    currentVisitDisplayItemsRef.current = currentVisitDisplayItems;
+  }, [currentVisitDisplayItems]);
+  const currentPhaseRef = useRef(currentPhase);
+  useEffect(() => {
+    currentPhaseRef.current = currentPhase;
+  }, [currentPhase]);
+  // startAutoAdvance は moveToNext → executeItems 経由で items に依存するため、
+  // ref 経由で参照して handleUpdateItem の再生成を避ける
+  const startAutoAdvanceRef = useRef(startAutoAdvance);
+  useEffect(() => {
+    startAutoAdvanceRef.current = startAutoAdvance;
+  }, [startAutoAdvance]);
+
   const handleUpdateItem = useCallback(
     (updatedItem: ShoppingItem) => {
       setLastInteractedItemId(updatedItem.id);
@@ -1099,8 +1118,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
       // まずアイテムを更新
       onUpdateItem(updatedItem);
 
+      const displayItems = currentVisitDisplayItemsRef.current;
+      const phase = currentPhaseRef.current;
+
       // 購入状態が変更されたかチェック
-      const originalItem = currentVisitDisplayItems.find((i) => i.id === updatedItem.id);
+      const originalItem = displayItems.find((i) => i.id === updatedItem.id);
       if (!originalItem) return;
 
       // 後回し/遅参以外に変更された場合、タイマーをクリア
@@ -1110,10 +1132,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
       }
 
       // 通常フェーズでのみ自動進行をチェック
-      if (currentPhase !== 'normal') return;
+      if (phase !== 'normal') return;
 
       // 更新後の状態で全アイテムが後回し/遅参かチェック
-      const willAllBePostponedOrLate = currentVisitDisplayItems.every((item) => {
+      const willAllBePostponedOrLate = displayItems.every((item) => {
         if (item.id === updatedItem.id) {
           return updatedItem.purchaseStatus === 'Postpone' || updatedItem.purchaseStatus === 'Late';
         }
@@ -1122,10 +1144,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
       if (willAllBePostponedOrLate) {
         // 3秒後に自動進行を開始
-        startAutoAdvance();
+        startAutoAdvanceRef.current();
       }
     },
-    [onUpdateItem, currentVisitDisplayItems, clearAutoAdvanceTimer, currentPhase, startAutoAdvance],
+    [onUpdateItem, clearAutoAdvanceTimer],
   );
 
   // スワイプハンドラ（スマートフォンモード用）

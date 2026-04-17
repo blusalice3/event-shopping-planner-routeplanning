@@ -256,9 +256,63 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     [item.url],
   );
 
-  const handleRemarksChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onUpdate({ ...item, remarks: e.target.value });
-  };
+  // 備考欄: ローカル状態 + 200ms デバウンスで onUpdate を呼ぶ
+  // 1キーストローク毎に全体再計算が走らないよう抑制する
+  const [remarksLocal, setRemarksLocal] = useState<string>(item.remarks ?? '');
+  const remarksCommitTimer = useRef<number | null>(null);
+  const pendingRemarksRef = useRef<string | null>(null);
+  const itemRef = useRef(item);
+  const onUpdateRef = useRef(onUpdate);
+  useEffect(() => {
+    itemRef.current = item;
+  }, [item]);
+  useEffect(() => {
+    onUpdateRef.current = onUpdate;
+  }, [onUpdate]);
+
+  // 外部からの item.remarks 変更（別画面での編集等）をローカルに同期
+  // 入力中(pending)の場合は上書きしない
+  useEffect(() => {
+    if (pendingRemarksRef.current === null) {
+      setRemarksLocal(item.remarks ?? '');
+    }
+  }, [item.remarks]);
+
+  const commitPendingRemarks = useCallback(() => {
+    if (remarksCommitTimer.current !== null) {
+      clearTimeout(remarksCommitTimer.current);
+      remarksCommitTimer.current = null;
+    }
+    const pending = pendingRemarksRef.current;
+    if (pending === null) return;
+    pendingRemarksRef.current = null;
+    const current = itemRef.current;
+    if (pending !== (current.remarks ?? '')) {
+      onUpdateRef.current({ ...current, remarks: pending });
+    }
+  }, []);
+
+  const handleRemarksChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const next = e.target.value;
+      setRemarksLocal(next);
+      pendingRemarksRef.current = next;
+      if (remarksCommitTimer.current !== null) {
+        clearTimeout(remarksCommitTimer.current);
+      }
+      remarksCommitTimer.current = window.setTimeout(() => {
+        commitPendingRemarks();
+      }, 200);
+    },
+    [commitPendingRemarks],
+  );
+
+  // アンマウント時に未コミット分を保存
+  useEffect(() => {
+    return () => {
+      commitPendingRemarks();
+    };
+  }, [commitPendingRemarks]);
 
   const clearLongPress = useCallback(() => {
     if (longPressTimeout.current) {
@@ -500,8 +554,9 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 {/* 備考欄 */}
                 <input
                   type="text"
-                  value={item.remarks}
+                  value={remarksLocal}
                   onChange={handleRemarksChange}
+                  onBlur={commitPendingRemarks}
                   placeholder="備考"
                   className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
                 />
@@ -731,11 +786,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             {/* 下段: 備考欄（条件表示） + 数量・価格・購入状態 */}
             <div className="p-1.5 pt-0.5 flex flex-col gap-1 border-t border-slate-200/50 dark:border-slate-700/50">
               {/* 備考欄（既に備考がある場合のみ表示） */}
-              {item.remarks && (
+              {(remarksLocal || item.remarks) && (
                 <input
                   type="text"
-                  value={item.remarks}
+                  value={remarksLocal}
                   onChange={handleRemarksChange}
+                  onBlur={commitPendingRemarks}
                   placeholder="備考"
                   className="text-xs bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-1.5 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
                 />
@@ -1043,8 +1099,9 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         <div className="relative z-10 flex items-center gap-2 min-w-0">
           <input
             type="text"
-            value={item.remarks}
+            value={remarksLocal}
             onChange={handleRemarksChange}
+            onBlur={commitPendingRemarks}
             placeholder="備考"
             className="flex-1 min-w-0 text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
           />
@@ -1144,4 +1201,4 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   );
 };
 
-export default ShoppingItemCard;
+export default React.memo(ShoppingItemCard);
