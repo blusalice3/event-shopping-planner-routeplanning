@@ -1,4 +1,5 @@
 import React, { useCallback, useLayoutEffect, useMemo, useState, useRef, useEffect } from 'react';
+import { flushSync } from 'react-dom';
 import {
   ShoppingItem,
   PurchaseStatus,
@@ -140,7 +141,7 @@ const protectionConfig: Record<
 const protectionCycle: ProtectionLevel[] = ['full', 'deletable', 'none'];
 
 const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
-  item,
+  item: sourceItem,
   onUpdate,
   isStriped,
   onEditRequest,
@@ -161,8 +162,24 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   highlightPrice = false,
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
+  const [optimisticItem, setOptimisticItem] = useState(sourceItem);
   const longPressTimeout = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const item = optimisticItem;
+
+  useEffect(() => {
+    setOptimisticItem(sourceItem);
+  }, [sourceItem]);
+
+  const commitItemUpdate = useCallback(
+    (updatedItem: ShoppingItem) => {
+      flushSync(() => {
+        setOptimisticItem(updatedItem);
+      });
+      onUpdate(updatedItem);
+    },
+    [onUpdate],
+  );
 
   // 長文の展開状態管理（PC/タブレットモードのみ使用）
   // サークル名・タイトルが truncate されている時、タップで展開/折り畳みを切替
@@ -190,12 +207,17 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     const update = () => {
       const circleEl = circleTextRef.current;
       const titleEl = titleTextRef.current;
-      setTruncatedMap({
+      const nextTruncatedMap = {
         circle:
           !!circleEl && !expanded.has('circle') && circleEl.scrollWidth > circleEl.clientWidth + 1,
         title:
           !!titleEl && !expanded.has('title') && titleEl.scrollWidth > titleEl.clientWidth + 1,
-      });
+      };
+      setTruncatedMap((prev) =>
+        prev.circle === nextTruncatedMap.circle && prev.title === nextTruncatedMap.title
+          ? prev
+          : nextTruncatedMap,
+      );
     };
     update();
     const ro = new ResizeObserver(update);
@@ -212,7 +234,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       ...item,
       price: value === '' ? null : parseInt(value, 10) || 0,
     };
-    onUpdate(updatedItem);
+    commitItemUpdate(updatedItem);
   };
 
   const handleQuantityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -221,15 +243,15 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       ...item,
       quantity: value,
     };
-    onUpdate(updatedItem);
+    commitItemUpdate(updatedItem);
   };
 
   const togglePurchaseStatus = useCallback(() => {
     const currentIndex = PurchaseStatuses.indexOf(item.purchaseStatus);
     const nextIndex = (currentIndex + 1) % PurchaseStatuses.length;
     const nextStatus = PurchaseStatuses[nextIndex];
-    onUpdate({ ...item, purchaseStatus: nextStatus });
-  }, [item, onUpdate]);
+    commitItemUpdate({ ...item, purchaseStatus: nextStatus });
+  }, [item, commitItemUpdate]);
 
   // 保護レベルを取得（未設定の場合はsourceに基づいてデフォルト値を決定）
   const getEffectiveProtectionLevel = useCallback((): ProtectionLevel => {
@@ -243,8 +265,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     const currentIndex = protectionCycle.indexOf(currentLevel);
     const nextIndex = (currentIndex + 1) % protectionCycle.length;
     const nextLevel = protectionCycle[nextIndex];
-    onUpdate({ ...item, protectionLevel: nextLevel });
-  }, [item, onUpdate, getEffectiveProtectionLevel]);
+    commitItemUpdate({ ...item, protectionLevel: nextLevel });
+  }, [item, commitItemUpdate, getEffectiveProtectionLevel]);
 
   const handleOpenUrl = useCallback(
     (e: React.MouseEvent) => {
@@ -257,7 +279,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   );
 
   const handleRemarksChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onUpdate({ ...item, remarks: e.target.value });
+    commitItemUpdate({ ...item, remarks: e.target.value });
   };
 
   const clearLongPress = useCallback(() => {

@@ -13,7 +13,7 @@ import {
 import FocusModeMapCanvas from './FocusModeMapCanvas';
 import { FocusModeHeader, FocusModeItemList, FocusModeMapControls } from './focus/FocusModePanels';
 import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
-import { sortItemsByHallOrder } from '../utils/hallGrouping';
+import { buildItemRoutingSignature, sortItemsByHallOrder } from '../utils/hallGrouping';
 import { generateRouteSegments, simplifyPath } from '../utils/pathfinding';
 
 // フェーズの定義
@@ -246,19 +246,33 @@ const FocusMode: React.FC<FocusModeProps> = ({
     };
   }, [layoutMode, isMapVisible, isCompleted]);
 
-  // 実行列のアイテムを取得（hallOrder + 優先度で並べ替え）
-  const executeItems = useMemo(() => {
+  const executeItemsRoutingSignature = useMemo(
+    () => buildItemRoutingSignature(items, executeModeItemIds),
+    [items, executeModeItemIds],
+  );
+
+  // 実行列の表示順を取得（hallOrder + 優先度で並べ替え）
+  const executeItemOrderIds = useMemo(() => {
     const rawItems = executeModeItemIds
       .map((id) => items.find((item) => item.id === id))
       .filter((item): item is ShoppingItem => item !== undefined);
 
     // ホール定義 0 件でも sortItemsByHallOrder は未定義+優先度バケットで並べ替える
     const firstItem = rawItems[0];
-    if (!firstItem) return rawItems;
+    if (!firstItem) return rawItems.map((item) => item.id);
     const dayMapData = mapData ? mapData[`${firstItem.eventDate}マップ`] || null : null;
 
-    return sortItemsByHallOrder(rawItems, dayMapData, hallDefinitions || [], hallOrder);
-  }, [items, executeModeItemIds, hallDefinitions, hallOrder, mapData]);
+    return sortItemsByHallOrder(rawItems, dayMapData, hallDefinitions || [], hallOrder).map(
+      (item) => item.id,
+    );
+  }, [executeItemsRoutingSignature, hallDefinitions, hallOrder, mapData]);
+
+  const executeItems = useMemo(() => {
+    const itemsById = new Map(items.map((item) => [item.id, item]));
+    return executeItemOrderIds
+      .map((id) => itemsById.get(id))
+      .filter((item): item is ShoppingItem => item !== undefined);
+  }, [items, executeItemOrderIds]);
 
   // 全訪問先リストを実行列順序で生成
   const allVisits = useMemo(() => {

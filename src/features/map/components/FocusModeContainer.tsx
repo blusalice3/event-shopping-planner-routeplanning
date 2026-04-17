@@ -12,6 +12,7 @@ import type {
   ShoppingItem,
 } from '../../../types';
 import { buildMergedHallRouteSettings } from '../../../utils/mergedHallRouteSettings';
+import { buildItemRoutingSignature } from '../../../utils/hallGrouping';
 
 type FocusModeContainerProps = {
   activeEventName: string | null;
@@ -76,6 +77,10 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   const executeModeItemIds = activeEventName
     ? executeModeItems[activeEventName]?.[currentDay] || []
     : [];
+  const focusRoutingSignature = useMemo(
+    () => buildItemRoutingSignature(items, executeModeItemIds),
+    [items, executeModeItemIds],
+  );
 
   // App.tsx の globalHallOrderRouteSettings と同じ実装で hallOrder を構築する
   // (map+mapless ホール統合 + 未定義系優先度キーの動的注入)。
@@ -99,8 +104,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       hasMapTab,
       hallDefinitions,
       hallRouteSettings,
-      executeModeItemIds,
-      items,
+      focusRoutingSignature,
       mapData,
     ],
   );

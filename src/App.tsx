@@ -898,29 +898,32 @@ const App: React.FC = () => {
     (updatedItem: ShoppingItem) => {
       if (!activeEventName) return;
 
-      const currentItems = eventLists[activeEventName] || [];
-      const currentItem = currentItems.find((item) => item.id === updatedItem.id);
       const currentEventDate = activeEventDate;
       const currentMode = dayModes[activeEventName]?.[currentEventDate];
 
-      const result = computeUpdateItem(
-        currentItems,
-        updatedItem,
-        currentMode as ViewMode | undefined,
-        currentItem?.protectionLevel,
-        currentItem?.source,
-      );
+      setEventLists((prev) => {
+        const currentItems = prev[activeEventName] || [];
+        const currentItem = currentItems.find((item) => item.id === updatedItem.id);
 
-      if (result.purchaseStatusChanged) {
-        setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
-      }
+        const result = computeUpdateItem(
+          currentItems,
+          updatedItem,
+          currentMode as ViewMode | undefined,
+          currentItem?.protectionLevel,
+          currentItem?.source,
+        );
 
-      setEventLists((prev) => ({
-        ...prev,
-        [activeEventName]: result.items,
-      }));
+        if (result.purchaseStatusChanged) {
+          setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
+        }
+
+        return {
+          ...prev,
+          [activeEventName]: result.items,
+        };
+      });
     },
-    [activeEventName, activeTab, eventDates, dayModes, eventLists],
+    [activeEventName, activeTab, eventDates, dayModes],
   );
 
   const handleMoveItem = useCallback(

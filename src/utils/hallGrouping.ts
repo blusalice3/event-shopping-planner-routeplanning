@@ -42,6 +42,24 @@ export function buildGroupId(
   return hallId;
 }
 
+export function buildItemRoutingSignature(items: ShoppingItem[], itemIds: string[]): string {
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  return itemIds
+    .map((itemId) => {
+      const item = itemsById.get(itemId);
+      if (!item) return `${itemId}:missing`;
+      return [
+        item.id,
+        item.eventDate,
+        item.block,
+        item.number,
+        item.priorityLevel || 'none',
+        item.manualHallId || '',
+      ].join('\u001f');
+    })
+    .join('\u001e');
+}
+
 /**
  * アイテムが属するホールIDを解決する。
  * 解決順序:
