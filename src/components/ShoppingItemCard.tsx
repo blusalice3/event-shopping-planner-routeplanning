@@ -1135,4 +1135,4 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   );
 };
 
-export default React.memo(ShoppingItemCard);
+export default ShoppingItemCard;
