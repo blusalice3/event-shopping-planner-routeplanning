@@ -105,8 +105,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const [lastInteractedItemId, setLastInteractedItemId] = useState<string | null>(null);
   // 次へボタンの点滅状態
   const [isNextButtonBlinking, setIsNextButtonBlinking] = useState(false);
-  // 価格未定警告の点滅状態
-  const [blinkingPriceItemIds, setBlinkingPriceItemIds] = useState<Set<string>>(new Set());
+  // 価格未定警告の点滅状態は下の useMemo で算出 (currentVisitDisplayItems 変更時の
+  // 追加 setState を避けて再レンダリング1回分を削減)
   // 通知メッセージ
   const [notification, setNotification] = useState<string | null>(null);
   // 完了状態
@@ -444,6 +444,22 @@ const FocusMode: React.FC<FocusModeProps> = ({
       (item) => item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null),
     );
   }, [currentVisitDisplayItems]);
+
+  // 価格未定警告: 購入済みかつ価格未定のアイテムIDを集合化 (従来は useEffect + setState だったが
+  // currentVisitDisplayItems 変更毎に追加 setState を発行していたため useMemo に変更)
+  const blinkingPriceItemIds = useMemo(() => {
+    if (currentVisitDisplayItems.length === 0 || !hasUndefinedPricePurchased) {
+      return new Set<string>();
+    }
+    return new Set(
+      currentVisitDisplayItems
+        .filter(
+          (item) =>
+            item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null),
+        )
+        .map((item) => item.id),
+    );
+  }, [currentVisitDisplayItems, hasUndefinedPricePurchased]);
 
   // 残りの合計金額を計算
   const remainingCost = useMemo(() => {
@@ -822,21 +838,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
     setPhaseChangeDialog({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
   }, []);
 
-  // 次へボタンの点滅を更新
+  // 次へボタンの点滅を更新 (blinkingPriceItemIds は useMemo 化済みのためここでは setState 不要)
   useEffect(() => {
     if (currentVisitDisplayItems.length === 0) return;
 
     if (hasUndefinedPricePurchased) {
       setIsNextButtonBlinking(false);
-      const undefinedPriceIds = currentVisitDisplayItems
-        .filter(
-          (item) =>
-            item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null),
-        )
-        .map((item) => item.id);
-      setBlinkingPriceItemIds(new Set(undefinedPriceIds));
     } else {
-      setBlinkingPriceItemIds(new Set());
       const hasUnprocessed = currentVisitDisplayItems.some(
         (item) => item.purchaseStatus === 'None',
       );
@@ -1011,13 +1019,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     // 価格未定チェック（設定で無効化されていない場合のみ進行をブロック）
     if (!disablePriceUndefinedCheck && hasUndefinedPricePurchased) {
       setNotification('価格未定のアイテムがあります。価格を入力してください。');
-      const undefinedPriceIds = currentVisitDisplayItems
-        .filter(
-          (item) =>
-            item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null),
-        )
-        .map((item) => item.id);
-      setBlinkingPriceItemIds(new Set(undefinedPriceIds));
+      // blinkingPriceItemIds は useMemo で自動算出されるためここでの setState は不要
       return;
     }
 
