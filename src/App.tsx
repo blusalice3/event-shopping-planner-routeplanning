@@ -894,12 +894,24 @@ const App: React.FC = () => {
     [eventLists],
   );
 
+  // handleUpdateItem は編集ごとに下流 (FocusMode 等) へ伝播するコールバックなので
+  // identity を安定させる必要がある。dayModes / activeEventDate は ref 経由で参照し、
+  // 未使用だった activeTab / eventDates は deps から外す。
+  const dayModesRef = useRef(dayModes);
+  useEffect(() => {
+    dayModesRef.current = dayModes;
+  }, [dayModes]);
+  const activeEventDateRef = useRef(activeEventDate);
+  useEffect(() => {
+    activeEventDateRef.current = activeEventDate;
+  }, [activeEventDate]);
+
   const handleUpdateItem = useCallback(
     (updatedItem: ShoppingItem) => {
       if (!activeEventName) return;
 
-      const currentEventDate = activeEventDate;
-      const currentMode = dayModes[activeEventName]?.[currentEventDate];
+      const currentEventDate = activeEventDateRef.current;
+      const currentMode = dayModesRef.current[activeEventName]?.[currentEventDate];
 
       setEventLists((prev) => {
         const currentItems = prev[activeEventName] || [];
@@ -923,7 +935,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeTab, eventDates, dayModes],
+    [activeEventName],
   );
 
   const handleMoveItem = useCallback(
@@ -3926,6 +3938,19 @@ const App: React.FC = () => {
   }, [activeEventName, activeEventDate, globalHallOrderMapTabName, hallDefinitions]);
 
   // マップ/mapless統合されたHallRouteSettings（hallOrderのマージ）
+  //
+  // buildMergedHallRouteSettings は items を Map 化し、executeIds ごとに
+  // findItemHallId(block / manualHallId 経由) と priorityLevel を参照して hallOrder を構築する。
+  // status/quantity/price/remarks 編集では結果が変わらないため、items 参照ではなく
+  // 結果に影響するフィールドのみを連結した構造キーを dep に使う。
+  const globalHallOrderItemsKey = useMemo(() => {
+    let key = '';
+    for (const it of items) {
+      key += `${it.id}|${it.block}|${it.manualHallId ?? ''}|${it.priorityLevel ?? ''}|${it.eventDate ?? ''};`;
+    }
+    return key;
+  }, [items]);
+
   const globalHallOrderRouteSettings = useMemo((): HallRouteSettings => {
     const executeIds =
       activeEventName && activeEventDate
@@ -3941,6 +3966,8 @@ const App: React.FC = () => {
       items,
       mapDataStore: mapData,
     }).mergedSettings;
+    // items は構造キー経由で比較する
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     activeEventName,
     activeEventDate,
@@ -3948,7 +3975,7 @@ const App: React.FC = () => {
     hallDefinitions,
     hallRouteSettings,
     executeModeItems,
-    items,
+    globalHallOrderItemsKey,
     mapData,
   ]);
 

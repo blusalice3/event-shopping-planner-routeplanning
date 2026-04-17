@@ -206,93 +206,21 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     return () => ro.disconnect();
   }, [item.circle, item.title, expanded]);
 
-  // ======== 最新 item / onUpdate への参照 refs ========
-  const itemRef = useRef(item);
-  const onUpdateRef = useRef(onUpdate);
-  useEffect(() => {
-    itemRef.current = item;
-  }, [item]);
-  useEffect(() => {
-    onUpdateRef.current = onUpdate;
-  }, [onUpdate]);
+  // ======== ハンドラ (item prop を唯一の真実として直接親更新) ========
+  const handlePriceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    const value = e.target.value;
+    onUpdate({ ...item, price: value === '' ? null : parseInt(value, 10) || 0 });
+  };
 
-  // ======== 楽観UIローカル state (購入状態/数量/価格/備考) ========
-  // 親 (App.tsx) の再レンダリング完了を待たずにカード単体で即時反映するため保持。
-  // 連打時も setter の updater 形式で前値を起点に次状態を算出でき、stale closure を回避できる。
-  const [statusLocal, setStatusLocal] = useState<PurchaseStatus>(item.purchaseStatus);
-  const [quantityLocal, setQuantityLocal] = useState<number>(item.quantity);
-  const [priceLocal, setPriceLocal] = useState<number | null>(item.price);
-  const [remarksLocal, setRemarksLocal] = useState<string>(item.remarks ?? '');
-
-  // 備考欄 debounce 管理
-  const remarksCommitTimer = useRef<number | null>(null);
-  const pendingRemarksRef = useRef<string | null>(null);
-
-  // 親からの item 更新をローカルに同期
-  // purchaseStatus / quantity / price は parent 優先で常に上書き (乖離を最小化)
-  useEffect(() => {
-    setStatusLocal(item.purchaseStatus);
-  }, [item.purchaseStatus]);
-  useEffect(() => {
-    setQuantityLocal(item.quantity);
-  }, [item.quantity]);
-  useEffect(() => {
-    setPriceLocal(item.price);
-  }, [item.price]);
-  // remarks は入力中(pending あり)の間は上書きしない
-  useEffect(() => {
-    if (pendingRemarksRef.current === null) {
-      setRemarksLocal(item.remarks ?? '');
-    }
-  }, [item.remarks]);
-
-  // 備考欄の debounce フラッシュ (トグル/ドロップダウン操作前に先行 flush される)
-  const commitPendingRemarks = useCallback(() => {
-    if (remarksCommitTimer.current !== null) {
-      clearTimeout(remarksCommitTimer.current);
-      remarksCommitTimer.current = null;
-    }
-    const pending = pendingRemarksRef.current;
-    if (pending === null) return;
-    pendingRemarksRef.current = null;
-    const current = itemRef.current;
-    if (pending !== (current.remarks ?? '')) {
-      onUpdateRef.current({ ...current, remarks: pending });
-    }
-  }, []);
-
-  // ======== ハンドラ (楽観UI 即時反映 + 親への即時伝播) ========
-  const handlePriceChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const raw = e.target.value;
-      const parsed = raw === '' ? null : parseInt(raw, 10) || 0;
-      commitPendingRemarks();
-      setPriceLocal(parsed);
-      onUpdateRef.current({ ...itemRef.current, price: parsed });
-    },
-    [commitPendingRemarks],
-  );
-
-  const handleQuantityChange = useCallback(
-    (e: React.ChangeEvent<HTMLSelectElement>) => {
-      const value = parseInt(e.target.value, 10) || 1;
-      commitPendingRemarks();
-      setQuantityLocal(value);
-      onUpdateRef.current({ ...itemRef.current, quantity: value });
-    },
-    [commitPendingRemarks],
-  );
+  const handleQuantityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+    onUpdate({ ...item, quantity: parseInt(e.target.value, 10) || 1 });
+  };
 
   const togglePurchaseStatus = useCallback(() => {
-    commitPendingRemarks();
-    // updater 形式で連打時も前値を起点にサイクル進行させる (stale closure 対策)
-    setStatusLocal((prev) => {
-      const currentIndex = PurchaseStatuses.indexOf(prev);
-      const nextStatus = PurchaseStatuses[(currentIndex + 1) % PurchaseStatuses.length];
-      onUpdateRef.current({ ...itemRef.current, purchaseStatus: nextStatus });
-      return nextStatus;
-    });
-  }, [commitPendingRemarks]);
+    const currentIndex = PurchaseStatuses.indexOf(item.purchaseStatus);
+    const nextStatus = PurchaseStatuses[(currentIndex + 1) % PurchaseStatuses.length];
+    onUpdate({ ...item, purchaseStatus: nextStatus });
+  }, [item, onUpdate]);
 
   // 保護レベルを取得（未設定の場合はsourceに基づいてデフォルト値を決定）
   const getEffectiveProtectionLevel = useCallback((): ProtectionLevel => {
@@ -319,27 +247,9 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     [item.url],
   );
 
-  const handleRemarksChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const next = e.target.value;
-      setRemarksLocal(next);
-      pendingRemarksRef.current = next;
-      if (remarksCommitTimer.current !== null) {
-        clearTimeout(remarksCommitTimer.current);
-      }
-      remarksCommitTimer.current = window.setTimeout(() => {
-        commitPendingRemarks();
-      }, 100);
-    },
-    [commitPendingRemarks],
-  );
-
-  // アンマウント時に未コミット分を保存
-  useEffect(() => {
-    return () => {
-      commitPendingRemarks();
-    };
-  }, [commitPendingRemarks]);
+  const handleRemarksChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    onUpdate({ ...item, remarks: e.target.value });
+  };
 
   const clearLongPress = useCallback(() => {
     if (longPressTimeout.current) {
@@ -390,17 +300,17 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     for (let i = 1; i <= 100; i++) {
       options.add(i * 100);
     }
-    if (priceLocal !== null) {
-      options.add(priceLocal); // Ensure current price is always an option
+    if (item.price !== null) {
+      options.add(item.price); // Ensure current price is always an option
     }
     return Array.from(options).sort((a, b) => {
       if (a === null) return -1;
       if (b === null) return 1;
       return a - b;
     });
-  }, [priceLocal]);
+  }, [item.price]);
 
-  const currentStatus = statusConfig[statusLocal];
+  const currentStatus = statusConfig[item.purchaseStatus];
   const locationString = `${item.block}-${item.number}`;
   const IconComponent = currentStatus.icon;
 
@@ -425,7 +335,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const hasWarningTags = warningTags.length > 0;
 
   // 未購入の場合はブロックベースの色を使用、それ以外は購入状態の色を優先
-  const isUnpurchased = statusLocal === 'None';
+  const isUnpurchased = item.purchaseStatus === 'None';
   const useBlockColor = isUnpurchased && blockBackgroundColor;
 
   // 文字情報エリアの背景は class ベースで切り替え、ダーク時の過度なハイライトを抑える。
@@ -581,9 +491,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 {/* 備考欄 */}
                 <input
                   type="text"
-                  value={remarksLocal}
+                  value={item.remarks ?? ''}
                   onChange={handleRemarksChange}
-                  onBlur={commitPendingRemarks}
                   placeholder="備考"
                   className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
                 />
@@ -597,7 +506,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                   <div className="flex items-center gap-1">
                     <span className="text-xs text-slate-600 dark:text-slate-400">数量</span>
                     <select
-                      value={quantityLocal}
+                      value={item.quantity}
                       onChange={handleQuantityChange}
                       className="text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-12"
                     >
@@ -616,13 +525,13 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                   <div className="flex items-center gap-2">
                     {/* 価格 */}
                     <div className="flex items-center gap-0.5">
-                      {priceLocal !== null && (
+                      {item.price !== null && (
                         <span className="text-xs text-slate-500 dark:text-slate-400">¥</span>
                       )}
                       <select
-                        value={priceLocal === null ? '' : priceLocal}
+                        value={item.price === null ? '' : item.price}
                         onChange={handlePriceChange}
-                        className={`text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-20 ${priceLocal === null ? 'text-red-600 dark:text-red-400' : ''} ${highlightPrice && priceLocal === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
+                        className={`text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-20 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''} ${highlightPrice && item.price === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
                       >
                         {priceOptions.map((p) => (
                           <option key={p === null ? '' : p} value={p === null ? '' : p}>
@@ -813,12 +722,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             {/* 下段: 備考欄（条件表示） + 数量・価格・購入状態 */}
             <div className="p-1.5 pt-0.5 flex flex-col gap-1 border-t border-slate-200/50 dark:border-slate-700/50">
               {/* 備考欄（既に備考がある場合のみ表示） */}
-              {(remarksLocal || item.remarks) && (
+              {item.remarks && (
                 <input
                   type="text"
-                  value={remarksLocal}
+                  value={item.remarks ?? ''}
                   onChange={handleRemarksChange}
-                  onBlur={commitPendingRemarks}
                   placeholder="備考"
                   className="text-xs bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-1.5 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
                 />
@@ -828,7 +736,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
               <div className="flex items-center justify-end gap-1">
                 {/* 数量 */}
                 <select
-                  value={quantityLocal}
+                  value={item.quantity}
                   onChange={handleQuantityChange}
                   className="text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-10"
                 >
@@ -841,13 +749,13 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
                 {/* 価格 */}
                 <div className="flex items-center gap-0.5">
-                  {priceLocal !== null && (
+                  {item.price !== null && (
                     <span className="text-[10px] text-slate-500 dark:text-slate-400">¥</span>
                   )}
                   <select
-                    value={priceLocal === null ? '' : priceLocal}
+                    value={item.price === null ? '' : item.price}
                     onChange={handlePriceChange}
-                    className={`text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-16 ${priceLocal === null ? 'text-red-600 dark:text-red-400' : ''} ${highlightPrice && priceLocal === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
+                    className={`text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-16 ${item.price === null ? 'text-red-600 dark:text-red-400' : ''} ${highlightPrice && item.price === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
                   >
                     {priceOptions.map((p) => (
                       <option key={p === null ? '' : p} value={p === null ? '' : p}>
@@ -1126,9 +1034,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         <div className="relative z-10 flex items-center gap-2 min-w-0">
           <input
             type="text"
-            value={remarksLocal}
+            value={item.remarks ?? ''}
             onChange={handleRemarksChange}
-            onBlur={commitPendingRemarks}
             placeholder="備考"
             className="flex-1 min-w-0 text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
           />
@@ -1163,7 +1070,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             数量
           </span>
           <select
-            value={quantityLocal}
+            value={item.quantity}
             onChange={handleQuantityChange}
             className="flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums"
           >
@@ -1178,15 +1085,15 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
             価格
           </span>
-          {priceLocal !== null && (
+          {item.price !== null && (
             <span className="text-slate-500 dark:text-slate-400 text-sm">¥</span>
           )}
           <select
-            value={priceLocal === null ? '' : priceLocal}
+            value={item.price === null ? '' : item.price}
             onChange={handlePriceChange}
             className={`flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums ${
-              priceLocal === null ? 'text-red-600 dark:text-red-400' : ''
-            } ${highlightPrice && priceLocal === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
+              item.price === null ? 'text-red-600 dark:text-red-400' : ''
+            } ${highlightPrice && item.price === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
           >
             {priceOptions.map((p) => (
               <option key={p === null ? '' : p} value={p === null ? '' : p}>

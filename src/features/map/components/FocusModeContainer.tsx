@@ -73,13 +73,27 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
 
   const mapTabName = `${currentDay}マップ`;
   const hasMapTab = !!(activeEventName && hallDefinitions[activeEventName]?.[mapTabName]);
-  const executeModeItemIds = activeEventName
-    ? executeModeItems[activeEventName]?.[currentDay] || []
-    : [];
+  const executeModeItemIds = useMemo(
+    () => (activeEventName ? executeModeItems[activeEventName]?.[currentDay] || [] : []),
+    [activeEventName, executeModeItems, currentDay],
+  );
 
   // App.tsx の globalHallOrderRouteSettings と同じ実装で hallOrder を構築する
   // (map+mapless ホール統合 + 未定義系優先度キーの動的注入)。
   // これにより HallOrderPanel で並べ替えた順序が集中モードでも一致する。
+  //
+  // buildMergedHallRouteSettings は items を Map 化し、executeIds ごとに
+  // findItemHallId(block / manualHallId 経由) と priorityLevel を参照して hallOrder を構築する。
+  // status/quantity/price/remarks 編集では結果が変わらないため、items 参照ではなく
+  // 結果に影響するフィールドのみを連結した構造キーを useMemo の dep として使う。
+  const structuralItemsKey = useMemo(() => {
+    let key = '';
+    for (const it of items) {
+      key += `${it.id}|${it.block}|${it.manualHallId ?? ''}|${it.priorityLevel ?? ''}|${it.eventDate ?? ''};`;
+    }
+    return key;
+  }, [items]);
+
   const { mergedHalls: focusMergedHalls, mergedSettings: focusMergedSettings } = useMemo(
     () =>
       buildMergedHallRouteSettings({
@@ -92,6 +106,8 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
         items,
         mapDataStore: mapData,
       }),
+    // items は構造キー経由で比較するため直接 deps に含めない
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [
       activeEventName,
       currentDay,
@@ -100,7 +116,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       hallDefinitions,
       hallRouteSettings,
       executeModeItemIds,
-      items,
+      structuralItemsKey,
       mapData,
     ],
   );
