@@ -104,6 +104,7 @@ import {
   type UIVisibilitySettings,
 } from './hooks/useUIVisibilitySettings';
 import { useNumberCellOutlineStyle } from './hooks/useNumberCellOutlineStyle';
+import { useDisablePriceUndefinedCheck } from './hooks/useDisablePriceUndefinedCheck';
 import { useIndexedDbPersistence } from './hooks/useIndexedDbPersistence';
 import MapRotationControls from './components/map/MapRotationControls';
 
@@ -295,6 +296,7 @@ const App: React.FC = () => {
   );
   const { uiVisibilitySettings, setUiVisibilitySettings } = useUIVisibilitySettings();
   const { numberCellOutlineStyle, setNumberCellOutlineStyle, DEFAULT_OUTLINE_STYLE } = useNumberCellOutlineStyle();
+  const { disablePriceUndefinedCheck, setDisablePriceUndefinedCheck } = useDisablePriceUndefinedCheck();
   const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
   const [uiSettingsPanelOpen, setUiSettingsPanelOpen] = useState(false);
   const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
@@ -5232,12 +5234,36 @@ const App: React.FC = () => {
                             </div>
                           </div>
 
+                          {/* 購入管理 */}
+                          <div className="mb-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+                            <h4 className="text-xs font-semibold text-rose-600 dark:text-rose-400 mb-2">
+                              購入管理
+                            </h4>
+                            <label className="flex items-start gap-2 cursor-pointer text-xs">
+                              <input
+                                type="checkbox"
+                                checked={disablePriceUndefinedCheck}
+                                onChange={(e) => setDisablePriceUndefinedCheck(e.target.checked)}
+                                className="mt-0.5 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                              />
+                              <span className="flex-1">
+                                <span className="block text-slate-700 dark:text-slate-300">
+                                  価格未定チェックを無効化
+                                </span>
+                                <span className="block text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                  ON にすると、購入済みで価格未定のアイテムがあっても次のスペースへ進めます（視覚警告は表示）
+                                </span>
+                              </span>
+                            </label>
+                          </div>
+
                           {/* 表示処理の補足 */}
                           <button
                             onClick={() => {
                               setUiVisibilitySettings(DEFAULT_UI_VISIBILITY);
                               setUiVisibilityOverride(false);
                               setNumberCellOutlineStyle(DEFAULT_OUTLINE_STYLE);
+                              setDisablePriceUndefinedCheck(false);
                             }}
                             className="w-full mt-1 px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                           >
@@ -6016,6 +6042,7 @@ const App: React.FC = () => {
                   mapInitialRotationAngle={currentFocusMapRotationState.initialAngle}
                   onMapRotationAngleChange={handleFocusMapRotationAngleChange}
                   numberCellOutlineStyle={numberCellOutlineStyle}
+                  disablePriceUndefinedCheck={disablePriceUndefinedCheck}
                 />
               </Suspense>
             ) : (
@@ -6047,6 +6074,7 @@ const App: React.FC = () => {
                 onBulkStatusChange={handleBulkStatusChange}
                 onSpaceGroupOrderChange={handleExecuteSpaceGroupOrderChange}
                 onCollapseAndOpenNext={handleCollapseAndOpenNext}
+                disablePriceUndefinedCheck={disablePriceUndefinedCheck}
                 showPostponeFilterButton={showPostponeFilterButton}
                 onActivatePostponeFilter={handleActivatePostponeFilter}
                 showLateFilterButton={showLateFilterButton}
