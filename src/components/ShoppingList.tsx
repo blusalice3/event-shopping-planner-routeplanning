@@ -87,8 +87,6 @@ interface ShoppingListProps {
   // 実行モード用: 後回しフィルタ中、最後のスペースグループで「遅参でフィルタ」ボタン表示
   showLateFilterButton?: boolean;
   onActivateLateFilter?: () => void;
-  // 実行モード用: 価格未定チェック無効化設定（true のとき、購入済・価格未定でも次のスペースへ進める）
-  disablePriceUndefinedCheck?: boolean;
 }
 
 // グループの表示名を取得
@@ -246,7 +244,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onActivatePostponeFilter,
   showLateFilterButton,
   onActivateLateFilter,
-  disablePriceUndefinedCheck = false,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
@@ -1897,15 +1894,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                               (item) => item.purchaseStatus === 'Purchased' && item.price === null
                             );
                             if (purchasedWithoutPrice.length > 0) {
-                              // 視覚警告（ハイライト）は設定に関係なく維持
                               setPriceHighlightItemIds(new Set(purchasedWithoutPrice.map(i => i.id)));
-                              // 設定で無効化されていない場合のみ進行をブロック
-                              if (!disablePriceUndefinedCheck) {
-                                return;
-                              }
-                            } else {
-                              setPriceHighlightItemIds(new Set());
+                              return;
                             }
+                            setPriceHighlightItemIds(new Set());
                             onCollapseAndOpenNext(group.groupKey);
                           }}
                           className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 ${

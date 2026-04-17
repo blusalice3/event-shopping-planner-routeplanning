@@ -43,7 +43,6 @@ interface FocusModeProps {
   mapInitialRotationAngle?: number;
   onMapRotationAngleChange?: (angle: number) => void;
   numberCellOutlineStyle?: NumberCellOutlineStyle;
-  disablePriceUndefinedCheck?: boolean;
 }
 
 // スワイプ判定の閾値
@@ -87,7 +86,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
   mapInitialRotationAngle = 0,
   onMapRotationAngleChange,
   numberCellOutlineStyle = 'rounded',
-  disablePriceUndefinedCheck = false,
 }) => {
   // onMapRotationAngleChange の安定フォールバック（React.memo 対策）
   const noopRotationHandler = useCallback(() => {}, []);
@@ -1008,8 +1006,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // 次の訪問先へ（手動）
   const handleNext = useCallback(() => {
-    // 価格未定チェック（設定で無効化されていない場合のみ進行をブロック）
-    if (!disablePriceUndefinedCheck && hasUndefinedPricePurchased) {
+    // 価格未定チェック
+    if (hasUndefinedPricePurchased) {
       setNotification('価格未定のアイテムがあります。価格を入力してください。');
       const undefinedPriceIds = currentVisitDisplayItems
         .filter(
@@ -1035,7 +1033,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         setNotification('前のサークルでチェック漏れがあります');
       }, 100);
     }
-  }, [disablePriceUndefinedCheck, hasUndefinedPricePurchased, currentVisitDisplayItems, clearAutoAdvanceTimer, moveToNext]);
+  }, [hasUndefinedPricePurchased, currentVisitDisplayItems, clearAutoAdvanceTimer, moveToNext]);
 
   // 前の訪問先へ
   const handlePrev = useCallback(() => {

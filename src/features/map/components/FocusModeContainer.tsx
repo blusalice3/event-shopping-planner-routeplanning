@@ -37,7 +37,6 @@ type FocusModeContainerProps = {
   mapInitialRotationAngle?: number;
   onMapRotationAngleChange?: (angle: number) => void;
   numberCellOutlineStyle?: NumberCellOutlineStyle;
-  disablePriceUndefinedCheck?: boolean;
 };
 
 const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
@@ -64,7 +63,6 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   mapInitialRotationAngle = 0,
   onMapRotationAngleChange,
   numberCellOutlineStyle,
-  disablePriceUndefinedCheck,
 }) => {
   const currentDay = useMemo(
     () => (eventDates.includes(activeTab) ? activeTab : eventDates[0] || ''),
@@ -137,7 +135,6 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       mapInitialRotationAngle={mapInitialRotationAngle}
       onMapRotationAngleChange={onMapRotationAngleChange}
       numberCellOutlineStyle={numberCellOutlineStyle}
-      disablePriceUndefinedCheck={disablePriceUndefinedCheck}
     />
   );
 };
