@@ -274,6 +274,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
       .filter((item): item is ShoppingItem => item !== undefined);
   }, [items, executeItemOrderIds]);
 
+  const routePositionItems = useMemo(
+    () => executeItems,
+    [executeItemsRoutingSignature],
+  );
+
   // 全訪問先リストを実行列順序で生成
   const allVisits = useMemo(() => {
     const visitKeyOrder: string[] = [];
@@ -357,7 +362,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
   }, [visitsByPhase, currentPhase]);
 
   // 全スペースのvisitKeyをルート順に格納（マップのルート線描画用）
-  const allVisitKeys = useMemo(() => currentPhaseVisits.map((visit) => visit.key), [currentPhaseVisits]);
+  const allVisitKeySignature = useMemo(
+    () => currentPhaseVisits.map((visit) => visit.key).join('\u001e'),
+    [currentPhaseVisits],
+  );
+  const allVisitKeys = useMemo(
+    () => (allVisitKeySignature ? allVisitKeySignature.split('\u001e') : []),
+    [allVisitKeySignature],
+  );
 
   // 現在表示すべき訪問先
   const currentVisit = useMemo(() => {
@@ -423,6 +435,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return currentVisit.items.filter((item) => latePhaseItemIds.has(item.id));
     }
   }, [currentVisit, currentPhase, postponedPhaseItemIds, latePhaseItemIds]);
+
+  const currentVisitDisplayItemIdsSignature = useMemo(
+    () => currentVisitDisplayItems.map((item) => item.id).join('\u001e'),
+    [currentVisitDisplayItems],
+  );
 
   // フェーズ名の日本語表示
   const phaseDisplayName = useMemo(() => {
@@ -548,7 +565,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     const map = new Map<string, { row: number; col: number; key: string }>();
     if (!mapDayName || !currentMapData) return map;
 
-    items.forEach((item) => {
+    routePositionItems.forEach((item) => {
       const itemEventDate = item.eventDate?.trim() || '';
       if (itemEventDate !== mapDayName) return;
 
@@ -575,7 +592,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     });
 
     return map;
-  }, [items, currentMapData, mapDayName]);
+  }, [routePositionItems, currentMapData, mapDayName]);
 
   // 全スペースのセル座標をルート順に取得
   const precomputedAllVisitCellCoords = useMemo(() => {
@@ -927,7 +944,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       clearTimeout(timer);
       window.removeEventListener('resize', checkOverlap);
     };
-  }, [currentVisitDisplayItems, currentPhaseIndex, currentPhase]);
+  }, [currentVisitDisplayItemIdsSignature, currentPhaseIndex, currentPhase]);
 
   // 次のフェーズまたは訪問先へ移動する関数
   const moveToNext = useCallback(() => {

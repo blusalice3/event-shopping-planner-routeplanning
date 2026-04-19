@@ -1,5 +1,4 @@
 import React, { useCallback, useLayoutEffect, useMemo, useState, useRef, useEffect } from 'react';
-import { flushSync } from 'react-dom';
 import {
   ShoppingItem,
   PurchaseStatus,
@@ -140,6 +139,27 @@ const protectionConfig: Record<
 // 保護レベルのサイクル順序
 const protectionCycle: ProtectionLevel[] = ['full', 'deletable', 'none'];
 
+const areSameItemSnapshot = (a: ShoppingItem, b: ShoppingItem): boolean =>
+  a.id === b.id &&
+  a.circle === b.circle &&
+  a.eventDate === b.eventDate &&
+  a.block === b.block &&
+  a.number === b.number &&
+  a.title === b.title &&
+  a.price === b.price &&
+  a.purchaseStatus === b.purchaseStatus &&
+  a.quantity === b.quantity &&
+  a.remarks === b.remarks &&
+  a.url === b.url &&
+  a.priorityLevel === b.priorityLevel &&
+  a.protectionLevel === b.protectionLevel &&
+  a.source === b.source &&
+  a.assignedTo === b.assignedTo &&
+  a.lastSyncedAt === b.lastSyncedAt &&
+  a.orderIndex === b.orderIndex &&
+  a.postponed === b.postponed &&
+  a.manualHallId === b.manualHallId;
+
 const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   item: sourceItem,
   onUpdate,
@@ -168,14 +188,14 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const item = optimisticItem;
 
   useEffect(() => {
-    setOptimisticItem(sourceItem);
+    setOptimisticItem((prev) => (areSameItemSnapshot(prev, sourceItem) ? prev : sourceItem));
   }, [sourceItem]);
 
   const commitItemUpdate = useCallback(
     (updatedItem: ShoppingItem) => {
-      flushSync(() => {
-        setOptimisticItem(updatedItem);
-      });
+      setOptimisticItem((prev) =>
+        areSameItemSnapshot(prev, updatedItem) ? prev : updatedItem,
+      );
       onUpdate(updatedItem);
     },
     [onUpdate],
