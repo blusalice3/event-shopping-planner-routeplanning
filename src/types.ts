@@ -53,6 +53,11 @@ export interface FocusModeSessionState {
   postponedItemIds: string[];
   lateItemIds: string[];
   isCompleted: boolean;
+  lastPurchaseChangeAt?: {
+    phase: FocusPhase;
+    phaseIndex: number;
+    visitKey: string;
+  } | null;
 }
 
 export interface EventMetadata {

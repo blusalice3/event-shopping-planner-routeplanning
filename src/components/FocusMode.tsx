@@ -137,6 +137,32 @@ const FocusMode: React.FC<FocusModeProps> = ({
     () => new Set(resumeState?.lateItemIds || []),
   );
 
+  // 最後に購入状態を変更した位置（再開ダイアログで「最後に購入状態を変更したスペース」選択肢に使用）
+  const [lastPurchaseChangeAt, setLastPurchaseChangeAt] = useState<{
+    phase: FocusPhase;
+    phaseIndex: number;
+    visitKey: string;
+  } | null>(() => resumeState?.lastPurchaseChangeAt ?? null);
+
+  // 再開ダイアログ表示用の状態
+  const [resumeChoiceDialog, setResumeChoiceDialog] = useState<{
+    isOpen: boolean;
+    lastSpaceLabel: string;
+    lastPhase: FocusPhase;
+    lastIndex: number;
+    lastChangeEnabled: boolean;
+    phaseStartEnabled: boolean;
+    normalStartEnabled: boolean;
+  } | null>(null);
+
+  // 復帰時の Postpone/Late 同期と完了判定の進行状態
+  const didSyncOnResumeRef = useRef(false);
+  const hadResumeStateRef = useRef(Boolean(resumeState));
+  const didInitResumeChoiceRef = useRef(false);
+  const [pendingResumeSyncSignature, setPendingResumeSyncSignature] = useState<string | null>(null);
+  const [isResumeSyncComplete, setIsResumeSyncComplete] = useState(() => !resumeState);
+  const [isResumeCompletionChecked, setIsResumeCompletionChecked] = useState(() => !resumeState);
+
   // フェーズ切り替え確認ダイアログの状態
   const [phaseChangeDialog, setPhaseChangeDialog] = useState<{
     isOpen: boolean;
@@ -306,12 +332,75 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   }, [executeItems]);
 
-  // 現時点で遅参状態のアイテムIDセット（通常・後回しフェーズ中に動的に更新）
+  // 現時点で遅参状態のアイテムIDセット(通常・後回しフェーズ中に動的に更新)
   const currentLateItemIds = useMemo(() => {
     return new Set(
       executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
     );
   }, [executeItems]);
+
+  // ID集合の等価判定ヘルパ
+  const isSameIdSet = (a: Set<string>, b: Set<string>) =>
+    a.size === b.size && [...a].every((id) => b.has(id));
+
+  // 同期判定の安定化用シグネチャ
+  const buildIdSetSignature = (ids: Set<string>) => Array.from(ids).sort().join('\u001e');
+
+  // 現在の Postpone/Late 集合のシグネチャ（2レンダ安定性ゲートで使用）
+  const resumeSyncCandidateSignature = useMemo(
+    () =>
+      `${buildIdSetSignature(currentPostponedItemIds)}\u001f${buildIdSetSignature(currentLateItemIds)}`,
+    [currentPostponedItemIds, currentLateItemIds],
+  );
+
+  // resumeState の null↔non-null 遷移検知（defense-in-depth）
+  useEffect(() => {
+    const hasResumeState = Boolean(resumeState);
+
+    if (hasResumeState && !hadResumeStateRef.current) {
+      didSyncOnResumeRef.current = false;
+      setPendingResumeSyncSignature(null);
+      setIsResumeSyncComplete(false);
+      setIsResumeCompletionChecked(false);
+    }
+
+    if (!hasResumeState && hadResumeStateRef.current) {
+      didSyncOnResumeRef.current = false;
+      setPendingResumeSyncSignature(null);
+      setIsResumeSyncComplete(true);
+      setIsResumeCompletionChecked(true);
+    }
+
+    hadResumeStateRef.current = hasResumeState;
+  }, [resumeState]);
+
+  // 復帰時に Postpone/Late を最新の実データへ1回だけ同期する
+  useEffect(() => {
+    if (!resumeState) return;
+    if (didSyncOnResumeRef.current) return;
+
+    // 1回目観測: state更新で2回目評価を必ず起こす
+    if (pendingResumeSyncSignature !== resumeSyncCandidateSignature) {
+      setPendingResumeSyncSignature(resumeSyncCandidateSignature);
+      return;
+    }
+
+    // 2回連続一致で同期確定
+    const postponedNow = new Set(currentPostponedItemIds);
+    const lateNow = new Set(currentLateItemIds);
+
+    setPostponedPhaseItemIds((prev) => (isSameIdSet(prev, postponedNow) ? prev : postponedNow));
+    setLatePhaseItemIds((prev) => (isSameIdSet(prev, lateNow) ? prev : lateNow));
+
+    didSyncOnResumeRef.current = true;
+    setIsResumeSyncComplete(true);
+  }, [
+    resumeState,
+    pendingResumeSyncSignature,
+    resumeSyncCandidateSignature,
+    currentPostponedItemIds,
+    currentLateItemIds,
+  ]);
 
   // フェーズごとの訪問先リストを計算
   const visitsByPhase = useMemo(() => {
@@ -360,6 +449,38 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const currentPhaseVisits = useMemo(() => {
     return visitsByPhase[currentPhase];
   }, [visitsByPhase, currentPhase]);
+
+  // 最後に購入状態を変更した位置の visitKey を visits 中で厳密一致探索
+  const exactLastChangeIndex = useMemo(() => {
+    const lpc = resumeState?.lastPurchaseChangeAt;
+    if (!lpc) return null;
+    const visits = visitsByPhase[lpc.phase];
+    if (!visits.length) return null;
+    const idx = visits.findIndex((visit) => visit.key === lpc.visitKey);
+    return idx >= 0 ? idx : null;
+  }, [resumeState, visitsByPhase]);
+
+  // phaseIndex を [0, visits.length - 1] にクランプ
+  const clampPhaseIndex = useCallback(
+    (phase: FocusPhase, index: number) => {
+      const len = visitsByPhase[phase].length;
+      if (len === 0) return 0;
+      return Math.min(Math.max(0, index), len - 1);
+    },
+    [visitsByPhase],
+  );
+
+  // 未処理アイテム（None/Postpone/Late）の存在判定（完了済み復帰時の自動通常復帰用）
+  const hasIncompleteItems = useMemo(
+    () =>
+      executeItems.some(
+        (item) =>
+          item.purchaseStatus === 'None' ||
+          item.purchaseStatus === 'Postpone' ||
+          item.purchaseStatus === 'Late',
+      ),
+    [executeItems],
+  );
 
   // 全スペースのvisitKeyをルート順に格納（マップのルート線描画用）
   const allVisitKeySignature = useMemo(
@@ -688,6 +809,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       postponedItemIds: Array.from(postponedPhaseItemIds),
       lateItemIds: Array.from(latePhaseItemIds),
       isCompleted,
+      lastPurchaseChangeAt,
     });
   }, [
     onSessionStateChange,
@@ -699,6 +821,83 @@ const FocusMode: React.FC<FocusModeProps> = ({
     postponedPhaseItemIds,
     latePhaseItemIds,
     isCompleted,
+    lastPurchaseChangeAt,
+  ]);
+
+  // 完了済み復帰時、未処理アイテムが残っていれば自動的に未完了に戻して先頭非空フェーズへ
+  useEffect(() => {
+    if (!resumeState) {
+      setIsResumeCompletionChecked(true);
+      return;
+    }
+    if (!isResumeSyncComplete) return;
+
+    if (isCompleted && hasIncompleteItems) {
+      setIsCompleted(false);
+      if (visitsByPhase.normal.length > 0) {
+        setCurrentPhase('normal');
+        setCurrentPhaseIndex(0);
+      } else if (visitsByPhase.postponed.length > 0) {
+        setCurrentPhase('postponed');
+        setCurrentPhaseIndex(0);
+      } else if (visitsByPhase.late.length > 0) {
+        setCurrentPhase('late');
+        setCurrentPhaseIndex(0);
+      }
+    }
+
+    setIsResumeCompletionChecked(true);
+  }, [resumeState, isResumeSyncComplete, isCompleted, hasIncompleteItems, visitsByPhase]);
+
+  // 再開ダイアログ初期化（resumeState 受領・sync 完了・completion-check 完了後の1回のみ評価）
+  useEffect(() => {
+    if (didInitResumeChoiceRef.current) return;
+    if (!resumeState) return;
+    if (!didSyncOnResumeRef.current) return;     // 真の同期完了ゲート（ref 即時反映）
+    if (!isResumeSyncComplete) return;            // state 側のシグナルも併用
+    if (!isResumeCompletionChecked) return;       // 完了判定の完了も待つ
+
+    if (isCompleted) {
+      didInitResumeChoiceRef.current = true;
+      return;
+    }
+
+    const lpc = resumeState.lastPurchaseChangeAt;
+    if (!lpc) {
+      didInitResumeChoiceRef.current = true;
+      return;
+    }
+
+    const lastChangeEnabled = exactLastChangeIndex !== null;
+
+    let lastSpaceLabel = '対象スペースが現在の並びに見つかりません';
+    if (lastChangeEnabled) {
+      const visits = visitsByPhase[lpc.phase];
+      const firstItem = visits[exactLastChangeIndex!]?.items?.[0];
+      if (firstItem) {
+        lastSpaceLabel = `${firstItem.block}-${firstItem.number} ${firstItem.circle ?? ''}`.trim();
+      }
+    }
+
+    setResumeChoiceDialog({
+      isOpen: true,
+      lastSpaceLabel,
+      lastPhase: lpc.phase,
+      lastIndex: lastChangeEnabled ? exactLastChangeIndex! : 0,
+      lastChangeEnabled,
+      phaseStartEnabled: visitsByPhase[currentPhase].length > 0,
+      normalStartEnabled: visitsByPhase.normal.length > 0,
+    });
+
+    didInitResumeChoiceRef.current = true;
+  }, [
+    resumeState,
+    isResumeSyncComplete,
+    isResumeCompletionChecked,
+    isCompleted,
+    visitsByPhase,
+    currentPhase,
+    exactLastChangeIndex,
   ]);
 
   // タイマーをクリアする関数（フェーズ切り替えでも使用するので先に定義）
@@ -852,6 +1051,31 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const cancelPhaseChange = useCallback(() => {
     setPhaseChangeDialog({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
   }, []);
+
+  // 再開ダイアログの選択ハンドラ
+  const applyResumeChoice = useCallback(
+    (choice: 'lastChange' | 'pointer' | 'phaseStart' | 'normalStart') => {
+      if (!resumeChoiceDialog) return;
+
+      if (choice === 'lastChange' && resumeChoiceDialog.lastChangeEnabled) {
+        setCurrentPhase(resumeChoiceDialog.lastPhase);
+        setCurrentPhaseIndex(resumeChoiceDialog.lastIndex);
+      } else if (choice === 'pointer') {
+        // edit 側で visits が減っていても範囲外を起こさないようクランプ
+        setCurrentPhaseIndex((prev) => clampPhaseIndex(currentPhase, prev));
+      } else if (choice === 'phaseStart' && resumeChoiceDialog.phaseStartEnabled) {
+        setCurrentPhaseIndex(0);
+      } else if (choice === 'normalStart' && resumeChoiceDialog.normalStartEnabled) {
+        setCurrentPhase('normal');
+        setCurrentPhaseIndex(0);
+      }
+      setLastPurchaseChangeAt(null);
+      setResumeChoiceDialog(null);
+      clearAutoAdvanceTimer();
+      setIsNextButtonBlinking(false);
+    },
+    [resumeChoiceDialog, clearAutoAdvanceTimer, clampPhaseIndex, currentPhase],
+  );
 
   // 次へボタンの点滅を更新
   useEffect(() => {
@@ -1136,6 +1360,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
       const originalItem = currentVisitDisplayItems.find((i) => i.id === updatedItem.id);
       if (!originalItem) return;
 
+      // 購入状態が実際に変更された場合、最後の変更位置を記録（再開ダイアログで使用）
+      if (originalItem.purchaseStatus !== updatedItem.purchaseStatus) {
+        setLastPurchaseChangeAt({
+          phase: currentPhase,
+          phaseIndex: currentPhaseIndex,
+          visitKey: getVisitKey(originalItem),
+        });
+      }
+
       // 後回し/遅参以外に変更された場合、タイマーをクリア
       if (updatedItem.purchaseStatus !== 'Postpone' && updatedItem.purchaseStatus !== 'Late') {
         clearAutoAdvanceTimer();
@@ -1158,7 +1391,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
         startAutoAdvance();
       }
     },
-    [onUpdateItem, currentVisitDisplayItems, clearAutoAdvanceTimer, currentPhase, startAutoAdvance],
+    [
+      onUpdateItem,
+      currentVisitDisplayItems,
+      clearAutoAdvanceTimer,
+      currentPhase,
+      currentPhaseIndex,
+      startAutoAdvance,
+    ],
   );
 
   // スワイプハンドラ（スマートフォンモード用）
@@ -1778,6 +2018,67 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
   };
 
+  // 集中モード再開時の選択ダイアログ
+  const ResumeChoiceDialog = () => {
+    if (!resumeChoiceDialog || !resumeChoiceDialog.isOpen) return null;
+
+    const phaseName =
+      resumeChoiceDialog.lastPhase === 'normal'
+        ? '通常'
+        : resumeChoiceDialog.lastPhase === 'postponed'
+          ? '後回し'
+          : '遅参';
+
+    return (
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-md w-full mx-4 overflow-hidden">
+          <div className="bg-gradient-to-r from-teal-500 to-indigo-600 text-white p-4">
+            <h2 className="text-lg font-bold">集中モードを再開しますか？</h2>
+            <p className="text-sm opacity-80 mt-1">どこから再開するか選んでください</p>
+          </div>
+
+          <div className="p-4 space-y-2">
+            <button
+              onClick={() => applyResumeChoice('lastChange')}
+              disabled={!resumeChoiceDialog.lastChangeEnabled}
+              className="w-full py-3 px-4 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            >
+              最後に購入状態を変更したスペース
+              <span className="block text-xs opacity-80 mt-0.5">
+                {resumeChoiceDialog.lastChangeEnabled
+                  ? `${resumeChoiceDialog.lastSpaceLabel} (${phaseName}フェーズ)`
+                  : resumeChoiceDialog.lastSpaceLabel}
+              </span>
+            </button>
+
+            <button
+              onClick={() => applyResumeChoice('pointer')}
+              className="w-full py-3 px-4 bg-slate-600 hover:bg-slate-700 text-white rounded-lg font-medium transition-colors text-left"
+            >
+              離脱時のポインタ位置
+            </button>
+
+            <button
+              onClick={() => applyResumeChoice('phaseStart')}
+              disabled={!resumeChoiceDialog.phaseStartEnabled}
+              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            >
+              現在のフェーズの最初から
+            </button>
+
+            <button
+              onClick={() => applyResumeChoice('normalStart')}
+              disabled={!resumeChoiceDialog.normalStartEnabled}
+              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
+            >
+              通常フェーズの最初から
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   // セルアイテムポップアップコンポーネント
   const CellItemPopup = () => {
     if (!cellPopupState.isOpen) return null;
@@ -2228,6 +2529,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
         {/* フェーズ切り替え確認ダイアログ */}
         <PhaseChangeDialog />
 
+        {/* 集中モード再開選択ダイアログ */}
+        <ResumeChoiceDialog />
+
         {/* セルアイテムポップアップ */}
         <CellItemPopup />
 
@@ -2426,6 +2730,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
         {/* フェーズ切り替え確認ダイアログ */}
         <PhaseChangeDialog />
 
+        {/* 集中モード再開選択ダイアログ */}
+        <ResumeChoiceDialog />
+
         {/* セルアイテムポップアップ */}
         <CellItemPopup />
 
@@ -2603,6 +2910,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
       {/* フェーズ切り替え確認ダイアログ */}
       <PhaseChangeDialog />
+
+      {/* 集中モード再開選択ダイアログ */}
+      <ResumeChoiceDialog />
 
       {/* セルアイテムポップアップ */}
       <CellItemPopup />

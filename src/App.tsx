@@ -188,16 +188,33 @@ const isFocusModeSessionStateEqual = (
   b: FocusModeSessionState,
 ): boolean => {
   if (!a) return false;
-  return (
-    a.phase === b.phase &&
-    a.phaseIndex === b.phaseIndex &&
-    a.isCompleted === b.isCompleted &&
-    a.savedPhaseIndices.normal === b.savedPhaseIndices.normal &&
-    a.savedPhaseIndices.postponed === b.savedPhaseIndices.postponed &&
-    a.savedPhaseIndices.late === b.savedPhaseIndices.late &&
-    areStringArraysEqual(a.postponedItemIds, b.postponedItemIds) &&
-    areStringArraysEqual(a.lateItemIds, b.lateItemIds)
-  );
+  if (
+    a.phase !== b.phase ||
+    a.phaseIndex !== b.phaseIndex ||
+    a.isCompleted !== b.isCompleted ||
+    a.savedPhaseIndices.normal !== b.savedPhaseIndices.normal ||
+    a.savedPhaseIndices.postponed !== b.savedPhaseIndices.postponed ||
+    a.savedPhaseIndices.late !== b.savedPhaseIndices.late ||
+    !areStringArraysEqual(a.postponedItemIds, b.postponedItemIds) ||
+    !areStringArraysEqual(a.lateItemIds, b.lateItemIds)
+  ) {
+    return false;
+  }
+
+  const lpcA = a.lastPurchaseChangeAt ?? null;
+  const lpcB = b.lastPurchaseChangeAt ?? null;
+  if ((lpcA === null) !== (lpcB === null)) return false;
+  if (
+    lpcA &&
+    lpcB &&
+    (lpcA.phase !== lpcB.phase ||
+      lpcA.phaseIndex !== lpcB.phaseIndex ||
+      lpcA.visitKey !== lpcB.visitKey)
+  ) {
+    return false;
+  }
+
+  return true;
 };
 
 const normalizeRotationAngle = (angle: number): number => {
@@ -664,6 +681,33 @@ const App: React.FC = () => {
     },
     [currentFocusSessionKey],
   );
+
+  // 有効な集中モードセッションキーの集合（イベント名×日付）。
+  const validFocusSessionKeys = useMemo(() => {
+    const keys = new Set<string>();
+    Object.entries(eventLists).forEach(([eventName, eventItems]) => {
+      extractEventDates(eventItems).forEach((eventDate) => {
+        keys.add(buildFocusSessionKey(eventName, eventDate));
+      });
+    });
+    return keys;
+  }, [eventLists]);
+
+  // 無効化された集中モードセッションキーを掃除する。
+  useEffect(() => {
+    setFocusModeSessions((prev) => {
+      let changed = false;
+      const next: Record<string, FocusModeSessionState> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        if (validFocusSessionKeys.has(key)) {
+          next[key] = value;
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [validFocusSessionKeys]);
 
   const currentFocusEventDate = useMemo(() => activeEventDate, [activeEventDate]);
 
@@ -1290,7 +1334,6 @@ const App: React.FC = () => {
       if (!activeEventName) return;
 
       const currentEventDate = activeEventDate;
-
       setDayModes((prev) => ({
         ...prev,
         [activeEventName]: {
@@ -1305,15 +1348,6 @@ const App: React.FC = () => {
 
       if (mode !== 'focus') {
         setFocusModeMapVisible(false);
-        if (currentEventDate) {
-          const sessionKey = buildFocusSessionKey(activeEventName, currentEventDate);
-          setFocusModeSessions((prev) => {
-            if (!prev[sessionKey]) return prev;
-            const next = { ...prev };
-            delete next[sessionKey];
-            return next;
-          });
-        }
       }
       setUiVisibilityOverride(false);
       setUiSettingsPanelOpen(false);
@@ -1328,7 +1362,7 @@ const App: React.FC = () => {
         }, 100);
       }
     },
-    [activeEventName, activeTab, eventDates],
+    [activeEventName, activeEventDate, activeTab, eventDates],
   );
 
   const handleSelectEvent = useCallback(

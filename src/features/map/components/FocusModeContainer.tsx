@@ -1,18 +1,16 @@
-import React, { useMemo } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import FocusMode from '../../../components/FocusMode';
+import { buildMergedHallRouteSettings } from '../../../utils/mergedHallRouteSettings';
 import type {
   ExecuteModeItems,
-  HallDefinition,
+  FocusModeSessionState,
   HallDefinitionsStore,
   HallRouteSettingsStore,
-  FocusModeSessionState,
   MapDataStore,
   NumberCellOutlineStyle,
   PurchaseStatus,
   ShoppingItem,
 } from '../../../types';
-import { buildMergedHallRouteSettings } from '../../../utils/mergedHallRouteSettings';
-import { buildItemRoutingSignature } from '../../../utils/hallGrouping';
 
 type FocusModeContainerProps = {
   activeEventName: string | null;
@@ -61,31 +59,41 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   appZoomLevel,
   resumeState,
   onSessionStateChange,
-  mapRotationAngle = 0,
-  mapInitialRotationAngle = 0,
+  mapRotationAngle,
+  mapInitialRotationAngle,
   onMapRotationAngleChange,
   numberCellOutlineStyle,
   disablePriceUndefinedCheck,
 }) => {
+  // 現在表示中の日付（タブ名が日付と一致すればそれ、そうでなければ先頭日）
   const currentDay = useMemo(
     () => (eventDates.includes(activeTab) ? activeTab : eventDates[0] || ''),
     [activeTab, eventDates],
   );
 
-  const mapTabName = `${currentDay}マップ`;
-  const hasMapTab = !!(activeEventName && hallDefinitions[activeEventName]?.[mapTabName]);
-  const executeModeItemIds = activeEventName
-    ? executeModeItems[activeEventName]?.[currentDay] || []
-    : [];
-  const focusRoutingSignature = useMemo(
-    () => buildItemRoutingSignature(items, executeModeItemIds),
-    [items, executeModeItemIds],
+  // 実行列に含まれるアイテムID
+  const executeModeItemIds = useMemo(() => {
+    if (!activeEventName) return [];
+    return executeModeItems[activeEventName]?.[currentDay] || [];
+  }, [executeModeItems, activeEventName, currentDay]);
+
+  // マップタブ名（イベント日付 + "マップ"）
+  const mapTabName = useMemo(
+    () => (currentDay ? `${currentDay}マップ` : null),
+    [currentDay],
   );
 
-  // App.tsx の globalHallOrderRouteSettings と同じ実装で hallOrder を構築する
-  // (map+mapless ホール統合 + 未定義系優先度キーの動的注入)。
-  // これにより HallOrderPanel で並べ替えた順序が集中モードでも一致する。
-  const { mergedHalls: focusMergedHalls, mergedSettings: focusMergedSettings } = useMemo(
+  // 当該マップが存在するか
+  const hasMapTab = useMemo(() => {
+    if (!activeEventName || !mapTabName) return false;
+    return !!mapData[activeEventName]?.[mapTabName];
+  }, [activeEventName, mapTabName, mapData]);
+
+  // マップ定義 + mapless ホール定義を統合した情報
+  const {
+    mergedHalls: focusMergedHalls,
+    mergedSettings: focusMergedSettings,
+  } = useMemo(
     () =>
       buildMergedHallRouteSettings({
         eventName: activeEventName,
@@ -100,24 +108,27 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
     [
       activeEventName,
       currentDay,
-      mapTabName,
       hasMapTab,
+      mapTabName,
       hallDefinitions,
       hallRouteSettings,
-      focusRoutingSignature,
+      executeModeItemIds,
+      items,
       mapData,
     ],
   );
 
-  if (!activeEventName) return null;
+  // FocusMode に渡す mapData（イベント別の分岐を吸収）
+  const focusMapData = useMemo(() => {
+    if (!activeEventName) return undefined;
+    return mapData[activeEventName] || undefined;
+  }, [activeEventName, mapData]);
 
-  const eventMapData = mapData[activeEventName];
-  const focusHallDefinitions: HallDefinition[] | undefined =
-    focusMergedHalls.length > 0 ? focusMergedHalls : undefined;
-  const focusHallOrder: string[] =
-    focusMergedSettings.hallOrder.length > 0
-      ? focusMergedSettings.hallOrder
-      : (focusHallDefinitions || []).map((h) => h.id);
+  useEffect(() => {
+    onMapVisibilityChange?.(false);
+  }, [onMapVisibilityChange]);
+
+  if (!activeEventName) return null;
 
   return (
     <FocusMode
@@ -127,9 +138,9 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       onModeChange={onModeChange}
       layoutMode={layoutMode}
       onLayoutModeChange={onLayoutModeChange}
-      mapData={eventMapData}
-      hallDefinitions={focusHallDefinitions}
-      hallOrder={focusHallOrder}
+      mapData={focusMapData}
+      hallDefinitions={focusMergedHalls}
+      hallOrder={focusMergedSettings.hallOrder}
       onMapVisibilityChange={onMapVisibilityChange}
       onAddItem={onAddItem}
       onEditRequest={onEditRequest}
