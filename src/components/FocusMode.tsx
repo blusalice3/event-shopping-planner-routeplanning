@@ -12,6 +12,10 @@ import {
 } from '../types';
 import FocusModeMapCanvas from './FocusModeMapCanvas';
 import { FocusModeHeader, FocusModeItemList, FocusModeMapControls } from './focus/FocusModePanels';
+import {
+  buildResumeChoiceDialogState,
+  resolveResumeChoice,
+} from './focus/resumeChoice';
 import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
 import { buildItemRoutingSignature, sortItemsByHallOrder } from '../utils/hallGrouping';
 import { generateRouteSegments, simplifyPath } from '../utils/pathfinding';
@@ -94,15 +98,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const stableMapRotationHandler = onMapRotationAngleChange || noopRotationHandler;
 
   // 現在のフェーズ（ユーザー操作でのみ変更）
-  const [currentPhase, setCurrentPhase] = useState<FocusPhase>(() => {
-    if (resumeState?.isCompleted) return 'normal';
-    return resumeState?.phase || 'normal';
-  });
+  const [currentPhase, setCurrentPhase] = useState<FocusPhase>(
+    () => resumeState?.phase || 'normal',
+  );
   // 現在のフェーズ内での訪問先インデックス
-  const [currentPhaseIndex, setCurrentPhaseIndex] = useState(() => {
-    if (resumeState?.isCompleted) return 0;
-    return Math.max(0, resumeState?.phaseIndex || 0);
-  });
+  const [currentPhaseIndex, setCurrentPhaseIndex] = useState(
+    () => Math.max(0, resumeState?.phaseIndex || 0),
+  );
   // 最後に操作したアイテムID
   const [lastInteractedItemId, setLastInteractedItemId] = useState<string | null>(null);
   // 次へボタンの点滅状態
@@ -111,7 +113,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const [blinkingPriceItemIds, setBlinkingPriceItemIds] = useState<Set<string>>(new Set());
   // 通知メッセージ
   const [notification, setNotification] = useState<string | null>(null);
-  // 完了状態（再入場時は通常フェーズ先頭から開始するため常に未完了で初期化）
+  // 完了状態は常に false 初期化。完了済み再入場時は再開ダイアログの pointer 選択で復元する。
   const [isCompleted, setIsCompleted] = useState(false);
   // 自動進行タイマーID
   const autoAdvanceTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -140,12 +142,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
   );
 
   // 最後に購入状態を変更した位置（再開ダイアログで「最後に購入状態を変更したスペース」選択肢に使用）
-  // 完了済み再入場時は破棄して通常フェーズ先頭から開始
+  // 完了済み再入場時も保持し、再開ダイアログの lastChange 選択肢を温存する。
   const [lastPurchaseChangeAt, setLastPurchaseChangeAt] = useState<{
     phase: FocusPhase;
     phaseIndex: number;
     visitKey: string;
-  } | null>(() => (resumeState?.isCompleted ? null : (resumeState?.lastPurchaseChangeAt ?? null)));
+  } | null>(() => resumeState?.lastPurchaseChangeAt ?? null);
 
   // 再開ダイアログ表示用の状態
   const [resumeChoiceDialog, setResumeChoiceDialog] = useState<{
@@ -153,19 +155,61 @@ const FocusMode: React.FC<FocusModeProps> = ({
     lastSpaceLabel: string;
     lastPhase: FocusPhase;
     lastIndex: number;
+    pointerPhase: FocusPhase;
+    pointerIndex: number;
+    phaseStartPhase: FocusPhase;
     lastChangeEnabled: boolean;
     phaseStartEnabled: boolean;
     normalStartEnabled: boolean;
+    wasCompleted: boolean;
   } | null>(null);
 
   // 復帰時の Postpone/Late 同期と完了判定の進行状態
   const didSyncOnResumeRef = useRef(false);
   const hadResumeStateRef = useRef(Boolean(resumeState));
-  // 完了済みセッションからの再入場時は再開ダイアログを抑止
-  const didInitResumeChoiceRef = useRef(resumeState?.isCompleted === true);
+  // 完了済みセッションからの再入場時も再開ダイアログを表示する(wasCompleted 判定で pointer 復元に使う)
+  const didInitResumeChoiceRef = useRef(false);
+  // 初回 resumeState のスナップショット。onSessionStateChange で親 state が上書きされる前の
+  // 値を保持し、再開ダイアログ初期化および「離脱時のポインタ位置」復元で参照する。
+  const initialResumeStateRef = useRef<FocusModeSessionState | null>(resumeState ?? null);
   const [pendingResumeSyncSignature, setPendingResumeSyncSignature] = useState<string | null>(null);
   const [isResumeSyncComplete, setIsResumeSyncComplete] = useState(() => !resumeState);
   const [isResumeCompletionChecked, setIsResumeCompletionChecked] = useState(() => !resumeState);
+  // 再開ダイアログ初期化が解決するまで onSessionStateChange による親への書き戻しを抑止する。
+  // resumeState=null なら初期解決は即座に true(新規セッション)。
+  const [isResumeInitResolved, setIsResumeInitResolved] = useState(() => !resumeState);
+
+  // render 時点の「null→non-null 遷移中」判定。
+  // useEffect による setIsResumeInitResolved(false) は次レンダーまで反映されないため、
+  // 同コミット内で onSessionStateChange が先に発火するレースを防ぐ。
+  const isResumeTransitioning = Boolean(resumeState) && !hadResumeStateRef.current;
+
+  // タイマーをクリアする関数(遷移 effect より前に宣言する必要があるため早期に定義)
+  const clearAutoAdvanceTimer = useCallback(() => {
+    if (autoAdvanceTimerRef.current) {
+      clearTimeout(autoAdvanceTimerRef.current);
+      autoAdvanceTimerRef.current = null;
+    }
+    if (countdownIntervalRef.current) {
+      clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = null;
+    }
+    setAutoAdvanceCountdown(null);
+  }, []);
+
+  // 初回 resumeState が遅れて届くケースのための backfill(一度だけ書き込む)
+  useEffect(() => {
+    if (!initialResumeStateRef.current && resumeState) {
+      initialResumeStateRef.current = resumeState;
+    }
+  }, [resumeState]);
+
+  // 再開ダイアログ表示中は既存タイマーを停止し、auto-advance 処理状態をリセットする
+  useEffect(() => {
+    if (resumeChoiceDialog?.isOpen) {
+      clearAutoAdvanceTimer();
+    }
+  }, [resumeChoiceDialog?.isOpen, clearAutoAdvanceTimer]);
 
   // フェーズ切り替え確認ダイアログの状態
   const [phaseChangeDialog, setPhaseChangeDialog] = useState<{
@@ -357,26 +401,36 @@ const FocusMode: React.FC<FocusModeProps> = ({
     [currentPostponedItemIds, currentLateItemIds],
   );
 
-  // resumeState の null↔non-null 遷移検知（defense-in-depth）
+  // resumeState の null↔non-null 遷移検知（defense-in-depth + ダイアログ初期化再評価)
   useEffect(() => {
     const hasResumeState = Boolean(resumeState);
 
     if (hasResumeState && !hadResumeStateRef.current) {
+      // null → non-null: 新しいセッションとして snapshot を差し替え、ダイアログ初期化をやり直す
+      initialResumeStateRef.current = resumeState;
       didSyncOnResumeRef.current = false;
+      didInitResumeChoiceRef.current = false;
+      setIsResumeInitResolved(false);
       setPendingResumeSyncSignature(null);
       setIsResumeSyncComplete(false);
       setIsResumeCompletionChecked(false);
     }
 
     if (!hasResumeState && hadResumeStateRef.current) {
+      // non-null → null: 残存する UI/タイマーを明示的に片付ける
+      initialResumeStateRef.current = null;
+      setResumeChoiceDialog(null);
+      clearAutoAdvanceTimer();
       didSyncOnResumeRef.current = false;
       setPendingResumeSyncSignature(null);
       setIsResumeSyncComplete(true);
       setIsResumeCompletionChecked(true);
+      didInitResumeChoiceRef.current = false;
+      setIsResumeInitResolved(true);
     }
 
     hadResumeStateRef.current = hasResumeState;
-  }, [resumeState]);
+  }, [resumeState, clearAutoAdvanceTimer]);
 
   // 復帰時に Postpone/Late を最新の実データへ1回だけ同期する
   useEffect(() => {
@@ -453,16 +507,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const currentPhaseVisits = useMemo(() => {
     return visitsByPhase[currentPhase];
   }, [visitsByPhase, currentPhase]);
-
-  // 最後に購入状態を変更した位置の visitKey を visits 中で厳密一致探索
-  const exactLastChangeIndex = useMemo(() => {
-    const lpc = resumeState?.lastPurchaseChangeAt;
-    if (!lpc) return null;
-    const visits = visitsByPhase[lpc.phase];
-    if (!visits.length) return null;
-    const idx = visits.findIndex((visit) => visit.key === lpc.visitKey);
-    return idx >= 0 ? idx : null;
-  }, [resumeState, visitsByPhase]);
 
   // phaseIndex を [0, visits.length - 1] にクランプ
   const clampPhaseIndex = useCallback(
@@ -790,6 +834,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   useEffect(() => {
     if (!onSessionStateChange) return;
+    // 遷移中・初期解決未完了・ダイアログ表示中は親への書き戻しを抑止する。
+    // これにより (1) 同コミット内レース、(2) 初期化前の先行書き戻し、(3) ダイアログ中の
+    // isCompleted=false 上書き、をすべて塞ぐ。
+    if (isResumeTransitioning) return;
+    if (!isResumeInitResolved) return;
+    if (resumeChoiceDialog?.isOpen) return;
     onSessionStateChange({
       phase: currentPhase,
       phaseIndex: currentPhaseIndex,
@@ -805,6 +855,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
     });
   }, [
     onSessionStateChange,
+    isResumeTransitioning,
+    isResumeInitResolved,
+    resumeChoiceDialog?.isOpen,
     currentPhase,
     currentPhaseIndex,
     savedPhaseIndices.normal,
@@ -829,66 +882,35 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 再開ダイアログ初期化（resumeState 受領・sync 完了・completion-check 完了後の1回のみ評価）
   useEffect(() => {
     if (didInitResumeChoiceRef.current) return;
-    if (!resumeState) return;
-    if (!didSyncOnResumeRef.current) return;     // 真の同期完了ゲート（ref 即時反映）
-    if (!isResumeSyncComplete) return;            // state 側のシグナルも併用
-    if (!isResumeCompletionChecked) return;       // 完了判定の完了も待つ
-
-    if (isCompleted) {
-      didInitResumeChoiceRef.current = true;
+    if (!resumeState) {
+      // 新規セッション (または null 状態): ダイアログ判定は保留。
+      // 後続で resumeState が non-null になれば line 361 effect が
+      // didInitResumeChoiceRef を false のまま維持するので再評価できる。
+      setIsResumeInitResolved(true);
       return;
     }
+    if (!didSyncOnResumeRef.current) return;
+    if (!isResumeSyncComplete) return;
+    if (!isResumeCompletionChecked) return;
 
-    const lpc = resumeState.lastPurchaseChangeAt;
-    if (!lpc) {
-      didInitResumeChoiceRef.current = true;
-      return;
-    }
-
-    const lastChangeEnabled = exactLastChangeIndex !== null;
-
-    let lastSpaceLabel = '対象スペースが現在の並びに見つかりません';
-    if (lastChangeEnabled) {
-      const visits = visitsByPhase[lpc.phase];
-      const firstItem = visits[exactLastChangeIndex!]?.items?.[0];
-      if (firstItem) {
-        lastSpaceLabel = `${firstItem.block}-${firstItem.number} ${firstItem.circle ?? ''}`.trim();
-      }
-    }
-
-    setResumeChoiceDialog({
-      isOpen: true,
-      lastSpaceLabel,
-      lastPhase: lpc.phase,
-      lastIndex: lastChangeEnabled ? exactLastChangeIndex! : 0,
-      lastChangeEnabled,
-      phaseStartEnabled: visitsByPhase[currentPhase].length > 0,
-      normalStartEnabled: visitsByPhase.normal.length > 0,
+    const dialogState = buildResumeChoiceDialogState({
+      initialResumeState: initialResumeStateRef.current,
+      visitsByPhase,
+      currentPhase,
     });
 
+    if (dialogState) {
+      setResumeChoiceDialog(dialogState);
+    }
     didInitResumeChoiceRef.current = true;
+    setIsResumeInitResolved(true);
   }, [
     resumeState,
     isResumeSyncComplete,
     isResumeCompletionChecked,
-    isCompleted,
     visitsByPhase,
     currentPhase,
-    exactLastChangeIndex,
   ]);
-
-  // タイマーをクリアする関数（フェーズ切り替えでも使用するので先に定義）
-  const clearAutoAdvanceTimer = useCallback(() => {
-    if (autoAdvanceTimerRef.current) {
-      clearTimeout(autoAdvanceTimerRef.current);
-      autoAdvanceTimerRef.current = null;
-    }
-    if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-      countdownIntervalRef.current = null;
-    }
-    setAutoAdvanceCountdown(null);
-  }, []);
 
   // フェーズ切り替えダイアログを開く
   const handlePhaseChangeRequest = useCallback(
@@ -1033,20 +1055,21 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const applyResumeChoice = useCallback(
     (choice: 'lastChange' | 'pointer' | 'phaseStart' | 'normalStart') => {
       if (!resumeChoiceDialog) return;
+      const result = resolveResumeChoice(choice, resumeChoiceDialog);
 
-      if (choice === 'lastChange' && resumeChoiceDialog.lastChangeEnabled) {
-        setCurrentPhase(resumeChoiceDialog.lastPhase);
-        setCurrentPhaseIndex(resumeChoiceDialog.lastIndex);
-      } else if (choice === 'pointer') {
-        // edit 側で visits が減っていても範囲外を起こさないようクランプ
-        setCurrentPhaseIndex((prev) => clampPhaseIndex(currentPhase, prev));
-      } else if (choice === 'phaseStart' && resumeChoiceDialog.phaseStartEnabled) {
-        setCurrentPhaseIndex(0);
-      } else if (choice === 'normalStart' && resumeChoiceDialog.normalStartEnabled) {
-        setCurrentPhase('normal');
-        setCurrentPhaseIndex(0);
+      const nextPhase = result.phase ?? currentPhase;
+      if (result.phase !== undefined) setCurrentPhase(result.phase);
+      if (result.phaseIndex !== undefined) {
+        setCurrentPhaseIndex(clampPhaseIndex(nextPhase, result.phaseIndex));
       }
-      setLastPurchaseChangeAt(null);
+      if (result.isCompleted === true) setIsCompleted(true);
+
+      // pointer 選択で完了画面を復元する場合は lastPurchaseChangeAt を保持する。
+      // 他の選択肢(lastChange/phaseStart/normalStart)は通常訪問に遷移するのでクリアする。
+      if (result.isCompleted !== true) {
+        setLastPurchaseChangeAt(null);
+      }
+
       setResumeChoiceDialog(null);
       clearAutoAdvanceTimer();
       setIsNextButtonBlinking(false);
@@ -1482,6 +1505,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const autoAdvanceProcessedRef = useRef(false);
 
   useEffect(() => {
+    // 再開ダイアログ表示中は auto-advance を抑止。ユーザーが選ぶまで state を動かさない
+    if (resumeChoiceDialog?.isOpen) {
+      autoAdvanceProcessedRef.current = false;
+      return;
+    }
+
     // 完了済みまたは訪問先がない場合は何もしない
     if (isCompleted || allVisits.length === 0) {
       autoAdvanceProcessedRef.current = false;
@@ -1584,10 +1613,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
     latePhaseItemIds,
     executeItems,
     clearAutoAdvanceTimer,
+    resumeChoiceDialog?.isOpen,
   ]);
 
   // 自動スキップ処理中かどうか（ローディング表示用）
+  // 再開ダイアログ表示中はローディング画面に落とさず、ダイアログを優先する
   const isAutoAdvancing =
+    !resumeChoiceDialog?.isOpen &&
     !isCompleted &&
     allVisits.length > 0 &&
     currentVisitDisplayItems.length === 0 &&
@@ -1714,8 +1746,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
 
   // ===== フックの移動ここまで =====
 
-  // 訪問先がない場合（完了状態を優先するため未完了時のみ表示）
-  if (!isCompleted && allVisits.length === 0) {
+  // 訪問先がない場合は完了状態より優先して「訪問先がありません」を表示する
+  // (完了済みのまま実行列を空にしても案内画面に抜けられるようにする)
+  if (allVisits.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
         <div className="text-6xl mb-4">📋</div>
