@@ -94,13 +94,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const stableMapRotationHandler = onMapRotationAngleChange || noopRotationHandler;
 
   // 現在のフェーズ（ユーザー操作でのみ変更）
-  const [currentPhase, setCurrentPhase] = useState<FocusPhase>(
-    () => resumeState?.phase || 'normal',
-  );
+  const [currentPhase, setCurrentPhase] = useState<FocusPhase>(() => {
+    if (resumeState?.isCompleted) return 'normal';
+    return resumeState?.phase || 'normal';
+  });
   // 現在のフェーズ内での訪問先インデックス
-  const [currentPhaseIndex, setCurrentPhaseIndex] = useState(() =>
-    Math.max(0, resumeState?.phaseIndex || 0),
-  );
+  const [currentPhaseIndex, setCurrentPhaseIndex] = useState(() => {
+    if (resumeState?.isCompleted) return 0;
+    return Math.max(0, resumeState?.phaseIndex || 0);
+  });
   // 最後に操作したアイテムID
   const [lastInteractedItemId, setLastInteractedItemId] = useState<string | null>(null);
   // 次へボタンの点滅状態
@@ -109,8 +111,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const [blinkingPriceItemIds, setBlinkingPriceItemIds] = useState<Set<string>>(new Set());
   // 通知メッセージ
   const [notification, setNotification] = useState<string | null>(null);
-  // 完了状態
-  const [isCompleted, setIsCompleted] = useState(() => resumeState?.isCompleted || false);
+  // 完了状態（再入場時は通常フェーズ先頭から開始するため常に未完了で初期化）
+  const [isCompleted, setIsCompleted] = useState(false);
   // 自動進行タイマーID
   const autoAdvanceTimerRef = useRef<NodeJS.Timeout | null>(null);
   // カウントダウンインターバルID
@@ -138,11 +140,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
   );
 
   // 最後に購入状態を変更した位置（再開ダイアログで「最後に購入状態を変更したスペース」選択肢に使用）
+  // 完了済み再入場時は破棄して通常フェーズ先頭から開始
   const [lastPurchaseChangeAt, setLastPurchaseChangeAt] = useState<{
     phase: FocusPhase;
     phaseIndex: number;
     visitKey: string;
-  } | null>(() => resumeState?.lastPurchaseChangeAt ?? null);
+  } | null>(() => (resumeState?.isCompleted ? null : (resumeState?.lastPurchaseChangeAt ?? null)));
 
   // 再開ダイアログ表示用の状態
   const [resumeChoiceDialog, setResumeChoiceDialog] = useState<{
@@ -158,7 +161,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 復帰時の Postpone/Late 同期と完了判定の進行状態
   const didSyncOnResumeRef = useRef(false);
   const hadResumeStateRef = useRef(Boolean(resumeState));
-  const didInitResumeChoiceRef = useRef(false);
+  // 完了済みセッションからの再入場時は再開ダイアログを抑止
+  const didInitResumeChoiceRef = useRef(resumeState?.isCompleted === true);
   const [pendingResumeSyncSignature, setPendingResumeSyncSignature] = useState<string | null>(null);
   const [isResumeSyncComplete, setIsResumeSyncComplete] = useState(() => !resumeState);
   const [isResumeCompletionChecked, setIsResumeCompletionChecked] = useState(() => !resumeState);
@@ -468,18 +472,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return Math.min(Math.max(0, index), len - 1);
     },
     [visitsByPhase],
-  );
-
-  // 未処理アイテム（None/Postpone/Late）の存在判定（完了済み復帰時の自動通常復帰用）
-  const hasIncompleteItems = useMemo(
-    () =>
-      executeItems.some(
-        (item) =>
-          item.purchaseStatus === 'None' ||
-          item.purchaseStatus === 'Postpone' ||
-          item.purchaseStatus === 'Late',
-      ),
-    [executeItems],
   );
 
   // 全スペースのvisitKeyをルート順に格納（マップのルート線描画用）
@@ -824,30 +816,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
     lastPurchaseChangeAt,
   ]);
 
-  // 完了済み復帰時、未処理アイテムが残っていれば自動的に未完了に戻して先頭非空フェーズへ
+  // 再開時の sync 完了を完了判定チェック完了としてシグナルするだけ（自動リセットは行わない）
   useEffect(() => {
     if (!resumeState) {
       setIsResumeCompletionChecked(true);
       return;
     }
     if (!isResumeSyncComplete) return;
-
-    if (isCompleted && hasIncompleteItems) {
-      setIsCompleted(false);
-      if (visitsByPhase.normal.length > 0) {
-        setCurrentPhase('normal');
-        setCurrentPhaseIndex(0);
-      } else if (visitsByPhase.postponed.length > 0) {
-        setCurrentPhase('postponed');
-        setCurrentPhaseIndex(0);
-      } else if (visitsByPhase.late.length > 0) {
-        setCurrentPhase('late');
-        setCurrentPhaseIndex(0);
-      }
-    }
-
     setIsResumeCompletionChecked(true);
-  }, [resumeState, isResumeSyncComplete, isCompleted, hasIncompleteItems, visitsByPhase]);
+  }, [resumeState, isResumeSyncComplete]);
 
   // 再開ダイアログ初期化（resumeState 受領・sync 完了・completion-check 完了後の1回のみ評価）
   useEffect(() => {
