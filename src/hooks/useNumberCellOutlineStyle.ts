@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { NumberCellOutlineStyle } from '../types';
+import { NumberCellOutlineStyle } from '../types/map';
 
 const STORAGE_KEY = 'numberCellOutlineStyle';
 const DEFAULT_STYLE: NumberCellOutlineStyle = 'rounded';

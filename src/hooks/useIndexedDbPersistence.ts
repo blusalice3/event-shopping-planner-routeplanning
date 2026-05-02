@@ -3,14 +3,16 @@ import {
   DayModeState,
   EventMetadata,
   ExecuteModeItems,
+  ShoppingItem,
+} from '../types/item';
+import {
   HallDefinitionsStore,
   HallRouteSettingsStore,
   MapDataStore,
   MapRotationSettingsStore,
   MapViewportSettingsStore,
   RouteSettingsStore,
-  ShoppingItem,
-} from '../types';
+} from '../types/map';
 import { db, type LoadResult } from '../utils/indexedDB';
 
 type PersistedStateValues = {
