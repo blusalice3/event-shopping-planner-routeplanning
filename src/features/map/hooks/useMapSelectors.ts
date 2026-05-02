@@ -6,8 +6,8 @@ import type {
   HallRouteSettings,
   HallRouteSettingsStore,
   MapDataStore,
-} from '../../../types';
-import { getMaplessKey } from '../../../types';
+} from '../../../types/map';
+import { getMaplessKey } from '../../../types/map';
 
 type UseMapSelectorsParams = {
   activeEventName: string | null;

@@ -1,16 +1,25 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useRef } from 'react';
 import FocusMode from '../../../components/FocusMode';
 import { buildMergedHallRouteSettings } from '../../../utils/mergedHallRouteSettings';
+import { buildItemRoutingSignature } from '../../../utils/hallGrouping';
+import { buildDayMapVisitLookupSignature } from '../../../utils/mapRoutingSignature';
+import {
+  buildActiveHallDefinitionsStore,
+  buildActiveHallRouteSettingsStore,
+  buildHallDefinitionsStoreRoutingSignature,
+  buildHallRouteSettingsStoreRoutingSignature,
+} from '../../../utils/hallRoutingSignature';
+import type { ExecuteModeItems, PurchaseStatus, ShoppingItem } from '../../../types/item';
+import type { FocusModeSessionState } from '../../../types/focus';
 import type {
-  ExecuteModeItems,
-  FocusModeSessionState,
+  HallDefinition,
   HallDefinitionsStore,
   HallRouteSettingsStore,
   MapDataStore,
   NumberCellOutlineStyle,
-  PurchaseStatus,
-  ShoppingItem,
-} from '../../../types';
+  HallRouteSettings,
+} from '../../../types/map';
+import { getMaplessKey } from '../../../types/map';
 
 type FocusModeContainerProps = {
   activeEventName: string | null;
@@ -77,6 +86,55 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
     return executeModeItems[activeEventName]?.[currentDay] || [];
   }, [executeModeItems, activeEventName, currentDay]);
 
+  const executeModeItemIdsSignature = useMemo(() => {
+    return JSON.stringify(executeModeItemIds);
+  }, [executeModeItemIds]);
+
+  const stableExecuteModeItemIdsRef = useRef<{
+    signature: string;
+    ids: string[];
+  } | null>(null);
+
+  const stableExecuteModeItemIds = useMemo(() => {
+    if (stableExecuteModeItemIdsRef.current?.signature === executeModeItemIdsSignature) {
+      return stableExecuteModeItemIdsRef.current.ids;
+    }
+
+    stableExecuteModeItemIdsRef.current = {
+      signature: executeModeItemIdsSignature,
+      ids: executeModeItemIds,
+    };
+
+    return executeModeItemIds;
+  }, [executeModeItemIds, executeModeItemIdsSignature]);
+
+  const focusRouteItemsSignature = useMemo(() => {
+    return buildItemRoutingSignature(items, stableExecuteModeItemIds);
+  }, [items, stableExecuteModeItemIds]);
+
+  const focusRouteRelevantItemsRef = useRef<{
+    signature: string;
+    items: ShoppingItem[];
+  } | null>(null);
+
+  const focusRouteRelevantItems = useMemo(() => {
+    if (focusRouteRelevantItemsRef.current?.signature === focusRouteItemsSignature) {
+      return focusRouteRelevantItemsRef.current.items;
+    }
+
+    const itemsById = new Map(items.map((item) => [item.id, item]));
+    const relevantItems = stableExecuteModeItemIds
+      .map((id) => itemsById.get(id))
+      .filter((item): item is ShoppingItem => item !== undefined);
+
+    focusRouteRelevantItemsRef.current = {
+      signature: focusRouteItemsSignature,
+      items: relevantItems,
+    };
+
+    return relevantItems;
+  }, [focusRouteItemsSignature, items, stableExecuteModeItemIds]);
+
   // マップタブ名（イベント日付 + "マップ"）
   const mapTabName = useMemo(
     () => (currentDay ? `${currentDay}マップ` : null),
@@ -89,40 +147,176 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
     return !!mapData[activeEventName]?.[mapTabName];
   }, [activeEventName, mapTabName, mapData]);
 
+  const activeEventMapData = useMemo(() => {
+    if (!activeEventName) return undefined;
+    return mapData[activeEventName] || undefined;
+  }, [activeEventName, mapData]);
+
+  const activeDayMapData = useMemo(() => {
+    if (!activeEventMapData || !mapTabName || !hasMapTab) return null;
+    return activeEventMapData[mapTabName] || null;
+  }, [activeEventMapData, mapTabName, hasMapTab]);
+
+  const activeDayMapVisitLookupSignature = useMemo(() => {
+    return buildDayMapVisitLookupSignature(activeDayMapData);
+  }, [activeDayMapData]);
+
+  const focusMapDataStoreRef = useRef<{
+    signature: string;
+    store: MapDataStore;
+  } | null>(null);
+
+  const focusMapDataStore = useMemo(() => {
+    const activeMapTabName = hasMapTab ? mapTabName : null;
+    const signature = JSON.stringify([
+      activeEventName || '',
+      activeMapTabName || '',
+      activeDayMapVisitLookupSignature,
+    ]);
+
+    if (focusMapDataStoreRef.current?.signature === signature) {
+      return focusMapDataStoreRef.current.store;
+    }
+
+    const store: MapDataStore =
+      activeEventName && activeMapTabName && activeDayMapData
+        ? { [activeEventName]: { [activeMapTabName]: activeDayMapData } }
+        : activeEventName
+          ? { [activeEventName]: {} }
+          : {};
+
+    focusMapDataStoreRef.current = { signature, store };
+    return store;
+  }, [
+    activeEventName,
+    hasMapTab,
+    mapTabName,
+    activeDayMapData,
+    activeDayMapVisitLookupSignature,
+  ]);
+
+  const maplessKey = useMemo(() => {
+    return currentDay ? getMaplessKey(currentDay) : null;
+  }, [currentDay]);
+
   // マップ定義 + mapless ホール定義を統合した情報
-  const {
-    mergedHalls: focusMergedHalls,
-    mergedSettings: focusMergedSettings,
-  } = useMemo(
+  const activeHallDefinitionsStoreRef = useRef<{
+    signature: string;
+    store: HallDefinitionsStore;
+  } | null>(null);
+
+  const activeHallDefinitionsStore = useMemo(() => {
+    const activeMapTabName = hasMapTab ? mapTabName : null;
+    const activeMapHalls: HallDefinition[] =
+      activeEventName && activeMapTabName
+        ? hallDefinitions[activeEventName]?.[activeMapTabName] || []
+        : [];
+    const activeMaplessHalls: HallDefinition[] =
+      activeEventName && maplessKey ? hallDefinitions[activeEventName]?.[maplessKey] || [] : [];
+
+    const signature = buildHallDefinitionsStoreRoutingSignature({
+      activeEventName,
+      activeMapTabName,
+      maplessKey,
+      activeMapHalls,
+      activeMaplessHalls,
+    });
+
+    if (activeHallDefinitionsStoreRef.current?.signature === signature) {
+      return activeHallDefinitionsStoreRef.current.store;
+    }
+
+    const store = buildActiveHallDefinitionsStore({
+      activeEventName,
+      activeMapTabName,
+      maplessKey,
+      activeMapHalls,
+      activeMaplessHalls,
+    });
+
+    activeHallDefinitionsStoreRef.current = { signature, store };
+    return store;
+  }, [activeEventName, hasMapTab, mapTabName, maplessKey, hallDefinitions]);
+
+  const activeHallRouteSettingsStoreRef = useRef<{
+    signature: string;
+    store: HallRouteSettingsStore;
+  } | null>(null);
+
+  const activeHallRouteSettingsStore = useMemo(() => {
+    const activeMapTabName = hasMapTab ? mapTabName : null;
+    const activeMapSettings: HallRouteSettings | undefined =
+      activeEventName && activeMapTabName
+        ? hallRouteSettings[activeEventName]?.[activeMapTabName]
+        : undefined;
+    const activeMaplessSettings: HallRouteSettings | undefined =
+      activeEventName && maplessKey ? hallRouteSettings[activeEventName]?.[maplessKey] : undefined;
+
+    const signature = buildHallRouteSettingsStoreRoutingSignature({
+      activeEventName,
+      activeMapTabName,
+      maplessKey,
+      activeMapSettings,
+      activeMaplessSettings,
+    });
+
+    if (activeHallRouteSettingsStoreRef.current?.signature === signature) {
+      return activeHallRouteSettingsStoreRef.current.store;
+    }
+
+    const store = buildActiveHallRouteSettingsStore({
+      activeEventName,
+      activeMapTabName,
+      maplessKey,
+      activeMapSettings,
+      activeMaplessSettings,
+    });
+
+    activeHallRouteSettingsStoreRef.current = { signature, store };
+    return store;
+  }, [activeEventName, hasMapTab, mapTabName, maplessKey, hallRouteSettings]);
+
+  const focusDisplayMergedHalls = useMemo(() => {
+    if (!activeEventName) return [];
+
+    const activeMapTabName = hasMapTab ? mapTabName : null;
+    const activeMapHalls =
+      activeMapTabName ? hallDefinitions[activeEventName]?.[activeMapTabName] || [] : [];
+    const activeMaplessHalls =
+      maplessKey ? hallDefinitions[activeEventName]?.[maplessKey] || [] : [];
+
+    return [...activeMapHalls, ...activeMaplessHalls];
+  }, [activeEventName, hasMapTab, mapTabName, maplessKey, hallDefinitions]);
+
+  const { mergedSettings: focusMergedSettings } = useMemo(
     () =>
       buildMergedHallRouteSettings({
         eventName: activeEventName,
         dayName: currentDay,
         mapTabName: hasMapTab ? mapTabName : null,
-        hallDefinitionsStore: hallDefinitions,
-        hallRouteSettingsStore: hallRouteSettings,
-        executeIds: executeModeItemIds,
-        items,
-        mapDataStore: mapData,
+        hallDefinitionsStore: activeHallDefinitionsStore,
+        hallRouteSettingsStore: activeHallRouteSettingsStore,
+        executeIds: stableExecuteModeItemIds,
+        items: focusRouteRelevantItems,
+        mapDataStore: focusMapDataStore,
       }),
     [
       activeEventName,
       currentDay,
       hasMapTab,
       mapTabName,
-      hallDefinitions,
-      hallRouteSettings,
-      executeModeItemIds,
-      items,
-      mapData,
+      activeHallDefinitionsStore,
+      activeHallRouteSettingsStore,
+      stableExecuteModeItemIds,
+      focusRouteRelevantItems,
+      focusMapDataStore,
     ],
   );
 
   // FocusMode に渡す mapData（イベント別の分岐を吸収）
   const focusMapData = useMemo(() => {
-    if (!activeEventName) return undefined;
-    return mapData[activeEventName] || undefined;
-  }, [activeEventName, mapData]);
+    return activeEventMapData;
+  }, [activeEventMapData]);
 
   useEffect(() => {
     onMapVisibilityChange?.(false);
@@ -139,7 +333,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       layoutMode={layoutMode}
       onLayoutModeChange={onLayoutModeChange}
       mapData={focusMapData}
-      hallDefinitions={focusMergedHalls}
+      hallDefinitions={focusDisplayMergedHalls}
       hallOrder={focusMergedSettings.hallOrder}
       onMapVisibilityChange={onMapVisibilityChange}
       onAddItem={onAddItem}
