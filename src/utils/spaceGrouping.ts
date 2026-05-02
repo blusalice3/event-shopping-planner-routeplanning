@@ -7,7 +7,7 @@
  *     block="A", number="01b"  → spaceKey="A-01b" （別スペース）
  */
 
-import { PurchaseStatus } from '../types';
+import { PurchaseStatus } from '../types/item';
 
 /**
  * ブース番号から末尾の追加数字を除去してベース番号を返す。

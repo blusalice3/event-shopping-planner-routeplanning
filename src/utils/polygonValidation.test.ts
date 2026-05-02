@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { HallDefinition } from '../types';
+import { HallDefinition } from '../types/map';
 import { calculatePolygonArea, validateHallPolygon } from './polygonValidation';
 
 const createHall = (id: string, name: string, vertices: { row: number; col: number }[]): HallDefinition => ({

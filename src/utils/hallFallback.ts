@@ -1,4 +1,4 @@
-import type { HallDefinition } from '../types';
+import type { HallDefinition } from '../types/map';
 
 /**
  * ブロック名を正規化（trim + NFKC）。

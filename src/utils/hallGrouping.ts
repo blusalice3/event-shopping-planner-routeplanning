@@ -1,5 +1,7 @@
-import type { ShoppingItem, HallDefinition, DayMapData, BlockDefinition } from '../types';
+import type { ShoppingItem } from '../types/item';
+import type { HallDefinition, DayMapData, BlockDefinition } from '../types/map';
 import { resolveManualHallId, resolveHallByBlockName } from './hallFallback';
+import { findRouteLookupNumberCell } from './mapRoutingSignature';
 
 export type PriorityLevel = 'none' | 'priority' | 'highest';
 
@@ -44,20 +46,23 @@ export function buildGroupId(
 
 export function buildItemRoutingSignature(items: ShoppingItem[], itemIds: string[]): string {
   const itemsById = new Map(items.map((item) => [item.id, item]));
-  return itemIds
-    .map((itemId) => {
+
+  return JSON.stringify(
+    itemIds.map((itemId) => {
       const item = itemsById.get(itemId);
-      if (!item) return `${itemId}:missing`;
+      if (!item) return ['missing', itemId];
+
       return [
+        'item',
         item.id,
-        item.eventDate,
-        item.block,
-        item.number,
+        item.eventDate ?? '',
+        item.block ?? '',
+        item.number ?? '',
         item.priorityLevel || 'none',
         item.manualHallId || '',
-      ].join('\u001f');
-    })
-    .join('\u001e');
+      ];
+    }),
+  );
 }
 
 /**
@@ -83,9 +88,7 @@ export function getHallIdForItem(
       const numMatch = item.number?.match(/\d+/);
       if (numMatch) {
         const num = parseInt(numMatch[0], 10);
-        const cell = block.numberCells.find(
-          (nc: { row: number; col: number; value: number }) => nc.value === num,
-        );
+        const cell = findRouteLookupNumberCell(block, num);
         if (cell) {
           const isPointInPoly = (
             row: number,

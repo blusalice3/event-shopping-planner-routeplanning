@@ -1,13 +1,13 @@
+import type { ShoppingItem } from '../types/item';
 import type {
-  ShoppingItem,
   HallDefinition,
   HallDefinitionsStore,
   HallRouteSettingsStore,
   HallRouteSettings,
   MapDataStore,
   DayMapData,
-} from '../types';
-import { getMaplessKey } from '../types';
+} from '../types/map';
+import { getMaplessKey } from '../types/map';
 import { getHallIdForItem } from './hallGrouping';
 
 /**

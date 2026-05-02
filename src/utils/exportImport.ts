@@ -9,13 +9,15 @@ import {
   EventMetadata,
   DayModeState,
   ExecuteModeItems,
+  PurchaseStatuses,
+} from '../types/item';
+import {
   MapDataStore,
   RouteSettingsStore,
   HallDefinitionsStore,
   HallRouteSettingsStore,
-  ExportOptions,
-  PurchaseStatuses,
-} from '../types';
+} from '../types/map';
+import { ExportOptions } from '../types/export';
 
 // エクスポートデータの型
 export interface ExportData {

@@ -1,4 +1,4 @@
-import { ShoppingItem } from '../types';
+import { ShoppingItem } from '../types/item';
 
 export function extractEventDates(items: ShoppingItem[]): string[] {
   const eventDates = new Set<string>();
