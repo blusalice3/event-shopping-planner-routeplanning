@@ -1183,6 +1183,64 @@ const FocusMode: React.FC<FocusModeProps> = ({
       startAutoAdvance,
     ],
   );
+
+  const handleBulkStatusChange = useCallback(
+    (targetStatus: PurchaseStatus) => {
+      if (!currentVisit || currentVisitDisplayItems.length === 0) {
+        clearAutoAdvanceTimer();
+        return;
+      }
+
+      const allAlready = currentVisitDisplayItems.every(
+        (item) => item.purchaseStatus === targetStatus,
+      );
+      const newStatus: PurchaseStatus = allAlready ? 'None' : targetStatus;
+      const changedItems = currentVisitDisplayItems.filter(
+        (item) => item.purchaseStatus !== newStatus,
+      );
+
+      if (changedItems.length === 0) {
+        clearAutoAdvanceTimer();
+        return;
+      }
+
+      setLastInteractedItemId(changedItems[changedItems.length - 1].id);
+      setLastPurchaseChangeAt({
+        phase: currentPhase,
+        phaseIndex: currentPhaseIndex,
+        visitKey: currentVisit.key,
+      });
+
+      changedItems.forEach((item) => {
+        onUpdateItem({ ...item, purchaseStatus: newStatus });
+      });
+
+      const willAllBePostponedOrLate =
+        newStatus === 'Postpone' || newStatus === 'Late'
+          ? true
+          : currentVisitDisplayItems.every((item) => {
+              const nextStatus = changedItems.some((changed) => changed.id === item.id)
+                ? newStatus
+                : item.purchaseStatus;
+              return nextStatus === 'Postpone' || nextStatus === 'Late';
+            });
+
+      if (currentPhase === 'normal' && willAllBePostponedOrLate) {
+        startAutoAdvance();
+      } else {
+        clearAutoAdvanceTimer();
+      }
+    },
+    [
+      currentVisit,
+      currentVisitDisplayItems,
+      currentPhase,
+      currentPhaseIndex,
+      onUpdateItem,
+      clearAutoAdvanceTimer,
+      startAutoAdvance,
+    ],
+  );
   // スワイプハンドラ（スマートフォンモード用）
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
@@ -1598,6 +1656,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
             currentVisitPriceInfo={currentVisitPriceInfo}
             currentPhase={currentPhase}
             onPhaseChangeRequest={handlePhaseChangeRequest}
+            currentVisitItems={currentVisitDisplayItems}
+            onBulkStatusChange={handleBulkStatusChange}
             nextVisitInfo={nextVisitInfo}
           />
           <FocusModeItemList
@@ -1698,6 +1758,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
             currentVisitPriceInfo={currentVisitPriceInfo}
             currentPhase={currentPhase}
             onPhaseChangeRequest={handlePhaseChangeRequest}
+            currentVisitItems={currentVisitDisplayItems}
+            onBulkStatusChange={handleBulkStatusChange}
             nextVisitInfo={nextVisitInfo}
           />
           <FocusModeItemList
@@ -1779,6 +1841,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
         currentVisitPriceInfo={currentVisitPriceInfo}
         currentPhase={currentPhase}
         onPhaseChangeRequest={handlePhaseChangeRequest}
+        currentVisitItems={currentVisitDisplayItems}
+        onBulkStatusChange={handleBulkStatusChange}
         nextVisitInfo={nextVisitInfo}
       />
       <FocusModeItemList

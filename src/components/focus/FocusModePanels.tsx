@@ -1,6 +1,6 @@
 import React from 'react';
 import { HallDefinition } from '../../types/map';
-import { ShoppingItem } from '../../types/item';
+import { PurchaseStatus, ShoppingItem } from '../../types/item';
 import { FocusMapCenteringMode } from '../../types/focus';
 import ShoppingItemCard from '../ShoppingItemCard';
 import MapRotationControls from '../map/MapRotationControls';
@@ -36,6 +36,8 @@ interface FocusModeHeaderProps {
   };
   currentPhase: FocusPhase;
   onPhaseChangeRequest: (phase: FocusPhase) => void;
+  currentVisitItems: ShoppingItem[];
+  onBulkStatusChange: (targetStatus: PurchaseStatus) => void;
   nextVisitInfo: {
     spaceInfo: string;
     circleName: string;
@@ -56,6 +58,20 @@ interface FocusModeMapControlsProps {
 
 const noopShoppingItemHandler = (_item: ShoppingItem) => {};
 const noopSelectItem = (_itemId: string) => {};
+
+const bulkStatusOptions: {
+  status: PurchaseStatus;
+  label: string;
+  activeColor: string;
+  hoverColor: string;
+}[] = [
+  { status: 'Purchased', label: '全購入', activeColor: 'bg-green-600 text-white', hoverColor: 'hover:bg-white/20' },
+  { status: 'SoldOut', label: '全売切', activeColor: 'bg-red-600 text-white', hoverColor: 'hover:bg-white/20' },
+  { status: 'Absent', label: '全欠席', activeColor: 'bg-yellow-500 text-white', hoverColor: 'hover:bg-white/20' },
+  { status: 'Postpone', label: '全後回', activeColor: 'bg-purple-700 text-white', hoverColor: 'hover:bg-white/20' },
+  { status: 'Late', label: '全遅参', activeColor: 'bg-blue-700 text-white', hoverColor: 'hover:bg-white/20' },
+  { status: 'LimitedPurchase', label: '全限数', activeColor: 'bg-orange-600 text-white', hoverColor: 'hover:bg-white/20' },
+];
 
 export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
   itemListRef,
@@ -127,6 +143,8 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(({
   currentVisitPriceInfo,
   currentPhase,
   onPhaseChangeRequest,
+  currentVisitItems,
+  onBulkStatusChange,
   nextVisitInfo,
 }) => {
   const rootClassName = containerClassName
@@ -206,6 +224,30 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(({
           </div>
         </div>
       </div>
+      {currentVisitItems.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-1.5">
+          {bulkStatusOptions.map(({ status, label, activeColor, hoverColor }) => {
+            const allMatch = currentVisitItems.every((item) => item.purchaseStatus === status);
+            return (
+              <button
+                key={status}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onBulkStatusChange(status);
+                }}
+                className={`${layoutMode === 'smartphone' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'} flex-shrink-0 whitespace-nowrap font-medium rounded transition-colors ${
+                  allMatch ? activeColor : `bg-white/10 text-white ${hoverColor}`
+                }`}
+                title={`${label}に一括変更${allMatch ? '（もう一度押すと未購入に戻す）' : ''}`}
+                aria-pressed={allMatch}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 });
