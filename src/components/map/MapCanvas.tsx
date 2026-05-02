@@ -2,7 +2,6 @@ import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react'
 import {
   DayMapData,
   CellData,
-  ShoppingItem,
   ZoomLevel,
   MergedCellInfo,
   MapCellStateDetail,
@@ -10,8 +9,11 @@ import {
   NumberCellOutlineStyle,
   MIN_ZOOM,
   MAX_ZOOM,
-} from '../../types';
+} from '../../types/map';
+import { ShoppingItem } from '../../types/item';
+import { useCanvasViewport } from '../../features/map/canvas/useCanvasViewport';
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
+import { findRouteLookupNumberCell } from '../../utils/mapRoutingSignature';
 import { generateRouteSegments, simplifyPath } from '../../utils/pathfinding';
 import {
   findAllCrossingsIndexed,
@@ -52,9 +54,9 @@ interface MapCanvasProps {
   numberCellOutlineStyle?: NumberCellOutlineStyle;
 }
 
-const BASE_CELL_SIZE = 28; // 蝓ｺ譛ｬ繧ｻ繝ｫ繧ｵ繧､繧ｺ
-const SCROLL_MARGIN = 5; // 繧ｹ繧ｯ繝ｭ繝ｼ繝ｫ菴咏區・郁｡・蛻玲焚・・
-const FILLED_SCROLL_MARGIN = 25; // 蜈･蜉帶ｸ医∩繧ｻ繝ｫ蠅・阜縺九ｉ縺ｮ霑ｽ蜉菴咏區・郁｡・蛻玲焚・・
+const BASE_CELL_SIZE = 28; // Base cell size.
+const SCROLL_MARGIN = 5; // Blank-cell scroll margin.
+const FILLED_SCROLL_MARGIN = 25; // Extra margin around filled cells.
 const normalizeDisplayText = (value: string | null | undefined): string => {
   return (value || '').replace(/\u3000/g, ' ').trim();
 };
@@ -93,29 +95,6 @@ interface TapAssistState {
   viewX: number;
   viewY: number;
 }
-
-const normalizeRotationAngle = (angle: number): number => {
-  const normalized = Math.round(angle) % 360;
-  return normalized < 0 ? normalized + 360 : normalized;
-};
-
-const rotatePointAroundCenter = (
-  x: number,
-  y: number,
-  centerX: number,
-  centerY: number,
-  angleRad: number,
-): { x: number; y: number } => {
-  if (angleRad === 0) return { x, y };
-  const dx = x - centerX;
-  const dy = y - centerY;
-  const cos = Math.cos(angleRad);
-  const sin = Math.sin(angleRad);
-  return {
-    x: dx * cos - dy * sin + centerX,
-    y: dx * sin + dy * cos + centerY,
-  };
-};
 
 type RgbColor = { r: number; g: number; b: number };
 
@@ -204,31 +183,51 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   offsetRef: externalOffsetRef,
   numberCellOutlineStyle = 'rounded',
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [offset, setOffsetState] = useState(initialOffset ?? { x: 0, y: 0 });
-  const internalOffsetRef = useRef(offset);
-  const offsetRef = externalOffsetRef ?? internalOffsetRef;
-  const setOffset = useCallback((newOffset: { x: number; y: number }) => {
-    setOffsetState(newOffset);
-    offsetRef.current = newOffset;
-  }, [offsetRef]);
-  const zoomLevelRef = useRef(zoomLevel);
-  const [isDragging, setIsDragging] = useState(false);
-  const isDraggingRef = useRef(false);
-  const dragStartRef = useRef({ x: 0, y: 0 });
-  const dragStartOffsetRef = useRef({ x: 0, y: 0 });
-  const rafPendingRef = useRef(false);
-  const drawCanvasRef = useRef<(() => void) | null>(null);
+  const {
+    activeTouchesRef,
+    canvasRef,
+    cellSize,
+    containerRef,
+    dpr,
+    dragStartOffsetRef,
+    dragStartRef,
+    drawCanvasRef,
+    getPointerViewMetrics,
+    isDragging,
+    isDraggingRef,
+    isPinchGestureRef,
+    isRotationInteracting,
+    mapCenterX,
+    mapCenterY,
+    offsetRef,
+    prevCellSizeRef,
+    rafPendingRef,
+    rotateAroundMapCenter,
+    rotationRadians,
+    setIsDragging,
+    setOffset,
+    setOffsetState,
+    suppressClickUntilRef,
+    toMapCoordinates,
+    zoomLevelRef,
+  } = useCanvasViewport({
+    mapMaxCol: mapData.maxCol,
+    mapMaxRow: mapData.maxRow,
+    zoomLevel,
+    rotationAngle,
+    baseCellSize: BASE_CELL_SIZE,
+    minZoom: MIN_ZOOM,
+    maxZoom: MAX_ZOOM,
+    initialOffset,
+    offsetRef: externalOffsetRef,
+    onZoomChange,
+    onRotationAngleChange,
+  });
   const [hoverGuide, setHoverGuide] = useState<HoverGuideState | null>(null);
   const [tapAssist, setTapAssist] = useState<TapAssistState | null>(null);
   const lastPointerTypeRef = useRef<string>('mouse');
   const tapAssistTimerRef = useRef<number | null>(null);
 
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-
-  const scale = zoomLevel / 100;
-  const cellSize = BASE_CELL_SIZE * scale;
   const isDarkMode =
     typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
 
@@ -236,132 +235,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const showNumbers = true;
   const showBorders = true;
 
-  const prevCellSizeRef = useRef<number>(cellSize);
   const initializedRef = useRef<boolean>(false);
-
-  const pinchStartDistRef = useRef<number>(0);
-  const pinchStartZoomRef = useRef<number>(zoomLevel);
-  const pinchStartOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
-  const isPinchGestureRef = useRef(false);
-  const suppressClickUntilRef = useRef(0);
-  const [isRotationInteracting, setIsRotationInteracting] = useState(false);
-  const rotationInteractionTimerRef = useRef<number | null>(null);
-
-  const normalizedRotationAngle = useMemo(
-    () => normalizeRotationAngle(rotationAngle),
-    [rotationAngle],
-  );
-  const rotationRadians = useMemo(
-    () => (normalizedRotationAngle * Math.PI) / 180,
-    [normalizedRotationAngle],
-  );
-  const mapCenterX = useMemo(() => (mapData.maxCol * cellSize) / 2, [mapData.maxCol, cellSize]);
-  const mapCenterY = useMemo(() => (mapData.maxRow * cellSize) / 2, [mapData.maxRow, cellSize]);
   const showSelectionGrid = selectionGuideOptions?.showGrid ?? false;
   const showSelectionRuler = selectionGuideOptions?.showRuler ?? false;
-
-  const toMapCoordinates = useCallback(
-    (viewX: number, viewY: number, currentOffset?: { x: number; y: number }) => {
-      const ofs = currentOffset ?? offsetRef.current;
-      const translatedX = viewX - ofs.x;
-      const translatedY = viewY - ofs.y;
-      if (rotationRadians === 0) return { x: translatedX, y: translatedY };
-
-      const dx = translatedX - mapCenterX;
-      const dy = translatedY - mapCenterY;
-      const cos = Math.cos(rotationRadians);
-      const sin = Math.sin(rotationRadians);
-
-      return {
-        x: dx * cos + dy * sin + mapCenterX,
-        y: -dx * sin + dy * cos + mapCenterY,
-      };
-    },
-    [rotationRadians, mapCenterX, mapCenterY],
-  );
-
-  const rotateAroundMapCenter = useCallback(
-    (x: number, y: number, angleRad = rotationRadians) => {
-      if (angleRad === 0) return { x, y };
-      const dx = x - mapCenterX;
-      const dy = y - mapCenterY;
-      const cos = Math.cos(angleRad);
-      const sin = Math.sin(angleRad);
-      return {
-        x: dx * cos - dy * sin + mapCenterX,
-        y: dx * sin + dy * cos + mapCenterY,
-      };
-    },
-    [mapCenterX, mapCenterY, rotationRadians],
-  );
-
-  const calculateOffsetForZoomPoint = useCallback(
-    (
-      viewX: number,
-      viewY: number,
-      newZoom: number,
-      options?: {
-        baseZoom?: number;
-        baseOffset?: { x: number; y: number };
-      },
-    ) => {
-      const baseZoom = options?.baseZoom ?? zoomLevel;
-      const baseOffset = options?.baseOffset ?? offsetRef.current;
-      const currentCellSize = BASE_CELL_SIZE * (baseZoom / 100);
-      const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
-      const translatedX = viewX - baseOffset.x;
-      const translatedY = viewY - baseOffset.y;
-      let mapPointX = translatedX;
-      let mapPointY = translatedY;
-
-      if (rotationRadians !== 0) {
-        const currentMapCenterX = (mapData.maxCol * currentCellSize) / 2;
-        const currentMapCenterY = (mapData.maxRow * currentCellSize) / 2;
-        const dx = translatedX - currentMapCenterX;
-        const dy = translatedY - currentMapCenterY;
-        const cos = Math.cos(rotationRadians);
-        const sin = Math.sin(rotationRadians);
-        mapPointX = dx * cos + dy * sin + currentMapCenterX;
-        mapPointY = -dx * sin + dy * cos + currentMapCenterY;
-      }
-
-      const normalizedMapX = mapPointX / currentCellSize;
-      const normalizedMapY = mapPointY / currentCellSize;
-      const scaledMapX = normalizedMapX * newCellSize;
-      const scaledMapY = normalizedMapY * newCellSize;
-      const newMapCenterX = (mapData.maxCol * newCellSize) / 2;
-      const newMapCenterY = (mapData.maxRow * newCellSize) / 2;
-      const rotatedPoint = rotatePointAroundCenter(
-        scaledMapX,
-        scaledMapY,
-        newMapCenterX,
-        newMapCenterY,
-        rotationRadians,
-      );
-      return {
-        x: viewX - rotatedPoint.x,
-        y: viewY - rotatedPoint.y,
-      };
-    },
-    [zoomLevel, mapData.maxCol, mapData.maxRow, rotationRadians],
-  );
-
-  const getPointerViewMetrics = useCallback(
-    (clientX: number, clientY: number) => {
-      const canvas = canvasRef.current;
-      if (!canvas) return null;
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = canvas.width / dpr / rect.width;
-      const scaleY = canvas.height / dpr / rect.height;
-
-      return {
-        viewX: (clientX - rect.left) * scaleX,
-        viewY: (clientY - rect.top) * scaleY,
-      };
-    },
-    [dpr],
-  );
 
   const showTapAssist = useCallback((next: TapAssistState) => {
     setTapAssist(next);
@@ -373,31 +249,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       tapAssistTimerRef.current = null;
     }, TAP_ASSIST_DURATION_MS);
   }, []);
-
-  useEffect(() => {
-    offsetRef.current = offset;
-  }, [offset]);
-
-  useEffect(() => {
-    zoomLevelRef.current = zoomLevel;
-  }, [zoomLevel]);
-
-  useEffect(() => {
-    setIsRotationInteracting(true);
-    if (rotationInteractionTimerRef.current !== null) {
-      clearTimeout(rotationInteractionTimerRef.current);
-    }
-    rotationInteractionTimerRef.current = window.setTimeout(() => {
-      setIsRotationInteracting(false);
-      rotationInteractionTimerRef.current = null;
-    }, 150);
-
-    return () => {
-      if (rotationInteractionTimerRef.current !== null) {
-        clearTimeout(rotationInteractionTimerRef.current);
-      }
-    };
-  }, [normalizedRotationAngle]);
 
   useEffect(() => {
     return () => {
@@ -434,156 +285,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     setOffset({ x: newOffsetX, y: newOffsetY });
     prevCellSizeRef.current = cellSize;
   }, [cellSize]);
-
-  const handleWheel = useCallback(
-    (e: WheelEvent) => {
-      e.preventDefault();
-      if (e.shiftKey && onRotationAngleChange) {
-        const delta = e.deltaY < 0 ? -15 : 15;
-        onRotationAngleChange(normalizeRotationAngle(rotationAngle + delta));
-        return;
-      }
-      if (!onZoomChange) return;
-
-      const container = containerRef.current;
-      if (!container) return;
-
-      const rect = container.getBoundingClientRect();
-      const mouseX = e.clientX - rect.left;
-      const mouseY = e.clientY - rect.top;
-
-      const currentZoom = zoomLevelRef.current;
-      const zoomDelta = -e.deltaY * 0.1;
-      const newZoom = Math.round(Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, currentZoom + zoomDelta)));
-
-      if (newZoom === currentZoom) return;
-
-      const newOffset = calculateOffsetForZoomPoint(mouseX, mouseY, newZoom, {
-        baseZoom: currentZoom,
-        baseOffset: offsetRef.current,
-      });
-      const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
-
-      setOffset(newOffset);
-      offsetRef.current = newOffset;
-      prevCellSizeRef.current = newCellSize;
-      zoomLevelRef.current = newZoom;
-      onZoomChange(newZoom);
-    },
-    [
-      onZoomChange,
-      onRotationAngleChange,
-      rotationAngle,
-      calculateOffsetForZoomPoint,
-    ],
-  );
-
-  const handleTouchStart = useCallback(
-    (e: TouchEvent) => {
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const touch = e.changedTouches[i];
-        activeTouchesRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
-      }
-
-      if (activeTouchesRef.current.size === 2) {
-        isPinchGestureRef.current = true;
-        isDraggingRef.current = false;
-        setIsDragging(false);
-        e.preventDefault();
-        const touches = Array.from(activeTouchesRef.current.values());
-        const dx = touches[1].x - touches[0].x;
-        const dy = touches[1].y - touches[0].y;
-        pinchStartDistRef.current = Math.sqrt(dx * dx + dy * dy);
-        pinchStartZoomRef.current = zoomLevelRef.current;
-        pinchStartOffsetRef.current = { ...offsetRef.current };
-      }
-    },
-    [],
-  );
-
-  const handleTouchMove = useCallback(
-    (e: TouchEvent) => {
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        const touch = e.changedTouches[i];
-        activeTouchesRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
-      }
-
-      if (activeTouchesRef.current.size === 2 && onZoomChange) {
-        isPinchGestureRef.current = true;
-        e.preventDefault();
-        const touches = Array.from(activeTouchesRef.current.values());
-        const dx = touches[1].x - touches[0].x;
-        const dy = touches[1].y - touches[0].y;
-        const currentDist = Math.sqrt(dx * dx + dy * dy);
-
-        if (pinchStartDistRef.current === 0) return;
-
-        const scaleRatio = currentDist / pinchStartDistRef.current;
-        const newZoom = Math.round(
-          Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, pinchStartZoomRef.current * scaleRatio)),
-        );
-
-        const container = containerRef.current;
-        if (!container) return;
-        const rect = container.getBoundingClientRect();
-        const midX = (touches[0].x + touches[1].x) / 2 - rect.left;
-        const midY = (touches[0].y + touches[1].y) / 2 - rect.top;
-
-        if (newZoom === zoomLevelRef.current) return;
-
-        const newOffset = calculateOffsetForZoomPoint(midX, midY, newZoom, {
-          baseZoom: pinchStartZoomRef.current,
-          baseOffset: pinchStartOffsetRef.current,
-        });
-        const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
-        setOffset(newOffset);
-        offsetRef.current = newOffset;
-        prevCellSizeRef.current = newCellSize;
-        zoomLevelRef.current = newZoom;
-        onZoomChange(newZoom);
-      }
-    },
-    [onZoomChange, calculateOffsetForZoomPoint],
-  );
-
-  const handleTouchEnd = useCallback((e: TouchEvent) => {
-    for (let i = 0; i < e.changedTouches.length; i++) {
-      activeTouchesRef.current.delete(e.changedTouches[i].identifier);
-    }
-
-    if (activeTouchesRef.current.size < 2) {
-      pinchStartDistRef.current = 0;
-      isPinchGestureRef.current = false;
-      isDraggingRef.current = false;
-      setIsDragging(false);
-
-      // 2本指ピンチ終了後の1本指移動で座標ジャンプしないよう、ドラッグ起点を現在値へ再同期する。
-      if (activeTouchesRef.current.size === 1) {
-        const remainingTouch = Array.from(activeTouchesRef.current.values())[0];
-        dragStartRef.current = { x: remainingTouch.x, y: remainingTouch.y };
-        dragStartOffsetRef.current = { ...offsetRef.current };
-      }
-    }
-  }, []);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    container.addEventListener('wheel', handleWheel, { passive: false });
-    container.addEventListener('touchstart', handleTouchStart, { passive: false });
-    container.addEventListener('touchmove', handleTouchMove, { passive: false });
-    container.addEventListener('touchend', handleTouchEnd);
-    container.addEventListener('touchcancel', handleTouchEnd);
-
-    return () => {
-      container.removeEventListener('wheel', handleWheel);
-      container.removeEventListener('touchstart', handleTouchStart);
-      container.removeEventListener('touchmove', handleTouchMove);
-      container.removeEventListener('touchend', handleTouchEnd);
-      container.removeEventListener('touchcancel', handleTouchEnd);
-    };
-  }, [handleWheel, handleTouchStart, handleTouchMove, handleTouchEnd]);
 
   const prevSelectedHallRef = useRef<HallDefinition | undefined>(undefined);
 
@@ -688,7 +389,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (!numStr) return;
 
       const num = parseInt(numStr, 10);
-      const cell = block.numberCells.find((nc) => nc.value === num);
+      const cell = findRouteLookupNumberCell(block, num);
       if (!cell) return;
 
       const key = `${cell.row}-${cell.col}`;
@@ -770,7 +471,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (!numStr) return;
 
       const num = parseInt(numStr, 10);
-      const cell = block.numberCells.find((nc) => nc.value === num);
+      const cell = findRouteLookupNumberCell(block, num);
       if (cell) {
         points.push({
           row: cell.row,
@@ -794,7 +495,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }));
   }, [isRouteVisible, routePoints, mapData]);
 
-  // 数値セル判定用Set（ブロック定義が変わらない限りキャッシュ）
+  // Cache number cells for quick lookup.
   const numberCellSet = useMemo(() => {
     const set = new Set<string>();
     mapData.blocks.forEach((block) => {
@@ -803,7 +504,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return set;
   }, [mapData.blocks]);
 
-  // ルート交差検出結果をキャッシュ（ドラッグ中に毎フレーム再計算するのを回避）
+  // Cache route crossing data to avoid recalculating it during drag redraws.
   const routeCrossingData = useMemo(() => {
     if (!isRouteVisible || routeSegments.length === 0) return null;
 
@@ -827,7 +528,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const crossingLookup = buildCrossingLookup(crossings);
     const bridgeParams = getBridgeParams(cellSize);
 
-    // エッジ使用マップ（並行ルート描画用）
+    // Use cell-rounded edge keys for parallel route rendering.
     const roundToCell = (v: number): number => Math.round(v);
     const getEdgeKeyLocal = (r1: number, c1: number, r2: number, c2: number): string => {
       const rr1 = roundToCell(r1); const rc1 = roundToCell(c1);
@@ -877,7 +578,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     ctx.clearRect(0, 0, containerWidth, containerHeight);
 
-    // ドラッグ中もリアルタイムで反映するためrefから読む
+    // Read from the ref so dragging reflects the latest offset immediately.
     const currentOffset = offsetRef.current;
 
     ctx.save();
@@ -888,7 +589,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.translate(-mapCenterX, -mapCenterY);
     }
 
-    // ビューポート座標変換をインライン化（toMapCoordinatesの依存を排除）
+    // Inline viewport-to-map coordinate conversion to avoid depending on toMapCoordinates.
     const viewToMap = (viewX: number, viewY: number) => {
       const tx = viewX - currentOffset.x;
       const ty = viewY - currentOffset.y;
@@ -1031,10 +732,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     const trimLineToWidth = (line: string, maxLineWidth: number): string => {
       let next = line;
-      while (next.length > 0 && ctx.measureText(`${next}窶ｦ`).width > maxLineWidth) {
+      while (next.length > 0 && ctx.measureText(`${next}…`).width > maxLineWidth) {
         next = next.slice(0, -1);
       }
-      return next.length > 0 ? `${next}窶ｦ` : '窶ｦ';
+      return next.length > 0 ? `${next}…` : '…';
     };
 
     const drawFittedHorizontalTextInCell = (
@@ -1141,7 +842,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       drawableColumns = drawableColumns.map((chars) => {
         if (chars.length <= maxRows) return chars;
         const trimmed = chars.slice(0, maxRows);
-        trimmed[maxRows - 1] = '窶ｦ';
+        trimmed[maxRows - 1] = '…';
         return trimmed;
       });
 
@@ -1149,9 +850,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const lastColumnIndex = drawableColumns.length - 1;
         const lastColumn = drawableColumns[lastColumnIndex];
         if (lastColumn.length < maxRows) {
-          lastColumn.push('窶ｦ');
+          lastColumn.push('…');
         } else {
-          lastColumn[lastColumn.length - 1] = '窶ｦ';
+          lastColumn[lastColumn.length - 1] = '…';
         }
       }
 
@@ -1277,7 +978,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     }
 
-    // 数値セルスタイル設定（分岐をループ外で解決）
+    // Resolve number-cell style values outside the loop.
     const outlineStyle = numberCellOutlineStyle;
     const useInset = outlineStyle !== 'none';
     const ncPad = useInset ? cellSize * 0.1 : 0;
@@ -1288,12 +989,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const drawStroke = outlineStyle !== 'none';
     const isDashed = outlineStyle === 'dashed';
 
-    // パス描画ヘルパー（スタイルに応じて1回だけ選択）
+    // Build the cell path once per style.
     const drawCellPath = ncRadius > 0
       ? (rx: number, ry: number, rw: number, rh: number) => ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius)
       : (rx: number, ry: number, rw: number, rh: number) => ctx.rect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2);
 
-    // バッチ描画用: ジオメトリ収集配列
+    // Collect geometry for batched drawing.
     const ncRects: { x: number; y: number; w: number; h: number }[] = [];
     const overlayGroups = new Map<string, { x: number; y: number; w: number; h: number }[]>();
     const patternOverlayCells: { x: number; y: number; w: number; h: number }[] = [];
@@ -1371,19 +1072,19 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     });
 
-    // バッチ描画: 数値セル背景
+    // Collect geometry for batched drawing.
     if (ncRects.length > 0) {
       ctx.beginPath();
       for (const r of ncRects) drawCellPath(r.x, r.y, r.w, r.h);
       ctx.fillStyle = ncBg;
       ctx.fill();
 
-      // ボーダー描画
+      // Draw borders.
       if (drawStroke) {
         ctx.strokeStyle = ncBorder;
         ctx.lineWidth = ncBorderWidth;
         if (isDashed) {
-          // dashed: セル毎にdash phaseをリセットするため個別stroke
+          // For dashed borders, reset the dash phase per cell.
           const dashLen = Math.max(2, cellSize * 0.12);
           ctx.setLineDash([dashLen, dashLen]);
           for (const r of ncRects) {
@@ -1393,12 +1094,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           }
           ctx.setLineDash([]);
         } else {
-          // rounded/square: 蓄積済みパスで一括stroke
+          // For rounded and square borders, stroke the batched path once.
           ctx.stroke();
         }
       }
 
-      // バッチ描画: オーバーレイ（色別）
+      // Collect geometry for batched drawing.
       for (const [color, rects] of overlayGroups) {
         ctx.beginPath();
         for (const r of rects) drawCellPath(r.x, r.y, r.w, r.h);
@@ -1406,7 +1107,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fill();
       }
 
-      // CanvasPatternオーバーレイ（個別clip必要）
+      // CanvasPattern overlays need per-cell clipping.
       if (warningPattern) {
         for (const r of patternOverlayCells) {
           ctx.save();
@@ -1688,7 +1389,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           ctx.strokeStyle = '#212121';
           ctx.lineWidth = Math.max(1, dotSize * 0.2);
           ctx.stroke();
-          return; // 縺薙・蛻・ｲ舌〒謠冗判縺悟ｮ御ｺ・☆繧九◆繧∵掠譛・return
+          return; // Priority markers are drawn with a custom stroked dot, so skip the common fill path.
         } else if (state.isVisited) {
           ctx.fillStyle = '#FFEE58';
         } else {
@@ -1726,14 +1427,14 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const lineWidth = Math.max(2, cellSize * 0.08);
       const parallelOffset = Math.max(3, cellSize * 0.12);
 
-      // ビューポートカリング用マージン
+      // Viewport-culling margin.
       const routeMargin = cellSize * 2;
       const visMinX = visibleMinX - routeMargin;
       const visMaxX = visibleMaxX + routeMargin;
       const visMinY = visibleMinY - routeMargin;
       const visMaxY = visibleMaxY + routeMargin;
 
-      // エッジキー生成: 小数座標はセル単位に丸めて比較
+      // Use cell-rounded edge keys for parallel route rendering.
       const roundToCell = (v: number): number => Math.round(v);
       const getEdgeKey = (r1: number, c1: number, r2: number, c2: number): string => {
         const rr1 = roundToCell(r1);
@@ -1814,13 +1515,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             }
           }
 
-          // ビューポートカリング: 両端点が画面外ならスキップ
+          // Viewport culling: skip segments fully outside the view.
           if (px1 < visMinX && px2 < visMinX) continue;
           if (px1 > visMaxX && px2 > visMaxX) continue;
           if (py1 < visMinY && py2 < visMinY) continue;
           if (py1 > visMaxY && py2 > visMaxY) continue;
 
-          // 飛び越し線付きでバッチ蓄積
+          // Draw with bridge gaps where route lines cross.
           collectEdgeWithBridges(
             collector, px1, py1, px2, py2,
             segIdx, i,
@@ -1828,7 +1529,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           );
         }
 
-        // 矢印描画（バッチ蓄積）
+        // Draw arrowheads.
         if (segment.path.length >= 2) {
           const last = segment.path[segment.path.length - 1];
           const prev = segment.path[segment.path.length - 2];
@@ -1836,7 +1537,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const endX = (last.col - 0.5) * cellSize;
           const endY = (last.row - 0.5) * cellSize;
 
-          // 矢印もビューポートカリング
+          // Cull arrowheads outside the viewport.
           if (endX >= visMinX && endX <= visMaxX && endY >= visMinY && endY <= visMaxY) {
             const angle = Math.atan2(
               (last.row - prev.row) * cellSize,
@@ -1864,7 +1565,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const px = (point.col - 0.5) * cellSize;
           const py = (point.row - 0.5) * cellSize;
 
-          // ビューポートカリング
+          // Viewport culling.
           if (px < visMinX || px > visMaxX || py < visMinY || py > visMaxY) return;
 
           const circleSize = Math.max(12, cellSize * 0.5);
@@ -1989,7 +1690,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fill();
         ctx.stroke();
 
-        // 鬆らせ逡ｪ蜿ｷ繝ｩ繝吶Ν
+        // Draw the vertex order label.
         ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -2112,7 +1813,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fill();
         ctx.stroke();
 
-        // 繧ｻ繝ｫ逡ｪ蜿ｷ繝ｩ繝吶Ν
+        // Draw the vertex order label.
         ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
@@ -2229,10 +1930,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     routeCrossingData,
   ]);
 
-  // drawCanvasRefを更新してrAFから呼べるようにする
+  // Keep drawCanvasRef current so rAF can call the latest draw function.
   drawCanvasRef.current = drawCanvas;
 
-  // 依存値が変わったら描画を実行（ドラッグ中以外の状態変更に対応）
+  // Redraw when dependencies change.
   useEffect(() => {
     drawCanvas();
   }, [drawCanvas]);
@@ -2538,7 +2239,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         x: newX,
         y: newY,
       };
-      // ドラッグ中はrefのみ更新し、rAFで描画（React再レンダリングを回避）
+      // During drag, update only the ref and redraw via rAF to avoid React rerenders.
       offsetRef.current = nextOffset;
       if (!rafPendingRef.current) {
         rafPendingRef.current = true;
@@ -2558,7 +2259,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
   const finishPointerInteraction = useCallback(() => {
     isDraggingRef.current = false;
-    // ドラッグ終了時にrefの最終値をReact stateに同期
+    // During drag, update only the ref and redraw via rAF to avoid React rerenders.
     setOffsetState(offsetRef.current);
     setTimeout(() => {
       setIsDragging(false);

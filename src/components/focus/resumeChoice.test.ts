@@ -5,7 +5,7 @@ import {
   type ResumeChoiceDialogState,
   type ResumeVisitGroup,
 } from './resumeChoice';
-import type { FocusModeSessionState } from '../../types';
+import type { FocusModeSessionState } from '../../types/focus';
 
 const makeVisit = (
   key: string,
@@ -28,6 +28,12 @@ const threeVisits: Record<'normal' | 'postponed' | 'late', ResumeVisitGroup[]> =
     makeVisit('2026-01-01-A-02a-none'),
   ],
   postponed: [],
+  late: [],
+};
+
+const mixedPhaseVisits: Record<'normal' | 'postponed' | 'late', ResumeVisitGroup[]> = {
+  normal: [makeVisit('2026-01-01-A-01a-none')],
+  postponed: [makeVisit('2026-01-01-P-03a-none', 'P', '03a', 'postponed circle')],
   late: [],
 };
 
@@ -166,6 +172,50 @@ describe('buildResumeChoiceDialogState', () => {
     });
     expect(result!.lastChangeEnabled).toBe(false);
     expect(result!.lastSpaceLabel).toBe('対象スペースが現在の並びに見つかりません');
+  });
+  it('lastChange can resume into postponed phase when visitKey still exists', () => {
+    const snapshot: FocusModeSessionState = {
+      ...baseCompletedSnapshot,
+      phase: 'postponed',
+      phaseIndex: 0,
+      lastPurchaseChangeAt: {
+        phase: 'postponed',
+        phaseIndex: 0,
+        visitKey: '2026-01-01-P-03a-none',
+      },
+    };
+    const result = buildResumeChoiceDialogState({
+      initialResumeState: snapshot,
+      visitsByPhase: mixedPhaseVisits,
+      currentPhase: 'normal',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.lastChangeEnabled).toBe(true);
+    expect(result!.lastPhase).toBe('postponed');
+    expect(result!.lastIndex).toBe(0);
+    expect(result!.lastSpaceLabel).toBe('P-03a postponed circle');
+  });
+
+  it('phaseStart is disabled when current phase has no visits', () => {
+    const result = buildResumeChoiceDialogState({
+      initialResumeState: baseCompletedSnapshot,
+      visitsByPhase: mixedPhaseVisits,
+      currentPhase: 'late',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.phaseStartPhase).toBe('late');
+    expect(result!.phaseStartEnabled).toBe(false);
+    expect(result!.normalStartEnabled).toBe(true);
+  });
+
+  it('negative saved pointer index is clamped to phase start', () => {
+    const result = buildResumeChoiceDialogState({
+      initialResumeState: { ...baseCompletedSnapshot, phaseIndex: -2 },
+      visitsByPhase: threeVisits,
+      currentPhase: 'normal',
+    });
+    expect(result).not.toBeNull();
+    expect(result!.pointerIndex).toBe(0);
   });
 });
 

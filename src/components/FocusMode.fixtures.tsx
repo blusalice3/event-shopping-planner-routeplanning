@@ -1,11 +1,8 @@
 import * as React from 'react';
 import FocusMode from './FocusMode';
-import type {
-  DayMapData,
-  FocusModeSessionState,
-  HallDefinition,
-  ShoppingItem,
-} from '../types';
+import type { DayMapData, HallDefinition } from '../types/map';
+import type { FocusModeSessionState } from '../types/focus';
+import type { ShoppingItem } from '../types/item';
 
 export const completedFixture: FocusModeSessionState = {
   phase: 'normal',
@@ -66,6 +63,21 @@ export const completedWithLastChangeFixture: FocusModeSessionState = {
   },
 };
 
+const cloneSessionState = (
+  state: FocusModeSessionState | null | undefined,
+): FocusModeSessionState | null => {
+  if (!state) return null;
+  return {
+    ...state,
+    savedPhaseIndices: { ...state.savedPhaseIndices },
+    postponedItemIds: [...state.postponedItemIds],
+    lateItemIds: [...state.lateItemIds],
+    lastPurchaseChangeAt: state.lastPurchaseChangeAt
+      ? { ...state.lastPurchaseChangeAt }
+      : state.lastPurchaseChangeAt ?? null,
+  };
+};
+
 // 最低限の FocusMode props 生成ヘルパ
 export const minimalProps = (
   overrides: {
@@ -75,6 +87,7 @@ export const minimalProps = (
     onUpdateItem?: (item: ShoppingItem) => void;
     onSessionStateChange?: (state: FocusModeSessionState) => void;
     onModeChange?: (mode: 'edit' | 'execute', lastItemId?: string) => void;
+    disablePriceUndefinedCheck?: boolean;
   } = {},
 ) => ({
   items: overrides.items ?? [],
@@ -86,8 +99,9 @@ export const minimalProps = (
   mapData: {} as { [dayMapName: string]: DayMapData },
   hallDefinitions: [] as HallDefinition[],
   hallOrder: [] as string[],
-  resumeState: overrides.resumeState ?? null,
+  resumeState: cloneSessionState(overrides.resumeState),
   onSessionStateChange: overrides.onSessionStateChange ?? (() => {}),
+  disablePriceUndefinedCheck: overrides.disablePriceUndefinedCheck ?? false,
 });
 
 /**

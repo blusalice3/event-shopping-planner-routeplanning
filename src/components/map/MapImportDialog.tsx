@@ -5,7 +5,7 @@ import {
   DayMapData,
   BlockDefinition,
   CellData,
-} from '../../types';
+} from '../../types/map';
 import { parseMapFile } from '../../utils/xlsxMapParser';
 
 interface MapImportDialogProps {

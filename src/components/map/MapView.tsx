@@ -1,7 +1,6 @@
 import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   DayMapData,
-  ShoppingItem,
   ZoomLevel,
   HallDefinition,
   HallRouteSettings,
@@ -10,10 +9,11 @@ import {
   MapViewportState,
   MIN_ZOOM,
   MAX_ZOOM,
-} from '../../types';
+} from '../../types/map';
+import { ShoppingItem } from '../../types/item';
 import MapCanvas from './MapCanvas';
 import CellItemsPopup from './CellItemsPopup';
-import VisitListPanel from './VisitListPanel';
+import MapVisitListPanel from './MapVisitListPanel';
 import HallOrderPanel from './HallOrderPanel';
 import InsertPositionDialog, { InsertPosition, SmartInsertMode } from './InsertPositionDialog';
 import { extractNumberFromItemNumber, extractNumberAlphaPrefix } from '../../utils/xlsxMapParser';
@@ -44,7 +44,7 @@ interface MapViewProps {
   onDeleteItem?: (itemId: string) => void;
   onAddNewItem?: (eventDate: string, block: string, number: string) => void;
   onAddItem?: (
-    item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: import('../../types').PurchaseStatus },
+    item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: import('../../types/item').PurchaseStatus },
   ) => void;
   onAddToExecuteListAtPosition?: (
     itemId: string,
@@ -97,7 +97,7 @@ interface MapViewProps {
   };
   initialViewport?: MapViewportState;
   onViewportChange?: (viewport: MapViewportState) => void;
-  numberCellOutlineStyle?: import('../../types').NumberCellOutlineStyle;
+  numberCellOutlineStyle?: import('../../types/map').NumberCellOutlineStyle;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -1119,7 +1119,7 @@ const MapView: React.FC<MapViewProps> = ({
         position={popupState.position}
       />
       {/* 訪問リストパネル */}
-      <VisitListPanel
+      <MapVisitListPanel
         isOpen={isVisitListOpen}
         onClose={() => setIsVisitListOpen(false)}
         items={filteredItems}
@@ -1155,5 +1155,4 @@ const MapView: React.FC<MapViewProps> = ({
 };
 
 export default React.memo(MapView);
-
 

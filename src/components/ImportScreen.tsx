@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { ShoppingItem } from '../types';
+import { ShoppingItem } from '../types/item';
 import { getItemKey } from '../utils/itemComparison';
 import type { BulkAddLayoutInfo, BulkAddMetadata } from '../features/events/bulkAdd';
 

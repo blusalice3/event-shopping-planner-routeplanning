@@ -1,27 +1,33 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import ReactDOM from 'react-dom';
-import {
-  ShoppingItem,
-  DayMapData,
-  HallDefinition,
-  PurchaseStatus,
-  FocusModeSessionState,
-  FocusPhase,
-  NumberCellOutlineStyle,
-  FocusMapCenteringMode,
-} from '../types';
+import { ShoppingItem, PurchaseStatus } from '../types/item';
+import { DayMapData, HallDefinition, NumberCellOutlineStyle } from '../types/map';
+import { FocusModeSessionState, FocusPhase, FocusMapCenteringMode } from '../types/focus';
 import FocusModeMapCanvas from './FocusModeMapCanvas';
+import { AutoAdvanceCountdown } from './focus/AutoAdvanceCountdown';
+import { AddItemDialogView, CellItemPopup, PhaseChangeDialogView } from './focus/FocusModeDialogs';
 import { FocusModeHeader, FocusModeItemList, FocusModeMapControls } from './focus/FocusModePanels';
+import { FocusModeFooterPortal } from './focus/FocusModeFooterPortal';
 import {
-  buildResumeChoiceDialogState,
-  resolveResumeChoice,
-} from './focus/resumeChoice';
+  AutoAdvancingStateView,
+  CompletionStateView,
+  EmptyVisitStateView,
+  ResumeChoiceDialogView,
+} from './focus/FocusModeStateViews';
+import { resolveResumeChoice } from './focus/resumeChoice';
+import { useAutoAdvanceTimer } from './focus/hooks/useAutoAdvanceTimer';
+import { useAutoSkipEmptyVisit } from './focus/hooks/useAutoSkipEmptyVisit';
+import { useFocusSessionState } from './focus/hooks/useFocusSessionState';
+import { useResumeFlow } from './focus/hooks/useResumeFlow';
 import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
 import { buildItemRoutingSignature, sortItemsByHallOrder } from '../utils/hallGrouping';
+import {
+  buildDayMapPathfindingSignature,
+  buildDayMapVisitLookupSignature,
+  findRouteLookupNumberCell,
+} from '../utils/mapRoutingSignature';
+import { buildHallDefinitionsRoutingSignature } from '../utils/hallRoutingSignature';
 import { generateRouteSegments, simplifyPath } from '../utils/pathfinding';
-
 // フェーズの定義
-
 interface FocusModeProps {
   items: ShoppingItem[];
   executeModeItemIds: string[];
@@ -49,19 +55,16 @@ interface FocusModeProps {
   numberCellOutlineStyle?: NumberCellOutlineStyle;
   disablePriceUndefinedCheck?: boolean;
 }
-
 // スワイプ判定の閾値
 const SWIPE_THRESHOLD = 50;
 const FOOTER_HEIGHT_SP = 56;
 const HEADER_HEIGHT = 64;
 const FOOTER_HEIGHT_PC = 64;
-
 // ナンバーからベース部分（アルファベットとその左側の数値）を抽出
 const extractBaseNumber = (number: string): string => {
   const match = number.match(/^(\d+[a-zA-Z])/);
   return match ? match[1].toLowerCase() : number.toLowerCase();
 };
-
 // 訪問先キーを生成（参加日 + ブロック + ベースナンバー + 優先度）
 // 同一スペースでも優先度が異なれば別訪問として扱い、編集モードの実行列と同じ順序を維持
 const getVisitKey = (item: ShoppingItem): string => {
@@ -69,7 +72,6 @@ const getVisitKey = (item: ShoppingItem): string => {
   const priority = item.priorityLevel || 'none';
   return `${item.eventDate}-${item.block}-${baseNumber}-${priority}`;
 };
-
 const FocusMode: React.FC<FocusModeProps> = ({
   items,
   executeModeItemIds,
@@ -96,31 +98,38 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // onMapRotationAngleChange の安定フォールバック（React.memo 対策）
   const noopRotationHandler = useCallback(() => {}, []);
   const stableMapRotationHandler = onMapRotationAngleChange || noopRotationHandler;
-
   // 現在のフェーズ（ユーザー操作でのみ変更）
-  const [currentPhase, setCurrentPhase] = useState<FocusPhase>(
-    () => resumeState?.phase || 'normal',
-  );
-  // 現在のフェーズ内での訪問先インデックス
-  const [currentPhaseIndex, setCurrentPhaseIndex] = useState(
-    () => Math.max(0, resumeState?.phaseIndex || 0),
-  );
-  // 最後に操作したアイテムID
-  const [lastInteractedItemId, setLastInteractedItemId] = useState<string | null>(null);
-  // 次へボタンの点滅状態
-  const [isNextButtonBlinking, setIsNextButtonBlinking] = useState(false);
-  // 価格未定警告の点滅状態
-  const [blinkingPriceItemIds, setBlinkingPriceItemIds] = useState<Set<string>>(new Set());
-  // 通知メッセージ
-  const [notification, setNotification] = useState<string | null>(null);
-  // 完了状態は常に false 初期化。完了済み再入場時は再開ダイアログの pointer 選択で復元する。
-  const [isCompleted, setIsCompleted] = useState(false);
-  // 自動進行タイマーID
-  const autoAdvanceTimerRef = useRef<NodeJS.Timeout | null>(null);
-  // カウントダウンインターバルID
-  const countdownIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  // 自動進行カウントダウン
-  const [autoAdvanceCountdown, setAutoAdvanceCountdown] = useState<number | null>(null);
+  const {
+    currentPhase,
+    setCurrentPhase,
+    currentPhaseIndex,
+    setCurrentPhaseIndex,
+    lastInteractedItemId,
+    setLastInteractedItemId,
+    isNextButtonBlinking,
+    setIsNextButtonBlinking,
+    blinkingPriceItemIds,
+    setBlinkingPriceItemIds,
+    notification,
+    setNotification,
+    isCompleted,
+    setIsCompleted,
+    postponedPhaseItemIds,
+    setPostponedPhaseItemIds,
+    latePhaseItemIds,
+    setLatePhaseItemIds,
+    phaseChangeDialog,
+    setPhaseChangeDialog,
+    lastPurchaseChangeAt,
+    setLastPurchaseChangeAt,
+    savedPhaseIndices,
+    setSavedPhaseIndices,
+  } = useFocusSessionState(resumeState);
+  const {
+    autoAdvanceCountdown,
+    clearAutoAdvanceTimer,
+    startAutoAdvance: scheduleAutoAdvance,
+  } = useAutoAdvanceTimer();
   // ナビゲーションボタンの位置オフセット
   const [navButtonOffset, setNavButtonOffset] = useState({ left: 0, right: 0 });
   // アイテムリストのref
@@ -131,102 +140,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const isSwipingRef = useRef(false);
   // スワイプコンテナのref
   const swipeContainerRef = useRef<HTMLDivElement>(null);
-
   // 後回しフェーズで表示するアイテムID（通常フェーズ終了時に確定）
-  const [postponedPhaseItemIds, setPostponedPhaseItemIds] = useState<Set<string>>(
-    () => new Set(resumeState?.postponedItemIds || []),
-  );
-  // 遅参フェーズで表示するアイテムID（後回しフェーズ終了時に確定）
-  const [latePhaseItemIds, setLatePhaseItemIds] = useState<Set<string>>(
-    () => new Set(resumeState?.lateItemIds || []),
-  );
-
-  // 最後に購入状態を変更した位置（再開ダイアログで「最後に購入状態を変更したスペース」選択肢に使用）
-  // 完了済み再入場時も保持し、再開ダイアログの lastChange 選択肢を温存する。
-  const [lastPurchaseChangeAt, setLastPurchaseChangeAt] = useState<{
-    phase: FocusPhase;
-    phaseIndex: number;
-    visitKey: string;
-  } | null>(() => resumeState?.lastPurchaseChangeAt ?? null);
-
-  // 再開ダイアログ表示用の状態
-  const [resumeChoiceDialog, setResumeChoiceDialog] = useState<{
-    isOpen: boolean;
-    lastSpaceLabel: string;
-    lastPhase: FocusPhase;
-    lastIndex: number;
-    pointerPhase: FocusPhase;
-    pointerIndex: number;
-    phaseStartPhase: FocusPhase;
-    lastChangeEnabled: boolean;
-    phaseStartEnabled: boolean;
-    normalStartEnabled: boolean;
-    wasCompleted: boolean;
-  } | null>(null);
-
-  // 復帰時の Postpone/Late 同期と完了判定の進行状態
-  const didSyncOnResumeRef = useRef(false);
-  const hadResumeStateRef = useRef(Boolean(resumeState));
-  // 完了済みセッションからの再入場時も再開ダイアログを表示する(wasCompleted 判定で pointer 復元に使う)
-  const didInitResumeChoiceRef = useRef(false);
-  // 初回 resumeState のスナップショット。onSessionStateChange で親 state が上書きされる前の
-  // 値を保持し、再開ダイアログ初期化および「離脱時のポインタ位置」復元で参照する。
-  const initialResumeStateRef = useRef<FocusModeSessionState | null>(resumeState ?? null);
-  const [pendingResumeSyncSignature, setPendingResumeSyncSignature] = useState<string | null>(null);
-  const [isResumeSyncComplete, setIsResumeSyncComplete] = useState(() => !resumeState);
-  const [isResumeCompletionChecked, setIsResumeCompletionChecked] = useState(() => !resumeState);
-  // 再開ダイアログ初期化が解決するまで onSessionStateChange による親への書き戻しを抑止する。
-  // resumeState=null なら初期解決は即座に true(新規セッション)。
-  const [isResumeInitResolved, setIsResumeInitResolved] = useState(() => !resumeState);
-
-  // render 時点の「null→non-null 遷移中」判定。
-  // useEffect による setIsResumeInitResolved(false) は次レンダーまで反映されないため、
-  // 同コミット内で onSessionStateChange が先に発火するレースを防ぐ。
-  const isResumeTransitioning = Boolean(resumeState) && !hadResumeStateRef.current;
-
-  // タイマーをクリアする関数(遷移 effect より前に宣言する必要があるため早期に定義)
-  const clearAutoAdvanceTimer = useCallback(() => {
-    if (autoAdvanceTimerRef.current) {
-      clearTimeout(autoAdvanceTimerRef.current);
-      autoAdvanceTimerRef.current = null;
-    }
-    if (countdownIntervalRef.current) {
-      clearInterval(countdownIntervalRef.current);
-      countdownIntervalRef.current = null;
-    }
-    setAutoAdvanceCountdown(null);
-  }, []);
-
-  // 初回 resumeState が遅れて届くケースのための backfill(一度だけ書き込む)
-  useEffect(() => {
-    if (!initialResumeStateRef.current && resumeState) {
-      initialResumeStateRef.current = resumeState;
-    }
-  }, [resumeState]);
-
-  // 再開ダイアログ表示中は既存タイマーを停止し、auto-advance 処理状態をリセットする
-  useEffect(() => {
-    if (resumeChoiceDialog?.isOpen) {
-      clearAutoAdvanceTimer();
-    }
-  }, [resumeChoiceDialog?.isOpen, clearAutoAdvanceTimer]);
-
-  // フェーズ切り替え確認ダイアログの状態
-  const [phaseChangeDialog, setPhaseChangeDialog] = useState<{
-    isOpen: boolean;
-    targetPhase: FocusPhase | null;
-    hasSavedIndex: boolean;
-    savedIndex: number;
-  }>({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
-
-  // 各フェーズで最後に表示していたインデックスを記憶
-  const [savedPhaseIndices, setSavedPhaseIndices] = useState<Record<FocusPhase, number>>(() => ({
-    normal: resumeState?.savedPhaseIndices?.normal || 0,
-    postponed: resumeState?.savedPhaseIndices?.postponed || 0,
-    late: resumeState?.savedPhaseIndices?.late || 0,
-  }));
-
-  // マップ表示関連の状態
   const [isMapVisible, setIsMapVisible] = useState(false);
   const [mapZoomLevel, setMapZoomLevel] = useState<number>(100);
   const [selectedHallId, setSelectedHallId] = useState<string | 'follow'>('follow');
@@ -234,7 +148,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const [splitRatio, setSplitRatio] = useState(50);
   const splitDragRef = useRef<{ startY: number; startRatio: number } | null>(null);
   const [measuredFooterHeight, setMeasuredFooterHeight] = useState<number>(FOOTER_HEIGHT_SP);
-
   // セルクリックポップアップの状態
   const [cellPopupState, setCellPopupState] = useState<{
     isOpen: boolean;
@@ -242,7 +155,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     number: number;
     items: ShoppingItem[];
   }>({ isOpen: false, blockName: '', number: 0, items: [] });
-
   // アイテム追加ダイアログの状態
   const [addItemDialog, setAddItemDialog] = useState<{
     isOpen: boolean;
@@ -250,7 +162,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     block: string;
     number: string;
   }>({ isOpen: false, eventDate: '', block: '', number: '' });
-
   // 新規アイテム追加フォームの状態
   const [newItemForm, setNewItemForm] = useState({
     circle: '',
@@ -261,12 +172,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
     url: '',
     purchaseStatus: 'Purchased' as 'Purchased' | 'Postpone' | 'Late',
   });
-
   // マップが利用可能かどうか
   const hasMapData = useMemo(() => {
     return mapData && Object.keys(mapData).length > 0;
   }, [mapData]);
-
   // メモ化された className（React.memo 対策）
   const headerContainerClass = useMemo(
     () => (layoutMode === 'smartphone' ? 'p-4 mb-4 mx-2' : 'p-4 mb-4 mx-16'),
@@ -276,7 +185,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     () => `space-y-4 pb-24 ${layoutMode === 'smartphone' ? 'mx-2' : 'mx-16'}`,
     [layoutMode],
   );
-
   // ナビゲーションボタンの style オブジェクト安定化
   const navPrevStyle = useMemo(
     () => ({ left: `${16 + navButtonOffset.left}px`, transition: 'left 0.2s ease-out' }),
@@ -286,78 +194,128 @@ const FocusMode: React.FC<FocusModeProps> = ({
     () => ({ right: `${16 + navButtonOffset.right}px`, transition: 'right 0.2s ease-out' }),
     [navButtonOffset.right],
   );
-
   useEffect(() => {
     const fallbackHeight = layoutMode === 'smartphone' ? FOOTER_HEIGHT_SP : FOOTER_HEIGHT_PC;
     setMeasuredFooterHeight(fallbackHeight);
   }, [layoutMode]);
-
   useEffect(() => {
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     if (!isMapVisible || isCompleted) return;
-
     const footer = document.getElementById('focus-mode-footer');
     if (!footer) return;
-
     const updateHeight = () => {
       const nextHeight = footer.getBoundingClientRect().height;
       if (!Number.isFinite(nextHeight) || nextHeight <= 0) return;
       setMeasuredFooterHeight((prev) => (Math.abs(prev - nextHeight) > 0.5 ? nextHeight : prev));
     };
-
     updateHeight();
-
     let resizeObserver: ResizeObserver | null = null;
     if (typeof ResizeObserver !== 'undefined') {
       resizeObserver = new ResizeObserver(() => updateHeight());
       resizeObserver.observe(footer);
     }
-
     window.addEventListener('resize', updateHeight);
     return () => {
       resizeObserver?.disconnect();
       window.removeEventListener('resize', updateHeight);
     };
   }, [layoutMode, isMapVisible, isCompleted]);
-
-  const executeItemsRoutingSignature = useMemo(
-    () => buildItemRoutingSignature(items, executeModeItemIds),
-    [items, executeModeItemIds],
-  );
-
-  // 実行列の表示順を取得（hallOrder + 優先度で並べ替え）
-  const executeItemOrderIds = useMemo(() => {
-    const rawItems = executeModeItemIds
-      .map((id) => items.find((item) => item.id === id))
-      .filter((item): item is ShoppingItem => item !== undefined);
-
-    // ホール定義 0 件でも sortItemsByHallOrder は未定義+優先度バケットで並べ替える
-    const firstItem = rawItems[0];
-    if (!firstItem) return rawItems.map((item) => item.id);
-    const dayMapData = mapData ? mapData[`${firstItem.eventDate}マップ`] || null : null;
-
-    return sortItemsByHallOrder(rawItems, dayMapData, hallDefinitions || [], hallOrder).map(
-      (item) => item.id,
-    );
-  }, [executeItemsRoutingSignature, hallDefinitions, hallOrder, mapData]);
+  // 実行列のアイテムを取得（hallOrder + 優先度で並べ替え）
+  const itemsById = useMemo(() => {
+    return new Map(items.map((item) => [item.id, item]));
+  }, [items]);
 
   const executeItems = useMemo(() => {
-    const itemsById = new Map(items.map((item) => [item.id, item]));
-    return executeItemOrderIds
+    const rawItems = executeModeItemIds
       .map((id) => itemsById.get(id))
       .filter((item): item is ShoppingItem => item !== undefined);
-  }, [items, executeItemOrderIds]);
+    // ホール定義 0 件でも sortItemsByHallOrder は未定義+優先度バケットで並べ替える
+    const firstItem = rawItems[0];
+    if (!firstItem) return rawItems;
+    const dayMapData = mapData ? mapData[`${firstItem.eventDate}マップ`] || null : null;
+    return sortItemsByHallOrder(rawItems, dayMapData, hallDefinitions || [], hallOrder);
+  }, [itemsById, executeModeItemIds, hallDefinitions, hallOrder, mapData]);
 
-  const routePositionItems = useMemo(
-    () => executeItems,
-    [executeItemsRoutingSignature],
-  );
+  const executeItemsRoutingSignature = useMemo(() => {
+    return buildItemRoutingSignature(items, executeModeItemIds);
+  }, [items, executeModeItemIds]);
 
+  const hallDefinitionsRoutingSignature = useMemo(() => {
+    return buildHallDefinitionsRoutingSignature(hallDefinitions);
+  }, [hallDefinitions]);
+
+  const hallOrderRoutingSignature = useMemo(() => {
+    return JSON.stringify(hallOrder);
+  }, [hallOrder]);
+
+  const routeDayMapData = useMemo(() => {
+    const firstItem = executeModeItemIds
+      .map((id) => itemsById.get(id))
+      .find((item): item is ShoppingItem => item !== undefined);
+
+    if (!firstItem || !mapData) return null;
+    return mapData[`${firstItem.eventDate}マップ`] || null;
+  }, [executeModeItemIds, itemsById, mapData]);
+
+  const routeVisitLookupMapSignature = useMemo(() => {
+    return buildDayMapVisitLookupSignature(routeDayMapData);
+  }, [routeDayMapData]);
+
+  const routePositionSignature = useMemo(() => {
+    return JSON.stringify([
+      executeItemsRoutingSignature,
+      hallDefinitionsRoutingSignature,
+      hallOrderRoutingSignature,
+      routeVisitLookupMapSignature,
+    ]);
+  }, [
+    executeItemsRoutingSignature,
+    hallDefinitionsRoutingSignature,
+    hallOrderRoutingSignature,
+    routeVisitLookupMapSignature,
+  ]);
+
+  const routePositionItemsRef = useRef<{
+    signature: string;
+    items: ShoppingItem[];
+  } | null>(null);
+
+  const routePositionItems = useMemo(() => {
+    if (routePositionItemsRef.current?.signature === routePositionSignature) {
+      return routePositionItemsRef.current.items;
+    }
+
+    const rawItems = executeModeItemIds
+      .map((id) => itemsById.get(id))
+      .filter((item): item is ShoppingItem => item !== undefined);
+
+    const firstItem = rawItems[0];
+    const sortedItems = firstItem
+      ? sortItemsByHallOrder(
+          rawItems,
+          mapData ? mapData[`${firstItem.eventDate}マップ`] || null : null,
+          hallDefinitions || [],
+          hallOrder,
+        )
+      : rawItems;
+
+    routePositionItemsRef.current = {
+      signature: routePositionSignature,
+      items: sortedItems,
+    };
+    return sortedItems;
+  }, [
+    routePositionSignature,
+    executeModeItemIds,
+    itemsById,
+    hallDefinitions,
+    hallOrder,
+    mapData,
+  ]);
   // 全訪問先リストを実行列順序で生成
   const allVisits = useMemo(() => {
     const visitKeyOrder: string[] = [];
     const visitMap = new Map<string, ShoppingItem[]>();
-
     executeItems.forEach((item) => {
       const key = getVisitKey(item);
       if (!visitMap.has(key)) {
@@ -366,110 +324,31 @@ const FocusMode: React.FC<FocusModeProps> = ({
       }
       visitMap.get(key)!.push(item);
     });
-
     return visitKeyOrder.map((key) => ({
       key,
       items: visitMap.get(key)!,
     }));
   }, [executeItems]);
-
   // 現時点で後回し状態のアイテムIDセット（通常フェーズ中に動的に更新）
   const currentPostponedItemIds = useMemo(() => {
     return new Set(
       executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
     );
   }, [executeItems]);
-
-  // 現時点で遅参状態のアイテムIDセット(通常・後回しフェーズ中に動的に更新)
+  // 現時点で遅参状態のアイテムIDセット（通常・後回しフェーズ中に動的に更新）
   const currentLateItemIds = useMemo(() => {
     return new Set(
       executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
     );
   }, [executeItems]);
-
-  // ID集合の等価判定ヘルパ
-  const isSameIdSet = (a: Set<string>, b: Set<string>) =>
-    a.size === b.size && [...a].every((id) => b.has(id));
-
-  // 同期判定の安定化用シグネチャ
-  const buildIdSetSignature = (ids: Set<string>) => Array.from(ids).sort().join('\u001e');
-
-  // 現在の Postpone/Late 集合のシグネチャ（2レンダ安定性ゲートで使用）
-  const resumeSyncCandidateSignature = useMemo(
-    () =>
-      `${buildIdSetSignature(currentPostponedItemIds)}\u001f${buildIdSetSignature(currentLateItemIds)}`,
-    [currentPostponedItemIds, currentLateItemIds],
-  );
-
-  // resumeState の null↔non-null 遷移検知（defense-in-depth + ダイアログ初期化再評価)
-  useEffect(() => {
-    const hasResumeState = Boolean(resumeState);
-
-    if (hasResumeState && !hadResumeStateRef.current) {
-      // null → non-null: 新しいセッションとして snapshot を差し替え、ダイアログ初期化をやり直す
-      initialResumeStateRef.current = resumeState;
-      didSyncOnResumeRef.current = false;
-      didInitResumeChoiceRef.current = false;
-      setIsResumeInitResolved(false);
-      setPendingResumeSyncSignature(null);
-      setIsResumeSyncComplete(false);
-      setIsResumeCompletionChecked(false);
-    }
-
-    if (!hasResumeState && hadResumeStateRef.current) {
-      // non-null → null: 残存する UI/タイマーを明示的に片付ける
-      initialResumeStateRef.current = null;
-      setResumeChoiceDialog(null);
-      clearAutoAdvanceTimer();
-      didSyncOnResumeRef.current = false;
-      setPendingResumeSyncSignature(null);
-      setIsResumeSyncComplete(true);
-      setIsResumeCompletionChecked(true);
-      didInitResumeChoiceRef.current = false;
-      setIsResumeInitResolved(true);
-    }
-
-    hadResumeStateRef.current = hasResumeState;
-  }, [resumeState, clearAutoAdvanceTimer]);
-
-  // 復帰時に Postpone/Late を最新の実データへ1回だけ同期する
-  useEffect(() => {
-    if (!resumeState) return;
-    if (didSyncOnResumeRef.current) return;
-
-    // 1回目観測: state更新で2回目評価を必ず起こす
-    if (pendingResumeSyncSignature !== resumeSyncCandidateSignature) {
-      setPendingResumeSyncSignature(resumeSyncCandidateSignature);
-      return;
-    }
-
-    // 2回連続一致で同期確定
-    const postponedNow = new Set(currentPostponedItemIds);
-    const lateNow = new Set(currentLateItemIds);
-
-    setPostponedPhaseItemIds((prev) => (isSameIdSet(prev, postponedNow) ? prev : postponedNow));
-    setLatePhaseItemIds((prev) => (isSameIdSet(prev, lateNow) ? prev : lateNow));
-
-    didSyncOnResumeRef.current = true;
-    setIsResumeSyncComplete(true);
-  }, [
-    resumeState,
-    pendingResumeSyncSignature,
-    resumeSyncCandidateSignature,
-    currentPostponedItemIds,
-    currentLateItemIds,
-  ]);
-
   // フェーズごとの訪問先リストを計算
   const visitsByPhase = useMemo(() => {
     const normal: typeof allVisits = [];
     const postponed: typeof allVisits = [];
     const late: typeof allVisits = [];
-
     allVisits.forEach((visit) => {
       // 通常フェーズ: 全ての訪問先を含む（網羅的）
       normal.push(visit);
-
       // 後回しフェーズ: 記憶されたアイテムIDがある訪問先
       if (currentPhase === 'normal') {
         // 通常フェーズ中は現時点の後回しアイテムで判定
@@ -480,7 +359,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
         const hasPostponedItems = visit.items.some((item) => postponedPhaseItemIds.has(item.id));
         if (hasPostponedItems) postponed.push(visit);
       }
-
       // 遅参フェーズ: 記憶されたアイテムIDがある訪問先
       if (currentPhase === 'normal' || currentPhase === 'postponed') {
         // 通常/後回しフェーズ中は現時点の遅参アイテムで判定
@@ -492,7 +370,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
         if (hasLateItems) late.push(visit);
       }
     });
-
     return { normal, postponed, late };
   }, [
     allVisits,
@@ -502,39 +379,18 @@ const FocusMode: React.FC<FocusModeProps> = ({
     postponedPhaseItemIds,
     latePhaseItemIds,
   ]);
-
   // 現在のフェーズの訪問先リスト
   const currentPhaseVisits = useMemo(() => {
     return visitsByPhase[currentPhase];
   }, [visitsByPhase, currentPhase]);
-
-  // phaseIndex を [0, visits.length - 1] にクランプ
-  const clampPhaseIndex = useCallback(
-    (phase: FocusPhase, index: number) => {
-      const len = visitsByPhase[phase].length;
-      if (len === 0) return 0;
-      return Math.min(Math.max(0, index), len - 1);
-    },
-    [visitsByPhase],
-  );
-
   // 全スペースのvisitKeyをルート順に格納（マップのルート線描画用）
-  const allVisitKeySignature = useMemo(
-    () => currentPhaseVisits.map((visit) => visit.key).join('\u001e'),
-    [currentPhaseVisits],
-  );
-  const allVisitKeys = useMemo(
-    () => (allVisitKeySignature ? allVisitKeySignature.split('\u001e') : []),
-    [allVisitKeySignature],
-  );
-
+  const allVisitKeys = useMemo(() => currentPhaseVisits.map((visit) => visit.key), [currentPhaseVisits]);
   // 現在表示すべき訪問先
   const currentVisit = useMemo(() => {
     if (currentPhaseVisits.length === 0) return null;
     const safeIndex = Math.min(currentPhaseIndex, currentPhaseVisits.length - 1);
     return currentPhaseVisits[safeIndex] || null;
   }, [currentPhaseVisits, currentPhaseIndex]);
-
   // 次の訪問先
   const nextVisit = useMemo(() => {
     if (currentPhaseVisits.length === 0) return null;
@@ -553,7 +409,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
     return null;
   }, [currentPhaseVisits, currentPhaseIndex, currentPhase, visitsByPhase]);
-
   // 前の訪問先
   const prevVisit = useMemo(() => {
     if (currentPhaseVisits.length === 0) return null;
@@ -576,11 +431,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
     return null;
   }, [currentPhaseVisits, currentPhaseIndex, currentPhase, visitsByPhase]);
-
   // 現在のフェーズで表示すべきアイテム
   const currentVisitDisplayItems = useMemo(() => {
     if (!currentVisit) return [];
-
     if (currentPhase === 'normal') {
       // 通常フェーズ: 全アイテムを表示
       return currentVisit.items;
@@ -592,12 +445,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return currentVisit.items.filter((item) => latePhaseItemIds.has(item.id));
     }
   }, [currentVisit, currentPhase, postponedPhaseItemIds, latePhaseItemIds]);
-
-  const currentVisitDisplayItemIdsSignature = useMemo(
-    () => currentVisitDisplayItems.map((item) => item.id).join('\u001e'),
-    [currentVisitDisplayItems],
-  );
-
   // フェーズ名の日本語表示
   const phaseDisplayName = useMemo(() => {
     switch (currentPhase) {
@@ -609,12 +456,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
         return '遅参';
     }
   }, [currentPhase]);
-
   // 総訪問先数（全フェーズ合計）
   const totalVisits = useMemo(() => {
     return visitsByPhase.normal.length + visitsByPhase.postponed.length + visitsByPhase.late.length;
   }, [visitsByPhase]);
-
   // 現在の訪問先番号（全フェーズ通算）
   const currentVisitNumber = useMemo(() => {
     let number = currentPhaseIndex + 1;
@@ -625,14 +470,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
     return number;
   }, [currentPhaseIndex, currentPhase, visitsByPhase]);
-
   // 価格未定かつ購入済みのアイテムをチェック
   const hasUndefinedPricePurchased = useMemo(() => {
     return currentVisitDisplayItems.some(
       (item) => item.purchaseStatus === 'Purchased' && (item.price === -1 || item.price === null),
     );
   }, [currentVisitDisplayItems]);
-
   // 残りの合計金額を計算
   const remainingCost = useMemo(() => {
     return executeItems.reduce((sum, item) => {
@@ -645,27 +488,22 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return sum + price * item.quantity;
     }, 0);
   }, [executeItems]);
-
   // 購入済み件数
   const purchasedCount = useMemo(() => {
     return executeItems.filter((item) => item.purchaseStatus === 'Purchased').length;
   }, [executeItems]);
-
   // 現在の訪問先のアイテムチェック状況
   const currentVisitCheckedCount = useMemo(() => {
     return currentVisitDisplayItems.filter((item) => item.purchaseStatus !== 'None').length;
   }, [currentVisitDisplayItems]);
-
   // 現在の訪問先のアイテム総数
   const currentVisitTotalCount = useMemo(() => {
     return currentVisitDisplayItems.length;
   }, [currentVisitDisplayItems]);
-
   // 現在の訪問先のアイテム総額情報
   const currentVisitPriceInfo = useMemo(() => {
     let totalPrice = 0;
     let undefinedCount = 0;
-
     currentVisitDisplayItems.forEach((item) => {
       // 価格未定の判定（nullまたは-1）
       if (item.price === null || item.price === -1) {
@@ -674,7 +512,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
         totalPrice += item.price * item.quantity;
       }
     });
-
     return {
       totalPrice,
       undefinedCount,
@@ -684,7 +521,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
         currentVisitDisplayItems.every((item) => item.price === null || item.price === -1),
     };
   }, [currentVisitDisplayItems]);
-
   // 次の訪問先情報
   const nextVisitInfo = useMemo(() => {
     if (!nextVisit) return { spaceInfo: '最終', circleName: '' };
@@ -696,19 +532,71 @@ const FocusMode: React.FC<FocusModeProps> = ({
       circleName: item.circle || '',
     };
   }, [nextVisit]);
-
   // 現在のマップ名
   const currentMapName = useMemo(() => {
     if (!currentVisit || currentVisit.items.length === 0) return null;
     const eventDate = currentVisit.items[0].eventDate;
     return `${eventDate}マップ`;
   }, [currentVisit]);
-
   // 現在のマップデータ
   const currentMapData = useMemo(() => {
     if (!currentMapName || !mapData) return null;
     return mapData[currentMapName] || null;
   }, [currentMapName, mapData]);
+
+  const currentVisitLookupMapSignature = useMemo(() => {
+    return JSON.stringify([
+      currentMapName || '',
+      buildDayMapVisitLookupSignature(currentMapData),
+    ]);
+  }, [currentMapName, currentMapData]);
+
+  const currentVisitLookupMapDataRef = useRef<{
+    signature: string;
+    mapData: DayMapData | null;
+  } | null>(null);
+
+  const currentVisitLookupMapData = useMemo(() => {
+    if (!currentMapName || !currentMapData) return null;
+
+    if (currentVisitLookupMapDataRef.current?.signature === currentVisitLookupMapSignature) {
+      return currentVisitLookupMapDataRef.current.mapData;
+    }
+
+    currentVisitLookupMapDataRef.current = {
+      signature: currentVisitLookupMapSignature,
+      mapData: currentMapData,
+    };
+
+    return currentMapData;
+  }, [currentMapData, currentMapName, currentVisitLookupMapSignature]);
+
+  const currentRouteMapDataSignature = useMemo(() => {
+    return JSON.stringify([
+      currentMapName || '',
+      buildDayMapPathfindingSignature(currentMapData),
+    ]);
+  }, [currentMapName, currentMapData]);
+
+  const currentRouteMapDataRef = useRef<{
+    signature: string;
+    mapData: DayMapData | null;
+  } | null>(null);
+
+  const currentRouteMapData = useMemo(() => {
+    if (!currentMapName || !currentMapData) return null;
+
+    if (currentRouteMapDataRef.current?.signature === currentRouteMapDataSignature) {
+      return currentRouteMapDataRef.current.mapData;
+    }
+
+    currentRouteMapDataRef.current = {
+      signature: currentRouteMapDataSignature,
+      mapData: currentMapData,
+    };
+
+    return currentMapData;
+  }, [currentMapData, currentMapName, currentRouteMapDataSignature]);
 
   // マップ用のdayName（マップ名からサフィックスを除去）
   const mapDayName = useMemo(() => {
@@ -716,43 +604,54 @@ const FocusMode: React.FC<FocusModeProps> = ({
     const dayMatch = currentMapName.match(/^(.+)マップ$/);
     return dayMatch ? dayMatch[1].trim() : '';
   }, [currentMapName]);
-
   // visitKey→セル座標のマッピング（FocusModeMapCanvasがアンマウントされても保持）
   const visitKeyCellMap = useMemo(() => {
     const map = new Map<string, { row: number; col: number; key: string }>();
-    if (!mapDayName || !currentMapData) return map;
-
+    if (!mapDayName || !currentVisitLookupMapData) return map;
     routePositionItems.forEach((item) => {
       const itemEventDate = item.eventDate?.trim() || '';
       if (itemEventDate !== mapDayName) return;
-
       const itemBlockName = item.block?.trim() || '';
-      let block = currentMapData.blocks.find((b) => b.name === itemBlockName);
+      let block = currentVisitLookupMapData.blocks.find((b) => b.name === itemBlockName);
       if (!block) {
-        const candidates = currentMapData.blocks.filter(
+        const candidates = currentVisitLookupMapData.blocks.filter(
           (b) => b.name.toLowerCase() === itemBlockName.toLowerCase(),
         );
         if (candidates.length === 1) block = candidates[0];
       }
       if (!block) return;
-
       const numStr = extractNumberFromItemNumber(item.number);
       if (!numStr) return;
       const num = parseInt(numStr, 10);
-      const cell = block.numberCells.find((nc) => nc.value === num);
+      const cell = findRouteLookupNumberCell(block, num);
       if (!cell) return;
-
       const visitKey = getVisitKey(item);
       if (!map.has(visitKey)) {
         map.set(visitKey, { row: cell.row, col: cell.col, key: `${cell.row}-${cell.col}` });
       }
     });
-
     return map;
-  }, [routePositionItems, currentMapData, mapDayName]);
+  }, [routePositionItems, currentVisitLookupMapData, mapDayName]);
+  const routeCoordsSignature = useMemo(() => {
+    return JSON.stringify(
+      allVisitKeys.map((visitKey) => {
+        const coord = visitKeyCellMap.get(visitKey);
+        return coord ? [visitKey, coord.row, coord.col, coord.key] : [visitKey, 'missing'];
+      }),
+    );
+  }, [allVisitKeys, visitKeyCellMap]);
+
+  const precomputedAllVisitCellCoordsRef = useRef<{
+    signature: string;
+    coords: { row: number; col: number; key: string }[];
+  } | null>(null);
 
   // 全スペースのセル座標をルート順に取得
   const precomputedAllVisitCellCoords = useMemo(() => {
+    if (precomputedAllVisitCellCoordsRef.current?.signature === routeCoordsSignature) {
+      return precomputedAllVisitCellCoordsRef.current.coords;
+    }
+
     const coords: { row: number; col: number; key: string }[] = [];
     for (const visitKey of allVisitKeys) {
       const coord = visitKeyCellMap.get(visitKey);
@@ -760,40 +659,38 @@ const FocusMode: React.FC<FocusModeProps> = ({
         coords.push(coord);
       }
     }
-    return coords;
-  }, [allVisitKeys, visitKeyCellMap]);
 
+    precomputedAllVisitCellCoordsRef.current = {
+      signature: routeCoordsSignature,
+      coords,
+    };
+
+    return coords;
+  }, [allVisitKeys, visitKeyCellMap, routeCoordsSignature]);
   // A* 経路計算（重複回避付き直交ルーティング）
   const precomputedRouteSegments = useMemo(() => {
-    if (!currentMapData || precomputedAllVisitCellCoords.length < 2) return [];
-
-    const segments = generateRouteSegments(currentMapData, precomputedAllVisitCellCoords);
+    if (!currentRouteMapData || precomputedAllVisitCellCoords.length < 2) return [];
+    const segments = generateRouteSegments(currentRouteMapData, precomputedAllVisitCellCoords);
     return segments.map((seg, i) => ({
       path: simplifyPath(seg.path),
       segmentIndex: i,
     }));
-  }, [precomputedAllVisitCellCoords, currentMapData]);
-
+  }, [precomputedAllVisitCellCoords, currentRouteMapData]);
   // 追随モード用ホール特定
   const followHall = useMemo(() => {
     if (!hallDefinitions || hallDefinitions.length === 0 || !currentVisit || !currentMapData)
       return null;
-
     const currentItem = currentVisit.items[0];
     if (!currentItem) return null;
-
     const block = currentMapData.blocks.find((b) => b.name === currentItem.block);
     if (!block) return null;
-
     const numStr = currentItem.number.match(/^(\d+)/)?.[1];
     if (!numStr) return null;
     const num = parseInt(numStr, 10);
-    const cell = block.numberCells.find((nc) => nc.value === num);
+    const cell = findRouteLookupNumberCell(block, num);
     if (!cell) return null;
-
     for (const hall of hallDefinitions) {
       if (hall.vertices.length < 3) continue;
-
       let inside = false;
       const vertices = hall.vertices;
       for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
@@ -801,7 +698,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
           yi = vertices[i].row;
         const xj = vertices[j].col,
           yj = vertices[j].row;
-
         if (
           yi > cell.row !== yj > cell.row &&
           cell.col < ((xj - xi) * (cell.row - yi)) / (yj - yi) + xi
@@ -809,13 +705,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
           inside = !inside;
         }
       }
-
       if (inside) return hall;
     }
-
     return null;
   }, [hallDefinitions, currentVisit, currentMapData]);
-
   // 選択されたホール
   const selectedHall = useMemo(() => {
     if (selectedHallId === 'follow') {
@@ -823,7 +716,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
     return hallDefinitions?.find((h) => h.id === selectedHallId) || null;
   }, [selectedHallId, followHall, hallDefinitions]);
-
   // 現在のインデックスを保存
   useEffect(() => {
     setSavedPhaseIndices((prev) => ({
@@ -831,12 +723,24 @@ const FocusMode: React.FC<FocusModeProps> = ({
       [currentPhase]: currentPhaseIndex,
     }));
   }, [currentPhase, currentPhaseIndex]);
-
+  // タイマーをクリアする関数（フェーズ切り替えでも使用するので先に定義）
+  const {
+    resumeChoiceDialog,
+    setResumeChoiceDialog,
+    isResumeTransitioning,
+    isResumeInitResolved,
+  } = useResumeFlow({
+    resumeState,
+    currentPhase,
+    visitsByPhase,
+    currentPostponedItemIds,
+    currentLateItemIds,
+    clearAutoAdvanceTimer,
+    setPostponedPhaseItemIds,
+    setLatePhaseItemIds,
+  });
   useEffect(() => {
     if (!onSessionStateChange) return;
-    // 遷移中・初期解決未完了・ダイアログ表示中は親への書き戻しを抑止する。
-    // これにより (1) 同コミット内レース、(2) 初期化前の先行書き戻し、(3) ダイアログ中の
-    // isCompleted=false 上書き、をすべて塞ぐ。
     if (isResumeTransitioning) return;
     if (!isResumeInitResolved) return;
     if (resumeChoiceDialog?.isOpen) return;
@@ -850,8 +754,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
       },
       postponedItemIds: Array.from(postponedPhaseItemIds),
       lateItemIds: Array.from(latePhaseItemIds),
-      isCompleted,
       lastPurchaseChangeAt,
+      isCompleted,
     });
   }, [
     onSessionStateChange,
@@ -865,58 +769,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
     savedPhaseIndices.late,
     postponedPhaseItemIds,
     latePhaseItemIds,
-    isCompleted,
     lastPurchaseChangeAt,
+    isCompleted,
   ]);
-
-  // 再開時の sync 完了を完了判定チェック完了としてシグナルするだけ（自動リセットは行わない）
-  useEffect(() => {
-    if (!resumeState) {
-      setIsResumeCompletionChecked(true);
-      return;
-    }
-    if (!isResumeSyncComplete) return;
-    setIsResumeCompletionChecked(true);
-  }, [resumeState, isResumeSyncComplete]);
-
-  // 再開ダイアログ初期化（resumeState 受領・sync 完了・completion-check 完了後の1回のみ評価）
-  useEffect(() => {
-    if (didInitResumeChoiceRef.current) return;
-    if (!resumeState) {
-      // 新規セッション (または null 状態): ダイアログ判定は保留。
-      // 後続で resumeState が non-null になれば line 361 effect が
-      // didInitResumeChoiceRef を false のまま維持するので再評価できる。
-      setIsResumeInitResolved(true);
-      return;
-    }
-    if (!didSyncOnResumeRef.current) return;
-    if (!isResumeSyncComplete) return;
-    if (!isResumeCompletionChecked) return;
-
-    const dialogState = buildResumeChoiceDialogState({
-      initialResumeState: initialResumeStateRef.current,
-      visitsByPhase,
-      currentPhase,
-    });
-
-    if (dialogState) {
-      setResumeChoiceDialog(dialogState);
-    }
-    didInitResumeChoiceRef.current = true;
-    setIsResumeInitResolved(true);
-  }, [
-    resumeState,
-    isResumeSyncComplete,
-    isResumeCompletionChecked,
-    visitsByPhase,
-    currentPhase,
-  ]);
-
   // フェーズ切り替えダイアログを開く
   const handlePhaseChangeRequest = useCallback(
     (targetPhase: FocusPhase) => {
       if (targetPhase === currentPhase) return;
-
       // 対象フェーズの訪問先が存在するか確認
       const targetVisits = visitsByPhase[targetPhase];
       if (targetVisits.length === 0) {
@@ -925,11 +784,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
         );
         return;
       }
-
       // 保存されたインデックスがあるかチェック
       const savedIndex = savedPhaseIndices[targetPhase];
       const hasSavedIndex = savedIndex > 0 && savedIndex < targetVisits.length;
-
       setPhaseChangeDialog({
         isOpen: true,
         targetPhase,
@@ -939,18 +796,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
     },
     [currentPhase, visitsByPhase, savedPhaseIndices],
   );
-
   // フェーズ切り替え実行（最初から開始）
   const executePhaseChangeFromStart = useCallback(() => {
     const { targetPhase } = phaseChangeDialog;
     if (!targetPhase) return;
-
     // 現在のフェーズのインデックスを保存
     setSavedPhaseIndices((prev) => ({
       ...prev,
       [currentPhase]: currentPhaseIndex,
     }));
-
     // フェーズ切り替え前に必要なデータを準備
     if (currentPhase === 'normal' && (targetPhase === 'postponed' || targetPhase === 'late')) {
       // 通常フェーズから後回し/遅参へ：現在の後回し/遅参アイテムを記憶
@@ -958,7 +812,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
         executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
       );
       setPostponedPhaseItemIds(postponedIds);
-
       const lateIds = new Set(
         executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
       );
@@ -973,17 +826,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
       });
       setLatePhaseItemIds(currentLateIds);
     }
-
     setCurrentPhase(targetPhase);
     setCurrentPhaseIndex(0);
     setIsNextButtonBlinking(false);
     setIsCompleted(false);
     clearAutoAdvanceTimer();
-
     const phaseName =
       targetPhase === 'normal' ? '通常' : targetPhase === 'postponed' ? '後回し' : '遅参';
     setNotification(`${phaseName}フェーズを最初から開始します`);
-
     setPhaseChangeDialog({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
   }, [
     phaseChangeDialog,
@@ -993,25 +843,21 @@ const FocusMode: React.FC<FocusModeProps> = ({
     latePhaseItemIds,
     clearAutoAdvanceTimer,
   ]);
-
   // フェーズ切り替え実行（途中から再開）
   const executePhaseChangeFromSaved = useCallback(() => {
     const { targetPhase, savedIndex } = phaseChangeDialog;
     if (!targetPhase) return;
-
     // 現在のフェーズのインデックスを保存
     setSavedPhaseIndices((prev) => ({
       ...prev,
       [currentPhase]: currentPhaseIndex,
     }));
-
     // フェーズ切り替え前に必要なデータを準備
     if (currentPhase === 'normal' && (targetPhase === 'postponed' || targetPhase === 'late')) {
       const postponedIds = new Set(
         executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
       );
       setPostponedPhaseItemIds(postponedIds);
-
       const lateIds = new Set(
         executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
       );
@@ -1025,17 +871,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
       });
       setLatePhaseItemIds(currentLateIds);
     }
-
     setCurrentPhase(targetPhase);
     setCurrentPhaseIndex(savedIndex);
     setIsNextButtonBlinking(false);
     setIsCompleted(false);
     clearAutoAdvanceTimer();
-
     const phaseName =
       targetPhase === 'normal' ? '通常' : targetPhase === 'postponed' ? '後回し' : '遅参';
     setNotification(`${phaseName}フェーズを途中から再開します`);
-
     setPhaseChangeDialog({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
   }, [
     phaseChangeDialog,
@@ -1045,43 +888,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
     latePhaseItemIds,
     clearAutoAdvanceTimer,
   ]);
-
   // フェーズ切り替えダイアログをキャンセル
   const cancelPhaseChange = useCallback(() => {
     setPhaseChangeDialog({ isOpen: false, targetPhase: null, hasSavedIndex: false, savedIndex: 0 });
   }, []);
-
-  // 再開ダイアログの選択ハンドラ
-  const applyResumeChoice = useCallback(
-    (choice: 'lastChange' | 'pointer' | 'phaseStart' | 'normalStart') => {
-      if (!resumeChoiceDialog) return;
-      const result = resolveResumeChoice(choice, resumeChoiceDialog);
-
-      const nextPhase = result.phase ?? currentPhase;
-      if (result.phase !== undefined) setCurrentPhase(result.phase);
-      if (result.phaseIndex !== undefined) {
-        setCurrentPhaseIndex(clampPhaseIndex(nextPhase, result.phaseIndex));
-      }
-      if (result.isCompleted === true) setIsCompleted(true);
-
-      // pointer 選択で完了画面を復元する場合は lastPurchaseChangeAt を保持する。
-      // 他の選択肢(lastChange/phaseStart/normalStart)は通常訪問に遷移するのでクリアする。
-      if (result.isCompleted !== true) {
-        setLastPurchaseChangeAt(null);
-      }
-
-      setResumeChoiceDialog(null);
-      clearAutoAdvanceTimer();
-      setIsNextButtonBlinking(false);
-    },
-    [resumeChoiceDialog, clearAutoAdvanceTimer, clampPhaseIndex, currentPhase],
-  );
-
   // 次へボタンの点滅を更新
   useEffect(() => {
     if (currentVisitDisplayItems.length === 0) return;
-
-    if (hasUndefinedPricePurchased) {
+    if (!disablePriceUndefinedCheck && hasUndefinedPricePurchased) {
       setIsNextButtonBlinking(false);
       const undefinedPriceIds = currentVisitDisplayItems
         .filter(
@@ -1097,8 +911,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       );
       setIsNextButtonBlinking(!hasUnprocessed && currentVisitDisplayItems.length > 0);
     }
-  }, [currentVisitDisplayItems, hasUndefinedPricePurchased]);
-
+  }, [currentVisitDisplayItems, disablePriceUndefinedCheck, hasUndefinedPricePurchased]);
   // 通知を自動で消す
   useEffect(() => {
     if (notification) {
@@ -1106,49 +919,39 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return () => clearTimeout(timer);
     }
   }, [notification]);
-
   // マップ表示状態の通知
   useEffect(() => {
     if (onMapVisibilityChange) {
       onMapVisibilityChange(isMapVisible);
     }
   }, [isMapVisible, onMapVisibilityChange]);
-
   // ナビゲーションボタンの位置を調整
   useEffect(() => {
     const checkOverlap = () => {
       if (!itemListRef.current) return;
-
       const buttonSize = 56; // w-14 = 56px
       const buttonMargin = 16; // left-4/right-4 = 16px
       const viewportHeight = window.innerHeight;
       const buttonCenterY = viewportHeight / 2;
-
       // アイテムカード内の操作部分（ボタンやドロップダウン）の位置を取得
       const interactiveElements = itemListRef.current.querySelectorAll(
         'button, select, [role="button"]',
       );
-
       let leftOffset = 0;
       let rightOffset = 0;
-
       interactiveElements.forEach((element) => {
         const rect = element.getBoundingClientRect();
-
         // ボタンの上下範囲
         const buttonTop = buttonCenterY - buttonSize / 2;
         const buttonBottom = buttonCenterY + buttonSize / 2;
-
         // Y軸で重なっているか
         const yOverlap = !(rect.bottom < buttonTop || rect.top > buttonBottom);
-
         if (yOverlap) {
           // 左ボタンとの重なりチェック
           const leftButtonRight = buttonMargin + buttonSize;
           if (rect.left < leftButtonRight) {
             leftOffset = Math.max(leftOffset, leftButtonRight - rect.left + 8);
           }
-
           // 右ボタンとの重なりチェック
           const rightButtonLeft = window.innerWidth - buttonMargin - buttonSize;
           if (rect.right > rightButtonLeft) {
@@ -1156,26 +959,20 @@ const FocusMode: React.FC<FocusModeProps> = ({
           }
         }
       });
-
       setNavButtonOffset({ left: leftOffset, right: rightOffset });
     };
-
     // 初回チェックと再チェック
     const timer = setTimeout(checkOverlap, 100);
     window.addEventListener('resize', checkOverlap);
-
     return () => {
       clearTimeout(timer);
       window.removeEventListener('resize', checkOverlap);
     };
-  }, [currentVisitDisplayItemIdsSignature, currentPhaseIndex, currentPhase]);
-
+  }, [currentVisitDisplayItems, currentPhaseIndex, currentPhase]);
   // 次のフェーズまたは訪問先へ移動する関数
   const moveToNext = useCallback(() => {
     clearAutoAdvanceTimer();
-
     const nextIndex = currentPhaseIndex + 1;
-
     if (nextIndex < currentPhaseVisits.length) {
       // 同じフェーズ内で次へ
       setCurrentPhaseIndex(nextIndex);
@@ -1188,13 +985,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
           executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
         );
         setPostponedPhaseItemIds(postponedIds);
-
         // 遅参アイテムIDも更新（通常フェーズで遅参にしたもの）
         const lateIds = new Set(
           executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
         );
         setLatePhaseItemIds(lateIds);
-
         if (postponedIds.size > 0) {
           setNotification('後回しアイテムの巡回を開始します');
           setCurrentPhase('postponed');
@@ -1217,7 +1012,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
           }
         });
         setLatePhaseItemIds(currentLateIds);
-
         if (currentLateIds.size > 0) {
           setNotification('遅参アイテムの巡回を開始します');
           setCurrentPhase('late');
@@ -1238,32 +1032,17 @@ const FocusMode: React.FC<FocusModeProps> = ({
     clearAutoAdvanceTimer,
     latePhaseItemIds,
   ]);
-
   // 自動進行を開始する関数（ユーザー操作からのみ呼び出す）
   const startAutoAdvance = useCallback(() => {
     // 既にタイマーが動いている場合は何もしない
-    if (autoAdvanceTimerRef.current) return;
-
     // カウントダウン開始
-    setAutoAdvanceCountdown(3);
-
-    countdownIntervalRef.current = setInterval(() => {
-      setAutoAdvanceCountdown((prev) => {
-        if (prev === null || prev <= 1) {
-          return prev;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    autoAdvanceTimerRef.current = setTimeout(() => {
+    scheduleAutoAdvance(() => {
       moveToNext();
-    }, 3000);
-  }, [moveToNext]);
-
+    });
+  }, [scheduleAutoAdvance, moveToNext]);
   // 次の訪問先へ（手動）
   const handleNext = useCallback(() => {
-    // 価格未定チェック（設定で無効化されていない場合のみ進行をブロック）
+    // 価格未定チェック
     if (!disablePriceUndefinedCheck && hasUndefinedPricePurchased) {
       setNotification('価格未定のアイテムがあります。価格を入力してください。');
       const undefinedPriceIds = currentVisitDisplayItems
@@ -1275,27 +1054,28 @@ const FocusMode: React.FC<FocusModeProps> = ({
       setBlinkingPriceItemIds(new Set(undefinedPriceIds));
       return;
     }
-
     // チェック漏れの確認
     const hasUncheckedItems = currentVisitDisplayItems.some(
       (item) => item.purchaseStatus === 'None',
     );
-
     clearAutoAdvanceTimer();
     moveToNext();
-
     // チェック漏れがある場合は通知を表示
     if (hasUncheckedItems) {
       setTimeout(() => {
         setNotification('前のサークルでチェック漏れがあります');
       }, 100);
     }
-  }, [disablePriceUndefinedCheck, hasUndefinedPricePurchased, currentVisitDisplayItems, clearAutoAdvanceTimer, moveToNext]);
-
+  }, [
+    disablePriceUndefinedCheck,
+    hasUndefinedPricePurchased,
+    currentVisitDisplayItems,
+    clearAutoAdvanceTimer,
+    moveToNext,
+  ]);
   // 前の訪問先へ
   const handlePrev = useCallback(() => {
     clearAutoAdvanceTimer();
-
     // 完了画面から戻る場合
     if (isCompleted) {
       setIsCompleted(false);
@@ -1312,7 +1092,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
       }
       return;
     }
-
     if (currentPhaseIndex > 0) {
       setCurrentPhaseIndex(currentPhaseIndex - 1);
       setIsNextButtonBlinking(false);
@@ -1347,37 +1126,40 @@ const FocusMode: React.FC<FocusModeProps> = ({
     postponedPhaseItemIds,
     latePhaseItemIds,
   ]);
-
   // アイテム更新ハンドラ
   const handleUpdateItem = useCallback(
     (updatedItem: ShoppingItem) => {
       setLastInteractedItemId(updatedItem.id);
-
       // まずアイテムを更新
       onUpdateItem(updatedItem);
-
       // 購入状態が変更されたかチェック
       const originalItem = currentVisitDisplayItems.find((i) => i.id === updatedItem.id);
-      if (!originalItem) return;
+      if (!originalItem) {
+        clearAutoAdvanceTimer();
+        return;
+      }
+      const purchaseStatusChanged = originalItem.purchaseStatus !== updatedItem.purchaseStatus;
 
-      // 購入状態が実際に変更された場合、最後の変更位置を記録（再開ダイアログで使用）
-      if (originalItem.purchaseStatus !== updatedItem.purchaseStatus) {
-        setLastPurchaseChangeAt({
-          phase: currentPhase,
-          phaseIndex: currentPhaseIndex,
-          visitKey: getVisitKey(originalItem),
-        });
+      if (!purchaseStatusChanged) {
+        clearAutoAdvanceTimer();
+        return;
       }
 
+      setLastPurchaseChangeAt({
+        phase: currentPhase,
+        phaseIndex: currentPhaseIndex,
+        visitKey: getVisitKey(originalItem),
+      });
       // 後回し/遅参以外に変更された場合、タイマーをクリア
       if (updatedItem.purchaseStatus !== 'Postpone' && updatedItem.purchaseStatus !== 'Late') {
         clearAutoAdvanceTimer();
         return;
       }
-
       // 通常フェーズでのみ自動進行をチェック
-      if (currentPhase !== 'normal') return;
-
+      if (currentPhase !== 'normal') {
+        clearAutoAdvanceTimer();
+        return;
+      }
       // 更新後の状態で全アイテムが後回し/遅参かチェック
       const willAllBePostponedOrLate = currentVisitDisplayItems.every((item) => {
         if (item.id === updatedItem.id) {
@@ -1385,10 +1167,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
         }
         return item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'Late';
       });
-
       if (willAllBePostponedOrLate) {
         // 3秒後に自動進行を開始
         startAutoAdvance();
+      } else {
+        clearAutoAdvanceTimer();
       }
     },
     [
@@ -1400,7 +1183,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
       startAutoAdvance,
     ],
   );
-
   // スワイプハンドラ（スマートフォンモード用）
   const handleTouchStart = useCallback(
     (e: React.TouchEvent) => {
@@ -1412,7 +1194,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     },
     [layoutMode],
   );
-
   const handleTouchMove = useCallback(
     (e: React.TouchEvent) => {
       if (
@@ -1421,11 +1202,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
         touchStartYRef.current === null
       )
         return;
-
       const touch = e.touches[0];
       const deltaX = touch.clientX - touchStartXRef.current;
       const deltaY = touch.clientY - touchStartYRef.current;
-
       // 水平方向の移動が垂直方向より大きい場合のみスワイプとして処理
       if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 10) {
         isSwipingRef.current = true;
@@ -1433,15 +1212,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
     },
     [layoutMode],
   );
-
   const handleTouchEnd = useCallback(
     (e: React.TouchEvent) => {
       if (layoutMode !== 'smartphone' || touchStartXRef.current === null) return;
-
       const touch = e.changedTouches[0];
       const deltaX = touch.clientX - touchStartXRef.current;
       const deltaY = touch.clientY - (touchStartYRef.current || 0);
-
       // 水平方向の移動が垂直方向より大きく、閾値を超えた場合のみ処理
       if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > SWIPE_THRESHOLD) {
         if (deltaX > 0) {
@@ -1452,14 +1228,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
           handleNext();
         }
       }
-
       touchStartXRef.current = null;
       touchStartYRef.current = null;
       isSwipingRef.current = false;
     },
     [layoutMode, handlePrev, handleNext],
   );
-
   // モード切り替え
   const handleModeChangeInternal = useCallback(
     (mode: 'edit' | 'execute') => {
@@ -1467,12 +1241,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
     },
     [onModeChange, lastInteractedItemId],
   );
-
   // マップ表示トグル
   const toggleMapVisibility = useCallback(() => {
     setIsMapVisible(!isMapVisible);
   }, [isMapVisible]);
-
   // スプリットドラッグ関連
   const handleSplitDragStart = useCallback(
     (e: React.TouchEvent | React.MouseEvent) => {
@@ -1481,7 +1253,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     },
     [splitRatio],
   );
-
   const handleSplitDragMove = useCallback((e: React.TouchEvent | React.MouseEvent) => {
     if (!splitDragRef.current) return;
     const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
@@ -1491,142 +1262,34 @@ const FocusMode: React.FC<FocusModeProps> = ({
     const newRatio = Math.max(20, Math.min(80, splitDragRef.current.startRatio + deltaRatio));
     setSplitRatio(newRatio);
   }, []);
-
   const handleSplitDragEnd = useCallback(() => {
     splitDragRef.current = null;
   }, []);
-
   // マップズームレベル変更
   const handleMapZoomChange = useCallback((newZoom: number) => {
     setMapZoomLevel(newZoom);
   }, []);
-
   // 現在のフェーズに表示するアイテムがない場合の自動スキップ処理（useEffectで安全に処理）
-  const autoAdvanceProcessedRef = useRef(false);
-
-  useEffect(() => {
-    // 再開ダイアログ表示中は auto-advance を抑止。ユーザーが選ぶまで state を動かさない
-    if (resumeChoiceDialog?.isOpen) {
-      autoAdvanceProcessedRef.current = false;
-      return;
-    }
-
-    // 完了済みまたは訪問先がない場合は何もしない
-    if (isCompleted || allVisits.length === 0) {
-      autoAdvanceProcessedRef.current = false;
-      return;
-    }
-
-    // 現在の訪問先にアイテムがある場合は何もしない
-    if (currentVisitDisplayItems.length > 0) {
-      autoAdvanceProcessedRef.current = false;
-      return;
-    }
-
-    // 既に処理中の場合はスキップ（無限ループ防止）
-    if (autoAdvanceProcessedRef.current) {
-      return;
-    }
-
-    // フェーズに訪問先がない場合も何もしない
-    if (currentPhaseVisits.length === 0) {
-      autoAdvanceProcessedRef.current = false;
-      return;
-    }
-
-    // 処理開始をマーク
-    autoAdvanceProcessedRef.current = true;
-
-    // 次の訪問先を探す
-    for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
-      const visit = currentPhaseVisits[i];
-      let hasItems = false;
-      if (currentPhase === 'normal') {
-        hasItems = visit.items.length > 0;
-      } else if (currentPhase === 'postponed') {
-        hasItems = visit.items.some((item) => postponedPhaseItemIds.has(item.id));
-      } else {
-        hasItems = visit.items.some((item) => latePhaseItemIds.has(item.id));
-      }
-      if (hasItems) {
-        setCurrentPhaseIndex(i);
-        return;
-      }
-    }
-
-    // 同じフェーズ内に次の訪問先がない場合、次のフェーズへ移行
-    clearAutoAdvanceTimer();
-
-    if (currentPhase === 'normal') {
-      // 通常フェーズ終了 → 後回し/遅参フェーズへ
-      const postponedIds = new Set(
-        executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
-      );
-      const lateIds = new Set(
-        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
-      );
-
-      if (postponedIds.size > 0) {
-        setPostponedPhaseItemIds(postponedIds);
-        setLatePhaseItemIds(lateIds);
-        setNotification('後回しアイテムの巡回を開始します');
-        setCurrentPhase('postponed');
-        setCurrentPhaseIndex(0);
-      } else if (lateIds.size > 0) {
-        setPostponedPhaseItemIds(postponedIds);
-        setLatePhaseItemIds(lateIds);
-        setNotification('遅参アイテムの巡回を開始します');
-        setCurrentPhase('late');
-        setCurrentPhaseIndex(0);
-      } else {
-        setIsCompleted(true);
-      }
-    } else if (currentPhase === 'postponed') {
-      // 後回しフェーズ終了 → 遅参フェーズへ
-      const currentLateIds = new Set(latePhaseItemIds);
-      executeItems.forEach((item) => {
-        if (item.purchaseStatus === 'Late') {
-          currentLateIds.add(item.id);
-        }
-      });
-
-      if (currentLateIds.size > 0) {
-        setLatePhaseItemIds(currentLateIds);
-        setNotification('遅参アイテムの巡回を開始します');
-        setCurrentPhase('late');
-        setCurrentPhaseIndex(0);
-      } else {
-        setIsCompleted(true);
-      }
-    } else {
-      // 遅参フェーズ終了 → 完了
-      setIsCompleted(true);
-    }
-  }, [
+  const isAutoAdvancing = useAutoSkipEmptyVisit({
     isCompleted,
-    allVisits.length,
-    currentVisitDisplayItems.length,
+    allVisitsLength: allVisits.length,
+    currentVisitDisplayItemsLength: currentVisitDisplayItems.length,
     currentPhaseVisits,
     currentPhaseIndex,
     currentPhase,
     postponedPhaseItemIds,
     latePhaseItemIds,
     executeItems,
+    isResumeChoiceOpen: Boolean(resumeChoiceDialog?.isOpen),
     clearAutoAdvanceTimer,
-    resumeChoiceDialog?.isOpen,
-  ]);
-
-  // 自動スキップ処理中かどうか（ローディング表示用）
-  // 再開ダイアログ表示中はローディング画面に落とさず、ダイアログを優先する
-  const isAutoAdvancing =
-    !resumeChoiceDialog?.isOpen &&
-    !isCompleted &&
-    allVisits.length > 0 &&
-    currentVisitDisplayItems.length === 0 &&
-    currentPhaseVisits.length > 0;
-
+    setPostponedPhaseItemIds,
+    setLatePhaseItemIds,
+    setNotification,
+    setCurrentPhase,
+    setCurrentPhaseIndex,
+    setIsCompleted,
+  });
   // ===== 以下のフックを早期returnの前に移動 =====
-
   // マップのセルクリックハンドラ
   const handleMapCellClick = useCallback(
     (blockName: string, number: number, matchingItems: ShoppingItem[]) => {
@@ -1639,12 +1302,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
     },
     [],
   );
-
   // セルポップアップを閉じる
   const closeCellPopup = useCallback(() => {
     setCellPopupState((prev) => ({ ...prev, isOpen: false }));
   }, []);
-
   // アイテム追加ダイアログを開く
   const openAddItemDialog = useCallback(() => {
     if (!currentVisit) return;
@@ -1666,7 +1327,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     });
     closeCellPopup();
   }, [currentVisit, cellPopupState, closeCellPopup]);
-
   // アイテムリスト末尾の「+」ボタンからアイテム追加ダイアログを開く
   const openAddItemDialogFromList = useCallback(() => {
     if (!currentVisit) return;
@@ -1690,12 +1350,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
       purchaseStatus: 'Purchased',
     });
   }, [currentVisit]);
-
   // アイテム追加ダイアログを閉じる
   const closeAddItemDialog = useCallback(() => {
     setAddItemDialog((prev) => ({ ...prev, isOpen: false }));
   }, []);
-
   // アイテムを追加
   const handleAddNewItem = useCallback(() => {
     if (!onAddItem) return;
@@ -1712,7 +1370,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
       url: newItemForm.url || undefined,
       purchaseStatus: newItemForm.purchaseStatus,
     });
-
     // 購入状態に応じたメッセージ
     const statusText =
       newItemForm.purchaseStatus === 'Purchased'
@@ -1723,7 +1380,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     setNotification(`${addItemDialog.block}-${addItemDialog.number} を${statusText}に追加しました`);
     closeAddItemDialog();
   }, [onAddItem, addItemDialog, newItemForm, closeAddItemDialog]);
-
   // 価格のクイック選択オプション
   const priceOptions = useMemo(() => {
     const options: number[] = [0];
@@ -1732,653 +1388,146 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
     return options;
   }, []);
-
   // 価格入力ハンドラ
   const handlePriceInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/[^0-9]/g, '');
     setNewItemForm((prev) => ({ ...prev, price: value }));
   }, []);
-
   // 価格選択ハンドラ
   const handlePriceSelectChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
     setNewItemForm((prev) => ({ ...prev, price: e.target.value }));
   }, []);
-
   // ===== フックの移動ここまで =====
-
-  // 訪問先がない場合は完了状態より優先して「訪問先がありません」を表示する
-  // (完了済みのまま実行列を空にしても案内画面に抜けられるようにする)
+  // 訪問先がない場合（完了状態を優先するため未完了時のみ表示）
+  const applyResumeChoice = useCallback(
+    (choice: 'lastChange' | 'pointer' | 'phaseStart' | 'normalStart') => {
+      if (!resumeChoiceDialog) return;
+      const result = resolveResumeChoice(choice, resumeChoiceDialog);
+      const nextPhase = result.phase ?? currentPhase;
+      if (result.phase !== undefined) {
+        setCurrentPhase(result.phase);
+      }
+      if (result.phaseIndex !== undefined) {
+        const visits = visitsByPhase[nextPhase];
+        const safeIndex =
+          visits.length === 0 ? 0 : Math.min(Math.max(0, result.phaseIndex), visits.length - 1);
+        setCurrentPhaseIndex(safeIndex);
+      }
+      if (result.isCompleted === true) {
+        setIsCompleted(true);
+      } else {
+        setIsCompleted(false);
+        setLastPurchaseChangeAt(null);
+      }
+      setResumeChoiceDialog(null);
+      clearAutoAdvanceTimer();
+      setIsNextButtonBlinking(false);
+    },
+    [
+      resumeChoiceDialog,
+      currentPhase,
+      visitsByPhase,
+      setResumeChoiceDialog,
+      clearAutoAdvanceTimer,
+    ],
+  );
+  const resumeChoiceDialogJSX = resumeChoiceDialog?.isOpen ? (
+    <ResumeChoiceDialogView dialog={resumeChoiceDialog} onChoice={applyResumeChoice} />
+  ) : null;
   if (allVisits.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
-        <div className="text-6xl mb-4">📋</div>
-        <h2 className="text-xl font-bold text-slate-700 dark:text-slate-300 mb-2">
-          訪問先がありません
-        </h2>
-        <p className="text-slate-500 dark:text-slate-400 mb-6 text-center">
-          実行列にアイテムを追加してください
-        </p>
-        <button
-          onClick={() => handleModeChangeInternal('edit')}
-          className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
-        >
-          編集モードへ
-        </button>
-      </div>
+      <>
+        <EmptyVisitStateView onEdit={() => handleModeChangeInternal('edit')} />
+        {resumeChoiceDialogJSX}
+      </>
     );
   }
-
-  // 完了画面（isAutoAdvancingより先にチェックして完了状態を確実に表示する）
   if (isCompleted) {
-    // 購入結果サマリーを計算
-    const summary = (() => {
-      const purchased = executeItems.filter((i) => i.purchaseStatus === 'Purchased');
-      const soldOut = executeItems.filter((i) => i.purchaseStatus === 'SoldOut');
-      const absent = executeItems.filter((i) => i.purchaseStatus === 'Absent');
-      const postponed = executeItems.filter((i) => i.purchaseStatus === 'Postpone');
-      const late = executeItems.filter((i) => i.purchaseStatus === 'Late');
-      const unprocessed = executeItems.filter((i) => i.purchaseStatus === 'None');
-
-      const purchasedAmount = purchased.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0);
-      const totalPlanned = executeItems.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0);
-
-      return {
-        total: executeItems.length,
-        purchased: purchased.length,
-        soldOut: soldOut.length,
-        absent: absent.length,
-        postponed: postponed.length,
-        late: late.length,
-        unprocessed: unprocessed.length,
-        purchasedAmount,
-        totalPlanned,
-      };
-    })();
-
     return (
-      <div
-        className="flex flex-col items-center justify-center min-h-[50vh] p-8 relative"
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={handleTouchEnd}
-      >
-        {/* 戻るボタン（PCモードのみ表示） */}
-        {layoutMode === 'pc' && (
-          <button
-            onClick={handlePrev}
-            className="fixed left-4 top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl transition-all z-40"
-            title="前の訪問先"
-          >
-            ◀
-          </button>
-        )}
-
-        {/* スマートフォンモードのスワイプヒント */}
-        {layoutMode === 'smartphone' && (
-          <div className="absolute top-4 left-0 right-0 text-center text-sm text-slate-500 dark:text-slate-400">
-            ← 右スワイプで前の訪問先へ戻る
-          </div>
-        )}
-
-        <div className="text-6xl mb-4">🎉</div>
-        <h2 className="text-xl font-bold text-slate-700 dark:text-slate-300 mb-2">
-          全ての訪問先を確認しました
-        </h2>
-        <p className="text-slate-500 dark:text-slate-400 mb-4 text-center">お疲れ様でした！</p>
-
-        {/* 購入結果サマリー */}
-        <div className="w-full max-w-sm mb-6 bg-slate-50 dark:bg-slate-800/80 rounded-xl p-4 border border-slate-200 dark:border-slate-700">
-          <h3 className="text-sm font-semibold text-slate-600 dark:text-slate-400 mb-3 text-center">
-            購入結果
-          </h3>
-
-          <div className="space-y-1.5 text-sm">
-            <div className="flex justify-between items-center">
-              <span className="text-green-600 dark:text-green-400">✅ 購入済み</span>
-              <span className="font-semibold text-slate-700 dark:text-slate-300">
-                {summary.purchased} 件
-              </span>
-            </div>
-            {summary.soldOut > 0 && (
-              <div className="flex justify-between items-center">
-                <span className="text-red-600 dark:text-red-400">❌ 売切</span>
-                <span className="font-semibold text-slate-700 dark:text-slate-300">
-                  {summary.soldOut} 件
-                </span>
-              </div>
-            )}
-            {summary.absent > 0 && (
-              <div className="flex justify-between items-center">
-                <span className="text-yellow-600 dark:text-yellow-400">⚠️ 欠席</span>
-                <span className="font-semibold text-slate-700 dark:text-slate-300">
-                  {summary.absent} 件
-                </span>
-              </div>
-            )}
-            {summary.postponed > 0 && (
-              <div className="flex justify-between items-center">
-                <span className="text-purple-600 dark:text-purple-400">⏸️ 後回し</span>
-                <span className="font-semibold text-slate-700 dark:text-slate-300">
-                  {summary.postponed} 件
-                </span>
-              </div>
-            )}
-            {summary.late > 0 && (
-              <div className="flex justify-between items-center">
-                <span className="text-blue-600 dark:text-blue-400">🕐 遅参</span>
-                <span className="font-semibold text-slate-700 dark:text-slate-300">
-                  {summary.late} 件
-                </span>
-              </div>
-            )}
-            {summary.unprocessed > 0 && (
-              <div className="flex justify-between items-center">
-                <span className="text-slate-500 dark:text-slate-400">⬚ 未処理</span>
-                <span className="font-semibold text-slate-700 dark:text-slate-300">
-                  {summary.unprocessed} 件
-                </span>
-              </div>
-            )}
-          </div>
-
-          <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-600 space-y-1.5 text-sm">
-            <div className="flex justify-between items-center">
-              <span className="text-slate-600 dark:text-slate-400">購入合計</span>
-              <span className="font-bold text-green-600 dark:text-green-400">
-                ¥{summary.purchasedAmount.toLocaleString()}
-              </span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-slate-600 dark:text-slate-400">予定合計</span>
-              <span className="font-semibold text-slate-700 dark:text-slate-300">
-                ¥{summary.totalPlanned.toLocaleString()}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex gap-4">
-          <button
-            onClick={() => handleModeChangeInternal('edit')}
-            className="px-6 py-3 bg-slate-600 text-white rounded-lg font-medium hover:bg-slate-700 transition-colors flex items-center gap-2"
-          >
-            <span>📝</span>
-            <span>編集モードへ</span>
-          </button>
-          <button
-            onClick={() => handleModeChangeInternal('execute')}
-            className="px-6 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors flex items-center gap-2"
-          >
-            <span>🏃</span>
-            <span>実行モードへ</span>
-          </button>
-        </div>
-      </div>
+      <>
+        <CompletionStateView
+          executeItems={executeItems}
+          layoutMode={layoutMode}
+          onPrev={handlePrev}
+          onModeChange={handleModeChangeInternal}
+          onTouchStart={handleTouchStart}
+          onTouchMove={handleTouchMove}
+          onTouchEnd={handleTouchEnd}
+        />
+        {resumeChoiceDialogJSX}
+      </>
     );
   }
-
-  // 自動スキップ処理中はローディング表示（状態変更を待つ）
   if (isAutoAdvancing) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] p-8">
-        <div className="text-4xl mb-4 animate-spin">⏳</div>
-        <p className="text-slate-500 dark:text-slate-400">次の訪問先を探しています...</p>
-      </div>
+      <>
+        <AutoAdvancingStateView />
+        {resumeChoiceDialogJSX}
+      </>
     );
   }
-
-  // 現在の訪問先情報
   const circleName = currentVisit?.items[0]?.circle || '';
   const spaceInfo = currentVisit?.items[0]
     ? `${currentVisit.items[0].block}-${extractBaseNumber(currentVisit.items[0].number).toUpperCase()}`
     : '';
-
   // 現在の訪問キー（マップ用）
   const currentVisitKey = currentVisit?.items[0]
     ? `${currentVisit.items[0].eventDate}-${currentVisit.items[0].block}-${extractBaseNumber(currentVisit.items[0].number)}`
     : null;
-
   // 次の訪問キー（マップ用）
   const nextVisitKey = nextVisit?.items[0]
     ? `${nextVisit.items[0].eventDate}-${nextVisit.items[0].block}-${extractBaseNumber(nextVisit.items[0].number)}`
     : null;
-
   // 前の訪問キー（マップ用）
   const prevVisitKey = prevVisit?.items[0]
     ? `${prevVisit.items[0].eventDate}-${prevVisit.items[0].block}-${extractBaseNumber(prevVisit.items[0].number)}`
     : null;
-
   // App.tsx側で scale されるため、高さは逆補正して実表示高さを安定させる
   const safeAppScale = Math.max(0.01, appZoomLevel / 100);
   // サブピクセル誤差でフッターに僅かに重なるのを防ぐ
   const footerOverlapGuardPx = 1;
-
   // フェーズ切り替え確認ダイアログ
-  const PhaseChangeDialog = () => {
-    if (!phaseChangeDialog.isOpen || !phaseChangeDialog.targetPhase) return null;
-
-    const targetPhaseName =
-      phaseChangeDialog.targetPhase === 'normal'
-        ? '通常'
-        : phaseChangeDialog.targetPhase === 'postponed'
-          ? '後回し'
-          : '遅参';
-    const targetVisits = visitsByPhase[phaseChangeDialog.targetPhase];
-    const targetVisit = targetVisits[phaseChangeDialog.savedIndex];
-    const savedVisitInfo = targetVisit
-      ? `${targetVisit.items[0]?.block}-${targetVisit.items[0]?.number} ${targetVisit.items[0]?.circle}`
-      : '';
-
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-md w-full mx-4 overflow-hidden">
-          <div className="bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-4">
-            <h2 className="text-lg font-bold">フェーズを切り替えますか？</h2>
-            <p className="text-sm opacity-80 mt-1">{targetPhaseName}フェーズに移動します</p>
-          </div>
-
-          <div className="p-4 space-y-4">
-            {targetVisits.length === 0 ? (
-              <p className="text-slate-600 dark:text-slate-300 text-center py-4">
-                {targetPhaseName}フェーズに該当するアイテムがありません
-              </p>
-            ) : (
-              <>
-                <p className="text-slate-600 dark:text-slate-300">
-                  {targetPhaseName}フェーズには {targetVisits.length} 件の訪問先があります。
-                </p>
-
-                <div className="space-y-2">
-                  <button
-                    onClick={executePhaseChangeFromStart}
-                    className="w-full py-3 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors"
-                  >
-                    最初から開始
-                    <span className="block text-xs opacity-80 mt-0.5">
-                      {targetVisits[0]?.items[0]?.block}-{targetVisits[0]?.items[0]?.number}{' '}
-                      {targetVisits[0]?.items[0]?.circle}
-                    </span>
-                  </button>
-
-                  {phaseChangeDialog.hasSavedIndex && (
-                    <button
-                      onClick={executePhaseChangeFromSaved}
-                      className="w-full py-3 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors"
-                    >
-                      途中から再開
-                      <span className="block text-xs opacity-80 mt-0.5">
-                        {savedVisitInfo} （{phaseChangeDialog.savedIndex + 1}/{targetVisits.length}
-                        ）
-                      </span>
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-
-            <button
-              onClick={cancelPhaseChange}
-              className="w-full py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
-            >
-              キャンセル
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // 集中モード再開時の選択ダイアログ
-  const ResumeChoiceDialog = () => {
-    if (!resumeChoiceDialog || !resumeChoiceDialog.isOpen) return null;
-
-    const phaseName =
-      resumeChoiceDialog.lastPhase === 'normal'
-        ? '通常'
-        : resumeChoiceDialog.lastPhase === 'postponed'
-          ? '後回し'
-          : '遅参';
-
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-md w-full mx-4 overflow-hidden">
-          <div className="bg-gradient-to-r from-teal-500 to-indigo-600 text-white p-4">
-            <h2 className="text-lg font-bold">集中モードを再開しますか？</h2>
-            <p className="text-sm opacity-80 mt-1">どこから再開するか選んでください</p>
-          </div>
-
-          <div className="p-4 space-y-2">
-            <button
-              onClick={() => applyResumeChoice('lastChange')}
-              disabled={!resumeChoiceDialog.lastChangeEnabled}
-              className="w-full py-3 px-4 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
-            >
-              最後に購入状態を変更したスペース
-              <span className="block text-xs opacity-80 mt-0.5">
-                {resumeChoiceDialog.lastChangeEnabled
-                  ? `${resumeChoiceDialog.lastSpaceLabel} (${phaseName}フェーズ)`
-                  : resumeChoiceDialog.lastSpaceLabel}
-              </span>
-            </button>
-
-            <button
-              onClick={() => applyResumeChoice('pointer')}
-              className="w-full py-3 px-4 bg-slate-600 hover:bg-slate-700 text-white rounded-lg font-medium transition-colors text-left"
-            >
-              離脱時のポインタ位置
-            </button>
-
-            <button
-              onClick={() => applyResumeChoice('phaseStart')}
-              disabled={!resumeChoiceDialog.phaseStartEnabled}
-              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
-            >
-              現在のフェーズの最初から
-            </button>
-
-            <button
-              onClick={() => applyResumeChoice('normalStart')}
-              disabled={!resumeChoiceDialog.normalStartEnabled}
-              className="w-full py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed text-left"
-            >
-              通常フェーズの最初から
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // セルアイテムポップアップコンポーネント
-  const CellItemPopup = () => {
-    if (!cellPopupState.isOpen) return null;
-    return (
-      <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-        <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-sm w-full mx-4 overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-            <h3 className="font-semibold text-slate-900 dark:text-white">
-              {cellPopupState.blockName}-{cellPopupState.number}{' '}
-              {cellPopupState.items.length > 0 ? `（${cellPopupState.items.length}件）` : ''}
-            </h3>
-            <button
-              onClick={closeCellPopup}
-              className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
-              </svg>
-            </button>
-          </div>
-          {onAddItem && (
-            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-              <button
-                onClick={openAddItemDialog}
-                className="w-full py-2 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
-              >
-                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 4v16m8-8H4"
-                  />
-                </svg>
-                新規アイテム追加
-              </button>
-            </div>
-          )}
-          <div className="max-h-60 overflow-y-auto">
-            {cellPopupState.items.length === 0 ? (
-              <div className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
-                このセルにはアイテムがありません
-              </div>
-            ) : (
-              cellPopupState.items.map((item) => (
-                <div
-                  key={item.id}
-                  className="p-3 border-b border-slate-100 dark:border-slate-700 last:border-b-0"
-                >
-                  <div className="font-medium text-slate-900 dark:text-white">{item.circle}</div>
-                  <div className="text-sm text-slate-600 dark:text-slate-400">{item.title}</div>
-                  {item.price !== null && (
-                    <div className="text-sm text-slate-500">¥{item.price.toLocaleString()}</div>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-          <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700">
-            <button
-              onClick={closeCellPopup}
-              className="w-full py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
-            >
-              閉じる
-            </button>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  // フォームスタイル
-  const formInputClass =
-    'w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white';
-  const labelClass = 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1';
-
-  // アイテム追加ダイアログのJSX（直接レンダリング用）
-  const addItemDialogJSX = addItemDialog.isOpen ? (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
-      <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
-        <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4">
-          <h2 className="text-lg font-bold">新規アイテム追加</h2>
-          <p className="text-sm opacity-80 mt-1">
-            {addItemDialog.eventDate} {addItemDialog.block}-{addItemDialog.number}
-          </p>
-        </div>
-        <div className="p-4 space-y-4">
-          {/* サークル名・タイトル */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className={labelClass}>
-                サークル名 <span className="text-red-500">*</span>
-              </label>
-              <input
-                type="text"
-                value={newItemForm.circle}
-                onChange={(e) => setNewItemForm((prev) => ({ ...prev, circle: e.target.value }))}
-                className={formInputClass}
-                placeholder="サークル名"
-                list="focus-add-circle-suggestions"
-              />
-              {currentVisit && currentVisit.items.length > 0 && (
-                <datalist id="focus-add-circle-suggestions">
-                  {[...new Set(currentVisit.items.map((item) => item.circle).filter(Boolean))].map((c) => (
-                    <option key={c} value={c} />
-                  ))}
-                </datalist>
-              )}
-            </div>
-            <div>
-              <label className={labelClass}>タイトル</label>
-              <input
-                type="text"
-                value={newItemForm.title}
-                onChange={(e) => setNewItemForm((prev) => ({ ...prev, title: e.target.value }))}
-                className={formInputClass}
-                placeholder="新刊セット"
-              />
-            </div>
-          </div>
-
-          {/* 参加日・ブロック・ナンバー（読み取り専用で表示） */}
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <label className={labelClass}>参加日</label>
-              <input
-                type="text"
-                value={addItemDialog.eventDate}
-                readOnly
-                className={`${formInputClass} bg-slate-100 dark:bg-slate-700`}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>ブロック</label>
-              <input
-                type="text"
-                value={addItemDialog.block}
-                readOnly
-                className={`${formInputClass} bg-slate-100 dark:bg-slate-700`}
-              />
-            </div>
-            <div>
-              <label className={labelClass}>ナンバー</label>
-              <input
-                type="text"
-                value={addItemDialog.number}
-                onChange={(e) => setAddItemDialog((prev) => ({ ...prev, number: e.target.value }))}
-                className={formInputClass}
-                placeholder="01a"
-              />
-            </div>
-          </div>
-
-          {/* 価格・クイック選択 */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
-            <div className="relative">
-              <label className={labelClass}>頒布価格</label>
-              <input
-                type="text"
-                value={newItemForm.price}
-                onChange={handlePriceInputChange}
-                className={`${formInputClass} pr-12`}
-                placeholder="0"
-                inputMode="numeric"
-              />
-              <span className="absolute right-3 top-9 text-slate-500 dark:text-slate-400">円</span>
-            </div>
-            <div>
-              <label className={labelClass}>クイック選択</label>
-              <select
-                onChange={handlePriceSelectChange}
-                className={formInputClass}
-                value={priceOptions.includes(Number(newItemForm.price)) ? newItemForm.price : ''}
-              >
-                <option value="" disabled>
-                  金額を選択...
-                </option>
-                {priceOptions.map((p) => (
-                  <option key={p} value={p}>
-                    {p.toLocaleString()}円
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* 数量・購入状態 */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className={labelClass}>数量</label>
-              <select
-                value={newItemForm.quantity}
-                onChange={(e) => setNewItemForm((prev) => ({ ...prev, quantity: e.target.value }))}
-                className={formInputClass}
-              >
-                {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
-                  <option key={num} value={num}>
-                    {num}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className={labelClass}>購入状態</label>
-              <select
-                value={newItemForm.purchaseStatus}
-                onChange={(e) =>
-                  setNewItemForm((prev) => ({
-                    ...prev,
-                    purchaseStatus: e.target.value as 'Purchased' | 'Postpone' | 'Late',
-                  }))
-                }
-                className={formInputClass}
-              >
-                <option value="Purchased">購入済</option>
-                <option value="Postpone">後回し</option>
-                <option value="Late">遅参</option>
-              </select>
-            </div>
-          </div>
-
-          {/* 備考・URL */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className={labelClass}>備考</label>
-              <input
-                type="text"
-                value={newItemForm.remarks}
-                onChange={(e) => setNewItemForm((prev) => ({ ...prev, remarks: e.target.value }))}
-                className={formInputClass}
-                placeholder="スケブお願い"
-              />
-            </div>
-            <div>
-              <label className={labelClass}>URL</label>
-              <input
-                type="text"
-                value={newItemForm.url}
-                onChange={(e) => setNewItemForm((prev) => ({ ...prev, url: e.target.value }))}
-                className={formInputClass}
-                placeholder="https://example.com"
-              />
-            </div>
-          </div>
-        </div>
-        <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
-          <button
-            onClick={closeAddItemDialog}
-            className="flex-1 py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
-          >
-            キャンセル
-          </button>
-          <button
-            onClick={handleAddNewItem}
-            disabled={!newItemForm.circle.trim()}
-            className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors"
-          >
-            リストに追加
-          </button>
-        </div>
-      </div>
-    </div>
-  ) : null;
-
-  // スマートフォン+マップ表示モード
+  const phaseChangeDialogJSX = (
+    <PhaseChangeDialogView
+      dialog={phaseChangeDialog}
+      visitsByPhase={visitsByPhase}
+      onStart={executePhaseChangeFromStart}
+      onSaved={executePhaseChangeFromSaved}
+      onCancel={cancelPhaseChange}
+    />
+  );
+  const cellItemPopupJSX = (
+    <CellItemPopup
+      state={cellPopupState}
+      canAddItem={Boolean(onAddItem)}
+      onAddItem={openAddItemDialog}
+      onClose={closeCellPopup}
+    />
+  );
+  const addItemDialogJSX = (
+    <AddItemDialogView
+      dialog={addItemDialog}
+      form={newItemForm}
+      setDialog={setAddItemDialog}
+      setForm={setNewItemForm}
+      currentVisit={currentVisit ?? undefined}
+      priceOptions={priceOptions}
+      onPriceInputChange={handlePriceInputChange}
+      onPriceSelectChange={handlePriceSelectChange}
+      onClose={closeAddItemDialog}
+      onSubmit={handleAddNewItem}
+    />
+  );
   if (layoutMode === 'smartphone' && isMapVisible && currentMapData && !isCompleted) {
     const availableHeight = `calc((100dvh - ${measuredFooterHeight + footerOverlapGuardPx}px) / ${safeAppScale})`;
-
     return (
       <div className="relative flex flex-col" style={{ height: availableHeight }}>
-        {/* 通知 */}
         {notification && (
           <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
             {notification}
           </div>
         )}
-
-        {/* 自動進行カウントダウン */}
-        {autoAdvanceCountdown !== null && (
-          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-orange-500 text-white px-6 py-3 rounded-lg shadow-lg">
-            {autoAdvanceCountdown}秒後に次の訪問先へ移動します...
-          </div>
-        )}
-
-        {/* マップエリア */}
+        <AutoAdvanceCountdown countdown={autoAdvanceCountdown} />
         <div style={{ height: `${splitRatio}%` }} className="relative flex flex-col min-h-0">
           <FocusModeMapControls
             selectedHallId={selectedHallId}
@@ -2420,8 +1569,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
             />
           </div>
         </div>
-
-        {/* 分割線（ドラッグ可能） */}
         <div
           className="h-3 bg-slate-300 dark:bg-slate-600 cursor-row-resize flex items-center justify-center touch-none flex-shrink-0"
           onTouchStart={handleSplitDragStart}
@@ -2434,8 +1581,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
         >
           <div className="w-12 h-1 bg-slate-500 dark:bg-slate-400 rounded-full" />
         </div>
-
-        {/* アイテムリストエリア（スワイプ判定はここのみ） */}
         <div
           style={{ height: `${100 - splitRatio}%` }}
           className="overflow-y-auto min-h-0"
@@ -2467,111 +1612,40 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onAddItem={onAddItem ? openAddItemDialogFromList : undefined}
           />
         </div>
-
-        {/* フッター（createPortalでtransform文脈の外に描画） */}
-        {ReactDOM.createPortal(
-          <div
-            id="focus-mode-footer"
-            className="fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-slate-800/90 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20"
-          >
-            <div className="px-4 py-2">
-              <div className="flex justify-between items-center">
-                <div className="text-slate-700 dark:text-slate-300">
-                  <span className="font-bold text-lg text-indigo-600 dark:text-indigo-400">
-                    {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <div className="text-sm text-slate-700 dark:text-slate-300">
-                    <span className="font-semibold">{purchasedCount}</span>/{executeItems.length}
-                  </div>
-                  <div className="text-sm">
-                    <span className="font-bold text-blue-600 dark:text-blue-400">
-                      ¥{remainingCost.toLocaleString()}
-                    </span>
-                  </div>
-                  {currentMapData && (
-                    <button
-                      onClick={toggleMapVisibility}
-                      className={`p-2 rounded-md transition-colors ${
-                        isMapVisible
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                      }`}
-                      title={isMapVisible ? 'マップを非表示' : 'マップを表示'}
-                    >
-                      <svg
-                        className="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
-                        />
-                      </svg>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => onLayoutModeChange('pc')}
-                    className="p-2 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
-                    title="タブレット/PCモードに切替"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
-
-        {/* フェーズ切り替え確認ダイアログ */}
-        <PhaseChangeDialog />
-
-        {/* 集中モード再開選択ダイアログ */}
-        <ResumeChoiceDialog />
-
-        {/* セルアイテムポップアップ */}
-        <CellItemPopup />
-
-        {/* アイテム追加ダイアログ */}
+        <FocusModeFooterPortal
+          compact
+          layoutMode={layoutMode}
+          phaseDisplayName={phaseDisplayName}
+          currentPhaseIndex={currentPhaseIndex}
+          currentPhaseVisitsLength={currentPhaseVisits.length}
+          currentVisitNumber={currentVisitNumber}
+          totalVisits={totalVisits}
+          purchasedCount={purchasedCount}
+          executeItemsLength={executeItems.length}
+          remainingCost={remainingCost}
+          hasMapData={Boolean(currentMapData)}
+          isMapVisible={isMapVisible}
+          onToggleMapVisibility={toggleMapVisibility}
+          onLayoutModeChange={onLayoutModeChange}
+        />
+        {phaseChangeDialogJSX}
+        {cellItemPopupJSX}
         {addItemDialogJSX}
+        {resumeChoiceDialogJSX}
       </div>
     );
   }
-
   // PC+マップ表示モード
   if (layoutMode === 'pc' && isMapVisible && currentMapData && !isCompleted) {
     const availableHeight = `calc((100dvh - ${HEADER_HEIGHT + measuredFooterHeight + footerOverlapGuardPx}px) / ${safeAppScale})`;
-
     return (
       <div className="relative flex" style={{ height: availableHeight }}>
-        {/* 通知 */}
         {notification && (
           <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
             {notification}
           </div>
         )}
-
-        {/* 自動進行カウントダウン */}
-        {autoAdvanceCountdown !== null && (
-          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-orange-500 text-white px-6 py-3 rounded-lg shadow-lg">
-            {autoAdvanceCountdown}秒後に次の訪問先へ移動します...
-          </div>
-        )}
-
-        {/* 左側: マップ */}
+        <AutoAdvanceCountdown countdown={autoAdvanceCountdown} />
         <div className="w-1/2 flex flex-col border-r border-slate-200 dark:border-slate-700">
           <FocusModeMapControls
             selectedHallId={selectedHallId}
@@ -2613,8 +1687,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
             />
           </div>
         </div>
-
-        {/* 右側: アイテムリスト */}
         <div className="w-1/2 flex flex-col overflow-y-auto pb-20">
           <FocusModeHeader
             layoutMode={layoutMode}
@@ -2640,8 +1712,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onAddItem={onAddItem ? openAddItemDialogFromList : undefined}
           />
         </div>
-
-        {/* ナビゲーションボタン */}
         <button
           onClick={handlePrev}
           className="fixed right-[calc(50%+16px)] top-1/2 transform -translate-y-1/2 w-12 h-12 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-xl z-40"
@@ -2649,7 +1719,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
         >
           ◀
         </button>
-
         <button
           onClick={handleNext}
           className={`fixed right-4 top-1/2 transform -translate-y-1/2 w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl z-40 ${
@@ -2663,95 +1732,27 @@ const FocusMode: React.FC<FocusModeProps> = ({
         >
           ▶
         </button>
-
-        {/* フッター（createPortalでtransform文脈の外に描画） */}
-        {ReactDOM.createPortal(
-          <div
-            id="focus-mode-footer"
-            className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20"
-          >
-            <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-              <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
-                <div className="text-slate-700 dark:text-slate-300">
-                  <span className="font-bold text-xl text-indigo-600 dark:text-indigo-400">
-                    {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
-                  </span>
-                  <span className="text-sm text-slate-500 dark:text-slate-400 ml-3 opacity-60">
-                    ({currentVisitNumber}/{totalVisits})
-                  </span>
-                </div>
-                <div className="flex items-center gap-3">
-                  <div className="text-slate-700 dark:text-slate-300">
-                    <span className="font-semibold">{purchasedCount}</span> / {executeItems.length}{' '}
-                    件購入済み
-                  </div>
-                  <div>
-                    <span className="text-sm text-slate-500 dark:text-slate-400">残りの合計: </span>
-                    <span className="font-bold text-xl text-blue-600 dark:text-blue-400">
-                      ¥{remainingCost.toLocaleString()}
-                    </span>
-                  </div>
-                  {currentMapData && (
-                    <button
-                      onClick={toggleMapVisibility}
-                      className={`p-2 rounded-md transition-colors ${
-                        isMapVisible
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                      }`}
-                      title={isMapVisible ? 'マップを非表示' : 'マップを表示'}
-                    >
-                      <svg
-                        className="w-5 h-5"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
-                        />
-                      </svg>
-                    </button>
-                  )}
-                  <button
-                    onClick={() => onLayoutModeChange('smartphone')}
-                    className="p-2 rounded-md bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
-                    title="スマートフォンモードに切替"
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"
-                      />
-                    </svg>
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>,
-          document.body,
-        )}
-
-        {/* フェーズ切り替え確認ダイアログ */}
-        <PhaseChangeDialog />
-
-        {/* 集中モード再開選択ダイアログ */}
-        <ResumeChoiceDialog />
-
-        {/* セルアイテムポップアップ */}
-        <CellItemPopup />
-
-        {/* アイテム追加ダイアログ */}
+        <FocusModeFooterPortal
+          layoutMode={layoutMode}
+          phaseDisplayName={phaseDisplayName}
+          currentPhaseIndex={currentPhaseIndex}
+          currentPhaseVisitsLength={currentPhaseVisits.length}
+          currentVisitNumber={currentVisitNumber}
+          totalVisits={totalVisits}
+          purchasedCount={purchasedCount}
+          executeItemsLength={executeItems.length}
+          remainingCost={remainingCost}
+          hasMapData={Boolean(currentMapData)}
+          isMapVisible={isMapVisible}
+          onToggleMapVisibility={toggleMapVisibility}
+          onLayoutModeChange={onLayoutModeChange}
+        />
+        {phaseChangeDialogJSX}
+        {cellItemPopupJSX}
         {addItemDialogJSX}
       </div>
     );
   }
-
   return (
     <div
       ref={swipeContainerRef}
@@ -2760,20 +1761,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
     >
-      {/* 通知 */}
       {notification && (
         <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
           {notification}
         </div>
       )}
-
-      {/* 自動進行カウントダウン */}
-      {autoAdvanceCountdown !== null && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-orange-500 text-white px-6 py-3 rounded-lg shadow-lg">
-          {autoAdvanceCountdown}秒後に次の訪問先へ移動します...
-        </div>
-      )}
-
+      <AutoAdvanceCountdown countdown={autoAdvanceCountdown} />
       <FocusModeHeader
         layoutMode={layoutMode}
         isMapVisible={isMapVisible}
@@ -2788,7 +1781,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
         onPhaseChangeRequest={handlePhaseChangeRequest}
         nextVisitInfo={nextVisitInfo}
       />
-
       <FocusModeItemList
         itemListRef={itemListRef}
         layoutMode={layoutMode}
@@ -2801,11 +1793,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
         onDeleteRequest={onDeleteRequest}
         onAddItem={onAddItem ? openAddItemDialogFromList : undefined}
       />
-
-      {/* ナビゲーションボタン（PCモードのみ表示） */}
       {layoutMode === 'pc' && (
         <>
-          {/* 戻るボタン（左側） */}
           <button
             onClick={handlePrev}
             style={navPrevStyle}
@@ -2814,8 +1803,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
           >
             ◀
           </button>
-
-          {/* 次へボタン（右側） */}
           <button
             onClick={handleNext}
             style={navNextStyle}
@@ -2832,105 +1819,26 @@ const FocusMode: React.FC<FocusModeProps> = ({
           </button>
         </>
       )}
-
-      {/* フッター（createPortalでtransform文脈の外に描画） */}
-      {ReactDOM.createPortal(
-        <div className="fixed bottom-0 left-0 right-0 bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20">
-          <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-            <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
-              <div className="text-slate-700 dark:text-slate-300">
-                <span className="font-bold text-xl text-indigo-600 dark:text-indigo-400">
-                  {phaseDisplayName}: {currentPhaseIndex + 1}/{currentPhaseVisits.length}
-                </span>
-                <span className="text-sm text-slate-500 dark:text-slate-400 ml-3 opacity-60">
-                  ({currentVisitNumber}/{totalVisits})
-                </span>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="text-slate-700 dark:text-slate-300">
-                  <span className="font-semibold">{purchasedCount}</span> / {executeItems.length}{' '}
-                  件購入済み
-                </div>
-                <div>
-                  <span className="text-sm text-slate-500 dark:text-slate-400">残りの合計: </span>
-                  <span className="font-bold text-xl text-blue-600 dark:text-blue-400">
-                    ¥{remainingCost.toLocaleString()}
-                  </span>
-                </div>
-                {currentMapData && (
-                  <button
-                    onClick={toggleMapVisibility}
-                    className={`p-2 rounded-md transition-colors ${
-                      isMapVisible
-                        ? 'bg-blue-600 text-white'
-                        : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                    }`}
-                    title={isMapVisible ? 'マップを非表示' : 'マップを表示'}
-                  >
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7"
-                      />
-                    </svg>
-                  </button>
-                )}
-                <button
-                  onClick={() => onLayoutModeChange(layoutMode === 'pc' ? 'smartphone' : 'pc')}
-                  className={`p-2 rounded-md transition-colors ${
-                    layoutMode === 'smartphone'
-                      ? 'bg-blue-600 text-white'
-                      : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                  }`}
-                  title={
-                    layoutMode === 'pc' ? 'スマートフォンモードに切替' : 'タブレット/PCモードに切替'
-                  }
-                  aria-label={
-                    layoutMode === 'pc' ? 'スマートフォンモードに切替' : 'タブレット/PCモードに切替'
-                  }
-                >
-                  {layoutMode === 'smartphone' ? (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z"
-                      />
-                    </svg>
-                  ) : (
-                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
-                      />
-                    </svg>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>,
-        document.body,
-      )}
-
-      {/* フェーズ切り替え確認ダイアログ */}
-      <PhaseChangeDialog />
-
-      {/* 集中モード再開選択ダイアログ */}
-      <ResumeChoiceDialog />
-
-      {/* セルアイテムポップアップ */}
-      <CellItemPopup />
-
-      {/* アイテム追加ダイアログ */}
+      <FocusModeFooterPortal
+        layoutMode={layoutMode}
+        phaseDisplayName={phaseDisplayName}
+        currentPhaseIndex={currentPhaseIndex}
+        currentPhaseVisitsLength={currentPhaseVisits.length}
+        currentVisitNumber={currentVisitNumber}
+        totalVisits={totalVisits}
+        purchasedCount={purchasedCount}
+        executeItemsLength={executeItems.length}
+        remainingCost={remainingCost}
+        hasMapData={Boolean(currentMapData)}
+        isMapVisible={isMapVisible}
+        onToggleMapVisibility={toggleMapVisibility}
+        onLayoutModeChange={onLayoutModeChange}
+      />
+      {phaseChangeDialogJSX}
+      {cellItemPopupJSX}
       {addItemDialogJSX}
+      {resumeChoiceDialogJSX}
     </div>
   );
 };
-
 export default React.memo(FocusMode);

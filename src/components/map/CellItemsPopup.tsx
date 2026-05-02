@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { ShoppingItem, PurchaseStatus, PurchaseStatuses } from '../../types';
+import { ShoppingItem, PurchaseStatus, PurchaseStatuses } from '../../types/item';
 import { getBaseNumber } from '../../utils/spaceGrouping';
 
 interface SpaceGroup {

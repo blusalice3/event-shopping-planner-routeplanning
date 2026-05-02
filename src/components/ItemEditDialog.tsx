@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useMemo } from 'react';
-import type { ShoppingItem, PurchaseStatus, HallDefinition } from '../types';
+import type { ShoppingItem, PurchaseStatus } from '../types/item';
+import type { HallDefinition } from '../types/map';
 import { findHallsByBlockName } from '../utils/hallFallback';
 
 interface ItemEditDialogProps {

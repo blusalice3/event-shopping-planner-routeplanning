@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BlockDefinition, DayMapData, HallDefinition } from '../../types';
+import { BlockDefinition, DayMapData, HallDefinition } from '../../types/map';
 import { validateHallPolygon } from '../../utils/polygonValidation';
 
 interface HallDefinitionPanelProps {

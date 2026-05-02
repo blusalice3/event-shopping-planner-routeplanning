@@ -1,6 +1,7 @@
 import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import { ShoppingItem, HallDefinition, DayMapData, PurchaseStatus } from '../types';
+import { ShoppingItem, PurchaseStatus } from '../types/item';
+import { HallDefinition, DayMapData } from '../types/map';
 import { getSpaceKey, getBaseNumber, getStatusSummaryText } from '../utils/spaceGrouping';
 import {
   parseGroupId,
@@ -1321,7 +1322,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     layoutMode === 'smartphone' ? 'px-2 py-1' : 'px-3 py-1.5'
                   }`}
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between min-w-0">
                     <div className={`flex items-center min-w-0 ${layoutMode === 'smartphone' ? 'gap-1' : 'gap-2'}`}>
                       <span
                         className={`text-xs transition-transform duration-200 flex-shrink-0 ${
@@ -1504,19 +1505,22 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   })()}
                   {/* 実行モード展開時：一括ステータス変更ボタン */}
                   {viewMode === 'execute' && !group.isCollapsed && onBulkStatusChange && (
-                    <div className={`flex flex-wrap justify-end gap-1 ${layoutMode === 'smartphone' ? 'mt-0.5' : 'mt-1 ml-4'}`}>
+                    <div className={`max-w-full overflow-x-auto overflow-y-hidden ${layoutMode === 'smartphone' ? 'mt-0.5' : 'mt-1 ml-4'}`}>
+                      <div className="ml-auto flex w-max max-w-none flex-nowrap justify-end gap-1">
                       {([
                         { status: 'Purchased' as PurchaseStatus, label: '全購入', activeColor: 'bg-green-600 text-white dark:bg-green-500', hoverColor: 'hover:bg-green-100 dark:hover:bg-green-900/30' },
                         { status: 'SoldOut' as PurchaseStatus, label: '全売切', activeColor: 'bg-red-600 text-white dark:bg-red-500', hoverColor: 'hover:bg-red-100 dark:hover:bg-red-900/30' },
+                        { status: 'Absent' as PurchaseStatus, label: '全欠席', activeColor: 'bg-yellow-500 text-white dark:bg-yellow-500', hoverColor: 'hover:bg-yellow-100 dark:hover:bg-yellow-900/30' },
                         { status: 'Postpone' as PurchaseStatus, label: '全後回', activeColor: 'bg-purple-600 text-white dark:bg-purple-500', hoverColor: 'hover:bg-purple-100 dark:hover:bg-purple-900/30' },
                         { status: 'Late' as PurchaseStatus, label: '全遅参', activeColor: 'bg-blue-600 text-white dark:bg-blue-500', hoverColor: 'hover:bg-blue-100 dark:hover:bg-blue-900/30' },
+                        { status: 'LimitedPurchase' as PurchaseStatus, label: '全限数', activeColor: 'bg-orange-600 text-white dark:bg-orange-500', hoverColor: 'hover:bg-orange-100 dark:hover:bg-orange-900/30' },
                       ]).map(({ status, label, activeColor, hoverColor }) => {
                         const allMatch = group.items.every((item) => item.purchaseStatus === status);
                         return (
                           <button
                             key={status}
                             onClick={(e) => { e.stopPropagation(); onBulkStatusChange(group.groupKey, status, group.items); }}
-                            className={`${layoutMode === 'smartphone' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'} font-medium rounded transition-colors ${
+                            className={`${layoutMode === 'smartphone' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'} flex-shrink-0 whitespace-nowrap font-medium rounded transition-colors ${
                               allMatch
                                 ? activeColor
                                 : `bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 border border-slate-300 dark:border-slate-600 ${hoverColor}`
@@ -1526,6 +1530,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           </button>
                         );
                       })}
+                      </div>
                     </div>
                   )}
                 </div>

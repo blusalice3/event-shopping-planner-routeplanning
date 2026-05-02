@@ -5,7 +5,7 @@ import {
   PurchaseStatuses,
   ProtectionLevel,
   ProtectionLevels,
-} from '../types';
+} from '../types/item';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 import CheckCircleIcon from './icons/CheckCircleIcon';
 import CircleIcon from './icons/CircleIcon';
@@ -15,6 +15,7 @@ import PauseCircleIcon from './icons/PauseCircleIcon';
 import ClockIcon from './icons/ClockIcon';
 import ChevronUpIcon from './icons/ChevronUpIcon';
 import ChevronDownIcon from './icons/ChevronDownIcon';
+import { areSameItemSnapshot } from './itemSnapshot';
 
 // 外部リンクアイコン
 const ExternalLinkIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
@@ -139,26 +140,51 @@ const protectionConfig: Record<
 // 保護レベルのサイクル順序
 const protectionCycle: ProtectionLevel[] = ['full', 'deletable', 'none'];
 
-const areSameItemSnapshot = (a: ShoppingItem, b: ShoppingItem): boolean =>
-  a.id === b.id &&
-  a.circle === b.circle &&
-  a.eventDate === b.eventDate &&
-  a.block === b.block &&
-  a.number === b.number &&
-  a.title === b.title &&
-  a.price === b.price &&
-  a.purchaseStatus === b.purchaseStatus &&
-  a.quantity === b.quantity &&
-  a.remarks === b.remarks &&
-  a.url === b.url &&
-  a.priorityLevel === b.priorityLevel &&
-  a.protectionLevel === b.protectionLevel &&
-  a.source === b.source &&
-  a.assignedTo === b.assignedTo &&
-  a.lastSyncedAt === b.lastSyncedAt &&
-  a.orderIndex === b.orderIndex &&
-  a.postponed === b.postponed &&
-  a.manualHallId === b.manualHallId;
+export const SHOPPING_ITEM_CARD_COMPARISON_KEYS = [
+  'item',
+  'onUpdate',
+  'onEditRequest',
+  'onDeleteRequest',
+  'onSelectItem',
+  'onMoveUp',
+  'onMoveDown',
+  'isStriped',
+  'isSelected',
+  'blockBackgroundColor',
+  'canMoveUp',
+  'canMoveDown',
+  'isDuplicateCircle',
+  'isSearchMatch',
+  'layoutMode',
+  'viewMode',
+  'hallIndex',
+  'priorityLevel',
+  'highlightPrice',
+] as const satisfies readonly (keyof ShoppingItemCardProps)[];
+
+export const areSameShoppingItemCardProps = (
+  prev: ShoppingItemCardProps,
+  next: ShoppingItemCardProps,
+): boolean =>
+  areSameItemSnapshot(prev.item, next.item) &&
+  prev.onUpdate === next.onUpdate &&
+  prev.onEditRequest === next.onEditRequest &&
+  prev.onDeleteRequest === next.onDeleteRequest &&
+  prev.onSelectItem === next.onSelectItem &&
+  prev.onMoveUp === next.onMoveUp &&
+  prev.onMoveDown === next.onMoveDown &&
+  prev.isStriped === next.isStriped &&
+  prev.isSelected === next.isSelected &&
+  prev.blockBackgroundColor === next.blockBackgroundColor &&
+  prev.canMoveUp === next.canMoveUp &&
+  prev.canMoveDown === next.canMoveDown &&
+  prev.isDuplicateCircle === next.isDuplicateCircle &&
+  prev.isSearchMatch === next.isSearchMatch &&
+  prev.layoutMode === next.layoutMode &&
+  prev.viewMode === next.viewMode &&
+  prev.hallIndex === next.hallIndex &&
+  prev.priorityLevel === next.priorityLevel &&
+  prev.highlightPrice === next.highlightPrice;
 
 const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   item: sourceItem,
@@ -1186,4 +1212,4 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   );
 };
 
-export default ShoppingItemCard;
+export default React.memo(ShoppingItemCard, areSameShoppingItemCardProps);

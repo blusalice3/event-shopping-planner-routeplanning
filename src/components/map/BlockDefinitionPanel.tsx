@@ -1,5 +1,11 @@
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
-import { DayMapData, BlockDefinition, CellData, NumberCellInfo, CellGroup } from '../../types';
+import {
+  DayMapData,
+  BlockDefinition,
+  CellData,
+  NumberCellInfo,
+  CellGroup,
+} from '../../types/map';
 
 interface BlockDefinitionPanelProps {
   isOpen: boolean;

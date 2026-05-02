@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { ShoppingItem } from '../../types';
+import { ShoppingItem } from '../../types/item';
 
 export type InsertPosition =
   | { type: 'before'; referenceItemId: string }

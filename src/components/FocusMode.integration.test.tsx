@@ -22,6 +22,13 @@ const flushAsync = async (cycles = 3) => {
 };
 
 describe('FocusMode resume dialog - integration', () => {
+  it('completed resume state with no visits renders the empty visit state', () => {
+    render(<FocusMode {...minimalProps({ resumeState: completedFixture })} />);
+
+    expect(screen.getByText('訪問先がありません')).toBeInTheDocument();
+    expect(screen.queryByText('全ての訪問先を確認しました')).toBeNull();
+  });
+
   it('同一マウントで resumeState=null → non-null (isCompleted=true) 遷移時に再開ダイアログが表示される', async () => {
     const { rerender } = render(
       <FocusMode {...minimalProps({ resumeState: null, ...singleVisitNoneItemFixture })} />,
@@ -73,11 +80,14 @@ describe('FocusMode resume dialog - integration', () => {
     }
   });
 
-  it('pointer 選択で完了画面が表示される', async () => {
+  it('pointer 選択で完了画面が表示される (lastPurchaseChangeAt あり)', async () => {
     const user = userEvent.setup();
     render(
       <FocusMode
-        {...minimalProps({ resumeState: completedFixture, ...singleVisitNoneItemFixture })}
+        {...minimalProps({
+          resumeState: completedWithLastChangeFixture,
+          ...singleVisitNoneItemFixture,
+        })}
       />,
     );
     await screen.findByText('集中モードを再開しますか？');

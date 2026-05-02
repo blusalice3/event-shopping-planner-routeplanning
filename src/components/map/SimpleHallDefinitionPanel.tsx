@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import type { HallDefinition } from '../../types';
+import type { HallDefinition } from '../../types/map';
 import { normalizeBlockName } from '../../utils/hallFallback';
 
 const HALL_COLORS = [

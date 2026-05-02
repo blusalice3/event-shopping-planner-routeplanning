@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { HallDefinition, HallRouteSettings } from '../../types';
+import { HallDefinition, HallRouteSettings } from '../../types/map';
 
 // 優先度レベルの型
 type PriorityLevel = 'none' | 'priority' | 'highest';

@@ -1,4 +1,5 @@
-import type { FocusModeSessionState, FocusPhase, ShoppingItem } from '../../types';
+import type { FocusModeSessionState, FocusPhase } from '../../types/focus';
+import type { ShoppingItem } from '../../types/item';
 
 // VisitGroup をそのまま import できないため、必要最小限のフィールドだけを型定義する。
 // 実際の FocusMode 側の VisitGroup (items: ShoppingItem[]) は structural 互換で受け渡し可能。

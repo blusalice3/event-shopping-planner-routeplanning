@@ -1,5 +1,7 @@
 import React from 'react';
-import { HallDefinition, ShoppingItem, FocusMapCenteringMode } from '../../types';
+import { HallDefinition } from '../../types/map';
+import { ShoppingItem } from '../../types/item';
+import { FocusMapCenteringMode } from '../../types/focus';
 import ShoppingItemCard from '../ShoppingItemCard';
 import MapRotationControls from '../map/MapRotationControls';
 
@@ -52,6 +54,9 @@ interface FocusModeMapControlsProps {
   onMapCenteringModeChange: (mode: FocusMapCenteringMode) => void;
 }
 
+const noopShoppingItemHandler = (_item: ShoppingItem) => {};
+const noopSelectItem = (_itemId: string) => {};
+
 export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
   itemListRef,
   layoutMode,
@@ -87,10 +92,10 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
           item={item}
           onUpdate={onUpdateItem}
           isStriped={index % 2 === 1}
-          onEditRequest={onEditRequest || (() => {})}
-          onDeleteRequest={onDeleteRequest || (() => {})}
+          onEditRequest={onEditRequest || noopShoppingItemHandler}
+          onDeleteRequest={onDeleteRequest || noopShoppingItemHandler}
           isSelected={false}
-          onSelectItem={() => {}}
+          onSelectItem={noopSelectItem}
           layoutMode={layoutMode}
           viewMode="focus"
         />

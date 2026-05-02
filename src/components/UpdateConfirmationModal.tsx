@@ -1,5 +1,5 @@
 import React from 'react';
-import { ShoppingItem } from '../types';
+import { ShoppingItem } from '../types/item';
 
 interface UpdateConfirmationModalProps {
   itemsToDelete: ShoppingItem[];

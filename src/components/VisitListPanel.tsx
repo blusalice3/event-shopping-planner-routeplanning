@@ -1,7 +1,9 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { ShoppingItem, DayMapData, HallDefinition, BlockDefinition } from '../types';
+import { ShoppingItem } from '../types/item';
+import { DayMapData, HallDefinition, BlockDefinition } from '../types/map';
 import { getSpaceKey } from '../utils/spaceGrouping';
 import { parseGroupId, groupItemsByHallOrder } from '../utils/hallGrouping';
+import { findRouteLookupNumberCell } from '../utils/mapRoutingSignature';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 
 // 優先度レベルの型
@@ -497,9 +499,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
       if (!numMatch) return;
       const num = parseInt(numMatch[0], 10);
 
-      const cell = block.numberCells.find(
-        (nc: { row: number; col: number; value: number }) => nc.value === num,
-      );
+      const cell = findRouteLookupNumberCell(block, num);
       if (cell) {
         onHighlightCell(cell.row, cell.col);
       }
