@@ -227,9 +227,9 @@ export interface RouteSegment {
 
 export type ZoomLevel = number;
 
-export const ZOOM_LEVELS: number[] = [30, 50, 75, 100, 125, 150];
+export const ZOOM_LEVELS: number[] = [15, 30, 50, 75, 100, 125, 150];
 
-export const MIN_ZOOM = 30;
+export const MIN_ZOOM = 15;
 export const MAX_ZOOM = 200;
 
 export const MAPLESS_HALL_KEY = '__mapless__';

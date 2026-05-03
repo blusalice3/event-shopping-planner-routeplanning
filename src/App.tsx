@@ -4185,7 +4185,7 @@ const App: React.FC = () => {
   const mainContentVisible = eventDates.includes(activeTab);
 
   const handleZoomChange = (newZoom: number) => {
-    setZoomLevel(Math.max(30, Math.min(150, newZoom)));
+    setZoomLevel(Math.max(15, Math.min(150, newZoom)));
   };
 
   return (

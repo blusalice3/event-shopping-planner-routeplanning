@@ -143,7 +143,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 後回しフェーズで表示するアイテムID（通常フェーズ終了時に確定）
   const [isMapVisible, setIsMapVisible] = useState(false);
   const [mapZoomLevel, setMapZoomLevel] = useState<number>(100);
-  const [selectedHallId, setSelectedHallId] = useState<string | 'follow'>('follow');
+  const selectedHallId: string | 'follow' = 'follow';
   const [mapCenteringMode, setMapCenteringMode] = useState<FocusMapCenteringMode>('prevToCurrent');
   const [splitRatio, setSplitRatio] = useState(50);
   const splitDragRef = useRef<{ startY: number; startRatio: number } | null>(null);
@@ -1588,9 +1588,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
         <AutoAdvanceCountdown countdown={autoAdvanceCountdown} />
         <div style={{ height: `${splitRatio}%` }} className="relative flex flex-col min-h-0">
           <FocusModeMapControls
-            selectedHallId={selectedHallId}
-            onSelectedHallIdChange={setSelectedHallId}
-            hallDefinitions={hallDefinitions}
             mapZoomLevel={mapZoomLevel}
             mapRotationAngle={mapRotationAngle}
             mapInitialRotationAngle={mapInitialRotationAngle}
@@ -1708,9 +1705,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
         <AutoAdvanceCountdown countdown={autoAdvanceCountdown} />
         <div className="w-1/2 flex flex-col border-r border-slate-200 dark:border-slate-700">
           <FocusModeMapControls
-            selectedHallId={selectedHallId}
-            onSelectedHallIdChange={setSelectedHallId}
-            hallDefinitions={hallDefinitions}
             mapZoomLevel={mapZoomLevel}
             mapRotationAngle={mapRotationAngle}
             mapInitialRotationAngle={mapInitialRotationAngle}

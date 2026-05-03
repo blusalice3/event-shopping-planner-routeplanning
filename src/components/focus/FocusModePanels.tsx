@@ -1,5 +1,4 @@
 import React from 'react';
-import { HallDefinition } from '../../types/map';
 import { PurchaseStatus, ShoppingItem } from '../../types/item';
 import { FocusMapCenteringMode } from '../../types/focus';
 import ShoppingItemCard from '../ShoppingItemCard';
@@ -45,9 +44,6 @@ interface FocusModeHeaderProps {
 }
 
 interface FocusModeMapControlsProps {
-  selectedHallId: string | 'follow';
-  onSelectedHallIdChange: (value: string | 'follow') => void;
-  hallDefinitions?: HallDefinition[];
   mapZoomLevel: number;
   mapRotationAngle: number;
   mapInitialRotationAngle: number;
@@ -225,7 +221,7 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(({
         </div>
       </div>
       {currentVisitItems.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-1.5">
+        <div className="mt-3 flex flex-wrap justify-end gap-1.5">
           {bulkStatusOptions.map(({ status, label, activeColor, hoverColor }) => {
             const allMatch = currentVisitItems.every((item) => item.purchaseStatus === status);
             return (
@@ -253,9 +249,6 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(({
 });
 
 export const FocusModeMapControls: React.FC<FocusModeMapControlsProps> = React.memo(({
-  selectedHallId,
-  onSelectedHallIdChange,
-  hallDefinitions,
   mapZoomLevel,
   mapRotationAngle,
   mapInitialRotationAngle,
@@ -264,19 +257,6 @@ export const FocusModeMapControls: React.FC<FocusModeMapControlsProps> = React.m
   onMapCenteringModeChange,
 }) => (
   <div className="flex items-center gap-2 p-2 bg-white/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 flex-wrap">
-    <select
-      value={selectedHallId}
-      onChange={(e) => onSelectedHallIdChange(e.target.value as string | 'follow')}
-      className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-    >
-      <option value="follow">追随モードON</option>
-      {hallDefinitions?.map((hall) => (
-        <option key={hall.id} value={hall.id}>
-          {hall.name}
-        </option>
-      ))}
-    </select>
-
     <div className="flex rounded-md overflow-hidden border border-slate-300 dark:border-slate-600">
       <button
         onClick={() => onMapCenteringModeChange('prevToCurrent')}

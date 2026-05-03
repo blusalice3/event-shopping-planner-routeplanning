@@ -545,7 +545,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     let minCol = currentCellCoords.col;
     let maxCol = currentCellCoords.col;
 
-    if (prevCellCoords && prevInSameHall) {
+    if (prevCellCoords) {
       minRow = Math.min(minRow, prevCellCoords.row);
       maxRow = Math.max(maxRow, prevCellCoords.row);
       minCol = Math.min(minCol, prevCellCoords.col);
@@ -559,7 +559,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     maxCol = maxCol + margin;
 
     return { minRow, maxRow, minCol, maxCol };
-  }, [currentCellCoords, prevCellCoords, prevInSameHall]);
+  }, [currentCellCoords, prevCellCoords]);
 
   const routeBoundsCurrentOnly = useMemo(() => {
     if (!currentCellCoords) return null;
