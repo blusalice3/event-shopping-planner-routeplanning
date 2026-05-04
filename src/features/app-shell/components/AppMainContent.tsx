@@ -4,6 +4,7 @@ import ShoppingList from '../../../components/ShoppingList';
 import SortAscendingIcon from '../../../components/icons/SortAscendingIcon';
 import SortDescendingIcon from '../../../components/icons/SortDescendingIcon';
 import { MapView } from '../../../components/map';
+import { getSpaceKey } from '../../../utils/spaceGrouping';
 import type { BulkAddMetadata } from '../../../features/events/bulkAdd';
 import type {
   DayMapData,
@@ -287,6 +288,22 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     zoomLevel,
   } = props;
 
+  const editSpaceGroupKeys = React.useMemo(() => {
+    const groupKeys = new Set<string>();
+    items
+      .filter((item) => item.eventDate === activeEventDate)
+      .forEach((item) => {
+        const spaceKey = getSpaceKey(item.block, item.number);
+        const priority = item.priorityLevel || 'none';
+        groupKeys.add(priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey);
+      });
+    return Array.from(groupKeys);
+  }, [activeEventDate, items]);
+
+  const allEditSpaceGroupsCollapsed =
+    editSpaceGroupKeys.length > 0 &&
+    editSpaceGroupKeys.every((groupKey) => collapsedSpaces.has(groupKey));
+
   return (
       <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
         {activeTab === 'eventList' && (
@@ -375,19 +392,29 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                       <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100">
                         実行リストアイテム
                       </h3>
-                      <button
-                        onClick={() => {
-                          setSpaceGroupingEnabled((prev: boolean) => !prev);
-                          setCollapsedSpaces(new Set());
-                        }}
-                        className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
-                          spaceGroupingEnabled
-                            ? 'bg-blue-600 text-white dark:bg-blue-500'
-                            : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
-                        }`}
-                      >
-                        スペース別
-                      </button>
+                      <div className="flex flex-col items-end gap-2">
+                        <button
+                          onClick={() => {
+                            setSpaceGroupingEnabled((prev: boolean) => !prev);
+                            setCollapsedSpaces(new Set());
+                          }}
+                          className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
+                            spaceGroupingEnabled
+                              ? 'bg-blue-600 text-white dark:bg-blue-500'
+                              : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
+                          }`}
+                        >
+                          スペース別
+                        </button>
+                        {spaceGroupingEnabled && (
+                          <button
+                            onClick={() => handleToggleAllSpaceCollapse(!allEditSpaceGroupsCollapsed)}
+                            className="text-xs px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
+                          >
+                            {allEditSpaceGroupsCollapsed ? '全て展開' : '全て折りたたむ'}
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <p className="text-xs text-blue-700 dark:text-blue-300 mb-3">
                       実行対象として選択中のアイテムを管理します。
@@ -427,7 +454,6 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                     showSpaceGroups={spaceGroupingEnabled}
                     collapsedSpaces={collapsedSpaces}
                     onToggleSpaceCollapse={handleToggleSpaceCollapse}
-                    onToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
                     onSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
                     onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
                     onAddItem={handleAddItemFromFocusMode}
@@ -532,7 +558,6 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                     showSpaceGroups={spaceGroupingEnabled}
                     collapsedSpaces={collapsedSpaces}
                     onToggleSpaceCollapse={handleToggleSpaceCollapse}
-                    onToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
                     onSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
                     onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
                     onAddItem={handleAddItemFromFocusMode}
