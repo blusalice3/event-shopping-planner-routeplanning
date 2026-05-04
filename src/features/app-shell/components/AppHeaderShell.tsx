@@ -233,6 +233,30 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     visibleSearchMatches,
   } = props;
 
+  React.useEffect(() => {
+    if (!uiSettingsPanelOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const previousTouchAction = document.body.style.touchAction;
+
+    document.body.style.overflow = 'hidden';
+    document.body.style.touchAction = 'none';
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.body.style.touchAction = previousTouchAction;
+    };
+  }, [uiSettingsPanelOpen]);
+
+  const stopUiSettingsBackgroundScroll = (e: React.WheelEvent | React.TouchEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const stopUiSettingsPanelPropagation = (e: React.WheelEvent | React.TouchEvent | React.MouseEvent) => {
+    e.stopPropagation();
+  };
+
   return (
     <>
       {(showHeaderBar || showTabBar) && (
@@ -485,8 +509,15 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                         <div
                           className="fixed inset-0 z-40"
                           onClick={() => setUiSettingsPanelOpen(false)}
+                          onTouchMove={stopUiSettingsBackgroundScroll}
+                          onWheel={stopUiSettingsBackgroundScroll}
                         />
-                        <div className="fixed left-3 right-3 top-[calc(env(safe-area-inset-top)+4.5rem)] z-50 max-h-[calc(100dvh-5.5rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 shadow-lg dark:border-slate-700 dark:bg-slate-800 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-1 sm:max-h-[70vh] sm:min-w-[320px]">
+                        <div
+                          className="fixed left-3 right-3 top-[calc(env(safe-area-inset-top)+4.5rem)] z-50 max-h-[calc(100dvh-5.5rem)] overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white p-4 shadow-lg dark:border-slate-700 dark:bg-slate-800 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-1 sm:max-h-[70vh] sm:min-w-[320px]"
+                          onClick={stopUiSettingsPanelPropagation}
+                          onTouchMove={stopUiSettingsPanelPropagation}
+                          onWheel={stopUiSettingsPanelPropagation}
+                        >
                           {/* テーマ切替 */}
                           <div className="mb-3 flex items-center justify-between">
                             <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">テーマ</span>
