@@ -486,7 +486,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                           className="fixed inset-0 z-40"
                           onClick={() => setUiSettingsPanelOpen(false)}
                         />
-                        <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-4 min-w-[320px] max-h-[70vh] overflow-y-auto">
+                        <div className="fixed left-3 right-3 top-[calc(env(safe-area-inset-top)+4.5rem)] z-50 max-h-[calc(100dvh-5.5rem)] overflow-y-auto rounded-lg border border-slate-200 bg-white p-4 shadow-lg dark:border-slate-700 dark:bg-slate-800 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-1 sm:max-h-[70vh] sm:min-w-[320px]">
                           {/* テーマ切替 */}
                           <div className="mb-3 flex items-center justify-between">
                             <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">テーマ</span>
