@@ -513,7 +513,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                           onWheel={stopUiSettingsBackgroundScroll}
                         />
                         <div
-                          className="fixed left-3 right-3 top-[calc(env(safe-area-inset-top)+4.5rem)] z-50 max-h-[calc(100dvh-5.5rem)] overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white p-4 shadow-lg dark:border-slate-700 dark:bg-slate-800 sm:absolute sm:left-0 sm:right-auto sm:top-full sm:mt-1 sm:max-h-[70vh] sm:min-w-[320px]"
+                          className="fixed bottom-[calc(env(safe-area-inset-bottom)+1rem)] left-3 right-3 top-[calc(env(safe-area-inset-top)+4.5rem)] z-50 overflow-y-auto overscroll-contain rounded-lg border border-slate-200 bg-white p-4 shadow-lg dark:border-slate-700 dark:bg-slate-800 sm:absolute sm:bottom-auto sm:left-0 sm:right-auto sm:top-full sm:mt-1 sm:max-h-[70vh] sm:min-w-[320px]"
                           onClick={stopUiSettingsPanelPropagation}
                           onTouchMove={stopUiSettingsPanelPropagation}
                           onWheel={stopUiSettingsPanelPropagation}
