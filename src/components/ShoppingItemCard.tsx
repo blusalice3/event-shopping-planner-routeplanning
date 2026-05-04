@@ -314,15 +314,14 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     commitItemUpdate({ ...item, protectionLevel: nextLevel });
   }, [item, commitItemUpdate, getEffectiveProtectionLevel]);
 
-  const handleOpenUrl = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      if (item.url) {
-        window.open(item.url, '_blank');
-      }
-    },
-    [item.url],
-  );
+  const itemUrlHref = useMemo(() => {
+    const trimmedUrl = item.url?.trim();
+    if (!trimmedUrl) return undefined;
+    if (/^[a-z][a-z\d+.-]*:/i.test(trimmedUrl) || trimmedUrl.startsWith('//')) {
+      return trimmedUrl;
+    }
+    return `https://${trimmedUrl}`;
+  }, [item.url]);
 
   const handleRemarksChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     commitItemUpdate({ ...item, remarks: e.target.value });
@@ -550,10 +549,13 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
               {/* 下段: 備考欄 + 購入状態・数量・価格 */}
               <div className="p-2 pt-1 flex flex-col gap-1.5 border-t border-slate-200/50 dark:border-slate-700/50">
                 {/* リンクアイコン */}
-                {item.url && (
+                {itemUrlHref && (
                   <div className="flex justify-end">
-                    <button
-                      onClick={handleOpenUrl}
+                    <a
+                      href={itemUrlHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
                       data-no-long-press
                       className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center gap-1"
                       aria-label="URLを開く"
@@ -561,7 +563,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                     >
                       <ExternalLinkIcon className="w-4 h-4" />
                       <span className="text-xs">🔗</span>
-                    </button>
+                    </a>
                   </div>
                 )}
 
@@ -782,16 +784,19 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 >
                   {item.title || '（タイトルなし）'}
                 </p>
-                {item.url && (
-                  <button
-                    onClick={handleOpenUrl}
+                {itemUrlHref && (
+                  <a
+                    href={itemUrlHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
                     data-no-long-press
                     className="p-0.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex-shrink-0"
                     aria-label="URLを開く"
                     title="URLを開く"
                   >
                     <ExternalLinkIcon className="w-3.5 h-3.5" />
-                  </button>
+                  </a>
                 )}
               </div>
             </div>
@@ -1116,16 +1121,19 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             placeholder="備考"
             className="flex-1 min-w-0 text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
           />
-          {item.url && (
-            <button
-              onClick={handleOpenUrl}
+          {itemUrlHref && (
+            <a
+              href={itemUrlHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
               data-no-long-press
               className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center flex-shrink-0"
               aria-label="URLを開く"
               title="URLを開く"
             >
               <ExternalLinkIcon className="w-5 h-5" />
-            </button>
+            </a>
           )}
         </div>
       </div>
