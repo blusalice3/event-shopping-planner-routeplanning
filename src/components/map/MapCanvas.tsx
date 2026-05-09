@@ -15,6 +15,7 @@ import { useCanvasViewport } from '../../features/map/canvas/useCanvasViewport';
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { findRouteLookupNumberCell } from '../../utils/mapRoutingSignature';
 import { generateRouteSegments, simplifyPath } from '../../utils/pathfinding';
+import { filterFirstRouteMarkers, normalizeMapRouteDayText } from '../../utils/mapRouteOrder';
 import {
   findAllCrossingsIndexed,
   buildCrossingLookup,
@@ -57,19 +58,16 @@ interface MapCanvasProps {
 const BASE_CELL_SIZE = 28; // Base cell size.
 const SCROLL_MARGIN = 5; // Blank-cell scroll margin.
 const FILLED_SCROLL_MARGIN = 25; // Extra margin around filled cells.
-const normalizeDisplayText = (value: string | null | undefined): string => {
-  return (value || '').replace(/\u3000/g, ' ').trim();
-};
 const getDragPanMultiplier = (zoom: number): number => {
   if (zoom < 70) return 2.0;
   if (zoom < 120) return 1.6;
   return 1.3;
 };
 const extractDayNameFromMapName = (mapName: string): string => {
-  const normalizedMapName = normalizeDisplayText(mapName);
+  const normalizedMapName = normalizeMapRouteDayText(mapName);
   const dayMatch = normalizedMapName.match(/^(.+)マップ$/);
   if (dayMatch) {
-    return normalizeDisplayText(dayMatch[1]);
+    return normalizeMapRouteDayText(dayMatch[1]);
   }
   return normalizedMapName;
 };
@@ -360,7 +358,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const states = new Map<string, MapCellStateDetail>();
 
     const dayName = extractDayNameFromMapName(mapName);
-    if (!dayName) return states;
+    const normalizedDayName = normalizeMapRouteDayText(dayName);
+    if (!normalizedDayName) return states;
 
     const isPriorityItem = (item: (typeof items)[number]) => {
       const remarks = item.remarks?.toLowerCase() || '';
@@ -368,8 +367,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     };
 
     items.forEach((item) => {
-      const itemEventDate = item.eventDate?.trim() || '';
-      if (itemEventDate !== dayName) return;
+      const itemEventDate = normalizeMapRouteDayText(item.eventDate);
+      if (itemEventDate !== normalizedDayName) return;
 
       const itemBlockName = item.block?.trim() || '';
       let block = mapData.blocks.find((b) => b.name === itemBlockName);
@@ -435,7 +434,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     if (!isRouteVisible) return [];
 
     const dayName = extractDayNameFromMapName(mapName);
-    if (!dayName) return [];
+    const normalizedDayName = normalizeMapRouteDayText(dayName);
+    if (!normalizedDayName) return [];
 
     const itemsMap = new Map(items.map((item) => [item.id, item]));
     const executeModeItemIdsArray = Array.from(executeModeItemIds);
@@ -443,7 +443,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const visitItems = executeModeItemIdsArray
       .map((id) => itemsMap.get(id))
       .filter(
-        (item): item is (typeof items)[number] => item !== undefined && item.eventDate === dayName,
+        (item): item is (typeof items)[number] =>
+          item !== undefined &&
+          normalizeMapRouteDayText(item.eventDate) === normalizedDayName,
       );
 
     const points: Array<{
@@ -484,6 +486,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     return points;
   }, [mapData.blocks, items, mapName, executeModeItemIds, isRouteVisible]);
+
+  const visibleRouteMarkers = useMemo(
+    () => filterFirstRouteMarkers(routePoints),
+    [routePoints],
+  );
 
   const routeSegments = useMemo(() => {
     if (!isRouteVisible || routePoints.length < 2) return [];
@@ -1561,7 +1568,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.setLineDash([]);
 
       if (isDetailedView) {
-        routePoints.forEach((point) => {
+        visibleRouteMarkers.forEach((point) => {
           const px = (point.col - 0.5) * cellSize;
           const py = (point.row - 0.5) * cellSize;
 
@@ -1909,7 +1916,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     mergedCellsMap,
     isRouteVisible,
     routeSegments,
-    routePoints,
+    visibleRouteMarkers,
     dpr,
     isDetailedView,
     showNumbers,

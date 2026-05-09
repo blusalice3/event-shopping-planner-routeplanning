@@ -35,7 +35,7 @@ const MapVisitListPanel: React.FC<MapVisitListPanelProps> = ({
     const cells: VisitCellInfo[] = [];
     const processedCells = new Set<string>();
 
-    executeModeItemIds.forEach((itemId) => {
+    executeModeItemIds.forEach((itemId, routeIndex) => {
       const item = items.find((i) => i.id === itemId);
       if (!item) return;
 
@@ -72,7 +72,7 @@ const MapVisitListPanel: React.FC<MapVisitListPanelProps> = ({
         col: numberCell.col,
         blockName: item.block,
         number: numValue,
-        order: cells.length + 1,
+        order: routeIndex + 1,
         circles: [item.circle],
       });
     });

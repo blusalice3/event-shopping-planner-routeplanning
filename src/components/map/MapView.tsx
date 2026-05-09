@@ -18,6 +18,7 @@ import HallOrderPanel from './HallOrderPanel';
 import InsertPositionDialog, { InsertPosition, SmartInsertMode } from './InsertPositionDialog';
 import { extractNumberFromItemNumber, extractNumberAlphaPrefix } from '../../utils/xlsxMapParser';
 import { resolveHallByBlockName, resolveManualHallId } from '../../utils/hallFallback';
+import { buildMapRouteExecuteItemIds, resolveMapRouteHallOrder } from '../../utils/mapRouteOrder';
 import { isPointInPolygon } from './HallDefinitionPanel';
 
 const normalizeDisplayText = (value: string | null | undefined): string => {
@@ -35,6 +36,7 @@ interface MapViewProps {
   mapName: string;
   items: ShoppingItem[];
   executeModeItemIds: string[];
+  routeHallOrder?: string[];
   onAddToExecuteList: (itemId: string) => void;
   onRemoveFromExecuteList: (itemId: string) => void;
   onMoveToFirst: (itemId: string) => void;
@@ -105,6 +107,7 @@ const MapView: React.FC<MapViewProps> = ({
   mapName,
   items,
   executeModeItemIds,
+  routeHallOrder,
   onAddToExecuteList,
   onRemoveFromExecuteList,
   onMoveToFirst: _onMoveToFirst,
@@ -472,6 +475,31 @@ const MapView: React.FC<MapViewProps> = ({
       return isItemInHall(item, selectedHallId);
     });
   }, [executeModeItemIds, items, selectedHallId, halls, isItemInHall]);
+
+  const routeExecuteModeItemIds = useMemo(() => {
+    const effectiveRouteHallOrder = resolveMapRouteHallOrder(
+      routeHallOrder,
+      hallRouteSettings.hallOrder,
+    );
+
+    return buildMapRouteExecuteItemIds({
+      executeModeItemIds: filteredExecuteModeItemIds,
+      items: filteredItems,
+      mapData,
+      hallDefinitions: halls,
+      hallOrder: effectiveRouteHallOrder,
+      dayName: mapDayName || normalizeDisplayText(mapName),
+    });
+  }, [
+    filteredExecuteModeItemIds,
+    filteredItems,
+    mapData,
+    halls,
+    routeHallOrder,
+    hallRouteSettings.hallOrder,
+    mapDayName,
+    mapName,
+  ]);
 
   // セルがブロック範囲内か判定する（cellGroups 対応）
   const isCellInBlock = useCallback((row: number, col: number, block: BlockDefinition): boolean => {
@@ -1079,7 +1107,7 @@ const MapView: React.FC<MapViewProps> = ({
         mapData={filteredMapData}
         mapName={mapName}
         items={filteredItems}
-        executeModeItemIds={filteredExecuteModeItemIds}
+        executeModeItemIds={routeExecuteModeItemIds}
         zoomLevel={zoomLevel}
         isRouteVisible={isRouteVisible && (halls.length === 0 || selectedHallId !== 'all')}
         onCellClick={handleCellClick}
@@ -1123,7 +1151,7 @@ const MapView: React.FC<MapViewProps> = ({
         isOpen={isVisitListOpen}
         onClose={() => setIsVisitListOpen(false)}
         items={filteredItems}
-        executeModeItemIds={filteredExecuteModeItemIds}
+        executeModeItemIds={routeExecuteModeItemIds}
         blocks={filteredMapData.blocks}
         onJumpToCell={handleJumpToCell}
       />
@@ -1155,4 +1183,3 @@ const MapView: React.FC<MapViewProps> = ({
 };
 
 export default React.memo(MapView);
-
