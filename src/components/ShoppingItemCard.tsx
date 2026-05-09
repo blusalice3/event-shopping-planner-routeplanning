@@ -1,11 +1,13 @@
-import React, { useCallback, useMemo, useState, useRef, useEffect } from 'react';
+import React, { useCallback, useLayoutEffect, useMemo, useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ShoppingItem,
   PurchaseStatus,
+  PurchaseStatusControlMode,
   PurchaseStatuses,
   ProtectionLevel,
   ProtectionLevels,
-} from '../types';
+} from '../types/item';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 import CheckCircleIcon from './icons/CheckCircleIcon';
 import CircleIcon from './icons/CircleIcon';
@@ -15,6 +17,7 @@ import PauseCircleIcon from './icons/PauseCircleIcon';
 import ClockIcon from './icons/ClockIcon';
 import ChevronUpIcon from './icons/ChevronUpIcon';
 import ChevronDownIcon from './icons/ChevronDownIcon';
+import { areSameItemSnapshot } from './itemSnapshot';
 
 // 外部リンクアイコン
 const ExternalLinkIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
@@ -54,6 +57,7 @@ export interface ShoppingItemCardProps {
   hallIndex?: number; // ホール内での訪問順番号（0始まり）
   priorityLevel?: 'none' | 'priority' | 'highest'; // グループの優先度レベル
   highlightPrice?: boolean; // 価格未定の購入済アイテムの価格欄を強調表示
+  purchaseStatusControlMode?: PurchaseStatusControlMode;
 }
 
 const statusConfig: Record<
@@ -139,8 +143,235 @@ const protectionConfig: Record<
 // 保護レベルのサイクル順序
 const protectionCycle: ProtectionLevel[] = ['full', 'deletable', 'none'];
 
+type PurchaseStatusRadialMenuProps = {
+  itemId: string;
+  anchorRef: React.RefObject<HTMLButtonElement>;
+  currentStatus: PurchaseStatus;
+  onSelect: (status: PurchaseStatus) => void;
+  onCancel: () => void;
+};
+
+const RADIAL_MENU_RADIUS = 46;
+const RADIAL_MENU_ITEM_SIZE = 40;
+export const OUTSIDE_CLICK_FALLBACK_CLOSE_DELAY_MS = 300;
+
+const PurchaseStatusRadialMenu: React.FC<PurchaseStatusRadialMenuProps> = ({
+  itemId,
+  anchorRef,
+  currentStatus,
+  onSelect,
+  onCancel,
+}) => {
+  const [center, setCenter] = useState<{ x: number; y: number } | null>(null);
+  const itemButtonRefs = useRef<Partial<Record<PurchaseStatus, HTMLButtonElement | null>>>({});
+  const cancelTimerRef = useRef<number | null>(null);
+
+  const stopPointerOverlayEvent = useCallback((event: React.SyntheticEvent) => {
+    event.stopPropagation();
+  }, []);
+
+  const stopMouseOverlayEvent = useCallback((event: React.SyntheticEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  const clearScheduledCancel = useCallback(() => {
+    if (cancelTimerRef.current === null) return;
+    window.clearTimeout(cancelTimerRef.current);
+    cancelTimerRef.current = null;
+  }, []);
+
+  const scheduleFallbackCancelAfterPointerUp = useCallback(() => {
+    if (cancelTimerRef.current !== null) return;
+    cancelTimerRef.current = window.setTimeout(() => {
+      cancelTimerRef.current = null;
+      onCancel();
+    }, OUTSIDE_CLICK_FALLBACK_CLOSE_DELAY_MS);
+  }, [onCancel]);
+
+  const cancelAfterCapturedClick = useCallback(() => {
+    clearScheduledCancel();
+    onCancel();
+  }, [clearScheduledCancel, onCancel]);
+
+  useLayoutEffect(() => {
+    const updateCenter = () => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setCenter({
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      });
+    };
+
+    updateCenter();
+    window.addEventListener('resize', updateCenter);
+    window.addEventListener('scroll', updateCenter, true);
+
+    return () => {
+      window.removeEventListener('resize', updateCenter);
+      window.removeEventListener('scroll', updateCenter, true);
+    };
+  }, [anchorRef]);
+
+  useEffect(() => {
+    if (!center) return;
+    itemButtonRefs.current[currentStatus]?.focus();
+  }, [center, currentStatus]);
+
+  useEffect(() => clearScheduledCancel, [clearScheduledCancel]);
+
+  if (!center) return null;
+
+  // Known a11y debt: this is a non-modal dialog without focus trapping. Tab can
+  // leave the dialog and reach background UI. The radiogroup uses tabbable
+  // button-based radio controls without roving tabindex or arrow-key movement.
+  // 3.5 guarantees focus placement, Tab reachability, Escape, and focus
+  // restoration; focus trap, aria-modal, roving tabindex, and arrow-key
+  // navigation are follow-ups.
+
+  return createPortal(
+    <div
+      data-purchase-status-overlay={itemId}
+      className="fixed inset-0 z-[90] pointer-events-auto"
+      onPointerDown={stopPointerOverlayEvent}
+      onPointerUp={(event) => {
+        stopPointerOverlayEvent(event);
+        scheduleFallbackCancelAfterPointerUp();
+      }}
+      onMouseDown={stopMouseOverlayEvent}
+      onMouseUp={stopMouseOverlayEvent}
+      onClick={(event) => {
+        stopMouseOverlayEvent(event);
+        cancelAfterCapturedClick();
+      }}
+    >
+      <div
+        data-purchase-status-menu={itemId}
+        className="absolute"
+        style={{ left: center.x, top: center.y }}
+        role="dialog"
+        aria-label="購入状態を選択"
+        onPointerDown={(event) => {
+          clearScheduledCancel();
+          event.stopPropagation();
+        }}
+        onPointerUp={(event) => event.stopPropagation()}
+        onMouseDown={(event) => {
+          clearScheduledCancel();
+          event.stopPropagation();
+        }}
+        onMouseUp={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="absolute -translate-x-1/2 -translate-y-1/2 w-34 h-34 rounded-full bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 shadow-2xl backdrop-blur-sm" />
+
+        <div role="radiogroup" aria-label="購入状態">
+          {PurchaseStatuses.map((status, index) => {
+            const angle = -90 + (360 / PurchaseStatuses.length) * index;
+            const rad = (angle * Math.PI) / 180;
+            const x = Math.cos(rad) * RADIAL_MENU_RADIUS;
+            const y = Math.sin(rad) * RADIAL_MENU_RADIUS;
+            const config = statusConfig[status];
+            const Icon = config.icon;
+            const selected = status === currentStatus;
+
+            return (
+              <button
+                key={status}
+                ref={(node) => {
+                  itemButtonRefs.current[status] = node;
+                }}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                aria-label={`${status}に変更`}
+                title={config.label}
+                data-status={status}
+                onClick={() => onSelect(status)}
+                className={`absolute flex items-center justify-center rounded-full border shadow-md transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  selected
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                }`}
+                style={{
+                  width: RADIAL_MENU_ITEM_SIZE,
+                  height: RADIAL_MENU_ITEM_SIZE,
+                  left: x - RADIAL_MENU_ITEM_SIZE / 2,
+                  top: y - RADIAL_MENU_ITEM_SIZE / 2,
+                }}
+              >
+                <Icon className={`w-5 h-5 ${selected ? 'text-white' : config.color}`} />
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          onClick={onCancel}
+          className="absolute -translate-x-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-slate-700 text-white shadow-lg border border-slate-500 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          aria-label="キャンセル"
+          title="キャンセル"
+        >
+          x
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
+export const SHOPPING_ITEM_CARD_COMPARISON_KEYS = [
+  'item',
+  'onUpdate',
+  'onEditRequest',
+  'onDeleteRequest',
+  'onSelectItem',
+  'onMoveUp',
+  'onMoveDown',
+  'isStriped',
+  'isSelected',
+  'blockBackgroundColor',
+  'canMoveUp',
+  'canMoveDown',
+  'isDuplicateCircle',
+  'isSearchMatch',
+  'layoutMode',
+  'viewMode',
+  'hallIndex',
+  'priorityLevel',
+  'highlightPrice',
+  'purchaseStatusControlMode',
+] as const satisfies readonly (keyof ShoppingItemCardProps)[];
+
+export const areSameShoppingItemCardProps = (
+  prev: ShoppingItemCardProps,
+  next: ShoppingItemCardProps,
+): boolean =>
+  areSameItemSnapshot(prev.item, next.item) &&
+  prev.onUpdate === next.onUpdate &&
+  prev.onEditRequest === next.onEditRequest &&
+  prev.onDeleteRequest === next.onDeleteRequest &&
+  prev.onSelectItem === next.onSelectItem &&
+  prev.onMoveUp === next.onMoveUp &&
+  prev.onMoveDown === next.onMoveDown &&
+  prev.isStriped === next.isStriped &&
+  prev.isSelected === next.isSelected &&
+  prev.blockBackgroundColor === next.blockBackgroundColor &&
+  prev.canMoveUp === next.canMoveUp &&
+  prev.canMoveDown === next.canMoveDown &&
+  prev.isDuplicateCircle === next.isDuplicateCircle &&
+  prev.isSearchMatch === next.isSearchMatch &&
+  prev.layoutMode === next.layoutMode &&
+  prev.viewMode === next.viewMode &&
+  prev.hallIndex === next.hallIndex &&
+  prev.priorityLevel === next.priorityLevel &&
+  prev.highlightPrice === next.highlightPrice &&
+  prev.purchaseStatusControlMode === next.purchaseStatusControlMode;
+
 const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
-  item,
+  item: sourceItem,
   onUpdate,
   isStriped,
   onEditRequest,
@@ -159,10 +390,76 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   hallIndex,
   priorityLevel = 'none',
   highlightPrice = false,
+  purchaseStatusControlMode = 'cycle',
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
+  const [optimisticItem, setOptimisticItem] = useState(sourceItem);
   const longPressTimeout = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const purchaseStatusButtonRef = useRef<HTMLButtonElement>(null);
+  const [purchaseStatusMenuOpen, setPurchaseStatusMenuOpen] = useState(false);
+  const item = optimisticItem;
+
+  useEffect(() => {
+    setOptimisticItem((prev) => (areSameItemSnapshot(prev, sourceItem) ? prev : sourceItem));
+  }, [sourceItem]);
+
+  const commitItemUpdate = useCallback(
+    (updatedItem: ShoppingItem) => {
+      setOptimisticItem((prev) =>
+        areSameItemSnapshot(prev, updatedItem) ? prev : updatedItem,
+      );
+      onUpdate(updatedItem);
+    },
+    [onUpdate],
+  );
+
+  // 長文の展開状態管理（PC/タブレットモードのみ使用）
+  // サークル名・タイトルが truncate されている時、タップで展開/折り畳みを切替
+  const [expanded, setExpanded] = useState<Set<'circle' | 'title'>>(new Set());
+  // ref は truncate が実際に発生する <span> に付ける（button 側は inline-flex なので
+  // 内部で overflow が吸収されて scrollWidth === clientWidth になり検出不可）
+  const circleTextRef = useRef<HTMLSpanElement>(null);
+  const titleTextRef = useRef<HTMLSpanElement>(null);
+  const [truncatedMap, setTruncatedMap] = useState<{ circle: boolean; title: boolean }>({
+    circle: false,
+    title: false,
+  });
+
+  const toggleExpand = useCallback((key: 'circle' | 'title') => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  // truncate 判定: scrollWidth > clientWidth で実際にはみ出しているかを検出
+  useLayoutEffect(() => {
+    const update = () => {
+      const circleEl = circleTextRef.current;
+      const titleEl = titleTextRef.current;
+      const nextTruncatedMap = {
+        circle:
+          !!circleEl && !expanded.has('circle') && circleEl.scrollWidth > circleEl.clientWidth + 1,
+        title:
+          !!titleEl && !expanded.has('title') && titleEl.scrollWidth > titleEl.clientWidth + 1,
+      };
+      setTruncatedMap((prev) =>
+        prev.circle === nextTruncatedMap.circle && prev.title === nextTruncatedMap.title
+          ? prev
+          : nextTruncatedMap,
+      );
+    };
+    update();
+    const ro = new ResizeObserver(update);
+    if (circleTextRef.current) ro.observe(circleTextRef.current);
+    if (titleTextRef.current) ro.observe(titleTextRef.current);
+    // 親の幅変化も捕捉するためカード全体も observe
+    if (cardRef.current) ro.observe(cardRef.current);
+    return () => ro.disconnect();
+  }, [item.circle, item.title, expanded]);
 
   const handlePriceChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const value = e.target.value;
@@ -170,7 +467,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       ...item,
       price: value === '' ? null : parseInt(value, 10) || 0,
     };
-    onUpdate(updatedItem);
+    commitItemUpdate(updatedItem);
   };
 
   const handleQuantityChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -179,15 +476,61 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       ...item,
       quantity: value,
     };
-    onUpdate(updatedItem);
+    commitItemUpdate(updatedItem);
   };
 
   const togglePurchaseStatus = useCallback(() => {
     const currentIndex = PurchaseStatuses.indexOf(item.purchaseStatus);
     const nextIndex = (currentIndex + 1) % PurchaseStatuses.length;
     const nextStatus = PurchaseStatuses[nextIndex];
-    onUpdate({ ...item, purchaseStatus: nextStatus });
-  }, [item, onUpdate]);
+    commitItemUpdate({ ...item, purchaseStatus: nextStatus });
+  }, [item, commitItemUpdate]);
+
+  const closePurchaseStatusMenu = useCallback(
+    (options: { restoreFocus?: boolean } = {}) => {
+      const { restoreFocus = true } = options;
+      setPurchaseStatusMenuOpen(false);
+
+      if (!restoreFocus) return;
+
+      const focusButton = () => {
+        purchaseStatusButtonRef.current?.focus();
+      };
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(focusButton);
+        return;
+      }
+      window.setTimeout(focusButton, 0);
+    },
+    [],
+  );
+
+  const setPurchaseStatus = useCallback(
+    (purchaseStatus: PurchaseStatus) => {
+      if (purchaseStatus === item.purchaseStatus) {
+        closePurchaseStatusMenu();
+        return;
+      }
+      commitItemUpdate({ ...item, purchaseStatus });
+      closePurchaseStatusMenu();
+    },
+    [item, commitItemUpdate, closePurchaseStatusMenu],
+  );
+
+  const handlePurchaseStatusButtonClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+
+      if (purchaseStatusControlMode === 'radial') {
+        setMenuVisible(false);
+        setPurchaseStatusMenuOpen((open) => !open);
+        return;
+      }
+
+      togglePurchaseStatus();
+    },
+    [purchaseStatusControlMode, togglePurchaseStatus],
+  );
 
   // 保護レベルを取得（未設定の場合はsourceに基づいてデフォルト値を決定）
   const getEffectiveProtectionLevel = useCallback((): ProtectionLevel => {
@@ -201,21 +544,20 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     const currentIndex = protectionCycle.indexOf(currentLevel);
     const nextIndex = (currentIndex + 1) % protectionCycle.length;
     const nextLevel = protectionCycle[nextIndex];
-    onUpdate({ ...item, protectionLevel: nextLevel });
-  }, [item, onUpdate, getEffectiveProtectionLevel]);
+    commitItemUpdate({ ...item, protectionLevel: nextLevel });
+  }, [item, commitItemUpdate, getEffectiveProtectionLevel]);
 
-  const handleOpenUrl = useCallback(
-    (e: React.MouseEvent) => {
-      e.stopPropagation();
-      if (item.url) {
-        window.open(item.url, '_blank');
-      }
-    },
-    [item.url],
-  );
+  const itemUrlHref = useMemo(() => {
+    const trimmedUrl = item.url?.trim();
+    if (!trimmedUrl) return undefined;
+    if (/^[a-z][a-z\d+.-]*:/i.test(trimmedUrl) || trimmedUrl.startsWith('//')) {
+      return trimmedUrl;
+    }
+    return `https://${trimmedUrl}`;
+  }, [item.url]);
 
   const handleRemarksChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    onUpdate({ ...item, remarks: e.target.value });
+    commitItemUpdate({ ...item, remarks: e.target.value });
   };
 
   const clearLongPress = useCallback(() => {
@@ -259,6 +601,28 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [menuVisible]);
+
+  useEffect(() => {
+    if (purchaseStatusControlMode !== 'radial' && purchaseStatusMenuOpen) {
+      closePurchaseStatusMenu({ restoreFocus: false });
+    }
+  }, [purchaseStatusControlMode, purchaseStatusMenuOpen, closePurchaseStatusMenu]);
+
+  useEffect(() => {
+    if (!purchaseStatusMenuOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closePurchaseStatusMenu();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [purchaseStatusMenuOpen, closePurchaseStatusMenu]);
 
   const priceOptions = useMemo(() => {
     const options = new Set<number | null>();
@@ -340,6 +704,17 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const statusBgOverlay = isUnpurchased
     ? ''
     : `absolute inset-0 rounded-lg ${currentStatus.bg} pointer-events-none`;
+
+  const purchaseStatusRadialMenu =
+    purchaseStatusControlMode === 'radial' && purchaseStatusMenuOpen ? (
+      <PurchaseStatusRadialMenu
+        itemId={item.id}
+        anchorRef={purchaseStatusButtonRef}
+        currentStatus={item.purchaseStatus}
+        onSelect={setPurchaseStatus}
+        onCancel={closePurchaseStatusMenu}
+      />
+    ) : null;
 
   // スマートフォンモード用レイアウト
   if (layoutMode === 'smartphone') {
@@ -440,10 +815,13 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
               {/* 下段: 備考欄 + 購入状態・数量・価格 */}
               <div className="p-2 pt-1 flex flex-col gap-1.5 border-t border-slate-200/50 dark:border-slate-700/50">
                 {/* リンクアイコン */}
-                {item.url && (
+                {itemUrlHref && (
                   <div className="flex justify-end">
-                    <button
-                      onClick={handleOpenUrl}
+                    <a
+                      href={itemUrlHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(e) => e.stopPropagation()}
                       data-no-long-press
                       className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center gap-1"
                       aria-label="URLを開く"
@@ -451,7 +829,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                     >
                       <ExternalLinkIcon className="w-4 h-4" />
                       <span className="text-xs">🔗</span>
-                    </button>
+                    </a>
                   </div>
                 )}
 
@@ -510,7 +888,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
                     {/* 購入状態（右端） */}
                     <button
-                      onClick={togglePurchaseStatus}
+                      ref={purchaseStatusButtonRef}
+                      onClick={handlePurchaseStatusButtonClick}
+                      data-no-long-press
+                      aria-haspopup={purchaseStatusControlMode === 'radial' ? 'dialog' : undefined}
+                      aria-expanded={purchaseStatusControlMode === 'radial' ? purchaseStatusMenuOpen : undefined}
                       className="flex items-center space-x-1 p-1.5 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
                       aria-label={`Current status: ${currentStatus.label}. Click to change.`}
                     >
@@ -525,6 +907,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             </div>
           </div>
 
+          {purchaseStatusRadialMenu}
           {menuVisible && (
             <div
               className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
@@ -672,16 +1055,19 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                 >
                   {item.title || '（タイトルなし）'}
                 </p>
-                {item.url && (
-                  <button
-                    onClick={handleOpenUrl}
+                {itemUrlHref && (
+                  <a
+                    href={itemUrlHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
                     data-no-long-press
                     className="p-0.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex-shrink-0"
                     aria-label="URLを開く"
                     title="URLを開く"
                   >
                     <ExternalLinkIcon className="w-3.5 h-3.5" />
-                  </button>
+                  </a>
                 )}
               </div>
             </div>
@@ -734,7 +1120,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
                 {/* 購入状態（アイコンのみ） */}
                 <button
-                  onClick={togglePurchaseStatus}
+                  ref={purchaseStatusButtonRef}
+                  onClick={handlePurchaseStatusButtonClick}
+                  data-no-long-press
+                  aria-haspopup={purchaseStatusControlMode === 'radial' ? 'dialog' : undefined}
+                  aria-expanded={purchaseStatusControlMode === 'radial' ? purchaseStatusMenuOpen : undefined}
                   className="p-1 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
                   aria-label={`Current status: ${currentStatus.label}. Click to change.`}
                   title={currentStatus.label}
@@ -746,6 +1136,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           </div>
         </div>
 
+        {purchaseStatusRadialMenu}
         {menuVisible && (
           <div
             className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
@@ -777,7 +1168,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     );
   }
 
-  // PCモード（従来のレイアウト）
+  // PCモード（改良案A: CSS Grid 中央エリア + 長文タップ展開 + 左端警告ストライプ）
   const pcCardClasses = `
     rounded-lg shadow-md transition-all duration-300 flex items-stretch relative overflow-hidden
     ${baseBg}
@@ -795,11 +1186,24 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       onTouchMove={handlePointerLeave} // Cancel on scroll
       data-search-match={isSearchMatch ? 'true' : undefined}
     >
-      {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500"></div>}
+      {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1.5 bg-blue-500 z-30"></div>}
       {statusBgOverlay && <div className={statusBgOverlay}></div>}
+
+      {/* 警告ストライプ: カード左端の縦バー（右側の可読性を阻害しない） */}
+      {hasWarningTags && !isSelected && (
+        <div
+          className="absolute left-0 top-0 bottom-0 w-1.5 pointer-events-none z-10"
+          style={{
+            backgroundImage:
+              'repeating-linear-gradient(45deg, #fef08a 0px, #fef08a 6px, #000 6px, #000 12px)',
+          }}
+        />
+      )}
+
+      {/* 左サイドバー */}
       <div
         data-drag-handle
-        className="relative p-3 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-2 z-10"
+        className="relative p-3 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-2 z-10 flex-shrink-0"
       >
         {/* ホール内番号表示 */}
         {hallIndex !== undefined && (
@@ -819,7 +1223,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           type="checkbox"
           checked={isSelected}
           onChange={() => onSelectItem(item.id)}
-          onClick={(e) => e.stopPropagation()} // Prevent long press/drag from firing
+          onClick={(e) => e.stopPropagation()}
           data-no-long-press
           className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
           aria-label={`Select item ${item.circle} - ${item.title}`}
@@ -863,7 +1267,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             <ChevronDownIcon className="w-4 h-4" />
           </button>
         )}
-        {/* 保護レベルトグルボタン */}
+        {/* 保護レベルトグルボタン（編集・実行・集中モード 全てで表示） */}
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -878,104 +1282,162 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         </button>
       </div>
 
-      <div className="relative flex-grow p-4 min-w-0 flex flex-col h-full z-20">
-        {/* 警告表示を隠すための背景レイヤー */}
+      {/* 中央エリア: CSS Grid 3行構造（情報 / タイトル / 備考） */}
+      <div
+        className="relative flex-grow p-4 min-w-0 z-20 grid gap-2"
+        style={{ gridTemplateRows: 'auto 1fr auto' }}
+      >
+        {/* 背景オーバーレイ */}
         <div
           className={`absolute inset-0 rounded-lg pointer-events-none ${textAreaOverlayClassName}`}
         ></div>
-        <div className="relative z-10 flex justify-between items-start gap-4">
-          <div>
-            <p className="font-bold text-md text-slate-900 dark:text-slate-100">{`${item.eventDate} ${locationString}`}</p>
-            <div className="mt-1 flex items-center gap-2 flex-wrap">
-              <p className="text-slate-600 dark:text-slate-300 truncate" title={item.circle}>
-                {item.circle}
-              </p>
-              {warningTags.map((tag, index) => (
-                <img
-                  key={index}
-                  src={`/${tag}.png`}
-                  alt={tag}
-                  className="h-12 w-auto object-contain"
-                  style={{ height: '3rem' }}
-                />
-              ))}
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            {/* 集中/実行モード時：備考欄の左横側にリンクアイコン */}
-            {!onMoveUp && item.url && (
-              <button
-                onClick={handleOpenUrl}
-                data-no-long-press
-                className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center gap-1"
-                aria-label="URLを開く"
-                title="URLを開く"
+
+        {/* Row 1: 日付バッジ + 配置バッジ + サークル名 + 警告バッジ列 */}
+        <div className="relative z-10 flex items-center gap-2 flex-wrap min-w-0">
+          <span className="inline-flex items-center whitespace-nowrap flex-shrink-0 px-2.5 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 text-sm font-semibold">
+            {item.eventDate}
+          </span>
+          <span className="inline-flex items-center whitespace-nowrap flex-shrink-0 px-2 py-0.5 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 text-sm font-bold">
+            {locationString}
+          </span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (truncatedMap.circle || expanded.has('circle')) toggleExpand('circle');
+            }}
+            data-no-long-press
+            title={item.circle}
+            aria-expanded={expanded.has('circle')}
+            className={`text-left text-slate-700 dark:text-slate-300 text-sm min-w-0 flex-1 rounded inline-flex items-center gap-1 transition-colors ${
+              expanded.has('circle')
+                ? 'whitespace-normal bg-blue-50 dark:bg-blue-900/30 px-2 py-0.5 ring-1 ring-blue-300 dark:ring-blue-700'
+                : ''
+            } ${
+              truncatedMap.circle && !expanded.has('circle')
+                ? 'border border-dashed border-blue-300 dark:border-blue-700 px-1.5 cursor-pointer hover:bg-blue-50/60 dark:hover:bg-blue-900/20'
+                : ''
+            }`}
+          >
+            <span
+              ref={circleTextRef}
+              className={
+                expanded.has('circle') ? 'break-words flex-1' : 'truncate flex-1 min-w-0 block'
+              }
+            >
+              {item.circle}
+            </span>
+            {(truncatedMap.circle || expanded.has('circle')) && (
+              <span
+                className="flex-shrink-0 text-blue-500 dark:text-blue-400 text-xs"
+                aria-hidden="true"
               >
-                <ExternalLinkIcon className="w-5 h-5" />
-                <span className="text-xs">🔗</span>
-              </button>
+                {expanded.has('circle') ? '⌃' : '⌄'}
+              </span>
             )}
-            <div className="flex flex-col gap-1">
-              <input
-                type="text"
-                value={item.remarks}
-                onChange={handleRemarksChange}
-                placeholder="備考"
-                className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 w-32 sm:w-40 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
-              />
-              {/* 編集モード時：備考欄の直下にリンクアイコン */}
-              {onMoveUp && item.url && (
-                <button
-                  onClick={handleOpenUrl}
-                  data-no-long-press
-                  className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center gap-1 self-end"
-                  aria-label="URLを開く"
-                  title="URLを開く"
-                >
-                  <ExternalLinkIcon className="w-4 h-4" />
-                  <span className="text-xs">🔗</span>
-                </button>
-              )}
-            </div>
-          </div>
+          </button>
+          {warningTags.map((tag, index) => (
+            <img
+              key={index}
+              src={`/${tag}.png`}
+              alt={tag}
+              className="h-6 w-auto object-contain flex-shrink-0"
+            />
+          ))}
         </div>
+
+        {/* Row 2: タイトル（中央寄せ、truncate + タップ展開） */}
         <div
-          className={`relative z-10 flex-grow flex flex-col items-center justify-center text-center text-slate-700 dark:text-slate-200 ${currentStatus.dim ? 'line-through' : ''}`}
+          className={`relative z-10 flex items-center justify-center min-w-0 text-center text-slate-700 dark:text-slate-200 ${currentStatus.dim ? 'line-through' : ''}`}
         >
-          <p className="text-lg font-semibold truncate" title={item.title}>
-            {item.title || '（タイトルなし）'}
-          </p>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              if (truncatedMap.title || expanded.has('title')) toggleExpand('title');
+            }}
+            data-no-long-press
+            title={item.title}
+            aria-expanded={expanded.has('title')}
+            className={`text-lg font-semibold min-w-0 max-w-full rounded inline-flex items-center gap-1.5 transition-colors ${
+              expanded.has('title')
+                ? 'whitespace-normal bg-blue-50 dark:bg-blue-900/30 px-3 py-1 ring-1 ring-blue-300 dark:ring-blue-700'
+                : ''
+            } ${
+              truncatedMap.title && !expanded.has('title')
+                ? 'border border-dashed border-blue-300 dark:border-blue-700 px-2 cursor-pointer hover:bg-blue-50/60 dark:hover:bg-blue-900/20'
+                : ''
+            }`}
+          >
+            <span
+              ref={titleTextRef}
+              className={
+                expanded.has('title') ? 'break-words' : 'truncate min-w-0 flex-1 block'
+              }
+            >
+              {item.title || '（タイトルなし）'}
+            </span>
+            {(truncatedMap.title || expanded.has('title')) && (
+              <span
+                className="flex-shrink-0 text-blue-500 dark:text-blue-400 text-sm"
+                aria-hidden="true"
+              >
+                {expanded.has('title') ? '⌃' : '⌄'}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* Row 3: 備考入力 + リンクアイコン（常に備考の右に統一） */}
+        <div className="relative z-10 flex items-center gap-2 min-w-0">
+          <input
+            type="text"
+            value={item.remarks}
+            onChange={handleRemarksChange}
+            placeholder="備考"
+            className="flex-1 min-w-0 text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+          />
+          {itemUrlHref && (
+            <a
+              href={itemUrlHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              data-no-long-press
+              className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center flex-shrink-0"
+              aria-label="URLを開く"
+              title="URLを開く"
+            >
+              <ExternalLinkIcon className="w-5 h-5" />
+            </a>
+          )}
         </div>
       </div>
 
-      <div className="relative flex flex-col items-end justify-between space-y-3 p-4 border-l border-slate-200/80 dark:border-slate-700/80 z-10">
-        {hasWarningTags && (
-          <div
-            className="absolute inset-0 pointer-events-none rounded-r-lg"
-            style={{
-              backgroundImage:
-                'repeating-linear-gradient(45deg, #fef08a 0px, #fef08a 10px, #000 10px, #000 20px)',
-              backgroundSize: '28.28px 28.28px',
-              opacity: 0.4,
-            }}
-          ></div>
-        )}
+      {/* 右サイドバー（購入トグル / 数量 / 価格） */}
+      <div className="relative flex flex-col items-stretch justify-between gap-3 px-3 py-3 border-l border-slate-200/80 dark:border-slate-700/80 z-10 flex-shrink-0">
         <button
-          onClick={togglePurchaseStatus}
-          className="flex items-center space-x-2 p-2 -m-2 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors relative z-10 w-full justify-start"
+          ref={purchaseStatusButtonRef}
+          onClick={handlePurchaseStatusButtonClick}
+          data-no-long-press
+          aria-haspopup={purchaseStatusControlMode === 'radial' ? 'dialog' : undefined}
+          aria-expanded={purchaseStatusControlMode === 'radial' ? purchaseStatusMenuOpen : undefined}
+          className="flex items-center space-x-2 p-2 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors relative z-10 justify-start"
           aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         >
-          <IconComponent className={`w-7 h-7 ${currentStatus.color}`} />
-          <span className={`font-semibold w-16 text-left ${currentStatus.color}`}>
+          <IconComponent className={`w-7 h-7 flex-shrink-0 ${currentStatus.color}`} />
+          <span className={`font-semibold whitespace-nowrap ${currentStatus.color}`}>
             {currentStatus.label}
           </span>
         </button>
-        <div className="flex items-center gap-2 relative z-10 w-full">
-          <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">数量</span>
+        <div className="flex items-center gap-2 relative z-10">
+          <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+            数量
+          </span>
           <select
             value={item.quantity}
             onChange={handleQuantityChange}
-            className="flex-1 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none min-w-[60px]"
+            className="flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums"
           >
             {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
               <option key={num} value={num}>
@@ -984,12 +1446,17 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             ))}
           </select>
         </div>
-        <div className="flex items-center gap-1 relative z-10 w-full justify-end">
-          {item.price !== null && <span className="text-slate-500 dark:text-slate-400">¥</span>}
+        <div className="flex items-center gap-1 relative z-10">
+          <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
+            価格
+          </span>
+          {item.price !== null && (
+            <span className="text-slate-500 dark:text-slate-400 text-sm">¥</span>
+          )}
           <select
             value={item.price === null ? '' : item.price}
             onChange={handlePriceChange}
-            className={`flex-1 text-md font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none min-w-[100px] ${
+            className={`flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums ${
               item.price === null ? 'text-red-600 dark:text-red-400' : ''
             } ${highlightPrice && item.price === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
           >
@@ -1002,6 +1469,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         </div>
       </div>
 
+      {purchaseStatusRadialMenu}
       {menuVisible && (
         <div
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
@@ -1033,4 +1501,4 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   );
 };
 
-export default ShoppingItemCard;
+export default React.memo(ShoppingItemCard, areSameShoppingItemCardProps);

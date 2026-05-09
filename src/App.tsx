@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
+﻿import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ShoppingItem,
   PurchaseStatus,
@@ -6,9 +6,10 @@ import {
   ViewMode,
   DayModeState,
   ExecuteModeItems,
+} from './types/item';
+import {
   MapDataStore,
   RouteSettingsStore,
-  ExportOptions,
   BlockDefinition,
   HallDefinition,
   HallRouteSettings,
@@ -16,37 +17,16 @@ import {
   HallRouteSettingsStore,
   DayMapData,
   BlockDetectionSettings,
-  FocusModeSessionState,
   MapRotationSettingsStore,
   MapViewportSettingsStore,
   MapViewportState,
-} from './types';
-const ImportScreen = React.lazy(() => import('./components/ImportScreen'));
-import ShoppingList from './components/ShoppingList';
-import SummaryBar from './components/SummaryBar';
-import EventListScreen from './components/EventListScreen';
-import DeleteConfirmationModal from './components/DeleteConfirmationModal';
-import { ItemEditDialog } from './components/ItemEditDialog';
-import ZoomControl from './components/ZoomControl';
-import BulkActionControls from './components/BulkActionControls';
-import UpdateConfirmationModal from './components/UpdateConfirmationModal';
-import UrlUpdateDialog from './components/UrlUpdateDialog';
-import EventRenameDialog from './components/EventRenameDialog';
-import ExportOptionsDialog from './components/ExportOptionsDialog';
-import SortAscendingIcon from './components/icons/SortAscendingIcon';
-import SortDescendingIcon from './components/icons/SortDescendingIcon';
-import SearchBar from './components/SearchBar';
-import {
-  MapView,
-  BlockDefinitionPanel,
-  HallDefinitionPanel,
-  isPointInPolygon,
-  MapImportDialog,
-  loadBlockDetectionSettings,
-  saveBlockDetectionSettings,
-} from './components/map';
-import VisitListPanel from './components/VisitListPanel';
-const FocusModeContainer = React.lazy(() => import('./features/map/components/FocusModeContainer'));
+} from './types/map';
+import { ExportOptions } from './types/export';
+import { FocusModeSessionState } from './types/focus';
+import { MAPLESS_HALL_KEY, getMaplessKey } from './types/map';
+import { resolveHallByBlockName, resolveManualHallId, findHallsByBlockName } from './utils/hallFallback';
+import { buildMergedHallRouteSettings } from './utils/mergedHallRouteSettings';
+import { isPointInPolygon, saveBlockDetectionSettings } from './components/map';
 import { extractEventDates } from './utils/eventDates';
 import { getSpaceKey } from './utils/spaceGrouping';
 import { importFromXlsx, downloadBlob, type ItemFallbackWarning } from './utils/exportImport';
@@ -84,12 +64,32 @@ import {
   computeMoveItem,
   computeMoveItemVertical,
   computeUpdateItemPriority,
+  computeHallOrderForPriorityChange,
+  reorderExecuteIdsForSpaceAdjacency,
 } from './features/events/itemOps';
 import {
   buildImportCompletionMessage,
   resolveEventListTab,
 } from './features/events/uiOrchestration';
+import {
+  cloneHallsForDates,
+  emptyHallRouteSettings,
+  getCombinedHallRouteSettingsForDate,
+  getGlobalHallItemCount as computeGlobalHallItemCount,
+  remapHallRouteSettings,
+  reorderExecuteIdsByHallOrder,
+  splitGlobalHallRouteSettings,
+  splitHallsForStorage,
+  updateHallDefinitionsForHalls,
+  updateHallRouteSettingsForHalls,
+  updateMaplessHallDefinitions,
+  updateMaplessHallRouteSettings,
+} from './features/map/domain/hallOperations';
 import { useMapSelectors } from './features/map/hooks/useMapSelectors';
+import { useListInteractionState } from './features/lists/hooks/useListInteractionState';
+import AppHeaderShell from './features/app-shell/components/AppHeaderShell';
+import AppMainContent from './features/app-shell/components/AppMainContent';
+import AppOverlayLayer from './features/app-shell/components/AppOverlayLayer';
 import { useThemeMode } from './hooks/useThemeMode';
 import {
   DEFAULT_UI_VISIBILITY,
@@ -97,8 +97,9 @@ import {
   type UIVisibilitySettings,
 } from './hooks/useUIVisibilitySettings';
 import { useNumberCellOutlineStyle } from './hooks/useNumberCellOutlineStyle';
+import { useDisablePriceUndefinedCheck } from './hooks/useDisablePriceUndefinedCheck';
+import { usePurchaseStatusControlMode } from './hooks/usePurchaseStatusControlMode';
 import { useIndexedDbPersistence } from './hooks/useIndexedDbPersistence';
-import MapRotationControls from './components/map/MapRotationControls';
 
 type ActiveTab = 'eventList' | 'import' | string;
 type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'None' | 'Purchased';
@@ -180,16 +181,33 @@ const isFocusModeSessionStateEqual = (
   b: FocusModeSessionState,
 ): boolean => {
   if (!a) return false;
-  return (
-    a.phase === b.phase &&
-    a.phaseIndex === b.phaseIndex &&
-    a.isCompleted === b.isCompleted &&
-    a.savedPhaseIndices.normal === b.savedPhaseIndices.normal &&
-    a.savedPhaseIndices.postponed === b.savedPhaseIndices.postponed &&
-    a.savedPhaseIndices.late === b.savedPhaseIndices.late &&
-    areStringArraysEqual(a.postponedItemIds, b.postponedItemIds) &&
-    areStringArraysEqual(a.lateItemIds, b.lateItemIds)
-  );
+  if (
+    a.phase !== b.phase ||
+    a.phaseIndex !== b.phaseIndex ||
+    a.isCompleted !== b.isCompleted ||
+    a.savedPhaseIndices.normal !== b.savedPhaseIndices.normal ||
+    a.savedPhaseIndices.postponed !== b.savedPhaseIndices.postponed ||
+    a.savedPhaseIndices.late !== b.savedPhaseIndices.late ||
+    !areStringArraysEqual(a.postponedItemIds, b.postponedItemIds) ||
+    !areStringArraysEqual(a.lateItemIds, b.lateItemIds)
+  ) {
+    return false;
+  }
+
+  const lpcA = a.lastPurchaseChangeAt ?? null;
+  const lpcB = b.lastPurchaseChangeAt ?? null;
+  if ((lpcA === null) !== (lpcB === null)) return false;
+  if (
+    lpcA &&
+    lpcB &&
+    (lpcA.phase !== lpcB.phase ||
+      lpcA.phaseIndex !== lpcB.phaseIndex ||
+      lpcA.visitKey !== lpcB.visitKey)
+  ) {
+    return false;
+  }
+
+  return true;
 };
 
 const normalizeRotationAngle = (angle: number): number => {
@@ -247,19 +265,33 @@ const App: React.FC = () => {
   const [editDialogItem, setEditDialogItem] = useState<ShoppingItem | null>(null);
   const [itemToDelete, setItemToDelete] = useState<ShoppingItem | null>(null);
   const [zoomLevel, setZoomLevel] = useState(100);
-  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
-  const [selectedBlockFilters, setSelectedBlockFilters] = useState<Set<string>>(new Set());
   const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
-  const [rangeStart, setRangeStart] = useState<{
-    itemId: string;
-    columnType: 'execute' | 'candidate';
-    sourceType?: 'item' | 'spaceHeader';
-  } | null>(null);
-  const [rangeEnd, setRangeEnd] = useState<{
-    itemId: string;
-    columnType: 'execute' | 'candidate';
-    sourceType?: 'item' | 'spaceHeader';
-  } | null>(null);
+  const {
+    selectedItemIds,
+    setSelectedItemIds,
+    selectedBlockFilters,
+    setSelectedBlockFilters,
+    rangeStart,
+    setRangeStart,
+    rangeEnd,
+    setRangeEnd,
+    spaceGroupingEnabled,
+    setSpaceGroupingEnabled,
+    collapsedSpaces,
+    setCollapsedSpaces,
+    executeSpaceGroupingEnabled,
+    setExecuteSpaceGroupingEnabled,
+    executeCollapsedSpaces,
+    setExecuteCollapsedSpaces,
+    clearSelection,
+    clearBlockFilters,
+    toggleBlockFilter,
+    toggleCollapsedSpace,
+    toggleExecuteCollapsedSpace,
+    selectItemForRange,
+    selectSpaceGroupForRange,
+    toggleCurrentRangeSelection,
+  } = useListInteractionState();
 
   // 新規追加フォームに引き継ぐ既定値。
   const [newItemDefaults, setNewItemDefaults] = useState<{
@@ -288,6 +320,12 @@ const App: React.FC = () => {
   );
   const { uiVisibilitySettings, setUiVisibilitySettings } = useUIVisibilitySettings();
   const { numberCellOutlineStyle, setNumberCellOutlineStyle, DEFAULT_OUTLINE_STYLE } = useNumberCellOutlineStyle();
+  const { disablePriceUndefinedCheck, setDisablePriceUndefinedCheck } = useDisablePriceUndefinedCheck();
+  const {
+    purchaseStatusControlMode,
+    setPurchaseStatusControlMode,
+    DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
+  } = usePurchaseStatusControlMode();
   const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
   const [uiSettingsPanelOpen, setUiSettingsPanelOpen] = useState(false);
   const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
@@ -304,6 +342,8 @@ const App: React.FC = () => {
   const [routeSettings, setRouteSettings] = useState<RouteSettingsStore>({});
   const [hallDefinitions, setHallDefinitions] = useState<HallDefinitionsStore>({});
   const [hallRouteSettings, setHallRouteSettings] = useState<HallRouteSettingsStore>({});
+  const [simpleHallDefinitionMode, setSimpleHallDefinitionMode] = useState(false);
+  const [globalHallOrderPanelOpen, setGlobalHallOrderPanelOpen] = useState(false);
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [exportEventName, setExportEventName] = useState<string | null>(null);
   const mapFileInputRef = useRef<HTMLInputElement>(null);
@@ -339,6 +379,104 @@ const App: React.FC = () => {
       setMapViewportSettings,
     },
   });
+
+  // マイグレーション:
+  // 1. 過去バグで mapTab 側に混入した mapless ホール (vertices 空 + blockNames 有) を寄せ直す
+  // 2. 旧 MAPLESS_HALL_KEY ("__mapless__") を日付別キー ("__mapless__:<eventDate>") に分離
+  const hallDefinitionsMigratedRef = useRef(false);
+  useEffect(() => {
+    if (!isInitialized || hallDefinitionsMigratedRef.current) return;
+    hallDefinitionsMigratedRef.current = true;
+
+    setHallDefinitions((prev) => {
+      let changed = false;
+      const next: HallDefinitionsStore = {};
+      for (const eventName of Object.keys(prev)) {
+        const byTab = { ...prev[eventName] };
+
+        // Step 1: mapTab 側に混入した mapless ホールを収集
+        const maplessById = new Map<string, HallDefinition>();
+        for (const h of byTab[MAPLESS_HALL_KEY] ?? []) {
+          maplessById.set(h.id, h);
+        }
+        for (const tabName of Object.keys(byTab)) {
+          if (tabName === MAPLESS_HALL_KEY || tabName.startsWith(MAPLESS_HALL_KEY + ':')) continue;
+          const original = byTab[tabName] || [];
+          const keep: HallDefinition[] = [];
+          for (const h of original) {
+            const isMapless =
+              (!h.vertices || h.vertices.length < 4) && !!h.blockNames?.length;
+            if (isMapless) {
+              if (!maplessById.has(h.id)) maplessById.set(h.id, h);
+              changed = true;
+            } else {
+              keep.push(h);
+            }
+          }
+          if (keep.length !== original.length) {
+            byTab[tabName] = keep;
+          }
+        }
+
+        // Step 2: 旧 MAPLESS_HALL_KEY を日付別キーに分離
+        const collectedMapless = Array.from(maplessById.values());
+        if (collectedMapless.length > 0) {
+          // イベントのアイテムから日付リストを取得
+          const eventItems = eventLists[eventName] || [];
+          const dates = extractEventDates(eventItems);
+          if (dates.length > 0) {
+            // 各日付のキーにコピー（既存の日付別キーがなければ）
+            for (const date of dates) {
+              const dateKey = getMaplessKey(date);
+              if (!byTab[dateKey] || byTab[dateKey].length === 0) {
+                byTab[dateKey] = collectedMapless.map((h) => ({ ...h }));
+                changed = true;
+              }
+            }
+          }
+        }
+        // 旧キーを削除
+        if (byTab[MAPLESS_HALL_KEY] != null) {
+          delete byTab[MAPLESS_HALL_KEY];
+          changed = true;
+        }
+
+        next[eventName] = byTab;
+      }
+      return changed ? next : prev;
+    });
+
+    // hallRouteSettings も同様にマイグレーション
+    setHallRouteSettings((prev) => {
+      let changed = false;
+      const next: HallRouteSettingsStore = {};
+      for (const eventName of Object.keys(prev)) {
+        const byTab = { ...prev[eventName] };
+        const oldSettings = byTab[MAPLESS_HALL_KEY];
+        if (oldSettings != null) {
+          const eventItems = eventLists[eventName] || [];
+          const dates = extractEventDates(eventItems);
+          for (const date of dates) {
+            const dateKey = getMaplessKey(date);
+            if (!byTab[dateKey]) {
+              byTab[dateKey] = {
+                hallOrder: [...oldSettings.hallOrder],
+                hallVisitLists: oldSettings.hallVisitLists.map((vl) => ({
+                  hallId: vl.hallId,
+                  itemIds: [...vl.itemIds],
+                })),
+              };
+              changed = true;
+            }
+          }
+          delete byTab[MAPLESS_HALL_KEY];
+          changed = true;
+        }
+        next[eventName] = byTab;
+      }
+      return changed ? next : prev;
+    });
+  }, [isInitialized, eventLists]);
 
   const items = useMemo(
     () => (activeEventName ? eventLists[activeEventName] || [] : []),
@@ -441,23 +579,29 @@ const App: React.FC = () => {
   const getItemHallId = useCallback(
     (item: ShoppingItem, eventDate: string): string | null => {
       const halls = getHallsForDate(eventDate);
+      if (!halls.length) return null;
+
+      // 1. 手動ホール設定が有効なら最優先
+      const manual = resolveManualHallId(item.manualHallId, halls);
+      if (manual) return manual;
+
+      // 2. 既存のポリゴン判定
       const mapDataForDate = getMapDataForDate(eventDate);
-      if (!halls.length || !mapDataForDate) return null;
-
-
-      const block = mapDataForDate.blocks.find((b) => b.name === item.block);
-      if (!block) return null;
-
-      const centerRow = (block.startRow + block.endRow) / 2;
-      const centerCol = (block.startCol + block.endCol) / 2;
-
-
-      for (const hall of halls) {
-        if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
-          return hall.id;
+      if (mapDataForDate) {
+        const block = mapDataForDate.blocks.find((b) => b.name === item.block);
+        if (block) {
+          const centerRow = (block.startRow + block.endRow) / 2;
+          const centerCol = (block.startCol + block.endCol) / 2;
+          for (const hall of halls) {
+            if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
+              return hall.id;
+            }
+          }
         }
       }
-      return null;
+
+      // 3. blockNames フォールバック
+      return resolveHallByBlockName(item.block, halls);
     },
     [getHallsForDate, getMapDataForDate],
   );
@@ -549,6 +693,33 @@ const App: React.FC = () => {
     },
     [currentFocusSessionKey],
   );
+
+  // 有効な集中モードセッションキーの集合（イベント名×日付）。
+  const validFocusSessionKeys = useMemo(() => {
+    const keys = new Set<string>();
+    Object.entries(eventLists).forEach(([eventName, eventItems]) => {
+      extractEventDates(eventItems).forEach((eventDate) => {
+        keys.add(buildFocusSessionKey(eventName, eventDate));
+      });
+    });
+    return keys;
+  }, [eventLists]);
+
+  // 無効化された集中モードセッションキーを掃除する。
+  useEffect(() => {
+    setFocusModeSessions((prev) => {
+      let changed = false;
+      const next: Record<string, FocusModeSessionState> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        if (validFocusSessionKeys.has(key)) {
+          next[key] = value;
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [validFocusSessionKeys]);
 
   const currentFocusEventDate = useMemo(() => activeEventDate, [activeEventDate]);
 
@@ -783,29 +954,32 @@ const App: React.FC = () => {
     (updatedItem: ShoppingItem) => {
       if (!activeEventName) return;
 
-      const currentItems = eventLists[activeEventName] || [];
-      const currentItem = currentItems.find((item) => item.id === updatedItem.id);
       const currentEventDate = activeEventDate;
       const currentMode = dayModes[activeEventName]?.[currentEventDate];
 
-      const result = computeUpdateItem(
-        currentItems,
-        updatedItem,
-        currentMode as ViewMode | undefined,
-        currentItem?.protectionLevel,
-        currentItem?.source,
-      );
+      setEventLists((prev) => {
+        const currentItems = prev[activeEventName] || [];
+        const currentItem = currentItems.find((item) => item.id === updatedItem.id);
 
-      if (result.purchaseStatusChanged) {
-        setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
-      }
+        const result = computeUpdateItem(
+          currentItems,
+          updatedItem,
+          currentMode as ViewMode | undefined,
+          currentItem?.protectionLevel,
+          currentItem?.source,
+        );
 
-      setEventLists((prev) => ({
-        ...prev,
-        [activeEventName]: result.items,
-      }));
+        if (result.purchaseStatusChanged) {
+          setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
+        }
+
+        return {
+          ...prev,
+          [activeEventName]: result.items,
+        };
+      });
     },
-    [activeEventName, activeTab, eventDates, dayModes, eventLists],
+    [activeEventName, activeTab, eventDates, dayModes],
   );
 
   const handleMoveItem = useCallback(
@@ -1172,7 +1346,6 @@ const App: React.FC = () => {
       if (!activeEventName) return;
 
       const currentEventDate = activeEventDate;
-
       setDayModes((prev) => ({
         ...prev,
         [activeEventName]: {
@@ -1187,15 +1360,6 @@ const App: React.FC = () => {
 
       if (mode !== 'focus') {
         setFocusModeMapVisible(false);
-        if (currentEventDate) {
-          const sessionKey = buildFocusSessionKey(activeEventName, currentEventDate);
-          setFocusModeSessions((prev) => {
-            if (!prev[sessionKey]) return prev;
-            const next = { ...prev };
-            delete next[sessionKey];
-            return next;
-          });
-        }
       }
       setUiVisibilityOverride(false);
       setUiSettingsPanelOpen(false);
@@ -1210,7 +1374,7 @@ const App: React.FC = () => {
         }, 100);
       }
     },
-    [activeEventName, activeTab, eventDates],
+    [activeEventName, activeEventDate, activeTab, eventDates],
   );
 
   const handleSelectEvent = useCallback(
@@ -1451,6 +1615,28 @@ const App: React.FC = () => {
     }
   };
 
+  const getListColumnItems = useCallback(
+    (columnType: 'execute' | 'candidate', currentEventDate: string): ShoppingItem[] => {
+      if (!activeEventName) return [];
+
+      if (columnType === 'execute') {
+        const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+        const itemsMap = new Map(items.map((item) => [item.id, item]));
+        return executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+      }
+
+      const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+      let filtered = items.filter(
+        (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
+      );
+      if (selectedBlockFilters.size > 0) {
+        filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
+      }
+      return filtered;
+    },
+    [activeEventName, executeModeItems, items, selectedBlockFilters],
+  );
+
   const handleSelectItem = useCallback(
     (itemId: string, columnType?: 'execute' | 'candidate') => {
       setSortState('Manual');
@@ -1465,72 +1651,15 @@ const App: React.FC = () => {
             : 'candidate'
           : 'execute');
 
-
-      let currentItems: ShoppingItem[] = [];
-      if (activeEventName) {
-        if (currentColumnType === 'execute') {
-          const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
-          const itemsMap = new Map(items.map((item) => [item.id, item]));
-          currentItems = executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
-        } else {
-          const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-          let filtered = items.filter(
-            (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
-          );
-          if (selectedBlockFilters.size > 0) {
-            filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
-          }
-          currentItems = filtered;
-        }
-      }
-
-      setSelectedItemIds((prev) => {
-        const newSet = new Set(prev);
-        const wasSelected = newSet.has(itemId);
-
-        if (wasSelected) {
-          newSet.delete(itemId);
-          if (rangeStart?.itemId === itemId && rangeStart.columnType === currentColumnType) {
-            setRangeStart(null);
-            setRangeEnd(null);
-          } else if (rangeEnd?.itemId === itemId && rangeEnd.columnType === currentColumnType) {
-            setRangeEnd(null);
-          }
-        } else {
-          newSet.add(itemId);
-
-
-          if (!rangeStart || rangeStart.columnType !== currentColumnType || rangeStart.sourceType === 'spaceHeader') {
-            setRangeStart({ itemId, columnType: currentColumnType, sourceType: 'item' });
-            setRangeEnd(null);
-          } else {
-            const startIndex = currentItems.findIndex((item) => item.id === rangeStart.itemId);
-            const currentIndex = currentItems.findIndex((item) => item.id === itemId);
-
-
-            if (startIndex !== -1 && currentIndex !== -1) {
-              const isAdjacent = Math.abs(startIndex - currentIndex) === 1;
-              if (!isAdjacent) {
-                setRangeEnd({ itemId, columnType: currentColumnType, sourceType: 'item' });
-              } else {
-                setRangeEnd(null);
-              }
-            }
-          }
-        }
-
-        return newSet;
-      });
+      selectItemForRange(itemId, currentColumnType, getListColumnItems(currentColumnType, currentEventDate));
     },
     [
       activeTab,
       activeEventName,
       executeModeItems,
       eventDates,
-      rangeStart,
-      rangeEnd,
-      items,
-      selectedBlockFilters,
+      getListColumnItems,
+      selectItemForRange,
     ],
   );
 
@@ -1542,112 +1671,20 @@ const App: React.FC = () => {
 
       // 隣接グループ判定用：現在のカラムのアイテムからスペースグループ順を算出
       const currentEventDate = activeEventDate;
-      let currentItems: ShoppingItem[] = [];
-      if (activeEventName) {
-        if (columnType === 'execute') {
-          const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
-          const itemsMap = new Map(items.map((item) => [item.id, item]));
-          currentItems = executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
-        } else {
-          const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-          let filtered = items.filter(
-            (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
-          );
-          if (selectedBlockFilters.size > 0) {
-            filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
-          }
-          currentItems = filtered;
-        }
-      }
-
-      // スペースグループ順序を構築
-      const groupOrder: string[] = [];
-      const groupFirstItemMap = new Map<string, string>();
-      for (const item of currentItems) {
-        const key = getSpaceKey(item.block, item.number);
-        if (!groupFirstItemMap.has(key)) {
-          groupOrder.push(key);
-          groupFirstItemMap.set(key, item.id);
-        }
-      }
-
-      setSelectedItemIds((prev) => {
-        const newSet = new Set(prev);
-        const allSelected = allItemIds.every((id) => newSet.has(id));
-
-        if (allSelected) {
-          // 全解除
-          allItemIds.forEach((id) => newSet.delete(id));
-          if (rangeStart && allItemIds.includes(rangeStart.itemId)) {
-            setRangeStart(null);
-            setRangeEnd(null);
-          } else if (rangeEnd && allItemIds.includes(rangeEnd.itemId)) {
-            setRangeEnd(null);
-          }
-        } else {
-          // 全選択
-          allItemIds.forEach((id) => newSet.add(id));
-          // rangeStart/rangeEndは先頭アイテムIDで設定
-          // rangeStartがアイテムカード由来の場合はスペースヘッダーとの混在を防ぐ
-          if (!rangeStart || rangeStart.columnType !== columnType || rangeStart.sourceType === 'item') {
-            setRangeStart({ itemId: firstItemId, columnType, sourceType: 'spaceHeader' });
-            setRangeEnd(null);
-          } else {
-            // 隣接グループチェック：隣接なら rangeEnd を設定しない
-            const startKey = (() => {
-              const startItem = currentItems.find((item) => item.id === rangeStart.itemId);
-              return startItem ? getSpaceKey(startItem.block, startItem.number) : null;
-            })();
-            const currentKey = (() => {
-              const currentItem = currentItems.find((item) => item.id === firstItemId);
-              return currentItem ? getSpaceKey(currentItem.block, currentItem.number) : null;
-            })();
-
-            if (startKey && currentKey) {
-              const startGroupIdx = groupOrder.indexOf(startKey);
-              const currentGroupIdx = groupOrder.indexOf(currentKey);
-              const isAdjacent = startGroupIdx !== -1 && currentGroupIdx !== -1 &&
-                Math.abs(startGroupIdx - currentGroupIdx) === 1;
-              if (!isAdjacent) {
-                setRangeEnd({ itemId: firstItemId, columnType, sourceType: 'spaceHeader' });
-              } else {
-                setRangeEnd(null);
-              }
-            } else {
-              setRangeEnd({ itemId: firstItemId, columnType, sourceType: 'spaceHeader' });
-            }
-          }
-        }
-        return newSet;
-      });
+      selectSpaceGroupForRange(
+        firstItemId,
+        allItemIds,
+        columnType,
+        getListColumnItems(columnType, currentEventDate),
+      );
     },
-    [rangeStart, rangeEnd, activeEventDate, activeEventName, executeModeItems, items, selectedBlockFilters],
+    [activeEventDate, getListColumnItems, selectSpaceGroupForRange],
   );
 
-  const handleToggleBlockFilter = useCallback((block: string) => {
-    setSelectedBlockFilters((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(block)) {
-        newSet.delete(block);
-      } else {
-        newSet.add(block);
-      }
-      return newSet;
-    });
-  }, []);
-
-  const handleClearBlockFilters = useCallback(() => {
-    setSelectedBlockFilters(new Set());
-  }, []);
-
   // スペース別グループ化の状態。
-  const [spaceGroupingEnabled, setSpaceGroupingEnabled] = useState(false);
-  const [collapsedSpaces, setCollapsedSpaces] = useState<Set<string>>(new Set());
   const spaceGroupDragItemIdsRef = useRef<string[] | null>(null);
 
   // 実行モード用スペース別グループ化の状態（編集モードとは独立）
-  const [executeSpaceGroupingEnabled, setExecuteSpaceGroupingEnabled] = useState(true);
-  const [executeCollapsedSpaces, setExecuteCollapsedSpaces] = useState<Set<string>>(new Set());
   const [showPostponeFilterButton, setShowPostponeFilterButton] = useState(false);
   const [showLateFilterButton, setShowLateFilterButton] = useState(false);
   const executeSpaceGroupOrderRef = useRef<string[]>([]); // ShoppingListから通知される表示順序
@@ -1754,23 +1791,13 @@ const App: React.FC = () => {
     eventDates,
   ]);
 
-  const handleClearSelection = useCallback(() => {
-    setSelectedItemIds(new Set());
-    setRangeStart(null);
-    setRangeEnd(null);
-  }, []);
+  const handleClearSelection = clearSelection;
+  const handleToggleBlockFilter = toggleBlockFilter;
+  const handleClearBlockFilters = clearBlockFilters;
 
   const handleToggleSpaceCollapse = useCallback((spaceKey: string) => {
-    setCollapsedSpaces((prev) => {
-      const next = new Set(prev);
-      if (next.has(spaceKey)) {
-        next.delete(spaceKey);
-      } else {
-        next.add(spaceKey);
-      }
-      return next;
-    });
-  }, []);
+    toggleCollapsedSpace(spaceKey);
+  }, [toggleCollapsedSpace]);
 
   const handleToggleAllSpaceCollapse = useCallback((collapse: boolean) => {
     if (!collapse) {
@@ -1791,16 +1818,8 @@ const App: React.FC = () => {
 
   // 実行モード用スペース折りたたみトグル
   const handleExecuteToggleSpaceCollapse = useCallback((spaceKey: string) => {
-    setExecuteCollapsedSpaces((prev) => {
-      const next = new Set(prev);
-      if (next.has(spaceKey)) {
-        next.delete(spaceKey);
-      } else {
-        next.add(spaceKey);
-      }
-      return next;
-    });
-  }, []);
+    toggleExecuteCollapsedSpace(spaceKey);
+  }, [toggleExecuteCollapsedSpace]);
 
   // 実行モード用全スペース折りたたみ/展開
   const handleExecuteToggleAllSpaceCollapse = useCallback((collapse: boolean) => {
@@ -1982,245 +2001,21 @@ const App: React.FC = () => {
 
   const handleToggleRangeSelection = useCallback(
     (columnType: 'execute' | 'candidate') => {
-      if (
-        !rangeStart ||
-        rangeStart.columnType !== columnType ||
-        !rangeEnd ||
-        rangeEnd.columnType !== columnType
-      ) {
-        return;
-      }
-
       if (!activeEventName) return;
 
       const currentEventDate = activeEventDate;
-
-
-      let currentItems: ShoppingItem[] = [];
-      if (columnType === 'execute') {
-        const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
-        const itemsMap = new Map(items.map((item) => [item.id, item]));
-        currentItems = executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
-      } else {
-        const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-        let filtered = items.filter(
-          (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
-        );
-        if (selectedBlockFilters.size > 0) {
-          filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
-        }
-        currentItems = filtered;
-      }
-
-
-      // スペースグループ化有効時の範囲選択
-      if (spaceGroupingEnabled) {
-        const startItem = currentItems.find((item) => item.id === rangeStart.itemId);
-        const endItem = currentItems.find((item) => item.id === rangeEnd.itemId);
-        if (!startItem || !endItem) return;
-
-        const startKey = getSpaceKey(startItem.block, startItem.number);
-        const endKey = getSpaceKey(endItem.block, endItem.number);
-
-        let rangeItems: ShoppingItem[];
-
-        if (startKey === endKey) {
-          // 同一スペース内の範囲選択
-          const groupItems = currentItems.filter(
-            (item) => getSpaceKey(item.block, item.number) === startKey,
-          );
-          const startIndex = groupItems.findIndex((item) => item.id === rangeStart.itemId);
-          const endIndex = groupItems.findIndex((item) => item.id === rangeEnd.itemId);
-          if (startIndex === -1 || endIndex === -1) return;
-          const minIndex = Math.min(startIndex, endIndex);
-          const maxIndex = Math.max(startIndex, endIndex);
-          rangeItems = groupItems.slice(minIndex, maxIndex + 1);
-        } else {
-          // クロスグループ範囲選択：開始・終了スペース間の全スペースの全アイテムを対象にする
-          // スペースグループの出現順を構築
-          const groupOrder: string[] = [];
-          for (const item of currentItems) {
-            const key = getSpaceKey(item.block, item.number);
-            if (!groupOrder.includes(key)) {
-              groupOrder.push(key);
-            }
-          }
-          const startGrpIdx = groupOrder.indexOf(startKey);
-          const endGrpIdx = groupOrder.indexOf(endKey);
-          if (startGrpIdx === -1 || endGrpIdx === -1) return;
-          const minGrpIdx = Math.min(startGrpIdx, endGrpIdx);
-          const maxGrpIdx = Math.max(startGrpIdx, endGrpIdx);
-          const rangeSpaceKeys = new Set(groupOrder.slice(minGrpIdx, maxGrpIdx + 1));
-          rangeItems = currentItems.filter((item) =>
-            rangeSpaceKeys.has(getSpaceKey(item.block, item.number)),
-          );
-        }
-
-        setSelectedItemIds((prev) => {
-          const allSelected = rangeItems.every((item) => prev.has(item.id));
-          const newSet = new Set(prev);
-          if (allSelected) {
-            rangeItems.forEach((item) => newSet.delete(item.id));
-            setRangeStart(null);
-            setRangeEnd(null);
-          } else {
-            rangeItems.forEach((item) => newSet.add(item.id));
-          }
-          return newSet;
-        });
-        return;
-      }
-
-      const halls = getHallsForDate(currentEventDate);
-      const currentMapData = getMapDataForDate(currentEventDate);
-
-
-      if (halls.length > 0 && currentMapData) {
-        const getHallIdForItem = (item: ShoppingItem): string | null => {
-          const block = currentMapData.blocks.find((b) => b.name === item.block);
-          if (!block) return null;
-
-          const numMatch = item.number?.match(/\d+/);
-          if (!numMatch) return null;
-          const num = parseInt(numMatch[0], 10);
-
-          const cell = block.numberCells.find(
-            (nc: { row: number; col: number; value: number }) => nc.value === num,
-          );
-          if (!cell) return null;
-
-
-          const isPointInPoly = (
-            row: number,
-            col: number,
-            vertices: { row: number; col: number }[],
-          ): boolean => {
-            if (vertices.length < 3) return false;
-            let inside = false;
-            for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-              const xi = vertices[i].col,
-                yi = vertices[i].row;
-              const xj = vertices[j].col,
-                yj = vertices[j].row;
-              if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
-                inside = !inside;
-              }
-            }
-            return inside;
-          };
-
-          for (const hall of halls) {
-            for (const vertex of hall.vertices) {
-              if (vertex.row === cell.row && vertex.col === cell.col) {
-                return hall.id;
-              }
-            }
-            if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
-              return hall.id;
-            }
-          }
-          return null;
-        };
-
-
-        const buildGroupId = (
-          hallId: string | null,
-          priority: 'none' | 'priority' | 'highest',
-        ): string | null => {
-          if (hallId === null) {
-            if (priority === 'highest') return 'undefined:highest';
-            if (priority === 'priority') return 'undefined:priority';
-            return null;
-          }
-          if (priority === 'highest') return `${hallId}:highest`;
-          if (priority === 'priority') return `${hallId}:priority`;
-          return hallId;
-        };
-
-        const getItemGroupId = (item: ShoppingItem): string | null => {
-          const hallId = getHallIdForItem(item);
-          const priority = item.priorityLevel || 'none';
-          return buildGroupId(hallId, priority);
-        };
-
-
-        const startItem = currentItems.find((item) => item.id === rangeStart.itemId);
-        const endItem = currentItems.find((item) => item.id === rangeEnd.itemId);
-
-        if (!startItem || !endItem) return;
-
-        const startGroupId = getItemGroupId(startItem);
-        const endGroupId = getItemGroupId(endItem);
-
-
-        if (startGroupId !== endGroupId) {
-          return;
-        }
-
-
-        const groupItems = currentItems.filter((item) => getItemGroupId(item) === startGroupId);
-
-        const startIndex = groupItems.findIndex((item) => item.id === rangeStart.itemId);
-        const endIndex = groupItems.findIndex((item) => item.id === rangeEnd.itemId);
-
-        if (startIndex === -1 || endIndex === -1) return;
-
-        const minIndex = Math.min(startIndex, endIndex);
-        const maxIndex = Math.max(startIndex, endIndex);
-        const rangeItems = groupItems.slice(minIndex, maxIndex + 1);
-
-
-        setSelectedItemIds((prev) => {
-          const allSelected = rangeItems.every((item) => prev.has(item.id));
-          const newSet = new Set(prev);
-          if (allSelected) {
-            rangeItems.forEach((item) => newSet.delete(item.id));
-            setRangeStart(null);
-            setRangeEnd(null);
-          } else {
-            rangeItems.forEach((item) => newSet.add(item.id));
-          }
-          return newSet;
-        });
-        return;
-      }
-
-
-      const startIndex = currentItems.findIndex((item) => item.id === rangeStart.itemId);
-      const endIndex = currentItems.findIndex((item) => item.id === rangeEnd.itemId);
-
-      if (startIndex === -1 || endIndex === -1) return;
-
-      const minIndex = Math.min(startIndex, endIndex);
-      const maxIndex = Math.max(startIndex, endIndex);
-      const rangeItems = currentItems.slice(minIndex, maxIndex + 1);
-
-
-      setSelectedItemIds((prev) => {
-        const allSelected = rangeItems.every((item) => prev.has(item.id));
-        const newSet = new Set(prev);
-        if (allSelected) {
-          rangeItems.forEach((item) => newSet.delete(item.id));
-          setRangeStart(null);
-          setRangeEnd(null);
-        } else {
-          rangeItems.forEach((item) => newSet.add(item.id));
-        }
-        return newSet;
+      toggleCurrentRangeSelection(columnType, getListColumnItems(columnType, currentEventDate), {
+        halls: getHallsForDate(currentEventDate),
+        currentMapData: getMapDataForDate(currentEventDate),
       });
     },
     [
-      rangeStart,
-      rangeEnd,
-      activeTab,
       activeEventName,
-      eventDates,
-      executeModeItems,
-      items,
-      selectedBlockFilters,
-      spaceGroupingEnabled,
+      activeEventDate,
+      getListColumnItems,
       getHallsForDate,
       getMapDataForDate,
+      toggleCurrentRangeSelection,
     ],
   );
 
@@ -3280,17 +3075,57 @@ const App: React.FC = () => {
           [visitListPanelMapTab]: result.hallRouteSettings,
         },
       }));
+
+      // 優先度変更後、同一スペースの兄弟と隣接するようにexecuteIds内の位置を調整
+      const item = items.find((i) => i.id === itemId);
+      if (item) {
+        const dayName = item.eventDate;
+        setExecuteModeItems((prev) => {
+          const currentExecItems = prev[activeEventName] || {};
+          const reordered = reorderExecuteIdsForSpaceAdjacency(
+            itemId,
+            result.items,
+            currentExecItems,
+            dayName,
+          );
+          return {
+            ...prev,
+            [activeEventName]: reordered,
+          };
+        });
+      }
     },
     [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData, hallRouteSettings],
   );
 
+  // マップビュー等から直接呼び出される優先度変更（items + hallOrder の両方を更新）。
+  // 編集ダイアログ経由ではない単独呼び出しなので race condition は発生しない。
   const handleUpdateItemPriorityFromEdit = useCallback(
     (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
-      if (!activeEventName || !currentMapTabName) return;
+      if (!activeEventName) return;
 
-      const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
-      const mapDataForTab = mapData[activeEventName]?.[currentMapTabName];
-      const currentSettings = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
+      const currentItems = eventLists[activeEventName] || [];
+      const item = currentItems.find((i) => i.id === itemId);
+      if (!item) return;
+
+      const resolvedHallId = getItemHallId(item, item.eventDate);
+      const mapTabForItem = getMapTabForDate(item.eventDate);
+      const mapHallIds = new Set(
+        mapTabForItem
+          ? (hallDefinitions[activeEventName]?.[mapTabForItem] || []).map((h) => h.id)
+          : [],
+      );
+      const targetKey: string =
+        resolvedHallId && mapHallIds.has(resolvedHallId)
+          ? (mapTabForItem as string)
+          : getMaplessKey(item.eventDate);
+
+      const targetHalls = hallDefinitions[activeEventName]?.[targetKey] || [];
+      const targetMapData =
+        targetKey.startsWith(MAPLESS_HALL_KEY)
+          ? undefined
+          : mapData[activeEventName]?.[targetKey];
+      const targetSettings = hallRouteSettings[activeEventName]?.[targetKey] || {
         hallOrder: [],
         hallVisitLists: [],
       };
@@ -3298,10 +3133,10 @@ const App: React.FC = () => {
       const result = computeUpdateItemPriority(
         itemId,
         priorityLevel,
-        items,
-        halls,
-        mapDataForTab,
-        currentSettings,
+        currentItems,
+        targetHalls,
+        targetMapData,
+        targetSettings,
       );
 
       setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
@@ -3309,11 +3144,127 @@ const App: React.FC = () => {
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
-          [currentMapTabName]: result.hallRouteSettings,
+          [targetKey]: result.hallRouteSettings,
         },
       }));
+
+      // 優先度変更後、同一スペースの兄弟と隣接するようにexecuteIds内の位置を調整
+      const dayName = item.eventDate;
+      setExecuteModeItems((prev) => {
+        const currentExecItems = prev[activeEventName] || {};
+        const reordered = reorderExecuteIdsForSpaceAdjacency(
+          itemId,
+          result.items,
+          currentExecItems,
+          dayName,
+        );
+        return {
+          ...prev,
+          [activeEventName]: reordered,
+        };
+      });
     },
-    [activeEventName, currentMapTabName, items, hallDefinitions, mapData, hallRouteSettings],
+    [
+      activeEventName,
+      eventLists,
+      hallDefinitions,
+      mapData,
+      hallRouteSettings,
+      getItemHallId,
+      getMapTabForDate,
+    ],
+  );
+
+  // 編集ダイアログからの優先度変更に伴う hallRouteSettings.hallOrder の更新のみを行う。
+  // アイテム本体 (priorityLevel) の更新は handleUpdateItem 経由の onSave に統合済み。
+  // 旧 handleUpdateItemPriorityFromEdit は items と hallRouteSettings の両方に setEventLists を発行しており、
+  // 同期クロージャ由来の race condition で priority が巻き戻るバグの原因だったため、
+  // items 側を触らない形に縮退させた。
+  const handleUpdateHallOrderForPriorityChangeFromEdit = useCallback(
+    (
+      itemId: string,
+      newPriorityLevel: 'none' | 'priority' | 'highest',
+      oldPriorityLevel: 'none' | 'priority' | 'highest',
+    ) => {
+      if (!activeEventName) return;
+
+      const currentItems = eventLists[activeEventName] || [];
+      const item = currentItems.find((i) => i.id === itemId);
+      if (!item) return;
+
+      // 統合ホール判定でアイテムの所属ホールを解決（manualHallId → polygon → blockNames）
+      const resolvedHallId = getItemHallId(item, item.eventDate);
+
+      // 解決されたホールが map タブ側か mapless 側かを判定して保存先を決定
+      const mapTabForItem = getMapTabForDate(item.eventDate);
+      const mapHallIds = new Set(
+        mapTabForItem
+          ? (hallDefinitions[activeEventName]?.[mapTabForItem] || []).map((h) => h.id)
+          : [],
+      );
+      const targetKey: string =
+        resolvedHallId && mapHallIds.has(resolvedHallId)
+          ? (mapTabForItem as string)
+          : getMaplessKey(item.eventDate);
+
+      const targetHalls = hallDefinitions[activeEventName]?.[targetKey] || [];
+      const targetMapData =
+        targetKey.startsWith(MAPLESS_HALL_KEY)
+          ? undefined
+          : mapData[activeEventName]?.[targetKey];
+      const targetSettings = hallRouteSettings[activeEventName]?.[targetKey] || {
+        hallOrder: [],
+        hallVisitLists: [],
+      };
+
+      // priority 変更後のアイテム状態を反映した allItems を渡す（hallOrder 計算のため）
+      const itemsAfter = currentItems.map((i) =>
+        i.id === itemId ? { ...i, priorityLevel: newPriorityLevel } : i,
+      );
+
+      const nextSettings = computeHallOrderForPriorityChange(
+        itemId,
+        newPriorityLevel,
+        oldPriorityLevel,
+        itemsAfter,
+        targetHalls,
+        targetMapData,
+        targetSettings,
+      );
+
+      setHallRouteSettings((prev) => ({
+        ...prev,
+        [activeEventName]: {
+          ...prev[activeEventName],
+          [targetKey]: nextSettings,
+        },
+      }));
+
+      // 優先度変更後、同一スペースの兄弟と隣接するようにexecuteIds内の位置を調整
+      const dayName = item.eventDate;
+      setExecuteModeItems((prev) => {
+        const currentExecItems = prev[activeEventName] || {};
+        const reordered = reorderExecuteIdsForSpaceAdjacency(
+          itemId,
+          itemsAfter,
+          currentExecItems,
+          dayName,
+        );
+        return {
+          ...prev,
+          [activeEventName]: reordered,
+        };
+      });
+    },
+    [
+      activeEventName,
+      eventLists,
+      hallDefinitions,
+      mapData,
+      hallRouteSettings,
+      getItemHallId,
+      getMapTabForDate,
+    ],
   );
 
   const handleTabChangeWithVisitListCheck = (newTab: string): boolean => {
@@ -3371,34 +3322,32 @@ const App: React.FC = () => {
     (halls: HallDefinition[]) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
 
-      setHallDefinitions((prev) => ({
-        ...prev,
-        [activeEventName]: {
-          ...prev[activeEventName],
-          [currentMapTabName]: halls,
-        },
-      }));
+      const { polygonHalls, maplessHalls } = splitHallsForStorage(halls);
+      const maplessKey = activeEventDate ? getMaplessKey(activeEventDate) : null;
 
+      setHallDefinitions((prev) =>
+        updateHallDefinitionsForHalls({
+          previous: prev,
+          eventName: activeEventName,
+          mapTabName: currentMapTabName,
+          maplessKey,
+          polygonHalls,
+          maplessHalls,
+        }),
+      );
 
-      const existingOrder = currentHallRouteSettings.hallOrder;
-      const newHallIds = halls.map((h) => h.id);
-      const updatedOrder = [
-        ...existingOrder.filter((id) => newHallIds.includes(id)),
-        ...newHallIds.filter((id) => !existingOrder.includes(id)),
-      ];
-
-      setHallRouteSettings((prev) => ({
-        ...prev,
-        [activeEventName]: {
-          ...prev[activeEventName],
-          [currentMapTabName]: {
-            ...currentHallRouteSettings,
-            hallOrder: updatedOrder,
-          },
-        },
-      }));
+      setHallRouteSettings((prev) =>
+        updateHallRouteSettingsForHalls({
+          previous: prev,
+          eventName: activeEventName,
+          mapTabName: currentMapTabName,
+          maplessKey,
+          polygonHalls,
+          maplessHalls,
+        }),
+      );
     },
-    [activeEventName, isMapTab, currentMapTabName, currentHallRouteSettings],
+    [activeEventName, activeEventDate, isMapTab, currentMapTabName],
   );
 
 
@@ -3417,22 +3366,254 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, currentMapTabName],
   );
 
+  // マップなしホール定義の更新ハンドラ
+  const handleUpdateMaplessHalls = useCallback(
+    (halls: HallDefinition[]) => {
+      if (!activeEventName || !activeEventDate) return;
+
+      const maplessKey = getMaplessKey(activeEventDate);
+
+      setHallDefinitions((prev) =>
+        updateMaplessHallDefinitions({
+          previous: prev,
+          eventName: activeEventName,
+          maplessKey,
+          halls,
+        }),
+      );
+
+      setHallRouteSettings((prev) =>
+        updateMaplessHallRouteSettings({
+          previous: prev,
+          eventName: activeEventName,
+          maplessKey,
+          halls,
+        }),
+      );
+    },
+    [activeEventName, activeEventDate],
+  );
+
+  // マップタブが存在する日付一覧
+  const mapTabDates = useMemo(
+    () => eventDates.filter((date) => !!getMapTabForDate(date)),
+    [eventDates, getMapTabForDate],
+  );
+
+  // マップなしホール定義を他の日付に同期
+  const handleSyncMaplessHallsToOtherDates = useCallback(
+    (targetDates: string[]) => {
+      if (!activeEventName || !activeEventDate) return;
+
+      const sourceKey = getMaplessKey(activeEventDate);
+      const sourceHalls = hallDefinitions[activeEventName]?.[sourceKey] || [];
+      if (sourceHalls.length === 0) return;
+
+      const clonedByDate = cloneHallsForDates(sourceHalls, targetDates);
+
+      setHallDefinitions((prev) => {
+        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        for (const date of targetDates) {
+          const targetKey = getMaplessKey(date);
+          updated[activeEventName][targetKey] = clonedByDate.get(date)!.halls;
+        }
+        return updated;
+      });
+
+      setHallRouteSettings((prev) => {
+        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        for (const date of targetDates) {
+          const targetKey = getMaplessKey(date);
+          const { idMap } = clonedByDate.get(date)!;
+          const sourceSettings = prev[activeEventName]?.[sourceKey] || emptyHallRouteSettings();
+          updated[activeEventName][targetKey] = remapHallRouteSettings(sourceSettings, idMap);
+        }
+        return updated;
+      });
+    },
+    [activeEventName, activeEventDate, hallDefinitions, hallRouteSettings],
+  );
+
+  // ポリゴンホール定義を他の日付に同期
+  const handleSyncPolygonHallsToOtherDates = useCallback(
+    (targetDates: string[]) => {
+      if (!activeEventName || !isMapTab || !currentMapTabName) return;
+
+      const sourceHalls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+      if (sourceHalls.length === 0) return;
+
+      const targetMapTabsByDate = new Map<string, string>();
+      for (const date of targetDates) {
+        const targetMapTab = getMapTabForDate(date);
+        if (!targetMapTab) continue;
+        targetMapTabsByDate.set(date, targetMapTab);
+      }
+      const clonedByDate = cloneHallsForDates(sourceHalls, Array.from(targetMapTabsByDate.keys()));
+
+      setHallDefinitions((prev) => {
+        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        for (const [date, { halls }] of clonedByDate) {
+          const targetMapTab = targetMapTabsByDate.get(date)!;
+          updated[activeEventName][targetMapTab] = halls;
+        }
+        return updated;
+      });
+
+      setHallRouteSettings((prev) => {
+        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        for (const [date, { idMap }] of clonedByDate) {
+          const targetMapTab = targetMapTabsByDate.get(date)!;
+          const sourceSettings =
+            prev[activeEventName]?.[currentMapTabName] || emptyHallRouteSettings();
+          updated[activeEventName][targetMapTab] = remapHallRouteSettings(sourceSettings, idMap);
+        }
+        return updated;
+      });
+    },
+    [activeEventName, isMapTab, currentMapTabName, hallDefinitions, hallRouteSettings, getMapTabForDate],
+  );
+
+  // ===== ホール間移動順序パネル用: マップ/maplessの統合ビュー =====
+
+  // 現在日付のマップタブ名（mapViewActive問わず、その日付にマップがあるか）
+  const globalHallOrderMapTabName = useMemo(
+    () => (activeEventDate ? getMapTabForDate(activeEventDate) : null),
+    [activeEventDate, getMapTabForDate],
+  );
+
+  // 現在日付の実行列に優先度付きアイテムが 1 件でもあるか
+  // (ホール定義 0 件でも「ホール間移動順序」アイコンを出すための条件)
+  const hasUndefinedPriorityItems = useMemo((): boolean => {
+    if (!activeEventName || !activeEventDate) return false;
+    const ids = executeModeItems[activeEventName]?.[activeEventDate] || [];
+    return ids.some((id) => {
+      const it = items.find((i) => i.id === id);
+      if (!it) return false;
+      const p = it.priorityLevel || 'none';
+      return p === 'priority' || p === 'highest';
+    });
+  }, [activeEventName, activeEventDate, executeModeItems, items]);
+
+  // マップ/maplessの両方を統合したホール一覧
+  const globalHallOrderHalls = useMemo((): HallDefinition[] => {
+    if (!activeEventName) return [];
+    const hasMap = !!globalHallOrderMapTabName;
+    const mapHalls = hasMap
+      ? hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []
+      : [];
+    const maplessKey = activeEventDate ? getMaplessKey(activeEventDate) : null;
+    const maplessHalls = maplessKey ? hallDefinitions[activeEventName]?.[maplessKey] || [] : [];
+    return [...mapHalls, ...maplessHalls];
+  }, [activeEventName, activeEventDate, globalHallOrderMapTabName, hallDefinitions]);
+
+  // マップ/mapless統合されたHallRouteSettings（hallOrderのマージ）
+  const globalHallOrderRouteSettings = useMemo((): HallRouteSettings => {
+    const executeIds =
+      activeEventName && activeEventDate
+        ? executeModeItems[activeEventName]?.[activeEventDate] || []
+        : [];
+    return buildMergedHallRouteSettings({
+      eventName: activeEventName,
+      dayName: activeEventDate,
+      mapTabName: globalHallOrderMapTabName,
+      hallDefinitionsStore: hallDefinitions,
+      hallRouteSettingsStore: hallRouteSettings,
+      executeIds,
+      items,
+      mapDataStore: mapData,
+    }).mergedSettings;
+  }, [
+    activeEventName,
+    activeEventDate,
+    globalHallOrderMapTabName,
+    hallDefinitions,
+    hallRouteSettings,
+    executeModeItems,
+    items,
+    mapData,
+  ]);
+
+  // 統合順序の保存: hallIDごとにmap側/mapless側を判別して分離保存
+  const handleUpdateGlobalHallRouteSettings = useCallback(
+    (settings: HallRouteSettings) => {
+      if (!activeEventName) return;
+
+      const mapHallIds = new Set<string>(
+        globalHallOrderMapTabName
+          ? (hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []).map(
+              (h) => h.id,
+            )
+          : [],
+      );
+      const maplessKey = activeEventDate ? getMaplessKey(activeEventDate) : null;
+      const maplessHallIds = new Set<string>(
+        (maplessKey ? hallDefinitions[activeEventName]?.[maplessKey] || [] : []).map((h) => h.id),
+      );
+
+      const { mapSettings, maplessSettings } = splitGlobalHallRouteSettings({
+        settings,
+        mapHallIds,
+        maplessHallIds,
+        hasMapTab: !!globalHallOrderMapTabName,
+      });
+
+      setHallRouteSettings((prev) => {
+        const eventSettings = { ...(prev[activeEventName] || {}) };
+        if (globalHallOrderMapTabName) {
+          eventSettings[globalHallOrderMapTabName] = mapSettings;
+        }
+        if (maplessKey) eventSettings[maplessKey] = maplessSettings;
+        return {
+          ...prev,
+          [activeEventName]: eventSettings,
+        };
+      });
+    },
+    [activeEventName, activeEventDate, globalHallOrderMapTabName, hallDefinitions],
+  );
+
+  // 統合ホール用アイテム数集計（groupId対応）
+  const getGlobalHallItemCount = useCallback(
+    (groupId: string): number => {
+      if (!activeEventName || !activeEventDate) return 0;
+      const executeIds =
+        executeModeItems[activeEventName]?.[activeEventDate] || [];
+      return computeGlobalHallItemCount({
+        groupId,
+        executeIds,
+        items,
+        getItemHallId,
+      });
+    },
+    [activeEventName, activeEventDate, executeModeItems, items, getItemHallId],
+  );
+
 
   const handleReorderExecuteListByHallOrder = useCallback(
     (hallOrder: string[]) => {
-      if (!activeEventName || !isMapTab || !currentMapTabName) return;
+      if (!activeEventName) return;
 
       if (!activeEventDate) return;
       const dayName = activeEventDate;
 
-      const currentMapData = mapData[activeEventName]?.[currentMapTabName];
-      const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
-      const currentHallRouteSettings = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
-        hallOrder: [],
-        hallVisitLists: [],
-      };
+      const mapTabForDate = getMapTabForDate(dayName);
+      const currentMapData = mapTabForDate
+        ? mapData[activeEventName]?.[mapTabForDate]
+        : undefined;
+      const mapHalls = mapTabForDate
+        ? hallDefinitions[activeEventName]?.[mapTabForDate] || []
+        : [];
+      const maplessKey = getMaplessKey(dayName);
+      const maplessHalls = hallDefinitions[activeEventName]?.[maplessKey] || [];
+      const halls = [...mapHalls, ...maplessHalls];
+      const currentHallRouteSettings = getCombinedHallRouteSettingsForDate({
+        eventName: activeEventName,
+        dayName,
+        mapTabName: mapTabForDate,
+        hallRouteSettings,
+      });
 
-      if (!currentMapData || halls.length === 0) return;
+      // ホール定義 0 件でも未定義+優先度バケットで並べ替え可能にするため早期 return しない
 
       setExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
@@ -3440,88 +3621,13 @@ const App: React.FC = () => {
 
         if (dayItems.length === 0) return prev;
 
-
-        const itemsMap = new Map(items.map((i) => [i.id, i]));
-        const getHallIdForItem = (itemId: string): string | null => {
-          const item = itemsMap.get(itemId);
-          if (!item || !currentMapData) return null;
-
-          const blockName = item.block?.trim() || '';
-          let block = currentMapData.blocks.find((b) => b.name === blockName);
-          if (!block) {
-            const candidates = currentMapData.blocks.filter(
-              (b) => b.name.toLowerCase() === blockName.toLowerCase(),
-            );
-            if (candidates.length === 1) {
-              block = candidates[0];
-            }
-          }
-          if (!block) return null;
-
-          const centerRow = (block.startRow + block.endRow) / 2;
-          const centerCol = (block.startCol + block.endCol) / 2;
-
-          for (const hall of halls) {
-            if (
-              hall.vertices.length >= 4 &&
-              isPointInPolygon(centerRow, centerCol, hall.vertices)
-            ) {
-              return hall.id;
-            }
-          }
-          return null;
-        };
-
-
-        const itemsByHall = new Map<string | null, Set<string>>();
-        dayItems.forEach((itemId) => {
-          const hallId = getHallIdForItem(itemId);
-          if (!itemsByHall.has(hallId)) {
-            itemsByHall.set(hallId, new Set());
-          }
-          itemsByHall.get(hallId)!.add(itemId);
-        });
-
-
-        const visitOrderMap = new Map<string, number>();
-        currentHallRouteSettings.hallVisitLists.forEach((list) => {
-          list.itemIds.forEach((itemId, index) => {
-            visitOrderMap.set(itemId, index);
-          });
-        });
-
-
-        const sortItemsInHall = (itemIds: Set<string>): string[] => {
-          const itemsArray = Array.from(itemIds);
-          return itemsArray.sort((a, b) => {
-            const orderA = visitOrderMap.get(a);
-            const orderB = visitOrderMap.get(b);
-
-
-            if (orderA !== undefined && orderB !== undefined) {
-              return orderA - orderB;
-            }
-            if (orderA !== undefined) return -1;
-            if (orderB !== undefined) return 1;
-            return dayItems.indexOf(a) - dayItems.indexOf(b);
-          });
-        };
-
-
-        const reorderedItems: string[] = [];
-
-        hallOrder.forEach((hallId) => {
-          const hallItems = itemsByHall.get(hallId);
-          if (hallItems && hallItems.size > 0) {
-            reorderedItems.push(...sortItemsInHall(hallItems));
-            itemsByHall.delete(hallId);
-          }
-        });
-
-        itemsByHall.forEach((hallItems) => {
-          if (hallItems.size > 0) {
-            reorderedItems.push(...sortItemsInHall(hallItems));
-          }
+        const reorderedItems = reorderExecuteIdsByHallOrder({
+          hallOrder,
+          dayItems,
+          items,
+          halls,
+          mapData: currentMapData,
+          hallRouteSettings: currentHallRouteSettings,
         });
 
         return {
@@ -3533,7 +3639,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, isMapTab, currentMapTabName, activeEventDate, mapData, hallDefinitions, hallRouteSettings, items],
+    [activeEventName, activeEventDate, getMapTabForDate, mapData, hallDefinitions, hallRouteSettings, items],
   );
 
 
@@ -3922,6 +4028,26 @@ const App: React.FC = () => {
     });
   }, [activeEventName, activeTab, executeModeItems, currentTabItems, eventDates]);
 
+  // ホール定義用: 当該日付の全アイテムからブロック名一覧を取得（実行列・候補列を問わず）
+  const allBlocksForHallDefinition = useMemo(() => {
+    if (!activeEventName) return [];
+    const blocks = new Set(currentTabItems.map((item) => item.block).filter(Boolean));
+    return Array.from(blocks).sort((a, b) => {
+      const numA = Number(a);
+      const numB = Number(b);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return numA - numB;
+      }
+      return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
+    });
+  }, [activeEventName, currentTabItems]);
+
+  // 現在のイベント・日付のマップなしホール一覧
+  const currentMaplessHalls = useMemo(() => {
+    if (!activeEventName || !activeEventDate) return [];
+    return hallDefinitions[activeEventName]?.[getMaplessKey(activeEventDate)] || [];
+  }, [activeEventName, activeEventDate, hallDefinitions]);
+
   const candidateColumnItems = useMemo(() => {
     if (!activeEventName) return [];
     const currentEventDate = activeEventDate;
@@ -4065,868 +4191,114 @@ const App: React.FC = () => {
   const mainContentVisible = eventDates.includes(activeTab);
 
   const handleZoomChange = (newZoom: number) => {
-    setZoomLevel(Math.max(30, Math.min(150, newZoom)));
+    setZoomLevel(Math.max(15, Math.min(150, newZoom)));
   };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-200 font-sans">
-      {(showHeaderBar || showTabBar) && (
-        <header className="bg-white dark:bg-slate-800 shadow-sm sticky top-0 z-10">
-          {showHeaderBar && (
-            <div className="max-w-7xl mx-auto py-2 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-lg font-bold text-slate-900 dark:text-white truncate max-w-[200px]">
-                    {activeEventName || '即売会購入巡回表'}
-                  </h1>
-                  {activeEventName &&
-                    mainContentVisible &&
-                    items.length > 0 &&
-                    currentMode === 'execute' && (
-                      <button
-                        onClick={handleBlockSortToggle}
-                        className={`p-2 rounded-md transition-colors duration-200 ${
-                          blockSortDirection
-                            ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
-                            : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400'
-                        }`}
-                        title={
-                          blockSortDirection === 'desc'
-                            ? 'ブロックを降順で並べ替え'
-                            : blockSortDirection === 'asc'
-                              ? 'ブロックを昇順で並べ替え'
-                              : 'ブロック番号で並べ替え'
-                        }
-                      >
-                        {blockSortDirection === 'desc' ? (
-                          <SortDescendingIcon className="w-5 h-5" />
-                        ) : (
-                          <SortAscendingIcon className="w-5 h-5" />
-                        )}
-                      </button>
-                    )}
-                  {activeEventName &&
-                    mainContentVisible &&
-                    items.length > 0 &&
-                    currentMode === 'edit' && (
-                      <button
-                        onClick={handleBlockSortToggleCandidate}
-                        className={`p-2 rounded-md transition-colors duration-200 ${
-                          blockSortDirection
-                            ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
-                            : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400'
-                        }`}
-                        title={
-                          blockSortDirection === 'desc'
-                            ? '候補ブロックを降順で並べ替え'
-                            : blockSortDirection === 'asc'
-                              ? '候補ブロックを昇順で並べ替え'
-                              : '候補ブロックを番号で並べ替え'
-                        }
-                      >
-                        {blockSortDirection === 'desc' ? (
-                          <SortDescendingIcon className="w-5 h-5" />
-                        ) : (
-                          <SortAscendingIcon className="w-5 h-5" />
-                        )}
-                      </button>
-                    )}
-                  {activeEventName &&
-                    mainContentVisible &&
-                    getMapTabForDate(activeEventDate || '') && (
-                        <div className="relative">
-                          <button
-                            ref={mapToggleButtonRef}
-                            onClick={() => {
-                              if (mapToggleLongPressFiredRef.current) {
-                                mapToggleLongPressFiredRef.current = false;
-                                return;
-                              }
-                              setMapViewActive((prev) => !prev);
-                            }}
-                            onPointerDown={(e) => {
-                              if (!mapViewActive) return;
-                              const target = e.currentTarget as HTMLButtonElement;
-                              const rect = target.getBoundingClientRect();
-                              const menuLeft = rect.left + rect.width / 2;
-                              const menuTop = rect.bottom + 4;
-                              mapToggleLongPressRef.current = window.setTimeout(() => {
-                                mapToggleLongPressFiredRef.current = true;
-                                setMapTabMenuPosition({ left: menuLeft, top: menuTop });
-                                setMapTabMenuOpen('mapToggle');
-                                mapToggleLongPressRef.current = null;
-                              }, 500);
-                            }}
-                            onPointerUp={() => {
-                              if (mapToggleLongPressRef.current) {
-                                clearTimeout(mapToggleLongPressRef.current);
-                                mapToggleLongPressRef.current = null;
-                              }
-                            }}
-                            onPointerCancel={() => {
-                              if (mapToggleLongPressRef.current) {
-                                clearTimeout(mapToggleLongPressRef.current);
-                                mapToggleLongPressRef.current = null;
-                              }
-                            }}
-                            className={`p-2 rounded-md transition-colors duration-200 ${
-                              mapViewActive
-                                ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
-                                : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400'
-                            }`}
-                            title={mapViewActive ? 'リスト表示に切り替え' : 'マップ表示に切り替え'}
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l5.447 2.724A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                            </svg>
-                          </button>
-                          {mapTabMenuOpen === 'mapToggle' && (
-                            <div
-                              ref={mapToggleMenuRef}
-                              className="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 min-w-[160px]"
-                              style={{
-                                left: `${mapTabMenuPosition.left}px`,
-                                top: `${mapTabMenuPosition.top}px`,
-                                transform: 'translateX(-50%)',
-                              }}
-                            >
-                              <div className="py-1">
-                                <button
-                                  onClick={() => {
-                                    setMapTabMenuOpen(null);
-                                    if (currentMapTabName) openVisitListPanel(currentMapTabName);
-                                  }}
-                                  className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
-                                >
-                                  <span>📍</span> 訪問リスト
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setMapTabMenuOpen(null);
-                                    setBlockDefinitionMode(true);
-                                  }}
-                                  className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
-                                >
-                                  <span>🔲</span> ブロック定義
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setMapTabMenuOpen(null);
-                                    setHallDefinitionMode(true);
-                                  }}
-                                  className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
-                                >
-                                  <span>🏛️</span> ホール定義
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                    )}
-                  {/* 表示処理の補足 */}
-                  <div className="relative">
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setUiSettingsPanelOpen(!uiSettingsPanelOpen);
-                      }}
-                      className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                        uiSettingsPanelOpen
-                          ? 'bg-slate-200 dark:bg-slate-700'
-                          : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
-                      }`}
-                      title="表示項目の設定"
-                      style={{
-                        WebkitTapHighlightColor: 'transparent',
-                        minWidth: '44px',
-                        minHeight: '44px',
-                      }}
-                      type="button"
-                    >
-                      <svg
-                        className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                        />
-                      </svg>
-                    </button>
+      <AppHeaderShell
+        activeEventDate={activeEventDate}
+        activeEventName={activeEventName}
+        activeTab={activeTab}
+        blockSortDirection={blockSortDirection}
+        currentHalls={currentHalls}
+        currentMapData={currentMapData}
+        currentMapTabName={currentMapTabName}
+        currentMapTabRotationState={currentMapTabRotationState}
+        currentMode={currentMode}
+        currentSearchIndex={currentSearchIndex}
+        DEFAULT_OUTLINE_STYLE={DEFAULT_OUTLINE_STYLE}
+        DEFAULT_PURCHASE_STATUS_CONTROL_MODE={DEFAULT_PURCHASE_STATUS_CONTROL_MODE}
+        DEFAULT_UI_VISIBILITY={DEFAULT_UI_VISIBILITY}
+        disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+        eventDates={eventDates}
+        executeSpaceGroupingEnabled={executeSpaceGroupingEnabled}
+        getHallExecuteCount={getHallExecuteCount}
+        getHallTotalItemCount={getHallTotalItemCount}
+        getMapTabForDate={getMapTabForDate}
+        globalHallOrderHalls={globalHallOrderHalls}
+        globalHallOrderMapTabName={globalHallOrderMapTabName}
+        handleBlockSortToggle={handleBlockSortToggle}
+        handleBlockSortToggleCandidate={handleBlockSortToggleCandidate}
+        handleBulkSort={handleBulkSort}
+        handleClearSelection={handleClearSelection}
+        handleMapTabRotationAngleChange={handleMapTabRotationAngleChange}
+        handleMoveToExecuteColumn={handleMoveToExecuteColumn}
+        handleRemoveFromExecuteColumn={handleRemoveFromExecuteColumn}
+        handleSearchNext={handleSearchNext}
+        handleSetViewMode={handleSetViewMode}
+        handleSortToggle={handleSortToggle}
+        hasCandidateSelection={hasCandidateSelection}
+        hasExecuteSelection={hasExecuteSelection}
+        hasUndefinedPriorityItems={hasUndefinedPriorityItems}
+        isMapTab={isMapTab}
+        items={items}
+        itemToEdit={itemToEdit}
+        layoutMode={layoutMode}
+        mainContentVisible={mainContentVisible}
+        mapHallSelectorOpen={mapHallSelectorOpen}
+        mapIsRouteVisible={mapIsRouteVisible}
+        mapSelectedHallId={mapSelectedHallId}
+        mapSmartInsertEnabled={mapSmartInsertEnabled}
+        mapSmartInsertMode={mapSmartInsertMode}
+        mapTabMenuOpen={mapTabMenuOpen}
+        mapTabMenuPosition={mapTabMenuPosition}
+        mapToggleButtonRef={mapToggleButtonRef}
+        mapToggleLongPressFiredRef={mapToggleLongPressFiredRef}
+        mapToggleLongPressRef={mapToggleLongPressRef}
+        mapToggleMenuRef={mapToggleMenuRef}
+        mapViewActive={mapViewActive}
+        numberCellOutlineStyle={numberCellOutlineStyle}
+        openVisitListPanel={openVisitListPanel}
+        purchaseStatusControlMode={purchaseStatusControlMode}
+        searchKeyword={searchKeyword}
+        selectedItemIds={selectedItemIds}
+        setActiveEventName={setActiveEventName}
+        setActiveTab={setActiveTab}
+        setBlockDefinitionMode={setBlockDefinitionMode}
+        setExecuteCollapsedSpaces={setExecuteCollapsedSpaces}
+        setExecuteSpaceGroupingEnabled={setExecuteSpaceGroupingEnabled}
+        setGlobalHallOrderPanelOpen={setGlobalHallOrderPanelOpen}
+        setHallDefinitionMode={setHallDefinitionMode}
+        setItemToEdit={setItemToEdit}
+        setLayoutMode={setLayoutMode}
+        setMapHallSelectorOpen={setMapHallSelectorOpen}
+        setMapIsHallOrderOpen={setMapIsHallOrderOpen}
+        setMapIsRouteVisible={setMapIsRouteVisible}
+        setMapSelectedHallId={setMapSelectedHallId}
+        setMapSmartInsertEnabled={setMapSmartInsertEnabled}
+        setMapSmartInsertMode={setMapSmartInsertMode}
+        setMapTabMenuOpen={setMapTabMenuOpen}
+        setMapTabMenuPosition={setMapTabMenuPosition}
+        setMapViewActive={setMapViewActive}
+        setDisablePriceUndefinedCheck={setDisablePriceUndefinedCheck}
+        setNumberCellOutlineStyle={setNumberCellOutlineStyle}
+        setPurchaseStatusControlMode={setPurchaseStatusControlMode}
+        setSearchKeyword={setSearchKeyword}
+        setSelectedBlockFilters={setSelectedBlockFilters}
+        setSelectedItemIds={setSelectedItemIds}
+        setSimpleHallDefinitionMode={setSimpleHallDefinitionMode}
+        setThemeMode={setThemeMode}
+        setUiSettingsPanelOpen={setUiSettingsPanelOpen}
+        setUiVisibilityOverride={setUiVisibilityOverride}
+        setUiVisibilitySettings={setUiVisibilitySettings}
+        showHeaderBar={showHeaderBar}
+        showMoveButtons={showMoveButtons}
+        showSmartInsertToast={showSmartInsertToast}
+        showTabBar={showTabBar}
+        smartInsertLongPressRef={smartInsertLongPressRef}
+        smartInsertLongPressTriggeredRef={smartInsertLongPressTriggeredRef}
+        sortLabels={sortLabels}
+        sortState={sortState}
+        TabButton={TabButton}
+        themeMode={themeMode}
+        uiSettingsPanelOpen={uiSettingsPanelOpen}
+        uiVisibilitySettings={uiVisibilitySettings}
+        updateUIVisibilityConfig={updateUIVisibilityConfig}
+        visibleSearchMatches={visibleSearchMatches}
+      />
 
-                    {/* 表示処理の補足 */}
-                    {uiSettingsPanelOpen && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-40"
-                          onClick={() => setUiSettingsPanelOpen(false)}
-                        />
-                        <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-4 min-w-[320px] max-h-[70vh] overflow-y-auto">
-                          {/* テーマ切替 */}
-                          <div className="mb-3 flex items-center justify-between">
-                            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">テーマ</span>
-                            <button
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setThemeMode((prev) => {
-                                  const next =
-                                    prev === 'system' ? 'light' : prev === 'light' ? 'dark' : 'system';
-                                  return next;
-                                });
-                              }}
-                              className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
-                              title={
-                                themeMode === 'system'
-                                  ? 'システム設定 → ライトモードへ'
-                                  : themeMode === 'light'
-                                    ? 'ライトモード → ダークモードへ'
-                                    : 'ダークモード → システム設定へ'
-                              }
-                              style={{ WebkitTapHighlightColor: 'transparent' }}
-                              type="button"
-                            >
-                              {themeMode === 'system' ? (
-                                <svg className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                </svg>
-                              ) : themeMode === 'light' ? (
-                                <svg className="w-5 h-5 text-amber-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                                </svg>
-                              ) : (
-                                <svg className="w-5 h-5 text-indigo-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                                </svg>
-                              )}
-                            </button>
-                          </div>
 
-                          {/* レイアウト切替 */}
-                          <div className="mb-3 pb-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">レイアウト</span>
-                            <button
-                              onClick={() => setLayoutMode(layoutMode === 'pc' ? 'smartphone' : 'pc')}
-                              className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                                layoutMode === 'smartphone'
-                                  ? 'bg-blue-600 text-white'
-                                  : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                              }`}
-                              title={layoutMode === 'pc' ? 'スマートフォンモードに切替' : 'タブレット/PCモードに切替'}
-                              style={{ WebkitTapHighlightColor: 'transparent' }}
-                              type="button"
-                            >
-                              {layoutMode === 'smartphone' ? (
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                                </svg>
-                              ) : (
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                </svg>
-                              )}
-                            </button>
-                          </div>
-
-                          <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3">
-                            ヘッダー/タブバー表示設定
-                          </h3>
-
-                          {/* 表示処理の補足 */}
-                          <div className="mb-3">
-                            <h4 className="text-xs font-semibold text-purple-600 dark:text-purple-400 mb-2">
-                              集中モード
-                            </h4>
-                            <div className="space-y-2">
-                              {(
-                                [
-                                  ['focus_sp_mapOn', 'スマホ・マップ表示'],
-                                  ['focus_sp_mapOff', 'スマホ・マップ非表示'],
-                                  ['focus_pc_mapOn', 'パソコン・マップ表示'],
-                                  ['focus_pc_mapOff', 'パソコン・マップ非表示'],
-                                ] as [keyof typeof uiVisibilitySettings, string][]
-                              ).map(([key, label]) => (
-                                <div
-                                  key={key}
-                                  className="flex items-center justify-between text-xs"
-                                >
-                                  <span className="text-slate-600 dark:text-slate-400 min-w-[110px]">
-                                    {label}
-                                  </span>
-                                  <div className="flex items-center gap-3">
-                                    <label className="flex items-center gap-1 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={uiVisibilitySettings[key].header}
-                                        onChange={(e) =>
-                                          updateUIVisibilityConfig(key, 'header', e.target.checked)
-                                        }
-                                        className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                      />
-                                      <span className="text-slate-500 dark:text-slate-400">
-                                        ヘッダー
-                                      </span>
-                                    </label>
-                                    <label className="flex items-center gap-1 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={uiVisibilitySettings[key].tabBar}
-                                        onChange={(e) =>
-                                          updateUIVisibilityConfig(key, 'tabBar', e.target.checked)
-                                        }
-                                        className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                      />
-                                      <span className="text-slate-500 dark:text-slate-400">
-                                        タブバー
-                                      </span>
-                                    </label>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* 表示処理の補足 */}
-                          <div className="mb-3">
-                            <h4 className="text-xs font-semibold text-green-600 dark:text-green-400 mb-2">
-                              実行モード
-                            </h4>
-                            <div className="space-y-2">
-                              {(
-                                [
-                                  ['execute_sp', 'スマートフォン'],
-                                  ['execute_pc', 'パソコン / タブレット'],
-                                ] as [keyof typeof uiVisibilitySettings, string][]
-                              ).map(([key, label]) => (
-                                <div
-                                  key={key}
-                                  className="flex items-center justify-between text-xs"
-                                >
-                                  <span className="text-slate-600 dark:text-slate-400 min-w-[110px]">
-                                    {label}
-                                  </span>
-                                  <div className="flex items-center gap-3">
-                                    <label className="flex items-center gap-1 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={uiVisibilitySettings[key].header}
-                                        onChange={(e) =>
-                                          updateUIVisibilityConfig(key, 'header', e.target.checked)
-                                        }
-                                        className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                      />
-                                      <span className="text-slate-500 dark:text-slate-400">
-                                        ヘッダー
-                                      </span>
-                                    </label>
-                                    <label className="flex items-center gap-1 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={uiVisibilitySettings[key].tabBar}
-                                        onChange={(e) =>
-                                          updateUIVisibilityConfig(key, 'tabBar', e.target.checked)
-                                        }
-                                        className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                      />
-                                      <span className="text-slate-500 dark:text-slate-400">
-                                        タブバー
-                                      </span>
-                                    </label>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* セル輪郭スタイル */}
-                          <div className="mb-3 pt-3 border-t border-slate-200 dark:border-slate-700">
-                            <h4 className="text-xs font-semibold text-orange-600 dark:text-orange-400 mb-2">
-                              セル輪郭スタイル
-                            </h4>
-                            <div className="space-y-1">
-                              {([
-                                ['rounded', '角丸（デフォルト）'],
-                                ['square', '直角'],
-                                ['dashed', '破線'],
-                                ['none', '輪郭なし'],
-                              ] as [import('./types').NumberCellOutlineStyle, string][]).map(([value, label]) => (
-                                <label key={value} className="flex items-center gap-2 cursor-pointer text-xs">
-                                  <input
-                                    type="radio"
-                                    name="numberCellOutlineStyle"
-                                    value={value}
-                                    checked={numberCellOutlineStyle === value}
-                                    onChange={() => setNumberCellOutlineStyle(value)}
-                                    className="text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                  />
-                                  <span className="text-slate-600 dark:text-slate-400">{label}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* 表示処理の補足 */}
-                          <button
-                            onClick={() => {
-                              setUiVisibilitySettings(DEFAULT_UI_VISIBILITY);
-                              setUiVisibilityOverride(false);
-                              setNumberCellOutlineStyle(DEFAULT_OUTLINE_STYLE);
-                            }}
-                            className="w-full mt-1 px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
-                          >
-                            デフォルトに戻す
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* 表示処理の補足 */}
-                  {activeEventName && mainContentVisible && !mapViewActive && (
-                    <div className="flex items-center gap-1 ml-2 border-l border-slate-300 dark:border-slate-600 pl-2">
-                      {/* 表示処理の補足 */}
-                      <button
-                        onClick={() => handleSetViewMode('edit')}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                          currentMode === 'edit'
-                            ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400'
-                            : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
-                        }`}
-                        title="編集モード"
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          minWidth: '40px',
-                          minHeight: '40px',
-                        }}
-                        type="button"
-                      >
-                        <span className="text-lg">📝</span>
-                      </button>
-
-                      {/* 表示処理の補足 */}
-                      <button
-                        onClick={() => handleSetViewMode('execute')}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                          currentMode === 'execute'
-                            ? 'bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400'
-                            : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
-                        }`}
-                        title="実行モード"
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          minWidth: '40px',
-                          minHeight: '40px',
-                        }}
-                        type="button"
-                      >
-                        <span className="text-lg">🏃‍♂️</span>
-                      </button>
-
-                      {/* 表示処理の補足 */}
-                      <button
-                        onClick={() => handleSetViewMode('focus')}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                          currentMode === 'focus'
-                            ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400'
-                            : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
-                        }`}
-                        title="集中モード"
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          minWidth: '40px',
-                          minHeight: '40px',
-                        }}
-                        type="button"
-                      >
-                        <span className="text-lg">🔍</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {/* 表示処理の補足 */}
-                  {activeEventName && isMapTab && currentMapData && (
-                    <>
-                      {currentHalls.length > 0 && (
-                        <>
-                          {/* 表示処理の補足 */}
-                          <div className="relative">
-                            <button
-                              onClick={() => setMapHallSelectorOpen(!mapHallSelectorOpen)}
-                              className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                                mapHallSelectorOpen
-                                  ? 'bg-slate-200 dark:bg-slate-700'
-                                  : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
-                              }`}
-                              title={`表示ホール: ${mapSelectedHallId === 'all' ? '全ホール' : currentHalls.find((h) => h.id === mapSelectedHallId)?.name || ''}`}
-                              style={{
-                                WebkitTapHighlightColor: 'transparent',
-                                minWidth: '44px',
-                                minHeight: '44px',
-                              }}
-                              type="button"
-                            >
-                              {/* 表示処理の補足 */}
-                              <svg
-                                className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                              >
-                                <path d="M2 18h3v-4h2v4h2v-6H7l-2-4-2 4H2v6zm5-8h2V8h2V6h2v2h2v2h2v8h-3v-4h-2v4h-3v-8z" />
-                                <path d="M14 10h2v2h-2zM14 14h2v2h-2zM18 10h2v2h-2zM18 14h2v2h-2z" />
-                              </svg>
-                            </button>
-                            {mapSelectedHallId !== 'all' && (
-                              <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full"></span>
-                            )}
-
-                            {/* 表示処理の補足 */}
-                            {mapHallSelectorOpen && (
-                              <>
-                                {/* 表示処理の補足 */}
-                                <div
-                                  className="fixed inset-0 z-40"
-                                  onClick={() => setMapHallSelectorOpen(false)}
-                                />
-                                <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 py-1 min-w-[200px]">
-                                  <button
-                                    onClick={() => {
-                                      setMapSelectedHallId('all');
-                                      setMapHallSelectorOpen(false);
-                                    }}
-                                    className={`w-full px-4 py-2 text-left text-sm transition-colors ${
-                                      mapSelectedHallId === 'all'
-                                        ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
-                                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-                                    }`}
-                                  >
-                                    全ホール
-                                  </button>
-                                  {currentHalls.map((hall) => {
-                                    const executeCount = getHallExecuteCount(hall.id);
-                                    const totalCount = getHallTotalItemCount(hall.id);
-                                    return (
-                                      <button
-                                        key={hall.id}
-                                        onClick={() => {
-                                          setMapSelectedHallId(hall.id);
-                                          setMapHallSelectorOpen(false);
-                                        }}
-                                        className={`w-full px-4 py-2 text-left text-sm transition-colors flex justify-between items-center ${
-                                          mapSelectedHallId === hall.id
-                                            ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
-                                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-                                        }`}
-                                      >
-                                        <span>{hall.name}</span>
-                                        <span className="text-xs text-slate-500 dark:text-slate-400 ml-2">
-                                          ({executeCount}/{totalCount}件)
-                                        </span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </>
-                            )}
-                          </div>
-
-                          {/* 表示処理の補足 */}
-                          <button
-                            onClick={() => setMapIsHallOrderOpen(true)}
-                            className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
-                            title="ホール順を編集"
-                            style={{
-                              WebkitTapHighlightColor: 'transparent',
-                              minWidth: '44px',
-                              minHeight: '44px',
-                            }}
-                            type="button"
-                          >
-                            <svg
-                              className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                              />
-                            </svg>
-                          </button>
-                        </>
-                      )}
-
-                      {/* 表示処理の補足 */}
-                      <button
-                        onClick={() => setMapIsRouteVisible(!mapIsRouteVisible)}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                          mapIsRouteVisible
-                            ? 'bg-blue-100 dark:bg-blue-900/50 hover:bg-blue-200 dark:hover:bg-blue-800'
-                            : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
-                        }`}
-                        title={mapIsRouteVisible ? 'ルート表示: 有効' : 'ルート表示: 無効'}
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          minWidth: '44px',
-                          minHeight: '44px',
-                        }}
-                        type="button"
-                      >
-                        {/* 表示処理の補足 */}
-                        <svg
-                          className={`w-5 h-5 pointer-events-none ${mapIsRouteVisible ? 'text-blue-600 dark:text-blue-400' : 'text-slate-600 dark:text-slate-400'}`}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle cx="6" cy="6" r="2" strokeWidth={2} />
-                          <circle cx="18" cy="18" r="2" strokeWidth={2} />
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M6 8v4a4 4 0 004 4h4M14 12l4 4m0 0l-4 4"
-                          />
-                        </svg>
-                      </button>
-
-                      {/* 表示処理の補足 */}
-                      <button
-                        onPointerDown={() => {
-                          smartInsertLongPressTriggeredRef.current = false;
-                          smartInsertLongPressRef.current = setTimeout(() => {
-                            smartInsertLongPressTriggeredRef.current = true;
-                            const newMode = mapSmartInsertMode === 'card' ? 'preview' : 'card';
-                            setMapSmartInsertMode(newMode);
-                            showSmartInsertToast(
-                              newMode === 'preview'
-                                ? 'プレビューモードに切り替え'
-                                : 'カードモードに切り替え',
-                            );
-                          }, 500);
-                        }}
-                        onPointerUp={() => {
-                          if (smartInsertLongPressRef.current) {
-                            clearTimeout(smartInsertLongPressRef.current);
-                            smartInsertLongPressRef.current = null;
-                          }
-                        }}
-                        onPointerLeave={() => {
-                          if (smartInsertLongPressRef.current) {
-                            clearTimeout(smartInsertLongPressRef.current);
-                            smartInsertLongPressRef.current = null;
-                          }
-                        }}
-                        onClick={() => {
-                          if (smartInsertLongPressTriggeredRef.current) {
-                            smartInsertLongPressTriggeredRef.current = false;
-                            return;
-                          }
-                          setMapSmartInsertEnabled(!mapSmartInsertEnabled);
-                        }}
-                        className={`relative p-2 rounded-md transition-colors touch-manipulation select-none ${
-                          mapSmartInsertEnabled
-                            ? 'bg-green-100 dark:bg-green-900/50 hover:bg-green-200 dark:hover:bg-green-800'
-                            : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
-                        }`}
-                        title={`スマート挿入: ${mapSmartInsertEnabled ? '有効' : '無効'}（${mapSmartInsertMode === 'card' ? 'カード' : 'プレビュー'}）`}
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          minWidth: '44px',
-                          minHeight: '44px',
-                        }}
-                        type="button"
-                      >
-                        <svg
-                          className={`w-5 h-5 pointer-events-none ${mapSmartInsertEnabled ? 'text-green-600 dark:text-green-400' : 'text-slate-600 dark:text-slate-400'}`}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 4v16m0-8l-4-4m4 4l4-4"
-                          />
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M5 12h14"
-                          />
-                        </svg>
-                        {/* 表示処理の補足 */}
-                        {mapSmartInsertEnabled && (
-                          <div className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 text-[8px] font-bold leading-none text-green-600 dark:text-green-400">
-                            {mapSmartInsertMode === 'preview' ? 'P' : 'C'}
-                          </div>
-                        )}
-                      </button>
-                    </>
-                  )}
-                  {activeEventName && isMapTab && currentMapData && (
-                    <MapRotationControls
-                      angle={currentMapTabRotationState.mapTabAngle}
-                      initialAngle={currentMapTabRotationState.initialAngle}
-                      onAngleChange={handleMapTabRotationAngleChange}
-                      showHint={true}
-                    />
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                {activeEventName &&
-                  mainContentVisible &&
-                  items.length > 0 &&
-                  selectedItemIds.size > 0 &&
-                  layoutMode !== 'smartphone' && (
-                    <>
-                      <BulkActionControls onSort={handleBulkSort} onClear={handleClearSelection} />
-                      {showMoveButtons && hasCandidateSelection && (
-                        <button
-                          onClick={() => handleMoveToExecuteColumn(Array.from(selectedItemIds))}
-                          className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
-                        >
-                          選択したアイテムを実行列に移動 ({selectedItemIds.size}件)
-                        </button>
-                      )}
-                      {showMoveButtons && hasExecuteSelection && (
-                        <button
-                          onClick={() => handleRemoveFromExecuteColumn(Array.from(selectedItemIds))}
-                          className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
-                        >
-                          選択したアイテムを実行列から戻す ({selectedItemIds.size}件)
-                        </button>
-                      )}
-                    </>
-                  )}
-                {activeEventName &&
-                  mainContentVisible &&
-                  items.length > 0 &&
-                  currentMode === 'execute' && (
-                    <button
-                      onClick={handleSortToggle}
-                      className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 flex-shrink-0"
-                    >
-                      {sortLabels[sortState]}
-                    </button>
-                  )}
-                {/* PC: 実行モード スペース別切替ボタン */}
-                {activeEventName &&
-                  mainContentVisible &&
-                  items.length > 0 &&
-                  currentMode === 'execute' &&
-                  layoutMode !== 'smartphone' && (
-                    <button
-                      onClick={() => {
-                        setExecuteSpaceGroupingEnabled((prev) => !prev);
-                        setExecuteCollapsedSpaces(new Set());
-                      }}
-                      className={`px-2 py-1 text-xs font-medium rounded transition-colors flex-shrink-0 ${
-                        executeSpaceGroupingEnabled
-                          ? 'bg-blue-600 text-white dark:bg-blue-500'
-                          : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
-                      }`}
-                    >
-                      スペース別
-                    </button>
-                  )}
-              </div>
-            </div>
-          )}
-          {showTabBar && (
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-200 dark:border-slate-700">
-              <div className="flex space-x-2 pt-2 pb-2 overflow-x-auto">
-                <TabButton
-                  tab="eventList"
-                  label="イベント一覧"
-                  onClick={() => {
-                    setActiveEventName(null);
-                    setItemToEdit(null);
-                    setSelectedItemIds(new Set());
-                    setSelectedBlockFilters(new Set());
-                    setActiveTab('eventList');
-                  }}
-                />
-                {activeEventName ? (
-                  <>
-                    {eventDates.map((eventDate) => {
-                      const count = items.filter((item) => item.eventDate === eventDate).length;
-                      return (
-                        <React.Fragment key={eventDate}>
-                          <TabButton tab={eventDate} label={eventDate} count={count} />
-                        </React.Fragment>
-                      );
-                    })}
-                    <TabButton
-                      tab="import"
-                      label={'アイテム追加'}
-                    />
-                    {activeEventName && (mainContentVisible || isMapTab) && (
-                      <SearchBar
-                        searchKeyword={searchKeyword}
-                        onSearchKeywordChange={setSearchKeyword}
-                        onSearchNext={handleSearchNext}
-                        matchCount={visibleSearchMatches.length}
-                        currentMatchIndex={currentSearchIndex}
-                      />
-                    )}
-                    {/* スマホ: 実行モード スペース別切替ボタン（フッターに表示） */}
-                    {activeEventName &&
-                      mainContentVisible &&
-                      currentMode === 'execute' &&
-                      layoutMode === 'smartphone' && (
-                        <button
-                          onClick={() => {
-                            setExecuteSpaceGroupingEnabled((prev) => !prev);
-                            setExecuteCollapsedSpaces(new Set());
-                          }}
-                          className={`px-2 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap flex-shrink-0 ${
-                            executeSpaceGroupingEnabled
-                              ? 'bg-blue-600 text-white dark:bg-blue-500'
-                              : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
-                          }`}
-                        >
-                          スペース別
-                        </button>
-                      )}
-                  </>
-                ) : (
-                  <button
-                    onClick={() => {
-                      setItemToEdit(null);
-                      setActiveTab('import');
-                    }}
-                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 whitespace-nowrap ${
-                      activeTab === 'import'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    新規リスト作成
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </header>
-      )}
-
-      {/* 表示処理の補足 */}
       {rawHideSomething &&
         activeEventName &&
         (currentMode === 'focus' || currentMode === 'execute') && (
@@ -4982,720 +4354,260 @@ const App: React.FC = () => {
           </button>
         )}
 
-      <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-        {activeTab === 'eventList' && (
-          <EventListScreen
-            eventNames={Object.keys(eventLists).sort()}
-            onSelect={handleSelectEvent}
-            onDelete={handleDeleteEvent}
-            onExport={handleExportEvent}
-            onUpdate={handleUpdateEvent}
-            onRename={(oldName) => handleRenameEvent(oldName)}
-            onImportMap={handleImportMapData}
-            onImportExportFile={() => exportFileInputRef.current?.click()}
-          />
-        )}
-        {activeTab === 'import' && (
-          <Suspense fallback={<div className="flex justify-center p-8"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}>
-            <ImportScreen
-              onBulkAdd={handleBulkAdd}
-              activeEventName={activeEventName}
-              itemToEdit={itemToEdit}
-              onUpdateItem={handleUpdateItem}
-              onDoneEditing={handleDoneEditing}
-              newItemDefaults={newItemDefaults}
-              onClearNewItemDefaults={handleClearNewItemDefaults}
-            />
-          </Suspense>
-        )}
-        {/* 表示処理の補足 */}
-        {activeEventName && isMapTab && currentMapData && currentMapTabName && (
-          <MapView
-            mapData={currentMapData}
-            mapName={currentMapTabName}
-            items={items}
-            executeModeItemIds={currentMapExecuteItemIds}
-            onAddToExecuteList={handleAddToExecuteListFromMap}
-            onAddToExecuteListAtPosition={handleAddToExecuteListFromMapAtPosition}
-            onRemoveFromExecuteList={handleRemoveFromExecuteListFromMap}
-            onBatchAddToExecuteList={handleBatchAddToExecuteListFromMap}
-            onBatchAddToExecuteListAtPosition={handleBatchAddToExecuteListFromMapAtPosition}
-            onBatchRemoveFromExecuteList={handleBatchRemoveFromExecuteListFromMap}
-            onMoveToFirst={handleMoveToFirstFromMap}
-            onMoveToLast={handleMoveToLastFromMap}
-            onUpdateItem={handleUpdateItem}
-            onUpdateItemPriority={handleUpdateItemPriorityFromEdit}
-            onDeleteItem={handleDeleteItemFromMap}
-            onAddNewItem={handleAddNewItemFromMap}
-            onAddItem={handleAddItemFromFocusMode}
-            halls={currentHalls}
-            hallRouteSettings={currentHallRouteSettings}
-            onUpdateHallRouteSettings={handleUpdateHallRouteSettings}
-            onReorderExecuteList={handleReorderExecuteListByHallOrder}
-            vertexSelectionMode={vertexSelectionMode}
-            cellSelectionMode={cellSelectionMode}
-            highlightedCell={visitListPanelOpen ? highlightedMapCell : null}
-            externalSelectedHallId={mapSelectedHallId}
-            onSelectedHallIdChange={setMapSelectedHallId}
-            externalIsRouteVisible={mapIsRouteVisible}
-            onRouteVisibleChange={setMapIsRouteVisible}
-            externalIsHallOrderOpen={mapIsHallOrderOpen}
-            onHallOrderOpenChange={setMapIsHallOrderOpen}
-            hideInternalControls={true}
-            smartInsertEnabled={mapSmartInsertEnabled}
-            smartInsertMode={mapSmartInsertMode}
-            rotationAngle={currentMapTabRotationState.mapTabAngle}
-            onRotationAngleChange={handleMapTabRotationAngleChange}
-            selectionGuideOptions={vertexGuideOptions}
-            initialViewport={currentMapTabViewport}
-            onViewportChange={handleMapViewportChange}
-            numberCellOutlineStyle={numberCellOutlineStyle}
-          />
-        )}
-        {activeEventName && mainContentVisible && !isMapTab && (
-          <div
-            style={{
-              transform: `scale(${zoomLevel / 100})`,
-              transformOrigin: 'top left',
-              width: `${100 * (100 / zoomLevel)}%`,
-            }}
-          >
-            {currentMode === 'edit' ? (
-              <div className="grid grid-cols-2 gap-4">
-                {/* 表示処理の補足 */}
-                <div className="space-y-2">
-                  <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100">
-                        実行リストアイテム
-                      </h3>
-                      <button
-                        onClick={() => {
-                          setSpaceGroupingEnabled((prev) => !prev);
-                          setCollapsedSpaces(new Set());
-                        }}
-                        className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
-                          spaceGroupingEnabled
-                            ? 'bg-blue-600 text-white dark:bg-blue-500'
-                            : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
-                        }`}
-                      >
-                        スペース別
-                      </button>
-                    </div>
-                    <p className="text-xs text-blue-700 dark:text-blue-300 mb-3">
-                      実行対象として選択中のアイテムを管理します。
-                    </p>
-                  </div>
-                  <ShoppingList
-                    items={executeColumnItems}
-                    onUpdateItem={handleUpdateItem}
-                    onMoveItem={handleMoveItem}
-                    onEditRequest={handleEditRequest}
-                    onDeleteRequest={handleDeleteRequest}
-                    selectedItemIds={selectedItemIds}
-                    onSelectItem={handleSelectItem}
-                    onRemoveFromColumn={handleRemoveFromExecuteColumn}
-                    onMoveToColumn={handleMoveToExecuteColumn}
-                    columnType="execute"
-                    currentDay={activeEventDate}
-                    onMoveItemUp={handleMoveItemUp}
-                    onMoveItemDown={handleMoveItemDown}
-                    rangeStart={rangeStart}
-                    rangeEnd={rangeEnd}
-                    onToggleRangeSelection={handleToggleRangeSelection}
-                    duplicateCircleItemIds={duplicateCircleItemIds}
-                    highlightedItemId={highlightedItemId}
-                    layoutMode={layoutMode}
-                    viewMode="edit"
-                    showHallGroups={!spaceGroupingEnabled}
-                    hallDefinitions={getHallsForDate(
-                      activeEventDate,
-                    )}
-                    hallOrder={getHallOrderForDate(
-                      activeEventDate,
-                    )}
-                    mapData={getMapDataForDate(
-                      activeEventDate,
-                    )}
-                    showSpaceGroups={spaceGroupingEnabled}
-                    collapsedSpaces={collapsedSpaces}
-                    onToggleSpaceCollapse={handleToggleSpaceCollapse}
-                    onToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
-                    onSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
-                    onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
-                    onAddItem={handleAddItemFromFocusMode}
-                  />
-                </div>
-
-                {/* 表示処理の補足 */}
-                <div className="space-y-2">
-                  <div className="bg-slate-100 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg p-3">
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
-                      候補アイテム
-                    </h3>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
-                      このリストから選択したアイテムを実行リストへ移動します。
-                    </p>
-                    {availableBlocks.length > 0 && (
-                      <div className="mt-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                            ブロックでフィルタ:
-                          </span>
-                          <div className="flex items-center gap-2">
-                            {selectedBlockFilters.size > 0 && (
-                              <>
-                                <button
-                                  onClick={handleCandidateNumberSort}
-                                  className={`p-1.5 rounded-md transition-colors ${
-                                    candidateNumberSortDirection
-                                      ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
-                                      : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400 border border-slate-300 dark:border-slate-600'
-                                  }`}
-                                  title={
-                                    candidateNumberSortDirection === 'desc'
-                                      ? '番号を降順で並べ替え'
-                                      : candidateNumberSortDirection === 'asc'
-                                        ? '番号を昇順で並べ替え'
-                                        : '番号で並べ替え'
-                                  }
-                                >
-                                  {candidateNumberSortDirection === 'desc' ? (
-                                    <SortDescendingIcon className="w-4 h-4" />
-                                  ) : (
-                                    <SortAscendingIcon className="w-4 h-4" />
-                                  )}
-                                </button>
-                                <button
-                                  onClick={handleClearBlockFilters}
-                                  className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline"
-                                >
-                                  すべて解除
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {availableBlocks.map((block) => (
-                            <button
-                              key={block}
-                              onClick={() => handleToggleBlockFilter(block)}
-                              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                                selectedBlockFilters.has(block)
-                                  ? 'bg-blue-600 text-white dark:bg-blue-500'
-                                  : blocksWithPriorityRemarks.has(block)
-                                    ? 'bg-yellow-300 dark:bg-yellow-600 text-slate-700 dark:text-slate-300 hover:bg-yellow-400 dark:hover:bg-yellow-500 border border-slate-300 dark:border-slate-600'
-                                    : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
-                              }`}
-                            >
-                              {block}
-                            </button>
-                          ))}
-                        </div>
-                        {selectedBlockFilters.size > 0 && (
-                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
-                            選択中: {selectedBlockFilters.size}件のブロック
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <ShoppingList
-                    items={candidateColumnItems}
-                    onUpdateItem={handleUpdateItem}
-                    onMoveItem={handleMoveItem}
-                    onEditRequest={handleEditRequest}
-                    onDeleteRequest={handleDeleteRequest}
-                    selectedItemIds={selectedItemIds}
-                    onSelectItem={handleSelectItem}
-                    onMoveToColumn={handleMoveToExecuteColumn}
-                    onRemoveFromColumn={handleRemoveFromExecuteColumn}
-                    columnType="candidate"
-                    currentDay={activeEventDate}
-                    onMoveItemUp={handleMoveItemUp}
-                    onMoveItemDown={handleMoveItemDown}
-                    rangeStart={rangeStart}
-                    rangeEnd={rangeEnd}
-                    onToggleRangeSelection={handleToggleRangeSelection}
-                    duplicateCircleItemIds={duplicateCircleItemIds}
-                    highlightedItemId={highlightedItemId}
-                    layoutMode={layoutMode}
-                    viewMode="edit"
-                    showSpaceGroups={spaceGroupingEnabled}
-                    collapsedSpaces={collapsedSpaces}
-                    onToggleSpaceCollapse={handleToggleSpaceCollapse}
-                    onToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
-                    onSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
-                    onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
-                    onAddItem={handleAddItemFromFocusMode}
-                  />
-                </div>
-              </div>
-            ) : currentMode === 'focus' ? (
-              <Suspense fallback={<div className="flex justify-center p-8"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}>
-                <FocusModeContainer
-                  key={currentFocusSessionKey || 'focus-mode'}
-                  activeEventName={activeEventName}
-                  activeTab={activeTab}
-                  eventDates={eventDates}
-                  items={items}
-                  executeModeItems={executeModeItems}
-                  mapData={mapData}
-                  hallDefinitions={hallDefinitions}
-                  hallRouteSettings={hallRouteSettings}
-                  onUpdateItem={handleUpdateItem}
-                  onModeChange={handleModeChangeFromFocus}
-                  layoutMode={layoutMode}
-                  onLayoutModeChange={setLayoutMode}
-                  onMapVisibilityChange={setFocusModeMapVisible}
-                  onAddItem={handleAddItemFromFocusMode}
-                  onEditRequest={handleEditRequest}
-                  onDeleteRequest={handleDeleteRequest}
-                  appZoomLevel={zoomLevel}
-                  resumeState={currentFocusResumeState}
-                  onSessionStateChange={handleFocusSessionStateChange}
-                  mapRotationAngle={currentFocusMapRotationState.focusModeAngle}
-                  mapInitialRotationAngle={currentFocusMapRotationState.initialAngle}
-                  onMapRotationAngleChange={handleFocusMapRotationAngleChange}
-                  numberCellOutlineStyle={numberCellOutlineStyle}
-                />
-              </Suspense>
-            ) : (
-              <ShoppingList
-                items={visibleItems}
-                onUpdateItem={handleExecuteItemUpdate}
-                onMoveItem={handleMoveItem}
-                onEditRequest={handleEditRequest}
-                onDeleteRequest={handleDeleteRequest}
-                selectedItemIds={selectedItemIds}
-                onSelectItem={handleSelectItem}
-                columnType="execute"
-                currentDay={activeEventDate}
-                onMoveItemUp={handleMoveItemUp}
-                onMoveItemDown={handleMoveItemDown}
-                rangeStart={rangeStart}
-                rangeEnd={rangeEnd}
-                onToggleRangeSelection={handleToggleRangeSelection}
-                duplicateCircleItemIds={duplicateCircleItemIds}
-                highlightedItemId={highlightedItemId}
-                layoutMode={layoutMode}
-                viewMode="execute"
-                showSpaceGroups={executeSpaceGroupingEnabled}
-                showHallGroups={!executeSpaceGroupingEnabled}
-                collapsedSpaces={executeCollapsedSpaces}
-                onToggleSpaceCollapse={handleExecuteToggleSpaceCollapse}
-                onToggleAllSpaceCollapse={handleExecuteToggleAllSpaceCollapse}
-                onAddItem={handleAddItemFromFocusMode}
-                onBulkStatusChange={handleBulkStatusChange}
-                onSpaceGroupOrderChange={handleExecuteSpaceGroupOrderChange}
-                onCollapseAndOpenNext={handleCollapseAndOpenNext}
-                showPostponeFilterButton={showPostponeFilterButton}
-                onActivatePostponeFilter={handleActivatePostponeFilter}
-                showLateFilterButton={showLateFilterButton}
-                onActivateLateFilter={handleActivateLateFilter}
-                hallDefinitions={getHallsForDate(
-                  activeEventDate,
-                )}
-                hallOrder={getHallOrderForDate(
-                  activeEventDate,
-                )}
-                mapData={getMapDataForDate(
-                  activeEventDate,
-                )}
-              />
-            )}
-          </div>
-        )}
-      </main>
-
-      {editDialogItem && (
-        <ItemEditDialog
-          item={editDialogItem}
-          allItems={items}
-          onSave={(updatedItem) => {
-            handleUpdateItem(updatedItem);
-            setEditDialogItem(null);
-            setTimeout(() => {
-              const element = document.querySelector(`[data-item-id="${updatedItem.id}"]`);
-              if (element) {
-                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              }
-            }, 100);
-          }}
-          onPriorityChange={handleUpdateItemPriorityFromEdit}
-          onClose={() => setEditDialogItem(null)}
-        />
-      )}
-
-      {itemToDelete && (
-        <DeleteConfirmationModal
-          item={itemToDelete}
-          onConfirm={handleConfirmDelete}
-          onCancel={() => setItemToDelete(null)}
-        />
-      )}
-
-      {showUpdateConfirmation && updateData && (
-        <UpdateConfirmationModal
-          itemsToDelete={updateData.itemsToDelete}
-          itemsToUpdate={updateData.itemsToUpdate}
-          itemsToAdd={updateData.itemsToAdd}
-          protectedFromDelete={updateData.protectedFromDelete}
-          protectedFromUpdate={updateData.protectedFromUpdate}
-          onConfirm={handleConfirmUpdate}
-          onCancel={() => {
-            setShowUpdateConfirmation(false);
-            setUpdateData(null);
-            setUpdateEventName(null);
-          }}
-        />
-      )}
-
-      {showUrlUpdateDialog && (
-        <UrlUpdateDialog
-          currentUrl={
-            pendingUpdateEventName
-              ? eventMetadata[pendingUpdateEventName]?.spreadsheetUrl || ''
-              : ''
-          }
-          onConfirm={handleUrlUpdate}
-          onCancel={() => {
-            setShowUrlUpdateDialog(false);
-            setPendingUpdateEventName(null);
-            setActiveEventName(null);
-            setActiveTab('eventList');
-          }}
-        />
-      )}
-
-      {showRenameDialog && eventToRename && (
-        <EventRenameDialog
-          currentName={eventToRename}
-          onConfirm={handleConfirmRename}
-          onCancel={() => {
-            setShowRenameDialog(false);
-            setEventToRename(null);
-          }}
-        />
-      )}
-
-      {/* 表示処理の補足 */}
-      {showExportOptions && exportEventName && (
-        <ExportOptionsDialog
-          isOpen={showExportOptions}
-          onClose={() => {
-            setShowExportOptions(false);
-            setExportEventName(null);
-          }}
-          onExport={handleConfirmExport}
-          hasMapData={
-            !!(
-              exportEventName &&
-              mapData[exportEventName] &&
-              Object.keys(mapData[exportEventName]).length > 0
-            )
-          }
-        />
-      )}
-
-      {/* 表示処理の補足 */}
-      {blockDefinitionMode && currentMapData && (
-        <BlockDefinitionPanel
-          isOpen={blockDefinitionMode}
-          onClose={() => {
-            setBlockDefinitionMode(false);
-            setPendingCellSelection(null);
-          }}
-          mapData={currentMapData}
-          onUpdateBlocks={handleUpdateBlocks}
-          onStartCellSelection={handleStartCellSelection}
-          pendingCellSelection={pendingCellSelection}
-          onClearPendingCellSelection={() => setPendingCellSelection(null)}
-        />
-      )}
-
-      {/* 表示処理の補足 */}
-      {cellSelectionMode && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-4 min-w-80">
-          <div className="text-center mb-3">
-            <div className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-1">
-              {(() => {
-                const data = cellSelectionMode.editingBlockData as { block?: { name?: string } } | undefined;
-                const name = data?.block?.name?.trim();
-                return name ? `「${name}」設定中` : '「名称不明ブロック」設定中';
-              })()}
-            </div>
-            <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
-              {cellSelectionMode.type === 'corner' &&
-                `セルをクリックして角を選択 (${cellSelectionMode.clickedCells.length}/4)`}
-              {cellSelectionMode.type === 'multiCorner' &&
-                `セルをクリックして角を選択 (${cellSelectionMode.clickedCells.length}/4)`}
-              {cellSelectionMode.type === 'rangeStart' &&
-                `対角の2セルをクリック (${cellSelectionMode.clickedCells.length}/2)`}
-              {cellSelectionMode.type === 'individual' &&
-                `対象セルをクリック (${cellSelectionMode.clickedCells.length}セル選択中)`}
-            </div>
-            {cellSelectionMode.clickedCells.length > 0 && (
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                選択: {cellSelectionMode.clickedCells.map((c) => `(${c.row},${c.col})`).join(', ')}
-              </div>
-            )}
-            <div className="text-xs text-blue-500 dark:text-blue-400 mt-1">
-              マーカーをクリックで選択解除
-            </div>
-          </div>
-          <div className="flex gap-2 justify-center">
-            <button
-              onClick={handleConfirmCellSelection}
-              disabled={
-                ((cellSelectionMode.type === 'corner' ||
-                  cellSelectionMode.type === 'multiCorner') &&
-                  cellSelectionMode.clickedCells.length < 4) ||
-                (cellSelectionMode.type === 'rangeStart' &&
-                  cellSelectionMode.clickedCells.length < 2) ||
-                (cellSelectionMode.type === 'individual' &&
-                  cellSelectionMode.clickedCells.length === 0)
-              }
-              className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              選択を確定
-            </button>
-            <button
-              onClick={handleCancelCellSelection}
-              className="px-4 py-2 text-sm font-medium rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
-            >
-              キャンセル
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 表示処理の補足 */}
-      {hallDefinitionMode && currentMapData && (
-        <HallDefinitionPanel
-          isOpen={hallDefinitionMode}
-          onClose={() => {
-            setHallDefinitionMode(false);
-            setPendingVertexSelection(null);
-          }}
-          mapData={currentMapData}
-          halls={currentHalls}
-          onUpdateHalls={handleUpdateHalls}
-          onStartVertexSelection={handleStartVertexSelection}
-          pendingVertexSelection={pendingVertexSelection}
-          onClearPendingVertexSelection={() => setPendingVertexSelection(null)}
-        />
-      )}
-
-      {/* 表示処理の補足 */}
-      {visitListPanelOpen && currentMapData && (
-        <VisitListPanel
-          isOpen={visitListPanelOpen}
-          onClose={handleVisitListClose}
-          items={visitListItems}
-          onUpdateOrder={handleVisitListOrderUpdate}
-          mapData={currentMapData}
-          hallDefinitions={currentHalls}
-          hallOrder={visitListHallOrder}
-          layoutMode={layoutMode}
-          onHighlightCell={handleHighlightMapCell}
-          onClearHighlight={handleClearMapCellHighlight}
-          hasUnsavedChanges={visitListHasUnsavedChanges}
-          onConfirm={handleVisitListConfirm}
-          onCancel={handleVisitListCancel}
-          onUpdateItemPriority={handleUpdateItemPriority}
-        />
-      )}
-
-      {/* 表示処理の補足 */}
-      {showVisitListConfirmDialog && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-3">
-              変更を保存しますか？
-            </h3>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
-              訪問リストに未保存の変更があります。保存して確定するか、キャンセルして破棄してください。
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={handleVisitListDialogCancel}
-                className="px-4 py-2 text-sm font-semibold rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
-              >
-                キャンセル（破棄）
-              </button>
-              <button
-                onClick={handleVisitListDialogConfirm}
-                className="px-4 py-2 text-sm font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700"
-              >
-                保存して確定
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 表示処理の補足 */}
-      {vertexSelectionMode && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-4 min-w-80">
-          <div className="text-center mb-3">
-            <div className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-1">
-              {(() => {
-                const data = vertexSelectionMode.editingData as { hall?: { name?: string } } | undefined;
-                const name = data?.hall?.name?.trim();
-                return name ? `「${name}」設定中` : '「名称不明ホール」設定中';
-              })()}
-            </div>
-            <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
-              ホールの頂点をクリック ({vertexSelectionMode.clickedVertices.length}
-              /6)
-            </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-              クリック順に多角形を作成します。
-            </div>
-            {vertexSelectionMode.clickedVertices.length > 0 && (
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                選択:{' '}
-                {vertexSelectionMode.clickedVertices.map((v) => `(${v.row},${v.col})`).join(' → ')}
-              </div>
-            )}
-          </div>
-          <div className="flex gap-2 justify-center mb-3">
-            <button
-              onClick={() =>
-                setVertexGuideOptions((prev) => ({ ...prev, showGrid: !prev.showGrid }))
-              }
-              className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                vertexGuideOptions.showGrid
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-              }`}
-            >
-              補助グリッド {vertexGuideOptions.showGrid ? 'ON' : 'OFF'}
-            </button>
-            <button
-              onClick={() =>
-                setVertexGuideOptions((prev) => ({ ...prev, showRuler: !prev.showRuler }))
-              }
-              className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                vertexGuideOptions.showRuler
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-              }`}
-            >
-              座標尺 {vertexGuideOptions.showRuler ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div className="flex gap-2 justify-center">
-            <button
-              onClick={handleConfirmVertexSelection}
-              disabled={vertexSelectionMode.clickedVertices.length < 4}
-              className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              確定
-            </button>
-            <button
-              onClick={handleCancelVertexSelection}
-              className="px-4 py-2 text-sm font-medium rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
-            >
-              キャンセル
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 表示処理の補足 */}
-      <input
-        type="file"
-        ref={mapFileInputRef}
-        accept=".xlsx"
-        onChange={handleMapFileChange}
-        style={{ display: 'none' }}
+      <AppMainContent
+        activeEventDate={activeEventDate}
+        activeEventName={activeEventName}
+        activeTab={activeTab}
+        availableBlocks={availableBlocks}
+        blocksWithPriorityRemarks={blocksWithPriorityRemarks}
+        candidateColumnItems={candidateColumnItems}
+        candidateNumberSortDirection={candidateNumberSortDirection}
+        cellSelectionMode={cellSelectionMode}
+        collapsedSpaces={collapsedSpaces}
+        currentFocusMapRotationState={currentFocusMapRotationState}
+        currentFocusResumeState={currentFocusResumeState}
+        currentFocusSessionKey={currentFocusSessionKey}
+        currentHallRouteSettings={currentHallRouteSettings}
+        currentHalls={currentHalls}
+        currentMapData={currentMapData}
+        currentMapExecuteItemIds={currentMapExecuteItemIds}
+        currentMapTabName={currentMapTabName}
+        currentMapTabRotationState={currentMapTabRotationState}
+        currentMapTabViewport={currentMapTabViewport}
+        currentMode={currentMode}
+        disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+        duplicateCircleItemIds={duplicateCircleItemIds}
+        eventDates={eventDates}
+        eventLists={eventLists}
+        executeCollapsedSpaces={executeCollapsedSpaces}
+        executeColumnItems={executeColumnItems}
+        executeModeItems={executeModeItems}
+        executeSpaceGroupingEnabled={executeSpaceGroupingEnabled}
+        exportFileInputRef={exportFileInputRef}
+        getHallOrderForDate={getHallOrderForDate}
+        getHallsForDate={getHallsForDate}
+        getMapDataForDate={getMapDataForDate}
+        hallDefinitions={hallDefinitions}
+        hallRouteSettings={hallRouteSettings}
+        handleActivateLateFilter={handleActivateLateFilter}
+        handleActivatePostponeFilter={handleActivatePostponeFilter}
+        handleAddItemFromFocusMode={handleAddItemFromFocusMode}
+        handleAddNewItemFromMap={handleAddNewItemFromMap}
+        handleAddToExecuteListFromMap={handleAddToExecuteListFromMap}
+        handleAddToExecuteListFromMapAtPosition={handleAddToExecuteListFromMapAtPosition}
+        handleBatchAddToExecuteListFromMap={handleBatchAddToExecuteListFromMap}
+        handleBatchAddToExecuteListFromMapAtPosition={handleBatchAddToExecuteListFromMapAtPosition}
+        handleBatchRemoveFromExecuteListFromMap={handleBatchRemoveFromExecuteListFromMap}
+        handleBulkAdd={handleBulkAdd}
+        handleBulkStatusChange={handleBulkStatusChange}
+        handleCandidateNumberSort={handleCandidateNumberSort}
+        handleClearBlockFilters={handleClearBlockFilters}
+        handleClearNewItemDefaults={handleClearNewItemDefaults}
+        handleCollapseAndOpenNext={handleCollapseAndOpenNext}
+        handleDeleteEvent={handleDeleteEvent}
+        handleDeleteItemFromMap={handleDeleteItemFromMap}
+        handleDeleteRequest={handleDeleteRequest}
+        handleDoneEditing={handleDoneEditing}
+        handleEditRequest={handleEditRequest}
+        handleExecuteItemUpdate={handleExecuteItemUpdate}
+        handleExecuteSpaceGroupOrderChange={handleExecuteSpaceGroupOrderChange}
+        handleExecuteToggleAllSpaceCollapse={handleExecuteToggleAllSpaceCollapse}
+        handleExecuteToggleSpaceCollapse={handleExecuteToggleSpaceCollapse}
+        handleExportEvent={handleExportEvent}
+        handleFocusMapRotationAngleChange={handleFocusMapRotationAngleChange}
+        handleFocusSessionStateChange={handleFocusSessionStateChange}
+        handleImportMapData={handleImportMapData}
+        handleMapTabRotationAngleChange={handleMapTabRotationAngleChange}
+        handleMapViewportChange={handleMapViewportChange}
+        handleModeChangeFromFocus={handleModeChangeFromFocus}
+        handleMoveItem={handleMoveItem}
+        handleMoveItemDown={handleMoveItemDown}
+        handleMoveItemUp={handleMoveItemUp}
+        handleMoveToExecuteColumn={handleMoveToExecuteColumn}
+        handleMoveToFirstFromMap={handleMoveToFirstFromMap}
+        handleMoveToLastFromMap={handleMoveToLastFromMap}
+        handleRemoveFromExecuteColumn={handleRemoveFromExecuteColumn}
+        handleRemoveFromExecuteListFromMap={handleRemoveFromExecuteListFromMap}
+        handleRenameEvent={handleRenameEvent}
+        handleReorderExecuteListByHallOrder={handleReorderExecuteListByHallOrder}
+        handleSelectEvent={handleSelectEvent}
+        handleSelectItem={handleSelectItem}
+        handleSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
+        handleSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
+        handleToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
+        handleToggleBlockFilter={handleToggleBlockFilter}
+        handleToggleRangeSelection={handleToggleRangeSelection}
+        handleToggleSpaceCollapse={handleToggleSpaceCollapse}
+        handleUpdateEvent={handleUpdateEvent}
+        handleUpdateHallRouteSettings={handleUpdateHallRouteSettings}
+        handleUpdateItem={handleUpdateItem}
+        handleUpdateItemPriorityFromEdit={handleUpdateItemPriorityFromEdit}
+        highlightedItemId={highlightedItemId}
+        highlightedMapCell={highlightedMapCell}
+        isMapTab={isMapTab}
+        items={items}
+        itemToEdit={itemToEdit}
+        layoutMode={layoutMode}
+        mainContentVisible={mainContentVisible}
+        mapData={mapData}
+        mapIsHallOrderOpen={mapIsHallOrderOpen}
+        mapIsRouteVisible={mapIsRouteVisible}
+        mapSelectedHallId={mapSelectedHallId}
+        mapSmartInsertEnabled={mapSmartInsertEnabled}
+        mapSmartInsertMode={mapSmartInsertMode}
+        newItemDefaults={newItemDefaults}
+        numberCellOutlineStyle={numberCellOutlineStyle}
+        purchaseStatusControlMode={purchaseStatusControlMode}
+        rangeEnd={rangeEnd}
+        rangeStart={rangeStart}
+        selectedBlockFilters={selectedBlockFilters}
+        selectedItemIds={selectedItemIds}
+        setCollapsedSpaces={setCollapsedSpaces}
+        setFocusModeMapVisible={setFocusModeMapVisible}
+        setLayoutMode={setLayoutMode}
+        setMapIsHallOrderOpen={setMapIsHallOrderOpen}
+        setMapIsRouteVisible={setMapIsRouteVisible}
+        setMapSelectedHallId={setMapSelectedHallId}
+        setSpaceGroupingEnabled={setSpaceGroupingEnabled}
+        showLateFilterButton={showLateFilterButton}
+        showPostponeFilterButton={showPostponeFilterButton}
+        spaceGroupingEnabled={spaceGroupingEnabled}
+        vertexGuideOptions={vertexGuideOptions}
+        vertexSelectionMode={vertexSelectionMode}
+        visibleItems={visibleItems}
+        visitListPanelOpen={visitListPanelOpen}
+        zoomLevel={zoomLevel}
       />
 
-      {/* 表示処理の補足 */}
-      <MapImportDialog
-        isOpen={mapImportDialogOpen}
-        file={mapImportPendingFile}
-        eventName={mapImportPendingEventName}
-        savedSettings={
-          mapImportPendingEventName ? loadBlockDetectionSettings(mapImportPendingEventName) : null
-        }
-        onImport={handleMapImportConfirm}
-        onClose={handleMapImportClose}
+      <AppOverlayLayer
+        editDialogItem={editDialogItem}
+        items={items}
+        getHallsForDate={getHallsForDate}
+        handleUpdateItem={handleUpdateItem}
+        handleUpdateHallOrderForPriorityChangeFromEdit={handleUpdateHallOrderForPriorityChangeFromEdit}
+        setEditDialogItem={setEditDialogItem}
+        itemToDelete={itemToDelete}
+        handleConfirmDelete={handleConfirmDelete}
+        setItemToDelete={setItemToDelete}
+        showUpdateConfirmation={showUpdateConfirmation}
+        updateData={updateData}
+        handleConfirmUpdate={handleConfirmUpdate}
+        setShowUpdateConfirmation={setShowUpdateConfirmation}
+        setUpdateData={setUpdateData}
+        setUpdateEventName={setUpdateEventName}
+        showUrlUpdateDialog={showUrlUpdateDialog}
+        pendingUpdateEventName={pendingUpdateEventName}
+        eventMetadata={eventMetadata}
+        handleUrlUpdate={handleUrlUpdate}
+        setShowUrlUpdateDialog={setShowUrlUpdateDialog}
+        setPendingUpdateEventName={setPendingUpdateEventName}
+        setActiveEventName={setActiveEventName}
+        setActiveTab={setActiveTab}
+        showRenameDialog={showRenameDialog}
+        eventToRename={eventToRename}
+        handleConfirmRename={handleConfirmRename}
+        setShowRenameDialog={setShowRenameDialog}
+        setEventToRename={setEventToRename}
+        showExportOptions={showExportOptions}
+        exportEventName={exportEventName}
+        setShowExportOptions={setShowExportOptions}
+        setExportEventName={setExportEventName}
+        handleConfirmExport={handleConfirmExport}
+        mapData={mapData}
+        blockDefinitionMode={blockDefinitionMode}
+        currentMapData={currentMapData}
+        setBlockDefinitionMode={setBlockDefinitionMode}
+        setPendingCellSelection={setPendingCellSelection}
+        handleUpdateBlocks={handleUpdateBlocks}
+        handleStartCellSelection={handleStartCellSelection}
+        pendingCellSelection={pendingCellSelection}
+        cellSelectionMode={cellSelectionMode}
+        handleConfirmCellSelection={handleConfirmCellSelection}
+        handleCancelCellSelection={handleCancelCellSelection}
+        simpleHallDefinitionMode={simpleHallDefinitionMode}
+        setSimpleHallDefinitionMode={setSimpleHallDefinitionMode}
+        currentMaplessHalls={currentMaplessHalls}
+        handleUpdateMaplessHalls={handleUpdateMaplessHalls}
+        allBlocksForHallDefinition={allBlocksForHallDefinition}
+        eventDates={eventDates}
+        activeEventDate={activeEventDate}
+        handleSyncMaplessHallsToOtherDates={handleSyncMaplessHallsToOtherDates}
+        globalHallOrderPanelOpen={globalHallOrderPanelOpen}
+        setGlobalHallOrderPanelOpen={setGlobalHallOrderPanelOpen}
+        globalHallOrderHalls={globalHallOrderHalls}
+        globalHallOrderRouteSettings={globalHallOrderRouteSettings}
+        handleUpdateGlobalHallRouteSettings={handleUpdateGlobalHallRouteSettings}
+        getGlobalHallItemCount={getGlobalHallItemCount}
+        handleReorderExecuteListByHallOrder={handleReorderExecuteListByHallOrder}
+        hallDefinitionMode={hallDefinitionMode}
+        setHallDefinitionMode={setHallDefinitionMode}
+        setPendingVertexSelection={setPendingVertexSelection}
+        currentHalls={currentHalls}
+        handleUpdateHalls={handleUpdateHalls}
+        handleStartVertexSelection={handleStartVertexSelection}
+        pendingVertexSelection={pendingVertexSelection}
+        mapTabDates={mapTabDates}
+        handleSyncPolygonHallsToOtherDates={handleSyncPolygonHallsToOtherDates}
+        visitListPanelOpen={visitListPanelOpen}
+        handleVisitListClose={handleVisitListClose}
+        visitListItems={visitListItems}
+        handleVisitListOrderUpdate={handleVisitListOrderUpdate}
+        visitListHallOrder={visitListHallOrder}
+        layoutMode={layoutMode}
+        handleHighlightMapCell={handleHighlightMapCell}
+        handleClearMapCellHighlight={handleClearMapCellHighlight}
+        visitListHasUnsavedChanges={visitListHasUnsavedChanges}
+        handleVisitListConfirm={handleVisitListConfirm}
+        handleVisitListCancel={handleVisitListCancel}
+        handleUpdateItemPriority={handleUpdateItemPriority}
+        showVisitListConfirmDialog={showVisitListConfirmDialog}
+        handleVisitListDialogCancel={handleVisitListDialogCancel}
+        handleVisitListDialogConfirm={handleVisitListDialogConfirm}
+        vertexSelectionMode={vertexSelectionMode}
+        vertexGuideOptions={vertexGuideOptions}
+        setVertexGuideOptions={setVertexGuideOptions}
+        handleConfirmVertexSelection={handleConfirmVertexSelection}
+        handleCancelVertexSelection={handleCancelVertexSelection}
+        mapFileInputRef={mapFileInputRef}
+        handleMapFileChange={handleMapFileChange}
+        mapImportDialogOpen={mapImportDialogOpen}
+        mapImportPendingFile={mapImportPendingFile}
+        mapImportPendingEventName={mapImportPendingEventName}
+        handleMapImportConfirm={handleMapImportConfirm}
+        handleMapImportClose={handleMapImportClose}
+        exportFileInputRef={exportFileInputRef}
+        handleExportFileImport={handleExportFileImport}
+        activeEventName={activeEventName}
+        mainContentVisible={mainContentVisible}
+        currentMode={currentMode}
+        visibleItems={visibleItems}
+        showHeaderBar={showHeaderBar}
+        sortLabels={sortLabels}
+        sortState={sortState}
+        handleSortToggle={handleSortToggle}
+        zoomLevel={zoomLevel}
+        handleZoomChange={handleZoomChange}
+        selectedItemIds={selectedItemIds}
+        handleBulkSort={handleBulkSort}
+        handleClearSelection={handleClearSelection}
+        showMoveButtons={showMoveButtons}
+        hasCandidateSelection={hasCandidateSelection}
+        handleMoveToExecuteColumn={handleMoveToExecuteColumn}
+        hasExecuteSelection={hasExecuteSelection}
+        handleRemoveFromExecuteColumn={handleRemoveFromExecuteColumn}
+        smartInsertToast={smartInsertToast}
+        smartInsertToastType={smartInsertToastType}
       />
-
-      {/* 表示処理の補足 */}
-      <input
-        type="file"
-        ref={exportFileInputRef}
-        accept=".xlsx"
-        onChange={handleExportFileImport}
-        style={{ display: 'none' }}
-      />
-
-      {activeEventName && items.length > 0 && mainContentVisible && (
-        <>
-          {currentMode === 'execute' && (
-            <SummaryBar
-              items={visibleItems}
-              filterLabel={!showHeaderBar ? sortLabels[sortState] : undefined}
-              onFilterToggle={!showHeaderBar ? handleSortToggle : undefined}
-            />
-          )}
-        </>
-      )}
-      {activeEventName && items.length > 0 && mainContentVisible && (
-        <ZoomControl zoomLevel={zoomLevel} onZoomChange={handleZoomChange} />
-      )}
-
-      {/* スマホ時：選択アイテム操作の下部固定バー */}
-      {layoutMode === 'smartphone' &&
-        activeEventName &&
-        mainContentVisible &&
-        items.length > 0 &&
-        selectedItemIds.size > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-lg px-3 py-2">
-            <div className="flex items-center justify-between gap-2">
-              <BulkActionControls onSort={handleBulkSort} onClear={handleClearSelection} />
-              <div className="flex items-center gap-2">
-                {showMoveButtons && hasCandidateSelection && (
-                  <button
-                    onClick={() => handleMoveToExecuteColumn(Array.from(selectedItemIds))}
-                    className="px-3 py-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors"
-                  >
-                    ⇦実行列へ ({selectedItemIds.size})
-                  </button>
-                )}
-                {showMoveButtons && hasExecuteSelection && (
-                  <button
-                    onClick={() => handleRemoveFromExecuteColumn(Array.from(selectedItemIds))}
-                    className="px-3 py-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors"
-                  >
-                    ⇨候補へ ({selectedItemIds.size})
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-      {/* 表示処理の補足 */}
-      {smartInsertToast && (
-        <div
-          className={`fixed top-16 left-1/2 transform -translate-x-1/2 z-[10000] text-white px-5 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-pulse ${
-            smartInsertToastType === 'error' ? 'bg-red-600' : 'bg-green-600'
-          }`}
-        >
-          {smartInsertToast}
-        </div>
-      )}
     </div>
   );
 };
 
 export default App;
+
+
+
+
+
+
 
 

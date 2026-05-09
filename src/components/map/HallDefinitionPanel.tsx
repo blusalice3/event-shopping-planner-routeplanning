@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BlockDefinition, DayMapData, HallDefinition } from '../../types';
+import { BlockDefinition, DayMapData, HallDefinition } from '../../types/map';
 import { validateHallPolygon } from '../../utils/polygonValidation';
 
 interface HallDefinitionPanelProps {
@@ -14,6 +14,10 @@ interface HallDefinitionPanelProps {
     editingData?: unknown;
   } | null;
   onClearPendingVertexSelection?: () => void;
+  eventDates?: string[];
+  activeEventDate?: string;
+  mapTabDates?: string[];
+  onSyncToOtherDates?: (targetDates: string[]) => void;
 }
 
 const HALL_COLORS = [
@@ -47,12 +51,23 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
   onStartVertexSelection,
   pendingVertexSelection,
   onClearPendingVertexSelection,
+  eventDates = [],
+  activeEventDate = '',
+  mapTabDates = [],
+  onSyncToOtherDates,
 }) => {
   const [localHalls, setLocalHalls] = useState<HallDefinition[]>(halls);
   const [selectedHallIndex, setSelectedHallIndex] = useState<number | null>(null);
   const [editingHall, setEditingHall] = useState<Partial<HallDefinition> | null>(null);
   const [isAddingNew, setIsAddingNew] = useState(false);
   const [activeTab, setActiveTab] = useState<'list' | 'edit'>('list');
+  const [showSyncUI, setShowSyncUI] = useState(false);
+  const [syncTargetDates, setSyncTargetDates] = useState<Set<string>>(new Set());
+
+  const otherMapDates = useMemo(
+    () => mapTabDates.filter((d) => d !== activeEventDate),
+    [mapTabDates, activeEventDate],
+  );
 
   const getBlocksInHall = useCallback(
     (hall: HallDefinition): BlockDefinition[] => {
@@ -142,31 +157,40 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
       alert('ホール名を入力してください。');
       return;
     }
-    if (!editingHall.vertices || editingHall.vertices.length < 4) {
+
+    // no-map 由来ホール: 頂点が未設定で blockNames を持つ場合は
+    // ポリゴン検証をスキップして名称/色の変更のみ許容する
+    const hasPolygon = !!editingHall.vertices && editingHall.vertices.length >= 4;
+    const isMaplessEdit =
+      !hasPolygon && !!editingHall.blockNames && editingHall.blockNames.length > 0;
+
+    if (!hasPolygon && !isMaplessEdit) {
       alert('4〜6個の頂点を選択してください。');
       return;
     }
 
-    const validation = validateHallPolygon({
-      vertices: editingHall.vertices,
-      existingHalls: localHalls,
-      currentHallId: editingHall.id,
-      mapBounds: {
-        maxRow: mapData.maxRow,
-        maxCol: mapData.maxCol,
-      },
-    });
-    const errors = validation.issues.filter((issue) => issue.level === 'error');
-    if (errors.length > 0) {
-      alert(`保存できません:\n${errors.map((issue) => `・${issue.message}`).join('\n')}`);
-      return;
-    }
-    const warnings = validation.issues.filter((issue) => issue.level === 'warning');
-    if (warnings.length > 0) {
-      const confirmed = confirm(
-        `以下の警告があります:\n${warnings.map((issue) => `・${issue.message}`).join('\n')}\n\nこのまま保存しますか？`,
-      );
-      if (!confirmed) return;
+    if (hasPolygon) {
+      const validation = validateHallPolygon({
+        vertices: editingHall.vertices!,
+        existingHalls: localHalls,
+        currentHallId: editingHall.id,
+        mapBounds: {
+          maxRow: mapData.maxRow,
+          maxCol: mapData.maxCol,
+        },
+      });
+      const errors = validation.issues.filter((issue) => issue.level === 'error');
+      if (errors.length > 0) {
+        alert(`保存できません:\n${errors.map((issue) => `・${issue.message}`).join('\n')}`);
+        return;
+      }
+      const warnings = validation.issues.filter((issue) => issue.level === 'warning');
+      if (warnings.length > 0) {
+        const confirmed = confirm(
+          `以下の警告があります:\n${warnings.map((issue) => `・${issue.message}`).join('\n')}\n\nこのまま保存しますか？`,
+        );
+        if (!confirmed) return;
+      }
     }
 
     const name = editingHall.name.trim();
@@ -179,8 +203,10 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
     const saved: HallDefinition = {
       id: editingHall.id || `hall-${Date.now()}`,
       name,
-      vertices: editingHall.vertices,
+      vertices: hasPolygon ? editingHall.vertices! : [],
       color: editingHall.color || HALL_COLORS[localHalls.length % HALL_COLORS.length],
+      // ポリゴンを設定した場合は blockNames を破棄してマップ側ホールへ移行
+      ...(isMaplessEdit ? { blockNames: editingHall.blockNames } : {}),
     };
 
     if (isAddingNew) {
@@ -216,6 +242,31 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
     },
     [localHalls, selectedHallIndex],
   );
+
+  const handleToggleSyncDate = useCallback((date: string) => {
+    setSyncTargetDates((prev) => {
+      const next = new Set(prev);
+      if (next.has(date)) next.delete(date);
+      else next.add(date);
+      return next;
+    });
+  }, []);
+
+  const handleSyncExecute = useCallback(() => {
+    if (syncTargetDates.size === 0 || !onSyncToOtherDates) return;
+    if (!confirm(`選択した${syncTargetDates.size}日分のホール定義を上書きします。よろしいですか？`)) return;
+    onSyncToOtherDates(Array.from(syncTargetDates));
+    setShowSyncUI(false);
+    setSyncTargetDates(new Set());
+  }, [syncTargetDates, onSyncToOtherDates]);
+
+  const handleSyncAll = useCallback(() => {
+    if (!onSyncToOtherDates || otherMapDates.length === 0) return;
+    if (!confirm(`全ての他の日付（${otherMapDates.length}日分）のホール定義を上書きします。よろしいですか？`)) return;
+    onSyncToOtherDates(otherMapDates);
+    setShowSyncUI(false);
+    setSyncTargetDates(new Set());
+  }, [onSyncToOtherDates, otherMapDates]);
 
   if (!isOpen) return null;
 
@@ -307,7 +358,9 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                               className="flex h-8 w-8 items-center justify-center rounded text-xs font-bold"
                               style={{ backgroundColor: hall.color || '#FFE0B2' }}
                             >
-                              {hall.vertices.length}角
+                              {hall.vertices && hall.vertices.length >= 4
+                                ? `${hall.vertices.length}角`
+                                : 'ブロック'}
                             </div>
                             <div>
                               <div className="text-sm font-medium text-slate-900 dark:text-white">
@@ -340,6 +393,16 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                   <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
                     {isAddingNew ? '新規ホール追加' : 'ホール編集'}
                   </h3>
+
+                  {!isAddingNew &&
+                    (!editingHall.vertices || editingHall.vertices.length < 4) &&
+                    !!editingHall.blockNames?.length && (
+                      <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+                        このホールは現在ブロック指定のみで定義されています（{editingHall.blockNames.length}ブロック）。
+                        ポリゴンを設定するとマップ側ホールへ移行します（ブロック指定は破棄されます）。
+                        名称・色のみの変更であればそのまま保存できます。
+                      </div>
+                    )}
 
                   <div>
                     <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
@@ -458,25 +521,94 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
           )}
         </div>
 
-        <div className="flex justify-end gap-3 border-t border-slate-200 px-6 py-4 dark:border-slate-700">
-          <button
-            onClick={() => {
-              setLocalHalls(halls);
-              onClose();
-            }}
-            className="rounded bg-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
-          >
-            キャンセル
-          </button>
-          <button
-            onClick={() => {
-              onUpdateHalls(localHalls);
-              onClose();
-            }}
-            className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
-          >
-            適用
-          </button>
+        <div className="border-t border-slate-200 px-6 py-4 dark:border-slate-700 space-y-3">
+          {/* 同期UI */}
+          {showSyncUI && (
+            <div className="rounded-lg border border-indigo-200 dark:border-indigo-700 bg-indigo-50 dark:bg-indigo-900/20 p-3 space-y-2">
+              <div className="text-xs font-semibold text-indigo-700 dark:text-indigo-300">
+                同期先の日付を選択（現在: {activeEventDate}）
+              </div>
+              {otherMapDates.length === 0 ? (
+                <div className="text-xs text-slate-500 dark:text-slate-400 py-2">
+                  マップが設定された他の日付がありません
+                </div>
+              ) : (
+                <div className="space-y-1 max-h-32 overflow-y-auto">
+                  {otherMapDates.map((date) => (
+                    <label
+                      key={date}
+                      className="flex items-center gap-2 px-2 py-1 rounded hover:bg-indigo-100 dark:hover:bg-indigo-800/30 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={syncTargetDates.has(date)}
+                        onChange={() => handleToggleSyncDate(date)}
+                        className="w-4 h-4 text-indigo-600 rounded"
+                      />
+                      <span className="text-sm text-slate-700 dark:text-slate-200">{date}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2 pt-1">
+                {otherMapDates.length > 0 && (
+                  <>
+                    <button
+                      onClick={handleSyncAll}
+                      className="flex-1 px-3 py-1.5 text-xs font-medium text-indigo-700 dark:text-indigo-300 bg-indigo-100 dark:bg-indigo-800/40 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-800/60"
+                    >
+                      全日付に適用
+                    </button>
+                    <button
+                      onClick={handleSyncExecute}
+                      disabled={syncTargetDates.size === 0}
+                      className="flex-1 px-3 py-1.5 text-xs font-medium text-white bg-indigo-600 rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      選択した日に同期 ({syncTargetDates.size})
+                    </button>
+                  </>
+                )}
+                <button
+                  onClick={() => { setShowSyncUI(false); setSyncTargetDates(new Set()); }}
+                  className="px-3 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                >
+                  閉じる
+                </button>
+              </div>
+            </div>
+          )}
+          <div className="flex justify-end gap-3">
+            <button
+              onClick={() => {
+                setLocalHalls(halls);
+                onClose();
+              }}
+              className="rounded bg-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
+            >
+              キャンセル
+            </button>
+            {onSyncToOtherDates && otherMapDates.length > 0 && localHalls.length > 0 && (
+              <button
+                onClick={() => setShowSyncUI((v) => !v)}
+                className={`rounded px-4 py-2 text-sm transition-colors ${
+                  showSyncUI
+                    ? 'text-indigo-700 bg-indigo-100 dark:text-indigo-300 dark:bg-indigo-800/40'
+                    : 'text-indigo-600 bg-indigo-50 dark:text-indigo-400 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-800/40'
+                }`}
+              >
+                他の日に同期
+              </button>
+            )}
+            <button
+              onClick={() => {
+                onUpdateHalls(localHalls);
+                onClose();
+              }}
+              className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
+            >
+              適用
+            </button>
+          </div>
         </div>
       </div>
     </div>

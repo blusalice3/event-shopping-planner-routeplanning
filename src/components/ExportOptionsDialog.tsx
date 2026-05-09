@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ExportOptions } from '../types';
+import { ExportOptions } from '../types/export';
 
 interface ExportOptionsDialogProps {
   isOpen: boolean;

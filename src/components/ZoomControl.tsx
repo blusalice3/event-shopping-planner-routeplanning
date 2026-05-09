@@ -6,7 +6,7 @@ interface ZoomControlProps {
 }
 
 const ZoomControl: React.FC<ZoomControlProps> = ({ zoomLevel, onZoomChange }) => {
-  const zoomOptions = [30, 50, 75, 100, 125, 150];
+  const zoomOptions = [15, 30, 50, 75, 100, 125, 150];
 
   return (
     <div className="fixed bottom-4 left-4 z-30">

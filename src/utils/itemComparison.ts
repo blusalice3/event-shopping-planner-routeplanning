@@ -1,4 +1,4 @@
-import { ShoppingItem } from '../types';
+import { ShoppingItem } from '../types/item';
 
 export function getItemKey(
   item: ShoppingItem | Omit<ShoppingItem, 'id' | 'purchaseStatus'>,

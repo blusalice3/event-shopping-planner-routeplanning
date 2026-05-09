@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { HallDefinition, HallRouteSettings } from '../../types';
+import { HallDefinition, HallRouteSettings } from '../../types/map';
 
 // 優先度レベルの型
 type PriorityLevel = 'none' | 'priority' | 'highest';
@@ -19,6 +19,7 @@ const parseGroupId = (
   groupId: string | null,
 ): { hallId: string | null; priority: PriorityLevel } => {
   if (groupId === null) return { hallId: null, priority: 'none' };
+  if (groupId === 'undefined') return { hallId: null, priority: 'none' };
   if (groupId === 'undefined:highest') return { hallId: null, priority: 'highest' };
   if (groupId === 'undefined:priority') return { hallId: null, priority: 'priority' };
   if (groupId.endsWith(':highest')) {
@@ -33,8 +34,9 @@ const parseGroupId = (
 // グループの表示名を取得
 const getGroupDisplayName = (groupId: string | null, halls: HallDefinition[]): string => {
   if (groupId === null) return 'ホール未定義';
-  if (groupId === 'undefined:highest') return '未定義最優先';
-  if (groupId === 'undefined:priority') return '未定義優先';
+  if (groupId === 'undefined') return 'ホール未定義';
+  if (groupId === 'undefined:highest') return 'ホール未定義最優先';
+  if (groupId === 'undefined:priority') return 'ホール未定義優先';
 
   const { hallId, priority } = parseGroupId(groupId);
   const hall = halls.find((h) => h.id === hallId);

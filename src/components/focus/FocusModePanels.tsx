@@ -1,5 +1,6 @@
 import React from 'react';
-import { HallDefinition, ShoppingItem, FocusMapCenteringMode } from '../../types';
+import { PurchaseStatus, PurchaseStatusControlMode, ShoppingItem } from '../../types/item';
+import { FocusMapCenteringMode } from '../../types/focus';
 import ShoppingItemCard from '../ShoppingItemCard';
 import MapRotationControls from '../map/MapRotationControls';
 
@@ -16,6 +17,7 @@ interface FocusModeItemListProps {
   onEditRequest?: (item: ShoppingItem) => void;
   onDeleteRequest?: (item: ShoppingItem) => void;
   onAddItem?: () => void;
+  purchaseStatusControlMode?: PurchaseStatusControlMode;
 }
 
 interface FocusModeHeaderProps {
@@ -34,6 +36,8 @@ interface FocusModeHeaderProps {
   };
   currentPhase: FocusPhase;
   onPhaseChangeRequest: (phase: FocusPhase) => void;
+  currentVisitItems: ShoppingItem[];
+  onBulkStatusChange: (targetStatus: PurchaseStatus) => void;
   nextVisitInfo: {
     spaceInfo: string;
     circleName: string;
@@ -41,9 +45,6 @@ interface FocusModeHeaderProps {
 }
 
 interface FocusModeMapControlsProps {
-  selectedHallId: string | 'follow';
-  onSelectedHallIdChange: (value: string | 'follow') => void;
-  hallDefinitions?: HallDefinition[];
   mapZoomLevel: number;
   mapRotationAngle: number;
   mapInitialRotationAngle: number;
@@ -51,6 +52,23 @@ interface FocusModeMapControlsProps {
   mapCenteringMode: FocusMapCenteringMode;
   onMapCenteringModeChange: (mode: FocusMapCenteringMode) => void;
 }
+
+const noopShoppingItemHandler = (_item: ShoppingItem) => {};
+const noopSelectItem = (_itemId: string) => {};
+
+const bulkStatusOptions: {
+  status: PurchaseStatus;
+  label: string;
+  activeColor: string;
+  hoverColor: string;
+}[] = [
+  { status: 'Purchased', label: '全購入', activeColor: 'bg-green-600 text-white', hoverColor: 'hover:bg-white/20' },
+  { status: 'SoldOut', label: '全売切', activeColor: 'bg-red-600 text-white', hoverColor: 'hover:bg-white/20' },
+  { status: 'Absent', label: '全欠席', activeColor: 'bg-yellow-500 text-white', hoverColor: 'hover:bg-white/20' },
+  { status: 'Postpone', label: '全後回', activeColor: 'bg-purple-700 text-white', hoverColor: 'hover:bg-white/20' },
+  { status: 'Late', label: '全遅参', activeColor: 'bg-blue-700 text-white', hoverColor: 'hover:bg-white/20' },
+  { status: 'LimitedPurchase', label: '全限数', activeColor: 'bg-orange-600 text-white', hoverColor: 'hover:bg-white/20' },
+];
 
 export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
   itemListRef,
@@ -63,6 +81,7 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
   onEditRequest,
   onDeleteRequest,
   onAddItem,
+  purchaseStatusControlMode = 'cycle',
 }) => (
   <div
     ref={itemListRef}
@@ -87,12 +106,13 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
           item={item}
           onUpdate={onUpdateItem}
           isStriped={index % 2 === 1}
-          onEditRequest={onEditRequest || (() => {})}
-          onDeleteRequest={onDeleteRequest || (() => {})}
+          onEditRequest={onEditRequest || noopShoppingItemHandler}
+          onDeleteRequest={onDeleteRequest || noopShoppingItemHandler}
           isSelected={false}
-          onSelectItem={() => {}}
+          onSelectItem={noopSelectItem}
           layoutMode={layoutMode}
           viewMode="focus"
+          purchaseStatusControlMode={purchaseStatusControlMode}
         />
       </div>
     ))}
@@ -122,6 +142,8 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(({
   currentVisitPriceInfo,
   currentPhase,
   onPhaseChangeRequest,
+  currentVisitItems,
+  onBulkStatusChange,
   nextVisitInfo,
 }) => {
   const rootClassName = containerClassName
@@ -201,14 +223,35 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(({
           </div>
         </div>
       </div>
+      {currentVisitItems.length > 0 && (
+        <div className="mt-3 flex flex-wrap justify-end gap-1.5">
+          {bulkStatusOptions.map(({ status, label, activeColor, hoverColor }) => {
+            const allMatch = currentVisitItems.every((item) => item.purchaseStatus === status);
+            return (
+              <button
+                key={status}
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onBulkStatusChange(status);
+                }}
+                className={`${layoutMode === 'smartphone' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'} flex-shrink-0 whitespace-nowrap font-medium rounded transition-colors ${
+                  allMatch ? activeColor : `bg-white/10 text-white ${hoverColor}`
+                }`}
+                title={`${label}に一括変更${allMatch ? '（もう一度押すと未購入に戻す）' : ''}`}
+                aria-pressed={allMatch}
+              >
+                {label}
+              </button>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 });
 
 export const FocusModeMapControls: React.FC<FocusModeMapControlsProps> = React.memo(({
-  selectedHallId,
-  onSelectedHallIdChange,
-  hallDefinitions,
   mapZoomLevel,
   mapRotationAngle,
   mapInitialRotationAngle,
@@ -217,19 +260,6 @@ export const FocusModeMapControls: React.FC<FocusModeMapControlsProps> = React.m
   onMapCenteringModeChange,
 }) => (
   <div className="flex items-center gap-2 p-2 bg-white/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 flex-wrap">
-    <select
-      value={selectedHallId}
-      onChange={(e) => onSelectedHallIdChange(e.target.value as string | 'follow')}
-      className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none"
-    >
-      <option value="follow">追随モードON</option>
-      {hallDefinitions?.map((hall) => (
-        <option key={hall.id} value={hall.id}>
-          {hall.name}
-        </option>
-      ))}
-    </select>
-
     <div className="flex rounded-md overflow-hidden border border-slate-300 dark:border-slate-600">
       <button
         onClick={() => onMapCenteringModeChange('prevToCurrent')}

@@ -1,5 +1,5 @@
 import React, { useMemo, useRef, useEffect } from 'react';
-import { ShoppingItem } from '../types';
+import { ShoppingItem } from '../types/item';
 
 interface SummaryBarProps {
   items: ShoppingItem[];

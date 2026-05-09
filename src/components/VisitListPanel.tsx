@@ -1,6 +1,9 @@
 import React, { useState, useCallback, useMemo, useEffect, useRef } from 'react';
-import { ShoppingItem, DayMapData, HallDefinition, BlockDefinition } from '../types';
+import { ShoppingItem } from '../types/item';
+import { DayMapData, HallDefinition, BlockDefinition } from '../types/map';
 import { getSpaceKey } from '../utils/spaceGrouping';
+import { parseGroupId, groupItemsByHallOrder } from '../utils/hallGrouping';
+import { findRouteLookupNumberCell } from '../utils/mapRoutingSignature';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 
 // 優先度レベルの型
@@ -27,96 +30,6 @@ interface VisitListPanelProps {
 interface HistoryState {
   items: ShoppingItem[];
 }
-
-// グループIDからホールIDと優先度を分離するヘルパー
-const parseGroupId = (
-  groupId: string | null,
-): { hallId: string | null; priority: PriorityLevel } => {
-  if (groupId === null) return { hallId: null, priority: 'none' };
-  if (groupId.endsWith(':highest')) {
-    return { hallId: groupId.replace(':highest', ''), priority: 'highest' };
-  }
-  if (groupId.endsWith(':priority')) {
-    return { hallId: groupId.replace(':priority', ''), priority: 'priority' };
-  }
-  return { hallId: groupId, priority: 'none' };
-};
-
-// ホールIDと優先度からグループIDを生成するヘルパー
-const buildGroupId = (hallId: string | null, priority: PriorityLevel): string | null => {
-  if (hallId === null) {
-    if (priority === 'highest') return 'undefined:highest';
-    if (priority === 'priority') return 'undefined:priority';
-    return null;
-  }
-  if (priority === 'highest') return `${hallId}:highest`;
-  if (priority === 'priority') return `${hallId}:priority`;
-  return hallId;
-};
-
-// アイテムのホールIDを取得するヘルパー
-const getItemHallId = (
-  item: ShoppingItem,
-  mapData: DayMapData | null,
-  hallDefinitions: HallDefinition[],
-): string | null => {
-  if (!mapData) return null;
-
-  const block = mapData.blocks.find((b: BlockDefinition) => b.name === item.block);
-  if (!block) return null;
-
-  const numMatch = item.number?.match(/\d+/);
-  if (!numMatch) return null;
-  const num = parseInt(numMatch[0], 10);
-
-  const cell = block.numberCells.find(
-    (nc: { row: number; col: number; value: number }) => nc.value === num,
-  );
-  if (!cell) return null;
-
-  // 多角形内判定（レイキャスティング法）
-  const isPointInPolygon = (
-    row: number,
-    col: number,
-    vertices: { row: number; col: number }[],
-  ): boolean => {
-    if (vertices.length < 3) return false;
-    let inside = false;
-    for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-      const xi = vertices[i].col,
-        yi = vertices[i].row;
-      const xj = vertices[j].col,
-        yj = vertices[j].row;
-      if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
-        inside = !inside;
-      }
-    }
-    return inside;
-  };
-
-  for (const hall of hallDefinitions) {
-    for (const vertex of hall.vertices) {
-      if (vertex.row === cell.row && vertex.col === cell.col) {
-        return hall.id;
-      }
-    }
-    if (isPointInPolygon(cell.row, cell.col, hall.vertices)) {
-      return hall.id;
-    }
-  }
-  return null;
-};
-
-// アイテムのグループID（ホールID + 優先度）を取得
-const getItemGroupId = (
-  item: ShoppingItem,
-  mapData: DayMapData | null,
-  hallDefinitions: HallDefinition[],
-): string | null => {
-  const hallId = getItemHallId(item, mapData, hallDefinitions);
-  const priority = item.priorityLevel || 'none';
-  return buildGroupId(hallId, priority);
-};
 
 // グループの表示名を取得
 const getGroupDisplayName = (groupId: string | null, hallDefinitions: HallDefinition[]): string => {
@@ -152,6 +65,8 @@ const getGroupHeaderStyle = (
 };
 
 // ホールごとにアイテムをグループ化するヘルパー（優先度対応版）
+// 4段階ロジックは hallGrouping ユーティリティに集約済み。ここでは表示用に
+// {item, hallIndex} 形式へ詰め替えるだけの薄いラッパー。
 const groupItemsByHallWithOrder = (
   items: ShoppingItem[],
   mapData: DayMapData | null,
@@ -177,94 +92,14 @@ const groupItemsByHallWithOrder = (
     ];
   }
 
-  // ホールID→ホール情報のマップ
-  const hallMap = new Map<string, HallDefinition>();
-  hallDefinitions.forEach((hall) => hallMap.set(hall.id, hall));
-
-  // グループ化（グループIDをキーに）
-  const groups = new Map<string | null, ShoppingItem[]>();
-
-  items.forEach((item) => {
-    const groupId = getItemGroupId(item, mapData, hallDefinitions);
-    if (!groups.has(groupId)) {
-      groups.set(groupId, []);
-    }
-    groups.get(groupId)!.push(item);
-  });
-
-  // グループ順序に従ってソート
-  const result: {
-    groupId: string | null;
-    hallId: string | null;
-    hallName: string | null;
-    hallColor?: string;
-    priority: PriorityLevel;
-    items: { item: ShoppingItem; hallIndex: number }[];
-  }[] = [];
-
-  // まずhallOrderに従ってグループを追加
-  hallOrder.forEach((groupId) => {
-    if (groups.has(groupId)) {
-      const { hallId, priority } = parseGroupId(groupId);
-      const hall = hallMap.get(hallId || '');
-      const groupItems = groups.get(groupId)!;
-      result.push({
-        groupId,
-        hallId,
-        hallName: hall?.name || null,
-        hallColor: hall?.color || '#6366f1',
-        priority,
-        items: groupItems.map((item, hallIndex) => ({ item, hallIndex })),
-      });
-      groups.delete(groupId);
-    }
-  });
-
-  // hallOrderに含まれないがhallDefinitionsに含まれるホール（通常グループ）を追加
-  hallDefinitions.forEach((hall) => {
-    const groupId = hall.id;
-    if (groups.has(groupId)) {
-      const groupItems = groups.get(groupId)!;
-      result.push({
-        groupId,
-        hallId: hall.id,
-        hallName: hall.name,
-        hallColor: hall.color || '#6366f1',
-        priority: 'none',
-        items: groupItems.map((item, hallIndex) => ({ item, hallIndex })),
-      });
-      groups.delete(groupId);
-    }
-  });
-
-  // 優先度付きグループで残っているものを追加
-  const remainingGroups = Array.from(groups.entries()).filter(([gId]) => gId !== null);
-  remainingGroups.forEach(([groupId, groupItems]) => {
-    const { hallId, priority } = parseGroupId(groupId);
-    const hall = hallMap.get(hallId || '');
-    result.push({
-      groupId,
-      hallId,
-      hallName: hall?.name || null,
-      hallColor: hall?.color || '#6366f1',
-      priority,
-      items: groupItems.map((item, hallIndex) => ({ item, hallIndex })),
-    });
-  });
-
-  // ホール未定義のアイテム（null）を最後に追加
-  if (groups.has(null)) {
-    const groupItems = groups.get(null)!;
-    result.push({
-      groupId: null,
-      hallId: null,
-      hallName: null,
-      priority: 'none',
-      items: groupItems.map((item, hallIndex) => ({ item, hallIndex })),
-    });
-  }
-
-  return result;
+  return groupItemsByHallOrder(items, mapData, hallDefinitions, hallOrder).map((group) => ({
+    groupId: group.groupId,
+    hallId: group.hallId,
+    hallName: group.hallName,
+    hallColor: group.hallColor,
+    priority: group.priority,
+    items: group.items.map((item, hallIndex) => ({ item, hallIndex })),
+  }));
 };
 
 const VisitListPanel: React.FC<VisitListPanelProps> = ({
@@ -664,9 +499,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
       if (!numMatch) return;
       const num = parseInt(numMatch[0], 10);
 
-      const cell = block.numberCells.find(
-        (nc: { row: number; col: number; value: number }) => nc.value === num,
-      );
+      const cell = findRouteLookupNumberCell(block, num);
       if (cell) {
         onHighlightCell(cell.row, cell.col);
       }

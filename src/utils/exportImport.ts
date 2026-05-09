@@ -9,13 +9,15 @@ import {
   EventMetadata,
   DayModeState,
   ExecuteModeItems,
+  PurchaseStatuses,
+} from '../types/item';
+import {
   MapDataStore,
   RouteSettingsStore,
   HallDefinitionsStore,
   HallRouteSettingsStore,
-  ExportOptions,
-  PurchaseStatuses,
-} from '../types';
+} from '../types/map';
+import { ExportOptions } from '../types/export';
 
 // エクスポートデータの型
 export interface ExportData {
@@ -101,6 +103,7 @@ export async function exportToXlsx(
     { header: '優先度', key: 'priorityLevel', width: 10 },
     { header: '保護レベル', key: 'protectionLevel', width: 12 },
     { header: '追加元', key: 'source', width: 12 },
+    { header: '手動ホール', key: 'manualHallId', width: 20 },
   ];
 
   // データ
@@ -120,6 +123,7 @@ export async function exportToXlsx(
       priorityLevel: item.priorityLevel || 'none',
       protectionLevel: item.protectionLevel || '',
       source: item.source || '',
+      manualHallId: item.manualHallId || '',
     });
   });
 
@@ -393,6 +397,10 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         }
       }
 
+      // 手動ホールIDを取得（列15、後方互換: 古いファイルは空）
+      const manualHallValue = String(row.getCell(15).value ?? '').trim();
+      const manualHallId = manualHallValue || undefined;
+
       const item: ShoppingItem = {
         id: itemId,
         circle,
@@ -408,6 +416,7 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         priorityLevel,
         protectionLevel,
         source,
+        manualHallId,
       };
 
       if (item.circle || item.title) {

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
-import { ShoppingItem, PurchaseStatus, PurchaseStatuses } from '../../types';
+import { ShoppingItem, PurchaseStatus, PurchaseStatuses } from '../../types/item';
 import { getBaseNumber } from '../../utils/spaceGrouping';
 
 interface SpaceGroup {
@@ -339,10 +339,8 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
 
   const handleDelete = () => {
     if (longPressItem && onDeleteItem) {
-      if (confirm(`「${longPressItem.title || longPressItem.circle}」を削除しますか？`)) {
-        onDeleteItem(longPressItem.id);
-        setLongPressItem(null);
-      }
+      onDeleteItem(longPressItem.id);
+      setLongPressItem(null);
     }
   };
 
@@ -699,8 +697,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    数量
-                  </label>
+                    数量</label>
                   <select
                     value={editingItem.quantity}
                     onChange={(e) =>
@@ -717,8 +714,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                    購入状態
-                  </label>
+                    購入状態</label>
                   <select
                     value={editingItem.purchaseStatus}
                     onChange={(e) =>

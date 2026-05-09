@@ -1,17 +1,22 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   DayMapData,
   CellData,
-  ShoppingItem,
   MergedCellInfo,
   HallDefinition,
   BlockDefinition,
   NumberCellOutlineStyle,
-  FocusMapCenteringMode,
   MIN_ZOOM,
   MAX_ZOOM,
-} from '../types';
+} from '../types/map';
+import { ShoppingItem } from '../types/item';
+import { FocusMapCenteringMode } from '../types/focus';
+import {
+  rotatePointAroundCenter,
+  useCanvasViewport,
+} from '../features/map/canvas/useCanvasViewport';
 import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
+import { findRouteLookupNumberCell } from '../utils/mapRoutingSignature';
 import { findPath, simplifyPath } from '../utils/pathfinding';
 import {
   findAllCrossingsIndexed,
@@ -44,7 +49,7 @@ interface FocusModeMapCanvasProps {
   currentPhaseIndex?: number;
   numberCellOutlineStyle?: NumberCellOutlineStyle;
   mapCenteringMode?: FocusMapCenteringMode;
-  // 事前計算データ（FocusMode.tsxで保持しマウント時の計算を省略）
+  // ルート再計算を避けるため、FocusMode 側で事前計算したデータを受け取る。
   precomputedVisitKeyCellMap?: Map<string, { row: number; col: number; key: string }>;
   precomputedAllVisitCellCoords?: { row: number; col: number; key: string }[];
   precomputedRouteSegments?: { path: { row: number; col: number }[]; segmentIndex: number }[];
@@ -58,29 +63,6 @@ const hasCellInputValue = (value: string | number | null): boolean => {
   if (value === null || value === undefined) return false;
   if (typeof value === 'string') return value.trim().length > 0;
   return true;
-};
-
-const normalizeRotationAngle = (angle: number): number => {
-  const normalized = Math.round(angle) % 360;
-  return normalized < 0 ? normalized + 360 : normalized;
-};
-
-const rotatePointAroundCenter = (
-  x: number,
-  y: number,
-  centerX: number,
-  centerY: number,
-  angleRad: number,
-): { x: number; y: number } => {
-  if (angleRad === 0) return { x, y };
-  const dx = x - centerX;
-  const dy = y - centerY;
-  const cos = Math.cos(angleRad);
-  const sin = Math.sin(angleRad);
-  return {
-    x: dx * cos - dy * sin + centerX,
-    y: dx * sin + dy * cos + centerY,
-  };
 };
 
 const extractBaseNumber = (number: string): string => {
@@ -180,37 +162,42 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   precomputedAllVisitCellCoords,
   precomputedRouteSegments,
 }) => {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [offset, setOffsetState] = useState({ x: 0, y: 0 });
-  const offsetRef = useRef(offset);
-  const zoomLevelRef = useRef(zoomLevel);
-  const [isDragging, setIsDragging] = useState(false);
-  const isDraggingRef = useRef(false);
-  const dragStartRef = useRef({ x: 0, y: 0 });
-  const dragStartOffsetRef = useRef({ x: 0, y: 0 });
-  const rafPendingRef = useRef(false);
-  const drawCanvasRef = useRef<(() => void) | null>(null);
-  const [isRotationInteracting, setIsRotationInteracting] = useState(false);
-  const rotationInteractionTimerRef = useRef<number | null>(null);
-
-  // ピンチ操作中のタッチ座標を識別子ごとに保持する。
-  const activeTouchesRef = useRef<Map<number, { x: number; y: number }>>(new Map());
-  const pinchStartDistRef = useRef<number>(0);
-  const pinchStartZoomRef = useRef<number>(zoomLevel);
-  const pinchStartOffsetRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
-  const isPinchGestureRef = useRef(false);
-  const suppressClickUntilRef = useRef(0);
-
-  const setOffset = useCallback((newOffset: { x: number; y: number }) => {
-    setOffsetState(newOffset);
-    offsetRef.current = newOffset;
-  }, []);
-
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-  const scale = zoomLevel / 100;
+  const {
+    activeTouchesRef,
+    canvasRef,
+    cellSize,
+    containerRef,
+    dpr,
+    dragStartOffsetRef,
+    dragStartRef,
+    drawCanvasRef,
+    isDragging,
+    isDraggingRef,
+    isPinchGestureRef,
+    isRotationInteracting,
+    mapCenterX,
+    mapCenterY,
+    offsetRef,
+    rafPendingRef,
+    rotationRadians,
+    setIsDragging,
+    setOffset,
+    setOffsetState,
+    suppressClickUntilRef,
+    toMapCoordinates,
+    zoomLevelRef,
+  } = useCanvasViewport({
+    mapMaxCol: mapData.maxCol,
+    mapMaxRow: mapData.maxRow,
+    zoomLevel,
+    rotationAngle,
+    baseCellSize: BASE_CELL_SIZE,
+    minZoom: MIN_ZOOM,
+    maxZoom: MAX_ZOOM,
+    onZoomChange,
+    onRotationAngleChange,
+  });
   const appScale = Math.max(0.01, appZoomLevel / 100);
-  const cellSize = BASE_CELL_SIZE * scale;
   const isDarkMode =
     typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
   const isDetailedView = true;
@@ -218,16 +205,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const showBorders = true;
 
   const prevSelectedHallRef = useRef<HallDefinition | null>(null);
-  const normalizedRotationAngle = useMemo(
-    () => normalizeRotationAngle(rotationAngle),
-    [rotationAngle],
-  );
-  const rotationRadians = useMemo(
-    () => (normalizedRotationAngle * Math.PI) / 180,
-    [normalizedRotationAngle],
-  );
-  const mapCenterX = useMemo(() => (mapData.maxCol * cellSize) / 2, [mapData.maxCol, cellSize]);
-  const mapCenterY = useMemo(() => (mapData.maxRow * cellSize) / 2, [mapData.maxRow, cellSize]);
 
   const cellsMap = useMemo(() => {
     const map = new Map<string, CellData>();
@@ -292,7 +269,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       if (!numStr) return;
 
       const num = parseInt(numStr, 10);
-      const cell = block.numberCells.find((nc) => nc.value === num);
+      const cell = findRouteLookupNumberCell(block, num);
       if (!cell) return;
 
       const key = `${cell.row}-${cell.col}`;
@@ -393,7 +370,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return null;
   }, [cellStates]);
 
-  // ラベル決定ロジック: 各セルに表示するテキストと色を決定
+  // セルに表示するラベル文字と色を決定する。
   const cellLabels = useMemo(() => {
     const labels = new Map<
       string,
@@ -409,7 +386,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       if (state.isCurrentPosition) {
         if (currentPhaseIndex === 0) {
-          // フェーズの最初のスペース
+          // 各フェーズの最初の訪問セルにはフェーズ別ラベルを表示する。
           if (currentPhase === 'normal') {
             labels.set(key, { text: '始', bgColor: 'rgba(255,109,0,0.5)', textColor: '#FFFFFF' });
           } else if (currentPhase === 'postponed') {
@@ -418,7 +395,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
             labels.set(key, { text: '遅始', bgColor: 'rgba(33,150,243,0.5)', textColor: '#FFFFFF' });
           }
         } else {
-          labels.set(key, { text: '次', bgColor: 'rgba(255,109,0,0.5)', textColor: '#FFFFFF' });
+          labels.set(key, { text: '\u6B21', bgColor: 'rgba(255,109,0,0.5)', textColor: '#FFFFFF' });
         }
       } else if (state.allProcessed && state.allPostponed) {
         labels.set(key, { text: '後', bgColor: 'rgba(156,39,176,0.4)', textColor: 'rgba(156,39,176,0.9)' });
@@ -427,14 +404,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       } else if (state.allProcessed) {
         labels.set(key, { text: '済', bgColor: 'rgba(158,158,158,0.5)', textColor: 'rgba(76,175,80,0.8)' });
       } else if (state.allNone) {
-        labels.set(key, { text: '未', bgColor: 'rgba(66,165,245,0.3)', textColor: 'rgba(33,150,243,0.8)' });
+        labels.set(key, { text: '\u672A', bgColor: 'rgba(66,165,245,0.3)', textColor: 'rgba(33,150,243,0.8)' });
       }
     });
 
     return labels;
   }, [cellStates, currentPhaseIndex, currentPhase]);
 
-  // 数値セル判定用Set（ブロック定義が変わらない限りキャッシュ）
+  // 番号セルを高速に判定できるようキャッシュする。
   const numberCellSet = useMemo(() => {
     const set = new Set<string>();
     mapData.blocks.forEach((block) => {
@@ -443,7 +420,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     return set;
   }, [mapData.blocks]);
 
-  // 事前計算データを使用（FocusMode.tsxで保持されマウント時の計算を省略）
+  // ルート再計算を避けるため、FocusMode 側で事前計算したデータを使用する。
   const allVisitCellCoords = precomputedAllVisitCellCoords || [];
   const routeSegments = precomputedRouteSegments || [];
 
@@ -568,7 +545,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     let minCol = currentCellCoords.col;
     let maxCol = currentCellCoords.col;
 
-    if (prevCellCoords && prevInSameHall) {
+    if (prevCellCoords) {
       minRow = Math.min(minRow, prevCellCoords.row);
       maxRow = Math.max(maxRow, prevCellCoords.row);
       minCol = Math.min(minCol, prevCellCoords.col);
@@ -582,7 +559,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     maxCol = maxCol + margin;
 
     return { minRow, maxRow, minCol, maxCol };
-  }, [currentCellCoords, prevCellCoords, prevInSameHall]);
+  }, [currentCellCoords, prevCellCoords]);
 
   const routeBoundsCurrentOnly = useMemo(() => {
     if (!currentCellCoords) return null;
@@ -601,34 +578,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const routeBounds = mapCenteringMode === 'currentOnly' ? routeBoundsCurrentOnly : routeBoundsPrevCurrent;
 
   const prevVisitKeyRef = useRef<string | null>(null);
-
-  const toMapCoordinates = useCallback(
-    (viewX: number, viewY: number, currentOffset?: { x: number; y: number }) => {
-      const ofs = currentOffset ?? offsetRef.current;
-      const translatedX = viewX - ofs.x;
-      const translatedY = viewY - ofs.y;
-      if (rotationRadians === 0) return { x: translatedX, y: translatedY };
-
-      const dx = translatedX - mapCenterX;
-      const dy = translatedY - mapCenterY;
-      const cos = Math.cos(rotationRadians);
-      const sin = Math.sin(rotationRadians);
-
-      return {
-        x: dx * cos + dy * sin + mapCenterX,
-        y: -dx * sin + dy * cos + mapCenterY,
-      };
-    },
-    [rotationRadians, mapCenterX, mapCenterY],
-  );
-
-  useEffect(() => {
-    offsetRef.current = offset;
-  }, [offset]);
-
-  useEffect(() => {
-    zoomLevelRef.current = zoomLevel;
-  }, [zoomLevel]);
 
   const calculateCenteredOffset = useCallback(
     (
@@ -655,75 +604,6 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     },
     [mapData.maxCol, mapData.maxRow],
   );
-
-  const calculateOffsetForZoomPoint = useCallback(
-    (
-      viewX: number,
-      viewY: number,
-      newZoom: number,
-      options?: {
-        baseZoom?: number;
-        baseOffset?: { x: number; y: number };
-      },
-    ) => {
-      const baseZoom = options?.baseZoom ?? zoomLevelRef.current;
-      const baseOffset = options?.baseOffset ?? offsetRef.current;
-      const currentCellSize = BASE_CELL_SIZE * (baseZoom / 100);
-      const newCellSize = BASE_CELL_SIZE * (newZoom / 100);
-      const translatedX = viewX - baseOffset.x;
-      const translatedY = viewY - baseOffset.y;
-      let mapPointX = translatedX;
-      let mapPointY = translatedY;
-
-      if (rotationRadians !== 0) {
-        const currentMapCenterX = (mapData.maxCol * currentCellSize) / 2;
-        const currentMapCenterY = (mapData.maxRow * currentCellSize) / 2;
-        const dx = translatedX - currentMapCenterX;
-        const dy = translatedY - currentMapCenterY;
-        const cos = Math.cos(rotationRadians);
-        const sin = Math.sin(rotationRadians);
-        mapPointX = dx * cos + dy * sin + currentMapCenterX;
-        mapPointY = -dx * sin + dy * cos + currentMapCenterY;
-      }
-
-      const normalizedMapX = mapPointX / currentCellSize;
-      const normalizedMapY = mapPointY / currentCellSize;
-      const scaledMapX = normalizedMapX * newCellSize;
-      const scaledMapY = normalizedMapY * newCellSize;
-      const newMapCenterX = (mapData.maxCol * newCellSize) / 2;
-      const newMapCenterY = (mapData.maxRow * newCellSize) / 2;
-      const rotatedPoint = rotatePointAroundCenter(
-        scaledMapX,
-        scaledMapY,
-        newMapCenterX,
-        newMapCenterY,
-        rotationRadians,
-      );
-      return {
-        x: viewX - rotatedPoint.x,
-        y: viewY - rotatedPoint.y,
-      };
-    },
-    [mapData.maxCol, mapData.maxRow, rotationRadians],
-  );
-
-  useEffect(() => {
-    setIsRotationInteracting(true);
-    if (rotationInteractionTimerRef.current !== null) {
-      clearTimeout(rotationInteractionTimerRef.current);
-    }
-    rotationInteractionTimerRef.current = window.setTimeout(() => {
-      setIsRotationInteracting(false);
-      rotationInteractionTimerRef.current = null;
-    }, 150);
-
-    return () => {
-      if (rotationInteractionTimerRef.current !== null) {
-        clearTimeout(rotationInteractionTimerRef.current);
-      }
-    };
-  }, [normalizedRotationAngle]);
-
 
   useEffect(() => {
     if (prevSelectedHallRef.current?.id === selectedHall?.id) {
@@ -870,7 +750,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     calculateCenteredOffset,
   ]);
 
-  // センタリングモード切替時に再センタリング
+  // 描画補助関数。
   const prevCenteringModeRef = useRef(mapCenteringMode);
   useEffect(() => {
     if (prevCenteringModeRef.current === mapCenteringMode) return;
@@ -919,7 +799,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     calculateCenteredOffset,
   ]);
 
-  // ルート交差検出結果をキャッシュ（ドラッグ中に毎フレーム再計算するのを回避）
+  // ドラッグ中の再描画で再計算しないよう、ルート交差データをキャッシュする。
   const routeCrossingData = useMemo(() => {
     if (routeSegments.length === 0) return null;
 
@@ -965,7 +845,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, containerWidth, containerHeight);
 
-    // ドラッグ中もリアルタイムで反映するためrefから読む
+    // ドラッグ中の最新オフセットを即時反映するため、ref から読み取る。
     const currentOffset = offsetRef.current;
 
     ctx.save();
@@ -979,7 +859,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
-    // ビューポート座標変換をインライン化（toMapCoordinatesの依存を排除）
+    // toMapCoordinates への依存を避けるため、表示座標からマップ座標への変換をここで行う。
     const viewToMap = (viewX: number, viewY: number) => {
       const tx = viewX - currentOffset.x;
       const ty = viewY - currentOffset.y;
@@ -1275,7 +1155,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.textBaseline = 'middle';
     };
 
-    // 数値セルスタイル設定（分岐をループ外で解決）
+    // 番号セルのスタイル値はループ外で解決する。
     const outlineStyle = numberCellOutlineStyle;
     const useInset = outlineStyle !== 'none';
     const ncPad = useInset ? cellSize * 0.1 : 0;
@@ -1286,12 +1166,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const drawStroke = outlineStyle !== 'none';
     const isDashed = outlineStyle === 'dashed';
 
-    // パス描画ヘルパー（スタイルに応じて1回だけ選択）
+    // セルのパス生成処理をスタイルごとにまとめる。
     const drawCellPath = ncRadius > 0
       ? (rx: number, ry: number, rw: number, rh: number) => ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius)
       : (rx: number, ry: number, rw: number, rh: number) => ctx.rect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2);
 
-    // バッチ描画用: ジオメトリ収集配列
+    // 一括描画用にジオメトリを収集する。
     const ncRects: { x: number; y: number; w: number; h: number }[] = [];
     const overlayGroups = new Map<string, { x: number; y: number; w: number; h: number }[]>();
 
@@ -1361,19 +1241,19 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
     });
 
-    // バッチ描画: 数値セル背景
+    // 収集したジオメトリをまとめて描画する。
     if (ncRects.length > 0) {
       ctx.beginPath();
       for (const r of ncRects) drawCellPath(r.x, r.y, r.w, r.h);
       ctx.fillStyle = ncBg;
       ctx.fill();
 
-      // ボーダー描画
+      // 枠線を描画する。
       if (drawStroke) {
         ctx.strokeStyle = ncBorder;
         ctx.lineWidth = ncBorderWidth;
         if (isDashed) {
-          // dashed: セル毎にdash phaseをリセットするため個別stroke
+          // 破線枠はセルごとに破線の開始位置をリセットする。
           const dashLen = Math.max(2, cellSize * 0.12);
           ctx.setLineDash([dashLen, dashLen]);
           for (const r of ncRects) {
@@ -1383,12 +1263,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           }
           ctx.setLineDash([]);
         } else {
-          // rounded/square: 蓄積済みパスで一括stroke
+          // 角丸と四角の枠線はまとめたパスを一度だけ stroke する。
           ctx.stroke();
         }
       }
 
-      // バッチ描画: オーバーレイ（色別）
+      // オーバーレイもまとめて描画する。
       for (const [color, rects] of overlayGroups) {
         ctx.beginPath();
         for (const r of rects) drawCellPath(r.x, r.y, r.w, r.h);
@@ -1397,7 +1277,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
     }
 
-    // 2. セルの罫線を描画する。
+    // セル境界線を描画する。
     if (showBorders && !isRotationInteracting) {
       type DrawnBorder = NonNullable<CellData['borders']['top']>;
       type BorderEdge = {
@@ -1609,12 +1489,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
     }
 
-    // ルート線描画: 全スペースをA*経路で接続（セグメントごとに色分け、飛び越し線対応）
+    // ドラッグ中の再描画で再計算しないよう、ルート交差データをキャッシュする。
     if (!isRotationInteracting && routeSegments.length > 0 && routeCrossingData) {
       const lineWidth = Math.max(2, cellSize * 0.08);
       const { crossingLookup, bridgeParams } = routeCrossingData;
 
-      // ビューポートカリング用マージン
+      // ビューポート外判定用の余白。
       const routeMargin = cellSize * 2;
       const visMinX = visibleMinX - routeMargin;
       const visMaxX = visibleMaxX + routeMargin;
@@ -1629,7 +1509,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         let currentLineWidth = lineWidth;
         let strokeStyle: string;
 
-        // セグメントの色を決定
+        // 現在フェーズ位置に応じてルート線の見た目を切り替える。
         if (segment.segmentIndex < currentPhaseIndex - 1) {
           strokeStyle = 'rgba(156, 163, 175, 0.4)';
         } else if (segment.segmentIndex === currentPhaseIndex - 1) {
@@ -1650,13 +1530,13 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           const px2 = (p2.col - 0.5) * cellSize;
           const py2 = (p2.row - 0.5) * cellSize;
 
-          // ビューポートカリング: 両端点が画面外ならスキップ
+          // ビューポート外のセグメントは描画をスキップする。
           if (px1 < visMinX && px2 < visMinX) continue;
           if (px1 > visMaxX && px2 > visMaxX) continue;
           if (py1 < visMinY && py2 < visMinY) continue;
           if (py1 > visMaxY && py2 > visMaxY) continue;
 
-          // 飛び越し線付きでバッチ蓄積
+          // ルート線の交差箇所にはブリッジ用の隙間を入れて描画する。
           collectEdgeWithBridges(
             collector, px1, py1, px2, py2,
             segIdx, i,
@@ -1668,7 +1548,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       batcher.flush(ctx);
     }
 
-    // ラベルテキスト描画: 各スペースに始/次/済/未/後/遅/後始/遅始を表示
+    // ラベルを描画する。
     if (!isRotationInteracting) {
       cellLabels.forEach((label, key) => {
         const [row, col] = key.split('-').map(Number);
@@ -1681,7 +1561,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
         const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
 
-        // 現在の目的地（始/次/後始/遅始）は枠線で強��
+        // 現在対象セルを枠線で強調する。
         const state = cellStates.get(key);
         if (state?.isCurrentPosition) {
           ctx.strokeStyle = 'rgba(255, 109, 0, 0.8)';
@@ -1689,24 +1569,24 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           ctx.strokeRect(x - 1, y - 1, width + 2, height + 2);
         }
 
-        // ラベルテキスト
+        // ラベル文字を描画する。
         if (state?.isCurrentPosition) {
-          // 現在の訪問先: セル上辺の外側に📍とラベルを表示（数値セルと重ならない）
+          // 現在対象セルはピンとラベルをセル上部に描画する。
           const pinFontSize = Math.max(12, cellSize * 0.45);
           ctx.font = `${pinFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
           ctx.textAlign = 'center';
           ctx.textBaseline = 'bottom';
-          const pinY = y; // セル上辺
+          const pinY = y; // ピンの描画位置。
           drawUprightText('\u{1F4CD}', x + width / 2, pinY);
 
-          // ラベルテキスト(「次」等)を📍のさらに上に表示
+          // ラベルはピンの上に配置する。
           const labelFontSize = Math.max(10, cellSize * 0.35);
           ctx.font = `bold ${labelFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
           ctx.textBaseline = 'bottom';
           ctx.fillStyle = label.textColor;
           drawUprightText(label.text, x + width / 2, pinY - pinFontSize);
         } else {
-          // 他のラベル(済/未/後/遅)は従来通りセル中央に表示
+          // その他のラベルはセル中央に描画する。
           const fontSize = Math.max(10, cellSize * 0.35);
           ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
           ctx.textAlign = 'center';
@@ -1742,137 +1622,13 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     routeCrossingData,
   ]);
 
-  // drawCanvasRefを更新してrAFから呼べるようにする
+  // rAF から最新の描画関数を呼べるよう drawCanvasRef を更新する。
   drawCanvasRef.current = drawCanvas;
 
-  // 依存値が変わったら描画を実行
+  // 依存値が変わったら再描画する。
   useEffect(() => {
     drawCanvas();
   }, [drawCanvas]);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-
-    const handleWheel = (e: WheelEvent) => {
-      e.preventDefault();
-      if (e.shiftKey && onRotationAngleChange) {
-        const deltaAngle = e.deltaY < 0 ? -15 : 15;
-        onRotationAngleChange(normalizeRotationAngle(rotationAngle + deltaAngle));
-        return;
-      }
-      if (!onZoomChange) return;
-
-      const rect = container.getBoundingClientRect();
-      const zoomCenter = {
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-      };
-
-      const delta = -e.deltaY * 0.1;
-      const currentZoom = zoomLevelRef.current;
-      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(currentZoom + delta)));
-      if (newZoom === currentZoom) return;
-
-      const newOffset = calculateOffsetForZoomPoint(zoomCenter.x, zoomCenter.y, newZoom, {
-        baseZoom: currentZoom,
-        baseOffset: offsetRef.current,
-      });
-      setOffset(newOffset);
-      zoomLevelRef.current = newZoom;
-      onZoomChange(newZoom);
-    };
-
-    const handleTouchStart = (e: TouchEvent) => {
-      Array.from(e.changedTouches).forEach((t) => {
-        activeTouchesRef.current.set(t.identifier, { x: t.clientX, y: t.clientY });
-      });
-      if (activeTouchesRef.current.size === 2) {
-        isPinchGestureRef.current = true;
-        isDraggingRef.current = false;
-        setIsDragging(false);
-        e.preventDefault();
-        const touches = Array.from(activeTouchesRef.current.values());
-        pinchStartDistRef.current = Math.sqrt(
-          Math.pow(touches[1].x - touches[0].x, 2) + Math.pow(touches[1].y - touches[0].y, 2),
-        );
-        pinchStartZoomRef.current = zoomLevelRef.current;
-        pinchStartOffsetRef.current = { ...offsetRef.current };
-      }
-    };
-
-    const handleTouchMove = (e: TouchEvent) => {
-      Array.from(e.changedTouches).forEach((t) => {
-        activeTouchesRef.current.set(t.identifier, { x: t.clientX, y: t.clientY });
-      });
-      if (activeTouchesRef.current.size === 2 && onZoomChange) {
-        isPinchGestureRef.current = true;
-        e.preventDefault();
-        const touches = Array.from(activeTouchesRef.current.values());
-        const currentDist = Math.sqrt(
-          Math.pow(touches[1].x - touches[0].x, 2) + Math.pow(touches[1].y - touches[0].y, 2),
-        );
-        if (pinchStartDistRef.current === 0) return;
-
-        const rect = container.getBoundingClientRect();
-        const midX = (touches[0].x + touches[1].x) / 2 - rect.left;
-        const midY = (touches[0].y + touches[1].y) / 2 - rect.top;
-
-        const scaleRatio = currentDist / pinchStartDistRef.current;
-        const newZoom = Math.max(
-          MIN_ZOOM,
-          Math.min(MAX_ZOOM, Math.round(pinchStartZoomRef.current * scaleRatio)),
-        );
-        if (newZoom === zoomLevelRef.current) return;
-
-        const newOffset = calculateOffsetForZoomPoint(midX, midY, newZoom, {
-          baseZoom: pinchStartZoomRef.current,
-          baseOffset: pinchStartOffsetRef.current,
-        });
-        setOffset(newOffset);
-        zoomLevelRef.current = newZoom;
-        onZoomChange(newZoom);
-      }
-    };
-
-    const handleTouchEnd = (e: TouchEvent) => {
-      Array.from(e.changedTouches).forEach((t) => {
-        activeTouchesRef.current.delete(t.identifier);
-      });
-
-      if (activeTouchesRef.current.size < 2) {
-        pinchStartDistRef.current = 0;
-        isPinchGestureRef.current = false;
-        isDraggingRef.current = false;
-        setIsDragging(false);
-
-        if (activeTouchesRef.current.size === 1) {
-          const remainingTouch = Array.from(activeTouchesRef.current.values())[0];
-          dragStartRef.current = { x: remainingTouch.x, y: remainingTouch.y };
-          dragStartOffsetRef.current = { ...offsetRef.current };
-        }
-      }
-    };
-
-    container.addEventListener('wheel', handleWheel, { passive: false });
-    container.addEventListener('touchstart', handleTouchStart, { passive: false });
-    container.addEventListener('touchmove', handleTouchMove, { passive: false });
-    container.addEventListener('touchend', handleTouchEnd);
-    container.addEventListener('touchcancel', handleTouchEnd);
-
-    return () => {
-      container.removeEventListener('wheel', handleWheel);
-      container.removeEventListener('touchstart', handleTouchStart);
-      container.removeEventListener('touchmove', handleTouchMove);
-      container.removeEventListener('touchend', handleTouchEnd);
-      container.removeEventListener('touchcancel', handleTouchEnd);
-    };
-  }, [
-    onZoomChange,
-    calculateOffsetForZoomPoint,
-    onRotationAngleChange,
-    rotationAngle,
-  ]);
 
   const activeScrollBounds = useMemo(() => {
     const isExplicitHallSelection = selectedHallMode !== 'follow';
@@ -2012,7 +1768,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         return;
       }
 
-      // マージセルの子セルがタップされた場合、親セル座標に解決
+      // 結合セルの子セルがタップされた場合は、親セル座標に解決する。
       let resolvedRow = row;
       let resolvedCol = col;
       for (const merge of mapData.mergedCells) {
@@ -2119,7 +1875,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         newY = Math.max(limits.minY, Math.min(limits.maxY, newY));
       }
 
-      // ドラッグ中はrefのみ更新し、rAFで描画（React再レンダリングを回避）
+      // ドラッグ中は React の再レンダリングを避けるため、ref だけ更新して rAF で再描画する。
       offsetRef.current = { x: newX, y: newY };
       if (!rafPendingRef.current) {
         rafPendingRef.current = true;
@@ -2134,7 +1890,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
   const finishPointerInteraction = useCallback(() => {
     isDraggingRef.current = false;
-    // ドラッグ終了時にrefの最終値をReact stateに同期
+    // ドラッグ終了時に ref の値を state へ反映する。
     setOffsetState(offsetRef.current);
     setTimeout(() => {
       setIsDragging(false);

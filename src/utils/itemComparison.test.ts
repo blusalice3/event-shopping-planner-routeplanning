@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { getItemKey, getItemKeyWithoutTitle, insertItemSorted } from './itemComparison';
-import { ShoppingItem } from '../types';
+import { ShoppingItem } from '../types/item';
 
 const createItem = (id: string, overrides: Partial<ShoppingItem> = {}): ShoppingItem => ({
   id,
