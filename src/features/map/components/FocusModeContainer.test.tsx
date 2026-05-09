@@ -196,4 +196,15 @@ describe("FocusModeContainer route merge cache", () => {
       hall({ id: "stale-merged", name: "Stale merged" }),
     ]);
   });
+
+  it("passes purchase status control mode to FocusMode", () => {
+    render(
+      <FocusModeContainer
+        {...baseProps}
+        purchaseStatusControlMode="radial"
+      />,
+    );
+
+    expect(mocks.focusModeProps.at(-1)?.purchaseStatusControlMode).toBe("radial");
+  });
 });

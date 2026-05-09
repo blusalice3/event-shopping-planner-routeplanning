@@ -10,6 +10,9 @@ export const PurchaseStatuses = [
 
 export type PurchaseStatus = (typeof PurchaseStatuses)[number];
 
+export const PurchaseStatusControlModes = ['cycle', 'radial'] as const;
+export type PurchaseStatusControlMode = (typeof PurchaseStatusControlModes)[number];
+
 export const ProtectionLevels = ['full', 'deletable', 'none'] as const;
 export type ProtectionLevel = (typeof ProtectionLevels)[number];
 

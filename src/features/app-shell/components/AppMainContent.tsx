@@ -17,7 +17,12 @@ import type {
   MapViewportState,
   NumberCellOutlineStyle,
 } from '../../../types/map';
-import type { ExecuteModeItems, ShoppingItem, ViewMode } from '../../../types/item';
+import type {
+  ExecuteModeItems,
+  PurchaseStatusControlMode,
+  ShoppingItem,
+  ViewMode,
+} from '../../../types/item';
 import type { FocusModeSessionState } from '../../../types/focus';
 import type {
   ActiveTab,
@@ -142,6 +147,7 @@ type AppMainContentProps = {
   mapSmartInsertMode: 'card' | 'preview';
   newItemDefaults: { eventDate: string; block: string; number: string } | null;
   numberCellOutlineStyle: NumberCellOutlineStyle;
+  purchaseStatusControlMode: PurchaseStatusControlMode;
   rangeEnd: RangeSelectionState;
   rangeStart: RangeSelectionState;
   selectedBlockFilters: Set<string>;
@@ -267,6 +273,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     mapSmartInsertMode,
     newItemDefaults,
     numberCellOutlineStyle,
+    purchaseStatusControlMode,
     rangeEnd,
     rangeStart,
     selectedBlockFilters,
@@ -457,6 +464,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                     onSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
                     onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
                     onAddItem={handleAddItemFromFocusMode}
+                    purchaseStatusControlMode={purchaseStatusControlMode}
                   />
                 </div>
 
@@ -561,6 +569,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                     onSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
                     onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
                     onAddItem={handleAddItemFromFocusMode}
+                    purchaseStatusControlMode={purchaseStatusControlMode}
                   />
                 </div>
               </div>
@@ -592,6 +601,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                   onMapRotationAngleChange={handleFocusMapRotationAngleChange}
                   numberCellOutlineStyle={numberCellOutlineStyle}
                   disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+                  purchaseStatusControlMode={purchaseStatusControlMode}
                 />
               </Suspense>
             ) : (
@@ -637,6 +647,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                 mapData={getMapDataForDate(
                   activeEventDate,
                 )}
+                purchaseStatusControlMode={purchaseStatusControlMode}
               />
             )}
           </div>

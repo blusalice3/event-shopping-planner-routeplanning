@@ -12,7 +12,11 @@ import type {
   HallDefinition,
   NumberCellOutlineStyle,
 } from '../../../types/map';
-import type { ShoppingItem, ViewMode } from '../../../types/item';
+import type {
+  PurchaseStatusControlMode,
+  ShoppingItem,
+  ViewMode,
+} from '../../../types/item';
 import type {
   ActiveTab,
   BlockSortDirection,
@@ -30,6 +34,84 @@ type TabButtonProps = {
   onClick?: () => void;
 };
 
+export type PurchaseStatusControlModeSettingsProps = {
+  purchaseStatusControlMode: PurchaseStatusControlMode;
+  setPurchaseStatusControlMode: React.Dispatch<React.SetStateAction<PurchaseStatusControlMode>>;
+};
+
+export const PurchaseStatusControlModeSettings: React.FC<
+  PurchaseStatusControlModeSettingsProps
+> = ({
+  purchaseStatusControlMode,
+  setPurchaseStatusControlMode,
+}) => (
+  <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700">
+    <div className="text-xs font-semibold text-slate-700 dark:text-slate-300 mb-2">
+      購入状態ボタン
+    </div>
+    <div className="space-y-1">
+      {(
+        [
+          ['cycle', '循環クリック', 'クリックするたびに次の状態へ進みます'],
+          ['radial', '放射状メニュー', 'クリックで7状態を直接選べるメニューを開きます'],
+        ] as const
+      ).map(([value, label, description]) => (
+        <label key={value} className="flex items-start gap-2 cursor-pointer text-xs">
+          <input
+            type="radio"
+            name="purchaseStatusControlMode"
+            value={value}
+            checked={purchaseStatusControlMode === value}
+            onChange={() => setPurchaseStatusControlMode(value)}
+            className="mt-0.5 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+          />
+          <span className="flex-1">
+            <span className="block text-slate-700 dark:text-slate-300">{label}</span>
+            <span className="block text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+              {description}
+            </span>
+          </span>
+        </label>
+      ))}
+    </div>
+  </div>
+);
+
+export type DisplaySettingsResetButtonProps = {
+  DEFAULT_OUTLINE_STYLE: NumberCellOutlineStyle;
+  DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode;
+  DEFAULT_UI_VISIBILITY: UIVisibilitySettings;
+  setDisablePriceUndefinedCheck: React.Dispatch<React.SetStateAction<boolean>>;
+  setNumberCellOutlineStyle: React.Dispatch<React.SetStateAction<NumberCellOutlineStyle>>;
+  setPurchaseStatusControlMode: React.Dispatch<React.SetStateAction<PurchaseStatusControlMode>>;
+  setUiVisibilityOverride: React.Dispatch<React.SetStateAction<boolean>>;
+  setUiVisibilitySettings: React.Dispatch<React.SetStateAction<UIVisibilitySettings>>;
+};
+
+export const DisplaySettingsResetButton: React.FC<DisplaySettingsResetButtonProps> = ({
+  DEFAULT_OUTLINE_STYLE,
+  DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
+  DEFAULT_UI_VISIBILITY,
+  setDisablePriceUndefinedCheck,
+  setNumberCellOutlineStyle,
+  setPurchaseStatusControlMode,
+  setUiVisibilityOverride,
+  setUiVisibilitySettings,
+}) => (
+  <button
+    onClick={() => {
+      setUiVisibilitySettings(DEFAULT_UI_VISIBILITY);
+      setUiVisibilityOverride(false);
+      setNumberCellOutlineStyle(DEFAULT_OUTLINE_STYLE);
+      setDisablePriceUndefinedCheck(false);
+      setPurchaseStatusControlMode(DEFAULT_PURCHASE_STATUS_CONTROL_MODE);
+    }}
+    className="w-full mt-1 px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
+  >
+    デフォルトに戻す
+  </button>
+);
+
 type AppHeaderShellProps = {
   activeEventDate: string;
   activeEventName: string | null;
@@ -42,6 +124,7 @@ type AppHeaderShellProps = {
   currentMode: ViewMode;
   currentSearchIndex: number;
   DEFAULT_OUTLINE_STYLE: NumberCellOutlineStyle;
+  DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode;
   DEFAULT_UI_VISIBILITY: UIVisibilitySettings;
   disablePriceUndefinedCheck: boolean;
   eventDates: string[];
@@ -82,6 +165,7 @@ type AppHeaderShellProps = {
   mapViewActive: boolean;
   numberCellOutlineStyle: NumberCellOutlineStyle;
   openVisitListPanel: (mapTab: string) => void;
+  purchaseStatusControlMode: PurchaseStatusControlMode;
   searchKeyword: string;
   selectedItemIds: Set<string>;
   executeSpaceGroupingEnabled: boolean;
@@ -105,6 +189,7 @@ type AppHeaderShellProps = {
   setMapViewActive: React.Dispatch<React.SetStateAction<boolean>>;
   setDisablePriceUndefinedCheck: React.Dispatch<React.SetStateAction<boolean>>;
   setNumberCellOutlineStyle: React.Dispatch<React.SetStateAction<NumberCellOutlineStyle>>;
+  setPurchaseStatusControlMode: React.Dispatch<React.SetStateAction<PurchaseStatusControlMode>>;
   setSearchKeyword: React.Dispatch<React.SetStateAction<string>>;
   setSelectedBlockFilters: React.Dispatch<React.SetStateAction<Set<string>>>;
   setSelectedItemIds: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -146,6 +231,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     currentMode,
     currentSearchIndex,
     DEFAULT_OUTLINE_STYLE,
+    DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
     DEFAULT_UI_VISIBILITY,
     disablePriceUndefinedCheck,
     eventDates,
@@ -186,6 +272,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     mapViewActive,
     numberCellOutlineStyle,
     openVisitListPanel,
+    purchaseStatusControlMode,
     searchKeyword,
     selectedItemIds,
     executeSpaceGroupingEnabled,
@@ -209,6 +296,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     setMapViewActive,
     setDisablePriceUndefinedCheck,
     setNumberCellOutlineStyle,
+    setPurchaseStatusControlMode,
     setSearchKeyword,
     setSelectedBlockFilters,
     setSelectedItemIds,
@@ -746,20 +834,23 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                 </span>
                               </span>
                             </label>
+                            <PurchaseStatusControlModeSettings
+                              purchaseStatusControlMode={purchaseStatusControlMode}
+                              setPurchaseStatusControlMode={setPurchaseStatusControlMode}
+                            />
                           </div>
 
                           {/* 表示処理の補足 */}
-                          <button
-                            onClick={() => {
-                              setUiVisibilitySettings(DEFAULT_UI_VISIBILITY);
-                              setUiVisibilityOverride(false);
-                              setNumberCellOutlineStyle(DEFAULT_OUTLINE_STYLE);
-                              setDisablePriceUndefinedCheck(false);
-                            }}
-                            className="w-full mt-1 px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
-                          >
-                            デフォルトに戻す
-                          </button>
+                          <DisplaySettingsResetButton
+                            DEFAULT_OUTLINE_STYLE={DEFAULT_OUTLINE_STYLE}
+                            DEFAULT_PURCHASE_STATUS_CONTROL_MODE={DEFAULT_PURCHASE_STATUS_CONTROL_MODE}
+                            DEFAULT_UI_VISIBILITY={DEFAULT_UI_VISIBILITY}
+                            setDisablePriceUndefinedCheck={setDisablePriceUndefinedCheck}
+                            setNumberCellOutlineStyle={setNumberCellOutlineStyle}
+                            setPurchaseStatusControlMode={setPurchaseStatusControlMode}
+                            setUiVisibilityOverride={setUiVisibilityOverride}
+                            setUiVisibilitySettings={setUiVisibilitySettings}
+                          />
                         </div>
                       </>
                     )}

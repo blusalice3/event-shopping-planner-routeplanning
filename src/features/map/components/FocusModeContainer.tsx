@@ -9,7 +9,12 @@ import {
   buildHallDefinitionsStoreRoutingSignature,
   buildHallRouteSettingsStoreRoutingSignature,
 } from '../../../utils/hallRoutingSignature';
-import type { ExecuteModeItems, PurchaseStatus, ShoppingItem } from '../../../types/item';
+import type {
+  ExecuteModeItems,
+  PurchaseStatus,
+  PurchaseStatusControlMode,
+  ShoppingItem,
+} from '../../../types/item';
 import type { FocusModeSessionState } from '../../../types/focus';
 import type {
   HallDefinition,
@@ -46,6 +51,7 @@ type FocusModeContainerProps = {
   onMapRotationAngleChange?: (angle: number) => void;
   numberCellOutlineStyle?: NumberCellOutlineStyle;
   disablePriceUndefinedCheck?: boolean;
+  purchaseStatusControlMode?: PurchaseStatusControlMode;
 };
 
 const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
@@ -73,6 +79,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   onMapRotationAngleChange,
   numberCellOutlineStyle,
   disablePriceUndefinedCheck,
+  purchaseStatusControlMode = 'cycle',
 }) => {
   // 現在表示中の日付（タブ名が日付と一致すればそれ、そうでなければ先頭日）
   const currentDay = useMemo(
@@ -347,6 +354,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       onMapRotationAngleChange={onMapRotationAngleChange}
       numberCellOutlineStyle={numberCellOutlineStyle}
       disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+      purchaseStatusControlMode={purchaseStatusControlMode}
     />
   );
 };
