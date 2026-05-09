@@ -98,6 +98,7 @@ import {
 } from './hooks/useUIVisibilitySettings';
 import { useNumberCellOutlineStyle } from './hooks/useNumberCellOutlineStyle';
 import { useDisablePriceUndefinedCheck } from './hooks/useDisablePriceUndefinedCheck';
+import { usePurchaseStatusControlMode } from './hooks/usePurchaseStatusControlMode';
 import { useIndexedDbPersistence } from './hooks/useIndexedDbPersistence';
 
 type ActiveTab = 'eventList' | 'import' | string;
@@ -320,6 +321,11 @@ const App: React.FC = () => {
   const { uiVisibilitySettings, setUiVisibilitySettings } = useUIVisibilitySettings();
   const { numberCellOutlineStyle, setNumberCellOutlineStyle, DEFAULT_OUTLINE_STYLE } = useNumberCellOutlineStyle();
   const { disablePriceUndefinedCheck, setDisablePriceUndefinedCheck } = useDisablePriceUndefinedCheck();
+  const {
+    purchaseStatusControlMode,
+    setPurchaseStatusControlMode,
+    DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
+  } = usePurchaseStatusControlMode();
   const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
   const [uiSettingsPanelOpen, setUiSettingsPanelOpen] = useState(false);
   const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
@@ -4202,6 +4208,7 @@ const App: React.FC = () => {
         currentMode={currentMode}
         currentSearchIndex={currentSearchIndex}
         DEFAULT_OUTLINE_STYLE={DEFAULT_OUTLINE_STYLE}
+        DEFAULT_PURCHASE_STATUS_CONTROL_MODE={DEFAULT_PURCHASE_STATUS_CONTROL_MODE}
         DEFAULT_UI_VISIBILITY={DEFAULT_UI_VISIBILITY}
         disablePriceUndefinedCheck={disablePriceUndefinedCheck}
         eventDates={eventDates}
@@ -4243,6 +4250,7 @@ const App: React.FC = () => {
         mapViewActive={mapViewActive}
         numberCellOutlineStyle={numberCellOutlineStyle}
         openVisitListPanel={openVisitListPanel}
+        purchaseStatusControlMode={purchaseStatusControlMode}
         searchKeyword={searchKeyword}
         selectedItemIds={selectedItemIds}
         setActiveEventName={setActiveEventName}
@@ -4265,6 +4273,7 @@ const App: React.FC = () => {
         setMapViewActive={setMapViewActive}
         setDisablePriceUndefinedCheck={setDisablePriceUndefinedCheck}
         setNumberCellOutlineStyle={setNumberCellOutlineStyle}
+        setPurchaseStatusControlMode={setPurchaseStatusControlMode}
         setSearchKeyword={setSearchKeyword}
         setSelectedBlockFilters={setSelectedBlockFilters}
         setSelectedItemIds={setSelectedItemIds}
@@ -4448,6 +4457,7 @@ const App: React.FC = () => {
         mapSmartInsertMode={mapSmartInsertMode}
         newItemDefaults={newItemDefaults}
         numberCellOutlineStyle={numberCellOutlineStyle}
+        purchaseStatusControlMode={purchaseStatusControlMode}
         rangeEnd={rangeEnd}
         rangeStart={rangeStart}
         selectedBlockFilters={selectedBlockFilters}
