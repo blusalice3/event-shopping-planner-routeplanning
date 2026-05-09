@@ -1,4 +1,9 @@
-import { CellData, PathNode, RouteSegment, DayMapData } from '../types';
+import {
+  CellData,
+  PathNode,
+  RouteSegment,
+  DayMapData,
+} from '../types/map';
 
 // サブセル解像度: 各セルをN×Nに分割
 const SUB_CELL_RESOLUTION = 3;

@@ -11,11 +11,11 @@ import {
   MergedCellInfo,
   BlockDefinition,
   DayMapData,
-  ShoppingItem,
   NumberCellInfo,
   BlockDetectionSettings,
   DEFAULT_BLOCK_DETECTION_SETTINGS,
-} from '../types';
+} from '../types/map';
+import { ShoppingItem } from '../types/item';
 
 type BorderWeight = 'thin' | 'medium' | 'thick' | 'double';
 

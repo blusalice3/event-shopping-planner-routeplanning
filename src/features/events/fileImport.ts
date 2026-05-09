@@ -2,12 +2,14 @@ import type {
   DayModeState,
   EventMetadata,
   ExecuteModeItems,
+  ShoppingItem,
+} from '../../types/item';
+import type {
   HallDefinitionsStore,
   HallRouteSettingsStore,
   MapDataStore,
   RouteSettingsStore,
-  ShoppingItem,
-} from '../../types';
+} from '../../types/map';
 import type { ImportResult } from '../../utils/exportImport';
 
 export type ImportedEventData = {

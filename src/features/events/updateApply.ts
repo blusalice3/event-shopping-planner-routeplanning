@@ -1,4 +1,4 @@
-import type { ExecuteModeItems, ShoppingItem } from '../../types';
+import type { ExecuteModeItems, ShoppingItem } from '../../types/item';
 import { insertItemSorted } from '../../utils/itemComparison';
 import type { EventUpdateDiff } from './updateDiff';
 

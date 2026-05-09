@@ -2,13 +2,15 @@ import type {
   DayModeState,
   EventMetadata,
   ExecuteModeItems,
-  ExportOptions,
+  ShoppingItem,
+} from '../../types/item';
+import type { ExportOptions } from '../../types/export';
+import type {
   HallDefinitionsStore,
   HallRouteSettingsStore,
   MapDataStore,
   RouteSettingsStore,
-  ShoppingItem,
-} from '../../types';
+} from '../../types/map';
 import { exportToXlsx } from '../../utils/exportImport';
 
 type ExportStores = {

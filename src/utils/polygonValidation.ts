@@ -1,4 +1,4 @@
-import { HallDefinition } from '../types';
+import { HallDefinition } from '../types/map';
 
 export type PolygonValidationIssueCode =
   | 'self_intersection'
