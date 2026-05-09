@@ -2,7 +2,7 @@ import * as React from 'react';
 import FocusMode from './FocusMode';
 import type { DayMapData, HallDefinition } from '../types/map';
 import type { FocusModeSessionState } from '../types/focus';
-import type { ShoppingItem } from '../types/item';
+import type { PurchaseStatusControlMode, ShoppingItem } from '../types/item';
 
 export const completedFixture: FocusModeSessionState = {
   phase: 'normal',
@@ -88,6 +88,7 @@ export const minimalProps = (
     onSessionStateChange?: (state: FocusModeSessionState) => void;
     onModeChange?: (mode: 'edit' | 'execute', lastItemId?: string) => void;
     disablePriceUndefinedCheck?: boolean;
+    purchaseStatusControlMode?: PurchaseStatusControlMode;
   } = {},
 ) => ({
   items: overrides.items ?? [],
@@ -102,6 +103,7 @@ export const minimalProps = (
   resumeState: cloneSessionState(overrides.resumeState),
   onSessionStateChange: overrides.onSessionStateChange ?? (() => {}),
   disablePriceUndefinedCheck: overrides.disablePriceUndefinedCheck ?? false,
+  purchaseStatusControlMode: overrides.purchaseStatusControlMode ?? 'cycle',
 });
 
 /**

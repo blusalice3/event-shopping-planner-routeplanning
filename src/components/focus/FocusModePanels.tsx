@@ -1,5 +1,5 @@
 import React from 'react';
-import { PurchaseStatus, ShoppingItem } from '../../types/item';
+import { PurchaseStatus, PurchaseStatusControlMode, ShoppingItem } from '../../types/item';
 import { FocusMapCenteringMode } from '../../types/focus';
 import ShoppingItemCard from '../ShoppingItemCard';
 import MapRotationControls from '../map/MapRotationControls';
@@ -17,6 +17,7 @@ interface FocusModeItemListProps {
   onEditRequest?: (item: ShoppingItem) => void;
   onDeleteRequest?: (item: ShoppingItem) => void;
   onAddItem?: () => void;
+  purchaseStatusControlMode?: PurchaseStatusControlMode;
 }
 
 interface FocusModeHeaderProps {
@@ -80,6 +81,7 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
   onEditRequest,
   onDeleteRequest,
   onAddItem,
+  purchaseStatusControlMode = 'cycle',
 }) => (
   <div
     ref={itemListRef}
@@ -110,6 +112,7 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
           onSelectItem={noopSelectItem}
           layoutMode={layoutMode}
           viewMode="focus"
+          purchaseStatusControlMode={purchaseStatusControlMode}
         />
       </div>
     ))}

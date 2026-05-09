@@ -1,7 +1,9 @@
 import React, { useCallback, useLayoutEffect, useMemo, useState, useRef, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ShoppingItem,
   PurchaseStatus,
+  PurchaseStatusControlMode,
   PurchaseStatuses,
   ProtectionLevel,
   ProtectionLevels,
@@ -55,6 +57,7 @@ export interface ShoppingItemCardProps {
   hallIndex?: number; // ホール内での訪問順番号（0始まり）
   priorityLevel?: 'none' | 'priority' | 'highest'; // グループの優先度レベル
   highlightPrice?: boolean; // 価格未定の購入済アイテムの価格欄を強調表示
+  purchaseStatusControlMode?: PurchaseStatusControlMode;
 }
 
 const statusConfig: Record<
@@ -140,6 +143,185 @@ const protectionConfig: Record<
 // 保護レベルのサイクル順序
 const protectionCycle: ProtectionLevel[] = ['full', 'deletable', 'none'];
 
+type PurchaseStatusRadialMenuProps = {
+  itemId: string;
+  anchorRef: React.RefObject<HTMLButtonElement>;
+  currentStatus: PurchaseStatus;
+  onSelect: (status: PurchaseStatus) => void;
+  onCancel: () => void;
+};
+
+const RADIAL_MENU_RADIUS = 46;
+const RADIAL_MENU_ITEM_SIZE = 40;
+export const OUTSIDE_CLICK_FALLBACK_CLOSE_DELAY_MS = 300;
+
+const PurchaseStatusRadialMenu: React.FC<PurchaseStatusRadialMenuProps> = ({
+  itemId,
+  anchorRef,
+  currentStatus,
+  onSelect,
+  onCancel,
+}) => {
+  const [center, setCenter] = useState<{ x: number; y: number } | null>(null);
+  const itemButtonRefs = useRef<Partial<Record<PurchaseStatus, HTMLButtonElement | null>>>({});
+  const cancelTimerRef = useRef<number | null>(null);
+
+  const stopPointerOverlayEvent = useCallback((event: React.SyntheticEvent) => {
+    event.stopPropagation();
+  }, []);
+
+  const stopMouseOverlayEvent = useCallback((event: React.SyntheticEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
+
+  const clearScheduledCancel = useCallback(() => {
+    if (cancelTimerRef.current === null) return;
+    window.clearTimeout(cancelTimerRef.current);
+    cancelTimerRef.current = null;
+  }, []);
+
+  const scheduleFallbackCancelAfterPointerUp = useCallback(() => {
+    if (cancelTimerRef.current !== null) return;
+    cancelTimerRef.current = window.setTimeout(() => {
+      cancelTimerRef.current = null;
+      onCancel();
+    }, OUTSIDE_CLICK_FALLBACK_CLOSE_DELAY_MS);
+  }, [onCancel]);
+
+  const cancelAfterCapturedClick = useCallback(() => {
+    clearScheduledCancel();
+    onCancel();
+  }, [clearScheduledCancel, onCancel]);
+
+  useLayoutEffect(() => {
+    const updateCenter = () => {
+      const rect = anchorRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setCenter({
+        x: rect.left + rect.width / 2,
+        y: rect.top + rect.height / 2,
+      });
+    };
+
+    updateCenter();
+    window.addEventListener('resize', updateCenter);
+    window.addEventListener('scroll', updateCenter, true);
+
+    return () => {
+      window.removeEventListener('resize', updateCenter);
+      window.removeEventListener('scroll', updateCenter, true);
+    };
+  }, [anchorRef]);
+
+  useEffect(() => {
+    if (!center) return;
+    itemButtonRefs.current[currentStatus]?.focus();
+  }, [center, currentStatus]);
+
+  useEffect(() => clearScheduledCancel, [clearScheduledCancel]);
+
+  if (!center) return null;
+
+  // Known a11y debt: this is a non-modal dialog without focus trapping. Tab can
+  // leave the dialog and reach background UI. The radiogroup uses tabbable
+  // button-based radio controls without roving tabindex or arrow-key movement.
+  // 3.5 guarantees focus placement, Tab reachability, Escape, and focus
+  // restoration; focus trap, aria-modal, roving tabindex, and arrow-key
+  // navigation are follow-ups.
+
+  return createPortal(
+    <div
+      data-purchase-status-overlay={itemId}
+      className="fixed inset-0 z-[90] pointer-events-auto"
+      onPointerDown={stopPointerOverlayEvent}
+      onPointerUp={(event) => {
+        stopPointerOverlayEvent(event);
+        scheduleFallbackCancelAfterPointerUp();
+      }}
+      onMouseDown={stopMouseOverlayEvent}
+      onMouseUp={stopMouseOverlayEvent}
+      onClick={(event) => {
+        stopMouseOverlayEvent(event);
+        cancelAfterCapturedClick();
+      }}
+    >
+      <div
+        data-purchase-status-menu={itemId}
+        className="absolute"
+        style={{ left: center.x, top: center.y }}
+        role="dialog"
+        aria-label="購入状態を選択"
+        onPointerDown={(event) => {
+          clearScheduledCancel();
+          event.stopPropagation();
+        }}
+        onPointerUp={(event) => event.stopPropagation()}
+        onMouseDown={(event) => {
+          clearScheduledCancel();
+          event.stopPropagation();
+        }}
+        onMouseUp={(event) => event.stopPropagation()}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="absolute -translate-x-1/2 -translate-y-1/2 w-34 h-34 rounded-full bg-white/90 dark:bg-slate-900/90 border border-slate-200 dark:border-slate-700 shadow-2xl backdrop-blur-sm" />
+
+        <div role="radiogroup" aria-label="購入状態">
+          {PurchaseStatuses.map((status, index) => {
+            const angle = -90 + (360 / PurchaseStatuses.length) * index;
+            const rad = (angle * Math.PI) / 180;
+            const x = Math.cos(rad) * RADIAL_MENU_RADIUS;
+            const y = Math.sin(rad) * RADIAL_MENU_RADIUS;
+            const config = statusConfig[status];
+            const Icon = config.icon;
+            const selected = status === currentStatus;
+
+            return (
+              <button
+                key={status}
+                ref={(node) => {
+                  itemButtonRefs.current[status] = node;
+                }}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                aria-label={`${status}に変更`}
+                title={config.label}
+                data-status={status}
+                onClick={() => onSelect(status)}
+                className={`absolute flex items-center justify-center rounded-full border shadow-md transition-transform hover:scale-110 focus:outline-none focus:ring-2 focus:ring-blue-500 ${
+                  selected
+                    ? 'bg-blue-600 border-blue-500 text-white'
+                    : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700'
+                }`}
+                style={{
+                  width: RADIAL_MENU_ITEM_SIZE,
+                  height: RADIAL_MENU_ITEM_SIZE,
+                  left: x - RADIAL_MENU_ITEM_SIZE / 2,
+                  top: y - RADIAL_MENU_ITEM_SIZE / 2,
+                }}
+              >
+                <Icon className={`w-5 h-5 ${selected ? 'text-white' : config.color}`} />
+              </button>
+            );
+          })}
+        </div>
+
+        <button
+          type="button"
+          onClick={onCancel}
+          className="absolute -translate-x-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-slate-700 text-white shadow-lg border border-slate-500 hover:bg-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500"
+          aria-label="キャンセル"
+          title="キャンセル"
+        >
+          x
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
+};
+
 export const SHOPPING_ITEM_CARD_COMPARISON_KEYS = [
   'item',
   'onUpdate',
@@ -160,6 +342,7 @@ export const SHOPPING_ITEM_CARD_COMPARISON_KEYS = [
   'hallIndex',
   'priorityLevel',
   'highlightPrice',
+  'purchaseStatusControlMode',
 ] as const satisfies readonly (keyof ShoppingItemCardProps)[];
 
 export const areSameShoppingItemCardProps = (
@@ -184,7 +367,8 @@ export const areSameShoppingItemCardProps = (
   prev.viewMode === next.viewMode &&
   prev.hallIndex === next.hallIndex &&
   prev.priorityLevel === next.priorityLevel &&
-  prev.highlightPrice === next.highlightPrice;
+  prev.highlightPrice === next.highlightPrice &&
+  prev.purchaseStatusControlMode === next.purchaseStatusControlMode;
 
 const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   item: sourceItem,
@@ -206,11 +390,14 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   hallIndex,
   priorityLevel = 'none',
   highlightPrice = false,
+  purchaseStatusControlMode = 'cycle',
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
   const [optimisticItem, setOptimisticItem] = useState(sourceItem);
   const longPressTimeout = useRef<number | null>(null);
   const cardRef = useRef<HTMLDivElement>(null);
+  const purchaseStatusButtonRef = useRef<HTMLButtonElement>(null);
+  const [purchaseStatusMenuOpen, setPurchaseStatusMenuOpen] = useState(false);
   const item = optimisticItem;
 
   useEffect(() => {
@@ -299,6 +486,52 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     commitItemUpdate({ ...item, purchaseStatus: nextStatus });
   }, [item, commitItemUpdate]);
 
+  const closePurchaseStatusMenu = useCallback(
+    (options: { restoreFocus?: boolean } = {}) => {
+      const { restoreFocus = true } = options;
+      setPurchaseStatusMenuOpen(false);
+
+      if (!restoreFocus) return;
+
+      const focusButton = () => {
+        purchaseStatusButtonRef.current?.focus();
+      };
+      if (typeof window.requestAnimationFrame === 'function') {
+        window.requestAnimationFrame(focusButton);
+        return;
+      }
+      window.setTimeout(focusButton, 0);
+    },
+    [],
+  );
+
+  const setPurchaseStatus = useCallback(
+    (purchaseStatus: PurchaseStatus) => {
+      if (purchaseStatus === item.purchaseStatus) {
+        closePurchaseStatusMenu();
+        return;
+      }
+      commitItemUpdate({ ...item, purchaseStatus });
+      closePurchaseStatusMenu();
+    },
+    [item, commitItemUpdate, closePurchaseStatusMenu],
+  );
+
+  const handlePurchaseStatusButtonClick = useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) => {
+      event.stopPropagation();
+
+      if (purchaseStatusControlMode === 'radial') {
+        setMenuVisible(false);
+        setPurchaseStatusMenuOpen((open) => !open);
+        return;
+      }
+
+      togglePurchaseStatus();
+    },
+    [purchaseStatusControlMode, togglePurchaseStatus],
+  );
+
   // 保護レベルを取得（未設定の場合はsourceに基づいてデフォルト値を決定）
   const getEffectiveProtectionLevel = useCallback((): ProtectionLevel => {
     if (item.protectionLevel) return item.protectionLevel;
@@ -368,6 +601,28 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, [menuVisible]);
+
+  useEffect(() => {
+    if (purchaseStatusControlMode !== 'radial' && purchaseStatusMenuOpen) {
+      closePurchaseStatusMenu({ restoreFocus: false });
+    }
+  }, [purchaseStatusControlMode, purchaseStatusMenuOpen, closePurchaseStatusMenu]);
+
+  useEffect(() => {
+    if (!purchaseStatusMenuOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        closePurchaseStatusMenu();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [purchaseStatusMenuOpen, closePurchaseStatusMenu]);
 
   const priceOptions = useMemo(() => {
     const options = new Set<number | null>();
@@ -449,6 +704,17 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const statusBgOverlay = isUnpurchased
     ? ''
     : `absolute inset-0 rounded-lg ${currentStatus.bg} pointer-events-none`;
+
+  const purchaseStatusRadialMenu =
+    purchaseStatusControlMode === 'radial' && purchaseStatusMenuOpen ? (
+      <PurchaseStatusRadialMenu
+        itemId={item.id}
+        anchorRef={purchaseStatusButtonRef}
+        currentStatus={item.purchaseStatus}
+        onSelect={setPurchaseStatus}
+        onCancel={closePurchaseStatusMenu}
+      />
+    ) : null;
 
   // スマートフォンモード用レイアウト
   if (layoutMode === 'smartphone') {
@@ -622,7 +888,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
                     {/* 購入状態（右端） */}
                     <button
-                      onClick={togglePurchaseStatus}
+                      ref={purchaseStatusButtonRef}
+                      onClick={handlePurchaseStatusButtonClick}
+                      data-no-long-press
+                      aria-haspopup={purchaseStatusControlMode === 'radial' ? 'dialog' : undefined}
+                      aria-expanded={purchaseStatusControlMode === 'radial' ? purchaseStatusMenuOpen : undefined}
                       className="flex items-center space-x-1 p-1.5 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
                       aria-label={`Current status: ${currentStatus.label}. Click to change.`}
                     >
@@ -637,6 +907,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             </div>
           </div>
 
+          {purchaseStatusRadialMenu}
           {menuVisible && (
             <div
               className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
@@ -849,7 +1120,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
                 {/* 購入状態（アイコンのみ） */}
                 <button
-                  onClick={togglePurchaseStatus}
+                  ref={purchaseStatusButtonRef}
+                  onClick={handlePurchaseStatusButtonClick}
+                  data-no-long-press
+                  aria-haspopup={purchaseStatusControlMode === 'radial' ? 'dialog' : undefined}
+                  aria-expanded={purchaseStatusControlMode === 'radial' ? purchaseStatusMenuOpen : undefined}
                   className="p-1 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
                   aria-label={`Current status: ${currentStatus.label}. Click to change.`}
                   title={currentStatus.label}
@@ -861,6 +1136,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           </div>
         </div>
 
+        {purchaseStatusRadialMenu}
         {menuVisible && (
           <div
             className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
@@ -1141,7 +1417,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       {/* 右サイドバー（購入トグル / 数量 / 価格） */}
       <div className="relative flex flex-col items-stretch justify-between gap-3 px-3 py-3 border-l border-slate-200/80 dark:border-slate-700/80 z-10 flex-shrink-0">
         <button
-          onClick={togglePurchaseStatus}
+          ref={purchaseStatusButtonRef}
+          onClick={handlePurchaseStatusButtonClick}
+          data-no-long-press
+          aria-haspopup={purchaseStatusControlMode === 'radial' ? 'dialog' : undefined}
+          aria-expanded={purchaseStatusControlMode === 'radial' ? purchaseStatusMenuOpen : undefined}
           className="flex items-center space-x-2 p-2 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors relative z-10 justify-start"
           aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         >
@@ -1189,6 +1469,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         </div>
       </div>
 
+      {purchaseStatusRadialMenu}
       {menuVisible && (
         <div
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useCallback, useEffect, useRef } from 'react';
-import { ShoppingItem, PurchaseStatus } from '../types/item';
+import { ShoppingItem, PurchaseStatus, PurchaseStatusControlMode } from '../types/item';
 import { DayMapData, HallDefinition, NumberCellOutlineStyle } from '../types/map';
 import { FocusModeSessionState, FocusPhase, FocusMapCenteringMode } from '../types/focus';
 import FocusModeMapCanvas from './FocusModeMapCanvas';
@@ -54,6 +54,7 @@ interface FocusModeProps {
   onMapRotationAngleChange?: (angle: number) => void;
   numberCellOutlineStyle?: NumberCellOutlineStyle;
   disablePriceUndefinedCheck?: boolean;
+  purchaseStatusControlMode?: PurchaseStatusControlMode;
 }
 // スワイプ判定の閾値
 const SWIPE_THRESHOLD = 50;
@@ -94,6 +95,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   onMapRotationAngleChange,
   numberCellOutlineStyle = 'rounded',
   disablePriceUndefinedCheck = false,
+  purchaseStatusControlMode = 'cycle',
 }) => {
   // onMapRotationAngleChange の安定フォールバック（React.memo 対策）
   const noopRotationHandler = useCallback(() => {}, []);
@@ -895,7 +897,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   // 次へボタンの点滅を更新
   useEffect(() => {
     if (currentVisitDisplayItems.length === 0) return;
-    if (!disablePriceUndefinedCheck && hasUndefinedPricePurchased) {
+    if (hasUndefinedPricePurchased) {
       setIsNextButtonBlinking(false);
       const undefinedPriceIds = currentVisitDisplayItems
         .filter(
@@ -911,7 +913,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       );
       setIsNextButtonBlinking(!hasUnprocessed && currentVisitDisplayItems.length > 0);
     }
-  }, [currentVisitDisplayItems, disablePriceUndefinedCheck, hasUndefinedPricePurchased]);
+  }, [currentVisitDisplayItems, hasUndefinedPricePurchased]);
   // 通知を自動で消す
   useEffect(() => {
     if (notification) {
@@ -1667,6 +1669,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onEditRequest={onEditRequest}
             onDeleteRequest={onDeleteRequest}
             onAddItem={onAddItem ? openAddItemDialogFromList : undefined}
+            purchaseStatusControlMode={purchaseStatusControlMode}
           />
         </div>
         <FocusModeFooterPortal
@@ -1766,6 +1769,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onEditRequest={onEditRequest}
             onDeleteRequest={onDeleteRequest}
             onAddItem={onAddItem ? openAddItemDialogFromList : undefined}
+            purchaseStatusControlMode={purchaseStatusControlMode}
           />
         </div>
         <button
@@ -1850,6 +1854,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         onEditRequest={onEditRequest}
         onDeleteRequest={onDeleteRequest}
         onAddItem={onAddItem ? openAddItemDialogFromList : undefined}
+        purchaseStatusControlMode={purchaseStatusControlMode}
       />
       {layoutMode === 'pc' && (
         <>

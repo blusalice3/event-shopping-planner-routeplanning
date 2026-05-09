@@ -1,6 +1,6 @@
 import React, { useRef, useState, useMemo, useEffect, useCallback } from 'react';
 import ReactDOM from 'react-dom';
-import { ShoppingItem, PurchaseStatus } from '../types/item';
+import { ShoppingItem, PurchaseStatus, PurchaseStatusControlMode } from '../types/item';
 import { HallDefinition, DayMapData } from '../types/map';
 import { getSpaceKey, getBaseNumber, getStatusSummaryText } from '../utils/spaceGrouping';
 import {
@@ -88,6 +88,7 @@ interface ShoppingListProps {
   // 実行モード用: 後回しフィルタ中、最後のスペースグループで「遅参でフィルタ」ボタン表示
   showLateFilterButton?: boolean;
   onActivateLateFilter?: () => void;
+  purchaseStatusControlMode?: PurchaseStatusControlMode;
   // 実行モード用: 価格未定チェック無効化設定（true のとき、購入済・価格未定でも次のスペースへ進める）
   disablePriceUndefinedCheck?: boolean;
 }
@@ -248,6 +249,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   showLateFilterButton,
   onActivateLateFilter,
   disablePriceUndefinedCheck = false,
+  purchaseStatusControlMode = 'cycle',
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
@@ -1709,6 +1711,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           layoutMode={layoutMode}
                           viewMode={viewMode}
                           highlightPrice={priceHighlightItemIds.has(item.id)}
+                          purchaseStatusControlMode={purchaseStatusControlMode}
                         />
 
                         {activeDropTarget?.id === item.id &&
@@ -2252,6 +2255,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         viewMode={viewMode}
                         hallIndex={hallIndex}
                         priorityLevel={group.priority}
+                        purchaseStatusControlMode={purchaseStatusControlMode}
                       />
 
                       {activeDropTarget?.id === item.id &&
@@ -2470,6 +2474,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               isSearchMatch={highlightedItemId === item.id}
               layoutMode={layoutMode}
               viewMode={viewMode}
+              purchaseStatusControlMode={purchaseStatusControlMode}
             />
 
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (

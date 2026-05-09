@@ -39,7 +39,7 @@ describe('FocusMode TICKET-06 undefined price blink guard', () => {
     });
   });
 
-  it('suppresses the undefined-price blink when the check is disabled', async () => {
+  it('keeps the undefined-price blink when the check is disabled', async () => {
     const { container } = render(
       <FocusMode
         {...minimalProps({
@@ -51,7 +51,7 @@ describe('FocusMode TICKET-06 undefined price blink guard', () => {
     );
 
     await waitFor(() => {
-      expect(container.querySelector('[data-item-id="item-undefined-price"]')).not.toHaveClass(
+      expect(container.querySelector('[data-item-id="item-undefined-price"]')).toHaveClass(
         'animate-pulse',
         'ring-red-500',
       );

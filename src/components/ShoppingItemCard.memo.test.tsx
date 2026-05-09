@@ -49,6 +49,7 @@ const representativeShoppingItemCardProps = {
   hallIndex: 1,
   priorityLevel: 'priority',
   highlightPrice: false,
+  purchaseStatusControlMode: 'cycle',
 } satisfies Required<ShoppingItemCardProps>;
 
 const changeProp = (
