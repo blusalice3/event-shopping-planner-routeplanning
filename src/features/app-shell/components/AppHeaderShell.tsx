@@ -1073,12 +1073,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                           smartInsertLongPressTriggeredRef.current = false;
                           smartInsertLongPressRef.current = setTimeout(() => {
                             smartInsertLongPressTriggeredRef.current = true;
-                            const newMode = mapSmartInsertMode === 'card' ? 'preview' : 'card';
+                            const newMode = mapSmartInsertMode === 'map' ? 'preview' : 'map';
                             setMapSmartInsertMode(newMode);
                             showSmartInsertToast(
                               newMode === 'preview'
                                 ? 'プレビューモードに切り替え'
-                                : 'カードモードに切り替え',
+                                : 'マップ選択モードに切り替え',
                             );
                           }, 500);
                         }}
@@ -1106,7 +1106,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                             ? 'bg-green-100 dark:bg-green-900/50 hover:bg-green-200 dark:hover:bg-green-800'
                             : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
                         }`}
-                        title={`スマート挿入: ${mapSmartInsertEnabled ? '有効' : '無効'}（${mapSmartInsertMode === 'card' ? 'カード' : 'プレビュー'}）`}
+                        title={`スマート挿入: ${mapSmartInsertEnabled ? '有効' : '無効'}（${mapSmartInsertMode === 'map' ? 'マップ' : 'プレビュー'}）`}
                         style={{
                           WebkitTapHighlightColor: 'transparent',
                           minWidth: '44px',
@@ -1136,7 +1136,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                         {/* 表示処理の補足 */}
                         {mapSmartInsertEnabled && (
                           <div className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 text-[8px] font-bold leading-none text-green-600 dark:text-green-400">
-                            {mapSmartInsertMode === 'preview' ? 'P' : 'C'}
+                            {mapSmartInsertMode === 'preview' ? 'P' : 'M'}
                           </div>
                         )}
                       </button>

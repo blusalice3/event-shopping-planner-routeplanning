@@ -68,7 +68,7 @@ const minimalAppHeaderShellProps = (): ComponentProps<typeof AppHeaderShell> => 
   mapIsRouteVisible: false,
   mapSelectedHallId: 'all',
   mapSmartInsertEnabled: false,
-  mapSmartInsertMode: 'card',
+  mapSmartInsertMode: 'map',
   mapTabMenuOpen: null,
   mapTabMenuPosition: { left: 0, top: 0 },
   mapToggleButtonRef: { current: null },

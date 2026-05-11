@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { findPath, generateRouteSegments, simplifyPath } from './pathfinding';
+import {
+  findPath,
+  generateRouteSegments,
+  generateRouteSegmentsStrict,
+  simplifyPath,
+} from './pathfinding';
 import { DayMapData, CellData } from '../types/map';
 
 const createMapData = (
@@ -104,6 +109,86 @@ describe('pathfinding utilities', () => {
     // Check all route segments are orthogonal.
     for (const seg of segments) {
       assertOrthogonal(seg.path);
+    }
+  });
+
+  it('preserves item metadata on route segments and after path simplification', () => {
+    const mapData = createMapData(3, 3, []);
+    const visitPoints = [
+      { row: 1, col: 1, itemId: 'a', order: 0 },
+      { row: 1, col: 3, itemId: 'b', order: 1 },
+    ];
+
+    const segments = generateRouteSegments(mapData, visitPoints);
+    expect(segments[0]).toMatchObject({
+      fromItemId: 'a',
+      toItemId: 'b',
+      fromOrder: 0,
+      toOrder: 1,
+    });
+
+    const simplified = segments.map((segment) => ({
+      ...segment,
+      path: simplifyPath(segment.path),
+    }));
+
+    expect(simplified[0]).toMatchObject({
+      fromItemId: 'a',
+      toItemId: 'b',
+      fromOrder: 0,
+      toOrder: 1,
+    });
+  });
+
+  it('returns ok false from strict route generation when fallback would be used', () => {
+    const mapData = createMapData(2, 2, [
+      { row: 1, col: 2, value: 1 },
+      { row: 2, col: 1, value: 1 },
+    ]);
+
+    const result = generateRouteSegmentsStrict(mapData, [
+      { row: 1, col: 1, itemId: 'a', order: 0 },
+      { row: 2, col: 2, itemId: 'b', order: 1 },
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.segments).toEqual([]);
+      expect(result.failedSegment.fromIndex).toBe(0);
+      expect(result.failedSegment.from.itemId).toBe('a');
+      expect(result.failedSegment.to.itemId).toBe('b');
+    }
+  });
+
+  it('returns ok false from strict route generation when path constraint rejects a path', () => {
+    const mapData = createMapData(3, 3, []);
+
+    const result = generateRouteSegmentsStrict(
+      mapData,
+      [
+        { row: 1, col: 1, itemId: 'a', order: 0 },
+        { row: 1, col: 2, itemId: 'b', order: 1 },
+        { row: 2, col: 2, itemId: 'c', order: 2 },
+      ],
+      {
+        pathConstraint: {
+          isPathAllowed: (path) => path[path.length - 1].row < 2,
+        },
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.segments).toHaveLength(1);
+      expect(result.segments[0]).toMatchObject({
+        fromItemId: 'a',
+        toItemId: 'b',
+        fromOrder: 0,
+        toOrder: 1,
+      });
+      expect(result.failedSegment.fromIndex).toBe(1);
+      expect(result.failedSegment.from.itemId).toBe('b');
+      expect(result.failedSegment.to.itemId).toBe('c');
     }
   });
 

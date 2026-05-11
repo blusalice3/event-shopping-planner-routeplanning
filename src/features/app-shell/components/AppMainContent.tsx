@@ -29,6 +29,7 @@ import type {
   CellSelectionMode,
   LayoutMode,
   RangeSelectionState,
+  SmartInsertMode,
   VertexGuideOptions,
   VertexSelectionMode,
 } from '../types';
@@ -144,7 +145,7 @@ type AppMainContentProps = {
   mapIsRouteVisible: boolean;
   mapSelectedHallId: string;
   mapSmartInsertEnabled: boolean;
-  mapSmartInsertMode: 'card' | 'preview';
+  mapSmartInsertMode: SmartInsertMode;
   newItemDefaults: { eventDate: string; block: string; number: string } | null;
   numberCellOutlineStyle: NumberCellOutlineStyle;
   purchaseStatusControlMode: PurchaseStatusControlMode;
@@ -295,6 +296,11 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     zoomLevel,
   } = props;
 
+  const currentMapRouteHallOrder = React.useMemo(
+    () => (activeEventDate ? getHallOrderForDate(activeEventDate) : []),
+    [activeEventDate, getHallOrderForDate],
+  );
+
   const editSpaceGroupKeys = React.useMemo(() => {
     const groupKeys = new Set<string>();
     items
@@ -345,6 +351,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
             mapName={currentMapTabName}
             items={items}
             executeModeItemIds={currentMapExecuteItemIds}
+            routeHallOrder={currentMapRouteHallOrder}
             onAddToExecuteList={handleAddToExecuteListFromMap}
             onAddToExecuteListAtPosition={handleAddToExecuteListFromMapAtPosition}
             onRemoveFromExecuteList={handleRemoveFromExecuteListFromMap}
