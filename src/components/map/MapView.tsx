@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+﻿import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   DayMapData,
   ZoomLevel,
@@ -7,6 +7,8 @@ import {
   BlockDefinition,
   CellGroup,
   MapViewportState,
+  RoutePathConstraint,
+  RouteSegment,
   MIN_ZOOM,
   MAX_ZOOM,
 } from '../../types/map';
@@ -15,11 +17,25 @@ import MapCanvas from './MapCanvas';
 import CellItemsPopup from './CellItemsPopup';
 import MapVisitListPanel from './MapVisitListPanel';
 import HallOrderPanel from './HallOrderPanel';
-import InsertPositionDialog, { InsertPosition, SmartInsertMode } from './InsertPositionDialog';
+import InsertPositionDialog, { InsertPosition } from './InsertPositionDialog';
+import type { SmartInsertMode } from '../../features/app-shell/types';
 import { extractNumberFromItemNumber, extractNumberAlphaPrefix } from '../../utils/xlsxMapParser';
 import { resolveHallByBlockName, resolveManualHallId } from '../../utils/hallFallback';
-import { buildMapRouteExecuteItemIds, resolveMapRouteHallOrder } from '../../utils/mapRouteOrder';
+import {
+  buildMapRouteExecuteItemIds,
+  normalizeMapRouteDayText,
+  resolveMapRouteHallOrder,
+} from '../../utils/mapRouteOrder';
 import { isPointInPolygon } from './HallDefinitionPanel';
+import {
+  isManualHallCompatibleForMapRoute,
+  resolveMapRouteCellForItem,
+} from '../../utils/hallGrouping';
+import { resolveMapRoutePoints, type MapRoutePoint } from '../../utils/mapRoutePoints';
+import { buildSelectedHallRouteMapData } from '../../utils/mapRouteMapData';
+import { generateRouteSegments, generateRouteSegmentsStrict, simplifyPath } from '../../utils/pathfinding';
+import { validateMapSmartInsert } from '../../utils/mapSmartInsert';
+import type { MapRouteHitResult } from '../../utils/mapRouteHitTest';
 
 const normalizeDisplayText = (value: string | null | undefined): string => {
   return (value || '').replace(/\u3000/g, ' ').trim();
@@ -30,6 +46,74 @@ const extractDayNameFromMapName = (mapName: string): string => {
   const dayMatch = normalizedMapName.match(/^(.+)マップ$/);
   return dayMatch ? normalizeDisplayText(dayMatch[1]) : '';
 };
+
+type RouteInsertAnchorCandidate = {
+  itemId: string;
+  order: number;
+  label: string;
+};
+
+type PendingHallVisitEntry = {
+  itemId: string;
+  hallId: string | null;
+};
+
+type MapRouteInsertPendingState = {
+  itemIds: string[];
+  representativeItem: ShoppingItem;
+  existingRoutePointsAtStart: MapRoutePoint[];
+  existingRouteSegmentsAtStart: RouteSegment[];
+  canvasMapDataAtStart: DayMapData;
+  routeInsertMissMapDataAtStart: DayMapData;
+  pendingMapPoints: MapRoutePoint[];
+  validationPoints: MapRoutePoint[];
+  pendingHallVisitEntries: PendingHallVisitEntry[];
+  message: string;
+  errorMessage: string | null;
+  duplicateCandidates: RouteInsertAnchorCandidate[];
+} | null;
+
+function cloneDayMapDataForRouteInsertSnapshot(mapData: DayMapData): DayMapData {
+  return {
+    ...mapData,
+    cells: mapData.cells.map((cell) => ({
+      ...cell,
+      borders: cell.borders ? { ...cell.borders } : cell.borders,
+    })),
+    blocks: mapData.blocks.map((block) => ({
+      ...block,
+      numberCells: block.numberCells.map((numberCell) => ({ ...numberCell })),
+      nameCells: block.nameCells?.map((nameCell) => ({ ...nameCell })),
+      cellGroups: block.cellGroups?.map((group) => ({
+        ...group,
+        cells: group.cells?.map((cell) => ({ ...cell })),
+      })),
+    })),
+    mergedCells: mapData.mergedCells.map((merge) => ({ ...merge })),
+  };
+}
+
+function simplifyStrictRouteSegments(
+  segments: RouteSegment[],
+  pathConstraint?: RoutePathConstraint,
+): RouteSegment[] | null {
+  const simplifiedSegments = segments.map((segment) => ({
+    ...segment,
+    path: segment.path.map((point) => ({ ...point })),
+  })).map((segment) => ({
+    ...segment,
+    path: simplifyPath(segment.path),
+  }));
+
+  if (
+    pathConstraint &&
+    simplifiedSegments.some((segment) => !pathConstraint.isPathAllowed(segment.path))
+  ) {
+    return null;
+  }
+
+  return simplifiedSegments;
+}
 
 interface MapViewProps {
   mapData: DayMapData;
@@ -52,36 +136,31 @@ interface MapViewProps {
     itemId: string,
     referenceItemId: string,
     position: 'before' | 'after',
-  ) => void;
+  ) => boolean;
   onBatchAddToExecuteList?: (itemIds: string[]) => void;
   onBatchAddToExecuteListAtPosition?: (
     itemIds: string[],
     referenceItemId: string,
     position: 'before' | 'after',
-  ) => void;
+  ) => boolean;
   onBatchRemoveFromExecuteList?: (itemIds: string[]) => void;
 
-  // ホール定義と訪問順設定
   halls: HallDefinition[];
   hallRouteSettings: HallRouteSettings;
   onUpdateHallRouteSettings: (settings: HallRouteSettings) => void;
   onReorderExecuteList?: (hallOrder: string[]) => void;
 
-  // ホール頂点選択モード（ホール定義パネル連携）
   vertexSelectionMode?: {
     clickedVertices: { row: number; col: number }[];
   } | null;
 
-  // セル選択モード（ブロック定義パネル連携）
   cellSelectionMode?: {
     type: string;
     clickedCells: { row: number; col: number }[];
   } | null;
 
-  // 外部から指定された強調セル（訪問リストとの連携）
   highlightedCell?: { row: number; col: number } | null;
 
-  // 親コンポーネントから制御するための外部状態
   externalSelectedHallId?: string;
   onSelectedHallIdChange?: (hallId: string) => void;
   externalIsRouteVisible?: boolean;
@@ -136,7 +215,7 @@ const MapView: React.FC<MapViewProps> = ({
   onHallOrderOpenChange,
   hideInternalControls = false,
   smartInsertEnabled = true,
-  smartInsertMode = 'card',
+  smartInsertMode = 'map',
   rotationAngle = 0,
   onRotationAngleChange,
   selectionGuideOptions,
@@ -160,7 +239,6 @@ const MapView: React.FC<MapViewProps> = ({
     setZoomLevelState(newZoom);
   }, []);
 
-  // アンマウント時にビューポート状態を保存
   useEffect(() => {
     return () => {
       onViewportChangeRef.current?.({
@@ -175,16 +253,20 @@ const MapView: React.FC<MapViewProps> = ({
   const [internalIsHallOrderOpen, setInternalIsHallOrderOpen] = useState(false);
   const [internalSelectedHallId, setInternalSelectedHallId] = useState<string>('all');
 
-  // 追加位置選択ダイアログの表示状態
   const [insertDialogState, setInsertDialogState] = useState<{
     isOpen: boolean;
     item: ShoppingItem | null;
   }>({ isOpen: false, item: null });
 
-  // バッチ挿入時の保留アイテムID群（スマート挿入ダイアログ待ち）
   const [batchInsertPendingIds, setBatchInsertPendingIds] = useState<string[] | null>(null);
+  const [mapRouteInsertPending, setMapRouteInsertPending] =
+    useState<MapRouteInsertPendingState>(null);
+  const mapRouteInsertPendingRef = useRef<MapRouteInsertPendingState>(null);
 
-  // 外部制御が渡されていればそれを優先し、未指定時は内部 state を使う
+  useEffect(() => {
+    mapRouteInsertPendingRef.current = mapRouteInsertPending;
+  }, [mapRouteInsertPending]);
+
   const selectedHallId =
     externalSelectedHallId !== undefined ? externalSelectedHallId : internalSelectedHallId;
   const setSelectedHallId = onSelectedHallIdChange || setInternalSelectedHallId;
@@ -195,7 +277,6 @@ const MapView: React.FC<MapViewProps> = ({
     externalIsHallOrderOpen !== undefined ? externalIsHallOrderOpen : internalIsHallOrderOpen;
   const setIsHallOrderOpen = onHallOrderOpenChange || setInternalIsHallOrderOpen;
 
-  // セルクリック時に表示するポップアップの状態
   const [popupState, setPopupState] = useState<{
     isOpen: boolean;
     row: number;
@@ -217,7 +298,6 @@ const MapView: React.FC<MapViewProps> = ({
   const executeModeItemIdsSet = useMemo(() => new Set(executeModeItemIds), [executeModeItemIds]);
   const mapDayName = useMemo(() => extractDayNameFromMapName(mapName), [mapName]);
 
-  // 指定セルが属するホールIDをすべて取得する（重なり・境界を考慮）
   const getHallIdsByCellPosition = useCallback(
     (row: number, col: number): string[] => {
       const ids: string[] = [];
@@ -231,7 +311,6 @@ const MapView: React.FC<MapViewProps> = ({
     [halls],
   );
 
-  // アイテムの block 名に対応するブロック候補を取得する
   const getCandidateBlocksForItem = useCallback(
     (itemBlockName: string): BlockDefinition[] => {
       if (!itemBlockName) return [];
@@ -247,12 +326,10 @@ const MapView: React.FC<MapViewProps> = ({
     [mapData.blocks],
   );
 
-  // アイテムが属し得るホールID候補を取得する
   const getHallCandidatesForItem = useCallback(
     (item: ShoppingItem): Set<string> => {
       const hallIds = new Set<string>();
 
-      // 1. 手動ホール設定が有効なら最優先
       const manual = resolveManualHallId(item.manualHallId, halls);
       if (manual) {
         hallIds.add(manual);
@@ -262,7 +339,6 @@ const MapView: React.FC<MapViewProps> = ({
       const itemBlockName = item.block?.trim() || '';
       const candidateBlocks = getCandidateBlocksForItem(itemBlockName);
       if (candidateBlocks.length === 0) {
-        // 2. ブロック情報がない場合もblockNamesフォールバックを試す
         const fallback = resolveHallByBlockName(item.block, halls);
         if (fallback) hallIds.add(fallback);
         return hallIds;
@@ -284,9 +360,8 @@ const MapView: React.FC<MapViewProps> = ({
         return hallIds;
       }
 
-      // 番号セル単体で判定できない場合、ブロック全体の番号セルからホールを一意推定する
+      const blockHallIds = new Set<string>();
       candidateBlocks.forEach((block) => {
-        const blockHallIds = new Set<string>();
         block.numberCells.forEach((numberCell) => {
           const matchedHallIds = getHallIdsByCellPosition(numberCell.row, numberCell.col);
           matchedHallIds.forEach((matchedHallId) => blockHallIds.add(matchedHallId));
@@ -301,7 +376,6 @@ const MapView: React.FC<MapViewProps> = ({
         return hallIds;
       }
 
-      // 数値セルから判定できない場合のみ中心座標でフォールバック
       candidateBlocks.forEach((block) => {
         const centerRow = (block.startRow + block.endRow) / 2;
         const centerCol = (block.startCol + block.endCol) / 2;
@@ -309,7 +383,6 @@ const MapView: React.FC<MapViewProps> = ({
         matchedHallIds.forEach((matchedHallId) => hallIds.add(matchedHallId));
       });
 
-      // 3. ポリゴン判定で何も取れなかった場合のみ blockNames フォールバック
       if (hallIds.size === 0) {
         const fallback = resolveHallByBlockName(item.block, halls);
         if (fallback) hallIds.add(fallback);
@@ -320,7 +393,6 @@ const MapView: React.FC<MapViewProps> = ({
     [getCandidateBlocksForItem, getHallIdsByCellPosition, halls],
   );
 
-  // アイテムが指定ホールに属するか（候補が複数でも true を返す）
   const isItemInHall = useCallback(
     (item: ShoppingItem, hallId: string): boolean => {
       return getHallCandidatesForItem(item).has(hallId);
@@ -328,9 +400,6 @@ const MapView: React.FC<MapViewProps> = ({
     [getHallCandidatesForItem],
   );
 
-  // アイテムが属するホールを判定する
-  // 1. block + number の実セル座標で判定
-  // 2. 判定不能時のみ中心座標でフォールバック
   const getItemHallId = useCallback(
     (item: ShoppingItem): string | null => {
       const hallCandidates = getHallCandidatesForItem(item);
@@ -345,7 +414,6 @@ const MapView: React.FC<MapViewProps> = ({
     [getHallCandidatesForItem, selectedHallId],
   );
 
-  // ホールIDと優先度をまとめた groupId を分解する
   const parseGroupId = useCallback(
     (
       groupId: string | null,
@@ -364,7 +432,6 @@ const MapView: React.FC<MapViewProps> = ({
     [],
   );
 
-  // 指定グループ（ホール + 優先度）に属する訪問先件数
   const getItemCountInHall = useCallback(
     (groupId: string): number => {
       const { hallId, priority } = parseGroupId(groupId);
@@ -384,7 +451,6 @@ const MapView: React.FC<MapViewProps> = ({
     [executeModeItemIds, items, getItemHallId, isItemInHall, parseGroupId],
   );
 
-  // ホール内の訪問先件数（優先度を問わない）
   const getHallTotalExecuteCount = useCallback(
     (hallId: string): number => {
       return executeModeItemIds.filter((itemId) => {
@@ -397,7 +463,6 @@ const MapView: React.FC<MapViewProps> = ({
     [executeModeItemIds, items, isItemInHall],
   );
 
-  // 現在日付タブにおけるホール内の総アイテム件数
   const getTotalItemCountInHall = useCallback(
     (hallId: string): number => {
       return items.filter((item) => {
@@ -408,8 +473,7 @@ const MapView: React.FC<MapViewProps> = ({
     [items, mapDayName, isItemInHall],
   );
 
-  // 選択中ホールに合わせて表示用マップを絞り込む
-  // blocks はマッチング互換のため残しつつ、numberCells はホール内優先で絞る
+  // Filter display map data to the selected hall while preserving display compatibility.
   const filteredMapData = useMemo(() => {
     if (selectedHallId === 'all' || halls.length === 0) {
       return mapData;
@@ -454,7 +518,6 @@ const MapView: React.FC<MapViewProps> = ({
     };
   }, [mapData, selectedHallId, halls]);
 
-  // 選択中ホールに属するアイテムだけを表示対象にする
   const filteredItems = useMemo(() => {
     if (selectedHallId === 'all' || halls.length === 0) {
       return items;
@@ -463,7 +526,6 @@ const MapView: React.FC<MapViewProps> = ({
     return items.filter((item) => isItemInHall(item, selectedHallId));
   }, [items, selectedHallId, halls, isItemInHall]);
 
-  // 実行列IDも選択中ホールに合わせて絞り込む
   const filteredExecuteModeItemIds = useMemo(() => {
     if (selectedHallId === 'all' || halls.length === 0) {
       return executeModeItemIds;
@@ -476,16 +538,35 @@ const MapView: React.FC<MapViewProps> = ({
     });
   }, [executeModeItemIds, items, selectedHallId, halls, isItemInHall]);
 
-  const routeExecuteModeItemIds = useMemo(() => {
-    const effectiveRouteHallOrder = resolveMapRouteHallOrder(
-      routeHallOrder,
-      hallRouteSettings.hallOrder,
-    );
+  const effectiveRouteHallOrder = useMemo(
+    () => resolveMapRouteHallOrder(routeHallOrder, hallRouteSettings.hallOrder),
+    [routeHallOrder, hallRouteSettings.hallOrder],
+  );
 
+  const selectedHallRouteMapData = useMemo(() => {
+    if (selectedHallId === 'all' || halls.length === 0) return null;
+    return buildSelectedHallRouteMapData(
+      mapData,
+      halls.find((hall) => hall.id === selectedHallId),
+    );
+  }, [mapData, selectedHallId, halls]);
+
+  const strictFilteredMapData = selectedHallRouteMapData?.strictFilteredMapData ?? null;
+  const hallConstrainedPathfindingMapData =
+    selectedHallRouteMapData?.hallConstrainedPathfindingMapData ?? null;
+  const selectedHallRoutePathConstraint =
+    selectedHallRouteMapData?.routePathConstraint ?? undefined;
+  const hasValidSelectedHallRouteContext =
+    selectedHallId === 'all' || halls.length === 0 || selectedHallRouteMapData !== null;
+
+  const routeResolutionMapData =
+    selectedHallId === 'all' || halls.length === 0 ? mapData : strictFilteredMapData;
+
+  const displayRouteExecuteModeItemIds = useMemo(() => {
     return buildMapRouteExecuteItemIds({
       executeModeItemIds: filteredExecuteModeItemIds,
       items: filteredItems,
-      mapData,
+      mapData: filteredMapData,
       hallDefinitions: halls,
       hallOrder: effectiveRouteHallOrder,
       dayName: mapDayName || normalizeDisplayText(mapName),
@@ -493,15 +574,142 @@ const MapView: React.FC<MapViewProps> = ({
   }, [
     filteredExecuteModeItemIds,
     filteredItems,
-    mapData,
+    filteredMapData,
     halls,
-    routeHallOrder,
-    hallRouteSettings.hallOrder,
+    effectiveRouteHallOrder,
     mapDayName,
     mapName,
   ]);
 
-  // セルがブロック範囲内か判定する（cellGroups 対応）
+  const mapRouteResolutionItems = useMemo(() => {
+    const normalizedDayName = normalizeMapRouteDayText(mapDayName || normalizeDisplayText(mapName));
+    return items.filter((item) => normalizeMapRouteDayText(item.eventDate) === normalizedDayName);
+  }, [items, mapDayName, mapName]);
+
+  const mapRouteExecuteCandidateItemIds = useMemo(() => {
+    if (selectedHallId === 'all' || halls.length === 0) return executeModeItemIds;
+    if (!routeResolutionMapData) return [];
+
+    const itemsById = new Map(mapRouteResolutionItems.map((item) => [item.id, item]));
+    return executeModeItemIds.filter((itemId) => {
+      const item = itemsById.get(itemId);
+      if (!item) return false;
+      if (
+        !isManualHallCompatibleForMapRoute({
+          item,
+          hallDefinitions: halls,
+          selectedHallId,
+        })
+      ) {
+        return false;
+      }
+      return (
+        resolveMapRouteCellForItem({
+          mapData: routeResolutionMapData,
+          item,
+          requireCellInMap: true,
+        }) !== null
+      );
+    });
+  }, [executeModeItemIds, mapRouteResolutionItems, routeResolutionMapData, selectedHallId, halls]);
+
+  const mapInsertRouteExecuteModeItemIds = useMemo(() => {
+    if (!hasValidSelectedHallRouteContext) return [];
+    return buildMapRouteExecuteItemIds({
+      executeModeItemIds: mapRouteExecuteCandidateItemIds,
+      items: mapRouteResolutionItems,
+      mapData: selectedHallId === 'all' || halls.length === 0 ? mapData : strictFilteredMapData,
+      hallDefinitions: halls,
+      hallOrder: effectiveRouteHallOrder,
+      dayName: mapDayName || normalizeDisplayText(mapName),
+      selectedHallId,
+    });
+  }, [
+    hasValidSelectedHallRouteContext,
+    mapRouteExecuteCandidateItemIds,
+    mapRouteResolutionItems,
+    selectedHallId,
+    halls,
+    mapData,
+    strictFilteredMapData,
+    effectiveRouteHallOrder,
+    mapDayName,
+    mapName,
+  ]);
+
+  const displayRoutePoints = useMemo(
+    () =>
+      resolveMapRoutePoints({
+        itemIds: displayRouteExecuteModeItemIds,
+        items: filteredItems,
+        mapData: filteredMapData,
+        hallDefinitions: halls,
+        dayName: mapDayName || normalizeDisplayText(mapName),
+        selectedHallId,
+        requireCellInMap: false,
+        respectManualHallMismatch: false,
+      }).routePoints,
+    [displayRouteExecuteModeItemIds, filteredItems, filteredMapData, halls, mapDayName, mapName, selectedHallId],
+  );
+
+  const mapInsertRoutePointsResult = useMemo(() => {
+    if (!routeResolutionMapData) {
+      return { routePoints: [], missingItemIds: mapInsertRouteExecuteModeItemIds };
+    }
+    return resolveMapRoutePoints({
+      itemIds: mapInsertRouteExecuteModeItemIds,
+      items: mapRouteResolutionItems,
+      mapData: routeResolutionMapData,
+      hallDefinitions: halls,
+      dayName: mapDayName || normalizeDisplayText(mapName),
+      selectedHallId,
+      requireCellInMap: selectedHallId !== 'all' && halls.length > 0,
+      respectManualHallMismatch: true,
+    });
+  }, [
+    routeResolutionMapData,
+    mapInsertRouteExecuteModeItemIds,
+    mapRouteResolutionItems,
+    halls,
+    mapDayName,
+    mapName,
+    selectedHallId,
+  ]);
+  const mapInsertRoutePoints = mapInsertRoutePointsResult.routePoints;
+
+  const displayRoutePathfindingMapData =
+    selectedHallId === 'all' || halls.length === 0 ? mapData : filteredMapData;
+  const mapInsertRoutePathfindingMapData =
+    selectedHallId === 'all' || halls.length === 0 ? mapData : hallConstrainedPathfindingMapData;
+
+  const displayRouteSegments = useMemo(() => {
+    if (displayRoutePoints.length < 2) return [];
+    return generateRouteSegments(displayRoutePathfindingMapData, displayRoutePoints).map((segment) => ({
+      ...segment,
+      path: simplifyPath(segment.path),
+    }));
+  }, [displayRoutePoints, displayRoutePathfindingMapData]);
+
+  const mapInsertRouteSegments = useMemo(() => {
+    if (mapInsertRoutePoints.length < 2) return [];
+    if (!mapInsertRoutePathfindingMapData) return [];
+    const pathConstraint =
+      selectedHallId === 'all' || halls.length === 0 ? undefined : selectedHallRoutePathConstraint;
+    const result = generateRouteSegmentsStrict(mapInsertRoutePathfindingMapData, mapInsertRoutePoints, {
+      pathConstraint,
+    });
+    if (!result.ok) return [];
+    return simplifyStrictRouteSegments(result.segments, pathConstraint) ?? [];
+  }, [
+    mapInsertRoutePoints,
+    mapInsertRoutePathfindingMapData,
+    selectedHallId,
+    halls.length,
+    selectedHallRoutePathConstraint,
+  ]);
+
+  const routeExecuteModeItemIds = displayRouteExecuteModeItemIds;
+
   const isCellInBlock = useCallback((row: number, col: number, block: BlockDefinition): boolean => {
 
     if (block.cellGroups && block.cellGroups.length > 0) {
@@ -525,7 +733,6 @@ const MapView: React.FC<MapViewProps> = ({
     );
   }, []);
 
-  // セルクリック時: 対象ブロックと番号を解決してポップアップを開く
   const handleCellClick = useCallback(
     (row: number, col: number, matchingItems: ShoppingItem[]) => {
 
@@ -533,7 +740,6 @@ const MapView: React.FC<MapViewProps> = ({
 
       let foundBlock: { name: string; number: number } | null = null;
 
-      // マージセルの子セルがクリックされた場合、親セル座標に解決
       let resolvedRow = row;
       let resolvedCol = col;
       for (const merge of mapData.mergedCells) {
@@ -627,7 +833,6 @@ const MapView: React.FC<MapViewProps> = ({
     setPopupState((prev) => ({ ...prev, isOpen: false }));
   }, []);
 
-  // ホール別訪問リストへアイテムIDを同期する
   const addToHallVisitList = useCallback(
     (itemId: string) => {
       const item = items.find((i) => i.id === itemId);
@@ -686,12 +891,124 @@ const MapView: React.FC<MapViewProps> = ({
     [items, getItemHallId, hallRouteSettings, onUpdateHallRouteSettings],
   );
 
+  const hallRouteSettingsRef = useRef(hallRouteSettings);
+  useEffect(() => {
+    hallRouteSettingsRef.current = hallRouteSettings;
+  }, [hallRouteSettings]);
+
+  const applyPendingHallVisitEntries = useCallback(
+    (entries: PendingHallVisitEntry[]) => {
+      const latestHallRouteSettings = hallRouteSettingsRef.current;
+      let updatedHallVisitLists = [...latestHallRouteSettings.hallVisitLists];
+
+      for (const { itemId, hallId } of entries) {
+        if (!hallId) continue;
+        const hallListIndex = updatedHallVisitLists.findIndex((list) => list.hallId === hallId);
+        if (hallListIndex >= 0) {
+          if (!updatedHallVisitLists[hallListIndex].itemIds.includes(itemId)) {
+            updatedHallVisitLists[hallListIndex] = {
+              ...updatedHallVisitLists[hallListIndex],
+              itemIds: [...updatedHallVisitLists[hallListIndex].itemIds, itemId],
+            };
+          }
+        } else {
+          updatedHallVisitLists.push({ hallId, itemIds: [itemId] });
+        }
+      }
+
+      onUpdateHallRouteSettings({
+        ...latestHallRouteSettings,
+        hallVisitLists: updatedHallVisitLists,
+      });
+    },
+    [onUpdateHallRouteSettings],
+  );
+
+  const tryStartMapRouteInsertSelection = useCallback(
+    (itemIds: string[], representativeItem: ShoppingItem): boolean => {
+      if (vertexSelectionMode || cellSelectionMode) return false;
+      if (!hasValidSelectedHallRouteContext) return false;
+      if (!routeResolutionMapData) return false;
+      if (!mapInsertRoutePathfindingMapData) return false;
+      if (mapInsertRoutePoints.length < 2) return false;
+      if (mapInsertRouteSegments.length === 0) return false;
+
+      const canInsertAtPosition =
+        itemIds.length === 1
+          ? Boolean(onAddToExecuteListAtPosition)
+          : Boolean(onBatchAddToExecuteListAtPosition);
+      if (!canInsertAtPosition) return false;
+
+      const pendingResult = resolveMapRoutePoints({
+        itemIds,
+        items: mapRouteResolutionItems,
+        mapData: routeResolutionMapData,
+        hallDefinitions: halls,
+        dayName: mapDayName || normalizeDisplayText(mapName),
+        selectedHallId,
+        orderOffset: mapInsertRoutePoints.length,
+        requireCellInMap: selectedHallId !== 'all' && halls.length > 0,
+        respectManualHallMismatch: true,
+      });
+      if (pendingResult.missingItemIds.length > 0) return false;
+
+      const existingRoutePointsAtStart = mapInsertRoutePoints.map((point) => ({ ...point }));
+      const existingRouteSegmentsAtStart = mapInsertRouteSegments.map((segment) => ({
+        ...segment,
+        path: segment.path.map((point) => ({ ...point })),
+      }));
+      const pendingMapPointsAtStart = pendingResult.routePoints.map((point) => ({ ...point }));
+      const validationPointsAtStart = [...existingRoutePointsAtStart, ...pendingMapPointsAtStart];
+      const pendingHallVisitEntriesAtStart = pendingMapPointsAtStart.map((point) => ({
+        itemId: point.itemId,
+        hallId: point.hallId,
+      }));
+
+      setPopupState((prev) => ({ ...prev, isOpen: false }));
+      setInsertDialogState({ isOpen: false, item: null });
+      setBatchInsertPendingIds(null);
+      const nextPending: MapRouteInsertPendingState = {
+        itemIds: [...itemIds],
+        representativeItem: { ...representativeItem },
+        existingRoutePointsAtStart,
+        existingRouteSegmentsAtStart,
+        canvasMapDataAtStart: cloneDayMapDataForRouteInsertSnapshot(filteredMapData),
+        routeInsertMissMapDataAtStart: cloneDayMapDataForRouteInsertSnapshot(routeResolutionMapData),
+        pendingMapPoints: pendingMapPointsAtStart,
+        validationPoints: validationPointsAtStart,
+        pendingHallVisitEntries: pendingHallVisitEntriesAtStart,
+        message: 'ルート線または番号をクリックしてください',
+        errorMessage: null,
+        duplicateCandidates: [],
+      };
+      mapRouteInsertPendingRef.current = nextPending;
+      setMapRouteInsertPending(nextPending);
+      return true;
+    },
+    [
+      vertexSelectionMode,
+      cellSelectionMode,
+      hasValidSelectedHallRouteContext,
+      routeResolutionMapData,
+      mapInsertRoutePathfindingMapData,
+      mapInsertRoutePoints,
+      mapInsertRouteSegments,
+      onAddToExecuteListAtPosition,
+      onBatchAddToExecuteListAtPosition,
+      mapRouteResolutionItems,
+      halls,
+      mapDayName,
+      mapName,
+      selectedHallId,
+      filteredMapData,
+    ],
+  );
+
   const handleAddToVisitList = useCallback(
     (itemId: string) => {
       const item = items.find((i) => i.id === itemId);
       if (!item) return;
 
-      // 同ブロック+ナンバープレフィックス一致時の自動挿入（スマート挿入より優先）
       const newItemPrefix = extractNumberAlphaPrefix(item.number);
       if (newItemPrefix && onAddToExecuteListAtPosition) {
         const itemBlock = item.block?.trim() || '';
@@ -709,9 +1026,18 @@ const MapView: React.FC<MapViewProps> = ({
         });
 
         if (lastMatchId) {
-          onAddToExecuteListAtPosition(itemId, lastMatchId, 'after');
-          addToHallVisitList(itemId);
-          return;
+          const accepted = onAddToExecuteListAtPosition(itemId, lastMatchId, 'after') === true;
+          if (accepted) {
+            addToHallVisitList(itemId);
+            return;
+          }
+          if (smartInsertEnabled && smartInsertMode === 'map') {
+            const started = tryStartMapRouteInsertSelection([itemId], item);
+            if (started) return;
+          } else if (smartInsertEnabled && smartInsertMode === 'preview') {
+            setInsertDialogState({ isOpen: true, item });
+            return;
+          }
         }
       }
 
@@ -739,7 +1065,20 @@ const MapView: React.FC<MapViewProps> = ({
         }
       });
 
-      if (nearbyVisitItems.length === 0 || !onAddToExecuteListAtPosition || !smartInsertEnabled) {
+      if (smartInsertEnabled && smartInsertMode === 'map') {
+        const started = tryStartMapRouteInsertSelection([itemId], item);
+        if (started) return;
+        onAddToExecuteList(itemId);
+        addToHallVisitList(itemId);
+        return;
+      }
+
+      if (
+        smartInsertMode !== 'preview' ||
+        nearbyVisitItems.length === 0 ||
+        !onAddToExecuteListAtPosition ||
+        !smartInsertEnabled
+      ) {
         onAddToExecuteList(itemId);
         addToHallVisitList(itemId);
         return;
@@ -753,37 +1092,51 @@ const MapView: React.FC<MapViewProps> = ({
       executeModeItemIds,
       addToHallVisitList,
       smartInsertEnabled,
+      smartInsertMode,
+      tryStartMapRouteInsertSelection,
     ],
   );
 
-  // スマート挿入ダイアログの選択結果を適用する（単体 & バッチ共通）
   const handleInsertPositionSelect = useCallback(
     (position: InsertPosition) => {
       const item = insertDialogState.item;
       if (!item) return;
 
-      // バッチ挿入か単体挿入かを判定
       const isBatch = batchInsertPendingIds !== null && batchInsertPendingIds.length > 0;
       const idsToInsert = isBatch ? batchInsertPendingIds : [item.id];
 
+      const addBatchNormally = () => {
+        if (onBatchAddToExecuteList) {
+          onBatchAddToExecuteList(idsToInsert);
+        } else {
+          for (const id of idsToInsert) {
+            onAddToExecuteList(id);
+          }
+        }
+        batchAddToHallVisitList(idsToInsert);
+      };
+
       if (position.type === 'before' || position.type === 'after') {
         if (isBatch && onBatchAddToExecuteListAtPosition) {
-          onBatchAddToExecuteListAtPosition(idsToInsert, position.referenceItemId, position.type);
+          const accepted =
+            onBatchAddToExecuteListAtPosition(idsToInsert, position.referenceItemId, position.type) === true;
+          if (!accepted) return;
           batchAddToHallVisitList(idsToInsert);
+        } else if (isBatch) {
+          addBatchNormally();
         } else if (onAddToExecuteListAtPosition) {
+          let accepted = true;
           if (position.type === 'before') {
-            for (let i = idsToInsert.length - 1; i >= 0; i--) {
-              onAddToExecuteListAtPosition(idsToInsert[i], position.referenceItemId, 'before');
-              addToHallVisitList(idsToInsert[i]);
-            }
+            accepted =
+              onAddToExecuteListAtPosition(idsToInsert[0], position.referenceItemId, 'before') === true;
           } else {
-            let insertAfter = position.referenceItemId;
-            for (const id of idsToInsert) {
-              onAddToExecuteListAtPosition(id, insertAfter, 'after');
-              addToHallVisitList(id);
-              insertAfter = id;
-            }
+            accepted =
+              onAddToExecuteListAtPosition(idsToInsert[0], position.referenceItemId, 'after') === true;
           }
+          if (!accepted) return;
+          addToHallVisitList(idsToInsert[0]);
+        } else {
+          return;
         }
       } else {
         if (position.type === 'listEnd') {
@@ -792,7 +1145,8 @@ const MapView: React.FC<MapViewProps> = ({
               ? executeModeItemIds[executeModeItemIds.length - 1]
               : null;
             if (lastId) {
-              onBatchAddToExecuteListAtPosition(idsToInsert, lastId, 'after');
+              const accepted = onBatchAddToExecuteListAtPosition(idsToInsert, lastId, 'after') === true;
+              if (!accepted) return;
             } else if (onBatchAddToExecuteList) {
               onBatchAddToExecuteList(idsToInsert);
             } else {
@@ -802,12 +1156,19 @@ const MapView: React.FC<MapViewProps> = ({
             }
             batchAddToHallVisitList(idsToInsert);
           } else if (onAddToExecuteListAtPosition) {
+            if (isBatch) {
+              addBatchNormally();
+              setBatchInsertPendingIds(null);
+              setInsertDialogState({ isOpen: false, item: null });
+              return;
+            }
             let insertAfter = executeModeItemIds.length > 0
               ? executeModeItemIds[executeModeItemIds.length - 1]
               : null;
             for (const id of idsToInsert) {
               if (insertAfter) {
-                onAddToExecuteListAtPosition(id, insertAfter, 'after');
+                const accepted = onAddToExecuteListAtPosition(id, insertAfter, 'after') === true;
+                if (!accepted) return;
               } else {
                 onAddToExecuteList(id);
               }
@@ -876,14 +1237,12 @@ const MapView: React.FC<MapViewProps> = ({
     return result;
   }, [insertDialogState.item, items, executeModeItemIds]);
 
-  // 追加対象アイテムがホール判定可能かどうか
   const insertDialogHasHall = useMemo(() => {
     const item = insertDialogState.item;
     if (!item) return false;
     return getHallCandidatesForItem(item).size > 0;
   }, [insertDialogState.item, getHallCandidatesForItem]);
 
-  // preview モード時のみ、実行列全体をダイアログ表示用に渡す
   const insertDialogAllVisitItems = useMemo(() => {
     if (smartInsertMode !== 'preview') return [];
     return executeModeItemIds
@@ -894,7 +1253,6 @@ const MapView: React.FC<MapViewProps> = ({
       .filter((v): v is { item: ShoppingItem; visitIndex: number } => v !== null);
   }, [smartInsertMode, executeModeItemIds, items]);
 
-  // 実行列から削除したアイテムをホール別訪問リストからも除去する
   const handleRemoveFromVisitList = useCallback(
     (itemId: string) => {
       onRemoveFromExecuteList(itemId);
@@ -912,12 +1270,10 @@ const MapView: React.FC<MapViewProps> = ({
     [onRemoveFromExecuteList, hallRouteSettings, onUpdateHallRouteSettings],
   );
 
-  // スペースグループ一括追加: スマート挿入をグループ単位で実行
   const handleBatchAddToVisitList = useCallback(
     (itemIds: string[]) => {
       if (itemIds.length === 0) return;
 
-      // アイテムを番号サフィックス順にソート
       const sortedIds = [...itemIds].sort((aId, bId) => {
         const a = items.find((i) => i.id === aId);
         const b = items.find((i) => i.id === bId);
@@ -934,15 +1290,13 @@ const MapView: React.FC<MapViewProps> = ({
         return numA - numB;
       });
 
-      // 代表アイテムでプレフィックスマッチングを試みる
       const firstItem = items.find((i) => i.id === sortedIds[0]);
       if (!firstItem) return;
 
       const newItemPrefix = extractNumberAlphaPrefix(firstItem.number);
       const itemBlock = firstItem.block?.trim() || '';
 
-      // 1) プレフィックスマッチ: 同ブロック+同プレフィックスの既存アイテムの最後の直後に挿入
-      if (newItemPrefix && (onBatchAddToExecuteListAtPosition || onAddToExecuteListAtPosition)) {
+      if (newItemPrefix && onBatchAddToExecuteListAtPosition) {
         let lastMatchId: string | null = null;
         executeModeItemIds.forEach((eid) => {
           const existingItem = items.find((i) => i.id === eid);
@@ -956,23 +1310,32 @@ const MapView: React.FC<MapViewProps> = ({
         });
 
         if (lastMatchId) {
-          if (onBatchAddToExecuteListAtPosition) {
-            onBatchAddToExecuteListAtPosition(sortedIds, lastMatchId, 'after');
-          } else {
-            let insertAfter: string = lastMatchId;
-            for (const id of sortedIds) {
-              onAddToExecuteListAtPosition!(id, insertAfter, 'after');
-              insertAfter = id;
-            }
+          const accepted =
+            onBatchAddToExecuteListAtPosition(sortedIds, lastMatchId, 'after') === true;
+          if (accepted) {
+            batchAddToHallVisitList(sortedIds);
+            return;
           }
-          batchAddToHallVisitList(sortedIds);
-          return;
         }
       }
 
-      // 2) 近隣判定: 数値差3以内の訪問済みアイテムがあればスマート挿入ダイアログを表示
+      if (smartInsertEnabled && smartInsertMode === 'map') {
+        const started = tryStartMapRouteInsertSelection(sortedIds, firstItem);
+        if (started) return;
+
+        if (onBatchAddToExecuteList) {
+          onBatchAddToExecuteList(sortedIds);
+        } else {
+          for (const id of sortedIds) {
+            onAddToExecuteList(id);
+          }
+        }
+        batchAddToHallVisitList(sortedIds);
+        return;
+      }
+
       const itemNum = extractNumberFromItemNumber(firstItem.number);
-      if (itemNum && smartInsertEnabled && (onBatchAddToExecuteListAtPosition || onAddToExecuteListAtPosition)) {
+      if (itemNum && smartInsertEnabled && smartInsertMode === 'preview') {
         const numValue = parseInt(itemNum, 10);
         const itemBlockLower = itemBlock.toLowerCase();
         const nearbyVisitItems: { item: ShoppingItem; visitIndex: number }[] = [];
@@ -990,14 +1353,12 @@ const MapView: React.FC<MapViewProps> = ({
         });
 
         if (nearbyVisitItems.length > 0) {
-          // バッチ挿入用の状態を保持してダイアログを開く
           setBatchInsertPendingIds(sortedIds);
           setInsertDialogState({ isOpen: true, item: firstItem });
           return;
         }
       }
 
-      // 3) マッチなし: 末尾に追加
       if (onBatchAddToExecuteList) {
         onBatchAddToExecuteList(sortedIds);
       } else {
@@ -1016,10 +1377,11 @@ const MapView: React.FC<MapViewProps> = ({
       onBatchAddToExecuteListAtPosition,
       batchAddToHallVisitList,
       smartInsertEnabled,
+      smartInsertMode,
+      tryStartMapRouteInsertSelection,
     ],
   );
 
-  // スペースグループ一括解除
   const handleBatchRemoveFromVisitList = useCallback(
     (itemIds: string[]) => {
       if (onBatchRemoveFromExecuteList) {
@@ -1048,12 +1410,178 @@ const MapView: React.FC<MapViewProps> = ({
     setIsVisitListOpen(false);
   }, []);
 
+  const insertPendingItemsAfterAnchor = useCallback(
+    (itemIds: string[], anchorItemId: string): boolean => {
+      if (itemIds.length > 1) {
+        if (!onBatchAddToExecuteListAtPosition) return false;
+        return onBatchAddToExecuteListAtPosition(itemIds, anchorItemId, 'after') === true;
+      }
+
+      const itemId = itemIds[0];
+      if (!itemId || !onAddToExecuteListAtPosition) return false;
+      return onAddToExecuteListAtPosition(itemId, anchorItemId, 'after') === true;
+    },
+    [onAddToExecuteListAtPosition, onBatchAddToExecuteListAtPosition],
+  );
+
+  const applyMapRouteInsertAfter = useCallback(
+    (anchorItemId: string) => {
+      const pending = mapRouteInsertPendingRef.current;
+      if (!pending) return;
+
+      if (!executeModeItemIds.includes(anchorItemId)) {
+        setMapRouteInsertPending((prev) =>
+          prev
+            ? {
+                ...prev,
+                errorMessage:
+                  '選択した基準アイテムが現在の実行リストにありません。別のルート線または番号を選んでください。',
+                duplicateCandidates: [],
+              }
+            : prev,
+        );
+        return;
+      }
+
+      const alreadyInsertedPendingIds = pending.itemIds.filter((id) =>
+        executeModeItemIds.includes(id),
+      );
+      if (alreadyInsertedPendingIds.length > 0) {
+        setMapRouteInsertPending((prev) =>
+          prev
+            ? {
+                ...prev,
+                errorMessage:
+                  '追加対象が現在の実行リストに既にあります。キャンセルして最新の状態からやり直してください。',
+                duplicateCandidates: [],
+              }
+            : prev,
+        );
+        return;
+      }
+
+      const validation = validateMapSmartInsert({
+        anchorItemId,
+        pendingItemIds: pending.itemIds,
+        routePoints: pending.validationPoints,
+      });
+      if (!validation.ok) {
+        setMapRouteInsertPending((prev) =>
+          prev
+            ? {
+                ...prev,
+                errorMessage: validation.message,
+                duplicateCandidates: [],
+              }
+            : prev,
+        );
+        return;
+      }
+
+      const inserted = insertPendingItemsAfterAnchor(pending.itemIds, anchorItemId);
+      if (!inserted) {
+        setMapRouteInsertPending((prev) =>
+          prev
+            ? {
+                ...prev,
+                errorMessage:
+                  '位置指定追加が現在利用できません。キャンセルして最新の状態からやり直してください。',
+                duplicateCandidates: [],
+              }
+            : prev,
+        );
+        return;
+      }
+
+      applyPendingHallVisitEntries(pending.pendingHallVisitEntries);
+      mapRouteInsertPendingRef.current = null;
+      setMapRouteInsertPending(null);
+    },
+    [
+      applyPendingHallVisitEntries,
+      executeModeItemIds,
+      insertPendingItemsAfterAnchor,
+    ],
+  );
+
+  const buildDuplicateAnchorCandidates = useCallback(
+    (
+      hitCandidates: Array<{ itemId: string; order: number }>,
+      routePointsAtStart: MapRoutePoint[],
+    ): RouteInsertAnchorCandidate[] => {
+      const pointByItemId = new Map(routePointsAtStart.map((point) => [point.itemId, point]));
+      return hitCandidates.map((candidate) => {
+        const point = pointByItemId.get(candidate.itemId);
+        return {
+          itemId: candidate.itemId,
+          order: candidate.order,
+          label: point?.anchorLabel ?? `${candidate.order + 1}. ${candidate.itemId} の後`,
+        };
+      });
+    },
+    [],
+  );
+
+  const handleRouteInsertHit = useCallback(
+    (hit: MapRouteHitResult) => {
+      if (!mapRouteInsertPendingRef.current) return;
+
+      if (hit.type === 'marker' && hit.duplicateCandidates.length > 1) {
+        setMapRouteInsertPending((prev) =>
+          prev
+            ? {
+                ...prev,
+                errorMessage: null,
+                duplicateCandidates: buildDuplicateAnchorCandidates(
+                  hit.duplicateCandidates,
+                  prev.existingRoutePointsAtStart,
+                ),
+              }
+            : prev,
+        );
+        return;
+      }
+
+      applyMapRouteInsertAfter(hit.type === 'marker' ? hit.itemId : hit.fromItemId);
+    },
+    [applyMapRouteInsertAfter, buildDuplicateAnchorCandidates],
+  );
+
+  const handleRouteInsertMiss = useCallback((miss: { kind: 'cell' | 'blank' }) => {
+    if (miss.kind === 'blank') return;
+
+    setMapRouteInsertPending((prev) =>
+      prev
+        ? {
+            ...prev,
+            errorMessage: null,
+            duplicateCandidates: [],
+            message: 'ルート線または番号をクリックしてください',
+          }
+        : prev,
+    );
+  }, []);
+
+  const cancelMapRouteInsertSelection = useCallback(() => {
+    mapRouteInsertPendingRef.current = null;
+    setMapRouteInsertPending(null);
+  }, []);
+
+  const routePointsForCanvas =
+    mapRouteInsertPending?.existingRoutePointsAtStart ?? displayRoutePoints;
+  const routeSegmentsForCanvas =
+    mapRouteInsertPending?.existingRouteSegmentsAtStart ?? displayRouteSegments;
+  const mapDataForCanvas =
+    mapRouteInsertPending?.canvasMapDataAtStart ?? filteredMapData;
+  const routeInsertMissMapDataForCanvas =
+    mapRouteInsertPending?.routeInsertMissMapDataAtStart;
+
   return (
     <div
       className="relative bg-slate-100 dark:bg-slate-900 overflow-hidden"
       style={{ height: 'calc(100vh - 140px)' }}
     >
-      {/* 右上コントロール: ホール選択 / ホール順序 / ルート表示 */}
+      {/* Top-right controls: hall selection, hall order, route visibility. */}
       {!hideInternalControls && (
         <div className="absolute top-4 right-4 z-10 flex items-center gap-3">
           {halls.length > 0 && (
@@ -1096,20 +1624,59 @@ const MapView: React.FC<MapViewProps> = ({
           </label>
         </div>
       )}
-      {/* 左下ズーム表示 */}
       <div className="absolute bottom-4 left-4 z-10">
         <div className="bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm shadow-md text-slate-700 dark:text-slate-300 select-none">
           {zoomLevel}%
         </div>
       </div>
-      {/* マップ本体 */}
+      {mapRouteInsertPending && (
+        <div className="absolute left-4 top-4 z-20 max-w-sm rounded-lg border border-slate-200 bg-white p-3 text-sm shadow-lg dark:border-slate-700 dark:bg-slate-800">
+          <div className="font-medium text-slate-900 dark:text-slate-100">
+            {mapRouteInsertPending.message}
+          </div>
+          {mapRouteInsertPending.errorMessage && (
+            <div className="mt-2 text-red-600 dark:text-red-400">
+              {mapRouteInsertPending.errorMessage}
+            </div>
+          )}
+          <button
+            type="button"
+            onClick={cancelMapRouteInsertSelection}
+            className="mt-3 rounded bg-slate-100 px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-200"
+          >
+            キャンセル
+          </button>
+        </div>
+      )}
+      {mapRouteInsertPending && mapRouteInsertPending.duplicateCandidates.length > 0 && (
+        <div className="absolute left-4 top-28 z-20 max-w-sm rounded-lg border border-slate-200 bg-white p-2 shadow-lg dark:border-slate-700 dark:bg-slate-800">
+          {mapRouteInsertPending.duplicateCandidates.map((candidate) => (
+            <button
+              key={`${candidate.itemId}-${candidate.order}`}
+              type="button"
+              onClick={() => applyMapRouteInsertAfter(candidate.itemId)}
+              className="block w-full rounded px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-700"
+            >
+              {candidate.label}
+            </button>
+          ))}
+        </div>
+      )}
+      {/* Map canvas */}
       <MapCanvas
-        mapData={filteredMapData}
+        mapData={mapDataForCanvas}
         mapName={mapName}
         items={filteredItems}
         executeModeItemIds={routeExecuteModeItemIds}
         zoomLevel={zoomLevel}
         isRouteVisible={isRouteVisible && (halls.length === 0 || selectedHallId !== 'all')}
+        routePointsOverride={routePointsForCanvas}
+        routeSegmentsOverride={routeSegmentsForCanvas}
+        routeInsertMissMapDataOverride={routeInsertMissMapDataForCanvas}
+        forceRouteVisible={mapRouteInsertPending !== null}
+        routeInsertSelectionActive={mapRouteInsertPending !== null}
+        onRouteInsertHit={handleRouteInsertHit}
+        onRouteInsertMiss={handleRouteInsertMiss}
         onCellClick={handleCellClick}
         selectedHall={
           selectedHallId !== 'all' ? halls.find((h) => h.id === selectedHallId) : undefined
@@ -1127,7 +1694,7 @@ const MapView: React.FC<MapViewProps> = ({
         offsetRef={canvasOffsetRef}
         numberCellOutlineStyle={numberCellOutlineStyle}
       />
-      {/* セル詳細ポップアップ */}
+      {/* Cell detail popup */}
       <CellItemsPopup
         isOpen={popupState.isOpen}
         onClose={handleClosePopup}
@@ -1146,7 +1713,7 @@ const MapView: React.FC<MapViewProps> = ({
         eventDate={mapDayName || normalizeDisplayText(mapName)}
         position={popupState.position}
       />
-      {/* 訪問リストパネル */}
+      {/* Visit list panel */}
       <MapVisitListPanel
         isOpen={isVisitListOpen}
         onClose={() => setIsVisitListOpen(false)}
@@ -1155,7 +1722,7 @@ const MapView: React.FC<MapViewProps> = ({
         blocks={filteredMapData.blocks}
         onJumpToCell={handleJumpToCell}
       />
-      {/* ホール順序設定パネル */}
+      {/* Hall order settings panel */}
       <HallOrderPanel
         isOpen={isHallOrderOpen}
         onClose={() => setIsHallOrderOpen(false)}
@@ -1165,7 +1732,6 @@ const MapView: React.FC<MapViewProps> = ({
         getItemCountInHall={getItemCountInHall}
         onReorderExecuteList={onReorderExecuteList}
       />
-      {/* スマート挿入ダイアログ */}
       {insertDialogState.item && (
         <InsertPositionDialog
           isOpen={insertDialogState.isOpen}
@@ -1173,7 +1739,6 @@ const MapView: React.FC<MapViewProps> = ({
           nearbyVisitItems={insertDialogNearbyItems}
           allVisitItems={insertDialogAllVisitItems}
           hasHallDefinition={insertDialogHasHall}
-          mode={smartInsertMode}
           onSelect={handleInsertPositionSelect}
           onCancel={() => { setBatchInsertPendingIds(null); setInsertDialogState({ isOpen: false, item: null }); }}
         />
@@ -1183,3 +1748,5 @@ const MapView: React.FC<MapViewProps> = ({
 };
 
 export default React.memo(MapView);
+
+
