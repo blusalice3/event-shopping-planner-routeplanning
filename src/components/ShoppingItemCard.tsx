@@ -18,6 +18,17 @@ import ClockIcon from './icons/ClockIcon';
 import ChevronUpIcon from './icons/ChevronUpIcon';
 import ChevronDownIcon from './icons/ChevronDownIcon';
 import { areSameItemSnapshot } from './itemSnapshot';
+import LimitedPurchaseDialog, {
+  type LimitedPurchaseDialogResult,
+} from './LimitedPurchaseDialog';
+import {
+  applyLimitedPurchase,
+  applyPurchasedFromLimitedInput,
+  clearLimitedPurchase,
+  formatDisplayQuantity,
+  getActualPurchasedQuantity,
+  getPlannedQuantity,
+} from '../utils/purchaseQuantity';
 
 // 外部リンクアイコン
 const ExternalLinkIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
@@ -57,6 +68,8 @@ export interface ShoppingItemCardProps {
   hallIndex?: number; // ホール内での訪問順番号（0始まり）
   priorityLevel?: 'none' | 'priority' | 'highest'; // グループの優先度レベル
   highlightPrice?: boolean; // 価格未定の購入済アイテムの価格欄を強調表示
+  highlightLimitedMissing?: boolean;
+  getLatestItemById?: (itemId: string) => ShoppingItem | undefined;
   purchaseStatusControlMode?: PurchaseStatusControlMode;
 }
 
@@ -342,6 +355,8 @@ export const SHOPPING_ITEM_CARD_COMPARISON_KEYS = [
   'hallIndex',
   'priorityLevel',
   'highlightPrice',
+  'highlightLimitedMissing',
+  'getLatestItemById',
   'purchaseStatusControlMode',
 ] as const satisfies readonly (keyof ShoppingItemCardProps)[];
 
@@ -368,6 +383,8 @@ export const areSameShoppingItemCardProps = (
   prev.hallIndex === next.hallIndex &&
   prev.priorityLevel === next.priorityLevel &&
   prev.highlightPrice === next.highlightPrice &&
+  prev.highlightLimitedMissing === next.highlightLimitedMissing &&
+  prev.getLatestItemById === next.getLatestItemById &&
   prev.purchaseStatusControlMode === next.purchaseStatusControlMode;
 
 const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
@@ -390,6 +407,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   hallIndex,
   priorityLevel = 'none',
   highlightPrice = false,
+  highlightLimitedMissing = false,
+  getLatestItemById,
   purchaseStatusControlMode = 'cycle',
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
@@ -398,6 +417,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const cardRef = useRef<HTMLDivElement>(null);
   const purchaseStatusButtonRef = useRef<HTMLButtonElement>(null);
   const [purchaseStatusMenuOpen, setPurchaseStatusMenuOpen] = useState(false);
+  const [limitedDialogOpen, setLimitedDialogOpen] = useState(false);
   const item = optimisticItem;
 
   useEffect(() => {
@@ -479,12 +499,67 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     commitItemUpdate(updatedItem);
   };
 
+  const resolveLatestDialogItem = useCallback(
+    (): ShoppingItem | undefined => (getLatestItemById ? getLatestItemById(item.id) : item),
+    [getLatestItemById, item],
+  );
+
+  const commitLimitedDialogResult = useCallback(
+    (baseItem: ShoppingItem, result: LimitedPurchaseDialogResult) => {
+      if (result.kind === 'limited') {
+        commitItemUpdate(
+          applyLimitedPurchase(baseItem, {
+            actual: result.actual,
+            planned: result.planned,
+          }),
+        );
+        return;
+      }
+
+      if (result.kind === 'purchased') {
+        commitItemUpdate(applyPurchasedFromLimitedInput(baseItem, result.planned));
+        return;
+      }
+
+      commitItemUpdate(applyLimitedPurchase(baseItem, { planned: result.planned }));
+    },
+    [commitItemUpdate],
+  );
+
+  const handleLimitedDialogSubmit = useCallback(
+    (result: LimitedPurchaseDialogResult) => {
+      const latestItem = resolveLatestDialogItem();
+      if (latestItem !== undefined) {
+        commitLimitedDialogResult(latestItem, result);
+      }
+      setLimitedDialogOpen(false);
+    },
+    [commitLimitedDialogResult, resolveLatestDialogItem],
+  );
+
+  const commitPurchaseStatusChange = useCallback(
+    (nextStatus: PurchaseStatus) => {
+      if (nextStatus === 'LimitedPurchase') {
+        setLimitedDialogOpen(true);
+        return;
+      }
+
+      const nextItem =
+        item.purchaseStatus === 'LimitedPurchase' || item.limitedPurchasedQuantity !== undefined
+          ? clearLimitedPurchase({ ...item, purchaseStatus: nextStatus })
+          : { ...item, purchaseStatus: nextStatus };
+
+      commitItemUpdate(nextItem);
+    },
+    [item, commitItemUpdate],
+  );
+
   const togglePurchaseStatus = useCallback(() => {
     const currentIndex = PurchaseStatuses.indexOf(item.purchaseStatus);
     const nextIndex = (currentIndex + 1) % PurchaseStatuses.length;
     const nextStatus = PurchaseStatuses[nextIndex];
-    commitItemUpdate({ ...item, purchaseStatus: nextStatus });
-  }, [item, commitItemUpdate]);
+    commitPurchaseStatusChange(nextStatus);
+  }, [item.purchaseStatus, commitPurchaseStatusChange]);
 
   const closePurchaseStatusMenu = useCallback(
     (options: { restoreFocus?: boolean } = {}) => {
@@ -511,10 +586,10 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         closePurchaseStatusMenu();
         return;
       }
-      commitItemUpdate({ ...item, purchaseStatus });
+      commitPurchaseStatusChange(purchaseStatus);
       closePurchaseStatusMenu();
     },
-    [item, commitItemUpdate, closePurchaseStatusMenu],
+    [item.purchaseStatus, commitPurchaseStatusChange, closePurchaseStatusMenu],
   );
 
   const handlePurchaseStatusButtonClick = useCallback(
@@ -716,6 +791,19 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       />
     ) : null;
 
+  const limitedPurchaseDialog = (
+    <LimitedPurchaseDialog
+      isOpen={limitedDialogOpen}
+      itemId={item.id}
+      itemTitle={item.title || item.circle}
+      initialActual={getActualPurchasedQuantity(item)}
+      initialPlanned={getPlannedQuantity(item)}
+      showDeferButton
+      onSubmit={handleLimitedDialogSubmit}
+      onCancel={() => setLimitedDialogOpen(false)}
+    />
+  );
+
   // スマートフォンモード用レイアウト
   if (layoutMode === 'smartphone') {
     // 実行/集中モード：左サイドバー型レイアウト
@@ -850,17 +938,29 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                   {/* 中央: 数量 */}
                   <div className="flex items-center gap-1">
                     <span className="text-xs text-slate-600 dark:text-slate-400">数量</span>
-                    <select
-                      value={item.quantity}
-                      onChange={handleQuantityChange}
-                      className="text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-12"
-                    >
-                      {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
-                        <option key={num} value={num}>
-                          {num}
-                        </option>
-                      ))}
-                    </select>
+                    {item.purchaseStatus === 'LimitedPurchase' ? (
+                      <button
+                        type="button"
+                        onClick={() => setLimitedDialogOpen(true)}
+                        className={`text-sm font-semibold rounded-md py-1 px-2 text-center bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-200 ${
+                          highlightLimitedMissing ? 'ring-2 ring-orange-500 animate-pulse' : ''
+                        }`}
+                      >
+                        {formatDisplayQuantity(item)}
+                      </button>
+                    ) : (
+                      <select
+                        value={item.quantity}
+                        onChange={handleQuantityChange}
+                        className="text-sm font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-1 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-12"
+                      >
+                        {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                          <option key={num} value={num}>
+                            {num}
+                          </option>
+                        ))}
+                      </select>
+                    )}
                   </div>
 
                   {/* 右側スペーサー */}
@@ -908,6 +1008,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           </div>
 
           {purchaseStatusRadialMenu}
+          {limitedPurchaseDialog}
           {menuVisible && (
             <div
               className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
@@ -1088,17 +1189,29 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
               {/* 操作エリア: 数量・価格・購入状態（右寄せコンパクト） */}
               <div className="flex items-center justify-end gap-1">
                 {/* 数量 */}
-                <select
-                  value={item.quantity}
-                  onChange={handleQuantityChange}
-                  className="text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-10"
-                >
-                  {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
-                    <option key={num} value={num}>
-                      {num}
-                    </option>
-                  ))}
-                </select>
+                {item.purchaseStatus === 'LimitedPurchase' ? (
+                  <button
+                    type="button"
+                    onClick={() => setLimitedDialogOpen(true)}
+                    className={`text-xs font-semibold rounded py-0.5 px-1.5 text-center bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-200 ${
+                      highlightLimitedMissing ? 'ring-2 ring-orange-500 animate-pulse' : ''
+                    }`}
+                  >
+                    {formatDisplayQuantity(item)}
+                  </button>
+                ) : (
+                  <select
+                    value={item.quantity}
+                    onChange={handleQuantityChange}
+                    className="text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-10"
+                  >
+                    {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                      <option key={num} value={num}>
+                        {num}
+                      </option>
+                    ))}
+                  </select>
+                )}
 
                 {/* 価格 */}
                 <div className="flex items-center gap-0.5">
@@ -1137,6 +1250,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         </div>
 
         {purchaseStatusRadialMenu}
+        {limitedPurchaseDialog}
         {menuVisible && (
           <div
             className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"
@@ -1434,17 +1548,29 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
             数量
           </span>
-          <select
-            value={item.quantity}
-            onChange={handleQuantityChange}
-            className="flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums"
-          >
-            {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
-              <option key={num} value={num}>
-                {num}
-              </option>
-            ))}
-          </select>
+          {item.purchaseStatus === 'LimitedPurchase' ? (
+            <button
+              type="button"
+              onClick={() => setLimitedDialogOpen(true)}
+              className={`flex-1 text-base font-semibold rounded-md py-1 px-2 text-center bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-200 tabular-nums ${
+                highlightLimitedMissing ? 'ring-2 ring-orange-500 animate-pulse' : ''
+              }`}
+            >
+              {formatDisplayQuantity(item)}
+            </button>
+          ) : (
+            <select
+              value={item.quantity}
+              onChange={handleQuantityChange}
+              className="flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums"
+            >
+              {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                <option key={num} value={num}>
+                  {num}
+                </option>
+              ))}
+            </select>
+          )}
         </div>
         <div className="flex items-center gap-1 relative z-10">
           <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
@@ -1470,6 +1596,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       </div>
 
       {purchaseStatusRadialMenu}
+      {limitedPurchaseDialog}
       {menuVisible && (
         <div
           className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 z-20"

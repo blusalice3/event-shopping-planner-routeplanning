@@ -1,5 +1,5 @@
 import type { ComponentProps } from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import ShoppingItemCard, {
@@ -55,6 +55,7 @@ const renderCard = (overrides: Partial<ComponentProps<typeof ShoppingItemCard>> 
 };
 
 const getStatusButton = () => screen.getByRole('button', { name: /Current status/i });
+const getLimitedDialog = () => screen.getByRole('dialog', { name: '限数購入の数量' });
 const getDialog = () => screen.getByRole('dialog', { name: '購入状態を選択' });
 const getOverlay = () => {
   const overlay = document.querySelector('[data-purchase-status-overlay="item-1"]');
@@ -83,6 +84,99 @@ describe('ShoppingItemCard purchase status control', () => {
     expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ purchaseStatus: 'Purchased' }));
   });
 
+  it('opens the limited purchase dialog without saving when cycle reaches LimitedPurchase', () => {
+    const { onUpdate } = renderCard({
+      item: { ...baseItem, purchaseStatus: 'Late', quantity: 5 },
+    });
+
+    fireEvent.click(getStatusButton());
+
+    expect(getLimitedDialog()).toBeInTheDocument();
+    expect(onUpdate).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'キャンセル' }));
+
+    expect(screen.queryByRole('dialog', { name: '限数購入の数量' })).not.toBeInTheDocument();
+    expect(onUpdate).not.toHaveBeenCalled();
+  });
+
+  it('converts limited purchase to purchased after confirmation when actual equals planned', () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const { onUpdate } = renderCard({
+      item: {
+        ...baseItem,
+        purchaseStatus: 'LimitedPurchase',
+        quantity: 5,
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '-/5' }));
+
+    const dialog = getLimitedDialog();
+    const [actualInput] = screen.getAllByRole('textbox').filter((input) =>
+      dialog.contains(input),
+    );
+    fireEvent.change(actualInput, { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purchaseStatus: 'Purchased',
+        quantity: 5,
+      }),
+    );
+    expect(onUpdate.mock.calls[0][0]).not.toHaveProperty('limitedPurchasedQuantity');
+  });
+
+  it('converts limited purchase to purchased from the excess confirmation dialog', () => {
+    const { onUpdate } = renderCard({
+      item: {
+        ...baseItem,
+        purchaseStatus: 'LimitedPurchase',
+        quantity: 5,
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '-/5' }));
+
+    const dialog = getLimitedDialog();
+    const [actualInput] = screen.getAllByRole('textbox').filter((input) =>
+      dialog.contains(input),
+    );
+    fireEvent.change(actualInput, { target: { value: '6' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    const excessDialog = screen.getAllByRole('dialog')[1];
+    fireEvent.click(within(excessDialog).getByRole('button', { name: '購入済にする' }));
+
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purchaseStatus: 'Purchased',
+        quantity: 5,
+      }),
+    );
+    expect(onUpdate.mock.calls[0][0]).not.toHaveProperty('limitedPurchasedQuantity');
+  });
+
+  it('does not save a limited dialog result when the latest item was deleted', () => {
+    const { onUpdate } = renderCard({
+      item: { ...baseItem, purchaseStatus: 'Late', quantity: 5 },
+      getLatestItemById: () => undefined,
+    });
+
+    fireEvent.click(getStatusButton());
+
+    const dialog = getLimitedDialog();
+    const [actualInput] = screen.getAllByRole('textbox').filter((input) =>
+      dialog.contains(input),
+    );
+    fireEvent.change(actualInput, { target: { value: '1' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(onUpdate).not.toHaveBeenCalled();
+    expect(screen.queryByRole('dialog', { name: '限数購入の数量' })).not.toBeInTheDocument();
+  });
+
   it('opens radial dialog with dialog aria on the status button', () => {
     renderCard({ purchaseStatusControlMode: 'radial' });
 
@@ -106,6 +200,27 @@ describe('ShoppingItemCard purchase status control', () => {
     expect(onUpdate).toHaveBeenCalledWith(expect.objectContaining({ purchaseStatus: 'Late' }));
     expect(screen.queryByRole('dialog', { name: '購入状態を選択' })).not.toBeInTheDocument();
     expect(getStatusButton()).toHaveFocus();
+  });
+
+  it('allows deferring quantity input after selecting limited purchase from the radial menu', () => {
+    const { onUpdate } = renderCard({
+      purchaseStatusControlMode: 'radial',
+      item: { ...baseItem, quantity: 5 },
+    });
+
+    fireEvent.click(getStatusButton());
+    fireEvent.click(screen.getByRole('radio', { name: /^LimitedPurchase/ }));
+
+    const dialog = getLimitedDialog();
+    fireEvent.click(within(dialog).getAllByRole('button')[0]);
+
+    expect(onUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        purchaseStatus: 'LimitedPurchase',
+        quantity: 5,
+      }),
+    );
+    expect(onUpdate.mock.calls[0][0]).not.toHaveProperty('limitedPurchasedQuantity');
   });
 
   it('closes without update when selecting the current status', () => {

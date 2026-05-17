@@ -17,6 +17,7 @@ const representativeShoppingItem = {
   price: 1000,
   purchaseStatus: 'None',
   quantity: 1,
+  limitedPurchasedQuantity: 1,
   remarks: 'remarks',
   url: 'https://example.com',
   priorityLevel: 'priority',
@@ -49,6 +50,8 @@ const representativeShoppingItemCardProps = {
   hallIndex: 1,
   priorityLevel: 'priority',
   highlightPrice: false,
+  highlightLimitedMissing: false,
+  getLatestItemById: vi.fn(),
   purchaseStatusControlMode: 'cycle',
 } satisfies Required<ShoppingItemCardProps>;
 

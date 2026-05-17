@@ -128,6 +128,7 @@ interface MapViewProps {
   onUpdateItem?: (item: ShoppingItem) => void;
   onUpdateItemPriority?: (itemId: string, level: 'none' | 'priority' | 'highest') => void;
   onDeleteItem?: (itemId: string) => void;
+  onEditRequest?: (item: ShoppingItem) => void;
   onAddNewItem?: (eventDate: string, block: string, number: string) => void;
   onAddItem?: (
     item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: import('../../types/item').PurchaseStatus },
@@ -194,6 +195,7 @@ const MapView: React.FC<MapViewProps> = ({
   onUpdateItem,
   onUpdateItemPriority,
   onDeleteItem,
+  onEditRequest,
   onAddNewItem,
   onAddItem,
   onAddToExecuteListAtPosition,
@@ -1710,6 +1712,7 @@ const MapView: React.FC<MapViewProps> = ({
         onUpdateItemPriority={onUpdateItemPriority}
         onDeleteItem={onDeleteItem}
         onAddItem={onAddItem}
+        onEditRequest={onEditRequest}
         eventDate={mapDayName || normalizeDisplayText(mapName)}
         position={popupState.position}
       />

@@ -11,9 +11,22 @@ import {
   sortItemsByHallOrder,
 } from '../utils/hallGrouping';
 import ShoppingItemCard from './ShoppingItemCard';
+import LimitedPurchaseDialog, {
+  type LimitedPurchaseDialogResult,
+} from './LimitedPurchaseDialog';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 import ChevronUpIcon from './icons/ChevronUpIcon';
 import ChevronDownIcon from './icons/ChevronDownIcon';
+import {
+  applyLimitedPurchase,
+  applyPurchasedFromLimitedInput,
+  clearLimitedPurchase,
+  getActualPurchasedQuantity,
+  getPlannedQuantity,
+  hasMissingLimitedPurchaseQuantity,
+  isPriceRequiredStatus,
+  isUndefinedPrice,
+} from '../utils/purchaseQuantity';
 
 // 優先度レベルの型
 type PriorityLevel = 'none' | 'priority' | 'highest';
@@ -91,6 +104,7 @@ interface ShoppingListProps {
   purchaseStatusControlMode?: PurchaseStatusControlMode;
   // 実行モード用: 価格未定チェック無効化設定（true のとき、購入済・価格未定でも次のスペースへ進める）
   disablePriceUndefinedCheck?: boolean;
+  disableLimitedPurchaseQuantityCheck?: boolean;
 }
 
 // グループの表示名を取得
@@ -249,11 +263,20 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   showLateFilterButton,
   onActivateLateFilter,
   disablePriceUndefinedCheck = false,
+  disableLimitedPurchaseQuantityCheck: _disableLimitedPurchaseQuantityCheck = false,
   purchaseStatusControlMode = 'cycle',
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const getLatestItemById = useCallback(
+    (itemId: string): ShoppingItem | undefined => items.find((item) => item.id === itemId),
+    [items],
+  );
+  const [limitedBulkQueueIds, setLimitedBulkQueueIds] = useState<string[]>([]);
+  const [limitedBulkIndex, setLimitedBulkIndex] = useState(0);
+  const [limitedBulkSkippedCount, setLimitedBulkSkippedCount] = useState(0);
+  const [limitedMessage, setLimitedMessage] = useState<string | null>(null);
 
   // タッチドラッグ用state/ref
   const touchDragActive = useRef(false);
@@ -275,6 +298,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   // 価格未定の購入済アイテムの価格欄を強調表示するためのアイテムIDセット
   const [priceHighlightItemIds, setPriceHighlightItemIds] = useState<Set<string>>(new Set());
+  const [limitedMissingHighlightItemIds, setLimitedMissingHighlightItemIds] =
+    useState<Set<string>>(new Set());
 
   // 価格が入力されたアイテムをハイライトセットから自動除外
   useEffect(() => {
@@ -282,7 +307,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     const remaining = new Set<string>();
     for (const id of priceHighlightItemIds) {
       const item = items.find(i => i.id === id);
-      if (item && item.purchaseStatus === 'Purchased' && item.price === null) {
+      if (item && isPriceRequiredStatus(item) && isUndefinedPrice(item.price)) {
         remaining.add(id);
       }
     }
@@ -290,6 +315,202 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       setPriceHighlightItemIds(remaining);
     }
   }, [items, priceHighlightItemIds]);
+
+  useEffect(() => {
+    if (limitedMissingHighlightItemIds.size === 0) return;
+    const remaining = new Set<string>();
+    for (const id of limitedMissingHighlightItemIds) {
+      const item = items.find((candidate) => candidate.id === id);
+      if (item && hasMissingLimitedPurchaseQuantity(item)) {
+        remaining.add(id);
+      }
+    }
+    if (remaining.size !== limitedMissingHighlightItemIds.size) {
+      setLimitedMissingHighlightItemIds(remaining);
+    }
+  }, [items, limitedMissingHighlightItemIds]);
+
+  useEffect(() => {
+    if (!limitedMessage) return;
+    const timer = window.setTimeout(() => setLimitedMessage(null), 2500);
+    return () => window.clearTimeout(timer);
+  }, [limitedMessage]);
+
+  const isLimitedBulkInputTarget = useCallback(
+    (item: ShoppingItem): boolean =>
+      item.purchaseStatus === 'None' ||
+      item.purchaseStatus === 'Postpone' ||
+      item.purchaseStatus === 'Late' ||
+      hasMissingLimitedPurchaseQuantity(item),
+    [],
+  );
+
+  const finishLimitedBulkFlow = useCallback(
+    (skipped: number) => {
+      setLimitedBulkQueueIds([]);
+      setLimitedBulkIndex(0);
+      setLimitedBulkSkippedCount(0);
+      if (skipped > 0) {
+        setLimitedMessage(`対象外になったアイテムを${skipped}件スキップしました`);
+      }
+    },
+    [],
+  );
+
+  const advanceLimitedBulkToNextTarget = useCallback(
+    (startIndex: number, skippedSoFar = limitedBulkSkippedCount) => {
+      let skipped = 0;
+      for (let index = startIndex; index < limitedBulkQueueIds.length; index += 1) {
+        const latestItem = getLatestItemById(limitedBulkQueueIds[index]);
+        if (latestItem !== undefined && isLimitedBulkInputTarget(latestItem)) {
+          setLimitedBulkIndex(index);
+          setLimitedBulkSkippedCount(skippedSoFar + skipped);
+          return;
+        }
+        skipped += 1;
+      }
+      finishLimitedBulkFlow(skippedSoFar + skipped);
+    },
+    [
+      finishLimitedBulkFlow,
+      getLatestItemById,
+      isLimitedBulkInputTarget,
+      limitedBulkQueueIds,
+      limitedBulkSkippedCount,
+    ],
+  );
+
+  useEffect(() => {
+    if (limitedBulkQueueIds.length === 0) return;
+    advanceLimitedBulkToNextTarget(limitedBulkIndex);
+  }, [advanceLimitedBulkToNextTarget, limitedBulkIndex, limitedBulkQueueIds.length]);
+
+  const commitLimitedDialogResult = useCallback(
+    (baseItem: ShoppingItem, result: LimitedPurchaseDialogResult) => {
+      if (result.kind === 'limited') {
+        onUpdateItem(applyLimitedPurchase(baseItem, { actual: result.actual, planned: result.planned }));
+        return;
+      }
+      if (result.kind === 'purchased') {
+        onUpdateItem(applyPurchasedFromLimitedInput(baseItem, result.planned));
+        return;
+      }
+      onUpdateItem(applyLimitedPurchase(baseItem, { planned: result.planned }));
+    },
+    [onUpdateItem],
+  );
+
+  const handleLimitedBulkSubmit = useCallback(
+    (result: LimitedPurchaseDialogResult) => {
+      const itemId = limitedBulkQueueIds[limitedBulkIndex];
+      const latestItem = itemId ? getLatestItemById(itemId) : undefined;
+      if (latestItem !== undefined) {
+        commitLimitedDialogResult(latestItem, result);
+      }
+      advanceLimitedBulkToNextTarget(limitedBulkIndex + 1);
+    },
+    [
+      advanceLimitedBulkToNextTarget,
+      commitLimitedDialogResult,
+      getLatestItemById,
+      limitedBulkIndex,
+      limitedBulkQueueIds,
+    ],
+  );
+
+  const handleLimitedBulkCancel = useCallback(() => {
+    finishLimitedBulkFlow(limitedBulkSkippedCount);
+  }, [finishLimitedBulkFlow, limitedBulkSkippedCount]);
+
+  const startLimitedBulkFlow = useCallback(
+    (groupItems: ShoppingItem[]) => {
+      const allAlreadyLimited =
+        groupItems.length > 0 &&
+        groupItems.every((item) => item.purchaseStatus === 'LimitedPurchase');
+
+      if (allAlreadyLimited) {
+        const missing = groupItems.filter(hasMissingLimitedPurchaseQuantity);
+        if (missing.length === 0) {
+          setLimitedMessage('解除対象の限数未入力はありません');
+          return;
+        }
+        if (!window.confirm('実購入数が未入力の限数だけ未購入に戻します。よろしいですか？')) return;
+        missing.forEach((item) => {
+          onUpdateItem(clearLimitedPurchase({ ...item, purchaseStatus: 'None' }));
+        });
+        return;
+      }
+
+      const queueIds = groupItems.filter(isLimitedBulkInputTarget).map((item) => item.id);
+      if (queueIds.length === 0) {
+        setLimitedMessage('変更対象のアイテムはありません');
+        return;
+      }
+      setLimitedBulkQueueIds(queueIds);
+      setLimitedBulkIndex(0);
+      setLimitedBulkSkippedCount(0);
+    },
+    [isLimitedBulkInputTarget, onUpdateItem],
+  );
+
+  const handleExecuteBulkStatusChange = useCallback(
+    (groupKey: string, targetStatus: PurchaseStatus, groupItems: ShoppingItem[]) => {
+      if (targetStatus === 'LimitedPurchase') {
+        startLimitedBulkFlow(groupItems);
+        return;
+      }
+
+      const hasLimitedPurchase = groupItems.some((item) => item.purchaseStatus === 'LimitedPurchase');
+      const targets = groupItems.filter((item) => item.purchaseStatus !== 'LimitedPurchase');
+      const changedItems = hasLimitedPurchase
+        ? targets.filter((item) => item.purchaseStatus !== targetStatus)
+        : targets;
+
+      if (changedItems.length === 0) {
+        setLimitedMessage('変更対象のアイテムはありません');
+        return;
+      }
+      onBulkStatusChange?.(groupKey, targetStatus, changedItems);
+    },
+    [onBulkStatusChange, startLimitedBulkFlow],
+  );
+
+  const blockPriceOrLimitedMissingIfNeeded = useCallback(
+    (targetItems: ShoppingItem[]): boolean => {
+      const priceMissing = targetItems.filter(
+        (item) => isPriceRequiredStatus(item) && isUndefinedPrice(item.price),
+      );
+      const limitedMissing = targetItems.filter(hasMissingLimitedPurchaseQuantity);
+      const blockedByPrice = !disablePriceUndefinedCheck && priceMissing.length > 0;
+      const blockedByLimited =
+        !_disableLimitedPurchaseQuantityCheck && limitedMissing.length > 0;
+
+      setPriceHighlightItemIds(blockedByPrice ? new Set(priceMissing.map((item) => item.id)) : new Set());
+      setLimitedMissingHighlightItemIds(
+        blockedByLimited ? new Set(limitedMissing.map((item) => item.id)) : new Set(),
+      );
+
+      if (blockedByPrice && blockedByLimited) {
+        setLimitedMessage('価格と限数の実購入数を入力してください');
+      } else if (blockedByPrice) {
+        setLimitedMessage('価格未定のアイテムがあります。価格を入力してください。');
+      } else if (blockedByLimited) {
+        setLimitedMessage('限数の実購入数が未入力の商品があります');
+      } else {
+        setLimitedMessage(null);
+      }
+
+      return blockedByPrice || blockedByLimited;
+    },
+    [_disableLimitedPurchaseQuantityCheck, disablePriceUndefinedCheck],
+  );
+
+  const currentLimitedBulkItem = useMemo(() => {
+    if (limitedBulkQueueIds.length === 0) return undefined;
+    const itemId = limitedBulkQueueIds[limitedBulkIndex];
+    const item = itemId ? getLatestItemById(itemId) : undefined;
+    return item && isLimitedBulkInputTarget(item) ? item : undefined;
+  }, [getLatestItemById, isLimitedBulkInputTarget, limitedBulkIndex, limitedBulkQueueIds]);
 
   // === アイテム追加ダイアログ ===
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -998,6 +1219,28 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     };
   }, [touchCleanUp]);
 
+  const limitedPurchaseOverlays = (
+    <>
+      {limitedMessage && (
+        <div className="fixed left-1/2 top-20 z-[95] -translate-x-1/2 rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-lg dark:bg-slate-100 dark:text-slate-900">
+          {limitedMessage}
+        </div>
+      )}
+      <LimitedPurchaseDialog
+        isOpen={currentLimitedBulkItem !== undefined}
+        itemId={currentLimitedBulkItem?.id}
+        itemTitle={currentLimitedBulkItem?.title || currentLimitedBulkItem?.circle}
+        initialActual={
+          currentLimitedBulkItem ? getActualPurchasedQuantity(currentLimitedBulkItem) : undefined
+        }
+        initialPlanned={currentLimitedBulkItem ? getPlannedQuantity(currentLimitedBulkItem) : 1}
+        showDeferButton
+        onSubmit={handleLimitedBulkSubmit}
+        onCancel={handleLimitedBulkCancel}
+      />
+    </>
+  );
+
   if (items.length === 0) {
     return (
       <div
@@ -1006,6 +1249,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         onDrop={handleDrop}
       >
         この日のアイテムはありません。
+        {limitedPurchaseOverlays}
       </div>
     );
   }
@@ -1061,6 +1305,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         onDrop={handleDrop}
         onDragLeave={() => setActiveDropTarget(null)}
       >
+        {limitedPurchaseOverlays}
         {/* 全スペース開閉ボタン */}
         {onToggleAllSpaceCollapse && (
           <div className="flex justify-end mb-1">
@@ -1521,7 +1766,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         return (
                           <button
                             key={status}
-                            onClick={(e) => { e.stopPropagation(); onBulkStatusChange(group.groupKey, status, group.items); }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleExecuteBulkStatusChange(group.groupKey, status, group.items);
+                            }}
                             className={`${layoutMode === 'smartphone' ? 'px-1.5 py-0.5 text-[10px]' : 'px-2 py-0.5 text-xs'} flex-shrink-0 whitespace-nowrap font-medium rounded transition-colors ${
                               allMatch
                                 ? activeColor
@@ -1711,6 +1959,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           layoutMode={layoutMode}
                           viewMode={viewMode}
                           highlightPrice={priceHighlightItemIds.has(item.id)}
+                          highlightLimitedMissing={limitedMissingHighlightItemIds.has(item.id)}
+                          getLatestItemById={getLatestItemById}
                           purchaseStatusControlMode={purchaseStatusControlMode}
                         />
 
@@ -1853,14 +2103,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       return (
                         <button
                           onClick={() => {
-                            const purchasedWithoutPrice = group.items.filter(
-                              (item) => item.purchaseStatus === 'Purchased' && item.price === null
-                            );
-                            if (purchasedWithoutPrice.length > 0) {
-                              setPriceHighlightItemIds(new Set(purchasedWithoutPrice.map(i => i.id)));
+                            if (blockPriceOrLimitedMissingIfNeeded(group.items)) {
                               return;
                             }
-                            setPriceHighlightItemIds(new Set());
                             onActivatePostponeFilter();
                           }}
                           className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-orange-600 hover:bg-orange-700 text-white dark:bg-orange-500 dark:hover:bg-orange-600 ${
@@ -1877,14 +2122,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       return (
                         <button
                           onClick={() => {
-                            const purchasedWithoutPrice = group.items.filter(
-                              (item) => item.purchaseStatus === 'Purchased' && item.price === null
-                            );
-                            if (purchasedWithoutPrice.length > 0) {
-                              setPriceHighlightItemIds(new Set(purchasedWithoutPrice.map(i => i.id)));
+                            if (blockPriceOrLimitedMissingIfNeeded(group.items)) {
                               return;
                             }
-                            setPriceHighlightItemIds(new Set());
                             onActivateLateFilter();
                           }}
                           className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-sky-600 hover:bg-sky-700 text-white dark:bg-sky-500 dark:hover:bg-sky-600 ${
@@ -1901,18 +2141,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       return (
                         <button
                           onClick={() => {
-                            const purchasedWithoutPrice = group.items.filter(
-                              (item) => item.purchaseStatus === 'Purchased' && item.price === null
-                            );
-                            if (purchasedWithoutPrice.length > 0) {
-                              // 視覚警告（ハイライト）は設定に関係なく維持
-                              setPriceHighlightItemIds(new Set(purchasedWithoutPrice.map(i => i.id)));
-                              // 設定で無効化されていない場合のみ進行をブロック
-                              if (!disablePriceUndefinedCheck) {
-                                return;
-                              }
-                            } else {
-                              setPriceHighlightItemIds(new Set());
+                            if (blockPriceOrLimitedMissingIfNeeded(group.items)) {
+                              return;
                             }
                             onCollapseAndOpenNext(group.groupKey);
                           }}
@@ -2255,6 +2485,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         viewMode={viewMode}
                         hallIndex={hallIndex}
                         priorityLevel={group.priority}
+                        highlightPrice={priceHighlightItemIds.has(item.id)}
+                        highlightLimitedMissing={limitedMissingHighlightItemIds.has(item.id)}
+                        getLatestItemById={getLatestItemById}
                         purchaseStatusControlMode={purchaseStatusControlMode}
                       />
 
@@ -2426,6 +2659,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       style={{ paddingBottom: 'var(--footer-height, 96px)' }}
       onDragLeave={() => setActiveDropTarget(null)}
     >
+      {limitedPurchaseOverlays}
       {items.map((item, index) => {
         // 範囲選択内かどうか判定
         const isInRange = rangeInfo && index >= rangeInfo.startIndex && index <= rangeInfo.endIndex;
@@ -2474,6 +2708,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               isSearchMatch={highlightedItemId === item.id}
               layoutMode={layoutMode}
               viewMode={viewMode}
+              highlightPrice={priceHighlightItemIds.has(item.id)}
+              highlightLimitedMissing={limitedMissingHighlightItemIds.has(item.id)}
+              getLatestItemById={getLatestItemById}
               purchaseStatusControlMode={purchaseStatusControlMode}
             />
 

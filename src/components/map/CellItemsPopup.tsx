@@ -1,6 +1,15 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { ShoppingItem, PurchaseStatus, PurchaseStatuses } from '../../types/item';
 import { getBaseNumber } from '../../utils/spaceGrouping';
+import {
+  clearLimitedPurchase,
+  formatDisplayQuantity,
+  getActualPurchasedQuantity,
+  getPlannedQuantity,
+  parseDecimalIntegerInput,
+  validateLimitedPurchasePlannedQuantity,
+  type LimitedPurchaseValidationError,
+} from '../../utils/purchaseQuantity';
 
 interface SpaceGroup {
   baseNumber: string;
@@ -25,6 +34,7 @@ interface CellItemsPopupProps {
   onDeleteItem?: (itemId: string) => void;
   onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
   onUpdateItemPriority?: (itemId: string, level: 'none' | 'priority' | 'highest') => void;
+  onEditRequest?: (item: ShoppingItem) => void;
   eventDate?: string;
   position: { x: number; y: number };
 }
@@ -54,12 +64,16 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   onDeleteItem,
   onAddItem,
   onUpdateItemPriority,
+  onEditRequest,
   eventDate,
   position,
 }) => {
   const popupRef = useRef<HTMLDivElement>(null);
   const [longPressItem, setLongPressItem] = useState<ShoppingItem | null>(null);
   const [editingItem, setEditingItem] = useState<ShoppingItem | null>(null);
+  const [editingQuantityText, setEditingQuantityText] = useState('1');
+  const [quantityError, setQuantityError] = useState<string | null>(null);
+  const [addQuantityError, setAddQuantityError] = useState<string | null>(null);
   const longPressTimeout = useRef<number | null>(null);
   const isLongPress = useRef(false);
   const suppressNextClick = useRef(false);
@@ -139,6 +153,25 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     return options;
   }, []);
 
+  const getMapQuantityOptions = useCallback((currentQuantity: number): number[] => {
+    const baseOptions = Array.from({ length: 10 }, (_, i) => i + 1);
+    if (
+      Number.isInteger(currentQuantity) &&
+      currentQuantity > 10 &&
+      !baseOptions.includes(currentQuantity)
+    ) {
+      return [...baseOptions, currentQuantity];
+    }
+    return baseOptions;
+  }, []);
+
+  const toPlannedQuantityMessage = (error: LimitedPurchaseValidationError): string => {
+    if (error === 'planned_required') return '購入予定量を入力してください';
+    if (error === 'planned_not_integer') return '購入予定量は整数で入力してください';
+    if (error === 'planned_not_positive') return '購入予定量は1以上で入力してください';
+    return '購入予定量を確認してください';
+  };
+
   const handlePriceInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value.replace(/[^0-9]/g, '');
     setNewItemForm((prev) => ({ ...prev, price: value }));
@@ -159,6 +192,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
       numberOverride: String(number),
       purchaseStatus: 'None',
     });
+    setAddQuantityError(null);
     setAddDialogOpen(true);
   }, [number]);
 
@@ -168,6 +202,12 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
 
   const handleAddItem = useCallback(() => {
     if (!onAddItem || !newItemForm.circle.trim()) return;
+    const parsedQuantity = parseDecimalIntegerInput(newItemForm.quantity);
+    const quantityValidation = validateLimitedPurchasePlannedQuantity(parsedQuantity);
+    if (!quantityValidation.ok) {
+      setAddQuantityError(toPlannedQuantityMessage(quantityValidation.error));
+      return;
+    }
     const price = newItemForm.price === '' ? null : parseInt(newItemForm.price, 10) || 0;
     onAddItem({
       eventDate: eventDate || '',
@@ -176,7 +216,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
       circle: newItemForm.circle,
       title: newItemForm.title,
       price,
-      quantity: parseInt(newItemForm.quantity, 10) || 1,
+      quantity: parsedQuantity!,
       remarks: newItemForm.remarks,
       url: newItemForm.url || undefined,
       purchaseStatus: newItemForm.purchaseStatus,
@@ -326,6 +366,8 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   const handleEdit = () => {
     if (longPressItem) {
       setEditingItem({ ...longPressItem });
+      setEditingQuantityText(String(getPlannedQuantity(longPressItem)));
+      setQuantityError(null);
       setLongPressItem(null);
     }
   };
@@ -346,10 +388,17 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
 
   const handleSaveEdit = () => {
     if (editingItem && onUpdateItem) {
+      if (editingItem.purchaseStatus === 'LimitedPurchase') return;
+      const parsedQuantity = parseDecimalIntegerInput(editingQuantityText);
+      const quantityValidation = validateLimitedPurchasePlannedQuantity(parsedQuantity);
+      if (!quantityValidation.ok) {
+        setQuantityError(toPlannedQuantityMessage(quantityValidation.error));
+        return;
+      }
       const originalItem = items.find((i) => i.id === editingItem.id);
       const originalPriority = originalItem?.priorityLevel || 'none';
       const newPriority = editingItem.priorityLevel || 'none';
-      onUpdateItem(editingItem);
+      onUpdateItem(clearLimitedPurchase({ ...editingItem, quantity: parsedQuantity! }));
       if (newPriority !== originalPriority && onUpdateItemPriority) {
         onUpdateItemPriority(editingItem.id, newPriority);
       }
@@ -524,6 +573,23 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                     {isInVisitList ? '訪問先' : 'タップで追加'}
                   </div>
                 </div>
+                {item.purchaseStatus === 'LimitedPurchase' && onEditRequest && (
+                  <div className="mt-3 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        clearLongPressTimer();
+                        setLongPressItem(null);
+                        onClose();
+                        onEditRequest(item);
+                      }}
+                      className="rounded bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-700"
+                    >
+                      限数を編集
+                    </button>
+                  </div>
+                )}
                 <p className="text-xs text-slate-400 dark:text-slate-500 mt-2 text-right">
                   長押しで編集・削除
                 </p>
@@ -605,6 +671,50 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                 {editingItem.block}-{editingItem.number}
               </p>
             </div>
+            {editingItem.purchaseStatus === 'LimitedPurchase' ? (
+              <>
+                <div className="p-4 max-h-[60vh] overflow-y-auto">
+                  <div className="rounded border border-orange-200 bg-orange-50 p-3 text-sm text-orange-800 dark:border-orange-800 dark:bg-orange-900/20 dark:text-orange-200">
+                    <div className="font-semibold">限数 {formatDisplayQuantity(editingItem)}</div>
+                    <dl className="mt-3 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1">
+                      <dt>価格</dt>
+                      <dd>
+                        {editingItem.price === null || editingItem.price === -1
+                          ? '価格未定'
+                          : `${editingItem.price.toLocaleString()}円`}
+                      </dd>
+                      <dt>購入予定量</dt>
+                      <dd>{getPlannedQuantity(editingItem)}</dd>
+                      <dt>実購入数</dt>
+                      <dd>{getActualPurchasedQuantity(editingItem) ?? '未入力'}</dd>
+                    </dl>
+                    <div className="mt-3">
+                      限数の実購入数と予定数量は実行モードまたは詳細編集で変更してください
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setEditingItem(null);
+                        onClose();
+                        onEditRequest?.(editingItem);
+                      }}
+                      className="mt-3 rounded bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-700"
+                    >
+                      限数を編集
+                    </button>
+                  </div>
+                </div>
+                <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2 justify-end">
+                  <button
+                    onClick={() => setEditingItem(null)}
+                    className="px-4 py-2 text-sm text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 rounded"
+                  >
+                    閉じる
+                  </button>
+                </div>
+              </>
+            ) : (
+            <>
             <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
               <div>
                 <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -699,18 +809,20 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                     数量</label>
                   <select
-                    value={editingItem.quantity}
-                    onChange={(e) =>
-                      setEditingItem({ ...editingItem, quantity: parseInt(e.target.value) || 1 })
-                    }
+                    value={editingQuantityText}
+                    onChange={(e) => {
+                      setQuantityError(null);
+                      setEditingQuantityText(e.target.value);
+                    }}
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
                   >
-                    {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                    {getMapQuantityOptions(getPlannedQuantity(editingItem)).map((num) => (
                       <option key={num} value={num}>
                         {num}
                       </option>
                     ))}
                   </select>
+                  {quantityError && <p className="mt-1 text-xs text-red-600">{quantityError}</p>}
                 </div>
                 <div>
                   <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
@@ -725,7 +837,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                     }
                     className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
                   >
-                    {PurchaseStatuses.map((status) => (
+                    {PurchaseStatuses.filter((status) => status !== 'LimitedPurchase').map((status) => (
                       <option key={status} value={status}>
                         {statusLabels[status]}
                       </option>
@@ -814,6 +926,8 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                 保存
               </button>
             </div>
+            </>
+            )}
           </div>
         </div>
       )}
@@ -942,17 +1056,19 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   <label className={labelClass}>数量</label>
                   <select
                     value={newItemForm.quantity}
-                    onChange={(e) =>
-                      setNewItemForm((prev) => ({ ...prev, quantity: e.target.value }))
-                    }
+                    onChange={(e) => {
+                      setAddQuantityError(null);
+                      setNewItemForm((prev) => ({ ...prev, quantity: e.target.value }));
+                    }}
                     className={formInputClass}
                   >
-                    {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
-                      <option key={num} value={num}>
-                        {num}
+                    {Array.from({ length: 10 }, (_, i) => String(i + 1)).map((value) => (
+                      <option key={value} value={value}>
+                        {value}
                       </option>
                     ))}
                   </select>
+                  {addQuantityError && <p className="mt-1 text-xs text-red-600">{addQuantityError}</p>}
                 </div>
                 <div>
                   <label className={labelClass}>購入状態</label>
