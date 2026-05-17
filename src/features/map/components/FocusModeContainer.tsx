@@ -51,6 +51,7 @@ type FocusModeContainerProps = {
   onMapRotationAngleChange?: (angle: number) => void;
   numberCellOutlineStyle?: NumberCellOutlineStyle;
   disablePriceUndefinedCheck?: boolean;
+  disableLimitedPurchaseQuantityCheck?: boolean;
   purchaseStatusControlMode?: PurchaseStatusControlMode;
 };
 
@@ -79,6 +80,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   onMapRotationAngleChange,
   numberCellOutlineStyle,
   disablePriceUndefinedCheck,
+  disableLimitedPurchaseQuantityCheck,
   purchaseStatusControlMode = 'cycle',
 }) => {
   // 現在表示中の日付（タブ名が日付と一致すればそれ、そうでなければ先頭日）
@@ -354,6 +356,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       onMapRotationAngleChange={onMapRotationAngleChange}
       numberCellOutlineStyle={numberCellOutlineStyle}
       disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+      disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
       purchaseStatusControlMode={purchaseStatusControlMode}
     />
   );

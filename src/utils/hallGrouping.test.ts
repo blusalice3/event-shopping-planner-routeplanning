@@ -84,7 +84,7 @@ const makeMap = (
 });
 
 describe("buildItemRoutingSignature", () => {
-  it("does not change when price quantity remarks or purchaseStatus change", () => {
+  it("does not change when price quantity remarks purchaseStatus or limitedPurchasedQuantity change", () => {
     const base = makeItem();
     const signature = buildItemRoutingSignature([base], [base.id]);
 
@@ -96,7 +96,8 @@ describe("buildItemRoutingSignature", () => {
             price: 2000,
             quantity: 9,
             remarks: "after",
-            purchaseStatus: "Purchased",
+            purchaseStatus: "LimitedPurchase",
+            limitedPurchasedQuantity: 2,
           },
         ],
         [base.id],

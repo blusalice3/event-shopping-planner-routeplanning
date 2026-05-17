@@ -39,6 +39,7 @@ const minimalAppHeaderShellProps = (): ComponentProps<typeof AppHeaderShell> => 
   DEFAULT_PURCHASE_STATUS_CONTROL_MODE: 'cycle',
   DEFAULT_UI_VISIBILITY,
   disablePriceUndefinedCheck: false,
+  disableLimitedPurchaseQuantityCheck: false,
   eventDates: ['Day1'],
   executeSpaceGroupingEnabled: false,
   getHallExecuteCount: vi.fn(() => 0),
@@ -100,6 +101,7 @@ const minimalAppHeaderShellProps = (): ComponentProps<typeof AppHeaderShell> => 
   setMapTabMenuPosition: vi.fn(),
   setMapViewActive: vi.fn(),
   setDisablePriceUndefinedCheck: vi.fn(),
+  setDisableLimitedPurchaseQuantityCheck: vi.fn(),
   setNumberCellOutlineStyle: vi.fn(),
   setPurchaseStatusControlMode: vi.fn(),
   setSearchKeyword: vi.fn(),
@@ -124,7 +126,9 @@ const minimalAppHeaderShellProps = (): ComponentProps<typeof AppHeaderShell> => 
     SoldOut: 'SoldOut',
     None: 'None',
     Purchased: 'Purchased',
+    LimitedPurchase: 'LimitedPurchase',
   },
+  sortDisplayLabel: 'Manual',
   sortState: 'Manual',
   TabButton: ({ label }) => <button>{label}</button>,
   themeMode: 'system',
@@ -156,6 +160,7 @@ describe('PurchaseStatusControlModeSettings', () => {
       DEFAULT_PURCHASE_STATUS_CONTROL_MODE: 'cycle',
       DEFAULT_UI_VISIBILITY,
       setDisablePriceUndefinedCheck: vi.fn(),
+      setDisableLimitedPurchaseQuantityCheck: vi.fn(),
       setNumberCellOutlineStyle: vi.fn(),
       setPurchaseStatusControlMode: vi.fn(),
       setUiVisibilityOverride: vi.fn(),
@@ -167,6 +172,7 @@ describe('PurchaseStatusControlModeSettings', () => {
 
     expect(props.setPurchaseStatusControlMode).toHaveBeenCalledWith('cycle');
     expect(props.setDisablePriceUndefinedCheck).toHaveBeenCalledWith(false);
+    expect(props.setDisableLimitedPurchaseQuantityCheck).toHaveBeenCalledWith(false);
     expect(props.setUiVisibilityOverride).toHaveBeenCalledWith(false);
   });
 });

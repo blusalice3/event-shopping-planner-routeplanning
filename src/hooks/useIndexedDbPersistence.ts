@@ -5,6 +5,7 @@ import {
   ExecuteModeItems,
   ShoppingItem,
 } from '../types/item';
+import { normalizeLimitedPurchaseFields } from '../utils/purchaseQuantity';
 import {
   HallDefinitionsStore,
   HallRouteSettingsStore,
@@ -150,10 +151,11 @@ export function useIndexedDbPersistence({
         const migratedLists: Record<string, ShoppingItem[]> = {};
         Object.keys(resolvedEventLists).forEach((eventName) => {
           migratedLists[eventName] = (resolvedEventLists[eventName] as ShoppingItem[]).map(
-            (item: ShoppingItem) => ({
-              ...item,
-              quantity: item.quantity ?? 1,
-            }),
+            (item: ShoppingItem) =>
+              normalizeLimitedPurchaseFields({
+                ...item,
+                quantity: item.quantity ?? 1,
+              }),
           );
         });
 

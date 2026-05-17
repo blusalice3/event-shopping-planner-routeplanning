@@ -63,6 +63,7 @@ type AppMainContentProps = {
   currentMapTabViewport: MapViewportState | undefined;
   currentMode: ViewMode;
   disablePriceUndefinedCheck: boolean;
+  disableLimitedPurchaseQuantityCheck: boolean;
   duplicateCircleItemIds: Set<string>;
   eventDates: string[];
   eventLists: Record<string, ShoppingItem[]>;
@@ -193,6 +194,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     currentMapTabViewport,
     currentMode,
     disablePriceUndefinedCheck,
+    disableLimitedPurchaseQuantityCheck,
     duplicateCircleItemIds,
     eventDates,
     eventLists,
@@ -363,6 +365,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
             onUpdateItem={handleUpdateItem}
             onUpdateItemPriority={handleUpdateItemPriorityFromEdit}
             onDeleteItem={handleDeleteItemFromMap}
+            onEditRequest={handleEditRequest}
             onAddNewItem={handleAddNewItemFromMap}
             onAddItem={handleAddItemFromFocusMode}
             halls={currentHalls}
@@ -608,6 +611,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                   onMapRotationAngleChange={handleFocusMapRotationAngleChange}
                   numberCellOutlineStyle={numberCellOutlineStyle}
                   disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+                  disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
                   purchaseStatusControlMode={purchaseStatusControlMode}
                 />
               </Suspense>
@@ -641,6 +645,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                 onSpaceGroupOrderChange={handleExecuteSpaceGroupOrderChange}
                 onCollapseAndOpenNext={handleCollapseAndOpenNext}
                 disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+                disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
                 showPostponeFilterButton={showPostponeFilterButton}
                 onActivatePostponeFilter={handleActivatePostponeFilter}
                 showLateFilterButton={showLateFilterButton}

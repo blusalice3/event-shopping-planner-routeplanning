@@ -29,6 +29,7 @@ export interface ShoppingItem {
   price: number | null;
   purchaseStatus: PurchaseStatus;
   quantity: number;
+  limitedPurchasedQuantity?: number;
   remarks: string;
   url?: string;
   priorityLevel?: 'none' | 'priority' | 'highest';

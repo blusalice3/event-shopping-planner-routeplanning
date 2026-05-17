@@ -8,7 +8,8 @@ export type SortState =
   | 'Absent'
   | 'SoldOut'
   | 'None'
-  | 'Purchased';
+  | 'Purchased'
+  | 'LimitedPurchase';
 export type BulkSortDirection = 'asc' | 'desc';
 export type BlockSortDirection = 'asc' | 'desc';
 export type LayoutMode = 'pc' | 'smartphone';

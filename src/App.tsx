@@ -97,13 +97,18 @@ import {
 } from './hooks/useUIVisibilitySettings';
 import { useNumberCellOutlineStyle } from './hooks/useNumberCellOutlineStyle';
 import { useDisablePriceUndefinedCheck } from './hooks/useDisablePriceUndefinedCheck';
+import { useDisableLimitedPurchaseQuantityCheck } from './hooks/useDisableLimitedPurchaseQuantityCheck';
 import { usePurchaseStatusControlMode } from './hooks/usePurchaseStatusControlMode';
 import { useIndexedDbPersistence } from './hooks/useIndexedDbPersistence';
-import type { SmartInsertMode } from './features/app-shell/types';
+import type { SmartInsertMode, SortState } from './features/app-shell/types';
 import { normalizeSmartInsertMode } from './utils/smartInsertMode';
+import {
+  clearLimitedPurchase,
+  getLimitedPurchaseCounts,
+  matchesPurchaseStatusFilter,
+} from './utils/purchaseQuantity';
 
 type ActiveTab = 'eventList' | 'import' | string;
-type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'None' | 'Purchased';
 export type BulkSortDirection = 'asc' | 'desc';
 type BlockSortDirection = 'asc' | 'desc';
 
@@ -115,6 +120,7 @@ const sortCycle: SortState[] = [
   'SoldOut',
   'None',
   'Purchased',
+  'LimitedPurchase',
 ];
 const sortLabels: Record<SortState, string> = {
   Manual: '巡回順',
@@ -124,6 +130,7 @@ const sortLabels: Record<SortState, string> = {
   SoldOut: '売切',
   None: '未購入',
   Purchased: '購入済',
+  LimitedPurchase: '\u9650\u6570',
 };
 
 type StrictPositionInsertResult = {
@@ -370,6 +377,10 @@ const App: React.FC = () => {
   const { uiVisibilitySettings, setUiVisibilitySettings } = useUIVisibilitySettings();
   const { numberCellOutlineStyle, setNumberCellOutlineStyle, DEFAULT_OUTLINE_STYLE } = useNumberCellOutlineStyle();
   const { disablePriceUndefinedCheck, setDisablePriceUndefinedCheck } = useDisablePriceUndefinedCheck();
+  const {
+    disableLimitedPurchaseQuantityCheck,
+    setDisableLimitedPurchaseQuantityCheck,
+  } = useDisableLimitedPurchaseQuantityCheck();
   const {
     purchaseStatusControlMode,
     setPurchaseStatusControlMode,
@@ -997,7 +1008,7 @@ const App: React.FC = () => {
           currentItem?.source,
         );
 
-        if (result.purchaseStatusChanged) {
+        if (result.purchaseStatusChanged || result.purchaseQuantityChanged) {
           setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
         }
 
@@ -1859,9 +1870,13 @@ const App: React.FC = () => {
         const groupItemIds = new Set(groupItems.map((item) => item.id));
         return {
           ...prev,
-          [activeEventName]: allItems.map((item) =>
-            groupItemIds.has(item.id) ? { ...item, purchaseStatus: newStatus } : item,
-          ),
+          [activeEventName]: allItems.map((item) => {
+            if (!groupItemIds.has(item.id)) return item;
+            if (targetStatus === 'LimitedPurchase' || item.purchaseStatus === 'LimitedPurchase') {
+              return item;
+            }
+            return clearLimitedPurchase({ ...item, purchaseStatus: newStatus });
+          }),
         };
       });
       // recentlyChangedItemIds に追加
@@ -3867,7 +3882,7 @@ const App: React.FC = () => {
     setShowLateFilterButton(false);
   }, [currentMode, sortState]);
 
-  const visibleItems = useMemo(() => {
+  const baseFilteredItems = useMemo(() => {
     const currentEventDate = activeEventDate;
     const itemsForTab = currentTabItems;
 
@@ -3880,9 +3895,7 @@ const App: React.FC = () => {
         return executeColumnItems;
       }
       const filterStatus = sortState as Exclude<SortState, 'Manual'>;
-      return executeColumnItems.filter(
-        (item) => item.purchaseStatus === filterStatus || recentlyChangedItemIds.has(item.id),
-      );
+      return executeColumnItems.filter((item) => matchesPurchaseStatusFilter(item, filterStatus));
     }
 
 
@@ -3895,7 +3908,85 @@ const App: React.FC = () => {
     dayModes,
     executeColumnItems,
     eventDates,
+  ]);
+
+  const baseFilteredItemIds = useMemo(
+    () => new Set(baseFilteredItems.map((item) => item.id)),
+    [baseFilteredItems],
+  );
+
+  const temporaryVisibleItems = useMemo(() => {
+    if (!activeEventName) return [];
+    const mode = dayModes[activeEventName]?.[activeEventDate];
+    if (mode !== 'execute' || sortState === 'Manual') return [];
+
+    return executeColumnItems.filter(
+      (item) => recentlyChangedItemIds.has(item.id) && !baseFilteredItemIds.has(item.id),
+    );
+  }, [
+    activeEventDate,
+    activeEventName,
+    baseFilteredItemIds,
+    dayModes,
+    executeColumnItems,
     recentlyChangedItemIds,
+    sortState,
+  ]);
+
+  const temporaryVisibleCount = temporaryVisibleItems.length;
+  const limitedCounts = useMemo(() => getLimitedPurchaseCounts(baseFilteredItems), [baseFilteredItems]);
+
+  const sortDisplayLabel = useMemo(() => {
+    const buildTemporaryLabel = (baseLabel: string): string =>
+      temporaryVisibleCount > 0
+        ? `${baseLabel}\uFF08\u4E00\u6642\u8868\u793A${temporaryVisibleCount}\u4EF6\uFF09`
+        : baseLabel;
+
+    if (sortState !== 'LimitedPurchase') {
+      return buildTemporaryLabel(sortLabels[sortState]);
+    }
+
+    const details = [
+      limitedCounts.missing > 0 ? `\u672A\u5165\u529B${limitedCounts.missing}` : null,
+      temporaryVisibleCount > 0
+        ? `\u4E00\u6642\u8868\u793A${temporaryVisibleCount}`
+        : null,
+    ].filter(Boolean);
+
+    return details.length > 0
+      ? `\u9650\u6570 ${limitedCounts.total}\u4EF6\uFF08${details.join('\u30FB')}\uFF09`
+      : `\u9650\u6570 ${limitedCounts.total}\u4EF6`;
+  }, [limitedCounts.missing, limitedCounts.total, sortState, temporaryVisibleCount]);
+
+  const visibleItemIds = useMemo(() => {
+    const currentEventDate = activeEventDate;
+    if (!activeEventName) return new Set(baseFilteredItems.map((item) => item.id));
+    const mode = dayModes[activeEventName]?.[currentEventDate];
+    if (mode !== 'execute' || sortState === 'Manual') {
+      return new Set(baseFilteredItems.map((item) => item.id));
+    }
+
+    return new Set([
+      ...baseFilteredItems.map((item) => item.id),
+      ...temporaryVisibleItems.map((item) => item.id),
+    ]);
+  }, [activeEventDate, activeEventName, baseFilteredItems, dayModes, sortState, temporaryVisibleItems]);
+
+  const visibleItems = useMemo(() => {
+    if (!activeEventName) return currentTabItems;
+    const mode = dayModes[activeEventName]?.[activeEventDate];
+    if (mode === 'execute') {
+      return executeColumnItems.filter((item) => visibleItemIds.has(item.id));
+    }
+    return baseFilteredItems;
+  }, [
+    activeEventDate,
+    activeEventName,
+    baseFilteredItems,
+    currentTabItems,
+    dayModes,
+    executeColumnItems,
+    visibleItemIds,
   ]);
 
 
@@ -4172,6 +4263,7 @@ const App: React.FC = () => {
         DEFAULT_PURCHASE_STATUS_CONTROL_MODE={DEFAULT_PURCHASE_STATUS_CONTROL_MODE}
         DEFAULT_UI_VISIBILITY={DEFAULT_UI_VISIBILITY}
         disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+        disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
         eventDates={eventDates}
         executeSpaceGroupingEnabled={executeSpaceGroupingEnabled}
         getHallExecuteCount={getHallExecuteCount}
@@ -4233,6 +4325,7 @@ const App: React.FC = () => {
         setMapTabMenuPosition={setMapTabMenuPosition}
         setMapViewActive={setMapViewActive}
         setDisablePriceUndefinedCheck={setDisablePriceUndefinedCheck}
+        setDisableLimitedPurchaseQuantityCheck={setDisableLimitedPurchaseQuantityCheck}
         setNumberCellOutlineStyle={setNumberCellOutlineStyle}
         setPurchaseStatusControlMode={setPurchaseStatusControlMode}
         setSearchKeyword={setSearchKeyword}
@@ -4250,6 +4343,7 @@ const App: React.FC = () => {
         smartInsertLongPressRef={smartInsertLongPressRef}
         smartInsertLongPressTriggeredRef={smartInsertLongPressTriggeredRef}
         sortLabels={sortLabels}
+        sortDisplayLabel={sortDisplayLabel}
         sortState={sortState}
         TabButton={TabButton}
         themeMode={themeMode}
@@ -4337,6 +4431,7 @@ const App: React.FC = () => {
         currentMapTabViewport={currentMapTabViewport}
         currentMode={currentMode}
         disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+        disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
         duplicateCircleItemIds={duplicateCircleItemIds}
         eventDates={eventDates}
         eventLists={eventLists}
@@ -4544,6 +4639,7 @@ const App: React.FC = () => {
         visibleItems={visibleItems}
         showHeaderBar={showHeaderBar}
         sortLabels={sortLabels}
+        sortDisplayLabel={sortDisplayLabel}
         sortState={sortState}
         handleSortToggle={handleSortToggle}
         zoomLevel={zoomLevel}

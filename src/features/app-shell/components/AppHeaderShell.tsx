@@ -82,6 +82,7 @@ export type DisplaySettingsResetButtonProps = {
   DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode;
   DEFAULT_UI_VISIBILITY: UIVisibilitySettings;
   setDisablePriceUndefinedCheck: React.Dispatch<React.SetStateAction<boolean>>;
+  setDisableLimitedPurchaseQuantityCheck: React.Dispatch<React.SetStateAction<boolean>>;
   setNumberCellOutlineStyle: React.Dispatch<React.SetStateAction<NumberCellOutlineStyle>>;
   setPurchaseStatusControlMode: React.Dispatch<React.SetStateAction<PurchaseStatusControlMode>>;
   setUiVisibilityOverride: React.Dispatch<React.SetStateAction<boolean>>;
@@ -93,6 +94,7 @@ export const DisplaySettingsResetButton: React.FC<DisplaySettingsResetButtonProp
   DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
   DEFAULT_UI_VISIBILITY,
   setDisablePriceUndefinedCheck,
+  setDisableLimitedPurchaseQuantityCheck,
   setNumberCellOutlineStyle,
   setPurchaseStatusControlMode,
   setUiVisibilityOverride,
@@ -104,6 +106,7 @@ export const DisplaySettingsResetButton: React.FC<DisplaySettingsResetButtonProp
       setUiVisibilityOverride(false);
       setNumberCellOutlineStyle(DEFAULT_OUTLINE_STYLE);
       setDisablePriceUndefinedCheck(false);
+      setDisableLimitedPurchaseQuantityCheck(false);
       setPurchaseStatusControlMode(DEFAULT_PURCHASE_STATUS_CONTROL_MODE);
     }}
     className="w-full mt-1 px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
@@ -127,6 +130,7 @@ type AppHeaderShellProps = {
   DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode;
   DEFAULT_UI_VISIBILITY: UIVisibilitySettings;
   disablePriceUndefinedCheck: boolean;
+  disableLimitedPurchaseQuantityCheck: boolean;
   eventDates: string[];
   getHallExecuteCount: (hallId: string) => number;
   getHallTotalItemCount: (hallId: string) => number;
@@ -188,6 +192,7 @@ type AppHeaderShellProps = {
   setMapTabMenuPosition: React.Dispatch<React.SetStateAction<MapTabMenuPosition>>;
   setMapViewActive: React.Dispatch<React.SetStateAction<boolean>>;
   setDisablePriceUndefinedCheck: React.Dispatch<React.SetStateAction<boolean>>;
+  setDisableLimitedPurchaseQuantityCheck: React.Dispatch<React.SetStateAction<boolean>>;
   setNumberCellOutlineStyle: React.Dispatch<React.SetStateAction<NumberCellOutlineStyle>>;
   setPurchaseStatusControlMode: React.Dispatch<React.SetStateAction<PurchaseStatusControlMode>>;
   setSearchKeyword: React.Dispatch<React.SetStateAction<string>>;
@@ -205,6 +210,7 @@ type AppHeaderShellProps = {
   smartInsertLongPressRef: React.MutableRefObject<ReturnType<typeof setTimeout> | null>;
   smartInsertLongPressTriggeredRef: React.MutableRefObject<boolean>;
   sortLabels: Record<SortState, string>;
+  sortDisplayLabel: string;
   sortState: SortState;
   TabButton: React.FC<TabButtonProps>;
   themeMode: ThemeMode;
@@ -234,6 +240,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
     DEFAULT_UI_VISIBILITY,
     disablePriceUndefinedCheck,
+    disableLimitedPurchaseQuantityCheck,
     eventDates,
     getHallExecuteCount,
     getHallTotalItemCount,
@@ -295,6 +302,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     setMapTabMenuPosition,
     setMapViewActive,
     setDisablePriceUndefinedCheck,
+    setDisableLimitedPurchaseQuantityCheck,
     setNumberCellOutlineStyle,
     setPurchaseStatusControlMode,
     setSearchKeyword,
@@ -312,6 +320,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     smartInsertLongPressRef,
     smartInsertLongPressTriggeredRef,
     sortLabels,
+    sortDisplayLabel,
     sortState,
     TabButton,
     themeMode,
@@ -834,6 +843,24 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                 </span>
                               </span>
                             </label>
+                            <label className="mt-2 flex items-start gap-2 cursor-pointer text-xs">
+                              <input
+                                type="checkbox"
+                                checked={disableLimitedPurchaseQuantityCheck}
+                                onChange={(e) =>
+                                  setDisableLimitedPurchaseQuantityCheck(e.target.checked)
+                                }
+                                className="mt-0.5 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                              />
+                              <span className="flex-1">
+                                <span className="block text-slate-700 dark:text-slate-300">
+                                  限数未入力チェックを無効化
+                                </span>
+                                <span className="block text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                  ON にすると、限数の実購入数が未入力でも次のスペースへ進めます
+                                </span>
+                              </span>
+                            </label>
                             <PurchaseStatusControlModeSettings
                               purchaseStatusControlMode={purchaseStatusControlMode}
                               setPurchaseStatusControlMode={setPurchaseStatusControlMode}
@@ -846,6 +873,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                             DEFAULT_PURCHASE_STATUS_CONTROL_MODE={DEFAULT_PURCHASE_STATUS_CONTROL_MODE}
                             DEFAULT_UI_VISIBILITY={DEFAULT_UI_VISIBILITY}
                             setDisablePriceUndefinedCheck={setDisablePriceUndefinedCheck}
+                            setDisableLimitedPurchaseQuantityCheck={setDisableLimitedPurchaseQuantityCheck}
                             setNumberCellOutlineStyle={setNumberCellOutlineStyle}
                             setPurchaseStatusControlMode={setPurchaseStatusControlMode}
                             setUiVisibilityOverride={setUiVisibilityOverride}
@@ -1186,7 +1214,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       onClick={handleSortToggle}
                       className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 flex-shrink-0"
                     >
-                      {sortLabels[sortState]}
+                      {sortDisplayLabel}
                     </button>
                   )}
                 {activeEventName &&
