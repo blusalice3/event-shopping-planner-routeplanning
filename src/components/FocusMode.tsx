@@ -3,7 +3,6 @@ import { ShoppingItem, PurchaseStatus, PurchaseStatusControlMode } from '../type
 import { DayMapData, HallDefinition, NumberCellOutlineStyle } from '../types/map';
 import { FocusModeSessionState, FocusPhase, FocusMapCenteringMode } from '../types/focus';
 import FocusModeMapCanvas from './FocusModeMapCanvas';
-import { AutoAdvanceCountdown } from './focus/AutoAdvanceCountdown';
 import { AddItemDialogView, CellItemPopup, PhaseChangeDialogView } from './focus/FocusModeDialogs';
 import { FocusModeHeader, FocusModeItemList, FocusModeMapControls } from './focus/FocusModePanels';
 import { FocusModeFooterPortal } from './focus/FocusModeFooterPortal';
@@ -22,7 +21,6 @@ import {
   ResumeChoiceDialogView,
 } from './focus/FocusModeStateViews';
 import { resolveResumeChoice } from './focus/resumeChoice';
-import { useAutoAdvanceTimer } from './focus/hooks/useAutoAdvanceTimer';
 import { useAutoSkipEmptyVisit } from './focus/hooks/useAutoSkipEmptyVisit';
 import { useFocusSessionState } from './focus/hooks/useFocusSessionState';
 import { useResumeFlow } from './focus/hooks/useResumeFlow';
@@ -156,11 +154,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     savedPhaseIndices,
     setSavedPhaseIndices,
   } = useFocusSessionState(resumeState);
-  const {
-    autoAdvanceCountdown,
-    clearAutoAdvanceTimer,
-    startAutoAdvance: scheduleAutoAdvance,
-  } = useAutoAdvanceTimer();
+  const clearAutoAdvanceTimer = useCallback(() => {}, []);
   const [blinkingLimitedMissingItemIds, setBlinkingLimitedMissingItemIds] =
     useState<Set<string>>(new Set());
   const [limitedBulkDialogContext, setLimitedBulkDialogContext] =
@@ -1087,11 +1081,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     clearAutoAdvanceTimer,
     latePhaseItemIds,
   ]);
-  const startAutoAdvance = useCallback(() => {
-    scheduleAutoAdvance(() => {
-      moveToNext();
-    });
-  }, [scheduleAutoAdvance, moveToNext]);
   const handleNext = useCallback(() => {
     const currentVisitUndefinedPriceItems = currentVisitDisplayItems.filter(
       (item) => isPriceRequiredStatus(item) && isUndefinedPrice(item.price),
@@ -1218,29 +1207,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         phaseIndex: currentPhaseIndex,
         visitKey: getVisitKey(originalItem),
       });
-      // 後回し・遅参以外に変更された場合、タイマーをクリア
-      if (updatedItem.purchaseStatus !== 'Postpone' && updatedItem.purchaseStatus !== 'Late') {
-        clearAutoAdvanceTimer();
-        return;
-      }
-      // 通常フェーズでのみ自動進行をチェック
-      if (currentPhase !== 'normal') {
-        clearAutoAdvanceTimer();
-        return;
-      }
-      // 更新後の状態で全アイテムが後回し・遅参かチェック
-      const willAllBePostponedOrLate = currentVisitDisplayItems.every((item) => {
-        if (item.id === updatedItem.id) {
-          return updatedItem.purchaseStatus === 'Postpone' || updatedItem.purchaseStatus === 'Late';
-        }
-        return item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'Late';
-      });
-      if (willAllBePostponedOrLate) {
-        // 3秒後に自動進行を開始
-        startAutoAdvance();
-      } else {
-        clearAutoAdvanceTimer();
-      }
+      clearAutoAdvanceTimer();
     },
     [
       onUpdateItem,
@@ -1248,7 +1215,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
       clearAutoAdvanceTimer,
       currentPhase,
       currentPhaseIndex,
-      startAutoAdvance,
     ],
   );
 
@@ -1553,21 +1519,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         onUpdateItem(clearLimitedPurchase({ ...item, purchaseStatus: newStatus }));
       });
 
-      const willAllBePostponedOrLate =
-        newStatus === 'Postpone' || newStatus === 'Late'
-          ? true
-          : currentVisitDisplayItems.every((item) => {
-              const nextStatus = changedItems.some((changed) => changed.id === item.id)
-                ? newStatus
-                : item.purchaseStatus;
-              return nextStatus === 'Postpone' || nextStatus === 'Late';
-            });
-
-      if (currentPhase === 'normal' && willAllBePostponedOrLate) {
-        startAutoAdvance();
-      } else {
-        clearAutoAdvanceTimer();
-      }
+      clearAutoAdvanceTimer();
     },
     [
       currentVisit,
@@ -1577,7 +1529,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
       onUpdateItem,
       clearAutoAdvanceTimer,
       setNotification,
-      startAutoAdvance,
       startLimitedBulkFlow,
     ],
   );
@@ -1940,7 +1891,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
             {visibleNotification}
           </div>
         )}
-        <AutoAdvanceCountdown countdown={autoAdvanceCountdown} />
         <div style={{ height: `${splitRatio}%` }} className="relative flex flex-col min-h-0">
           <FocusModeMapControls
             mapZoomLevel={mapZoomLevel}
@@ -2062,7 +2012,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
             {visibleNotification}
           </div>
         )}
-        <AutoAdvanceCountdown countdown={autoAdvanceCountdown} />
         <div className="w-1/2 flex flex-col border-r border-slate-200 dark:border-slate-700">
           <FocusModeMapControls
             mapZoomLevel={mapZoomLevel}
@@ -2190,7 +2139,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
           {visibleNotification}
         </div>
       )}
-      <AutoAdvanceCountdown countdown={autoAdvanceCountdown} />
       <FocusModeHeader
         layoutMode={layoutMode}
         isMapVisible={isMapVisible}
