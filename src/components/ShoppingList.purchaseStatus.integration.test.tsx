@@ -29,6 +29,7 @@ describe('ShoppingList purchase status control mode', () => {
         onSelectItem={vi.fn()}
         layoutMode="pc"
         viewMode="execute"
+        skipLimitedPurchaseForSingleQuantity
         purchaseStatusControlMode="radial"
       />,
     );
@@ -67,6 +68,7 @@ describe('ShoppingList purchase status control mode', () => {
         onSelectItem={vi.fn()}
         layoutMode="pc"
         viewMode="execute"
+        skipLimitedPurchaseForSingleQuantity
         showSpaceGroups
         onBulkStatusChange={onBulkStatusChange}
       />,

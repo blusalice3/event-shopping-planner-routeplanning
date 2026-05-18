@@ -11,9 +11,13 @@ import {
   sortItemsByHallOrder,
 } from '../utils/hallGrouping';
 import ShoppingItemCard from './ShoppingItemCard';
-import LimitedPurchaseDialog, {
-  type LimitedPurchaseDialogResult,
-} from './LimitedPurchaseDialog';
+import LimitedPurchaseDialog from './LimitedPurchaseDialog';
+import type {
+  BulkLimitedMessageState,
+  LimitedBulkDialogContext,
+  LimitedBulkNotificationOwner,
+  LimitedPurchaseDialogResult,
+} from '../types/limitedPurchase';
 import GripVerticalIcon from './icons/GripVerticalIcon';
 import ChevronUpIcon from './icons/ChevronUpIcon';
 import ChevronDownIcon from './icons/ChevronDownIcon';
@@ -22,13 +26,18 @@ import {
   applyPurchasedFromLimitedInput,
   clearLimitedPurchase,
   getActualPurchasedQuantity,
+  getLimitedBulkInputTargetDecision,
+  getLimitedBulkInputTargets,
   getPlannedQuantity,
   hasMissingLimitedPurchaseQuantity,
   isPriceRequiredStatus,
   isUndefinedPrice,
 } from '../utils/purchaseQuantity';
+import {
+  computeLimitedBulkCancelDecision,
+  computeLimitedBulkSubmitDecision,
+} from '../utils/limitedBulkFlow';
 
-// 優先度レベルの型
 type PriorityLevel = 'none' | 'priority' | 'highest';
 
 interface HallGroup {
@@ -105,9 +114,9 @@ interface ShoppingListProps {
   // 実行モード用: 価格未定チェック無効化設定（true のとき、購入済・価格未定でも次のスペースへ進める）
   disablePriceUndefinedCheck?: boolean;
   disableLimitedPurchaseQuantityCheck?: boolean;
+  skipLimitedPurchaseForSingleQuantity: boolean;
 }
 
-// グループの表示名を取得
 const getGroupDisplayName = (groupId: string | null, hallDefinitions: HallDefinition[]): string => {
   if (groupId === null) return 'ホール未定義';
   if (groupId === 'undefined' ) return 'ホール未定義';
@@ -123,7 +132,6 @@ const getGroupDisplayName = (groupId: string | null, hallDefinitions: HallDefini
   return hallName;
 };
 
-// グループのヘッダースタイルを取得
 const getGroupHeaderStyle = (
   groupId: string | null,
   hallDefinitions: HallDefinition[],
@@ -146,7 +154,6 @@ const SCROLL_SPEED = 20;
 const TOP_SCROLL_TRIGGER_PX = 150;
 const BOTTOM_SCROLL_TRIGGER_PX = 100;
 
-// 色のパレット定義（変更なし）
 const colorPalette: Array<{ light: string; dark: string }> = [
   { light: 'bg-red-50 dark:bg-red-950/30', dark: 'bg-red-100 dark:bg-red-900/40' },
   { light: 'bg-blue-50 dark:bg-blue-950/30', dark: 'bg-blue-100 dark:bg-blue-900/40' },
@@ -180,7 +187,6 @@ const colorPalette: Array<{ light: string; dark: string }> = [
   { light: 'bg-orange-100 dark:bg-orange-900/40', dark: 'bg-orange-200 dark:bg-orange-800/50' },
 ];
 
-// アイテムリストからブロックベースの色情報を計算（変更なし）
 const calculateBlockColors = (items: ShoppingItem[]): Map<string, string> => {
   const colorMap = new Map<string, string>();
   const uniqueBlocks = new Set<string>();
@@ -264,6 +270,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onActivateLateFilter,
   disablePriceUndefinedCheck = false,
   disableLimitedPurchaseQuantityCheck: _disableLimitedPurchaseQuantityCheck = false,
+  skipLimitedPurchaseForSingleQuantity,
   purchaseStatusControlMode = 'cycle',
 }) => {
   const dragItem = useRef<string | null>(null);
@@ -273,10 +280,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     (itemId: string): ShoppingItem | undefined => items.find((item) => item.id === itemId),
     [items],
   );
-  const [limitedBulkQueueIds, setLimitedBulkQueueIds] = useState<string[]>([]);
-  const [limitedBulkIndex, setLimitedBulkIndex] = useState(0);
-  const [limitedBulkSkippedCount, setLimitedBulkSkippedCount] = useState(0);
+  const [limitedBulkDialogContext, setLimitedBulkDialogContext] =
+    useState<LimitedBulkDialogContext | null>(null);
   const [limitedMessage, setLimitedMessage] = useState<string | null>(null);
+  const [bulkLimitedMessage, setBulkLimitedMessage] = useState<BulkLimitedMessageState | null>(null);
+  const activeLimitedBulkFlowTokenRef = useRef<symbol | null>(null);
+  const limitedBulkNotificationOwnerRef = useRef<LimitedBulkNotificationOwner | null>(null);
 
   // タッチドラッグ用state/ref
   const touchDragActive = useRef(false);
@@ -287,13 +296,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const touchScrollInterval = useRef<ReturnType<typeof setInterval> | null>(null);
   const touchDragSpaceGroupIds = useRef<string[] | null>(null);
   const touchDragSourceEl = useRef<HTMLElement | null>(null); // ドラッグ元要素（draggable復元用）
-
   const [activeDropTarget, setActiveDropTarget] = useState<{
     id: string;
     position: 'top' | 'bottom';
   } | null>(null);
 
-  // 備考展開管理（折りたたみヘッダー用）
   const [expandedRemarks, setExpandedRemarks] = useState<Set<string>>(new Set());
 
   // 価格未定の購入済アイテムの価格欄を強調表示するためのアイテムIDセット
@@ -301,7 +308,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const [limitedMissingHighlightItemIds, setLimitedMissingHighlightItemIds] =
     useState<Set<string>>(new Set());
 
-  // 価格が入力されたアイテムをハイライトセットから自動除外
   useEffect(() => {
     if (priceHighlightItemIds.size === 0) return;
     const remaining = new Set<string>();
@@ -336,54 +342,110 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     return () => window.clearTimeout(timer);
   }, [limitedMessage]);
 
+  useEffect(() => {
+    if (!bulkLimitedMessage) return;
+    const owner = limitedBulkNotificationOwnerRef.current;
+    const timer = window.setTimeout(() => {
+      if (limitedBulkNotificationOwnerRef.current === owner) {
+        limitedBulkNotificationOwnerRef.current = null;
+        setBulkLimitedMessage(null);
+      }
+    }, 2500);
+    return () => window.clearTimeout(timer);
+  }, [bulkLimitedMessage]);
+
+  const clearLimitedBulkMessage = useCallback((flowToken?: symbol) => {
+    if (
+      flowToken !== undefined &&
+      limitedBulkNotificationOwnerRef.current?.flowToken !== flowToken
+    ) {
+      return;
+    }
+    limitedBulkNotificationOwnerRef.current = null;
+    setBulkLimitedMessage(null);
+  }, []);
+
+  const showLimitedBulkMessage = useCallback((message: string, flowToken: symbol) => {
+    limitedBulkNotificationOwnerRef.current = { flowToken, message };
+    setBulkLimitedMessage((current) => ({
+      message,
+      nonce: (current?.nonce ?? 0) + 1,
+    }));
+  }, []);
+
   const isLimitedBulkInputTarget = useCallback(
     (item: ShoppingItem): boolean =>
-      item.purchaseStatus === 'None' ||
-      item.purchaseStatus === 'Postpone' ||
-      item.purchaseStatus === 'Late' ||
-      hasMissingLimitedPurchaseQuantity(item),
+      getLimitedBulkInputTargetDecision(item, {
+        skipLimitedPurchaseForSingleQuantity,
+      }).isTarget,
+    [skipLimitedPurchaseForSingleQuantity],
+  );
+
+  const isActiveLimitedBulkFlow = useCallback(
+    (flowToken: symbol): boolean => activeLimitedBulkFlowTokenRef.current === flowToken,
     [],
   );
 
   const finishLimitedBulkFlow = useCallback(
-    (skipped: number) => {
-      setLimitedBulkQueueIds([]);
-      setLimitedBulkIndex(0);
-      setLimitedBulkSkippedCount(0);
+    (
+      skipped: number,
+      options: { flowToken?: symbol; preserveStartNotification?: boolean } = {},
+    ) => {
+      setLimitedBulkDialogContext((current) =>
+        options.flowToken !== undefined && current?.flowToken !== options.flowToken ? current : null,
+      );
+      if (
+        options.flowToken === undefined ||
+        activeLimitedBulkFlowTokenRef.current === options.flowToken
+      ) {
+        activeLimitedBulkFlowTokenRef.current = null;
+      }
       if (skipped > 0) {
-        setLimitedMessage(`対象外になったアイテムを${skipped}件スキップしました`);
+        showLimitedBulkMessage(
+          `対象外になったアイテムを${skipped}件スキップしました`,
+          options.flowToken ?? Symbol('limited-bulk-flow'),
+        );
+        return;
+      }
+      if (!options.preserveStartNotification) {
+        clearLimitedBulkMessage(options.flowToken);
       }
     },
-    [],
+    [clearLimitedBulkMessage, showLimitedBulkMessage],
   );
 
   const advanceLimitedBulkToNextTarget = useCallback(
-    (startIndex: number, skippedSoFar = limitedBulkSkippedCount) => {
+    (
+      queueIds: string[],
+      startIndex: number,
+      skippedSoFar: number,
+      preserveStartNotification: boolean,
+      flowToken: symbol,
+    ) => {
       let skipped = 0;
-      for (let index = startIndex; index < limitedBulkQueueIds.length; index += 1) {
-        const latestItem = getLatestItemById(limitedBulkQueueIds[index]);
+      for (let index = startIndex; index < queueIds.length; index += 1) {
+        const latestItem = getLatestItemById(queueIds[index]);
         if (latestItem !== undefined && isLimitedBulkInputTarget(latestItem)) {
-          setLimitedBulkIndex(index);
-          setLimitedBulkSkippedCount(skippedSoFar + skipped);
+          setLimitedBulkDialogContext({
+            itemSnapshot: latestItem,
+            queueIds,
+            index,
+            skippedCount: skippedSoFar + skipped,
+            preserveStartNotification,
+            flowToken,
+          });
           return;
         }
         skipped += 1;
       }
-      finishLimitedBulkFlow(skippedSoFar + skipped);
+      finishLimitedBulkFlow(skippedSoFar + skipped, { flowToken, preserveStartNotification });
     },
     [
       finishLimitedBulkFlow,
       getLatestItemById,
       isLimitedBulkInputTarget,
-      limitedBulkQueueIds,
-      limitedBulkSkippedCount,
     ],
   );
-
-  useEffect(() => {
-    if (limitedBulkQueueIds.length === 0) return;
-    advanceLimitedBulkToNextTarget(limitedBulkIndex);
-  }, [advanceLimitedBulkToNextTarget, limitedBulkIndex, limitedBulkQueueIds.length]);
 
   const commitLimitedDialogResult = useCallback(
     (baseItem: ShoppingItem, result: LimitedPurchaseDialogResult) => {
@@ -402,55 +464,165 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   const handleLimitedBulkSubmit = useCallback(
     (result: LimitedPurchaseDialogResult) => {
-      const itemId = limitedBulkQueueIds[limitedBulkIndex];
-      const latestItem = itemId ? getLatestItemById(itemId) : undefined;
-      if (latestItem !== undefined) {
-        commitLimitedDialogResult(latestItem, result);
+      if (limitedBulkDialogContext === null) return;
+
+      const latestItem = getLatestItemById(limitedBulkDialogContext.itemSnapshot.id);
+      const isActiveFlow = isActiveLimitedBulkFlow(limitedBulkDialogContext.flowToken);
+      const submitDecision =
+        latestItem === undefined
+          ? computeLimitedBulkSubmitDecision({
+              context: limitedBulkDialogContext,
+              latestItem: undefined,
+              isActiveFlow,
+            })
+          : computeLimitedBulkSubmitDecision({
+              context: limitedBulkDialogContext,
+              latestItem,
+              decision: getLimitedBulkInputTargetDecision(latestItem, {
+                skipLimitedPurchaseForSingleQuantity,
+              }),
+              isActiveFlow,
+            });
+
+      switch (submitDecision.kind) {
+        case 'stale':
+          setLimitedBulkDialogContext((current) =>
+            current?.flowToken === submitDecision.flowToken ? null : current,
+          );
+          return;
+
+        case 'notFound':
+        case 'notTarget':
+          setLimitedBulkDialogContext(null);
+          advanceLimitedBulkToNextTarget(
+            limitedBulkDialogContext.queueIds,
+            submitDecision.nextIndex,
+            submitDecision.nextSkippedCount,
+            limitedBulkDialogContext.preserveStartNotification,
+            submitDecision.flowToken,
+          );
+          return;
+
+        case 'commit':
+          commitLimitedDialogResult(submitDecision.baseItem, result);
+          setLimitedBulkDialogContext(null);
+          advanceLimitedBulkToNextTarget(
+            limitedBulkDialogContext.queueIds,
+            submitDecision.nextIndex,
+            submitDecision.nextSkippedCount,
+            limitedBulkDialogContext.preserveStartNotification,
+            submitDecision.flowToken,
+          );
+          return;
+
+        default: {
+          const _exhaustive: never = submitDecision;
+          void _exhaustive;
+        }
       }
-      advanceLimitedBulkToNextTarget(limitedBulkIndex + 1);
     },
     [
       advanceLimitedBulkToNextTarget,
       commitLimitedDialogResult,
       getLatestItemById,
-      limitedBulkIndex,
-      limitedBulkQueueIds,
+      isActiveLimitedBulkFlow,
+      limitedBulkDialogContext,
+      skipLimitedPurchaseForSingleQuantity,
     ],
   );
 
   const handleLimitedBulkCancel = useCallback(() => {
-    finishLimitedBulkFlow(limitedBulkSkippedCount);
-  }, [finishLimitedBulkFlow, limitedBulkSkippedCount]);
+    if (limitedBulkDialogContext === null) return;
+
+    const cancelDecision = computeLimitedBulkCancelDecision({
+      context: limitedBulkDialogContext,
+      isActiveFlow: isActiveLimitedBulkFlow(limitedBulkDialogContext.flowToken),
+    });
+
+    switch (cancelDecision.kind) {
+      case 'stale':
+        setLimitedBulkDialogContext((current) =>
+          current?.flowToken === cancelDecision.flowToken ? null : current,
+        );
+        return;
+
+      case 'finish':
+        finishLimitedBulkFlow(cancelDecision.skippedCount, {
+          flowToken: cancelDecision.flowToken,
+          preserveStartNotification: cancelDecision.preserveStartNotification,
+        });
+        return;
+
+      default: {
+        const _exhaustive: never = cancelDecision;
+        void _exhaustive;
+      }
+    }
+  }, [finishLimitedBulkFlow, isActiveLimitedBulkFlow, limitedBulkDialogContext]);
 
   const startLimitedBulkFlow = useCallback(
     (groupItems: ShoppingItem[]) => {
       const allAlreadyLimited =
         groupItems.length > 0 &&
         groupItems.every((item) => item.purchaseStatus === 'LimitedPurchase');
+      const flowToken = Symbol('limited-bulk-flow');
+      activeLimitedBulkFlowTokenRef.current = flowToken;
 
       if (allAlreadyLimited) {
+        setLimitedBulkDialogContext(null);
         const missing = groupItems.filter(hasMissingLimitedPurchaseQuantity);
         if (missing.length === 0) {
-          setLimitedMessage('解除対象の限数未入力はありません');
+          showLimitedBulkMessage('解除対象の限数未入力はありません', flowToken);
+          activeLimitedBulkFlowTokenRef.current = null;
           return;
         }
-        if (!window.confirm('実購入数が未入力の限数だけ未購入に戻します。よろしいですか？')) return;
+        if (!window.confirm('実購入数が未入力の限数だけ未購入に戻します。よろしいですか？')) {
+          activeLimitedBulkFlowTokenRef.current = null;
+          return;
+        }
+        clearLimitedBulkMessage();
         missing.forEach((item) => {
           onUpdateItem(clearLimitedPurchase({ ...item, purchaseStatus: 'None' }));
         });
+        activeLimitedBulkFlowTokenRef.current = null;
         return;
       }
 
-      const queueIds = groupItems.filter(isLimitedBulkInputTarget).map((item) => item.id);
+      const { targets, singleQuantitySkippedCount, baseTargetCount } =
+        getLimitedBulkInputTargets(groupItems, { skipLimitedPurchaseForSingleQuantity });
+      const queueIds = targets.map((item) => item.id);
       if (queueIds.length === 0) {
-        setLimitedMessage('変更対象のアイテムはありません');
+        setLimitedBulkDialogContext(null);
+        clearLimitedBulkMessage();
+        if (baseTargetCount > 0 && singleQuantitySkippedCount > 0) {
+          showLimitedBulkMessage(
+            `数量1のアイテム${singleQuantitySkippedCount}件を除外したため、変更対象はありません`,
+            flowToken,
+          );
+          activeLimitedBulkFlowTokenRef.current = null;
+          return;
+        }
+        showLimitedBulkMessage('変更対象のアイテムはありません', flowToken);
+        activeLimitedBulkFlowTokenRef.current = null;
         return;
       }
-      setLimitedBulkQueueIds(queueIds);
-      setLimitedBulkIndex(0);
-      setLimitedBulkSkippedCount(0);
+      if (singleQuantitySkippedCount > 0) {
+        showLimitedBulkMessage(
+          `数量1のアイテムを${singleQuantitySkippedCount}件スキップしました`,
+          flowToken,
+        );
+      } else {
+        clearLimitedBulkMessage();
+      }
+      advanceLimitedBulkToNextTarget(queueIds, 0, 0, singleQuantitySkippedCount > 0, flowToken);
     },
-    [isLimitedBulkInputTarget, onUpdateItem],
+    [
+      advanceLimitedBulkToNextTarget,
+      clearLimitedBulkMessage,
+      onUpdateItem,
+      showLimitedBulkMessage,
+      skipLimitedPurchaseForSingleQuantity,
+    ],
   );
 
   const handleExecuteBulkStatusChange = useCallback(
@@ -495,7 +667,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       } else if (blockedByPrice) {
         setLimitedMessage('価格未定のアイテムがあります。価格を入力してください。');
       } else if (blockedByLimited) {
-        setLimitedMessage('限数の実購入数が未入力の商品があります');
+        setLimitedMessage('限数未入力があります。実購入数を入力してください');
       } else {
         setLimitedMessage(null);
       }
@@ -505,12 +677,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     [_disableLimitedPurchaseQuantityCheck, disablePriceUndefinedCheck],
   );
 
-  const currentLimitedBulkItem = useMemo(() => {
-    if (limitedBulkQueueIds.length === 0) return undefined;
-    const itemId = limitedBulkQueueIds[limitedBulkIndex];
-    const item = itemId ? getLatestItemById(itemId) : undefined;
-    return item && isLimitedBulkInputTarget(item) ? item : undefined;
-  }, [getLatestItemById, isLimitedBulkInputTarget, limitedBulkIndex, limitedBulkQueueIds]);
+  const limitedBulkDialogItemSnapshot = limitedBulkDialogContext?.itemSnapshot;
 
   // === アイテム追加ダイアログ ===
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -586,7 +753,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const formInputClass = 'w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white';
   const labelClass = 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1';
 
-  // ホールごとにアイテムをグループ化（優先度対応版）
   const hallGroups = useMemo((): HallGroup[] => {
     if (!showHallGroups) {
       return [{ groupId: null, hallId: null, hallName: null, priority: 'none', items }];
@@ -597,7 +763,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   const blockColorMap = useMemo(() => calculateBlockColors(items), [items]);
 
-  // スペースグループ化（hallOrder + 優先度順に並べ替え後にグループ化）
   const spaceGroups = useMemo((): SpaceGroup[] => {
     if (!showSpaceGroups) return [];
 
@@ -616,7 +781,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     sortedItems.forEach((item) => {
       const spaceKey = getSpaceKey(item.block, item.number);
       const priority = (item.priorityLevel || 'none') as PriorityLevel;
-      // 優先度別にグループ化（アイテム単独表示のセクション分割と一致）
       const groupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
       if (!groupMap.has(groupKey)) {
         // 先頭アイテムのhallGroupIdを算出
@@ -651,7 +815,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     }
   }, [spaceGroups, onSpaceGroupOrderChange]);
 
-  // スペースグループのブロック色マップ（グループヘッダー用）
   const spaceGroupBlockColorMap = useMemo(() => {
     if (!showSpaceGroups) return new Map<string, { light: string; dark: string }>();
     const uniqueBlocks = new Set<string>();
@@ -669,7 +832,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     return blockColorMapResult;
   }, [items, showSpaceGroups]);
 
-  // グループ化表示時の範囲選択情報を計算（同一グループ内のみ）
   const groupRangeInfo = useMemo(() => {
     if (
       !showHallGroups ||
@@ -682,7 +844,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       return null;
     }
 
-    // rangeStartとrangeEndのアイテムがどのグループに属するか確認
     let startGroupId: string | null = null;
     let endGroupId: string | null = null;
     let startHallIndex = -1;
@@ -701,7 +862,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       }
     }
 
-    // 異なるグループ間では範囲選択を無効化
     if (startGroupId !== endGroupId || startHallIndex === -1 || endHallIndex === -1) {
       return null;
     }
@@ -730,7 +890,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     };
   }, [showHallGroups, rangeStart, rangeEnd, columnType, hallGroups, selectedItemIds]);
 
-  // スペースグループ化表示時の範囲選択情報を計算（同一スペースグループ内のみ）
   const spaceGroupRangeInfo = useMemo(() => {
     if (
       !showSpaceGroups ||
@@ -761,7 +920,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       }
     }
 
-    // 異なるスペースグループ間では範囲選択を無効化
     if (startGroupKey !== endGroupKey || startIdx === -1 || endIdx === -1) {
       return null;
     }
@@ -790,7 +948,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     };
   }, [showSpaceGroups, rangeStart, rangeEnd, columnType, spaceGroups, selectedItemIds]);
 
-  // クロスグループ範囲選択情報（折りたたみヘッダー間のチェーン表示用）
   const crossSpaceGroupRangeInfo = useMemo(() => {
     if (
       !showSpaceGroups ||
@@ -813,11 +970,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
     if (startGroupIdx === -1 || endGroupIdx === -1) return null;
     if (startGroupIdx === endGroupIdx) return null; // 同一グループはspaceGroupRangeInfoで処理
-
     const minIdx = Math.min(startGroupIdx, endGroupIdx);
     const maxIdx = Math.max(startGroupIdx, endGroupIdx);
 
-    // 範囲内の全アイテムが選択済みか
     const rangeGroupItems = spaceGroups
       .slice(minIdx, maxIdx + 1)
       .flatMap((g) => g.items);
@@ -835,7 +990,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     };
   }, [showSpaceGroups, rangeStart, rangeEnd, columnType, spaceGroups, selectedItemIds]);
 
-  // 通常表示時の範囲選択の状態を計算
   const rangeInfo = useMemo(() => {
     if (
       !rangeStart ||
@@ -1002,7 +1156,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   // === タッチドラッグ&ドロップ ===
   const TOUCH_LONG_PRESS_MS = 200;
   const TOUCH_MOVE_THRESHOLD = 5; // px — 指の微小な揺れを無視
-
   const touchCleanUp = useCallback(() => {
     if (touchLongPressTimer.current) {
       clearTimeout(touchLongPressTimer.current);
@@ -1016,7 +1169,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       touchDragClone.current.remove();
       touchDragClone.current = null;
     }
-    // draggable属性を復元
     if (touchDragSourceEl.current) {
       touchDragSourceEl.current.setAttribute('draggable', 'true');
       touchDragSourceEl.current = null;
@@ -1075,7 +1227,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       });
     }
 
-    // スペースグループドラッグの場合
     if (spaceGroupItemIds && onSetSpaceGroupDragItemIds) {
       touchDragSpaceGroupIds.current = spaceGroupItemIds;
       onSetSpaceGroupDragItemIds(spaceGroupItemIds);
@@ -1092,7 +1243,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   }, [columnType, selectedItemIds, createDragClone, onSetSpaceGroupDragItemIds]);
 
   const handleItemTouchStart = useCallback((e: React.TouchEvent<HTMLDivElement>, item: ShoppingItem) => {
-    // data-no-long-press属性がある要素からのタッチは無視（チェックボックス、ボタン等）
     const target = e.target as HTMLElement;
     if (target.closest('[data-no-long-press]')) return;
 
@@ -1109,7 +1259,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const handleItemTouchMove = useCallback((e: React.TouchEvent<HTMLDivElement>) => {
     const touch = e.touches[0];
 
-    // ロングプレス判定中に指が動いたらキャンセル（通常スクロール）
     if (!touchDragActive.current) {
       const dx = Math.abs(touch.clientX - touchStartX.current);
       const dy = Math.abs(touch.clientY - touchStartY.current);
@@ -1124,7 +1273,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
     e.preventDefault(); // ドラッグ中はスクロール防止
 
-    // クローンを指の位置に追従
     if (touchDragClone.current) {
       touchDragClone.current.style.top = `${touch.clientY - 20}px`;
     }
@@ -1142,8 +1290,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       touchScrollInterval.current = setInterval(() => window.scrollBy(0, SCROLL_SPEED), 16);
     }
 
-    // ドロップターゲット判定: 指の下にあるアイテムを探す
-    // クローンを一時的に非表示にしてelementFromPointを使う
     if (touchDragClone.current) touchDragClone.current.style.display = 'none';
     const elementUnder = document.elementFromPoint(touch.clientX, touch.clientY);
     if (touchDragClone.current) touchDragClone.current.style.display = '';
@@ -1174,7 +1320,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
     if (!touchDragActive.current) return;
 
-    // ドロップ実行
     if (activeDropTarget && dragItem.current && columnType) {
       const sourceColumn = dragSourceColumn.current;
       const { id: targetId, position } = activeDropTarget;
@@ -1199,12 +1344,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     touchCleanUp();
   }, [activeDropTarget, columnType, items, onMoveItem, touchCleanUp]);
 
-  // タッチキャンセル時（ブラウザがタッチを横取り、通知表示等）
   const handleItemTouchCancel = useCallback(() => {
     touchCleanUp();
   }, [touchCleanUp]);
 
-  // グローバルなタッチ終了/キャンセル監視（要素外でタッチが離された場合の保険）
   useEffect(() => {
     const handleGlobalTouchEnd = () => {
       if (touchDragActive.current) {
@@ -1219,21 +1362,26 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     };
   }, [touchCleanUp]);
 
+  const limitedToastMessage = bulkLimitedMessage?.message ?? limitedMessage;
   const limitedPurchaseOverlays = (
     <>
-      {limitedMessage && (
+      {limitedToastMessage && (
         <div className="fixed left-1/2 top-20 z-[95] -translate-x-1/2 rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-lg dark:bg-slate-100 dark:text-slate-900">
-          {limitedMessage}
+          {limitedToastMessage}
         </div>
       )}
       <LimitedPurchaseDialog
-        isOpen={currentLimitedBulkItem !== undefined}
-        itemId={currentLimitedBulkItem?.id}
-        itemTitle={currentLimitedBulkItem?.title || currentLimitedBulkItem?.circle}
+        isOpen={limitedBulkDialogContext !== null}
+        itemId={limitedBulkDialogItemSnapshot?.id}
+        itemTitle={limitedBulkDialogItemSnapshot?.title || limitedBulkDialogItemSnapshot?.circle}
         initialActual={
-          currentLimitedBulkItem ? getActualPurchasedQuantity(currentLimitedBulkItem) : undefined
+          limitedBulkDialogItemSnapshot
+            ? getActualPurchasedQuantity(limitedBulkDialogItemSnapshot)
+            : undefined
         }
-        initialPlanned={currentLimitedBulkItem ? getPlannedQuantity(currentLimitedBulkItem) : 1}
+        initialPlanned={
+          limitedBulkDialogItemSnapshot ? getPlannedQuantity(limitedBulkDialogItemSnapshot) : 1
+        }
         showDeferButton
         onSubmit={handleLimitedBulkSubmit}
         onCancel={handleLimitedBulkCancel}
@@ -1248,7 +1396,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         onDragOver={handleContainerDragOver}
         onDrop={handleDrop}
       >
-        この日のアイテムはありません。
         {limitedPurchaseOverlays}
       </div>
     );
@@ -1256,7 +1403,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   // スペースグループ化表示
   if (showSpaceGroups && spaceGroups.length > 0) {
-    // チェーン選択済みの全アイテムIDを収集（折りたたみグループのドラッグ・移動用）
     const getEffectiveDragIds = (group: SpaceGroup): string[] => {
       const groupIds = new Set(group.items.map((item) => item.id));
       const isGroupInSelection = group.items.some((item) => selectedItemIds.has(item.id));
@@ -1321,7 +1467,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         {(() => {
           const hasPriorityGroups = spaceGroups.some(g => g.priority !== 'none');
           return spaceGroups.map((group, groupIndex) => {
-          // ホール+優先度セクションヘッダー（アイテム単独表示のセクションヘッダーと同等）
           const prevHallGroupId = groupIndex > 0 ? spaceGroups[groupIndex - 1].hallGroupId : undefined;
           const showHallSectionHeader =
             group.hallGroupId !== prevHallGroupId &&
@@ -1353,13 +1498,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
           const block = group.spaceKey.split('-')[0];
           const blockColor = spaceGroupBlockColorMap.get(block);
 
-          // このスペースの全アイテムがチェックされているか
           const allItemsSelected =
             group.items.length > 0 && group.items.every((item) => selectedItemIds.has(item.id));
           const someItemsSelected =
             !allItemsSelected && group.items.some((item) => selectedItemIds.has(item.id));
 
-          // 合計金額
           const totalPrice = group.items.reduce(
             (sum, item) => sum + (item.price ?? 0) * (item.quantity || 1),
             0,
@@ -1382,7 +1525,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               // 全解除
               groupItemIds.forEach((id) => onSelectItem(id, columnType));
             } else {
-              // 未選択のものを全て選択
               groupItemIds.forEach((id) => {
                 if (!selectedItemIds.has(id)) {
                   onSelectItem(id, columnType);
@@ -1391,7 +1533,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             }
           };
 
-          // スペースグループ上移動
           const handleSpaceGroupMoveUp = (e: React.MouseEvent) => {
             e.stopPropagation();
             if (!canMoveGroupUp || !onMoveItemUp) return;
@@ -1399,14 +1540,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             if (onSetSpaceGroupDragItemIds) {
               onSetSpaceGroupDragItemIds(effectiveIds);
             }
-            // 先頭アイテムを上に移動（グループ全体が移動する）
             onMoveItemUp(group.items[0].id, columnType);
             if (onSetSpaceGroupDragItemIds) {
               onSetSpaceGroupDragItemIds(null);
             }
           };
 
-          // スペースグループ下移動
           const handleSpaceGroupMoveDown = (e: React.MouseEvent) => {
             e.stopPropagation();
             if (!canMoveGroupDown || !onMoveItemDown) return;
@@ -1414,7 +1553,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             if (onSetSpaceGroupDragItemIds) {
               onSetSpaceGroupDragItemIds(effectiveIds);
             }
-            // 末尾アイテムを下に移動（グループ全体が移動する）
             onMoveItemDown(group.items[group.items.length - 1].id, columnType);
             if (onSetSpaceGroupDragItemIds) {
               onSetSpaceGroupDragItemIds(null);
@@ -1430,7 +1568,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             groupIndex === crossSpaceGroupRangeInfo.endGroupIndex;
           const isCrossMiddle = crossRangeInGroup && !isCrossStart && !isCrossEnd;
 
-          // ドロップガイド表示判定
           const showDropGuide = group.isCollapsed &&
             activeDropTarget?.id === group.items[0]?.id &&
             activeDropTarget?.position === 'top';
@@ -1892,7 +2029,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   {group.items.map((item, spaceItemIndex) => {
                     const globalIndex = items.findIndex((i) => i.id === item.id);
 
-                    // スペースグループ内での範囲選択状態
                     const isThisGroupInRange =
                       spaceGroupRangeInfo && spaceGroupRangeInfo.groupKey === group.groupKey;
                     const isInRange =
@@ -1961,7 +2097,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           highlightPrice={priceHighlightItemIds.has(item.id)}
                           highlightLimitedMissing={limitedMissingHighlightItemIds.has(item.id)}
                           getLatestItemById={getLatestItemById}
+                          onNotify={setLimitedMessage}
                           purchaseStatusControlMode={purchaseStatusControlMode}
+                          skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                         />
 
                         {activeDropTarget?.id === item.id &&
@@ -2098,7 +2236,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     if (!allNonNone) return null;
                     const isLastGroup = groupIndex === spaceGroups.length - 1;
 
-                    // 最後のグループ: 後回しフィルタボタン（フラグがtrueの場合のみ）
                     if (isLastGroup && showPostponeFilterButton && onActivatePostponeFilter) {
                       return (
                         <button
@@ -2117,7 +2254,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       );
                     }
 
-                    // 最後のグループ: 遅参フィルタボタン（後回しフィルタ中、フラグがtrueの場合のみ）
                     if (isLastGroup && showLateFilterButton && onActivateLateFilter) {
                       return (
                         <button
@@ -2378,8 +2514,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   // ホールグループ化表示
   // ホール定義 0 件でも、優先度別の未定義セクション (highest/priority/none) が
-  // 1 つでもあれば groupItemsByHallOrder が複数バケットを返すか、または
-  // 単一でも groupId が 'undefined:*' になるためグループ表示分岐に入れる。
+  // 1 つでもあれば groupItemsByHallOrder が複数バケットを返す
   const shouldShowHallGroups =
     showHallGroups &&
     (hallDefinitions.length > 0 ||
@@ -2420,7 +2555,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 {group.items.map((item, hallIndex) => {
                   const globalIndex = items.findIndex((i) => i.id === item.id);
 
-                  // グループ内での範囲選択状態
                   const isInRange =
                     isThisGroupInRange &&
                     hallIndex >= groupRangeInfo!.startIndex &&
@@ -2488,7 +2622,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         highlightPrice={priceHighlightItemIds.has(item.id)}
                         highlightLimitedMissing={limitedMissingHighlightItemIds.has(item.id)}
                         getLatestItemById={getLatestItemById}
+                        onNotify={setLimitedMessage}
                         purchaseStatusControlMode={purchaseStatusControlMode}
+                        skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                       />
 
                       {activeDropTarget?.id === item.id &&
@@ -2651,7 +2787,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   }
 
   // 通常表示（既存のコード）
-
   return (
     <div
       ref={containerRef}
@@ -2661,7 +2796,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     >
       {limitedPurchaseOverlays}
       {items.map((item, index) => {
-        // 範囲選択内かどうか判定
         const isInRange = rangeInfo && index >= rangeInfo.startIndex && index <= rangeInfo.endIndex;
         const isStart = rangeInfo && index === rangeInfo.startIndex;
         const isEnd = rangeInfo && index === rangeInfo.endIndex;
@@ -2711,7 +2845,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               highlightPrice={priceHighlightItemIds.has(item.id)}
               highlightLimitedMissing={limitedMissingHighlightItemIds.has(item.id)}
               getLatestItemById={getLatestItemById}
+              onNotify={setLimitedMessage}
               purchaseStatusControlMode={purchaseStatusControlMode}
+              skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
             />
 
             {activeDropTarget?.id === item.id && activeDropTarget.position === 'bottom' && (
@@ -2820,7 +2956,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       />
                     )}
                     {isMiddle && (
-                      // 間: 全体
                       <rect
                         x="0"
                         y="0"

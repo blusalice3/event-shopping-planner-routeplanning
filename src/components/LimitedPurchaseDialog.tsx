@@ -1,17 +1,14 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import type { LimitedPurchaseDialogResult } from '../types/limitedPurchase';
+export type { LimitedPurchaseDialogResult } from '../types/limitedPurchase';
+import LimitedPurchaseConfirmDialog from './LimitedPurchaseConfirmDialog';
 import LimitedPurchaseExcessConfirmDialog from './LimitedPurchaseExcessConfirmDialog';
 import {
   parseDecimalIntegerInput,
   validateLimitedPurchasePlannedQuantity,
-  validateLimitedPurchaseQuantities,
   type LimitedPurchaseValidationError,
 } from '../utils/purchaseQuantity';
-
-export type LimitedPurchaseDialogResult =
-  | { kind: 'limited'; actual: number; planned: number }
-  | { kind: 'purchased'; planned: number }
-  | { kind: 'defer'; planned: number };
 
 type LimitedPurchaseDialogProps = {
   isOpen: boolean;
@@ -35,6 +32,14 @@ const toMessage = (error: LimitedPurchaseValidationError): string => {
   return '限数購入では実購入数を購入予定量より少なくしてください';
 };
 
+const SINGLE_QUANTITY_LIMITED_MESSAGE =
+  '限数として保存するには、購入予定数を2以上に変更してください。';
+
+const stopDialogEvent = (event: React.SyntheticEvent) => {
+  event.stopPropagation();
+  event.nativeEvent.stopImmediatePropagation?.();
+};
+
 export default function LimitedPurchaseDialog({
   isOpen,
   itemId,
@@ -50,51 +55,117 @@ export default function LimitedPurchaseDialog({
   const [plannedText, setPlannedText] = useState(String(initialPlanned));
   const [error, setError] = useState<string | null>(null);
   const [excessConfirm, setExcessConfirm] = useState<{ planned: number } | null>(null);
+  const [sameQuantityConfirm, setSameQuantityConfirm] = useState<{ planned: number } | null>(null);
+  const saveButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      setError(null);
+      setExcessConfirm(null);
+      setSameQuantityConfirm(null);
+      return;
+    }
     setActualText(initialActual === undefined ? '' : String(initialActual));
     setPlannedText(String(initialPlanned));
     setError(null);
     setExcessConfirm(null);
+    setSameQuantityConfirm(null);
   }, [isOpen, itemId, dialogKey, initialActual, initialPlanned]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      if (sameQuantityConfirm !== null) {
+        setSameQuantityConfirm(null);
+        window.setTimeout(() => saveButtonRef.current?.focus(), 0);
+        return;
+      }
+      if (excessConfirm !== null) {
+        setExcessConfirm(null);
+        window.setTimeout(() => saveButtonRef.current?.focus(), 0);
+        return;
+      }
+      onCancel();
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [excessConfirm, isOpen, onCancel, sameQuantityConfirm]);
+
   if (!isOpen) return null;
+
+  const restoreSaveFocus = () => {
+    window.setTimeout(() => saveButtonRef.current?.focus(), 0);
+  };
+
+  const closeSameQuantityConfirm = () => {
+    setSameQuantityConfirm(null);
+    restoreSaveFocus();
+  };
+
+  const closeExcessConfirm = () => {
+    setExcessConfirm(null);
+    restoreSaveFocus();
+  };
 
   const handleSubmit = () => {
     const actual = parseDecimalIntegerInput(actualText);
     const planned = parseDecimalIntegerInput(plannedText);
-    const validation = validateLimitedPurchaseQuantities(actual, planned);
 
-    if (validation.ok) {
-      onSubmit({ kind: 'limited', actual: actual!, planned: planned! });
+    if (actual === undefined) {
+      setError(toMessage('actual_required'));
+      return;
+    }
+    if (!Number.isInteger(actual)) {
+      setError(toMessage('actual_not_integer'));
+      return;
+    }
+    if (actual < 1) {
+      setError(toMessage('actual_not_positive'));
+      return;
+    }
+    if (planned === undefined) {
+      setError(toMessage('planned_required'));
+      return;
+    }
+    if (!Number.isInteger(planned)) {
+      setError(toMessage('planned_not_integer'));
+      return;
+    }
+    if (planned < 1) {
+      setError(toMessage('planned_not_positive'));
       return;
     }
 
-    if (
-      validation.error === 'actual_not_less_than_planned' &&
-      actual !== undefined &&
-      planned !== undefined
-    ) {
-      if (actual === planned) {
-        if (window.confirm('全て購入できているので「購入済」にします。よろしいですか？')) {
-          onSubmit({ kind: 'purchased', planned });
-        }
-        return;
-      }
-
-      if (actual > planned) {
-        setExcessConfirm({ planned });
-        return;
-      }
+    if (actual === planned) {
+      setSameQuantityConfirm({ planned });
+      return;
     }
 
-    setError(toMessage(validation.error));
+    if (planned === 1) {
+      setError(SINGLE_QUANTITY_LIMITED_MESSAGE);
+      return;
+    }
+
+    if (actual > planned) {
+      setExcessConfirm({ planned });
+      return;
+    }
+
+    onSubmit({ kind: 'limited', actual, planned });
   };
 
   const handleDefer = () => {
     const planned = parseDecimalIntegerInput(plannedText);
     const validation = validateLimitedPurchasePlannedQuantity(planned);
+
+    if (validation.ok && planned === 1) {
+      setError(SINGLE_QUANTITY_LIMITED_MESSAGE);
+      return;
+    }
 
     if (validation.ok) {
       onSubmit({ kind: 'defer', planned: planned! });
@@ -104,13 +175,24 @@ export default function LimitedPurchaseDialog({
     setError(toMessage(validation.error));
   };
 
+  const isConfirmOpen = sameQuantityConfirm !== null || excessConfirm !== null;
+  const parsedPlannedForHelp = parseDecimalIntegerInput(plannedText);
+  const shouldShowSingleQuantityHelp =
+    error === null &&
+    sameQuantityConfirm === null &&
+    excessConfirm === null &&
+    parsedPlannedForHelp === 1;
+
   const dialogContent = (
     <>
       <div
         role="dialog"
-        aria-modal="true"
+        aria-modal={!isConfirmOpen}
         aria-labelledby="limited-purchase-dialog-title"
         className="fixed inset-0 z-[80] flex items-center justify-center bg-black/50 p-4"
+        onClick={stopDialogEvent}
+        onMouseDown={stopDialogEvent}
+        onPointerDown={stopDialogEvent}
       >
         <div className="w-full max-w-sm rounded-lg bg-white p-4 shadow-xl dark:bg-slate-800">
           <h3
@@ -146,7 +228,13 @@ export default function LimitedPurchaseDialog({
               inputMode="numeric"
             />
           </label>
-          {error && <p className="mt-3 text-sm text-red-600 dark:text-red-300">{error}</p>}
+          {error ? (
+            <p className="mt-3 text-sm text-red-600 dark:text-red-300">{error}</p>
+          ) : shouldShowSingleQuantityHelp ? (
+            <p className="mt-3 text-sm text-red-600 dark:text-red-300">
+              {SINGLE_QUANTITY_LIMITED_MESSAGE}
+            </p>
+          ) : null}
           <div className="mt-4 flex flex-wrap justify-end gap-2">
             {showDeferButton && (
               <button
@@ -161,6 +249,7 @@ export default function LimitedPurchaseDialog({
               キャンセル
             </button>
             <button
+              ref={saveButtonRef}
               type="button"
               onClick={handleSubmit}
               className="rounded bg-blue-600 px-3 py-2 text-sm font-semibold text-white"
@@ -170,9 +259,25 @@ export default function LimitedPurchaseDialog({
           </div>
         </div>
       </div>
+      <LimitedPurchaseConfirmDialog
+        isOpen={sameQuantityConfirm !== null}
+        isModal
+        title="購入済として保存しますか？"
+        message="実購入数と購入予定数が同じため、購入済として保存しますか？"
+        cancelLabel="入力に戻る"
+        confirmLabel="購入済にする"
+        initialFocus="confirm"
+        onCancel={closeSameQuantityConfirm}
+        onConfirm={() => {
+          if (!sameQuantityConfirm) return;
+          onSubmit({ kind: 'purchased', planned: sameQuantityConfirm.planned });
+          setSameQuantityConfirm(null);
+        }}
+      />
       <LimitedPurchaseExcessConfirmDialog
         isOpen={excessConfirm !== null}
-        onFix={() => setExcessConfirm(null)}
+        isModal
+        onFix={closeExcessConfirm}
         onConvertToPurchased={() => {
           if (!excessConfirm) return;
           onSubmit({ kind: 'purchased', planned: excessConfirm.planned });

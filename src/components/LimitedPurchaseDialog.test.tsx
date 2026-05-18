@@ -86,16 +86,39 @@ describe('LimitedPurchaseDialog', () => {
     expect(onSubmit).toHaveBeenCalledWith({ kind: 'defer', planned: 6 });
   });
 
-  it('converts to purchased after native confirmation when actual equals planned', async () => {
+  it('converts to purchased after app confirmation when actual equals planned', async () => {
     const user = userEvent.setup();
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = vi.spyOn(window, 'confirm');
     const { onSubmit } = renderDialog();
     const { actualInput } = getDialogInputs();
 
     await user.type(actualInput, '5');
     await clickPrimaryButton(user);
 
+    const confirmDialog = screen.getByRole('dialog', { name: '購入済として保存しますか？' });
+    expect(confirmDialog).toBeInTheDocument();
+    expect(confirmSpy).not.toHaveBeenCalled();
+    await user.click(within(confirmDialog).getByRole('button', { name: '購入済にする' }));
+
     expect(onSubmit).toHaveBeenCalledWith({ kind: 'purchased', planned: 5 });
+  });
+
+  it('blocks saving and deferring when planned quantity is 1', async () => {
+    const user = userEvent.setup();
+    const { onSubmit } = renderDialog({ initialPlanned: 1, showDeferButton: true });
+    const { actualInput, dialog } = getDialogInputs();
+
+    await user.type(actualInput, '2');
+    await clickPrimaryButton(user);
+
+    expect(
+      within(dialog).getByText('限数として保存するには、購入予定数を2以上に変更してください。'),
+    ).toBeInTheDocument();
+    expect(onSubmit).not.toHaveBeenCalled();
+
+    await user.click(within(dialog).getByRole('button', { name: 'この商品を後で入力' }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
   });
 
   it('shows custom excess confirmation and can return to the input dialog', async () => {
