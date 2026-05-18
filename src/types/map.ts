@@ -223,6 +223,14 @@ export interface RouteSegment {
   path: { row: number; col: number }[];
   fromPriority?: 'none' | 'priority' | 'highest';
   toPriority?: 'none' | 'priority' | 'highest';
+  fromItemId?: string;
+  toItemId?: string;
+  fromOrder?: number;
+  toOrder?: number;
+}
+
+export interface RoutePathConstraint {
+  isPathAllowed: (path: { row: number; col: number }[]) => boolean;
 }
 
 export type ZoomLevel = number;

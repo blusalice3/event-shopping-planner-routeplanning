@@ -103,6 +103,7 @@ const baseProps = {
   onModeChange: vi.fn(),
   layoutMode: "pc" as const,
   onLayoutModeChange: vi.fn(),
+  skipLimitedPurchaseForSingleQuantity: true,
 };
 
 describe("FocusModeContainer route merge cache", () => {

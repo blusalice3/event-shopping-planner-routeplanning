@@ -6,10 +6,16 @@ import type {
   ShoppingItem,
   ViewMode,
 } from '../../../types/item';
+import { normalizeLimitedPurchaseFields } from '../../../utils/purchaseQuantity';
 
 export interface UpdateItemResult {
   items: ShoppingItem[];
   purchaseStatusChanged: boolean;
+  priceChanged: boolean;
+  quantityChanged: boolean;
+  limitedPurchasedQuantityChanged: boolean;
+  purchaseQuantityChanged: boolean;
+  importantItemChanged: boolean;
 }
 
 /**
@@ -22,26 +28,36 @@ export function computeUpdateItem(
   currentProtection: ProtectionLevel | undefined,
   itemSource: ItemSource | undefined,
 ): UpdateItemResult {
-  const currentItem = items.find((item) => item.id === updatedItem.id);
+  const normalizedUpdatedItem = normalizeLimitedPurchaseFields(updatedItem);
+  const currentItem = items.find((item) => item.id === normalizedUpdatedItem.id);
   const purchaseStatusChanged =
-    currentItem != null && currentItem.purchaseStatus !== updatedItem.purchaseStatus;
-  const priceChanged = currentItem != null && currentItem.price !== updatedItem.price;
+    currentItem != null && currentItem.purchaseStatus !== normalizedUpdatedItem.purchaseStatus;
+  const priceChanged = currentItem != null && currentItem.price !== normalizedUpdatedItem.price;
+  const quantityChanged =
+    currentItem != null && currentItem.quantity !== normalizedUpdatedItem.quantity;
+  const limitedPurchasedQuantityChanged =
+    currentItem != null &&
+    currentItem.limitedPurchasedQuantity !== normalizedUpdatedItem.limitedPurchasedQuantity;
+  const purchaseQuantityChanged = quantityChanged || limitedPurchasedQuantityChanged;
+  const importantItemChanged = purchaseStatusChanged || priceChanged || purchaseQuantityChanged;
 
-  let finalItem = updatedItem;
+  let finalItem = normalizedUpdatedItem;
 
-  if (
-    (mode === 'execute' || mode === 'focus') &&
-    (purchaseStatusChanged || priceChanged)
-  ) {
+  if ((mode === 'execute' || mode === 'focus') && importantItemChanged) {
     const effectiveProtection = currentProtection ?? (itemSource === 'app' ? 'full' : 'none');
     if (effectiveProtection === 'none') {
-      finalItem = { ...updatedItem, protectionLevel: 'deletable' as const };
+      finalItem = { ...normalizedUpdatedItem, protectionLevel: 'deletable' as const };
     }
   }
 
   return {
-    items: items.map((item) => (item.id === updatedItem.id ? finalItem : item)),
+    items: items.map((item) => (item.id === normalizedUpdatedItem.id ? finalItem : item)),
     purchaseStatusChanged,
+    priceChanged,
+    quantityChanged,
+    limitedPurchasedQuantityChanged,
+    purchaseQuantityChanged,
+    importantItemChanged,
   };
 }
 

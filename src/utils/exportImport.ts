@@ -18,6 +18,10 @@ import {
   HallRouteSettingsStore,
 } from '../types/map';
 import { ExportOptions } from '../types/export';
+import {
+  normalizeLimitedPurchaseFields,
+  validateLimitedPurchaseQuantities,
+} from './purchaseQuantity';
 
 // エクスポートデータの型
 export interface ExportData {
@@ -61,7 +65,56 @@ export interface ItemFallbackWarning {
   reasons: string[];
 }
 
-const EXPORT_VERSION = '2.0';
+const EXPORT_VERSION = '2.1';
+
+type StrictPositiveIntegerCellParseResult =
+  | { kind: 'empty' }
+  | { kind: 'value'; value: number }
+  | { kind: 'invalid'; raw: string };
+
+const isFormulaCellValue = (
+  rawValue: ExcelJS.CellValue,
+): rawValue is ExcelJS.CellFormulaValue | ExcelJS.CellSharedFormulaValue =>
+  typeof rawValue === 'object' &&
+  rawValue !== null &&
+  ('formula' in rawValue || 'sharedFormula' in rawValue);
+
+const parseStrictPositiveIntegerScalar = (
+  rawValue: number | string,
+): StrictPositiveIntegerCellParseResult => {
+  if (typeof rawValue === 'number') {
+    return Number.isInteger(rawValue) && rawValue >= 1
+      ? { kind: 'value', value: rawValue }
+      : { kind: 'invalid', raw: String(rawValue) };
+  }
+
+  const rawText = rawValue.trim();
+  if (rawText === '') return { kind: 'empty' };
+  if (!/^\d+$/.test(rawText)) return { kind: 'invalid', raw: rawText };
+
+  const value = Number(rawText);
+  return value >= 1 ? { kind: 'value', value } : { kind: 'invalid', raw: rawText };
+};
+
+const parseStrictPositiveIntegerCell = (
+  rawValue: ExcelJS.CellValue,
+): StrictPositiveIntegerCellParseResult => {
+  if (rawValue === null || rawValue === undefined) return { kind: 'empty' };
+
+  if (typeof rawValue === 'number' || typeof rawValue === 'string') {
+    return parseStrictPositiveIntegerScalar(rawValue);
+  }
+
+  if (isFormulaCellValue(rawValue)) {
+    const result = rawValue.result;
+    if (typeof result === 'number' || typeof result === 'string') {
+      return parseStrictPositiveIntegerScalar(result);
+    }
+    return { kind: 'invalid', raw: '数式結果なし' };
+  }
+
+  return { kind: 'invalid', raw: '非対応セル形式' };
+};
 
 /**
  * データをxlsxファイルにエクスポート
@@ -104,6 +157,7 @@ export async function exportToXlsx(
     { header: '保護レベル', key: 'protectionLevel', width: 12 },
     { header: '追加元', key: 'source', width: 12 },
     { header: '手動ホール', key: 'manualHallId', width: 20 },
+    { header: '限数実購入数', key: 'limitedPurchasedQuantity', width: 14 },
   ];
 
   // データ
@@ -124,6 +178,8 @@ export async function exportToXlsx(
       protectionLevel: item.protectionLevel || '',
       source: item.source || '',
       manualHallId: item.manualHallId || '',
+      limitedPurchasedQuantity:
+        item.purchaseStatus === 'LimitedPurchase' ? item.limitedPurchasedQuantity ?? '' : '',
     });
   });
 
@@ -323,20 +379,19 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         const parsedPrice = Number(rawPrice);
         if (Number.isFinite(parsedPrice)) {
           price = parsedPrice;
-        } else {
+      } else {
           rowReasons.push(`価格「${String(rawPrice)}」は不正のため空値で補完しました`);
         }
       }
 
       const rawQuantity = row.getCell(8).value;
+      const parsedQuantity = parseStrictPositiveIntegerCell(rawQuantity);
       let quantity = 1;
-      if (rawQuantity !== null && rawQuantity !== undefined && String(rawQuantity).trim() !== '') {
-        const parsedQuantity = Number(rawQuantity);
-        if (Number.isFinite(parsedQuantity) && parsedQuantity > 0) {
-          quantity = Math.max(1, Math.floor(parsedQuantity));
-        } else {
-          rowReasons.push(`数量「${String(rawQuantity)}」は不正のため1で補完しました`);
-        }
+      if (parsedQuantity.kind === 'value') {
+        quantity = parsedQuantity.value;
+      } else {
+        const raw = parsedQuantity.kind === 'invalid' ? `「${parsedQuantity.raw}」` : '空欄';
+        rowReasons.push(`購入予定量${raw}は不正のため1で補完しました`);
       }
 
       if (!Number.isInteger(quantity)) {
@@ -400,8 +455,33 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
       // 手動ホールIDを取得（列15、後方互換: 古いファイルは空）
       const manualHallValue = String(row.getCell(15).value ?? '').trim();
       const manualHallId = manualHallValue || undefined;
+      const parsedLimitedPurchasedQuantity = parseStrictPositiveIntegerCell(row.getCell(16).value);
+      let limitedPurchasedQuantity: number | undefined;
 
-      const item: ShoppingItem = {
+      if (parsedLimitedPurchasedQuantity.kind === 'value') {
+        limitedPurchasedQuantity = parsedLimitedPurchasedQuantity.value;
+      } else if (parsedLimitedPurchasedQuantity.kind === 'invalid') {
+        rowReasons.push(
+          `限数実購入数「${parsedLimitedPurchasedQuantity.raw}」は不正のため未入力にしました`,
+        );
+      }
+
+      if (purchaseStatus === 'LimitedPurchase' && limitedPurchasedQuantity !== undefined) {
+        const validation = validateLimitedPurchaseQuantities(limitedPurchasedQuantity, quantity);
+        if (!validation.ok) {
+          rowReasons.push(
+            `限数実購入数「${limitedPurchasedQuantity}」は購入予定量「${quantity}」に対して不正のため未入力にしました`,
+          );
+          limitedPurchasedQuantity = undefined;
+        }
+      }
+
+      if (purchaseStatus !== 'LimitedPurchase' && limitedPurchasedQuantity !== undefined) {
+        rowReasons.push('限数以外の限数実購入数は無視しました');
+        limitedPurchasedQuantity = undefined;
+      }
+
+      const item: ShoppingItem = normalizeLimitedPurchaseFields({
         id: itemId,
         circle,
         eventDate,
@@ -417,7 +497,8 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         protectionLevel,
         source,
         manualHallId,
-      };
+        ...(limitedPurchasedQuantity !== undefined ? { limitedPurchasedQuantity } : {}),
+      });
 
       if (item.circle || item.title) {
         items.push(item);

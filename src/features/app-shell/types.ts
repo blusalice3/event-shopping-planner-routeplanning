@@ -8,11 +8,12 @@ export type SortState =
   | 'Absent'
   | 'SoldOut'
   | 'None'
-  | 'Purchased';
+  | 'Purchased'
+  | 'LimitedPurchase';
 export type BulkSortDirection = 'asc' | 'desc';
 export type BlockSortDirection = 'asc' | 'desc';
 export type LayoutMode = 'pc' | 'smartphone';
-export type SmartInsertMode = 'card' | 'preview';
+export type SmartInsertMode = 'map' | 'preview';
 export type ColumnType = 'execute' | 'candidate';
 
 export type CellPosition = { row: number; col: number };

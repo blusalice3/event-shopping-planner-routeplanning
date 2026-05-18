@@ -37,8 +37,11 @@ const minimalAppHeaderShellProps = (): ComponentProps<typeof AppHeaderShell> => 
   currentSearchIndex: -1,
   DEFAULT_OUTLINE_STYLE: 'rounded',
   DEFAULT_PURCHASE_STATUS_CONTROL_MODE: 'cycle',
+  DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY: true,
   DEFAULT_UI_VISIBILITY,
   disablePriceUndefinedCheck: false,
+  disableLimitedPurchaseQuantityCheck: false,
+  skipLimitedPurchaseForSingleQuantity: true,
   eventDates: ['Day1'],
   executeSpaceGroupingEnabled: false,
   getHallExecuteCount: vi.fn(() => 0),
@@ -68,7 +71,7 @@ const minimalAppHeaderShellProps = (): ComponentProps<typeof AppHeaderShell> => 
   mapIsRouteVisible: false,
   mapSelectedHallId: 'all',
   mapSmartInsertEnabled: false,
-  mapSmartInsertMode: 'card',
+  mapSmartInsertMode: 'map',
   mapTabMenuOpen: null,
   mapTabMenuPosition: { left: 0, top: 0 },
   mapToggleButtonRef: { current: null },
@@ -100,6 +103,8 @@ const minimalAppHeaderShellProps = (): ComponentProps<typeof AppHeaderShell> => 
   setMapTabMenuPosition: vi.fn(),
   setMapViewActive: vi.fn(),
   setDisablePriceUndefinedCheck: vi.fn(),
+  setDisableLimitedPurchaseQuantityCheck: vi.fn(),
+  setSkipLimitedPurchaseForSingleQuantity: vi.fn(),
   setNumberCellOutlineStyle: vi.fn(),
   setPurchaseStatusControlMode: vi.fn(),
   setSearchKeyword: vi.fn(),
@@ -124,7 +129,9 @@ const minimalAppHeaderShellProps = (): ComponentProps<typeof AppHeaderShell> => 
     SoldOut: 'SoldOut',
     None: 'None',
     Purchased: 'Purchased',
+    LimitedPurchase: 'LimitedPurchase',
   },
+  sortDisplayLabel: 'Manual',
   sortState: 'Manual',
   TabButton: ({ label }) => <button>{label}</button>,
   themeMode: 'system',
@@ -154,8 +161,11 @@ describe('PurchaseStatusControlModeSettings', () => {
     const props: DisplaySettingsResetButtonProps = {
       DEFAULT_OUTLINE_STYLE: 'none',
       DEFAULT_PURCHASE_STATUS_CONTROL_MODE: 'cycle',
+      DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY: true,
       DEFAULT_UI_VISIBILITY,
       setDisablePriceUndefinedCheck: vi.fn(),
+      setDisableLimitedPurchaseQuantityCheck: vi.fn(),
+      setSkipLimitedPurchaseForSingleQuantity: vi.fn(),
       setNumberCellOutlineStyle: vi.fn(),
       setPurchaseStatusControlMode: vi.fn(),
       setUiVisibilityOverride: vi.fn(),
@@ -167,6 +177,7 @@ describe('PurchaseStatusControlModeSettings', () => {
 
     expect(props.setPurchaseStatusControlMode).toHaveBeenCalledWith('cycle');
     expect(props.setDisablePriceUndefinedCheck).toHaveBeenCalledWith(false);
+    expect(props.setDisableLimitedPurchaseQuantityCheck).toHaveBeenCalledWith(false);
     expect(props.setUiVisibilityOverride).toHaveBeenCalledWith(false);
   });
 });

@@ -153,6 +153,7 @@ type AppOverlayLayerProps = {
   visibleItems: ShoppingItem[];
   showHeaderBar: boolean;
   sortLabels: Record<SortState, string>;
+  sortDisplayLabel: string;
   sortState: SortState;
   handleSortToggle: () => void;
   zoomLevel: number;
@@ -273,6 +274,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
   visibleItems,
   showHeaderBar,
   sortLabels,
+  sortDisplayLabel,
   sortState,
   handleSortToggle,
   zoomLevel,
@@ -659,7 +661,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
           {currentMode === 'execute' && (
             <SummaryBar
               items={visibleItems}
-              filterLabel={!showHeaderBar ? sortLabels[sortState] : undefined}
+              filterLabel={!showHeaderBar ? sortDisplayLabel : undefined}
               onFilterToggle={!showHeaderBar ? handleSortToggle : undefined}
             />
           )}

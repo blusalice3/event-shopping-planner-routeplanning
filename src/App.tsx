@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ShoppingItem,
   PurchaseStatus,
@@ -57,7 +57,6 @@ import {
   computeDeleteItem,
   computeAddItemFromFocusMode,
   computeAddToExecuteListFromMap,
-  computeAddToExecuteListFromMapAtPosition,
   computeRemoveFromExecuteListFromMap,
   computeMoveToExecuteColumn,
   computeRemoveFromExecuteColumn,
@@ -98,11 +97,22 @@ import {
 } from './hooks/useUIVisibilitySettings';
 import { useNumberCellOutlineStyle } from './hooks/useNumberCellOutlineStyle';
 import { useDisablePriceUndefinedCheck } from './hooks/useDisablePriceUndefinedCheck';
+import { useDisableLimitedPurchaseQuantityCheck } from './hooks/useDisableLimitedPurchaseQuantityCheck';
+import {
+  DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY,
+  useSkipLimitedPurchaseForSingleQuantity,
+} from './hooks/useSkipLimitedPurchaseForSingleQuantity';
 import { usePurchaseStatusControlMode } from './hooks/usePurchaseStatusControlMode';
 import { useIndexedDbPersistence } from './hooks/useIndexedDbPersistence';
+import type { SmartInsertMode, SortState } from './features/app-shell/types';
+import { normalizeSmartInsertMode } from './utils/smartInsertMode';
+import {
+  clearLimitedPurchase,
+  getLimitedPurchaseCounts,
+  matchesPurchaseStatusFilter,
+} from './utils/purchaseQuantity';
 
 type ActiveTab = 'eventList' | 'import' | string;
-type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'None' | 'Purchased';
 export type BulkSortDirection = 'asc' | 'desc';
 type BlockSortDirection = 'asc' | 'desc';
 
@@ -114,6 +124,7 @@ const sortCycle: SortState[] = [
   'SoldOut',
   'None',
   'Purchased',
+  'LimitedPurchase',
 ];
 const sortLabels: Record<SortState, string> = {
   Manual: '巡回順',
@@ -123,13 +134,32 @@ const sortLabels: Record<SortState, string> = {
   SoldOut: '売切',
   None: '未購入',
   Purchased: '購入済',
+  LimitedPurchase: '\u9650\u6570',
 };
 
-// 集中モードのセッションキーは「イベント名::日付」で統一する。
+type StrictPositionInsertResult = {
+  accepted: boolean;
+  executeModeItems: ExecuteModeItems;
+};
+
+function computeAddToExecuteListFromMapAtPositionStrict(
+  itemId: string,
+  referenceItemId: string,
+  position: 'before' | 'after',
+  executeModeItems: ExecuteModeItems,
+  dayName: string,
+): StrictPositionInsertResult {
+  const dayItems = [...(executeModeItems[dayName] || [])];
+  if (dayItems.includes(itemId)) return { accepted: false, executeModeItems };
+  const refIndex = dayItems.indexOf(referenceItemId);
+  if (refIndex < 0) return { accepted: false, executeModeItems };
+  dayItems.splice(position === 'before' ? refIndex : refIndex + 1, 0, itemId);
+  return { accepted: true, executeModeItems: { ...executeModeItems, [dayName]: dayItems } };
+}
+
 const buildFocusSessionKey = (eventName: string, eventDate: string): string =>
   `${eventName}::${eventDate}`;
 
-// イベント削除時に、対象イベントに紐づく集中モードセッションをまとめて除外する。
 const removeFocusModeSessionByEvent = (
   sessions: Record<string, FocusModeSessionState>,
   eventName: string,
@@ -148,7 +178,6 @@ const removeFocusModeSessionByEvent = (
   return changed ? next : sessions;
 };
 
-// イベント名変更時に、セッションキーの先頭だけを新しい名前へ差し替える。
 const renameFocusModeSessionKeys = (
   sessions: Record<string, FocusModeSessionState>,
   oldEventName: string,
@@ -175,7 +204,6 @@ const areStringArraysEqual = (a: string[], b: string[]): boolean => {
   return a.every((value, index) => value === b[index]);
 };
 
-// 集中モード再開可否の判定に使う比較関数。
 const isFocusModeSessionStateEqual = (
   a: FocusModeSessionState | undefined,
   b: FocusModeSessionState,
@@ -245,13 +273,49 @@ const resolveDayMapRotationState = (
 };
 
 const App: React.FC = () => {
-  // イベント単位で保持する主要データ。
   const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>({});
   const [eventMetadata, setEventMetadata] = useState<Record<string, EventMetadata>>({});
   const [executeModeItems, setExecuteModeItems] = useState<Record<string, ExecuteModeItems>>({});
+  const executeModeItemsRef = useRef<Record<string, ExecuteModeItems>>({});
+  const commitExecuteModeItems = useCallback((nextAllEvents: Record<string, ExecuteModeItems>) => {
+    executeModeItemsRef.current = nextAllEvents;
+    setExecuteModeItems(nextAllEvents);
+  }, []);
+  const updateExecuteModeItems = useCallback(
+    (
+      updater: (
+        current: Record<string, ExecuteModeItems>,
+      ) => Record<string, ExecuteModeItems>,
+    ) => {
+      const nextAllEvents = updater(executeModeItemsRef.current);
+      commitExecuteModeItems(nextAllEvents);
+      return nextAllEvents;
+    },
+    [commitExecuteModeItems],
+  );
+  const setExecuteModeItemsCommitted = useCallback(
+    (next: React.SetStateAction<Record<string, ExecuteModeItems>>) => {
+      const nextAllEvents =
+        typeof next === 'function'
+          ? (next as (current: Record<string, ExecuteModeItems>) => Record<string, ExecuteModeItems>)(
+              executeModeItemsRef.current,
+            )
+          : next;
+      commitExecuteModeItems(nextAllEvents);
+    },
+    [commitExecuteModeItems],
+  );
+  const commitExecuteModeItemsForEvent = useCallback(
+    (eventName: string, nextEventItems: ExecuteModeItems) => {
+      commitExecuteModeItems({
+        ...executeModeItemsRef.current,
+        [eventName]: nextEventItems,
+      });
+    },
+    [commitExecuteModeItems],
+  );
   const [dayModes, setDayModes] = useState<Record<string, DayModeState>>({});
 
-  // 画面表示と選択状態。
   const [activeEventName, setActiveEventName] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>('eventList');
   const [mapViewActive, setMapViewActive] = useState(false);
@@ -293,14 +357,12 @@ const App: React.FC = () => {
     toggleCurrentRangeSelection,
   } = useListInteractionState();
 
-  // 新規追加フォームに引き継ぐ既定値。
   const [newItemDefaults, setNewItemDefaults] = useState<{
     eventDate: string;
     block: string;
     number: string;
   } | null>(null);
 
-  // 更新・名称変更まわりのダイアログ状態。
   const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
   const [updateData, setUpdateData] = useState<EventUpdateDiff | null>(null);
   const [updateEventName, setUpdateEventName] = useState<string | null>(null);
@@ -309,12 +371,10 @@ const App: React.FC = () => {
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [eventToRename, setEventToRename] = useState<string | null>(null);
 
-  // 検索 UI の状態。
   const [searchKeyword, setSearchKeyword] = useState('');
   const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
-  // レイアウト・表示設定・集中モード表示状態。
   const [layoutMode, setLayoutMode] = useState<'pc' | 'smartphone'>(() =>
     typeof window !== 'undefined' && window.innerWidth < 768 ? 'smartphone' : 'pc',
   );
@@ -322,10 +382,18 @@ const App: React.FC = () => {
   const { numberCellOutlineStyle, setNumberCellOutlineStyle, DEFAULT_OUTLINE_STYLE } = useNumberCellOutlineStyle();
   const { disablePriceUndefinedCheck, setDisablePriceUndefinedCheck } = useDisablePriceUndefinedCheck();
   const {
+    disableLimitedPurchaseQuantityCheck,
+    setDisableLimitedPurchaseQuantityCheck,
+  } = useDisableLimitedPurchaseQuantityCheck();
+  const {
     purchaseStatusControlMode,
     setPurchaseStatusControlMode,
     DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
   } = usePurchaseStatusControlMode();
+  const {
+    skipLimitedPurchaseForSingleQuantity,
+    setSkipLimitedPurchaseForSingleQuantity,
+  } = useSkipLimitedPurchaseForSingleQuantity();
   const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
   const [uiSettingsPanelOpen, setUiSettingsPanelOpen] = useState(false);
   const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
@@ -335,7 +403,6 @@ const App: React.FC = () => {
 
   const { themeMode, setThemeMode } = useThemeMode();
 
-  // マップ・ホール関連の永続データ。
   const [mapData, setMapData] = useState<MapDataStore>({});
   const [mapRotationSettings, setMapRotationSettings] = useState<MapRotationSettingsStore>({});
   const [mapViewportSettings, setMapViewportSettings] = useState<MapViewportSettingsStore>({});
@@ -349,7 +416,6 @@ const App: React.FC = () => {
   const mapFileInputRef = useRef<HTMLInputElement>(null);
   const exportFileInputRef = useRef<HTMLInputElement>(null);
 
-  // マップ取り込みダイアログの一時データ。
   const [mapImportDialogOpen, setMapImportDialogOpen] = useState(false);
   const [mapImportPendingFile, setMapImportPendingFile] = useState<File | null>(null);
   const [mapImportPendingEventName, setMapImportPendingEventName] = useState<string>('');
@@ -369,7 +435,7 @@ const App: React.FC = () => {
     setters: {
       setEventLists,
       setEventMetadata,
-      setExecuteModeItems,
+      setExecuteModeItems: setExecuteModeItemsCommitted,
       setDayModes,
       setMapData,
       setMapRotationSettings,
@@ -380,9 +446,6 @@ const App: React.FC = () => {
     },
   });
 
-  // マイグレーション:
-  // 1. 過去バグで mapTab 側に混入した mapless ホール (vertices 空 + blockNames 有) を寄せ直す
-  // 2. 旧 MAPLESS_HALL_KEY ("__mapless__") を日付別キー ("__mapless__:<eventDate>") に分離
   const hallDefinitionsMigratedRef = useRef(false);
   useEffect(() => {
     if (!isInitialized || hallDefinitionsMigratedRef.current) return;
@@ -394,7 +457,6 @@ const App: React.FC = () => {
       for (const eventName of Object.keys(prev)) {
         const byTab = { ...prev[eventName] };
 
-        // Step 1: mapTab 側に混入した mapless ホールを収集
         const maplessById = new Map<string, HallDefinition>();
         for (const h of byTab[MAPLESS_HALL_KEY] ?? []) {
           maplessById.set(h.id, h);
@@ -418,14 +480,11 @@ const App: React.FC = () => {
           }
         }
 
-        // Step 2: 旧 MAPLESS_HALL_KEY を日付別キーに分離
         const collectedMapless = Array.from(maplessById.values());
         if (collectedMapless.length > 0) {
-          // イベントのアイテムから日付リストを取得
           const eventItems = eventLists[eventName] || [];
           const dates = extractEventDates(eventItems);
           if (dates.length > 0) {
-            // 各日付のキーにコピー（既存の日付別キーがなければ）
             for (const date of dates) {
               const dateKey = getMaplessKey(date);
               if (!byTab[dateKey] || byTab[dateKey].length === 0) {
@@ -435,7 +494,6 @@ const App: React.FC = () => {
             }
           }
         }
-        // 旧キーを削除
         if (byTab[MAPLESS_HALL_KEY] != null) {
           delete byTab[MAPLESS_HALL_KEY];
           changed = true;
@@ -446,7 +504,6 @@ const App: React.FC = () => {
       return changed ? next : prev;
     });
 
-    // hallRouteSettings も同様にマイグレーション
     setHallRouteSettings((prev) => {
       let changed = false;
       const next: HallRouteSettingsStore = {};
@@ -581,11 +638,9 @@ const App: React.FC = () => {
       const halls = getHallsForDate(eventDate);
       if (!halls.length) return null;
 
-      // 1. 手動ホール設定が有効なら最優先
       const manual = resolveManualHallId(item.manualHallId, halls);
       if (manual) return manual;
 
-      // 2. 既存のポリゴン判定
       const mapDataForDate = getMapDataForDate(eventDate);
       if (mapDataForDate) {
         const block = mapDataForDate.blocks.find((b) => b.name === item.block);
@@ -600,14 +655,12 @@ const App: React.FC = () => {
         }
       }
 
-      // 3. blockNames フォールバック
       return resolveHallByBlockName(item.block, halls);
     },
     [getHallsForDate, getMapDataForDate],
   );
 
 
-  // ホール+優先度+スペースの境界チェック（個別アイテム移動用）
   const areItemsInSameHall = useCallback(
     (itemId1: string, itemId2: string, eventDate: string): boolean => {
       const item1 = items.find((i) => i.id === itemId1);
@@ -624,7 +677,6 @@ const App: React.FC = () => {
       const priority2 = item2.priorityLevel || 'none';
       if (hallId1 !== hallId2 || priority1 !== priority2) return false;
 
-      // 同一スペース+同一優先度のアイテムが分散配置されないよう、スペースも比較
       const spaceKey1 = getSpaceKey(item1.block, item1.number);
       const spaceKey2 = getSpaceKey(item2.block, item2.number);
       return spaceKey1 === spaceKey2;
@@ -632,7 +684,6 @@ const App: React.FC = () => {
     [items, getHallsForDate, getItemHallId],
   );
 
-  // ホール+優先度の境界チェックのみ（スペースグループ移動用）
   const areItemsInSameHallGroup = useCallback(
     (itemId1: string, itemId2: string, eventDate: string): boolean => {
       const item1 = items.find((i) => i.id === itemId1);
@@ -694,7 +745,6 @@ const App: React.FC = () => {
     [currentFocusSessionKey],
   );
 
-  // 有効な集中モードセッションキーの集合（イベント名×日付）。
   const validFocusSessionKeys = useMemo(() => {
     const keys = new Set<string>();
     Object.entries(eventLists).forEach(([eventName, eventItems]) => {
@@ -705,7 +755,6 @@ const App: React.FC = () => {
     return keys;
   }, [eventLists]);
 
-  // 無効化された集中モードセッションキーを掃除する。
   useEffect(() => {
     setFocusModeSessions((prev) => {
       let changed = false;
@@ -793,7 +842,6 @@ const App: React.FC = () => {
     [activeEventName, currentFocusMapName, updateMapRotationAngle],
   );
 
-  // マップビューポート状態の取得・更新
   const currentMapTabViewport = useMemo((): MapViewportState | undefined => {
     if (!activeEventName || !isMapTab || !currentMapTabName) return undefined;
     return mapViewportSettings[activeEventName]?.[currentMapTabName];
@@ -870,7 +918,6 @@ const App: React.FC = () => {
           [field]: value,
         },
       }));
-      // 設定変更を即時反映するため、強制表示モードを解除する。
       setUiVisibilityOverride(false);
     },
     [setUiVisibilitySettings],
@@ -894,7 +941,7 @@ const App: React.FC = () => {
           ...prevLists,
           [eventName]: sortedItems,
         }));
-        setExecuteModeItems((prev) => ({
+        updateExecuteModeItems((prev) => ({
           ...prev,
           [eventName]: executeModeItems,
         }));
@@ -925,7 +972,7 @@ const App: React.FC = () => {
 
         if (!hasBulkAddLayoutInfo(metadata)) {
           const initialExecuteItems = buildInitialExecuteItemsForBulkAdd(newItems);
-          setExecuteModeItems((prev) => ({
+          updateExecuteModeItems((prev) => ({
             ...prev,
             [eventName]: initialExecuteItems,
           }));
@@ -969,7 +1016,7 @@ const App: React.FC = () => {
           currentItem?.source,
         );
 
-        if (result.purchaseStatusChanged) {
+        if (result.purchaseStatusChanged || result.purchaseQuantityChanged) {
           setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
         }
 
@@ -1002,11 +1049,14 @@ const App: React.FC = () => {
         : selectedItemIds;
       spaceGroupDragItemIdsRef.current = null;
 
-      const currentExecuteItems = executeModeItems[activeEventName]?.[currentEventDate]
-        ? { ...executeModeItems[activeEventName], [currentEventDate]: [...(executeModeItems[activeEventName]?.[currentEventDate] || [])] }
-        : (executeModeItems[activeEventName] || {});
+      const currentEventExecuteItems = executeModeItemsRef.current[activeEventName] || {};
+      const currentExecuteItems = currentEventExecuteItems[currentEventDate]
+        ? {
+            ...currentEventExecuteItems,
+            [currentEventDate]: [...(currentEventExecuteItems[currentEventDate] || [])],
+          }
+        : currentEventExecuteItems;
 
-      // スペースグループ移動 or 複数スペース選択時はスペースチェックを緩和
       const selectionSpansMultipleSpaces = (() => {
         if (effectiveSelectedIds.size <= 1) return false;
         const spaceKeys = new Set<string>();
@@ -1038,7 +1088,7 @@ const App: React.FC = () => {
         setEventLists((prev) => ({ ...prev, [activeEventName]: result.eventListItems! }));
       }
       if (result.executeModeItems) {
-        setExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems! }));
+        updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems! }));
       }
     },
     [
@@ -1062,22 +1112,19 @@ const App: React.FC = () => {
 
       const currentEventDate = activeEventDate;
       const mode = dayModes[activeEventName]?.[currentEventDate];
+      const currentEventExecuteItems = executeModeItemsRef.current[activeEventName] || {};
 
       const spaceGroupIds = spaceGroupDragItemIdsRef.current;
       const isSpaceGroupMove = !!spaceGroupIds;
 
-      // スペースグループ移動（スペース別表示の折りたたみグループ移動 or 個別アイテムのスペース境界越え）
-      // → 選択中の全スペースグループをまとめて入れ替え
       if (mode === 'edit' && targetColumn === 'execute') {
-        const dayItems = [...(executeModeItems[activeEventName]?.[currentEventDate] || [])];
+        const dayItems = [...(currentEventExecuteItems[currentEventDate] || [])];
         const getItemSpaceKey = (id: string): string => {
           const item = items.find((i) => i.id === id);
           return item ? getSpaceKey(item.block, item.number) : '';
         };
 
-        // 選択中のアイテム（spaceGroupIds or selectedItemIds）を考慮して移動ブロックを決定
         const effectiveIds = spaceGroupIds ? new Set(spaceGroupIds) : selectedItemIds;
-        // 移動対象のスペースキー一覧（クリックしたアイテムのスペース＋選択中のアイテムのスペース）
         const movingSpaceKeys = new Set<string>();
         movingSpaceKeys.add(getItemSpaceKey(itemId));
         effectiveIds.forEach((id) => {
@@ -1086,7 +1133,6 @@ const App: React.FC = () => {
           }
         });
 
-        // 移動ブロック：movingSpaceKeysに含まれるスペースの連続した範囲を検出
         const movingIndices = dayItems
           .map((id, idx) => movingSpaceKeys.has(getItemSpaceKey(id)) ? idx : -1)
           .filter((idx) => idx >= 0);
@@ -1095,35 +1141,28 @@ const App: React.FC = () => {
           const movingStart = movingIndices[0];
           const movingEnd = movingIndices[movingIndices.length - 1];
 
-          // 隣接アイテムの検出
           const adjacentIndex = direction === 'up' ? movingStart - 1 : movingEnd + 1;
           if (adjacentIndex >= 0 && adjacentIndex < dayItems.length) {
             const adjacentId = dayItems[adjacentIndex];
             const adjacentSpaceKey = getItemSpaceKey(adjacentId);
 
-            // 隣接アイテムが移動ブロック外かつ異スペースの場合のみ入れ替え
             if (!movingSpaceKeys.has(adjacentSpaceKey)) {
-              // 隣接スペースの連続ブロック範囲を検出
               let adjStart = adjacentIndex;
               let adjEnd = adjacentIndex;
               while (adjStart > 0 && getItemSpaceKey(dayItems[adjStart - 1]) === adjacentSpaceKey) adjStart--;
               while (adjEnd < dayItems.length - 1 && getItemSpaceKey(dayItems[adjEnd + 1]) === adjacentSpaceKey) adjEnd++;
 
-              // 移動ブロックを抜き出して隣接ブロックの前後に挿入
               const movingBlock = dayItems.slice(movingStart, movingEnd + 1);
               const remaining = [...dayItems.slice(0, movingStart), ...dayItems.slice(movingEnd + 1)];
 
-              // 隣接ブロックの位置を残りリストから再検出
               const adjItemIdx = remaining.findIndex((id) => id === adjacentId);
               if (adjItemIdx >= 0) {
                 let insertIdx: number;
                 if (direction === 'up') {
-                  // 上方向：隣接スペースグループの先頭に挿入
                   let targetStart = adjItemIdx;
                   while (targetStart > 0 && getItemSpaceKey(remaining[targetStart - 1]) === adjacentSpaceKey) targetStart--;
                   insertIdx = targetStart;
                 } else {
-                  // 下方向：隣接スペースグループの末尾の次に挿入
                   let targetEnd = adjItemIdx;
                   while (targetEnd < remaining.length - 1 && getItemSpaceKey(remaining[targetEnd + 1]) === adjacentSpaceKey) targetEnd++;
                   insertIdx = targetEnd + 1;
@@ -1131,7 +1170,7 @@ const App: React.FC = () => {
 
                 remaining.splice(insertIdx, 0, ...movingBlock);
 
-                setExecuteModeItems((prev) => ({
+                updateExecuteModeItems((prev) => ({
                   ...prev,
                   [activeEventName]: {
                     ...prev[activeEventName],
@@ -1145,7 +1184,6 @@ const App: React.FC = () => {
         }
       }
 
-      // 通常の個別アイテム移動（同一スペース内）
       const effectiveSelectedIds = spaceGroupIds
         ? new Set(spaceGroupIds)
         : selectedItemIds;
@@ -1160,7 +1198,7 @@ const App: React.FC = () => {
         mode as ViewMode | undefined,
         effectiveSelectedIds,
         eventLists[activeEventName] || [],
-        executeModeItems[activeEventName] || {},
+        currentEventExecuteItems,
         currentEventDate,
         hallCheck,
       );
@@ -1169,7 +1207,7 @@ const App: React.FC = () => {
         setEventLists((prev) => ({ ...prev, [activeEventName]: result.eventListItems! }));
       }
       if (result.executeModeItems) {
-        setExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems! }));
+        updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems! }));
       }
     },
     [
@@ -1198,7 +1236,6 @@ const App: React.FC = () => {
     [handleMoveItemVerticalInternal],
   );
 
-  // 選択されたアイテムIDに同一スペース+同一優先度の全アイテムを自動追加
   const expandToFullSpaceGroups = useCallback(
     (itemIds: string[]): string[] => {
       const expandedSet = new Set(itemIds);
@@ -1227,7 +1264,6 @@ const App: React.FC = () => {
 
       const currentEventDate = activeEventDate;
 
-      // 同一スペース+同一優先度の全アイテムを自動追加
       const expandedIds = expandToFullSpaceGroups(itemIds);
 
       if (
@@ -1245,17 +1281,15 @@ const App: React.FC = () => {
         setRangeEnd(null);
       }
 
-      const newExecuteItems = computeMoveToExecuteColumn(
-        expandedIds,
-        currentEventDate,
-        items,
-        executeModeItems[activeEventName] || {},
-        selectedBlockFilters,
-      );
-
-      setExecuteModeItems((prev) => ({
+      updateExecuteModeItems((prev) => ({
         ...prev,
-        [activeEventName]: newExecuteItems,
+        [activeEventName]: computeMoveToExecuteColumn(
+          expandedIds,
+          currentEventDate,
+          items,
+          prev[activeEventName] || {},
+          selectedBlockFilters,
+        ),
       }));
 
       setSelectedItemIds(new Set());
@@ -1278,7 +1312,6 @@ const App: React.FC = () => {
 
       const currentEventDate = activeEventDate;
 
-      // 同一スペース+同一優先度の全アイテムを自動追加
       const expandedIds = expandToFullSpaceGroups(itemIds);
 
       if (
@@ -1296,15 +1329,13 @@ const App: React.FC = () => {
         setRangeEnd(null);
       }
 
-      const newExecuteItems = computeRemoveFromExecuteColumn(
-        expandedIds,
-        executeModeItems[activeEventName] || {},
-        currentEventDate,
-      );
-
-      setExecuteModeItems((prev) => ({
+      updateExecuteModeItems((prev) => ({
         ...prev,
-        [activeEventName]: newExecuteItems,
+        [activeEventName]: computeRemoveFromExecuteColumn(
+          expandedIds,
+          prev[activeEventName] || {},
+          currentEventDate,
+        ),
       }));
 
       setSelectedItemIds(new Set());
@@ -1398,7 +1429,7 @@ const App: React.FC = () => {
     (eventName: string) => {
       setEventLists((prev) => removeRecordKey(prev, eventName));
       setEventMetadata((prev) => removeRecordKey(prev, eventName));
-      setExecuteModeItems((prev) => removeRecordKey(prev, eventName));
+      updateExecuteModeItems((prev) => removeRecordKey(prev, eventName));
       setDayModes((prev) => removeRecordKey(prev, eventName));
       setMapData((prev) => removeRecordKey(prev, eventName));
       setMapRotationSettings((prev) => removeRecordKey(prev, eventName));
@@ -1440,7 +1471,7 @@ const App: React.FC = () => {
 
       setDayModes((prev) => renameRecordKey(prev, eventToRename, newName));
 
-      setExecuteModeItems((prev) => renameRecordKey(prev, eventToRename, newName));
+      updateExecuteModeItems((prev) => renameRecordKey(prev, eventToRename, newName));
 
 
       setMapData((prev) => renameRecordKey(prev, eventToRename, newName));
@@ -1596,11 +1627,11 @@ const App: React.FC = () => {
     const result = computeDeleteItem(
       eventLists[activeEventName] || [],
       itemToDelete.id,
-      executeModeItems[activeEventName] || {},
+      executeModeItemsRef.current[activeEventName] || {},
     );
 
     setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
-    setExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
+    updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
     setItemToDelete(null);
   };
 
@@ -1663,13 +1694,11 @@ const App: React.FC = () => {
     ],
   );
 
-  // 折りたたみスペースグループのチェックボックス用：範囲選択対応
   const handleSelectSpaceGroupForRange = useCallback(
     (firstItemId: string, allItemIds: string[], columnType: 'execute' | 'candidate') => {
       setSortState('Manual');
       setBlockSortDirection(null);
 
-      // 隣接グループ判定用：現在のカラムのアイテムからスペースグループ順を算出
       const currentEventDate = activeEventDate;
       selectSpaceGroupForRange(
         firstItemId,
@@ -1681,15 +1710,13 @@ const App: React.FC = () => {
     [activeEventDate, getListColumnItems, selectSpaceGroupForRange],
   );
 
-  // スペース別グループ化の状態。
   const spaceGroupDragItemIdsRef = useRef<string[] | null>(null);
 
-  // 実行モード用スペース別グループ化の状態（編集モードとは独立）
   const [showPostponeFilterButton, setShowPostponeFilterButton] = useState(false);
   const [showLateFilterButton, setShowLateFilterButton] = useState(false);
-  const executeSpaceGroupOrderRef = useRef<string[]>([]); // ShoppingListから通知される表示順序
-  const executeColumnItemsRef = useRef<ShoppingItem[]>([]); // handleExecuteItemUpdate用
-  const recentlyChangedItemIdsRef = useRef<Set<string>>(new Set()); // Postponeフィルタ内可視アイテム判定用
+  const executeSpaceGroupOrderRef = useRef<string[]>([]);
+  const executeColumnItemsRef = useRef<ShoppingItem[]>([]);
+  const recentlyChangedItemIdsRef = useRef<Set<string>>(new Set());
 
   const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
     'asc' | 'desc' | null
@@ -1816,12 +1843,10 @@ const App: React.FC = () => {
     }
   }, [items, activeEventDate]);
 
-  // 実行モード用スペース折りたたみトグル
   const handleExecuteToggleSpaceCollapse = useCallback((spaceKey: string) => {
     toggleExecuteCollapsedSpace(spaceKey);
   }, [toggleExecuteCollapsedSpace]);
 
-  // 実行モード用全スペース折りたたみ/展開
   const handleExecuteToggleAllSpaceCollapse = useCallback((collapse: boolean) => {
     if (!collapse) {
       setExecuteCollapsedSpaces(new Set());
@@ -1843,7 +1868,6 @@ const App: React.FC = () => {
     }
   }, [activeEventName, activeEventDate, executeModeItems, items]);
 
-  // 実行モード用スペース内全アイテム一括ステータス変更（トグル動作）
   const handleBulkStatusChange = useCallback(
     (groupKey: string, targetStatus: PurchaseStatus, groupItems: ShoppingItem[]) => {
       if (!activeEventName) return;
@@ -1854,9 +1878,13 @@ const App: React.FC = () => {
         const groupItemIds = new Set(groupItems.map((item) => item.id));
         return {
           ...prev,
-          [activeEventName]: allItems.map((item) =>
-            groupItemIds.has(item.id) ? { ...item, purchaseStatus: newStatus } : item,
-          ),
+          [activeEventName]: allItems.map((item) => {
+            if (!groupItemIds.has(item.id)) return item;
+            if (targetStatus === 'LimitedPurchase' || item.purchaseStatus === 'LimitedPurchase') {
+              return item;
+            }
+            return clearLimitedPurchase({ ...item, purchaseStatus: newStatus });
+          }),
         };
       });
       // recentlyChangedItemIds に追加
@@ -1866,7 +1894,6 @@ const App: React.FC = () => {
         return next;
       });
 
-      // 最下段グループの一括変更で全アイテム非未購入→後回しフィルタボタン表示
       if (sortState === 'Manual' && newStatus !== 'None') {
         const groupOrder = executeSpaceGroupOrderRef.current;
         if (groupOrder.length > 0 && groupKey === groupOrder[groupOrder.length - 1]) {
@@ -1879,17 +1906,14 @@ const App: React.FC = () => {
         }
       }
 
-      // 後回しフィルタ中: 最下段グループの一括変更で全可視アイテム非未購入→遅参フィルタボタン表示
       if (sortState === 'Postpone' && newStatus !== 'None') {
         const groupOrder = executeSpaceGroupOrderRef.current;
         if (groupOrder.length > 0 && groupKey === groupOrder[groupOrder.length - 1]) {
           const currentItems = executeColumnItemsRef.current;
           const groupItemIds = new Set(groupItems.map((item) => item.id));
           const recentIds = recentlyChangedItemIdsRef.current;
-          // Postponeフィルタ内の可視アイテム（グループ外）が全て非Noneか判定
           const allVisibleNonNone = currentItems.every((item) => {
-            if (groupItemIds.has(item.id)) return true; // グループ内はnewStatus(非None)になる
-            // 可視でないアイテムはスキップ
+            if (groupItemIds.has(item.id)) return true;
             if (item.purchaseStatus !== 'Postpone' && !recentIds.has(item.id)) return true;
             return item.purchaseStatus !== 'None';
           });
@@ -1900,12 +1924,10 @@ const App: React.FC = () => {
     [activeEventName, sortState],
   );
 
-  // 実行モード用アイテム更新ラッパー
   const handleExecuteItemUpdate = useCallback(
     (updatedItem: ShoppingItem) => {
       handleUpdateItem(updatedItem);
 
-      // 最下段アイテムのステータス変更で全アイテム非未購入→フィルタボタン表示
       if (sortState !== 'Manual' && sortState !== 'Postpone') return;
       if (updatedItem.purchaseStatus === 'None') return;
 
@@ -1913,7 +1935,6 @@ const App: React.FC = () => {
       if (groupOrder.length === 0) return;
       const lastGroupKey = groupOrder[groupOrder.length - 1];
 
-      // このアイテムのgroupKeyを計算
       const spaceKey = getSpaceKey(updatedItem.block, updatedItem.number);
       const priority = updatedItem.priorityLevel || 'none';
       const itemGroupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
@@ -1922,7 +1943,6 @@ const App: React.FC = () => {
       const currentItems = executeColumnItemsRef.current;
 
       if (sortState === 'Manual') {
-        // Manual: 最後のグループ内の最後のアイテムか判定
         const lastGroupItems = currentItems.filter((item) => {
           const sk = getSpaceKey(item.block, item.number);
           const p = item.priorityLevel || 'none';
@@ -1930,13 +1950,11 @@ const App: React.FC = () => {
         });
         if (lastGroupItems[lastGroupItems.length - 1]?.id !== updatedItem.id) return;
 
-        // 全アイテムが非Noneになるか
         const allNonNone = currentItems.every(
           (item) => item.id === updatedItem.id || item.purchaseStatus !== 'None',
         );
         if (allNonNone) setShowPostponeFilterButton(true);
       } else {
-        // Postpone: 可視アイテム内の最後のグループの最後のアイテムか判定
         const recentIds = recentlyChangedItemIdsRef.current;
         const visibleLastGroupItems = currentItems.filter((item) => {
           const sk = getSpaceKey(item.block, item.number);
@@ -1947,9 +1965,8 @@ const App: React.FC = () => {
         });
         if (visibleLastGroupItems[visibleLastGroupItems.length - 1]?.id !== updatedItem.id) return;
 
-        // 全可視アイテムが非Noneになるか
         const allVisibleNonNone = currentItems.every((item) => {
-          if (item.id === updatedItem.id) return true; // 更新アイテムは非None確定
+          if (item.id === updatedItem.id) return true;
           if (item.purchaseStatus !== 'Postpone' && !recentIds.has(item.id)) return true;
           return item.purchaseStatus !== 'None';
         });
@@ -1959,26 +1976,22 @@ const App: React.FC = () => {
     [handleUpdateItem, sortState],
   );
 
-  // 後回しフィルタボタンのクリックで後回しフィルタを有効化
   const handleActivatePostponeFilter = useCallback(() => {
     setRecentlyChangedItemIds(new Set());
     setSortState('Postpone');
     setShowPostponeFilterButton(false);
   }, []);
 
-  // 遅参フィルタボタンのクリックで遅参フィルタを有効化
   const handleActivateLateFilter = useCallback(() => {
     setRecentlyChangedItemIds(new Set());
     setSortState('Late');
     setShowLateFilterButton(false);
   }, []);
 
-  // ShoppingListからスペースグループの表示順序を受け取るコールバック
   const handleExecuteSpaceGroupOrderChange = useCallback((orderedGroupKeys: string[]) => {
     executeSpaceGroupOrderRef.current = orderedGroupKeys;
   }, []);
 
-  // 現スペース折りたたみ＋次スペース展開
   const handleCollapseAndOpenNext = useCallback((currentGroupKey: string) => {
     const order = executeSpaceGroupOrderRef.current;
     const currentIndex = order.indexOf(currentGroupKey);
@@ -2034,7 +2047,7 @@ const App: React.FC = () => {
         const isInCandidateColumn = selectedItems.some((item) => !executeIds.has(item.id));
 
         if (isInExecuteColumn && !isInCandidateColumn) {
-          setExecuteModeItems((prev) => {
+          updateExecuteModeItems((prev) => {
             const eventItems = prev[activeEventName] || {};
             const dayItems = [...(eventItems[currentEventDate] || [])];
 
@@ -2304,7 +2317,7 @@ const App: React.FC = () => {
 
         if (importedData.executeModeItems) {
           const executeItems = importedData.executeModeItems;
-          setExecuteModeItems((prev) => upsertRecordKey(prev, eventName, executeItems));
+          updateExecuteModeItems((prev) => upsertRecordKey(prev, eventName, executeItems));
         }
         if (importedData.dayModes) {
           const importedDayModes = importedData.dayModes;
@@ -2406,7 +2419,7 @@ const App: React.FC = () => {
     });
 
 
-    setExecuteModeItems((prev) => {
+    updateExecuteModeItems((prev) => {
       const eventItems = prev[eventName];
       if (!eventItems) return prev;
 
@@ -2575,44 +2588,42 @@ const App: React.FC = () => {
       };
       const currentMapData = mapData[activeEventName]?.[currentMapTabName];
 
+      const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
       const newExecuteItems = computeAddToExecuteListFromMap(
         itemId,
         dayName,
         items,
-        executeModeItems[activeEventName] || {},
+        currentForEvent,
         halls,
         hallRouteSettingsForMap,
         currentMapData,
       );
 
-      setExecuteModeItems((prev) => ({
-        ...prev,
-        [activeEventName]: newExecuteItems,
-      }));
+      commitExecuteModeItemsForEvent(activeEventName, newExecuteItems);
     },
-    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, executeModeItems],
+    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, commitExecuteModeItemsForEvent],
   );
 
 
   const handleAddToExecuteListFromMapAtPosition = useCallback(
-    (itemId: string, referenceItemId: string, position: 'before' | 'after') => {
-      if (!activeEventName || !isMapTab || !activeEventDate) return;
+    (itemId: string, referenceItemId: string, position: 'before' | 'after'): boolean => {
+      if (!activeEventName || !isMapTab || !activeEventDate) return false;
 
       const dayName = activeEventDate;
-      const newExecuteItems = computeAddToExecuteListFromMapAtPosition(
+      const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
+      const result = computeAddToExecuteListFromMapAtPositionStrict(
         itemId,
         referenceItemId,
         position,
-        executeModeItems[activeEventName] || {},
+        currentForEvent,
         dayName,
       );
+      if (!result.accepted) return false;
 
-      setExecuteModeItems((prev) => ({
-        ...prev,
-        [activeEventName]: newExecuteItems,
-      }));
+      commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
+      return true;
     },
-    [activeEventName, activeEventDate, isMapTab, executeModeItems],
+    [activeEventName, activeEventDate, isMapTab, commitExecuteModeItemsForEvent],
   );
 
 
@@ -2621,18 +2632,16 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !activeEventDate) return;
 
       const dayName = activeEventDate;
+      const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
       const newExecuteItems = computeRemoveFromExecuteListFromMap(
         itemId,
-        executeModeItems[activeEventName] || {},
+        currentForEvent,
         dayName,
       );
 
-      setExecuteModeItems((prev) => ({
-        ...prev,
-        [activeEventName]: newExecuteItems,
-      }));
+      commitExecuteModeItemsForEvent(activeEventName, newExecuteItems);
     },
-    [activeEventName, activeEventDate, isMapTab, executeModeItems],
+    [activeEventName, activeEventDate, isMapTab, commitExecuteModeItemsForEvent],
   );
 
 
@@ -2647,40 +2656,49 @@ const App: React.FC = () => {
       };
       const currentMap = mapData[activeEventName]?.[currentMapTabName];
 
-      setExecuteModeItems((prev) => {
-        let current = prev[activeEventName] || {};
+      {
+        let current = executeModeItemsRef.current[activeEventName] || {};
         for (const id of itemIds) {
           current = computeAddToExecuteListFromMap(id, dayName, items, current, halls, hallRouteSettingsForMap, currentMap);
         }
-        return { ...prev, [activeEventName]: current };
-      });
+        commitExecuteModeItemsForEvent(activeEventName, current);
+      }
     },
-    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData],
+    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, commitExecuteModeItemsForEvent],
   );
 
 
   const handleBatchAddToExecuteListFromMapAtPosition = useCallback(
-    (itemIds: string[], referenceItemId: string, position: 'before' | 'after') => {
-      if (!activeEventName || !isMapTab || !activeEventDate) return;
+    (itemIds: string[], referenceItemId: string, position: 'before' | 'after'): boolean => {
+      if (!activeEventName || !isMapTab || !activeEventDate) return false;
       const dayName = activeEventDate;
 
-      setExecuteModeItems((prev) => {
-        let current = prev[activeEventName] || {};
-        if (position === 'before') {
-          for (let i = itemIds.length - 1; i >= 0; i--) {
-            current = computeAddToExecuteListFromMapAtPosition(itemIds[i], referenceItemId, 'before', current, dayName);
-          }
-        } else {
-          let ref = referenceItemId;
-          for (const id of itemIds) {
-            current = computeAddToExecuteListFromMapAtPosition(id, ref, 'after', current, dayName);
-            ref = id;
-          }
+      let current = executeModeItemsRef.current[activeEventName] || {};
+      if (position === 'before') {
+        for (const id of itemIds) {
+          const result = computeAddToExecuteListFromMapAtPositionStrict(
+            id,
+            referenceItemId,
+            'before',
+            current,
+            dayName,
+          );
+          if (!result.accepted) return false;
+          current = result.executeModeItems;
         }
-        return { ...prev, [activeEventName]: current };
-      });
+      } else {
+        let ref = referenceItemId;
+        for (const id of itemIds) {
+          const result = computeAddToExecuteListFromMapAtPositionStrict(id, ref, 'after', current, dayName);
+          if (!result.accepted) return false;
+          current = result.executeModeItems;
+          ref = id;
+        }
+      }
+      commitExecuteModeItemsForEvent(activeEventName, current);
+      return true;
     },
-    [activeEventName, activeEventDate, isMapTab],
+    [activeEventName, activeEventDate, isMapTab, commitExecuteModeItemsForEvent],
   );
 
 
@@ -2689,15 +2707,13 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !activeEventDate) return;
       const dayName = activeEventDate;
 
-      setExecuteModeItems((prev) => {
-        let current = prev[activeEventName] || {};
-        for (const id of itemIds) {
-          current = computeRemoveFromExecuteListFromMap(id, current, dayName);
-        }
-        return { ...prev, [activeEventName]: current };
-      });
+      let current = executeModeItemsRef.current[activeEventName] || {};
+      for (const id of itemIds) {
+        current = computeRemoveFromExecuteListFromMap(id, current, dayName);
+      }
+      commitExecuteModeItemsForEvent(activeEventName, current);
     },
-    [activeEventName, activeEventDate, isMapTab],
+    [activeEventName, activeEventDate, isMapTab, commitExecuteModeItemsForEvent],
   );
 
 
@@ -2718,11 +2734,11 @@ const App: React.FC = () => {
       const result = computeAddItemFromFocusMode(
         eventLists[activeEventName] || [],
         newItem,
-        executeModeItems[activeEventName] || {},
+        executeModeItemsRef.current[activeEventName] || {},
       );
 
       setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
-      setExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
+      updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
     },
     [activeEventName, eventLists, executeModeItems],
   );
@@ -2735,7 +2751,7 @@ const App: React.FC = () => {
       if (!activeEventDate) return;
       const dayName = activeEventDate;
 
-      setExecuteModeItems((prev) => {
+      updateExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
         const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
 
@@ -2759,7 +2775,7 @@ const App: React.FC = () => {
       if (!activeEventDate) return;
       const dayName = activeEventDate;
 
-      setExecuteModeItems((prev) => {
+      updateExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
         const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
 
@@ -2797,7 +2813,6 @@ const App: React.FC = () => {
     top: 0,
   });
 
-  // ヘッダーマップトグルボタンの長押しメニュー外クリックで閉じる
   React.useEffect(() => {
     if (mapTabMenuOpen !== 'mapToggle') return;
     const handleClickOutside = (e: MouseEvent) => {
@@ -2833,17 +2848,16 @@ const App: React.FC = () => {
   const [mapSmartInsertEnabled, setMapSmartInsertEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('mapSmartInsertEnabled');
-      return saved !== null ? saved === 'true' : true; // 保存値が存在しない場合は有効を既定値として扱う。
+      return saved !== null ? saved === 'true' : true;
     } catch {
       return true;
     }
   });
-  const [mapSmartInsertMode, setMapSmartInsertMode] = useState<'card' | 'preview'>(() => {
+  const [mapSmartInsertMode, setMapSmartInsertMode] = useState<SmartInsertMode>(() => {
     try {
-      const saved = localStorage.getItem('mapSmartInsertMode');
-      return saved === 'card' || saved === 'preview' ? saved : 'card';
+      return normalizeSmartInsertMode(localStorage.getItem('mapSmartInsertMode'));
     } catch {
-      return 'card';
+      return 'map';
     }
   });
   const [smartInsertToast, setSmartInsertToast] = useState<string | null>(null);
@@ -2959,7 +2973,7 @@ const App: React.FC = () => {
       const newIds = newOrderItems.map((item) => item.id);
 
 
-      setExecuteModeItems((prev) => ({
+      updateExecuteModeItems((prev) => ({
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
@@ -2987,7 +3001,7 @@ const App: React.FC = () => {
 
 
     if (visitListOriginalOrder.length > 0) {
-      setExecuteModeItems((prev) => ({
+      updateExecuteModeItems((prev) => ({
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
@@ -3076,11 +3090,10 @@ const App: React.FC = () => {
         },
       }));
 
-      // 優先度変更後、同一スペースの兄弟と隣接するようにexecuteIds内の位置を調整
       const item = items.find((i) => i.id === itemId);
       if (item) {
         const dayName = item.eventDate;
-        setExecuteModeItems((prev) => {
+        updateExecuteModeItems((prev) => {
           const currentExecItems = prev[activeEventName] || {};
           const reordered = reorderExecuteIdsForSpaceAdjacency(
             itemId,
@@ -3098,8 +3111,6 @@ const App: React.FC = () => {
     [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData, hallRouteSettings],
   );
 
-  // マップビュー等から直接呼び出される優先度変更（items + hallOrder の両方を更新）。
-  // 編集ダイアログ経由ではない単独呼び出しなので race condition は発生しない。
   const handleUpdateItemPriorityFromEdit = useCallback(
     (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
       if (!activeEventName) return;
@@ -3148,9 +3159,8 @@ const App: React.FC = () => {
         },
       }));
 
-      // 優先度変更後、同一スペースの兄弟と隣接するようにexecuteIds内の位置を調整
       const dayName = item.eventDate;
-      setExecuteModeItems((prev) => {
+      updateExecuteModeItems((prev) => {
         const currentExecItems = prev[activeEventName] || {};
         const reordered = reorderExecuteIdsForSpaceAdjacency(
           itemId,
@@ -3175,11 +3185,6 @@ const App: React.FC = () => {
     ],
   );
 
-  // 編集ダイアログからの優先度変更に伴う hallRouteSettings.hallOrder の更新のみを行う。
-  // アイテム本体 (priorityLevel) の更新は handleUpdateItem 経由の onSave に統合済み。
-  // 旧 handleUpdateItemPriorityFromEdit は items と hallRouteSettings の両方に setEventLists を発行しており、
-  // 同期クロージャ由来の race condition で priority が巻き戻るバグの原因だったため、
-  // items 側を触らない形に縮退させた。
   const handleUpdateHallOrderForPriorityChangeFromEdit = useCallback(
     (
       itemId: string,
@@ -3192,10 +3197,8 @@ const App: React.FC = () => {
       const item = currentItems.find((i) => i.id === itemId);
       if (!item) return;
 
-      // 統合ホール判定でアイテムの所属ホールを解決（manualHallId → polygon → blockNames）
       const resolvedHallId = getItemHallId(item, item.eventDate);
 
-      // 解決されたホールが map タブ側か mapless 側かを判定して保存先を決定
       const mapTabForItem = getMapTabForDate(item.eventDate);
       const mapHallIds = new Set(
         mapTabForItem
@@ -3217,7 +3220,6 @@ const App: React.FC = () => {
         hallVisitLists: [],
       };
 
-      // priority 変更後のアイテム状態を反映した allItems を渡す（hallOrder 計算のため）
       const itemsAfter = currentItems.map((i) =>
         i.id === itemId ? { ...i, priorityLevel: newPriorityLevel } : i,
       );
@@ -3240,9 +3242,8 @@ const App: React.FC = () => {
         },
       }));
 
-      // 優先度変更後、同一スペースの兄弟と隣接するようにexecuteIds内の位置を調整
       const dayName = item.eventDate;
-      setExecuteModeItems((prev) => {
+      updateExecuteModeItems((prev) => {
         const currentExecItems = prev[activeEventName] || {};
         const reordered = reorderExecuteIdsForSpaceAdjacency(
           itemId,
@@ -3366,7 +3367,6 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, currentMapTabName],
   );
 
-  // マップなしホール定義の更新ハンドラ
   const handleUpdateMaplessHalls = useCallback(
     (halls: HallDefinition[]) => {
       if (!activeEventName || !activeEventDate) return;
@@ -3394,13 +3394,11 @@ const App: React.FC = () => {
     [activeEventName, activeEventDate],
   );
 
-  // マップタブが存在する日付一覧
   const mapTabDates = useMemo(
     () => eventDates.filter((date) => !!getMapTabForDate(date)),
     [eventDates, getMapTabForDate],
   );
 
-  // マップなしホール定義を他の日付に同期
   const handleSyncMaplessHallsToOtherDates = useCallback(
     (targetDates: string[]) => {
       if (!activeEventName || !activeEventDate) return;
@@ -3434,7 +3432,6 @@ const App: React.FC = () => {
     [activeEventName, activeEventDate, hallDefinitions, hallRouteSettings],
   );
 
-  // ポリゴンホール定義を他の日付に同期
   const handleSyncPolygonHallsToOtherDates = useCallback(
     (targetDates: string[]) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
@@ -3473,16 +3470,12 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, currentMapTabName, hallDefinitions, hallRouteSettings, getMapTabForDate],
   );
 
-  // ===== ホール間移動順序パネル用: マップ/maplessの統合ビュー =====
 
-  // 現在日付のマップタブ名（mapViewActive問わず、その日付にマップがあるか）
   const globalHallOrderMapTabName = useMemo(
     () => (activeEventDate ? getMapTabForDate(activeEventDate) : null),
     [activeEventDate, getMapTabForDate],
   );
 
-  // 現在日付の実行列に優先度付きアイテムが 1 件でもあるか
-  // (ホール定義 0 件でも「ホール間移動順序」アイコンを出すための条件)
   const hasUndefinedPriorityItems = useMemo((): boolean => {
     if (!activeEventName || !activeEventDate) return false;
     const ids = executeModeItems[activeEventName]?.[activeEventDate] || [];
@@ -3494,7 +3487,6 @@ const App: React.FC = () => {
     });
   }, [activeEventName, activeEventDate, executeModeItems, items]);
 
-  // マップ/maplessの両方を統合したホール一覧
   const globalHallOrderHalls = useMemo((): HallDefinition[] => {
     if (!activeEventName) return [];
     const hasMap = !!globalHallOrderMapTabName;
@@ -3506,7 +3498,6 @@ const App: React.FC = () => {
     return [...mapHalls, ...maplessHalls];
   }, [activeEventName, activeEventDate, globalHallOrderMapTabName, hallDefinitions]);
 
-  // マップ/mapless統合されたHallRouteSettings（hallOrderのマージ）
   const globalHallOrderRouteSettings = useMemo((): HallRouteSettings => {
     const executeIds =
       activeEventName && activeEventDate
@@ -3572,7 +3563,6 @@ const App: React.FC = () => {
     [activeEventName, activeEventDate, globalHallOrderMapTabName, hallDefinitions],
   );
 
-  // 統合ホール用アイテム数集計（groupId対応）
   const getGlobalHallItemCount = useCallback(
     (groupId: string): number => {
       if (!activeEventName || !activeEventDate) return 0;
@@ -3613,9 +3603,8 @@ const App: React.FC = () => {
         hallRouteSettings,
       });
 
-      // ホール定義 0 件でも未定義+優先度バケットで並べ替え可能にするため早期 return しない
 
-      setExecuteModeItems((prev) => {
+      updateExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
         const dayItems = [...(eventItems[dayName] || [])];
 
@@ -3754,7 +3743,7 @@ const App: React.FC = () => {
   const handleStartCellSelection = useCallback(
     (type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual', editingData?: unknown) => {
       setCellSelectionMode({ type, clickedCells: [], editingBlockData: editingData });
-      setBlockDefinitionMode(false); // セル選択モード中はブロック定義パネルを閉じる。
+      setBlockDefinitionMode(false);
     },
     [],
   );
@@ -3769,20 +3758,20 @@ const App: React.FC = () => {
       });
     }
     setCellSelectionMode(null);
-    setBlockDefinitionMode(true); // セル選択を確定したらブロック定義パネルを再表示する。
+    setBlockDefinitionMode(true);
   }, [cellSelectionMode]);
 
 
   const handleCancelCellSelection = useCallback(() => {
     if (cellSelectionMode?.editingBlockData) {
       setPendingCellSelection({
-        type: 'cancelled', // 編集キャンセルとして確認ダイアログへ引き渡す。
+        type: 'cancelled',
         cells: [],
         editingData: cellSelectionMode.editingBlockData,
       });
     }
     setCellSelectionMode(null);
-    setBlockDefinitionMode(true); // セル選択を終了したらブロック定義パネルを再表示する。
+    setBlockDefinitionMode(true);
   }, [cellSelectionMode]);
 
 
@@ -3888,23 +3877,20 @@ const App: React.FC = () => {
     return executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
   }, [activeEventName, activeTab, executeModeItems, items, eventDates]);
 
-  // handleExecuteItemUpdate用にrefを同期
   useEffect(() => {
     executeColumnItemsRef.current = executeColumnItems;
   }, [executeColumnItems]);
 
-  // recentlyChangedItemIdsのref同期（Postponeフィルタ内可視アイテム判定用）
   useEffect(() => {
     recentlyChangedItemIdsRef.current = recentlyChangedItemIds;
   }, [recentlyChangedItemIds]);
 
-  // フィルタボタンのフラグリセット（モード変更・フィルタ変更時）
   useEffect(() => {
     setShowPostponeFilterButton(false);
     setShowLateFilterButton(false);
   }, [currentMode, sortState]);
 
-  const visibleItems = useMemo(() => {
+  const baseFilteredItems = useMemo(() => {
     const currentEventDate = activeEventDate;
     const itemsForTab = currentTabItems;
 
@@ -3917,9 +3903,7 @@ const App: React.FC = () => {
         return executeColumnItems;
       }
       const filterStatus = sortState as Exclude<SortState, 'Manual'>;
-      return executeColumnItems.filter(
-        (item) => item.purchaseStatus === filterStatus || recentlyChangedItemIds.has(item.id),
-      );
+      return executeColumnItems.filter((item) => matchesPurchaseStatusFilter(item, filterStatus));
     }
 
 
@@ -3932,7 +3916,85 @@ const App: React.FC = () => {
     dayModes,
     executeColumnItems,
     eventDates,
+  ]);
+
+  const baseFilteredItemIds = useMemo(
+    () => new Set(baseFilteredItems.map((item) => item.id)),
+    [baseFilteredItems],
+  );
+
+  const temporaryVisibleItems = useMemo(() => {
+    if (!activeEventName) return [];
+    const mode = dayModes[activeEventName]?.[activeEventDate];
+    if (mode !== 'execute' || sortState === 'Manual') return [];
+
+    return executeColumnItems.filter(
+      (item) => recentlyChangedItemIds.has(item.id) && !baseFilteredItemIds.has(item.id),
+    );
+  }, [
+    activeEventDate,
+    activeEventName,
+    baseFilteredItemIds,
+    dayModes,
+    executeColumnItems,
     recentlyChangedItemIds,
+    sortState,
+  ]);
+
+  const temporaryVisibleCount = temporaryVisibleItems.length;
+  const limitedCounts = useMemo(() => getLimitedPurchaseCounts(baseFilteredItems), [baseFilteredItems]);
+
+  const sortDisplayLabel = useMemo(() => {
+    const buildTemporaryLabel = (baseLabel: string): string =>
+      temporaryVisibleCount > 0
+        ? `${baseLabel}\uFF08\u4E00\u6642\u8868\u793A${temporaryVisibleCount}\u4EF6\uFF09`
+        : baseLabel;
+
+    if (sortState !== 'LimitedPurchase') {
+      return buildTemporaryLabel(sortLabels[sortState]);
+    }
+
+    const details = [
+      limitedCounts.missing > 0 ? `\u672A\u5165\u529B${limitedCounts.missing}` : null,
+      temporaryVisibleCount > 0
+        ? `\u4E00\u6642\u8868\u793A${temporaryVisibleCount}`
+        : null,
+    ].filter(Boolean);
+
+    return details.length > 0
+      ? `\u9650\u6570 ${limitedCounts.total}\u4EF6\uFF08${details.join('\u30FB')}\uFF09`
+      : `\u9650\u6570 ${limitedCounts.total}\u4EF6`;
+  }, [limitedCounts.missing, limitedCounts.total, sortState, temporaryVisibleCount]);
+
+  const visibleItemIds = useMemo(() => {
+    const currentEventDate = activeEventDate;
+    if (!activeEventName) return new Set(baseFilteredItems.map((item) => item.id));
+    const mode = dayModes[activeEventName]?.[currentEventDate];
+    if (mode !== 'execute' || sortState === 'Manual') {
+      return new Set(baseFilteredItems.map((item) => item.id));
+    }
+
+    return new Set([
+      ...baseFilteredItems.map((item) => item.id),
+      ...temporaryVisibleItems.map((item) => item.id),
+    ]);
+  }, [activeEventDate, activeEventName, baseFilteredItems, dayModes, sortState, temporaryVisibleItems]);
+
+  const visibleItems = useMemo(() => {
+    if (!activeEventName) return currentTabItems;
+    const mode = dayModes[activeEventName]?.[activeEventDate];
+    if (mode === 'execute') {
+      return executeColumnItems.filter((item) => visibleItemIds.has(item.id));
+    }
+    return baseFilteredItems;
+  }, [
+    activeEventDate,
+    activeEventName,
+    baseFilteredItems,
+    currentTabItems,
+    dayModes,
+    executeColumnItems,
+    visibleItemIds,
   ]);
 
 
@@ -4028,7 +4090,6 @@ const App: React.FC = () => {
     });
   }, [activeEventName, activeTab, executeModeItems, currentTabItems, eventDates]);
 
-  // ホール定義用: 当該日付の全アイテムからブロック名一覧を取得（実行列・候補列を問わず）
   const allBlocksForHallDefinition = useMemo(() => {
     if (!activeEventName) return [];
     const blocks = new Set(currentTabItems.map((item) => item.block).filter(Boolean));
@@ -4042,7 +4103,6 @@ const App: React.FC = () => {
     });
   }, [activeEventName, currentTabItems]);
 
-  // 現在のイベント・日付のマップなしホール一覧
   const currentMaplessHalls = useMemo(() => {
     if (!activeEventName || !activeEventDate) return [];
     return hallDefinitions[activeEventName]?.[getMaplessKey(activeEventDate)] || [];
@@ -4209,8 +4269,13 @@ const App: React.FC = () => {
         currentSearchIndex={currentSearchIndex}
         DEFAULT_OUTLINE_STYLE={DEFAULT_OUTLINE_STYLE}
         DEFAULT_PURCHASE_STATUS_CONTROL_MODE={DEFAULT_PURCHASE_STATUS_CONTROL_MODE}
+        DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY={
+          DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY
+        }
         DEFAULT_UI_VISIBILITY={DEFAULT_UI_VISIBILITY}
         disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+        disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
+        skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
         eventDates={eventDates}
         executeSpaceGroupingEnabled={executeSpaceGroupingEnabled}
         getHallExecuteCount={getHallExecuteCount}
@@ -4272,6 +4337,8 @@ const App: React.FC = () => {
         setMapTabMenuPosition={setMapTabMenuPosition}
         setMapViewActive={setMapViewActive}
         setDisablePriceUndefinedCheck={setDisablePriceUndefinedCheck}
+        setDisableLimitedPurchaseQuantityCheck={setDisableLimitedPurchaseQuantityCheck}
+        setSkipLimitedPurchaseForSingleQuantity={setSkipLimitedPurchaseForSingleQuantity}
         setNumberCellOutlineStyle={setNumberCellOutlineStyle}
         setPurchaseStatusControlMode={setPurchaseStatusControlMode}
         setSearchKeyword={setSearchKeyword}
@@ -4289,6 +4356,7 @@ const App: React.FC = () => {
         smartInsertLongPressRef={smartInsertLongPressRef}
         smartInsertLongPressTriggeredRef={smartInsertLongPressTriggeredRef}
         sortLabels={sortLabels}
+        sortDisplayLabel={sortDisplayLabel}
         sortState={sortState}
         TabButton={TabButton}
         themeMode={themeMode}
@@ -4376,6 +4444,8 @@ const App: React.FC = () => {
         currentMapTabViewport={currentMapTabViewport}
         currentMode={currentMode}
         disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+        disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
+        skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
         duplicateCircleItemIds={duplicateCircleItemIds}
         eventDates={eventDates}
         eventLists={eventLists}
@@ -4583,6 +4653,7 @@ const App: React.FC = () => {
         visibleItems={visibleItems}
         showHeaderBar={showHeaderBar}
         sortLabels={sortLabels}
+        sortDisplayLabel={sortDisplayLabel}
         sortState={sortState}
         handleSortToggle={handleSortToggle}
         zoomLevel={zoomLevel}

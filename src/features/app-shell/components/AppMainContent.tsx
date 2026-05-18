@@ -29,6 +29,7 @@ import type {
   CellSelectionMode,
   LayoutMode,
   RangeSelectionState,
+  SmartInsertMode,
   VertexGuideOptions,
   VertexSelectionMode,
 } from '../types';
@@ -62,6 +63,8 @@ type AppMainContentProps = {
   currentMapTabViewport: MapViewportState | undefined;
   currentMode: ViewMode;
   disablePriceUndefinedCheck: boolean;
+  disableLimitedPurchaseQuantityCheck: boolean;
+  skipLimitedPurchaseForSingleQuantity: boolean;
   duplicateCircleItemIds: Set<string>;
   eventDates: string[];
   eventLists: Record<string, ShoppingItem[]>;
@@ -144,7 +147,7 @@ type AppMainContentProps = {
   mapIsRouteVisible: boolean;
   mapSelectedHallId: string;
   mapSmartInsertEnabled: boolean;
-  mapSmartInsertMode: 'card' | 'preview';
+  mapSmartInsertMode: SmartInsertMode;
   newItemDefaults: { eventDate: string; block: string; number: string } | null;
   numberCellOutlineStyle: NumberCellOutlineStyle;
   purchaseStatusControlMode: PurchaseStatusControlMode;
@@ -192,6 +195,8 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     currentMapTabViewport,
     currentMode,
     disablePriceUndefinedCheck,
+    disableLimitedPurchaseQuantityCheck,
+    skipLimitedPurchaseForSingleQuantity,
     duplicateCircleItemIds,
     eventDates,
     eventLists,
@@ -295,6 +300,11 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     zoomLevel,
   } = props;
 
+  const currentMapRouteHallOrder = React.useMemo(
+    () => (activeEventDate ? getHallOrderForDate(activeEventDate) : []),
+    [activeEventDate, getHallOrderForDate],
+  );
+
   const editSpaceGroupKeys = React.useMemo(() => {
     const groupKeys = new Set<string>();
     items
@@ -345,6 +355,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
             mapName={currentMapTabName}
             items={items}
             executeModeItemIds={currentMapExecuteItemIds}
+            routeHallOrder={currentMapRouteHallOrder}
             onAddToExecuteList={handleAddToExecuteListFromMap}
             onAddToExecuteListAtPosition={handleAddToExecuteListFromMapAtPosition}
             onRemoveFromExecuteList={handleRemoveFromExecuteListFromMap}
@@ -356,6 +367,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
             onUpdateItem={handleUpdateItem}
             onUpdateItemPriority={handleUpdateItemPriorityFromEdit}
             onDeleteItem={handleDeleteItemFromMap}
+            onEditRequest={handleEditRequest}
             onAddNewItem={handleAddNewItemFromMap}
             onAddItem={handleAddItemFromFocusMode}
             halls={currentHalls}
@@ -465,6 +477,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                     onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
                     onAddItem={handleAddItemFromFocusMode}
                     purchaseStatusControlMode={purchaseStatusControlMode}
+                    skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                   />
                 </div>
 
@@ -570,6 +583,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                     onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
                     onAddItem={handleAddItemFromFocusMode}
                     purchaseStatusControlMode={purchaseStatusControlMode}
+                    skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                   />
                 </div>
               </div>
@@ -601,6 +615,8 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                   onMapRotationAngleChange={handleFocusMapRotationAngleChange}
                   numberCellOutlineStyle={numberCellOutlineStyle}
                   disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+                  disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
+                  skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                   purchaseStatusControlMode={purchaseStatusControlMode}
                 />
               </Suspense>
@@ -634,6 +650,8 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                 onSpaceGroupOrderChange={handleExecuteSpaceGroupOrderChange}
                 onCollapseAndOpenNext={handleCollapseAndOpenNext}
                 disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+                disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
+                skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                 showPostponeFilterButton={showPostponeFilterButton}
                 onActivatePostponeFilter={handleActivatePostponeFilter}
                 showLateFilterButton={showLateFilterButton}
