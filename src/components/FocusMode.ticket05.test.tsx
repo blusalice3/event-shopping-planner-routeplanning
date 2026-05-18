@@ -13,7 +13,7 @@ describe('FocusMode TICKET-05 resume completion semantics', () => {
     );
 
     await waitFor(() => {
-      expect(screen.queryByText('蜈ｨ縺ｦ縺ｮ險ｪ蝠丞・繧堤｢ｺ隱阪＠縺ｾ縺励◆')).toBeNull();
+      expect(screen.queryByText('全ての訪問先を確認しました')).toBeNull();
     });
   });
 });

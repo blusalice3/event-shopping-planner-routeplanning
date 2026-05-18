@@ -1,6 +1,13 @@
 import type { ShoppingItem } from '../../types/item';
 import type React from 'react';
 import type { ResumeChoiceDialogState } from './resumeChoice';
+import {
+  getChargeableQuantity,
+  getLimitedPurchaseCounts,
+  getPlannedBudgetQuantity,
+  getSafePriceForCalculation,
+  isCountedAsPurchased,
+} from '../../utils/purchaseQuantity';
 
 const resumePhaseNameMap = {
   normal: '通常',
@@ -111,6 +118,7 @@ export function CompletionStateView({
   onTouchStart,
   onTouchMove,
   onTouchEnd,
+  onLimitedMissingClick,
 }: {
   executeItems: ShoppingItem[];
   layoutMode: 'pc' | 'smartphone';
@@ -119,15 +127,23 @@ export function CompletionStateView({
   onTouchStart: (e: React.TouchEvent) => void;
   onTouchMove: (e: React.TouchEvent) => void;
   onTouchEnd: (e: React.TouchEvent) => void;
+  onLimitedMissingClick?: () => void;
 }) {
-  const purchased = executeItems.filter((i) => i.purchaseStatus === 'Purchased');
+  const purchased = executeItems.filter(isCountedAsPurchased);
   const soldOut = executeItems.filter((i) => i.purchaseStatus === 'SoldOut');
   const absent = executeItems.filter((i) => i.purchaseStatus === 'Absent');
   const postponed = executeItems.filter((i) => i.purchaseStatus === 'Postpone');
   const late = executeItems.filter((i) => i.purchaseStatus === 'Late');
   const unprocessed = executeItems.filter((i) => i.purchaseStatus === 'None');
-  const purchasedAmount = purchased.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0);
-  const totalPlanned = executeItems.reduce((sum, i) => sum + (i.price ?? 0) * i.quantity, 0);
+  const limitedCounts = getLimitedPurchaseCounts(executeItems);
+  const purchasedAmount = executeItems.reduce(
+    (sum, i) => sum + getSafePriceForCalculation(i.price) * getChargeableQuantity(i),
+    0,
+  );
+  const totalPlanned = executeItems.reduce(
+    (sum, i) => sum + getSafePriceForCalculation(i.price) * getPlannedBudgetQuantity(i),
+    0,
+  );
 
   return (
     <div
@@ -164,6 +180,9 @@ export function CompletionStateView({
         </h3>
         <div className="space-y-1.5 text-sm">
           <SummaryRow label="✅ 購入済み" value={purchased.length} className="text-green-600 dark:text-green-400" />
+          {limitedCounts.missing > 0 && (
+            <SummaryRow label="限数未入力" value={limitedCounts.missing} className="text-orange-600 dark:text-orange-400" />
+          )}
           {soldOut.length > 0 && <SummaryRow label="❌ 売切" value={soldOut.length} className="text-red-600 dark:text-red-400" />}
           {absent.length > 0 && <SummaryRow label="⚠️ 欠席" value={absent.length} className="text-yellow-600 dark:text-yellow-400" />}
           {postponed.length > 0 && <SummaryRow label="⏸️ 後回し" value={postponed.length} className="text-purple-600 dark:text-purple-400" />}
@@ -176,6 +195,15 @@ export function CompletionStateView({
           <AmountRow label="予定合計" amount={totalPlanned} />
         </div>
       </div>
+
+      {limitedCounts.missing > 0 && (
+        <button
+          onClick={onLimitedMissingClick}
+          className="mb-4 rounded-lg bg-orange-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-700"
+        >
+          限数未入力を確認
+        </button>
+      )}
 
       <div className="flex gap-4">
         <button

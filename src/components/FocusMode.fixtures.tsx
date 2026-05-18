@@ -88,6 +88,7 @@ export const minimalProps = (
     onSessionStateChange?: (state: FocusModeSessionState) => void;
     onModeChange?: (mode: 'edit' | 'execute', lastItemId?: string) => void;
     disablePriceUndefinedCheck?: boolean;
+    skipLimitedPurchaseForSingleQuantity?: boolean;
     purchaseStatusControlMode?: PurchaseStatusControlMode;
   } = {},
 ) => ({
@@ -103,6 +104,8 @@ export const minimalProps = (
   resumeState: cloneSessionState(overrides.resumeState),
   onSessionStateChange: overrides.onSessionStateChange ?? (() => {}),
   disablePriceUndefinedCheck: overrides.disablePriceUndefinedCheck ?? false,
+  skipLimitedPurchaseForSingleQuantity:
+    overrides.skipLimitedPurchaseForSingleQuantity ?? true,
   purchaseStatusControlMode: overrides.purchaseStatusControlMode ?? 'cycle',
 });
 

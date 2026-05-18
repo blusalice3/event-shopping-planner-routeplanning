@@ -26,6 +26,7 @@ describe('FocusModeItemList purchase status control mode', () => {
         currentVisitDisplayItems={[baseItem]}
         blinkingPriceItemIds={new Set()}
         onUpdateItem={vi.fn()}
+        skipLimitedPurchaseForSingleQuantity
         purchaseStatusControlMode="radial"
       />,
     );

@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { BlockDefinition, DayMapData, HallDefinition } from '../../types/map';
+import { isPointInPolygonInclusive } from '../../utils/mapRoutePolygon';
 import { validateHallPolygon } from '../../utils/polygonValidation';
 
 interface HallDefinitionPanelProps {
@@ -638,32 +639,7 @@ function isPointInPolygon(
   col: number,
   vertices: { row: number; col: number }[],
 ): boolean {
-  if (vertices.length < 3) return false;
-
-  // Boundary is treated as inside to avoid dropping hall-edge cells from counts.
-  for (let i = 0; i < vertices.length; i++) {
-    const a = vertices[i];
-    const b = vertices[(i + 1) % vertices.length];
-    if (isPointOnSegment(row, col, a, b)) {
-      return true;
-    }
-  }
-
-  let inside = false;
-  const n = vertices.length;
-  for (let i = 0, j = n - 1; i < n; j = i++) {
-    const vi = vertices[i];
-    const vj = vertices[j];
-
-    if (
-      vi.col > col !== vj.col > col &&
-      row < ((vj.row - vi.row) * (col - vi.col)) / (vj.col - vi.col) + vi.row
-    ) {
-      inside = !inside;
-    }
-  }
-
-  return inside;
+  return isPointInPolygonInclusive(row, col, vertices);
 }
 
 export { isPointInPolygon };

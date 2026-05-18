@@ -7,6 +7,7 @@ import {
   MapCellStateDetail,
   HallDefinition,
   NumberCellOutlineStyle,
+  RouteSegment,
   MIN_ZOOM,
   MAX_ZOOM,
 } from '../../types/map';
@@ -15,6 +16,9 @@ import { useCanvasViewport } from '../../features/map/canvas/useCanvasViewport';
 import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
 import { findRouteLookupNumberCell } from '../../utils/mapRoutingSignature';
 import { generateRouteSegments, simplifyPath } from '../../utils/pathfinding';
+import { filterFirstRouteMarkers, normalizeMapRouteDayText } from '../../utils/mapRouteOrder';
+import type { MapRoutePoint } from '../../utils/mapRoutePoints';
+import { hitTestMapRoute, type MapRouteHitResult } from '../../utils/mapRouteHitTest';
 import {
   findAllCrossingsIndexed,
   buildCrossingLookup,
@@ -52,24 +56,28 @@ interface MapCanvasProps {
   initialOffset?: { x: number; y: number };
   offsetRef?: React.MutableRefObject<{ x: number; y: number }>;
   numberCellOutlineStyle?: NumberCellOutlineStyle;
+  routePointsOverride?: MapRoutePoint[];
+  routeSegmentsOverride?: RouteSegment[];
+  routeInsertMissMapDataOverride?: DayMapData;
+  forceRouteVisible?: boolean;
+  routeInsertSelectionActive?: boolean;
+  onRouteInsertHit?: (hit: MapRouteHitResult) => void;
+  onRouteInsertMiss?: (miss: { kind: 'cell' | 'blank' }) => void;
 }
 
 const BASE_CELL_SIZE = 28; // Base cell size.
 const SCROLL_MARGIN = 5; // Blank-cell scroll margin.
 const FILLED_SCROLL_MARGIN = 25; // Extra margin around filled cells.
-const normalizeDisplayText = (value: string | null | undefined): string => {
-  return (value || '').replace(/\u3000/g, ' ').trim();
-};
 const getDragPanMultiplier = (zoom: number): number => {
   if (zoom < 70) return 2.0;
   if (zoom < 120) return 1.6;
   return 1.3;
 };
 const extractDayNameFromMapName = (mapName: string): string => {
-  const normalizedMapName = normalizeDisplayText(mapName);
+  const normalizedMapName = normalizeMapRouteDayText(mapName);
   const dayMatch = normalizedMapName.match(/^(.+)マップ$/);
   if (dayMatch) {
-    return normalizeDisplayText(dayMatch[1]);
+    return normalizeMapRouteDayText(dayMatch[1]);
   }
   return normalizedMapName;
 };
@@ -182,6 +190,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   initialOffset,
   offsetRef: externalOffsetRef,
   numberCellOutlineStyle = 'rounded',
+  routePointsOverride,
+  routeSegmentsOverride,
+  routeInsertMissMapDataOverride,
+  forceRouteVisible = false,
+  routeInsertSelectionActive = false,
+  onRouteInsertHit,
+  onRouteInsertMiss,
 }) => {
   const {
     activeTouchesRef,
@@ -234,6 +249,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const isDetailedView = true;
   const showNumbers = true;
   const showBorders = true;
+  const effectiveRouteVisible = isRouteVisible || forceRouteVisible;
 
   const initializedRef = useRef<boolean>(false);
   const showSelectionGrid = selectionGuideOptions?.showGrid ?? false;
@@ -360,7 +376,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const states = new Map<string, MapCellStateDetail>();
 
     const dayName = extractDayNameFromMapName(mapName);
-    if (!dayName) return states;
+    const normalizedDayName = normalizeMapRouteDayText(dayName);
+    if (!normalizedDayName) return states;
 
     const isPriorityItem = (item: (typeof items)[number]) => {
       const remarks = item.remarks?.toLowerCase() || '';
@@ -368,8 +385,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     };
 
     items.forEach((item) => {
-      const itemEventDate = item.eventDate?.trim() || '';
-      if (itemEventDate !== dayName) return;
+      const itemEventDate = normalizeMapRouteDayText(item.eventDate);
+      if (itemEventDate !== normalizedDayName) return;
 
       const itemBlockName = item.block?.trim() || '';
       let block = mapData.blocks.find((b) => b.name === itemBlockName);
@@ -432,10 +449,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   }, [mapData.blocks, items, mapName, executeModeItemIdsSet]);
 
   const routePoints = useMemo(() => {
-    if (!isRouteVisible) return [];
+    if (!effectiveRouteVisible) return [];
+    if (routePointsOverride) return routePointsOverride;
+    if (routeInsertSelectionActive) return [];
 
     const dayName = extractDayNameFromMapName(mapName);
-    if (!dayName) return [];
+    const normalizedDayName = normalizeMapRouteDayText(dayName);
+    if (!normalizedDayName) return [];
 
     const itemsMap = new Map(items.map((item) => [item.id, item]));
     const executeModeItemIdsArray = Array.from(executeModeItemIds);
@@ -443,7 +463,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const visitItems = executeModeItemIdsArray
       .map((id) => itemsMap.get(id))
       .filter(
-        (item): item is (typeof items)[number] => item !== undefined && item.eventDate === dayName,
+        (item): item is (typeof items)[number] =>
+          item !== undefined &&
+          normalizeMapRouteDayText(item.eventDate) === normalizedDayName,
       );
 
     const points: Array<{
@@ -483,17 +505,39 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     });
 
     return points;
-  }, [mapData.blocks, items, mapName, executeModeItemIds, isRouteVisible]);
+  }, [
+    mapData.blocks,
+    items,
+    mapName,
+    executeModeItemIds,
+    effectiveRouteVisible,
+    routePointsOverride,
+    routeInsertSelectionActive,
+  ]);
+
+  const visibleRouteMarkers = useMemo(
+    () => filterFirstRouteMarkers(routePoints),
+    [routePoints],
+  );
 
   const routeSegments = useMemo(() => {
-    if (!isRouteVisible || routePoints.length < 2) return [];
+    if (!effectiveRouteVisible) return [];
+    if (routeSegmentsOverride) return routeSegmentsOverride;
+    if (routeInsertSelectionActive) return [];
+    if (routePoints.length < 2) return [];
 
     const segments = generateRouteSegments(mapData, routePoints);
     return segments.map((seg) => ({
       ...seg,
       path: simplifyPath(seg.path),
     }));
-  }, [isRouteVisible, routePoints, mapData]);
+  }, [
+    effectiveRouteVisible,
+    routeSegmentsOverride,
+    routeInsertSelectionActive,
+    routePoints,
+    mapData,
+  ]);
 
   // Cache number cells for quick lookup.
   const numberCellSet = useMemo(() => {
@@ -506,7 +550,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
   // Cache route crossing data to avoid recalculating it during drag redraws.
   const routeCrossingData = useMemo(() => {
-    if (!isRouteVisible || routeSegments.length === 0) return null;
+    if (!effectiveRouteVisible || routeSegments.length === 0) return null;
 
     const allPixelEdges: PixelEdge[][] = routeSegments.map((segment) => {
       if (segment.path.length < 2) return [];
@@ -556,7 +600,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     });
 
     return { crossingLookup, bridgeParams, edgeUsage };
-  }, [isRouteVisible, routeSegments, cellSize]);
+  }, [effectiveRouteVisible, routeSegments, cellSize]);
 
   const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -1401,7 +1445,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
     }
 
-    if (!isRotationInteracting && isRouteVisible && routeSegments.length > 0 && routeCrossingData) {
+    if (!isRotationInteracting && effectiveRouteVisible && routeSegments.length > 0 && routeCrossingData) {
       const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
         switch (priority) {
           case 'highest':
@@ -1561,7 +1605,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.setLineDash([]);
 
       if (isDetailedView) {
-        routePoints.forEach((point) => {
+        visibleRouteMarkers.forEach((point) => {
           const px = (point.col - 0.5) * cellSize;
           const py = (point.row - 0.5) * cellSize;
 
@@ -1907,9 +1951,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     cellStates,
     numberCellSet,
     mergedCellsMap,
-    isRouteVisible,
+    effectiveRouteVisible,
     routeSegments,
-    routePoints,
+    visibleRouteMarkers,
     dpr,
     isDetailedView,
     showNumbers,
@@ -1938,9 +1982,70 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     drawCanvas();
   }, [drawCanvas]);
 
+  const hasRouteInsertRouteSnapshot =
+    routeInsertSelectionActive &&
+    routePointsOverride !== undefined &&
+    routeSegmentsOverride !== undefined;
+
+  const canHitTestRouteInsert =
+    hasRouteInsertRouteSnapshot &&
+    routePointsOverride.length >= 2 &&
+    routeSegmentsOverride.length > 0;
+
+  const getRouteInsertMissKind = useCallback(
+    (row: number, col: number): 'cell' | 'blank' => {
+      if (!routeInsertSelectionActive) return 'blank';
+      if (!routeInsertMissMapDataOverride) return 'blank';
+
+      const missMapData = routeInsertMissMapDataOverride;
+      if (row < 1 || row > missMapData.maxRow || col < 1 || col > missMapData.maxCol) {
+        return 'blank';
+      }
+
+      const isOnMissMap =
+        missMapData.cells.some((cell) => cell.row === row && cell.col === col) ||
+        missMapData.blocks.some((block) =>
+          block.numberCells.some((numberCell) => numberCell.row === row && numberCell.col === col),
+        ) ||
+        missMapData.mergedCells.some(
+          (merge) =>
+            row >= merge.startRow &&
+            row <= merge.endRow &&
+            col >= merge.startCol &&
+            col <= merge.endCol,
+        );
+
+      if (!isOnMissMap) return 'blank';
+      return cellStates.has(`${row}-${col}`) || isOnMissMap ? 'cell' : 'blank';
+    },
+    [cellStates, routeInsertMissMapDataOverride, routeInsertSelectionActive],
+  );
+
   const handleTapAtViewPosition = useCallback(
     (viewX: number, viewY: number, pointerType: string) => {
       const { x, y } = toMapCoordinates(viewX, viewY);
+      const col = Math.floor(x / cellSize) + 1;
+      const row = Math.floor(y / cellSize) + 1;
+
+      if (routeInsertSelectionActive) {
+        if (canHitTestRouteInsert) {
+          const hit = hitTestMapRoute({
+            mapX: x,
+            mapY: y,
+            cellSize,
+            routePoints: routePointsOverride ?? [],
+            routeSegments: routeSegmentsOverride ?? [],
+          });
+
+          if (hit) {
+            onRouteInsertHit?.(hit);
+            return;
+          }
+        }
+
+        onRouteInsertMiss?.({ kind: getRouteInsertMissKind(row, col) });
+        return;
+      }
 
       if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
         const markerSize = Math.max(10, cellSize * 0.4);
@@ -1961,9 +2066,6 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           }
         }
       }
-
-      const col = Math.floor(x / cellSize) + 1;
-      const row = Math.floor(y / cellSize) + 1;
 
       if (row < 1 || row > mapData.maxRow || col < 1 || col > mapData.maxCol) {
         return;
@@ -2037,15 +2139,22 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     },
     [
       cellSize,
+      canHitTestRouteInsert,
+      getRouteInsertMissKind,
       mapData.maxRow,
       mapData.maxCol,
       mapData.mergedCells,
       cellStates,
       onCellClick,
+      onRouteInsertHit,
+      onRouteInsertMiss,
       vertexSelectionMode,
       cellSelectionMode,
       showTapAssist,
       mergedCellsMap,
+      routeInsertSelectionActive,
+      routePointsOverride,
+      routeSegmentsOverride,
       toMapCoordinates,
     ],
   );
@@ -2321,6 +2430,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerLeave}
       onPointerCancel={handlePointerCancel}
+      cursor={isDragging ? 'grabbing' : routeInsertSelectionActive ? 'crosshair' : 'grab'}
     />
   );
 };

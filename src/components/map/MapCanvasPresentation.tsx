@@ -10,6 +10,7 @@ type MapCanvasPresentationProps = {
   onPointerUp: (e: React.PointerEvent<HTMLCanvasElement>) => void;
   onPointerLeave: (e: React.PointerEvent<HTMLCanvasElement>) => void;
   onPointerCancel: (e: React.PointerEvent<HTMLCanvasElement>) => void;
+  cursor?: React.CSSProperties['cursor'];
 };
 
 const MapCanvasPresentation: React.FC<MapCanvasPresentationProps> = ({
@@ -22,6 +23,7 @@ const MapCanvasPresentation: React.FC<MapCanvasPresentationProps> = ({
   onPointerUp,
   onPointerLeave,
   onPointerCancel,
+  cursor,
 }) => {
   return (
     <div
@@ -41,7 +43,7 @@ const MapCanvasPresentation: React.FC<MapCanvasPresentationProps> = ({
         onPointerLeave={onPointerLeave}
         onPointerCancel={onPointerCancel}
         style={{
-          cursor: isDragging ? 'grabbing' : 'grab',
+          cursor: cursor || (isDragging ? 'grabbing' : 'grab'),
           touchAction: 'none',
         }}
       />

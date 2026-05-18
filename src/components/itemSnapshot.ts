@@ -10,6 +10,7 @@ export const SHOPPING_ITEM_SNAPSHOT_KEYS = [
   'price',
   'purchaseStatus',
   'quantity',
+  'limitedPurchasedQuantity',
   'remarks',
   'url',
   'priorityLevel',
@@ -32,6 +33,7 @@ export const areSameItemSnapshot = (a: ShoppingItem, b: ShoppingItem): boolean =
   a.price === b.price &&
   a.purchaseStatus === b.purchaseStatus &&
   a.quantity === b.quantity &&
+  a.limitedPurchasedQuantity === b.limitedPurchasedQuantity &&
   a.remarks === b.remarks &&
   a.url === b.url &&
   a.priorityLevel === b.priorityLevel &&

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import ShoppingList from './ShoppingList';
 import type { ShoppingItem } from '../types/item';
@@ -29,6 +29,7 @@ describe('ShoppingList purchase status control mode', () => {
         onSelectItem={vi.fn()}
         layoutMode="pc"
         viewMode="execute"
+        skipLimitedPurchaseForSingleQuantity
         purchaseStatusControlMode="radial"
       />,
     );
@@ -37,5 +38,45 @@ describe('ShoppingList purchase status control mode', () => {
       'aria-haspopup',
       'dialog',
     );
+  });
+
+  it('does not toggle already matching non-limited items when limited items are excluded from a bulk change', () => {
+    const onBulkStatusChange = vi.fn();
+    const limitedItem: ShoppingItem = {
+      ...baseItem,
+      id: 'limited-item',
+      circle: 'Limited Circle',
+      purchaseStatus: 'LimitedPurchase',
+      quantity: 5,
+      limitedPurchasedQuantity: 2,
+    };
+    const soldOutItem: ShoppingItem = {
+      ...baseItem,
+      id: 'sold-out-item',
+      circle: 'Sold Out Circle',
+      purchaseStatus: 'SoldOut',
+    };
+
+    render(
+      <ShoppingList
+        items={[limitedItem, soldOutItem]}
+        onUpdateItem={vi.fn()}
+        onMoveItem={vi.fn()}
+        onEditRequest={vi.fn()}
+        onDeleteRequest={vi.fn()}
+        selectedItemIds={new Set()}
+        onSelectItem={vi.fn()}
+        layoutMode="pc"
+        viewMode="execute"
+        skipLimitedPurchaseForSingleQuantity
+        showSpaceGroups
+        onBulkStatusChange={onBulkStatusChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '全売切' }));
+
+    expect(onBulkStatusChange).not.toHaveBeenCalled();
+    expect(screen.getByText('変更対象のアイテムはありません')).toBeInTheDocument();
   });
 });

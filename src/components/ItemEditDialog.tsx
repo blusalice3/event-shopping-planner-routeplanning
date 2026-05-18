@@ -2,6 +2,18 @@ import React, { useState, useCallback, useMemo } from 'react';
 import type { ShoppingItem, PurchaseStatus } from '../types/item';
 import type { HallDefinition } from '../types/map';
 import { findHallsByBlockName } from '../utils/hallFallback';
+import LimitedPurchaseExcessConfirmDialog from './LimitedPurchaseExcessConfirmDialog';
+import {
+  applyLimitedPurchase,
+  applyPurchasedFromLimitedInput,
+  clearLimitedPurchase,
+  getActualPurchasedQuantity,
+  getPlannedQuantity,
+  parseDecimalIntegerInput,
+  validateLimitedPurchasePlannedQuantity,
+  validateLimitedPurchaseQuantities,
+  type LimitedPurchaseValidationError,
+} from '../utils/purchaseQuantity';
 
 interface ItemEditDialogProps {
   item: ShoppingItem;
@@ -11,6 +23,16 @@ interface ItemEditDialogProps {
   halls?: HallDefinition[];
   onPriorityChange?: (itemId: string, level: 'none' | 'priority' | 'highest') => void;
 }
+
+const toLimitedPurchaseMessage = (error: LimitedPurchaseValidationError): string => {
+  if (error === 'planned_required') return '購入予定量を入力してください';
+  if (error === 'actual_required') return '実購入数を入力してください';
+  if (error === 'planned_not_integer') return '購入予定量は整数で入力してください';
+  if (error === 'actual_not_integer') return '実購入数は整数で入力してください';
+  if (error === 'planned_not_positive') return '購入予定量は1以上で入力してください';
+  if (error === 'actual_not_positive') return '実購入数は1以上で入力してください';
+  return '限数購入では実購入数を購入予定量より少なくしてください';
+};
 
 export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
   item,
@@ -34,6 +56,16 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
     priorityLevel: (item.priorityLevel || 'none') as 'none' | 'priority' | 'highest',
     manualHallId: item.manualHallId || '',
   });
+  const [limitedActualText, setLimitedActualText] = useState(
+    item.purchaseStatus === 'LimitedPurchase'
+      ? String(getActualPurchasedQuantity(item) ?? '')
+      : '',
+  );
+  const [limitedPlannedText, setLimitedPlannedText] = useState(String(getPlannedQuantity(item)));
+  const [limitedError, setLimitedError] = useState<string | null>(null);
+  const [excessConfirm, setExcessConfirm] = useState<{ item: ShoppingItem; planned: number } | null>(
+    null,
+  );
 
   // 現在のブロックが属するホール候補（blockNamesに含まれているホール）
   const blockHallCandidates = useMemo(
@@ -67,7 +99,7 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
   const handleSave = useCallback(() => {
     if (!form.circle.trim()) return;
     const price = form.price === '' ? null : parseInt(form.price, 10) || 0;
-    const updatedItem: ShoppingItem = {
+    const baseItem: ShoppingItem = {
       ...item,
       circle: form.circle,
       title: form.title,
@@ -75,17 +107,62 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
       block: form.block,
       number: form.number,
       price,
-      quantity: parseInt(form.quantity, 10) || 1,
       purchaseStatus: form.purchaseStatus as PurchaseStatus,
       remarks: form.remarks,
       url: form.url || undefined,
       priorityLevel: form.priorityLevel,
       manualHallId: form.manualHallId || undefined,
     };
+
+    if (form.purchaseStatus === 'LimitedPurchase') {
+      const planned = parseDecimalIntegerInput(limitedPlannedText);
+      if (limitedActualText.trim() === '') {
+        const plannedValidation = validateLimitedPurchasePlannedQuantity(planned);
+        if (!plannedValidation.ok) {
+          setLimitedError(toLimitedPurchaseMessage(plannedValidation.error));
+          return;
+        }
+        onSave(applyLimitedPurchase(baseItem, { planned: planned! }));
+        return;
+      }
+
+      const actual = parseDecimalIntegerInput(limitedActualText);
+      const validation = validateLimitedPurchaseQuantities(actual, planned);
+      if (validation.ok) {
+        onSave(applyLimitedPurchase(baseItem, { actual: actual!, planned: planned! }));
+        return;
+      }
+
+      if (
+        validation.error === 'actual_not_less_than_planned' &&
+        actual !== undefined &&
+        planned !== undefined
+      ) {
+        if (actual === planned) {
+          if (window.confirm('全て購入できているので「購入済」にします。よろしいですか？')) {
+            onSave(applyPurchasedFromLimitedInput(baseItem, planned));
+          }
+          return;
+        }
+        if (actual > planned) {
+          setExcessConfirm({ item: baseItem, planned });
+          return;
+        }
+      }
+
+      setLimitedError(toLimitedPurchaseMessage(validation.error));
+      return;
+    }
+
+    const updatedItem: ShoppingItem = clearLimitedPurchase({
+      ...baseItem,
+      quantity: parseInt(form.quantity, 10) || 1,
+      purchaseStatus: form.purchaseStatus as PurchaseStatus,
+    });
     onSave(updatedItem);
     // priority 変更の反映は onSave 経由（handleUpdateItem + hallOrder 更新を App 側で統合）に一本化。
     // 旧 onPriorityChange による二重 setEventLists は race condition の原因だったため廃止。
-  }, [form, item, onSave]);
+  }, [form, item, limitedActualText, limitedPlannedText, onSave]);
 
   const circleSuggestions = useMemo(
     () => [...new Set(allItems.map((i) => i.circle).filter(Boolean))],
@@ -203,39 +280,83 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-              <label className={labelClass}>数量</label>
-              <select
-                value={form.quantity}
-                onChange={(e) => setForm((prev) => ({ ...prev, quantity: e.target.value }))}
-                className={formInputClass}
-              >
-                {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
-                  <option key={num} value={num}>
-                    {num}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {form.purchaseStatus === 'LimitedPurchase' ? (
+              <>
+                <div>
+                  <label className={labelClass}>実購入数</label>
+                  <input
+                    value={limitedActualText}
+                    onChange={(e) => {
+                      setLimitedActualText(e.target.value);
+                      setLimitedError(null);
+                    }}
+                    className={formInputClass}
+                    inputMode="numeric"
+                  />
+                </div>
+                <div>
+                  <label className={labelClass}>購入予定量</label>
+                  <input
+                    value={limitedPlannedText}
+                    onChange={(e) => {
+                      setLimitedPlannedText(e.target.value);
+                      setLimitedError(null);
+                    }}
+                    className={formInputClass}
+                    inputMode="numeric"
+                  />
+                </div>
+              </>
+            ) : (
+              <div>
+                <label className={labelClass}>数量</label>
+                <select
+                  value={form.quantity}
+                  onChange={(e) => setForm((prev) => ({ ...prev, quantity: e.target.value }))}
+                  className={formInputClass}
+                >
+                  {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                    <option key={num} value={num}>
+                      {num}
+                    </option>
+                  ))}
+                  {Number(form.quantity) > 10 && (
+                    <option value={form.quantity}>{form.quantity}</option>
+                  )}
+                </select>
+              </div>
+            )}
             <div>
               <label className={labelClass}>購入状態</label>
               <select
                 value={form.purchaseStatus}
-                onChange={(e) =>
+                onChange={(e) => {
+                  const nextStatus = e.target.value;
                   setForm((prev) => ({
                     ...prev,
-                    purchaseStatus: e.target.value,
-                  }))
-                }
+                    purchaseStatus: nextStatus,
+                  }));
+                  if (nextStatus === 'LimitedPurchase') {
+                    setLimitedPlannedText(String(getPlannedQuantity(item)));
+                    setLimitedActualText(String(getActualPurchasedQuantity(item) ?? ''));
+                    setLimitedError(null);
+                  }
+                }}
                 className={formInputClass}
               >
                 <option value="None">未購入</option>
                 <option value="Purchased">購入済</option>
+                <option value="SoldOut">売切</option>
+                <option value="Absent">欠席</option>
                 <option value="Postpone">後回し</option>
                 <option value="Late">遅参</option>
+                <option value="LimitedPurchase">限数</option>
               </select>
             </div>
           </div>
+          {limitedError && (
+            <p className="text-sm text-red-600 dark:text-red-300">{limitedError}</p>
+          )}
           {showHallSelector && (
             <div className="border border-amber-200 dark:border-amber-700/50 bg-amber-50/50 dark:bg-amber-900/20 rounded-lg p-3">
               <label className={labelClass}>
@@ -330,6 +451,15 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
             保存
           </button>
         </div>
+        <LimitedPurchaseExcessConfirmDialog
+          isOpen={excessConfirm !== null}
+          onFix={() => setExcessConfirm(null)}
+          onConvertToPurchased={() => {
+            if (!excessConfirm) return;
+            onSave(applyPurchasedFromLimitedInput(excessConfirm.item, excessConfirm.planned));
+            setExcessConfirm(null);
+          }}
+        />
       </div>
     </div>
   );

@@ -13,11 +13,15 @@ interface FocusModeItemListProps {
   containerClassName?: string;
   currentVisitDisplayItems: ShoppingItem[];
   blinkingPriceItemIds: Set<string>;
+  blinkingLimitedMissingItemIds?: Set<string>;
   onUpdateItem: (item: ShoppingItem) => void;
   onEditRequest?: (item: ShoppingItem) => void;
   onDeleteRequest?: (item: ShoppingItem) => void;
   onAddItem?: () => void;
+  getLatestItemById?: (itemId: string) => ShoppingItem | undefined;
+  onNotify?: (message: string) => void;
   purchaseStatusControlMode?: PurchaseStatusControlMode;
+  skipLimitedPurchaseForSingleQuantity: boolean;
 }
 
 interface FocusModeHeaderProps {
@@ -30,9 +34,9 @@ interface FocusModeHeaderProps {
   currentVisitCheckedCount: number;
   currentVisitTotalCount: number;
   currentVisitPriceInfo: {
-    allUndefined: boolean;
-    undefinedCount: number;
-    totalPrice: number;
+    chargeableTotal: number;
+    plannedTotal: number;
+    priceMissingItemCount: number;
   };
   currentPhase: FocusPhase;
   onPhaseChangeRequest: (phase: FocusPhase) => void;
@@ -77,11 +81,15 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
   containerClassName,
   currentVisitDisplayItems,
   blinkingPriceItemIds,
+  blinkingLimitedMissingItemIds = new Set(),
   onUpdateItem,
   onEditRequest,
   onDeleteRequest,
   onAddItem,
+  getLatestItemById,
+  onNotify,
   purchaseStatusControlMode = 'cycle',
+  skipLimitedPurchaseForSingleQuantity,
 }) => (
   <div
     ref={itemListRef}
@@ -100,7 +108,13 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
       <div
         key={item.id}
         data-item-id={item.id}
-        className={`relative ${blinkingPriceItemIds.has(item.id) ? 'animate-pulse ring-2 ring-red-500 rounded-lg' : ''}`}
+        className={`relative ${
+          blinkingPriceItemIds.has(item.id)
+            ? 'animate-pulse ring-2 ring-red-500 rounded-lg'
+            : blinkingLimitedMissingItemIds.has(item.id)
+              ? 'animate-pulse ring-2 ring-orange-500 rounded-lg'
+              : ''
+        }`}
       >
         <ShoppingItemCard
           item={item}
@@ -113,6 +127,10 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
           layoutMode={layoutMode}
           viewMode="focus"
           purchaseStatusControlMode={purchaseStatusControlMode}
+          skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
+          highlightLimitedMissing={blinkingLimitedMissingItemIds.has(item.id)}
+          getLatestItemById={getLatestItemById}
+          onNotify={onNotify}
         />
       </div>
     ))}
@@ -176,19 +194,18 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(({
         </div>
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
-            <div className={labelClassName}>総額</div>
+            <div className={labelClassName}>この訪問の支払額</div>
             <div className={totalClassName}>
-              {currentVisitPriceInfo.allUndefined ? (
-                <span className="text-red-400">価格未定</span>
-              ) : currentVisitPriceInfo.undefinedCount > 0 ? (
-                <>
-                  <span>¥{currentVisitPriceInfo.totalPrice.toLocaleString()}</span>
-                  <span className="text-red-400">
-                    +未定{currentVisitPriceInfo.undefinedCount}件
-                  </span>
-                </>
-              ) : (
-                <span>¥{currentVisitPriceInfo.totalPrice.toLocaleString()}</span>
+              <span>¥{currentVisitPriceInfo.chargeableTotal.toLocaleString()}</span>
+              {currentVisitPriceInfo.plannedTotal !== currentVisitPriceInfo.chargeableTotal && (
+                <span className="block text-xs opacity-80">
+                  予定額 ¥{currentVisitPriceInfo.plannedTotal.toLocaleString()}
+                </span>
+              )}
+              {currentVisitPriceInfo.priceMissingItemCount > 0 && (
+                <span className="block text-xs text-red-300">
+                  価格未定 {currentVisitPriceInfo.priceMissingItemCount}件
+                </span>
               )}
             </div>
           </div>
