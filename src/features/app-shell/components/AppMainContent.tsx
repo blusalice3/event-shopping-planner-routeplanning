@@ -64,6 +64,7 @@ type AppMainContentProps = {
   currentMode: ViewMode;
   disablePriceUndefinedCheck: boolean;
   disableLimitedPurchaseQuantityCheck: boolean;
+  skipLimitedPurchaseForSingleQuantity: boolean;
   duplicateCircleItemIds: Set<string>;
   eventDates: string[];
   eventLists: Record<string, ShoppingItem[]>;
@@ -195,6 +196,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     currentMode,
     disablePriceUndefinedCheck,
     disableLimitedPurchaseQuantityCheck,
+    skipLimitedPurchaseForSingleQuantity,
     duplicateCircleItemIds,
     eventDates,
     eventLists,
@@ -475,6 +477,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                     onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
                     onAddItem={handleAddItemFromFocusMode}
                     purchaseStatusControlMode={purchaseStatusControlMode}
+                    skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                   />
                 </div>
 
@@ -580,6 +583,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                     onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
                     onAddItem={handleAddItemFromFocusMode}
                     purchaseStatusControlMode={purchaseStatusControlMode}
+                    skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                   />
                 </div>
               </div>
@@ -612,6 +616,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                   numberCellOutlineStyle={numberCellOutlineStyle}
                   disablePriceUndefinedCheck={disablePriceUndefinedCheck}
                   disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
+                  skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                   purchaseStatusControlMode={purchaseStatusControlMode}
                 />
               </Suspense>
@@ -646,6 +651,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                 onCollapseAndOpenNext={handleCollapseAndOpenNext}
                 disablePriceUndefinedCheck={disablePriceUndefinedCheck}
                 disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
+                skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                 showPostponeFilterButton={showPostponeFilterButton}
                 onActivatePostponeFilter={handleActivatePostponeFilter}
                 showLateFilterButton={showLateFilterButton}

@@ -1,4 +1,5 @@
-import type { ShoppingItem } from '../types/item';
+import type { PurchaseStatus, ShoppingItem } from '../types/item';
+import { PurchaseStatuses } from '../types/item';
 
 export type LimitedPurchaseValidationError =
   | 'planned_required'
@@ -188,4 +189,97 @@ export const normalizeLimitedPurchaseFields = (item: ShoppingItem): ShoppingItem
   }
 
   return normalizedBase;
+};
+
+export type LimitedBulkInputTargetDecision = {
+  isBaseTarget: boolean;
+  isTarget: boolean;
+  skippedForSingleQuantity: boolean;
+};
+
+export const shouldSkipLimitedPurchaseForTransition = (
+  item: Pick<ShoppingItem, 'quantity'>,
+  fromStatus: PurchaseStatus,
+  toStatus: PurchaseStatus,
+  enabled: boolean,
+): boolean =>
+  enabled &&
+  getPlannedQuantity(item) === 1 &&
+  fromStatus !== 'LimitedPurchase' &&
+  toStatus === 'LimitedPurchase';
+
+export const getNextPurchaseStatus = (
+  currentStatus: PurchaseStatus,
+  options: {
+    item: Pick<ShoppingItem, 'quantity'>;
+    skipLimitedPurchaseForSingleQuantity: boolean;
+  },
+): PurchaseStatus => {
+  const currentIndex = PurchaseStatuses.indexOf(currentStatus);
+  if (currentIndex < 0) {
+    return PurchaseStatuses[0];
+  }
+
+  const nextStatus = PurchaseStatuses[(currentIndex + 1) % PurchaseStatuses.length];
+
+  if (
+    shouldSkipLimitedPurchaseForTransition(
+      options.item,
+      currentStatus,
+      nextStatus,
+      options.skipLimitedPurchaseForSingleQuantity,
+    )
+  ) {
+    return PurchaseStatuses[(currentIndex + 2) % PurchaseStatuses.length];
+  }
+
+  return nextStatus;
+};
+
+export const getLimitedBulkInputTargetDecision = (
+  item: Pick<ShoppingItem, 'purchaseStatus' | 'limitedPurchasedQuantity' | 'quantity'>,
+  options: { skipLimitedPurchaseForSingleQuantity: boolean },
+): LimitedBulkInputTargetDecision => {
+  const isExistingMissingLimited = hasMissingLimitedPurchaseQuantity(item);
+  const isNewLimitedTarget =
+    item.purchaseStatus === 'None' ||
+    item.purchaseStatus === 'Postpone' ||
+    item.purchaseStatus === 'Late';
+  const isBaseTarget = isNewLimitedTarget || isExistingMissingLimited;
+  const skippedForSingleQuantity =
+    isNewLimitedTarget &&
+    shouldSkipLimitedPurchaseForTransition(
+      item,
+      item.purchaseStatus,
+      'LimitedPurchase',
+      options.skipLimitedPurchaseForSingleQuantity,
+    );
+
+  return {
+    isBaseTarget,
+    isTarget: isBaseTarget && !skippedForSingleQuantity,
+    skippedForSingleQuantity,
+  };
+};
+
+export const getLimitedBulkInputTargets = <T extends ShoppingItem>(
+  items: T[],
+  options: { skipLimitedPurchaseForSingleQuantity: boolean },
+): {
+  targets: T[];
+  singleQuantitySkippedCount: number;
+  baseTargetCount: number;
+} => {
+  let singleQuantitySkippedCount = 0;
+  let baseTargetCount = 0;
+  const targets: T[] = [];
+
+  items.forEach((item) => {
+    const decision = getLimitedBulkInputTargetDecision(item, options);
+    if (decision.isBaseTarget) baseTargetCount += 1;
+    if (decision.skippedForSingleQuantity) singleQuantitySkippedCount += 1;
+    if (decision.isTarget) targets.push(item);
+  });
+
+  return { targets, singleQuantitySkippedCount, baseTargetCount };
 };

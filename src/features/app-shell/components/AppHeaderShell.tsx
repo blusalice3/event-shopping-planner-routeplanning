@@ -80,9 +80,11 @@ export const PurchaseStatusControlModeSettings: React.FC<
 export type DisplaySettingsResetButtonProps = {
   DEFAULT_OUTLINE_STYLE: NumberCellOutlineStyle;
   DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode;
+  DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY: boolean;
   DEFAULT_UI_VISIBILITY: UIVisibilitySettings;
   setDisablePriceUndefinedCheck: React.Dispatch<React.SetStateAction<boolean>>;
   setDisableLimitedPurchaseQuantityCheck: React.Dispatch<React.SetStateAction<boolean>>;
+  setSkipLimitedPurchaseForSingleQuantity: React.Dispatch<React.SetStateAction<boolean>>;
   setNumberCellOutlineStyle: React.Dispatch<React.SetStateAction<NumberCellOutlineStyle>>;
   setPurchaseStatusControlMode: React.Dispatch<React.SetStateAction<PurchaseStatusControlMode>>;
   setUiVisibilityOverride: React.Dispatch<React.SetStateAction<boolean>>;
@@ -92,9 +94,11 @@ export type DisplaySettingsResetButtonProps = {
 export const DisplaySettingsResetButton: React.FC<DisplaySettingsResetButtonProps> = ({
   DEFAULT_OUTLINE_STYLE,
   DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
+  DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY,
   DEFAULT_UI_VISIBILITY,
   setDisablePriceUndefinedCheck,
   setDisableLimitedPurchaseQuantityCheck,
+  setSkipLimitedPurchaseForSingleQuantity,
   setNumberCellOutlineStyle,
   setPurchaseStatusControlMode,
   setUiVisibilityOverride,
@@ -107,6 +111,7 @@ export const DisplaySettingsResetButton: React.FC<DisplaySettingsResetButtonProp
       setNumberCellOutlineStyle(DEFAULT_OUTLINE_STYLE);
       setDisablePriceUndefinedCheck(false);
       setDisableLimitedPurchaseQuantityCheck(false);
+      setSkipLimitedPurchaseForSingleQuantity(DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY);
       setPurchaseStatusControlMode(DEFAULT_PURCHASE_STATUS_CONTROL_MODE);
     }}
     className="w-full mt-1 px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
@@ -128,9 +133,11 @@ type AppHeaderShellProps = {
   currentSearchIndex: number;
   DEFAULT_OUTLINE_STYLE: NumberCellOutlineStyle;
   DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode;
+  DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY: boolean;
   DEFAULT_UI_VISIBILITY: UIVisibilitySettings;
   disablePriceUndefinedCheck: boolean;
   disableLimitedPurchaseQuantityCheck: boolean;
+  skipLimitedPurchaseForSingleQuantity: boolean;
   eventDates: string[];
   getHallExecuteCount: (hallId: string) => number;
   getHallTotalItemCount: (hallId: string) => number;
@@ -193,6 +200,7 @@ type AppHeaderShellProps = {
   setMapViewActive: React.Dispatch<React.SetStateAction<boolean>>;
   setDisablePriceUndefinedCheck: React.Dispatch<React.SetStateAction<boolean>>;
   setDisableLimitedPurchaseQuantityCheck: React.Dispatch<React.SetStateAction<boolean>>;
+  setSkipLimitedPurchaseForSingleQuantity: React.Dispatch<React.SetStateAction<boolean>>;
   setNumberCellOutlineStyle: React.Dispatch<React.SetStateAction<NumberCellOutlineStyle>>;
   setPurchaseStatusControlMode: React.Dispatch<React.SetStateAction<PurchaseStatusControlMode>>;
   setSearchKeyword: React.Dispatch<React.SetStateAction<string>>;
@@ -238,9 +246,11 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     currentSearchIndex,
     DEFAULT_OUTLINE_STYLE,
     DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
+    DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY,
     DEFAULT_UI_VISIBILITY,
     disablePriceUndefinedCheck,
     disableLimitedPurchaseQuantityCheck,
+    skipLimitedPurchaseForSingleQuantity,
     eventDates,
     getHallExecuteCount,
     getHallTotalItemCount,
@@ -303,6 +313,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     setMapViewActive,
     setDisablePriceUndefinedCheck,
     setDisableLimitedPurchaseQuantityCheck,
+    setSkipLimitedPurchaseForSingleQuantity,
     setNumberCellOutlineStyle,
     setPurchaseStatusControlMode,
     setSearchKeyword,
@@ -861,6 +872,24 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                 </span>
                               </span>
                             </label>
+                            <label className="mt-2 flex items-start gap-2 cursor-pointer text-xs">
+                              <input
+                                type="checkbox"
+                                checked={skipLimitedPurchaseForSingleQuantity}
+                                onChange={(e) =>
+                                  setSkipLimitedPurchaseForSingleQuantity(e.target.checked)
+                                }
+                                className="mt-0.5 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
+                              />
+                              <span className="flex-1">
+                                <span className="block text-slate-700 dark:text-slate-300">
+                                  数量1の限数スキップを有効化
+                                </span>
+                                <span className="block text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
+                                  ON にすると、数量1の新規限数入力を購入済み扱いの導線に寄せます
+                                </span>
+                              </span>
+                            </label>
                             <PurchaseStatusControlModeSettings
                               purchaseStatusControlMode={purchaseStatusControlMode}
                               setPurchaseStatusControlMode={setPurchaseStatusControlMode}
@@ -871,9 +900,13 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                           <DisplaySettingsResetButton
                             DEFAULT_OUTLINE_STYLE={DEFAULT_OUTLINE_STYLE}
                             DEFAULT_PURCHASE_STATUS_CONTROL_MODE={DEFAULT_PURCHASE_STATUS_CONTROL_MODE}
+                            DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY={
+                              DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY
+                            }
                             DEFAULT_UI_VISIBILITY={DEFAULT_UI_VISIBILITY}
                             setDisablePriceUndefinedCheck={setDisablePriceUndefinedCheck}
                             setDisableLimitedPurchaseQuantityCheck={setDisableLimitedPurchaseQuantityCheck}
+                            setSkipLimitedPurchaseForSingleQuantity={setSkipLimitedPurchaseForSingleQuantity}
                             setNumberCellOutlineStyle={setNumberCellOutlineStyle}
                             setPurchaseStatusControlMode={setPurchaseStatusControlMode}
                             setUiVisibilityOverride={setUiVisibilityOverride}

@@ -98,6 +98,10 @@ import {
 import { useNumberCellOutlineStyle } from './hooks/useNumberCellOutlineStyle';
 import { useDisablePriceUndefinedCheck } from './hooks/useDisablePriceUndefinedCheck';
 import { useDisableLimitedPurchaseQuantityCheck } from './hooks/useDisableLimitedPurchaseQuantityCheck';
+import {
+  DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY,
+  useSkipLimitedPurchaseForSingleQuantity,
+} from './hooks/useSkipLimitedPurchaseForSingleQuantity';
 import { usePurchaseStatusControlMode } from './hooks/usePurchaseStatusControlMode';
 import { useIndexedDbPersistence } from './hooks/useIndexedDbPersistence';
 import type { SmartInsertMode, SortState } from './features/app-shell/types';
@@ -386,6 +390,10 @@ const App: React.FC = () => {
     setPurchaseStatusControlMode,
     DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
   } = usePurchaseStatusControlMode();
+  const {
+    skipLimitedPurchaseForSingleQuantity,
+    setSkipLimitedPurchaseForSingleQuantity,
+  } = useSkipLimitedPurchaseForSingleQuantity();
   const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
   const [uiSettingsPanelOpen, setUiSettingsPanelOpen] = useState(false);
   const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
@@ -4261,9 +4269,13 @@ const App: React.FC = () => {
         currentSearchIndex={currentSearchIndex}
         DEFAULT_OUTLINE_STYLE={DEFAULT_OUTLINE_STYLE}
         DEFAULT_PURCHASE_STATUS_CONTROL_MODE={DEFAULT_PURCHASE_STATUS_CONTROL_MODE}
+        DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY={
+          DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY
+        }
         DEFAULT_UI_VISIBILITY={DEFAULT_UI_VISIBILITY}
         disablePriceUndefinedCheck={disablePriceUndefinedCheck}
         disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
+        skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
         eventDates={eventDates}
         executeSpaceGroupingEnabled={executeSpaceGroupingEnabled}
         getHallExecuteCount={getHallExecuteCount}
@@ -4326,6 +4338,7 @@ const App: React.FC = () => {
         setMapViewActive={setMapViewActive}
         setDisablePriceUndefinedCheck={setDisablePriceUndefinedCheck}
         setDisableLimitedPurchaseQuantityCheck={setDisableLimitedPurchaseQuantityCheck}
+        setSkipLimitedPurchaseForSingleQuantity={setSkipLimitedPurchaseForSingleQuantity}
         setNumberCellOutlineStyle={setNumberCellOutlineStyle}
         setPurchaseStatusControlMode={setPurchaseStatusControlMode}
         setSearchKeyword={setSearchKeyword}
@@ -4432,6 +4445,7 @@ const App: React.FC = () => {
         currentMode={currentMode}
         disablePriceUndefinedCheck={disablePriceUndefinedCheck}
         disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
+        skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
         duplicateCircleItemIds={duplicateCircleItemIds}
         eventDates={eventDates}
         eventLists={eventLists}

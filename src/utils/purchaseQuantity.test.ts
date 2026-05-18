@@ -5,7 +5,10 @@ import {
   formatDisplayQuantity,
   getActualPurchasedQuantity,
   getChargeableQuantity,
+  getLimitedBulkInputTargetDecision,
+  getLimitedBulkInputTargets,
   getLimitedPurchaseCounts,
+  getNextPurchaseStatus,
   getPlannedBudgetQuantity,
   getSafePriceForCalculation,
   hasMissingLimitedPurchaseQuantity,
@@ -35,6 +38,62 @@ const makeItem = (overrides: Partial<ShoppingItem> = {}): ShoppingItem => ({
 });
 
 describe('purchaseQuantity utilities', () => {
+  it('skips LimitedPurchase in cycle mode for quantity 1 when enabled', () => {
+    expect(
+      getNextPurchaseStatus('Late', {
+        item: makeItem({ quantity: 1 }),
+        skipLimitedPurchaseForSingleQuantity: true,
+      }),
+    ).toBe('None');
+    expect(
+      getNextPurchaseStatus('Late', {
+        item: makeItem({ quantity: 2 }),
+        skipLimitedPurchaseForSingleQuantity: true,
+      }),
+    ).toBe('LimitedPurchase');
+    expect(
+      getNextPurchaseStatus('Late', {
+        item: makeItem({ quantity: 1 }),
+        skipLimitedPurchaseForSingleQuantity: false,
+      }),
+    ).toBe('LimitedPurchase');
+  });
+
+  it('falls back to None for an invalid current status', () => {
+    expect(
+      getNextPurchaseStatus('Unknown' as never, {
+        item: makeItem({ quantity: 1 }),
+        skipLimitedPurchaseForSingleQuantity: true,
+      }),
+    ).toBe('None');
+  });
+
+  it('keeps existing missing LimitedPurchase items in bulk targets', () => {
+    const quantityOneNone = makeItem({ id: 'none-1', purchaseStatus: 'None', quantity: 1 });
+    const quantityTwoLate = makeItem({ id: 'late-2', purchaseStatus: 'Late', quantity: 2 });
+    const missingLimited = makeItem({
+      id: 'limited-1',
+      purchaseStatus: 'LimitedPurchase',
+      quantity: 1,
+    });
+
+    expect(
+      getLimitedBulkInputTargetDecision(quantityOneNone, {
+        skipLimitedPurchaseForSingleQuantity: true,
+      }),
+    ).toEqual({ isBaseTarget: true, isTarget: false, skippedForSingleQuantity: true });
+
+    expect(
+      getLimitedBulkInputTargets([quantityOneNone, quantityTwoLate, missingLimited], {
+        skipLimitedPurchaseForSingleQuantity: true,
+      }),
+    ).toEqual({
+      targets: [quantityTwoLate, missingLimited],
+      singleQuantitySkippedCount: 1,
+      baseTargetCount: 3,
+    });
+  });
+
   it('formats limited purchase quantities', () => {
     expect(
       formatDisplayQuantity(
