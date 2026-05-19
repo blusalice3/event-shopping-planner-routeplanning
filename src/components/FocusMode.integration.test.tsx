@@ -139,10 +139,10 @@ describe('FocusMode resume dialog - integration', () => {
     );
   });
 
-  it('auto-advance 起動中に non-null → null 遷移すると、タイマーが発火せず phase/phaseIndex が動かない', async () => {
+  it('全アイテムを後回しにしても自動遷移せず phase/phaseIndex が動かない', async () => {
     const onSessionStateChange = vi.fn();
 
-    // Phase 1: real timers でクリック操作を行い、auto-advance を起動させる
+    // Phase 1: real timers でクリック操作を行い、全アイテムを後回しにする
     const { rerender } = render(
       <StatefulFocusModeHarness
         initialItems={singleVisitNoneItemFixture.items}
@@ -161,12 +161,9 @@ describe('FocusMode resume dialog - integration', () => {
     fireEvent.click(statusButton()); // → Absent
     fireEvent.click(statusButton()); // → Postpone
 
-    // カウントダウン UI 出現で auto-advance 起動を目視検証
-    expect(
-      await screen.findByText(/秒後に次の訪問先へ移動します/),
-    ).toBeInTheDocument();
+    expect(screen.queryByText(/秒後に次の訪問先へ移動します/)).toBeNull();
 
-    // Phase 2: fake timers に切り替えて遷移と進行を検証
+    // Phase 2: fake timers に切り替えても自動遷移しないことを検証
     vi.useFakeTimers();
     try {
       rerender(

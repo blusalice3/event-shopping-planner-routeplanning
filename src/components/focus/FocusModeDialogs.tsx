@@ -1,4 +1,5 @@
 import type React from 'react';
+import { createPortal } from 'react-dom';
 import type { FocusPhase } from '../../types/focus';
 import type { ShoppingItem } from '../../types/item';
 import type { PhaseChangeDialogState } from './hooks/useFocusSessionState';
@@ -219,8 +220,8 @@ export function AddItemDialogView({
     ? [...new Set(currentVisit.items.map((item) => item.circle).filter(Boolean))]
     : [];
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+  return createPortal(
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 backdrop-blur-sm">
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto">
         <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4">
           <h2 className="text-lg font-bold">新規アイテム追加</h2>
@@ -295,7 +296,8 @@ export function AddItemDialogView({
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
