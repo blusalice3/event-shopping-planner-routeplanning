@@ -73,6 +73,7 @@ export interface ShoppingItemCardProps {
   highlightLimitedMissing?: boolean;
   getLatestItemById?: (itemId: string) => ShoppingItem | undefined;
   onNotify?: (message: string) => void;
+  onLimitedPurchaseDefer?: (item: ShoppingItem) => void;
   purchaseStatusControlMode?: PurchaseStatusControlMode;
   skipLimitedPurchaseForSingleQuantity: boolean;
 }
@@ -367,6 +368,7 @@ export const SHOPPING_ITEM_CARD_COMPARISON_KEYS = [
   'highlightLimitedMissing',
   'getLatestItemById',
   'onNotify',
+  'onLimitedPurchaseDefer',
   'purchaseStatusControlMode',
   'skipLimitedPurchaseForSingleQuantity',
 ] as const satisfies readonly (keyof ShoppingItemCardProps)[];
@@ -397,6 +399,7 @@ export const areSameShoppingItemCardProps = (
   prev.highlightLimitedMissing === next.highlightLimitedMissing &&
   prev.getLatestItemById === next.getLatestItemById &&
   prev.onNotify === next.onNotify &&
+  prev.onLimitedPurchaseDefer === next.onLimitedPurchaseDefer &&
   prev.purchaseStatusControlMode === next.purchaseStatusControlMode &&
   prev.skipLimitedPurchaseForSingleQuantity === next.skipLimitedPurchaseForSingleQuantity;
 
@@ -423,6 +426,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   highlightLimitedMissing = false,
   getLatestItemById,
   onNotify,
+  onLimitedPurchaseDefer,
   purchaseStatusControlMode = 'cycle',
   skipLimitedPurchaseForSingleQuantity,
 }) => {
@@ -541,9 +545,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         return;
       }
 
+      if (result.kind === 'defer') {
+        onLimitedPurchaseDefer?.(baseItem);
+      }
       commitItemUpdate(applyLimitedPurchase(baseItem, { planned: result.planned }));
     },
-    [commitItemUpdate],
+    [commitItemUpdate, onLimitedPurchaseDefer],
   );
 
   const restorePurchaseStatusButtonFocus = useCallback(() => {

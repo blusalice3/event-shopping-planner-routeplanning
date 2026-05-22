@@ -157,6 +157,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const clearAutoAdvanceTimer = useCallback(() => {}, []);
   const [blinkingLimitedMissingItemIds, setBlinkingLimitedMissingItemIds] =
     useState<Set<string>>(new Set());
+  const [deferredLimitedItemIdsByVisitKey, setDeferredLimitedItemIdsByVisitKey] =
+    useState<Map<string, Set<string>>>(() => new Map());
   const [limitedBulkDialogContext, setLimitedBulkDialogContext] =
     useState<LimitedBulkDialogContext | null>(null);
   const [bulkLimitedMessage, setBulkLimitedMessage] = useState<BulkLimitedMessageState | null>(null);
@@ -263,6 +265,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
     const dayMapData = mapData ? mapData[`${firstItem.eventDate}マップ`] || null : null;
     return sortItemsByHallOrder(rawItems, dayMapData, hallDefinitions || [], hallOrder);
   }, [itemsById, executeModeItemIds, hallDefinitions, hallOrder, mapData]);
+  const executeItemsById = useMemo(() => {
+    return new Map(executeItems.map((item) => [item.id, item]));
+  }, [executeItems]);
+  const executeModeItemIdSet = useMemo(() => {
+    return new Set(executeModeItemIds);
+  }, [executeModeItemIds]);
 
   const executeItemsRoutingSignature = useMemo(() => {
     return buildItemRoutingSignature(items, executeModeItemIds);
@@ -462,6 +470,47 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return currentVisit.items.filter((item) => latePhaseItemIds.has(item.id));
     }
   }, [currentVisit, currentPhase, postponedPhaseItemIds, latePhaseItemIds]);
+  const currentVisitUndefinedPriceItems = useMemo(
+    () =>
+      currentVisitDisplayItems.filter(
+        (item) => isPriceRequiredStatus(item) && isUndefinedPrice(item.price),
+      ),
+    [currentVisitDisplayItems],
+  );
+  const currentVisitUndefinedPriceItemIds = useMemo(
+    () => new Set(currentVisitUndefinedPriceItems.map((item) => item.id)),
+    [currentVisitUndefinedPriceItems],
+  );
+  const blockedByPrice = useMemo(
+    () => !disablePriceUndefinedCheck && currentVisitUndefinedPriceItems.length > 0,
+    [disablePriceUndefinedCheck, currentVisitUndefinedPriceItems],
+  );
+  const currentVisitLimitedMissingItems = useMemo(
+    () => currentVisitDisplayItems.filter(hasMissingLimitedPurchaseQuantity),
+    [currentVisitDisplayItems],
+  );
+  const isCurrentVisitLimitedCheckDeferred = useMemo(() => {
+    if (!currentVisit || currentVisitLimitedMissingItems.length === 0) return false;
+    const deferredItemIds = deferredLimitedItemIdsByVisitKey.get(currentVisit.key);
+    if (!deferredItemIds) return false;
+    return currentVisitLimitedMissingItems.every((item) => deferredItemIds.has(item.id));
+  }, [currentVisit, currentVisitLimitedMissingItems, deferredLimitedItemIdsByVisitKey]);
+  const isLimitedPurchaseQuantityCheckDisabledForCurrentVisit =
+    disableLimitedPurchaseQuantityCheck || isCurrentVisitLimitedCheckDeferred;
+  const blockedByLimited = useMemo(
+    () =>
+      !isLimitedPurchaseQuantityCheckDisabledForCurrentVisit &&
+      currentVisitLimitedMissingItems.length > 0,
+    [isLimitedPurchaseQuantityCheckDisabledForCurrentVisit, currentVisitLimitedMissingItems],
+  );
+  const nextButtonBlockTone =
+    blockedByPrice && blockedByLimited
+      ? 'both'
+      : blockedByPrice
+        ? 'price'
+        : blockedByLimited
+          ? 'limited'
+          : 'none';
   // フェーズ名の日本語表示
   const phaseDisplayName = useMemo(() => {
     switch (currentPhase) {
@@ -485,27 +534,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
     return number;
   }, [currentPhaseIndex, currentPhase, visitsByPhase]);
-  // 価格未定かつ購入済みのアイテムをチェック
-  const hasUndefinedPricePurchased = useMemo(() => {
-    return currentVisitDisplayItems.some(
-      (item) => isPriceRequiredStatus(item) && isUndefinedPrice(item.price),
-    );
-  }, [currentVisitDisplayItems]);
-  const hasMissingLimitedPurchaseInCurrentVisit = useMemo(
-    () => currentVisitDisplayItems.some(hasMissingLimitedPurchaseQuantity),
-    [currentVisitDisplayItems],
-  );
-  const nextButtonBlockTone =
-    !disablePriceUndefinedCheck &&
-    hasUndefinedPricePurchased &&
-    !disableLimitedPurchaseQuantityCheck &&
-    hasMissingLimitedPurchaseInCurrentVisit
-      ? 'both'
-      : !disablePriceUndefinedCheck && hasUndefinedPricePurchased
-        ? 'price'
-        : !disableLimitedPurchaseQuantityCheck && hasMissingLimitedPurchaseInCurrentVisit
-          ? 'limited'
-          : 'none';
   const remainingCost = useMemo(() => {
     return executeItems.reduce((sum, item) => {
       const isPurchasable =
@@ -532,18 +560,98 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const currentVisitPriceInfo = useMemo(() => {
     let chargeableTotal = 0;
     let plannedTotal = 0;
-    let priceMissingItemCount = 0;
     currentVisitDisplayItems.forEach((item) => {
-      if (isPriceRequiredStatus(item) && isUndefinedPrice(item.price)) {
-        priceMissingItemCount += 1;
-        return;
-      }
+      if (currentVisitUndefinedPriceItemIds.has(item.id)) return;
       const price = getSafePriceForCalculation(item.price);
       chargeableTotal += price * getChargeableQuantity(item);
       plannedTotal += price * getPlannedBudgetQuantity(item);
     });
-    return { chargeableTotal, plannedTotal, priceMissingItemCount };
-  }, [currentVisitDisplayItems]);
+    return {
+      chargeableTotal,
+      plannedTotal,
+      priceMissingItemCount: currentVisitUndefinedPriceItems.length,
+    };
+  }, [currentVisitDisplayItems, currentVisitUndefinedPriceItemIds, currentVisitUndefinedPriceItems]);
+  const markLimitedPurchaseQuantityDeferred = useCallback((visitKey: string, itemId: string) => {
+    setDeferredLimitedItemIdsByVisitKey((previous) => {
+      const next = new Map(previous);
+      const itemIds = new Set(next.get(visitKey) ?? []);
+      itemIds.add(itemId);
+      next.set(visitKey, itemIds);
+      return next;
+    });
+  }, []);
+  const clearLimitedPurchaseQuantityDeferredForItem = useCallback((itemId: string) => {
+    setDeferredLimitedItemIdsByVisitKey((previous) => {
+      let mutated = false;
+      const next = new Map<string, Set<string>>();
+      previous.forEach((itemIds, visitKey) => {
+        if (!itemIds.has(itemId)) {
+          next.set(visitKey, itemIds);
+          return;
+        }
+        mutated = true;
+        const updated = new Set(itemIds);
+        updated.delete(itemId);
+        if (updated.size > 0) {
+          next.set(visitKey, updated);
+        }
+      });
+      return mutated ? next : previous;
+    });
+  }, []);
+  const handleLimitedPurchaseDefer = useCallback(
+    (item: ShoppingItem) => {
+      markLimitedPurchaseQuantityDeferred(getVisitKey(item), item.id);
+    },
+    [markLimitedPurchaseQuantityDeferred],
+  );
+  const updateItemWithDeferredCleanup = useCallback(
+    (updatedItem: ShoppingItem) => {
+      const shouldClearDefer =
+        updatedItem.purchaseStatus !== 'LimitedPurchase' ||
+        !hasMissingLimitedPurchaseQuantity(updatedItem);
+      if (shouldClearDefer) {
+        clearLimitedPurchaseQuantityDeferredForItem(updatedItem.id);
+      }
+      onUpdateItem(updatedItem);
+    },
+    [clearLimitedPurchaseQuantityDeferredForItem, onUpdateItem],
+  );
+  useEffect(() => {
+    setDeferredLimitedItemIdsByVisitKey((previous) => {
+      if (previous.size === 0) return previous;
+
+      let mutated = false;
+      const next = new Map<string, Set<string>>();
+      previous.forEach((itemIds, visitKey) => {
+        const retainedIds = new Set<string>();
+        itemIds.forEach((itemId) => {
+          const latest = itemsById.get(itemId);
+          const isInExecuteScope =
+            executeModeItemIdSet.has(itemId) || executeItemsById.has(itemId);
+          if (
+            latest &&
+            isInExecuteScope &&
+            latest.purchaseStatus === 'LimitedPurchase' &&
+            hasMissingLimitedPurchaseQuantity(latest) &&
+            getVisitKey(latest) === visitKey
+          ) {
+            retainedIds.add(itemId);
+          } else {
+            mutated = true;
+          }
+        });
+        if (retainedIds.size > 0) {
+          next.set(visitKey, retainedIds);
+        } else if (itemIds.size > 0) {
+          mutated = true;
+        }
+      });
+
+      return mutated ? next : previous;
+    });
+  }, [executeItemsById, executeModeItemIdSet, itemsById]);
   // 次の訪問先情報
   const nextVisitInfo = useMemo(() => {
     if (!nextVisit) return { spaceInfo: '最終', circleName: '' };
@@ -905,21 +1013,18 @@ const FocusMode: React.FC<FocusModeProps> = ({
   }, []);
   // 次へボタンの点滅を更新
   useEffect(() => {
-    if (currentVisitDisplayItems.length === 0) return;
-    const currentVisitUndefinedPriceItems = currentVisitDisplayItems.filter(
-      (item) => isPriceRequiredStatus(item) && isUndefinedPrice(item.price),
-    );
-    const currentVisitLimitedMissingItems = currentVisitDisplayItems.filter(
-      hasMissingLimitedPurchaseQuantity,
-    );
-    const blockedByPrice =
-      !disablePriceUndefinedCheck && currentVisitUndefinedPriceItems.length > 0;
-    const blockedByLimited =
-      !disableLimitedPurchaseQuantityCheck && currentVisitLimitedMissingItems.length > 0;
-
-    if (currentVisitUndefinedPriceItems.length > 0 || blockedByLimited) {
+    if (currentVisitDisplayItems.length === 0) {
+      setBlinkingPriceItemIds(new Set<string>());
+      setBlinkingLimitedMissingItemIds(new Set<string>());
       setIsNextButtonBlinking(false);
-      setBlinkingPriceItemIds(new Set(currentVisitUndefinedPriceItems.map((item) => item.id)));
+      return;
+    }
+
+    if (blockedByPrice || blockedByLimited) {
+      setIsNextButtonBlinking(false);
+      setBlinkingPriceItemIds(
+        blockedByPrice ? new Set(currentVisitUndefinedPriceItems.map((item) => item.id)) : new Set(),
+      );
       setBlinkingLimitedMissingItemIds(
         blockedByLimited
           ? new Set(currentVisitLimitedMissingItems.map((item) => item.id))
@@ -933,7 +1038,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
       );
       setIsNextButtonBlinking(!hasUnprocessed && currentVisitDisplayItems.length > 0);
     }
-  }, [currentVisitDisplayItems, disableLimitedPurchaseQuantityCheck, disablePriceUndefinedCheck]);
+  }, [
+    blockedByLimited,
+    blockedByPrice,
+    currentVisitDisplayItems,
+    currentVisitLimitedMissingItems,
+    currentVisitUndefinedPriceItems,
+  ]);
   // 通知を自動で消す
   useEffect(() => {
     if (notification) {
@@ -1082,17 +1193,6 @@ const FocusMode: React.FC<FocusModeProps> = ({
     latePhaseItemIds,
   ]);
   const handleNext = useCallback(() => {
-    const currentVisitUndefinedPriceItems = currentVisitDisplayItems.filter(
-      (item) => isPriceRequiredStatus(item) && isUndefinedPrice(item.price),
-    );
-    const currentVisitLimitedMissingItems = currentVisitDisplayItems.filter(
-      hasMissingLimitedPurchaseQuantity,
-    );
-    const blockedByPrice =
-      !disablePriceUndefinedCheck && currentVisitUndefinedPriceItems.length > 0;
-    const blockedByLimited =
-      !disableLimitedPurchaseQuantityCheck && currentVisitLimitedMissingItems.length > 0;
-
     setBlinkingPriceItemIds(
       blockedByPrice ? new Set(currentVisitUndefinedPriceItems.map((item) => item.id)) : new Set(),
     );
@@ -1126,9 +1226,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
       }, 100);
     }
   }, [
-    disablePriceUndefinedCheck,
-    disableLimitedPurchaseQuantityCheck,
+    blockedByLimited,
+    blockedByPrice,
     currentVisitDisplayItems,
+    currentVisitLimitedMissingItems,
+    currentVisitUndefinedPriceItems,
     clearAutoAdvanceTimer,
     moveToNext,
   ]);
@@ -1188,7 +1290,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     (updatedItem: ShoppingItem) => {
       setLastInteractedItemId(updatedItem.id);
       // まずアイテムを更新
-      onUpdateItem(updatedItem);
+      updateItemWithDeferredCleanup(updatedItem);
       // 購入状態が変更されたかチェック
       const originalItem = currentVisitDisplayItems.find((i) => i.id === updatedItem.id);
       if (!originalItem) {
@@ -1210,7 +1312,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       clearAutoAdvanceTimer();
     },
     [
-      onUpdateItem,
+      updateItemWithDeferredCleanup,
       currentVisitDisplayItems,
       clearAutoAdvanceTimer,
       currentPhase,
@@ -1300,16 +1402,16 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const commitLimitedDialogResult = useCallback(
     (baseItem: ShoppingItem, result: LimitedPurchaseDialogResult) => {
       if (result.kind === 'limited') {
-        onUpdateItem(applyLimitedPurchase(baseItem, { actual: result.actual, planned: result.planned }));
+        updateItemWithDeferredCleanup(applyLimitedPurchase(baseItem, { actual: result.actual, planned: result.planned }));
         return;
       }
       if (result.kind === 'purchased') {
-        onUpdateItem(applyPurchasedFromLimitedInput(baseItem, result.planned));
+        updateItemWithDeferredCleanup(applyPurchasedFromLimitedInput(baseItem, result.planned));
         return;
       }
-      onUpdateItem(applyLimitedPurchase(baseItem, { planned: result.planned }));
+      updateItemWithDeferredCleanup(applyLimitedPurchase(baseItem, { planned: result.planned }));
     },
-    [onUpdateItem],
+    [updateItemWithDeferredCleanup],
   );
 
   const startLimitedBulkFlow = useCallback(
@@ -1334,7 +1436,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         }
         clearLimitedBulkMessage();
         missing.forEach((item) => {
-          onUpdateItem(clearLimitedPurchase({ ...item, purchaseStatus: 'None' }));
+          updateItemWithDeferredCleanup(clearLimitedPurchase({ ...item, purchaseStatus: 'None' }));
         });
         activeLimitedBulkFlowTokenRef.current = null;
         return;
@@ -1372,9 +1474,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
     [
       advanceLimitedBulkToNextTarget,
       clearLimitedBulkMessage,
-      onUpdateItem,
       showLimitedBulkMessage,
       skipLimitedPurchaseForSingleQuantity,
+      updateItemWithDeferredCleanup,
     ],
   );
 
@@ -1420,6 +1522,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
           return;
 
         case 'commit':
+          if (result.kind === 'defer') {
+            markLimitedPurchaseQuantityDeferred(
+              getVisitKey(submitDecision.baseItem),
+              submitDecision.baseItem.id,
+            );
+          }
           commitLimitedDialogResult(submitDecision.baseItem, result);
           setLimitedBulkDialogContext(null);
           advanceLimitedBulkToNextTarget(
@@ -1443,6 +1551,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       getLatestItemById,
       isActiveLimitedBulkFlow,
       limitedBulkDialogContext,
+      markLimitedPurchaseQuantityDeferred,
       skipLimitedPurchaseForSingleQuantity,
     ],
   );
@@ -1516,7 +1625,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       });
 
       changedItems.forEach((item) => {
-        onUpdateItem(clearLimitedPurchase({ ...item, purchaseStatus: newStatus }));
+        updateItemWithDeferredCleanup(clearLimitedPurchase({ ...item, purchaseStatus: newStatus }));
       });
 
       clearAutoAdvanceTimer();
@@ -1526,10 +1635,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
       currentVisitDisplayItems,
       currentPhase,
       currentPhaseIndex,
-      onUpdateItem,
       clearAutoAdvanceTimer,
       setNotification,
       startLimitedBulkFlow,
+      updateItemWithDeferredCleanup,
     ],
   );
   const handleTouchStart = useCallback(
@@ -1806,7 +1915,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         {completionSubView === 'limitedMissingList' ? (
           <LimitedPurchaseMissingListView
             items={executeItems}
-            onUpdateItem={onUpdateItem}
+            onUpdateItem={updateItemWithDeferredCleanup}
             onBack={() => setCompletionSubView('summary')}
           />
         ) : (
@@ -1977,6 +2086,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onNotify={setNotification}
             purchaseStatusControlMode={purchaseStatusControlMode}
             skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
+            onLimitedPurchaseDefer={handleLimitedPurchaseDefer}
           />
         </div>
         <FocusModeFooterPortal
@@ -2080,6 +2190,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
             onNotify={setNotification}
             purchaseStatusControlMode={purchaseStatusControlMode}
             skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
+            onLimitedPurchaseDefer={handleLimitedPurchaseDefer}
           />
         </div>
         <button
@@ -2171,6 +2282,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         onNotify={setNotification}
         purchaseStatusControlMode={purchaseStatusControlMode}
         skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
+        onLimitedPurchaseDefer={handleLimitedPurchaseDefer}
       />
       {layoutMode === 'pc' && (
         <>

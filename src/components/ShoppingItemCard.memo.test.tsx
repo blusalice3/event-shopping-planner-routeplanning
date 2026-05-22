@@ -53,6 +53,7 @@ const representativeShoppingItemCardProps = {
   highlightLimitedMissing: false,
   getLatestItemById: vi.fn(),
   onNotify: vi.fn(),
+  onLimitedPurchaseDefer: vi.fn(),
   purchaseStatusControlMode: 'cycle',
   skipLimitedPurchaseForSingleQuantity: true,
 } satisfies Required<ShoppingItemCardProps>;

@@ -88,6 +88,7 @@ export const minimalProps = (
     onSessionStateChange?: (state: FocusModeSessionState) => void;
     onModeChange?: (mode: 'edit' | 'execute', lastItemId?: string) => void;
     disablePriceUndefinedCheck?: boolean;
+    disableLimitedPurchaseQuantityCheck?: boolean;
     skipLimitedPurchaseForSingleQuantity?: boolean;
     purchaseStatusControlMode?: PurchaseStatusControlMode;
   } = {},
@@ -104,6 +105,7 @@ export const minimalProps = (
   resumeState: cloneSessionState(overrides.resumeState),
   onSessionStateChange: overrides.onSessionStateChange ?? (() => {}),
   disablePriceUndefinedCheck: overrides.disablePriceUndefinedCheck ?? false,
+  disableLimitedPurchaseQuantityCheck: overrides.disableLimitedPurchaseQuantityCheck ?? false,
   skipLimitedPurchaseForSingleQuantity:
     overrides.skipLimitedPurchaseForSingleQuantity ?? true,
   purchaseStatusControlMode: overrides.purchaseStatusControlMode ?? 'cycle',
@@ -125,7 +127,14 @@ export const StatefulFocusModeHarness: React.FC<{
   executeModeItemIds: string[];
   resumeState: FocusModeSessionState | null;
   onSessionStateChange?: (state: FocusModeSessionState) => void;
-}> = ({ initialItems, executeModeItemIds, resumeState, onSessionStateChange }) => {
+  disableLimitedPurchaseQuantityCheck?: boolean;
+}> = ({
+  initialItems,
+  executeModeItemIds,
+  resumeState,
+  onSessionStateChange,
+  disableLimitedPurchaseQuantityCheck,
+}) => {
   const [items, setItems] = React.useState(initialItems);
   // 後続 initialItems 変更は取り込まない。リセットしたければ key でリマウント
   const handleUpdateItem = React.useCallback((updated: ShoppingItem) => {
@@ -139,6 +148,7 @@ export const StatefulFocusModeHarness: React.FC<{
         onUpdateItem: handleUpdateItem,
         resumeState,
         onSessionStateChange,
+        disableLimitedPurchaseQuantityCheck,
       })}
     />
   );

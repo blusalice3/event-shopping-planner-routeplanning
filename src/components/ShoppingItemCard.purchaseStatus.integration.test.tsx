@@ -300,6 +300,77 @@ describe('ShoppingItemCard purchase status control', () => {
     expect(onUpdate.mock.calls[0][0]).not.toHaveProperty('limitedPurchasedQuantity');
   });
 
+  it('notifies when limited quantity input is deferred', () => {
+    const onLimitedPurchaseDefer = vi.fn();
+    const { onUpdate } = renderCard({
+      purchaseStatusControlMode: 'radial',
+      item: { ...baseItem, quantity: 5 },
+      onLimitedPurchaseDefer,
+    });
+
+    fireEvent.click(getStatusButton());
+    fireEvent.click(screen.getByRole('radio', { name: /^LimitedPurchase/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'この商品を後で入力' }));
+
+    expect(onLimitedPurchaseDefer).toHaveBeenCalledTimes(1);
+    expect(onLimitedPurchaseDefer).toHaveBeenCalledWith(expect.objectContaining({ id: baseItem.id }));
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not notify defer when limited quantity input is saved', () => {
+    const onLimitedPurchaseDefer = vi.fn();
+    const { onUpdate } = renderCard({
+      item: {
+        ...baseItem,
+        purchaseStatus: 'LimitedPurchase',
+        quantity: 5,
+      },
+      onLimitedPurchaseDefer,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '-/5' }));
+
+    const dialog = getLimitedDialog();
+    const [actualInput] = screen.getAllByRole('textbox').filter((input) =>
+      dialog.contains(input),
+    );
+    fireEvent.change(actualInput, { target: { value: '2' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+
+    expect(onLimitedPurchaseDefer).not.toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not notify defer when limited quantity input becomes purchased', () => {
+    const onLimitedPurchaseDefer = vi.fn();
+    const { onUpdate } = renderCard({
+      item: {
+        ...baseItem,
+        purchaseStatus: 'LimitedPurchase',
+        quantity: 5,
+      },
+      onLimitedPurchaseDefer,
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '-/5' }));
+
+    const dialog = getLimitedDialog();
+    const [actualInput] = screen.getAllByRole('textbox').filter((input) =>
+      dialog.contains(input),
+    );
+    fireEvent.change(actualInput, { target: { value: '5' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog', { name: '購入済として保存しますか？' })).getByRole(
+        'button',
+        { name: '購入済にする' },
+      ),
+    );
+
+    expect(onLimitedPurchaseDefer).not.toHaveBeenCalled();
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+  });
+
   it('closes without update when selecting the current status', () => {
     const { onUpdate } = renderCard({ purchaseStatusControlMode: 'radial' });
 
