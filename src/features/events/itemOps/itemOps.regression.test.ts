@@ -3,7 +3,10 @@ import type { ExecuteModeItems, ShoppingItem } from '../../../types/item';
 import type { HallDefinition, HallRouteSettings } from '../../../types/map';
 import {
   computeAddToExecuteListFromMap,
+  computeAddToExecuteListFromMapWithResult,
+  computeInsertIntoExecuteAtPosition,
   computeMoveItem,
+  computeRemoveFromExecuteListFromMap,
   computeUpdateItemPriority,
   reorderExecuteIdsForSpaceAdjacency,
 } from './index';
@@ -52,6 +55,107 @@ describe('itemOps regressions', () => {
     );
 
     expect(result[dayName]).toEqual(['a1', 'b1']);
+  });
+
+  it('adds a map item together with uninserted same-space same-priority siblings', () => {
+    const allItems = [
+      makeItem('b1', 'B', '01'),
+      makeItem('a1', 'A', '01a', 'priority'),
+      makeItem('a2', 'A', '01a2', 'priority'),
+      makeItem('a3', 'A', '01a3', 'highest'),
+      makeItem('a4', 'A', '02', 'priority'),
+    ];
+    const executeModeItems: ExecuteModeItems = { [dayName]: ['b1'] };
+
+    const result = computeAddToExecuteListFromMapWithResult(
+      'a1',
+      dayName,
+      allItems,
+      executeModeItems,
+      halls,
+      { hallOrder: ['hall-a', 'hall-b'], hallVisitLists: [] },
+      undefined,
+    );
+
+    expect(result.insertedItemIds).toEqual(['a1', 'a2']);
+    expect(result.executeModeItems[dayName]).toEqual(['a1', 'a2', 'b1']);
+  });
+
+  it('adds only uninserted same-space siblings when the clicked map item is already inserted', () => {
+    const allItems = [
+      makeItem('a1', 'A', '01a', 'priority'),
+      makeItem('a2', 'A', '01a2', 'priority'),
+    ];
+    const executeModeItems: ExecuteModeItems = { [dayName]: ['a1'] };
+
+    const result = computeAddToExecuteListFromMapWithResult(
+      'a1',
+      dayName,
+      allItems,
+      executeModeItems,
+      halls,
+      emptySettings,
+      undefined,
+    );
+
+    expect(result.insertedItemIds).toEqual(['a2']);
+    expect(result.executeModeItems[dayName]).toEqual(['a1', 'a2']);
+  });
+
+  it('removes a map item together with same-space same-priority execute siblings', () => {
+    const allItems = [
+      makeItem('a1', 'A', '01a', 'priority'),
+      makeItem('a2', 'A', '01a2', 'priority'),
+      makeItem('a3', 'A', '01a3', 'highest'),
+    ];
+    const executeModeItems: ExecuteModeItems = { [dayName]: ['a1', 'a2', 'a3'] };
+
+    const result = computeRemoveFromExecuteListFromMap('a1', executeModeItems, dayName, allItems);
+
+    expect(result[dayName]).toEqual(['a3']);
+  });
+
+  it('snaps positioned map insert after an existing same-space same-priority group', () => {
+    const allItems = [
+      makeItem('a1', 'A', '01a', 'priority'),
+      makeItem('a2', 'A', '01a2', 'priority'),
+      makeItem('a3', 'A', '01a3', 'priority'),
+      makeItem('b1', 'B', '01'),
+    ];
+    const executeModeItems: ExecuteModeItems = { [dayName]: ['a1', 'a2', 'b1'] };
+
+    const result = computeInsertIntoExecuteAtPosition(
+      ['a3'],
+      'a1',
+      'after',
+      executeModeItems,
+      dayName,
+      allItems,
+    );
+
+    expect(result.insertedItemIds).toEqual(['a3']);
+    expect(result.executeModeItems[dayName]).toEqual(['a1', 'a2', 'a3', 'b1']);
+  });
+
+  it('rejects positioned map insert when the shared boundary rule rejects the reference', () => {
+    const allItems = [
+      makeItem('a1', 'A', '01a', 'priority'),
+      makeItem('b1', 'B', '01'),
+    ];
+    const executeModeItems: ExecuteModeItems = { [dayName]: ['b1'] };
+
+    const result = computeInsertIntoExecuteAtPosition(
+      ['a1'],
+      'b1',
+      'after',
+      executeModeItems,
+      dayName,
+      allItems,
+      { canInsertWithReference: () => false },
+    );
+
+    expect(result.accepted).toBe(false);
+    expect(result.executeModeItems[dayName]).toEqual(['b1']);
   });
 
   it('moves a candidate item together with same-space same-priority siblings', () => {

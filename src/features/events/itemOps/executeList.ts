@@ -3,6 +3,169 @@ import type { ExecuteModeItems, ShoppingItem } from '../../../types/item';
 import { getSpaceKey } from '../../../utils/spaceGrouping';
 import { findItemHallId } from './geometry';
 
+export interface MapExecuteInsertResult {
+  accepted: boolean;
+  executeModeItems: ExecuteModeItems;
+  insertedItemIds: string[];
+}
+
+export interface ExecutePositionInsertResult {
+  accepted: boolean;
+  executeModeItems: ExecuteModeItems;
+  insertedItemIds: string[];
+}
+
+export function expandSameSpacePriorityItemIds(
+  itemIds: string[],
+  allItems: ShoppingItem[],
+  options: {
+    dayName?: string;
+    excludedIds?: Set<string>;
+    sourceIds?: Set<string>;
+    excludeSeedIdsFromSiblingExpansion?: boolean;
+  } = {},
+): string[] {
+  const seedIdsSet = new Set(itemIds);
+  const expandedIds: string[] = [];
+  const expandedIdsSet = new Set<string>();
+
+  for (const itemId of itemIds) {
+    const item = allItems.find((i) => i.id === itemId);
+    if (!item) continue;
+    if (options.dayName && item.eventDate !== options.dayName) continue;
+
+    const addIfAvailable = (id: string) => {
+      if (options.excludedIds?.has(id) || expandedIdsSet.has(id)) return;
+      if (options.sourceIds && !options.sourceIds.has(id)) return;
+      expandedIds.push(id);
+      expandedIdsSet.add(id);
+    };
+
+    addIfAvailable(item.id);
+
+    const spaceKey = getSpaceKey(item.block, item.number);
+    const priorityLevel = item.priorityLevel || 'none';
+    for (const sibling of allItems) {
+      if (options.excludeSeedIdsFromSiblingExpansion && seedIdsSet.has(sibling.id)) continue;
+      if (options.dayName && sibling.eventDate !== options.dayName) continue;
+      if (sibling.eventDate !== item.eventDate) continue;
+      if (getSpaceKey(sibling.block, sibling.number) !== spaceKey) continue;
+      if ((sibling.priorityLevel || 'none') !== priorityLevel) continue;
+      addIfAvailable(sibling.id);
+    }
+  }
+
+  return expandedIds;
+}
+
+export function expandMapExecuteInsertItemIds(
+  itemIds: string[],
+  dayName: string,
+  allItems: ShoppingItem[],
+  executeModeItems: ExecuteModeItems,
+): string[] {
+  return expandSameSpacePriorityItemIds(itemIds, allItems, {
+    dayName,
+    excludedIds: new Set(executeModeItems[dayName] || []),
+    excludeSeedIdsFromSiblingExpansion: true,
+  });
+}
+
+export function expandExecuteRemovalItemIds(
+  itemIds: string[],
+  dayName: string,
+  allItems: ShoppingItem[],
+  executeModeItems: ExecuteModeItems,
+): string[] {
+  return expandSameSpacePriorityItemIds(itemIds, allItems, {
+    dayName,
+    sourceIds: new Set(executeModeItems[dayName] || []),
+  });
+}
+
+function isSameSpacePriorityGroup(
+  id1: string,
+  id2: string,
+  itemsMap: Map<string, ShoppingItem>,
+): boolean {
+  const item1 = itemsMap.get(id1);
+  const item2 = itemsMap.get(id2);
+  if (!item1 || !item2) return false;
+  return (
+    getSpaceKey(item1.block, item1.number) === getSpaceKey(item2.block, item2.number) &&
+    (item1.priorityLevel || 'none') === (item2.priorityLevel || 'none')
+  );
+}
+
+export function computeInsertIntoExecuteAtPosition(
+  itemIds: string[],
+  referenceItemId: string,
+  position: 'before' | 'after',
+  executeModeItems: ExecuteModeItems,
+  dayName: string,
+  allItems: ShoppingItem[],
+  options: {
+    expandSiblings?: boolean;
+    requireReference?: boolean;
+    canInsertWithReference?: (insertedItemId: string, referenceItemId: string) => boolean;
+  } = {},
+): ExecutePositionInsertResult {
+  const currentDayItems = [...(executeModeItems[dayName] || [])];
+  const refIndex = currentDayItems.indexOf(referenceItemId);
+  if (refIndex < 0 && options.requireReference !== false) {
+    return { accepted: false, executeModeItems, insertedItemIds: [] };
+  }
+
+  const insertedItemIds = options.expandSiblings === false
+    ? itemIds.filter((id) => !currentDayItems.includes(id))
+    : expandMapExecuteInsertItemIds(itemIds, dayName, allItems, executeModeItems);
+  if (insertedItemIds.length === 0) {
+    return { accepted: false, executeModeItems, insertedItemIds: [] };
+  }
+
+  if (
+    options.canInsertWithReference &&
+    refIndex >= 0 &&
+    insertedItemIds.some((id) => !options.canInsertWithReference!(id, referenceItemId))
+  ) {
+    return { accepted: false, executeModeItems, insertedItemIds: [] };
+  }
+
+  const itemsMap = new Map(allItems.map((item) => [item.id, item]));
+  const dayItems = currentDayItems.filter((id) => !insertedItemIds.includes(id));
+  let insertIndex = dayItems.length;
+
+  const currentRefIndex = dayItems.indexOf(referenceItemId);
+  if (currentRefIndex >= 0) {
+    let groupStart = currentRefIndex;
+    let groupEnd = currentRefIndex;
+
+    while (
+      groupStart > 0 &&
+      isSameSpacePriorityGroup(dayItems[groupStart - 1], referenceItemId, itemsMap)
+    ) {
+      groupStart--;
+    }
+    while (
+      groupEnd < dayItems.length - 1 &&
+      isSameSpacePriorityGroup(dayItems[groupEnd + 1], referenceItemId, itemsMap)
+    ) {
+      groupEnd++;
+    }
+
+    insertIndex = position === 'before' ? groupStart : groupEnd + 1;
+  } else if (options.requireReference !== false) {
+    return { accepted: false, executeModeItems, insertedItemIds: [] };
+  }
+
+  dayItems.splice(insertIndex, 0, ...insertedItemIds);
+  return {
+    accepted: true,
+    executeModeItems: { ...executeModeItems, [dayName]: dayItems },
+    insertedItemIds,
+  };
+}
+
 export function computeAddToExecuteListFromMap(
   itemId: string,
   dayName: string,
@@ -12,60 +175,90 @@ export function computeAddToExecuteListFromMap(
   hallRouteSettingsForMap: HallRouteSettings,
   mapData: DayMapData | undefined,
 ): ExecuteModeItems {
-  const dayItems = [...(executeModeItems[dayName] || [])];
+  return computeAddToExecuteListFromMapWithResult(
+    itemId,
+    dayName,
+    allItems,
+    executeModeItems,
+    halls,
+    hallRouteSettingsForMap,
+    mapData,
+  ).executeModeItems;
+}
 
-  if (dayItems.includes(itemId)) return executeModeItems;
-
-  const item = allItems.find((i) => i.id === itemId);
-  if (!item) return executeModeItems;
-
-  const itemHallId = findItemHallId(item, halls, mapData);
-
-  if (!itemHallId || halls.length === 0) {
-    dayItems.push(itemId);
-    return { ...executeModeItems, [dayName]: dayItems };
+export function computeAddToExecuteListFromMapWithResult(
+  itemId: string,
+  dayName: string,
+  allItems: ShoppingItem[],
+  executeModeItems: ExecuteModeItems,
+  halls: HallDefinition[],
+  hallRouteSettingsForMap: HallRouteSettings,
+  mapData: DayMapData | undefined,
+): MapExecuteInsertResult {
+  const insertItemIds = expandMapExecuteInsertItemIds([itemId], dayName, allItems, executeModeItems);
+  if (insertItemIds.length === 0) {
+    return { accepted: false, executeModeItems, insertedItemIds: [] };
   }
 
-  const hallOrder =
-    hallRouteSettingsForMap.hallOrder.length > 0
-      ? hallRouteSettingsForMap.hallOrder
-      : halls.map((h) => h.id);
+  const dayItems = [...(executeModeItems[dayName] || [])];
 
-  const itemsMap = new Map(allItems.map((i) => [i.id, i]));
-  const getHallIdForItem = (id: string): string | null => {
-    const targetItem = itemsMap.get(id);
-    if (!targetItem) return null;
-    return findItemHallId(targetItem, halls, mapData);
-  };
+  for (const insertItemId of insertItemIds) {
+    const item = allItems.find((i) => i.id === insertItemId);
+    if (!item) continue;
 
-  let insertIndex = dayItems.length;
-  const itemHallIndex = hallOrder.indexOf(itemHallId);
+    const itemHallId = findItemHallId(item, halls, mapData);
 
-  if (itemHallIndex >= 0) {
-    let lastSameHallIndex = -1;
-    let firstLaterHallIndex = -1;
+    if (!itemHallId || halls.length === 0) {
+      dayItems.push(insertItemId);
+      continue;
+    }
 
-    for (let i = 0; i < dayItems.length; i++) {
-      const existingItemHallId = getHallIdForItem(dayItems[i]);
-      if (existingItemHallId === itemHallId) {
-        lastSameHallIndex = i;
-      } else if (existingItemHallId) {
-        const existingHallIndex = hallOrder.indexOf(existingItemHallId);
-        if (existingHallIndex > itemHallIndex && firstLaterHallIndex === -1) {
-          firstLaterHallIndex = i;
+    const hallOrder =
+      hallRouteSettingsForMap.hallOrder.length > 0
+        ? hallRouteSettingsForMap.hallOrder
+        : halls.map((h) => h.id);
+
+    const itemsMap = new Map(allItems.map((i) => [i.id, i]));
+    const getHallIdForItem = (id: string): string | null => {
+      const targetItem = itemsMap.get(id);
+      if (!targetItem) return null;
+      return findItemHallId(targetItem, halls, mapData);
+    };
+
+    let insertIndex = dayItems.length;
+    const itemHallIndex = hallOrder.indexOf(itemHallId);
+
+    if (itemHallIndex >= 0) {
+      let lastSameHallIndex = -1;
+      let firstLaterHallIndex = -1;
+
+      for (let i = 0; i < dayItems.length; i++) {
+        const existingItemHallId = getHallIdForItem(dayItems[i]);
+        if (existingItemHallId === itemHallId) {
+          lastSameHallIndex = i;
+        } else if (existingItemHallId) {
+          const existingHallIndex = hallOrder.indexOf(existingItemHallId);
+          if (existingHallIndex > itemHallIndex && firstLaterHallIndex === -1) {
+            firstLaterHallIndex = i;
+          }
         }
+      }
+
+      if (lastSameHallIndex >= 0) {
+        insertIndex = lastSameHallIndex + 1;
+      } else if (firstLaterHallIndex >= 0) {
+        insertIndex = firstLaterHallIndex;
       }
     }
 
-    if (lastSameHallIndex >= 0) {
-      insertIndex = lastSameHallIndex + 1;
-    } else if (firstLaterHallIndex >= 0) {
-      insertIndex = firstLaterHallIndex;
-    }
+    dayItems.splice(insertIndex, 0, insertItemId);
   }
 
-  dayItems.splice(insertIndex, 0, itemId);
-  return { ...executeModeItems, [dayName]: dayItems };
+  return {
+    accepted: true,
+    executeModeItems: { ...executeModeItems, [dayName]: dayItems },
+    insertedItemIds: insertItemIds,
+  };
 }
 
 // ────────────────────────────────────────────────
@@ -82,19 +275,15 @@ export function computeAddToExecuteListFromMapAtPosition(
   executeModeItems: ExecuteModeItems,
   dayName: string,
 ): ExecuteModeItems {
-  const dayItems = [...(executeModeItems[dayName] || [])];
-
-  if (dayItems.includes(itemId)) return executeModeItems;
-
-  const refIndex = dayItems.indexOf(referenceItemId);
-  if (refIndex < 0) {
-    dayItems.push(itemId);
-  } else {
-    const insertIndex = position === 'before' ? refIndex : refIndex + 1;
-    dayItems.splice(insertIndex, 0, itemId);
-  }
-
-  return { ...executeModeItems, [dayName]: dayItems };
+  return computeInsertIntoExecuteAtPosition(
+    [itemId],
+    referenceItemId,
+    position,
+    executeModeItems,
+    dayName,
+    [],
+    { expandSiblings: false, requireReference: false },
+  ).executeModeItems;
 }
 
 // ────────────────────────────────────────────────
@@ -108,8 +297,12 @@ export function computeRemoveFromExecuteListFromMap(
   itemId: string,
   executeModeItems: ExecuteModeItems,
   dayName: string,
+  allItems?: ShoppingItem[],
 ): ExecuteModeItems {
-  const dayItems = (executeModeItems[dayName] || []).filter((id) => id !== itemId);
+  const removeIds = allItems
+    ? expandExecuteRemovalItemIds([itemId], dayName, allItems, executeModeItems)
+    : [itemId];
+  const dayItems = (executeModeItems[dayName] || []).filter((id) => !removeIds.includes(id));
   return { ...executeModeItems, [dayName]: dayItems };
 }
 

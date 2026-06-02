@@ -1,5 +1,6 @@
 import type { ExecuteModeItems, ShoppingItem, ViewMode } from '../../../types/item';
 import { getSpaceKey } from '../../../utils/spaceGrouping';
+import { expandSameSpacePriorityItemIds } from './executeList';
 
 export interface MoveItemResult {
   eventListItems?: ShoppingItem[];
@@ -43,25 +44,6 @@ export function computeMoveItem(params: {
   const isAppendToEnd = hoverId === '__END_OF_LIST__';
   const executeIdsSet = new Set(executeModeItems[dayName] || []);
 
-  // 同一スペース+同一優先度の全アイテムIDに展開するヘルパー
-  const expandSpaceGroup = (itemIds: string[], sourceItems: ShoppingItem[]): string[] => {
-    const expandedSet = new Set(itemIds);
-    itemIds.forEach((id) => {
-      const item = sourceItems.find((i) => i.id === id);
-      if (!item) return;
-      const sk = getSpaceKey(item.block, item.number);
-      const pr = item.priorityLevel || 'none';
-      sourceItems.forEach((other) => {
-        if (expandedSet.has(other.id)) return;
-        if (other.eventDate !== item.eventDate) return;
-        if (getSpaceKey(other.block, other.number) === sk && (other.priorityLevel || 'none') === pr) {
-          expandedSet.add(other.id);
-        }
-      });
-    });
-    return Array.from(expandedSet);
-  };
-
   // ---- editモード列間移動 ----
   if (mode === 'edit' && sourceColumn && targetColumn && sourceColumn !== targetColumn) {
     if (sourceColumn === 'candidate' && targetColumn === 'execute') {
@@ -76,7 +58,7 @@ export function computeMoveItem(params: {
       let itemsToMove: ShoppingItem[] = [];
       if (isDragInEffectiveSelection) {
         // スペースグループ展開：選択アイテムの同一スペース+同一優先度を自動追加
-        const expandedIds = expandSpaceGroup(
+        const expandedIds = expandSameSpacePriorityItemIds(
           Array.from(effectiveSelectedIds),
           candidateItems,
         );
@@ -85,7 +67,7 @@ export function computeMoveItem(params: {
         const item = candidateItems.find((item) => item.id === dragId);
         if (item) {
           // 単一アイテムでもスペースグループ全体を移動
-          const expandedIds = expandSpaceGroup([dragId], candidateItems);
+          const expandedIds = expandSameSpacePriorityItemIds([dragId], candidateItems);
           itemsToMove = candidateItems.filter((i) => expandedIds.includes(i.id));
         }
       }
@@ -123,7 +105,7 @@ export function computeMoveItem(params: {
       let itemsToMove: ShoppingItem[] = [];
       if (isDragInEffectiveSelection) {
         // スペースグループ展開：選択アイテムの同一スペース+同一優先度を自動追加
-        const expandedIds = expandSpaceGroup(
+        const expandedIds = expandSameSpacePriorityItemIds(
           Array.from(effectiveSelectedIds),
           executeItems,
         );
@@ -132,7 +114,7 @@ export function computeMoveItem(params: {
         const item = executeItems.find((item) => item.id === dragId);
         if (item) {
           // 単一アイテムでもスペースグループ全体を移動
-          const expandedIds = expandSpaceGroup([dragId], executeItems);
+          const expandedIds = expandSameSpacePriorityItemIds([dragId], executeItems);
           itemsToMove = executeItems.filter((i) => expandedIds.includes(i.id));
         }
       }
@@ -206,45 +188,20 @@ export function computeMoveItem(params: {
 
     const dayItems = [...(executeModeItems[dayName] || [])];
 
-    // スペースキー取得ヘルパー
-    const getIdSpaceKey = (id: string): string => {
+    // 同一スペース+同一優先度キー取得ヘルパー
+    const getIdSpacePriorityKey = (id: string): string => {
       const item = allItems.find((i) => i.id === id);
-      return item ? getSpaceKey(item.block, item.number) : '';
+      return item ? `${getSpaceKey(item.block, item.number)}::${item.priorityLevel || 'none'}` : '';
     };
 
-    // 選択をスペースグループ全体に展開
-    const expandedSelection = new Set(effectiveSelectedIds);
-    if (isDragInEffectiveSelection) {
-      effectiveSelectedIds.forEach((id) => {
-        const item = allItems.find((i) => i.id === id);
-        if (!item) return;
-        const sk = getSpaceKey(item.block, item.number);
-        const pr = item.priorityLevel || 'none';
-        dayItems.forEach((did) => {
-          if (expandedSelection.has(did)) return;
-          const ditem = allItems.find((i) => i.id === did);
-          if (!ditem) return;
-          if (getSpaceKey(ditem.block, ditem.number) === sk && (ditem.priorityLevel || 'none') === pr) {
-            expandedSelection.add(did);
-          }
-        });
-      });
-    } else {
-      // 単一アイテムでもスペースグループ全体を展開
-      const dragItem = allItems.find((i) => i.id === dragId);
-      if (dragItem) {
-        const sk = getSpaceKey(dragItem.block, dragItem.number);
-        const pr = dragItem.priorityLevel || 'none';
-        dayItems.forEach((did) => {
-          if (expandedSelection.has(did)) return;
-          const ditem = allItems.find((i) => i.id === did);
-          if (!ditem) return;
-          if (getSpaceKey(ditem.block, ditem.number) === sk && (ditem.priorityLevel || 'none') === pr) {
-            expandedSelection.add(did);
-          }
-        });
-      }
-    }
+    // 選択を同一スペース+同一優先度グループ全体に展開
+    const expandedSelection = new Set(
+      expandSameSpacePriorityItemIds(
+        isDragInEffectiveSelection ? Array.from(effectiveSelectedIds) : [dragId],
+        allItems,
+        { dayName, sourceIds: new Set(dayItems) },
+      ),
+    );
 
     const selectedBlock = dayItems.filter((id) => expandedSelection.has(id));
     const listWithoutSelection = dayItems.filter((id) => !expandedSelection.has(id));
@@ -262,9 +219,12 @@ export function computeMoveItem(params: {
     let targetIndex = listWithoutSelection.findIndex((id) => id === hoverId);
     if (targetIndex === -1) return {};
 
-    // hoverIdのスペースグループの先頭にスナップ（途中に割り込まない）
-    const hoverSpaceKey = getIdSpaceKey(hoverId);
-    while (targetIndex > 0 && getIdSpaceKey(listWithoutSelection[targetIndex - 1]) === hoverSpaceKey) {
+    // hoverIdの同一スペース+同一優先度グループの先頭にスナップ（途中に割り込まない）
+    const hoverGroupKey = getIdSpacePriorityKey(hoverId);
+    while (
+      targetIndex > 0 &&
+      getIdSpacePriorityKey(listWithoutSelection[targetIndex - 1]) === hoverGroupKey
+    ) {
       targetIndex--;
     }
 
