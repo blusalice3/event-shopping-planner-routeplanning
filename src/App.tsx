@@ -56,7 +56,7 @@ import {
   computeUpdateItem,
   computeDeleteItem,
   computeAddItemFromFocusMode,
-  computeAddToExecuteListFromMap,
+  computeAddToExecuteListFromMapWithResult,
   computeRemoveFromExecuteListFromMap,
   computeMoveToExecuteColumn,
   computeRemoveFromExecuteColumn,
@@ -64,6 +64,9 @@ import {
   computeMoveItemVertical,
   computeUpdateItemPriority,
   computeHallOrderForPriorityChange,
+  computeInsertIntoExecuteAtPosition,
+  expandExecuteRemovalItemIds,
+  expandSameSpacePriorityItemIds,
   reorderExecuteIdsForSpaceAdjacency,
 } from './features/events/itemOps';
 import {
@@ -136,26 +139,6 @@ const sortLabels: Record<SortState, string> = {
   Purchased: '購入済',
   LimitedPurchase: '\u9650\u6570',
 };
-
-type StrictPositionInsertResult = {
-  accepted: boolean;
-  executeModeItems: ExecuteModeItems;
-};
-
-function computeAddToExecuteListFromMapAtPositionStrict(
-  itemId: string,
-  referenceItemId: string,
-  position: 'before' | 'after',
-  executeModeItems: ExecuteModeItems,
-  dayName: string,
-): StrictPositionInsertResult {
-  const dayItems = [...(executeModeItems[dayName] || [])];
-  if (dayItems.includes(itemId)) return { accepted: false, executeModeItems };
-  const refIndex = dayItems.indexOf(referenceItemId);
-  if (refIndex < 0) return { accepted: false, executeModeItems };
-  dayItems.splice(position === 'before' ? refIndex : refIndex + 1, 0, itemId);
-  return { accepted: true, executeModeItems: { ...executeModeItems, [dayName]: dayItems } };
-}
 
 const buildFocusSessionKey = (eventName: string, eventDate: string): string =>
   `${eventName}::${eventDate}`;
@@ -1119,22 +1102,22 @@ const App: React.FC = () => {
 
       if (mode === 'edit' && targetColumn === 'execute') {
         const dayItems = [...(currentEventExecuteItems[currentEventDate] || [])];
-        const getItemSpaceKey = (id: string): string => {
+        const getItemSpacePriorityKey = (id: string): string => {
           const item = items.find((i) => i.id === id);
-          return item ? getSpaceKey(item.block, item.number) : '';
+          return item ? `${getSpaceKey(item.block, item.number)}::${item.priorityLevel || 'none'}` : '';
         };
 
         const effectiveIds = spaceGroupIds ? new Set(spaceGroupIds) : selectedItemIds;
-        const movingSpaceKeys = new Set<string>();
-        movingSpaceKeys.add(getItemSpaceKey(itemId));
+        const movingGroupKeys = new Set<string>();
+        movingGroupKeys.add(getItemSpacePriorityKey(itemId));
         effectiveIds.forEach((id) => {
           if (dayItems.includes(id)) {
-            movingSpaceKeys.add(getItemSpaceKey(id));
+            movingGroupKeys.add(getItemSpacePriorityKey(id));
           }
         });
 
         const movingIndices = dayItems
-          .map((id, idx) => movingSpaceKeys.has(getItemSpaceKey(id)) ? idx : -1)
+          .map((id, idx) => movingGroupKeys.has(getItemSpacePriorityKey(id)) ? idx : -1)
           .filter((idx) => idx >= 0);
 
         if (movingIndices.length > 0) {
@@ -1144,13 +1127,13 @@ const App: React.FC = () => {
           const adjacentIndex = direction === 'up' ? movingStart - 1 : movingEnd + 1;
           if (adjacentIndex >= 0 && adjacentIndex < dayItems.length) {
             const adjacentId = dayItems[adjacentIndex];
-            const adjacentSpaceKey = getItemSpaceKey(adjacentId);
+            const adjacentGroupKey = getItemSpacePriorityKey(adjacentId);
 
-            if (!movingSpaceKeys.has(adjacentSpaceKey)) {
+            if (!movingGroupKeys.has(adjacentGroupKey)) {
               let adjStart = adjacentIndex;
               let adjEnd = adjacentIndex;
-              while (adjStart > 0 && getItemSpaceKey(dayItems[adjStart - 1]) === adjacentSpaceKey) adjStart--;
-              while (adjEnd < dayItems.length - 1 && getItemSpaceKey(dayItems[adjEnd + 1]) === adjacentSpaceKey) adjEnd++;
+              while (adjStart > 0 && getItemSpacePriorityKey(dayItems[adjStart - 1]) === adjacentGroupKey) adjStart--;
+              while (adjEnd < dayItems.length - 1 && getItemSpacePriorityKey(dayItems[adjEnd + 1]) === adjacentGroupKey) adjEnd++;
 
               const movingBlock = dayItems.slice(movingStart, movingEnd + 1);
               const remaining = [...dayItems.slice(0, movingStart), ...dayItems.slice(movingEnd + 1)];
@@ -1160,11 +1143,11 @@ const App: React.FC = () => {
                 let insertIdx: number;
                 if (direction === 'up') {
                   let targetStart = adjItemIdx;
-                  while (targetStart > 0 && getItemSpaceKey(remaining[targetStart - 1]) === adjacentSpaceKey) targetStart--;
+                  while (targetStart > 0 && getItemSpacePriorityKey(remaining[targetStart - 1]) === adjacentGroupKey) targetStart--;
                   insertIdx = targetStart;
                 } else {
                   let targetEnd = adjItemIdx;
-                  while (targetEnd < remaining.length - 1 && getItemSpaceKey(remaining[targetEnd + 1]) === adjacentSpaceKey) targetEnd++;
+                  while (targetEnd < remaining.length - 1 && getItemSpacePriorityKey(remaining[targetEnd + 1]) === adjacentGroupKey) targetEnd++;
                   insertIdx = targetEnd + 1;
                 }
 
@@ -1238,22 +1221,7 @@ const App: React.FC = () => {
 
   const expandToFullSpaceGroups = useCallback(
     (itemIds: string[]): string[] => {
-      const expandedSet = new Set(itemIds);
-      itemIds.forEach((id) => {
-        const item = items.find((i) => i.id === id);
-        if (!item) return;
-        const spaceKey = getSpaceKey(item.block, item.number);
-        const priority = item.priorityLevel || 'none';
-        items.forEach((other) => {
-          if (expandedSet.has(other.id)) return;
-          if (other.eventDate !== item.eventDate) return;
-          if (getSpaceKey(other.block, other.number) === spaceKey &&
-              (other.priorityLevel || 'none') === priority) {
-            expandedSet.add(other.id);
-          }
-        });
-      });
-      return Array.from(expandedSet);
+      return expandSameSpacePriorityItemIds(itemIds, items);
     },
     [items],
   );
@@ -2578,7 +2546,7 @@ const App: React.FC = () => {
 
   const handleAddToExecuteListFromMap = useCallback(
     (itemId: string) => {
-      if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return;
+      if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return [];
 
       const dayName = activeEventDate;
       const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
@@ -2589,7 +2557,7 @@ const App: React.FC = () => {
       const currentMapData = mapData[activeEventName]?.[currentMapTabName];
 
       const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
-      const newExecuteItems = computeAddToExecuteListFromMap(
+      const result = computeAddToExecuteListFromMapWithResult(
         itemId,
         dayName,
         items,
@@ -2599,31 +2567,38 @@ const App: React.FC = () => {
         currentMapData,
       );
 
-      commitExecuteModeItemsForEvent(activeEventName, newExecuteItems);
+      if (!result.accepted) return [];
+      commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
+      return result.insertedItemIds;
     },
     [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, commitExecuteModeItemsForEvent],
   );
 
 
   const handleAddToExecuteListFromMapAtPosition = useCallback(
-    (itemId: string, referenceItemId: string, position: 'before' | 'after'): boolean => {
-      if (!activeEventName || !isMapTab || !activeEventDate) return false;
+    (itemId: string, referenceItemId: string, position: 'before' | 'after') => {
+      if (!activeEventName || !isMapTab || !activeEventDate) return [];
 
       const dayName = activeEventDate;
       const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
-      const result = computeAddToExecuteListFromMapAtPositionStrict(
-        itemId,
+      const result = computeInsertIntoExecuteAtPosition(
+        [itemId],
         referenceItemId,
         position,
         currentForEvent,
         dayName,
+        items,
+        {
+          canInsertWithReference: (insertedItemId, refId) =>
+            areItemsInSameHallGroup(insertedItemId, refId, dayName),
+        },
       );
-      if (!result.accepted) return false;
+      if (!result.accepted) return [];
 
       commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
-      return true;
+      return result.insertedItemIds;
     },
-    [activeEventName, activeEventDate, isMapTab, commitExecuteModeItemsForEvent],
+    [activeEventName, activeEventDate, isMapTab, items, areItemsInSameHallGroup, commitExecuteModeItemsForEvent],
   );
 
 
@@ -2633,21 +2608,24 @@ const App: React.FC = () => {
 
       const dayName = activeEventDate;
       const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
+      const removeIds = expandExecuteRemovalItemIds([itemId], dayName, items, currentForEvent);
       const newExecuteItems = computeRemoveFromExecuteListFromMap(
         itemId,
         currentForEvent,
         dayName,
+        items,
       );
 
       commitExecuteModeItemsForEvent(activeEventName, newExecuteItems);
+      return removeIds;
     },
-    [activeEventName, activeEventDate, isMapTab, commitExecuteModeItemsForEvent],
+    [activeEventName, activeEventDate, isMapTab, items, commitExecuteModeItemsForEvent],
   );
 
 
   const handleBatchAddToExecuteListFromMap = useCallback(
     (itemIds: string[]) => {
-      if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return;
+      if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return [];
       const dayName = activeEventDate;
       const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
       const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
@@ -2658,10 +2636,16 @@ const App: React.FC = () => {
 
       {
         let current = executeModeItemsRef.current[activeEventName] || {};
+        const insertedItemIds: string[] = [];
         for (const id of itemIds) {
-          current = computeAddToExecuteListFromMap(id, dayName, items, current, halls, hallRouteSettingsForMap, currentMap);
+          const result = computeAddToExecuteListFromMapWithResult(id, dayName, items, current, halls, hallRouteSettingsForMap, currentMap);
+          if (result.accepted) {
+            current = result.executeModeItems;
+            insertedItemIds.push(...result.insertedItemIds);
+          }
         }
         commitExecuteModeItemsForEvent(activeEventName, current);
+        return insertedItemIds;
       }
     },
     [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, commitExecuteModeItemsForEvent],
@@ -2669,36 +2653,28 @@ const App: React.FC = () => {
 
 
   const handleBatchAddToExecuteListFromMapAtPosition = useCallback(
-    (itemIds: string[], referenceItemId: string, position: 'before' | 'after'): boolean => {
-      if (!activeEventName || !isMapTab || !activeEventDate) return false;
+    (itemIds: string[], referenceItemId: string, position: 'before' | 'after') => {
+      if (!activeEventName || !isMapTab || !activeEventDate) return [];
       const dayName = activeEventDate;
 
-      let current = executeModeItemsRef.current[activeEventName] || {};
-      if (position === 'before') {
-        for (const id of itemIds) {
-          const result = computeAddToExecuteListFromMapAtPositionStrict(
-            id,
-            referenceItemId,
-            'before',
-            current,
-            dayName,
-          );
-          if (!result.accepted) return false;
-          current = result.executeModeItems;
-        }
-      } else {
-        let ref = referenceItemId;
-        for (const id of itemIds) {
-          const result = computeAddToExecuteListFromMapAtPositionStrict(id, ref, 'after', current, dayName);
-          if (!result.accepted) return false;
-          current = result.executeModeItems;
-          ref = id;
-        }
-      }
-      commitExecuteModeItemsForEvent(activeEventName, current);
-      return true;
+      const current = executeModeItemsRef.current[activeEventName] || {};
+      const result = computeInsertIntoExecuteAtPosition(
+        itemIds,
+        referenceItemId,
+        position,
+        current,
+        dayName,
+        items,
+        {
+          canInsertWithReference: (insertedItemId, refId) =>
+            areItemsInSameHallGroup(insertedItemId, refId, dayName),
+        },
+      );
+      if (!result.accepted) return [];
+      commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
+      return result.insertedItemIds;
     },
-    [activeEventName, activeEventDate, isMapTab, commitExecuteModeItemsForEvent],
+    [activeEventName, activeEventDate, isMapTab, items, areItemsInSameHallGroup, commitExecuteModeItemsForEvent],
   );
 
 
@@ -2708,12 +2684,16 @@ const App: React.FC = () => {
       const dayName = activeEventDate;
 
       let current = executeModeItemsRef.current[activeEventName] || {};
+      const removedItemIds: string[] = [];
       for (const id of itemIds) {
-        current = computeRemoveFromExecuteListFromMap(id, current, dayName);
+        const removeIds = expandExecuteRemovalItemIds([id], dayName, items, current);
+        current = computeRemoveFromExecuteListFromMap(id, current, dayName, items);
+        removedItemIds.push(...removeIds.filter((removeId) => !removedItemIds.includes(removeId)));
       }
       commitExecuteModeItemsForEvent(activeEventName, current);
+      return removedItemIds;
     },
-    [activeEventName, activeEventDate, isMapTab, commitExecuteModeItemsForEvent],
+    [activeEventName, activeEventDate, isMapTab, items, commitExecuteModeItemsForEvent],
   );
 
 
