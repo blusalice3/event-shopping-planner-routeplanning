@@ -514,6 +514,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
           }).map((item) => {
             const isInVisitList = executeModeItemIds.has(item.id);
             const numberSuffix = item.number.replace(/^\d+/, '');
+            const priorityLevel = item.priorityLevel || 'none';
             return (
               <div
                 key={item.id}
@@ -539,6 +540,22 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                       {numberSuffix && (
                         <span className="text-sm font-medium text-slate-500 dark:text-slate-400">
                           [{numberSuffix}]
+                        </span>
+                      )}
+                      {(priorityLevel === 'priority' || priorityLevel === 'highest') && (
+                        <span
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                            priorityLevel === 'highest'
+                              ? 'bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300'
+                              : 'bg-orange-100 text-orange-700 dark:bg-orange-900/40 dark:text-orange-300'
+                          }`}
+                        >
+                          <span
+                            className={`h-2 w-2 rounded-full ${
+                              priorityLevel === 'highest' ? 'bg-red-500' : 'bg-orange-500'
+                            }`}
+                          />
+                          {priorityLevel === 'highest' ? '最優先' : '優先'}
                         </span>
                       )}
                     </div>

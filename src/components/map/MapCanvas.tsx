@@ -90,6 +90,8 @@ const hasCellInputValue = (value: string | number | null): boolean => {
 
 const TAP_ASSIST_DURATION_MS = 900;
 
+type PriorityIndicatorLevel = 'priority' | 'highest';
+
 interface HoverGuideState {
   row: number;
   col: number;
@@ -379,9 +381,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const normalizedDayName = normalizeMapRouteDayText(dayName);
     if (!normalizedDayName) return states;
 
-    const isPriorityItem = (item: (typeof items)[number]) => {
-      const remarks = item.remarks?.toLowerCase() || '';
-      return remarks.includes('\u512A\u5148') || remarks.includes('\u6700\u512A\u5148');
+    const getPriorityIndicatorLevel = (item: (typeof items)[number]): PriorityIndicatorLevel | null => {
+      const priorityLevel = item.priorityLevel || 'none';
+      return priorityLevel === 'priority' || priorityLevel === 'highest' ? priorityLevel : null;
     };
 
     items.forEach((item) => {
@@ -418,16 +420,24 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         items: [],
         hasPriorityItem: false,
         hasPriorityUnvisited: false,
+        hasPriorityLevel: false,
+        hasHighestPriorityLevel: false,
       };
 
       existing.hasItems = true;
       existing.itemCount++;
       existing.items.push(item);
 
-      if (isPriorityItem(item)) {
+      const priorityIndicatorLevel = getPriorityIndicatorLevel(item);
+      if (priorityIndicatorLevel) {
         existing.hasPriorityItem = true;
         if (!executeModeItemIdsSet.has(item.id)) {
           existing.hasPriorityUnvisited = true;
+        }
+        if (priorityIndicatorLevel === 'highest') {
+          existing.hasHighestPriorityLevel = true;
+        } else {
+          existing.hasPriorityLevel = true;
         }
       }
 
@@ -1444,6 +1454,43 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.fill();
       });
     }
+
+    mapData.cells.forEach((cell) => {
+      if (cell.isMerged) return;
+
+      const state = cellStates.get(`${cell.row}-${cell.col}`);
+      if (!state?.hasPriorityLevel && !state?.hasHighestPriorityLevel) return;
+
+      const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
+      const spanCols = merge ? merge.endCol - merge.startCol + 1 : 1;
+      const spanRows = merge ? merge.endRow - merge.startRow + 1 : 1;
+      if (!isCellVisible(cell.row, cell.col, spanRows, spanCols)) return;
+
+      const x = (cell.col - 1) * cellSize;
+      const y = (cell.row - 1) * cellSize;
+      const width = spanCols * cellSize;
+      const height = spanRows * cellSize;
+      const radius = Math.max(3, Math.min(7, Math.min(width, height) * 0.18));
+      const inset = Math.max(2, radius * 0.6);
+      const cy = y + inset + radius;
+
+      const drawPriorityDot = (level: PriorityIndicatorLevel, cx: number) => {
+        ctx.beginPath();
+        ctx.arc(cx, cy, radius, 0, Math.PI * 2);
+        ctx.fillStyle = level === 'highest' ? '#EF4444' : '#F97316';
+        ctx.fill();
+        ctx.lineWidth = Math.max(1, radius * 0.28);
+        ctx.strokeStyle = isDarkMode ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)';
+        ctx.stroke();
+      };
+
+      if (state.hasHighestPriorityLevel) {
+        drawPriorityDot('highest', x + inset + radius);
+      }
+      if (state.hasPriorityLevel) {
+        drawPriorityDot('priority', x + width - inset - radius);
+      }
+    });
 
     if (!isRotationInteracting && effectiveRouteVisible && routeSegments.length > 0 && routeCrossingData) {
       const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {

@@ -229,6 +229,31 @@ const calculateBlockColors = (items: ShoppingItem[]): Map<string, string> => {
   return colorMap;
 };
 
+const compareItemsByBlockAndNumber = (a: ShoppingItem, b: ShoppingItem): number => {
+  const blockComparison = a.block.localeCompare(b.block, 'ja', {
+    numeric: true,
+    sensitivity: 'base',
+  });
+  if (blockComparison !== 0) return blockComparison;
+
+  return a.number.localeCompare(b.number, 'ja', {
+    numeric: true,
+    sensitivity: 'base',
+  });
+};
+
+const getSpaceGroupKeyForItem = (
+  item: ShoppingItem,
+  columnType: 'execute' | 'candidate' | undefined,
+): string => {
+  const spaceKey = getSpaceKey(item.block, item.number);
+  const priority = columnType === 'candidate' ? 'none' : item.priorityLevel || 'none';
+
+  return columnType === 'candidate' || priority === 'none'
+    ? spaceKey
+    : `${spaceKey}:${priority}`;
+};
+
 const ShoppingList: React.FC<ShoppingListProps> = ({
   items,
   onUpdateItem,
@@ -307,6 +332,47 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const [priceHighlightItemIds, setPriceHighlightItemIds] = useState<Set<string>>(new Set());
   const [limitedMissingHighlightItemIds, setLimitedMissingHighlightItemIds] =
     useState<Set<string>>(new Set());
+  const [deferredLimitedItemIdsByGroupKey, setDeferredLimitedItemIdsByGroupKey] =
+    useState<Map<string, Set<string>>>(() => new Map());
+
+  const markLimitedPurchaseQuantityDeferred = useCallback(
+    (item: ShoppingItem) => {
+      if (viewMode !== 'execute' || columnType !== 'execute') {
+        return;
+      }
+
+      const groupKey = getSpaceGroupKeyForItem(item, columnType);
+
+      setDeferredLimitedItemIdsByGroupKey((previous) => {
+        const next = new Map(previous);
+        const itemIds = new Set(next.get(groupKey) ?? []);
+        itemIds.add(item.id);
+        next.set(groupKey, itemIds);
+        return next;
+      });
+    },
+    [columnType, viewMode],
+  );
+
+  const clearLimitedPurchaseQuantityDeferredForItem = useCallback((itemId: string) => {
+    setDeferredLimitedItemIdsByGroupKey((previous) => {
+      let mutated = false;
+      const next = new Map<string, Set<string>>();
+      previous.forEach((itemIds, groupKey) => {
+        if (!itemIds.has(itemId)) {
+          next.set(groupKey, itemIds);
+          return;
+        }
+        mutated = true;
+        const updated = new Set(itemIds);
+        updated.delete(itemId);
+        if (updated.size > 0) {
+          next.set(groupKey, updated);
+        }
+      });
+      return mutated ? next : previous;
+    });
+  }, []);
 
   useEffect(() => {
     if (priceHighlightItemIds.size === 0) return;
@@ -335,6 +401,42 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       setLimitedMissingHighlightItemIds(remaining);
     }
   }, [items, limitedMissingHighlightItemIds]);
+
+  useEffect(() => {
+    setDeferredLimitedItemIdsByGroupKey((previous) => {
+      if (previous.size === 0) return previous;
+
+      const itemsById = new Map(items.map((item) => [item.id, item]));
+      let mutated = false;
+      const next = new Map<string, Set<string>>();
+
+      previous.forEach((itemIds, groupKey) => {
+        const retainedIds = new Set<string>();
+
+        itemIds.forEach((itemId) => {
+          const latest = itemsById.get(itemId);
+          if (
+            latest &&
+            latest.purchaseStatus === 'LimitedPurchase' &&
+            hasMissingLimitedPurchaseQuantity(latest) &&
+            getSpaceGroupKeyForItem(latest, columnType) === groupKey
+          ) {
+            retainedIds.add(itemId);
+          } else {
+            mutated = true;
+          }
+        });
+
+        if (retainedIds.size > 0) {
+          next.set(groupKey, retainedIds);
+        } else if (itemIds.size > 0) {
+          mutated = true;
+        }
+      });
+
+      return mutated ? next : previous;
+    });
+  }, [items, columnType]);
 
   useEffect(() => {
     if (!limitedMessage) return;
@@ -447,19 +549,37 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     ],
   );
 
+  const updateItemWithDeferredCleanup = useCallback(
+    (updatedItem: ShoppingItem) => {
+      const shouldClearDefer =
+        updatedItem.purchaseStatus !== 'LimitedPurchase' ||
+        !hasMissingLimitedPurchaseQuantity(updatedItem);
+
+      if (shouldClearDefer) {
+        clearLimitedPurchaseQuantityDeferredForItem(updatedItem.id);
+      }
+
+      onUpdateItem(updatedItem);
+    },
+    [clearLimitedPurchaseQuantityDeferredForItem, onUpdateItem],
+  );
+
   const commitLimitedDialogResult = useCallback(
     (baseItem: ShoppingItem, result: LimitedPurchaseDialogResult) => {
       if (result.kind === 'limited') {
-        onUpdateItem(applyLimitedPurchase(baseItem, { actual: result.actual, planned: result.planned }));
+        updateItemWithDeferredCleanup(applyLimitedPurchase(baseItem, { actual: result.actual, planned: result.planned }));
         return;
       }
       if (result.kind === 'purchased') {
-        onUpdateItem(applyPurchasedFromLimitedInput(baseItem, result.planned));
+        updateItemWithDeferredCleanup(applyPurchasedFromLimitedInput(baseItem, result.planned));
         return;
       }
-      onUpdateItem(applyLimitedPurchase(baseItem, { planned: result.planned }));
+      if (result.kind === 'defer') {
+        markLimitedPurchaseQuantityDeferred(baseItem);
+      }
+      updateItemWithDeferredCleanup(applyLimitedPurchase(baseItem, { planned: result.planned }));
     },
-    [onUpdateItem],
+    [markLimitedPurchaseQuantityDeferred, updateItemWithDeferredCleanup],
   );
 
   const handleLimitedBulkSubmit = useCallback(
@@ -582,7 +702,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         }
         clearLimitedBulkMessage();
         missing.forEach((item) => {
-          onUpdateItem(clearLimitedPurchase({ ...item, purchaseStatus: 'None' }));
+          updateItemWithDeferredCleanup(clearLimitedPurchase({ ...item, purchaseStatus: 'None' }));
         });
         activeLimitedBulkFlowTokenRef.current = null;
         return;
@@ -619,9 +739,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     [
       advanceLimitedBulkToNextTarget,
       clearLimitedBulkMessage,
-      onUpdateItem,
       showLimitedBulkMessage,
       skipLimitedPurchaseForSingleQuantity,
+      updateItemWithDeferredCleanup,
     ],
   );
 
@@ -648,14 +768,23 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   );
 
   const blockPriceOrLimitedMissingIfNeeded = useCallback(
-    (targetItems: ShoppingItem[]): boolean => {
+    (groupKey: string, targetItems: ShoppingItem[]): boolean => {
       const priceMissing = targetItems.filter(
         (item) => isPriceRequiredStatus(item) && isUndefinedPrice(item.price),
       );
       const limitedMissing = targetItems.filter(hasMissingLimitedPurchaseQuantity);
+      const deferredItemIds = deferredLimitedItemIdsByGroupKey.get(groupKey);
+
+      const isLimitedCheckDeferredForGroup =
+        limitedMissing.length > 0 &&
+        deferredItemIds !== undefined &&
+        limitedMissing.every((item) => deferredItemIds.has(item.id));
+
       const blockedByPrice = !disablePriceUndefinedCheck && priceMissing.length > 0;
       const blockedByLimited =
-        !_disableLimitedPurchaseQuantityCheck && limitedMissing.length > 0;
+        !_disableLimitedPurchaseQuantityCheck &&
+        !isLimitedCheckDeferredForGroup &&
+        limitedMissing.length > 0;
 
       setPriceHighlightItemIds(blockedByPrice ? new Set(priceMissing.map((item) => item.id)) : new Set());
       setLimitedMissingHighlightItemIds(
@@ -674,7 +803,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
       return blockedByPrice || blockedByLimited;
     },
-    [_disableLimitedPurchaseQuantityCheck, disablePriceUndefinedCheck],
+    [
+      _disableLimitedPurchaseQuantityCheck,
+      deferredLimitedItemIdsByGroupKey,
+      disablePriceUndefinedCheck,
+    ],
   );
 
   const limitedBulkDialogItemSnapshot = limitedBulkDialogContext?.itemSnapshot;
@@ -766,28 +899,29 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   const spaceGroups = useMemo((): SpaceGroup[] => {
     if (!showSpaceGroups) return [];
 
-    // hallGroupsと同一の4段階ロジックでアイテムを並べ替え
-    // (sortItemsByHallOrder はホール定義 0 件でも未定義+優先度バケットで並べる)
-    const sortedItems: ShoppingItem[] = sortItemsByHallOrder(
-      items,
-      mapData,
-      hallDefinitions,
-      hallOrder,
-    );
+    const sortedItems: ShoppingItem[] =
+      columnType === 'candidate'
+        ? [...items].sort(compareItemsByBlockAndNumber)
+        : sortItemsByHallOrder(
+            items,
+            mapData,
+            hallDefinitions,
+            hallOrder,
+          );
 
-    // 並べ替え済みアイテムをスペース+優先度でグループ化
+    // 候補列は優先度で分割せず、スペース単位でブロック/番号昇順にまとめる
     const groupMap = new Map<string, { spaceKey: string; priority: PriorityLevel; hallGroupId: string | null; items: ShoppingItem[] }>();
     const groupOrder: string[] = [];
     sortedItems.forEach((item) => {
       const spaceKey = getSpaceKey(item.block, item.number);
-      const priority = (item.priorityLevel || 'none') as PriorityLevel;
-      const groupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
+      const priority = columnType === 'candidate' ? 'none' : (item.priorityLevel || 'none') as PriorityLevel;
+      const groupKey = getSpaceGroupKeyForItem(item, columnType);
       if (!groupMap.has(groupKey)) {
         // 先頭アイテムのhallGroupIdを算出
-        const hallId = hallDefinitions.length > 0 && mapData
+        const hallId = columnType !== 'candidate' && hallDefinitions.length > 0 && mapData
           ? getHallIdForItem(item, mapData, hallDefinitions)
           : null;
-        const hallGroupId = buildGroupId(hallId, priority);
+        const hallGroupId = columnType === 'candidate' ? null : buildGroupId(hallId, priority);
         groupMap.set(groupKey, { spaceKey, priority, hallGroupId, items: [] });
         groupOrder.push(groupKey);
       }
@@ -806,7 +940,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         hallGroupId,
       };
     });
-  }, [items, showSpaceGroups, collapsedSpaces, hallDefinitions, hallOrder, mapData]);
+  }, [items, showSpaceGroups, collapsedSpaces, hallDefinitions, hallOrder, mapData, columnType]);
 
   // スペースグループの表示順序をApp.tsxに通知
   useEffect(() => {
@@ -1469,6 +1603,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
           return spaceGroups.map((group, groupIndex) => {
           const prevHallGroupId = groupIndex > 0 ? spaceGroups[groupIndex - 1].hallGroupId : undefined;
           const showHallSectionHeader =
+            columnType !== 'candidate' &&
             group.hallGroupId !== prevHallGroupId &&
             (hallDefinitions.length > 0 || hasPriorityGroups);
           const hallSectionHeader = showHallSectionHeader ? (() => {
@@ -2071,7 +2206,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
                         <ShoppingItemCard
                           item={item}
-                          onUpdate={onUpdateItem}
+                          onUpdate={updateItemWithDeferredCleanup}
                           isStriped={globalIndex % 2 !== 0}
                           onEditRequest={onEditRequest}
                           onDeleteRequest={onDeleteRequest}
@@ -2098,6 +2233,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           highlightLimitedMissing={limitedMissingHighlightItemIds.has(item.id)}
                           getLatestItemById={getLatestItemById}
                           onNotify={setLimitedMessage}
+                          onLimitedPurchaseDefer={
+                            viewMode === 'execute' && columnType === 'execute'
+                              ? markLimitedPurchaseQuantityDeferred
+                              : undefined
+                          }
                           purchaseStatusControlMode={purchaseStatusControlMode}
                           skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                         />
@@ -2240,7 +2380,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       return (
                         <button
                           onClick={() => {
-                            if (blockPriceOrLimitedMissingIfNeeded(group.items)) {
+                            if (blockPriceOrLimitedMissingIfNeeded(group.groupKey, group.items)) {
                               return;
                             }
                             onActivatePostponeFilter();
@@ -2258,7 +2398,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       return (
                         <button
                           onClick={() => {
-                            if (blockPriceOrLimitedMissingIfNeeded(group.items)) {
+                            if (blockPriceOrLimitedMissingIfNeeded(group.groupKey, group.items)) {
                               return;
                             }
                             onActivateLateFilter();
@@ -2277,7 +2417,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       return (
                         <button
                           onClick={() => {
-                            if (blockPriceOrLimitedMissingIfNeeded(group.items)) {
+                            if (blockPriceOrLimitedMissingIfNeeded(group.groupKey, group.items)) {
                               return;
                             }
                             onCollapseAndOpenNext(group.groupKey);
