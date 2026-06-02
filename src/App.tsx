@@ -4119,7 +4119,22 @@ const App: React.FC = () => {
       filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
     }
 
-    return filtered;
+    if (candidateNumberSortDirection !== null) {
+      return filtered;
+    }
+
+    return [...filtered].sort((a, b) => {
+      const blockComparison = a.block.localeCompare(b.block, 'ja', {
+        numeric: true,
+        sensitivity: 'base',
+      });
+      if (blockComparison !== 0) return blockComparison;
+
+      return a.number.localeCompare(b.number, 'ja', {
+        numeric: true,
+        sensitivity: 'base',
+      });
+    });
   }, [
     activeEventName,
     activeTab,
@@ -4127,6 +4142,7 @@ const App: React.FC = () => {
     currentTabItems,
     selectedBlockFilters,
     eventDates,
+    candidateNumberSortDirection,
   ]);
 
 

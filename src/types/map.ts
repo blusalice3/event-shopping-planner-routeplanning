@@ -181,6 +181,8 @@ export interface MapCellStateDetail {
   items: ShoppingItem[];
   hasPriorityItem: boolean;
   hasPriorityUnvisited: boolean;
+  hasPriorityLevel: boolean;
+  hasHighestPriorityLevel: boolean;
 }
 
 export type MapCellState =
