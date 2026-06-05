@@ -49,6 +49,15 @@ const statusLabels: Record<PurchaseStatus, string> = {
   LimitedPurchase: '限数',
 };
 
+const getExternalUrlHref = (url?: string) => {
+  const trimmedUrl = url?.trim();
+  if (!trimmedUrl) return undefined;
+  if (/^[a-z][a-z\d+.-]*:/i.test(trimmedUrl) || trimmedUrl.startsWith('//')) {
+    return trimmedUrl;
+  }
+  return `https://${trimmedUrl}`;
+};
+
 const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   isOpen,
   onClose,
@@ -372,12 +381,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     }
   };
 
-  const handleOpenUrl = () => {
-    if (longPressItem?.url) {
-      window.open(longPressItem.url, '_blank', 'noopener,noreferrer');
-      setLongPressItem(null);
-    }
-  };
+  const longPressItemUrlHref = getExternalUrlHref(longPressItem?.url);
 
   const handleDelete = () => {
     if (longPressItem && onDeleteItem) {
@@ -643,13 +647,16 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               >
                 ✏️ 編集
               </button>
-              {longPressItem.url && (
-                <button
-                  onClick={handleOpenUrl}
-                  className="w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
+              {longPressItemUrlHref && (
+                <a
+                  href={longPressItemUrlHref}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={() => setLongPressItem(null)}
+                  className="block w-full px-4 py-2 text-left text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700"
                 >
                   🔗 URLを開く
-                </button>
+                </a>
               )}
               {onDeleteItem && (
                 <button
