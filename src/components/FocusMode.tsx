@@ -1020,24 +1020,23 @@ const FocusMode: React.FC<FocusModeProps> = ({
       return;
     }
 
-    if (blockedByPrice || blockedByLimited) {
+    const hasBlockingIssue = blockedByPrice || blockedByLimited;
+    setBlinkingPriceItemIds(new Set(currentVisitUndefinedPriceItems.map((item) => item.id)));
+    setBlinkingLimitedMissingItemIds(
+      blockedByLimited
+        ? new Set(currentVisitLimitedMissingItems.map((item) => item.id))
+        : new Set(),
+    );
+
+    if (hasBlockingIssue) {
       setIsNextButtonBlinking(false);
-      setBlinkingPriceItemIds(
-        blockedByPrice ? new Set(currentVisitUndefinedPriceItems.map((item) => item.id)) : new Set(),
-      );
-      setBlinkingLimitedMissingItemIds(
-        blockedByLimited
-          ? new Set(currentVisitLimitedMissingItems.map((item) => item.id))
-          : new Set(),
-      );
-    } else {
-      setBlinkingPriceItemIds(new Set());
-      setBlinkingLimitedMissingItemIds(new Set());
-      const hasUnprocessed = currentVisitDisplayItems.some(
-        (item) => item.purchaseStatus === 'None',
-      );
-      setIsNextButtonBlinking(!hasUnprocessed && currentVisitDisplayItems.length > 0);
+      return;
     }
+
+    const hasUnprocessed = currentVisitDisplayItems.some(
+      (item) => item.purchaseStatus === 'None',
+    );
+    setIsNextButtonBlinking(!hasUnprocessed && currentVisitDisplayItems.length > 0);
   }, [
     blockedByLimited,
     blockedByPrice,
@@ -1194,7 +1193,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   ]);
   const handleNext = useCallback(() => {
     setBlinkingPriceItemIds(
-      blockedByPrice ? new Set(currentVisitUndefinedPriceItems.map((item) => item.id)) : new Set(),
+      new Set(currentVisitUndefinedPriceItems.map((item) => item.id)),
     );
     setBlinkingLimitedMissingItemIds(
       blockedByLimited
