@@ -145,14 +145,14 @@ describe('App executeModeItems commit integration', () => {
       'const currentMapExecuteItemIds = useMemo',
     );
 
-    expect(mapAddHandler).toContain('commitExecuteModeItemsForEvent(activeEventName, newExecuteItems)');
+    expect(mapAddHandler).toContain('commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems)');
     expect(mapPositionAddHandler).toContain(
       'commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems)',
     );
     expect(mapRemoveHandler).toContain('commitExecuteModeItemsForEvent(activeEventName, newExecuteItems)');
     expect(mapBatchAddHandler).toContain('commitExecuteModeItemsForEvent(activeEventName, current)');
     expect(mapBatchPositionAddHandler).toContain(
-      'commitExecuteModeItemsForEvent(activeEventName, current)',
+      'commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems)',
     );
     expect(mapBatchRemoveHandler).toContain('commitExecuteModeItemsForEvent(activeEventName, current)');
     expect(mapMoveFirstHandler).toContain('updateExecuteModeItems((prev)');
@@ -165,9 +165,8 @@ describe('App executeModeItems commit integration', () => {
     const batchHandlerEnd = source.indexOf('const handleBatchRemoveFromExecuteListFromMap', batchHandlerStart);
     const batchHandler = source.slice(batchHandlerStart, batchHandlerEnd);
 
-    expect(batchHandler).toContain("if (position === 'before')");
-    expect(batchHandler).toContain('for (const id of itemIds)');
-    expect(batchHandler).toMatch(/referenceItemId,\s*'before'/);
+    expect(batchHandler).toContain('computeInsertIntoExecuteAtPosition');
+    expect(batchHandler).toMatch(/itemIds,\s*referenceItemId,\s*position/);
     expect(batchHandler).not.toContain('reverse()');
   });
 });
