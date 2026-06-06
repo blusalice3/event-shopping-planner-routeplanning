@@ -38,6 +38,7 @@ const StateFulShoppingListHarness = ({
   onActivatePostponeFilter,
   showLateFilterButton,
   onActivateLateFilter,
+  disablePriceUndefinedCheck,
 }: {
   initialItems: ShoppingItem[];
   onCollapseAndOpenNext?: (groupKey: string) => void;
@@ -47,6 +48,7 @@ const StateFulShoppingListHarness = ({
   onActivatePostponeFilter?: () => void;
   showLateFilterButton?: boolean;
   onActivateLateFilter?: () => void;
+  disablePriceUndefinedCheck?: boolean;
 }) => {
   const [items, setItems] = useState(initialItems);
 
@@ -74,6 +76,7 @@ const StateFulShoppingListHarness = ({
       onActivatePostponeFilter={onActivatePostponeFilter}
       showLateFilterButton={showLateFilterButton}
       onActivateLateFilter={onActivateLateFilter}
+      disablePriceUndefinedCheck={disablePriceUndefinedCheck}
     />
   );
 };
@@ -204,6 +207,45 @@ describe('ShoppingList purchase status control mode', () => {
     fireEvent.click(screen.getByRole('button', { name: 'スペースを閉じて次のスペースを展開' }));
 
     expect(onCollapseAndOpenNext).toHaveBeenCalledWith('A-01');
+  });
+
+  it('keeps undefined price highlighted while allowing next-space transition when price check is disabled', () => {
+    const onCollapseAndOpenNext = vi.fn();
+    render(
+      <StateFulShoppingListHarness
+        initialItems={[
+          {
+            ...baseItem,
+            id: 'undefined-price',
+            title: '価格未定',
+            price: null,
+            purchaseStatus: 'Purchased',
+          },
+          {
+            ...baseItem,
+            id: 'next-space',
+            title: '次スペース',
+            block: 'A',
+            number: '02',
+            purchaseStatus: 'Purchased',
+          },
+        ]}
+        onCollapseAndOpenNext={onCollapseAndOpenNext}
+        disablePriceUndefinedCheck
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'スペースを閉じて次のスペースを展開' }));
+
+    expect(onCollapseAndOpenNext).toHaveBeenCalledWith('A-01');
+    expect(screen.queryByText('価格未定のアイテムがあります。価格を入力してください。')).not.toBeInTheDocument();
+
+    const card = screen.getByLabelText('Select item Circle - 価格未定').closest('[data-item-id]');
+    if (!card) throw new Error('undefined price card not found');
+    expect(within(card as HTMLElement).getByDisplayValue('価格未定')).toHaveClass(
+      'ring-red-500',
+      'animate-pulse',
+    );
   });
 
   it('does not share deferred limited quantities across priority groups in the same space', async () => {

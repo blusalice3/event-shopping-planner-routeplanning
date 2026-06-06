@@ -786,7 +786,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         !isLimitedCheckDeferredForGroup &&
         limitedMissing.length > 0;
 
-      setPriceHighlightItemIds(blockedByPrice ? new Set(priceMissing.map((item) => item.id)) : new Set());
+      setPriceHighlightItemIds(new Set(priceMissing.map((item) => item.id)));
       setLimitedMissingHighlightItemIds(
         blockedByLimited ? new Set(limitedMissing.map((item) => item.id)) : new Set(),
       );
