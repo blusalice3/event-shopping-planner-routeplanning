@@ -92,6 +92,25 @@ const TAP_ASSIST_DURATION_MS = 900;
 
 type PriorityIndicatorLevel = 'priority' | 'highest';
 
+export const shouldHighlightCandidateRemarks = (
+  item: Pick<ShoppingItem, 'id' | 'remarks'>,
+  executeModeItemIds: ReadonlySet<string>,
+): boolean =>
+  !executeModeItemIds.has(item.id) &&
+  Boolean(item.remarks && (item.remarks.includes('優先') || item.remarks.includes('委託無')));
+
+export const shouldDrawReadableNumberBackground = (
+  state:
+    | Pick<
+        MapCellStateDetail,
+        'hasPriorityUnvisited' | 'hasWarningRemarksUnvisited'
+      >
+    | undefined,
+  value: CellData['value'],
+): boolean =>
+  typeof value === 'number' &&
+  Boolean(state?.hasPriorityUnvisited || state?.hasWarningRemarksUnvisited);
+
 interface HoverGuideState {
   row: number;
   col: number;
@@ -420,6 +439,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         items: [],
         hasPriorityItem: false,
         hasPriorityUnvisited: false,
+        hasWarningRemarksUnvisited: false,
         hasPriorityLevel: false,
         hasHighestPriorityLevel: false,
       };
@@ -441,7 +461,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
       }
 
-      if (executeModeItemIdsSet.has(item.id)) {
+      const isExecuteModeItem = executeModeItemIdsSet.has(item.id);
+      if (shouldHighlightCandidateRemarks(item, executeModeItemIdsSet)) {
+        existing.hasWarningRemarksUnvisited = true;
+      }
+
+      if (isExecuteModeItem) {
         existing.isVisited = true;
       }
 
@@ -1088,14 +1113,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             ctx.fillStyle = 'rgba(239, 83, 80, 0.5)';
             ctx.fillRect(x, y, width, height);
           }
-        } else if (state.hasPriorityUnvisited && warningPattern) {
+        } else if (
+          (state.hasPriorityUnvisited || state.hasWarningRemarksUnvisited) &&
+          warningPattern
+        ) {
           if (isNumberCell) {
             patternOverlayCells.push({ x, y, w: width, h: height });
           } else {
             ctx.fillStyle = warningPattern;
             ctx.fillRect(x, y, width, height);
           }
-        } else if (state.hasPriorityUnvisited) {
+        } else if (state.hasPriorityUnvisited || state.hasWarningRemarksUnvisited) {
           if (isNumberCell) {
             const color = 'rgba(255, 214, 0, 0.45)';
             if (!overlayGroups.has(color)) overlayGroups.set(color, []);
@@ -1350,7 +1378,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const enforceBlackNumberTextInDarkMode =
           isDarkMode && Boolean(state?.hasItems) && isNumberLikeCellValue(cell.value);
 
-        if (state?.hasPriorityUnvisited && typeof cell.value === 'number') {
+        if (shouldDrawReadableNumberBackground(state, cell.value)) {
           const textMetrics = ctx.measureText(text);
           const textWidth = textMetrics.width;
           const textHeight = fontSize;
@@ -1436,7 +1464,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
         if (state.isFullyVisited) {
           ctx.fillStyle = '#EF5350';
-        } else if (state.hasPriorityUnvisited) {
+        } else if (state.hasPriorityUnvisited || state.hasWarningRemarksUnvisited) {
           ctx.arc(x + width / 2, y + height / 2, dotSize / 2, 0, Math.PI * 2);
           ctx.fillStyle = '#FFD600';
           ctx.fill();
