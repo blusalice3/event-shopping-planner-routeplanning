@@ -1,0 +1,72 @@
+[
+  {
+    "path": "src\\components\\map\\MapView.tsx",
+    "bom": true,
+    "replacementCount": 0
+  },
+  {
+    "path": "src\\features\\app-shell\\components\\AppHeaderShell.tsx",
+    "bom": true,
+    "replacementCount": 0
+  },
+  {
+    "path": "src\\features\\app-shell\\components\\AppMainContent.tsx",
+    "bom": true,
+    "replacementCount": 0
+  },
+  {
+    "path": "docs\\refactor-regression-tickets.md",
+    "bom": false,
+    "replacementCount": 2
+  },
+  {
+    "path": "docs\\スマート挿入のマップ線クリック化 実装プラン 2.7.md",
+    "bom": true,
+    "replacementCount": 0
+  },
+  {
+    "path": "docs\\スマート挿入のマップ線クリック化 実装プラン 2.8.md",
+    "bom": true,
+    "replacementCount": 0
+  },
+  {
+    "path": "docs\\スマート挿入のマップ線クリック化 実装プラン 2.9.md",
+    "bom": true,
+    "replacementCount": 0
+  },
+  {
+    "path": "docs\\マップ経由追加・スマート挿入を直接リスト操作規則へ統一する実装プラン 1.0.md",
+    "bom": true,
+    "replacementCount": 0
+  },
+  {
+    "path": "docs\\マップ経由追加・スマート挿入を直接リスト操作規則へ統一する実装プラン 1.1.md",
+    "bom": true,
+    "replacementCount": 0
+  },
+  {
+    "path": "docs\\マップ経由追加・スマート挿入を直接リスト操作規則へ統一する実装プラン 1.2.md",
+    "bom": true,
+    "replacementCount": 0
+  },
+  {
+    "path": "docs\\マップ経由追加・スマート挿入を直接リスト操作規則へ統一する実装プラン 1.3.md",
+    "bom": true,
+    "replacementCount": 0
+  },
+  {
+    "path": "docs\\マップ経由追加・スマート挿入を直接リスト操作規則へ統一する実装プラン 1.4.md",
+    "bom": true,
+    "replacementCount": 0
+  },
+  {
+    "path": "docs\\マップ経由追加・スマート挿入を直接リスト操作規則へ統一する実装プラン 1.5.md",
+    "bom": true,
+    "replacementCount": 0
+  },
+  {
+    "path": "docs\\マップ経由追加・スマート挿入を直接リスト操作規則へ統一する実装プラン 1.6.md",
+    "bom": true,
+    "replacementCount": 0
+  }
+]
