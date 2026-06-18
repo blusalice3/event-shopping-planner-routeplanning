@@ -1,0 +1,78 @@
+name: Sharing Public Guard
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  public-guard-static:
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - case_name: sharing_guard_public_blocks_without_edge_url
+            command: |
+              $env:VITE_SHARING_PUBLIC_GATE_ENABLED='true'
+              npm run sharing:public-guard:check
+              if ($LASTEXITCODE -eq 0) { throw 'Expected public Guard check to fail without VITE_SHARING_EDGE_GUARD_URL.' }
+              exit 0
+          - case_name: sharing_guard_public_unit_contract
+            command: npm run sharing:public-guard:unit
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: ${{ matrix.case_name }}
+        shell: pwsh
+        run: ${{ matrix.command }}
+
+  public-guard-db-boundary:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        case_name:
+          - sharing_guard_local_allows_db_only_smoke
+          - sharing_guard_public_rejects_direct_rpc_without_challenge
+          - sharing_guard_public_accepts_valid_challenge_once
+          - sharing_guard_public_rejects_reused_or_wrong_purpose_challenge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Start Supabase
+        run: npm run db:start
+      - name: ${{ matrix.case_name }}
+        run: npm run db:test
+      - name: Stop Supabase
+        if: always()
+        run: npm run db:stop
+
+  public-guard-live:
+    runs-on: windows-latest
+    if: ${{ github.event_name == 'workflow_dispatch' && vars.SHARING_PUBLIC_GUARD_LIVE_CHECK == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: sharing_guard_public_edge_integration
+        shell: pwsh
+        env:
+          VITE_SHARING_PUBLIC_GATE_ENABLED: 'true'
+          VITE_SHARING_EDGE_GUARD_URL: ${{ secrets.VITE_SHARING_EDGE_GUARD_URL }}
+          VITE_SHARING_CONTRACT_VERSION: '1'
+          VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          SHARING_PUBLIC_GUARD_RELEASE_CHECKLIST_ACK: 'true'
+          SHARING_PUBLIC_GUARD_MUTATING_CHECK_ACK: 'true'
+        run: npm run sharing:public-guard:check
