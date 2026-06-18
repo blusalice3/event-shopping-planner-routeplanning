@@ -49,6 +49,7 @@ describe('buildRoomEventPayloadForEvent', () => {
 
     expect(result.itemCount).toBe(1);
     expect(result.payload.schemaVersion).toBe(1);
+    expect(result.payload.eventMetadata.eventName).toBe('テスト即売会');
     expect(result.payload.executeModeItems).toEqual({ '1日目': ['item-1'] });
     expect(result.payload.routeOrderByDate).toEqual({ '1日目': ['item-1'] });
     expect(result.payload.itemSnapshots['item-1']).toMatchObject({

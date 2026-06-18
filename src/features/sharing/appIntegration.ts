@@ -80,10 +80,14 @@ export const buildRoomEventPayloadForEvent = (
 ): SharingRoomEventPayloadResult => {
   const eventItems = input.eventLists[input.eventName] ?? [];
   const eventExecuteModeItems = stringArrayRecord(input.executeModeItems[input.eventName]);
+  const eventMetadata = {
+    ...jsonRecord(input.eventMetadata[input.eventName] ?? {}),
+    eventName: input.eventName,
+  };
 
   const payload: RoomEventDataPayload = {
     schemaVersion: ROOM_EVENT_DATA_SCHEMA_VERSION,
-    eventMetadata: jsonRecord(input.eventMetadata[input.eventName] ?? {}),
+    eventMetadata,
     executeModeItems: eventExecuteModeItems,
     dayModes: Object.fromEntries(
       Object.entries(input.dayModes[input.eventName] ?? {}).filter(
