@@ -9,20 +9,19 @@ import {
   EventMetadata,
   DayModeState,
   ExecuteModeItems,
+  PurchaseStatuses,
+} from '../types/item';
+import {
   MapDataStore,
   RouteSettingsStore,
   HallDefinitionsStore,
   HallRouteSettingsStore,
-  ExportOptions,
-  PurchaseStatuses,
-} from '../types';
-
-// メンバー情報（エクスポート/インポート用）
-export interface ExportMemberInfo {
-  jerseyNumber: number;
-  displayName: string;
-  color: string;
-}
+} from '../types/map';
+import { ExportOptions } from '../types/export';
+import {
+  normalizeLimitedPurchaseFields,
+  validateLimitedPurchaseQuantities,
+} from './purchaseQuantity';
 
 // エクスポートデータの型
 export interface ExportData {
@@ -40,7 +39,6 @@ export interface ExportData {
   routeSettings?: Record<string, unknown>;
   hallDefinitions?: Record<string, unknown[]>;
   hallRouteSettings?: Record<string, unknown>;
-  members?: ExportMemberInfo[];
 }
 
 // インポート結果の型
@@ -57,7 +55,6 @@ export interface ImportResult {
   routeSettings?: Record<string, unknown>;
   hallDefinitions?: Record<string, unknown[]>;
   hallRouteSettings?: Record<string, unknown>;
-  members?: ExportMemberInfo[];
   errors: string[];
   itemFallbackWarnings?: ItemFallbackWarning[];
 }
@@ -68,7 +65,56 @@ export interface ItemFallbackWarning {
   reasons: string[];
 }
 
-const EXPORT_VERSION = '2.0';
+const EXPORT_VERSION = '2.1';
+
+type StrictPositiveIntegerCellParseResult =
+  | { kind: 'empty' }
+  | { kind: 'value'; value: number }
+  | { kind: 'invalid'; raw: string };
+
+const isFormulaCellValue = (
+  rawValue: ExcelJS.CellValue,
+): rawValue is ExcelJS.CellFormulaValue | ExcelJS.CellSharedFormulaValue =>
+  typeof rawValue === 'object' &&
+  rawValue !== null &&
+  ('formula' in rawValue || 'sharedFormula' in rawValue);
+
+const parseStrictPositiveIntegerScalar = (
+  rawValue: number | string,
+): StrictPositiveIntegerCellParseResult => {
+  if (typeof rawValue === 'number') {
+    return Number.isInteger(rawValue) && rawValue >= 1
+      ? { kind: 'value', value: rawValue }
+      : { kind: 'invalid', raw: String(rawValue) };
+  }
+
+  const rawText = rawValue.trim();
+  if (rawText === '') return { kind: 'empty' };
+  if (!/^\d+$/.test(rawText)) return { kind: 'invalid', raw: rawText };
+
+  const value = Number(rawText);
+  return value >= 1 ? { kind: 'value', value } : { kind: 'invalid', raw: rawText };
+};
+
+const parseStrictPositiveIntegerCell = (
+  rawValue: ExcelJS.CellValue,
+): StrictPositiveIntegerCellParseResult => {
+  if (rawValue === null || rawValue === undefined) return { kind: 'empty' };
+
+  if (typeof rawValue === 'number' || typeof rawValue === 'string') {
+    return parseStrictPositiveIntegerScalar(rawValue);
+  }
+
+  if (isFormulaCellValue(rawValue)) {
+    const result = rawValue.result;
+    if (typeof result === 'number' || typeof result === 'string') {
+      return parseStrictPositiveIntegerScalar(result);
+    }
+    return { kind: 'invalid', raw: '数式結果なし' };
+  }
+
+  return { kind: 'invalid', raw: '非対応セル形式' };
+};
 
 /**
  * データをxlsxファイルにエクスポート
@@ -85,7 +131,6 @@ export async function exportToXlsx(
     routeSettings?: RouteSettingsStore;
     hallDefinitions?: HallDefinitionsStore;
     hallRouteSettings?: HallRouteSettingsStore;
-    members?: ExportMemberInfo[];
   },
 ): Promise<Blob> {
   const workbook = new ExcelJS.Workbook();
@@ -111,7 +156,8 @@ export async function exportToXlsx(
     { header: '優先度', key: 'priorityLevel', width: 10 },
     { header: '保護レベル', key: 'protectionLevel', width: 12 },
     { header: '追加元', key: 'source', width: 12 },
-    { header: '担当者背番号', key: 'assignedToJersey', width: 12 },
+    { header: '手動ホール', key: 'manualHallId', width: 20 },
+    { header: '限数実購入数', key: 'limitedPurchasedQuantity', width: 14 },
   ];
 
   // データ
@@ -131,7 +177,9 @@ export async function exportToXlsx(
       priorityLevel: item.priorityLevel || 'none',
       protectionLevel: item.protectionLevel || '',
       source: item.source || '',
-      assignedToJersey: item.assignedTo || '',
+      manualHallId: item.manualHallId || '',
+      limitedPurchasedQuantity:
+        item.purchaseStatus === 'LimitedPurchase' ? item.limitedPurchasedQuantity ?? '' : '',
     });
   });
 
@@ -274,31 +322,6 @@ export async function exportToXlsx(
     routeSheet.getRow(1).font = { bold: true };
   }
 
-  // 6. メンバー情報シート（背番号→名前マッピング）
-  if (options.format === 'full' && additionalData.members && additionalData.members.length > 0) {
-    const membersSheet = workbook.addWorksheet('メンバー情報');
-    membersSheet.columns = [
-      { header: '背番号', key: 'jerseyNumber', width: 10 },
-      { header: '表示名', key: 'displayName', width: 20 },
-      { header: '色', key: 'color', width: 12 },
-    ];
-
-    additionalData.members.forEach((member) => {
-      membersSheet.addRow({
-        jerseyNumber: member.jerseyNumber,
-        displayName: member.displayName,
-        color: member.color,
-      });
-    });
-
-    membersSheet.getRow(1).font = { bold: true };
-    membersSheet.getRow(1).fill = {
-      type: 'pattern',
-      pattern: 'solid',
-      fgColor: { argb: 'FFE0E0E0' },
-    };
-  }
-
   // Blobとして出力
   const buffer = await workbook.xlsx.writeBuffer();
   return new Blob([buffer], {
@@ -356,20 +379,19 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         const parsedPrice = Number(rawPrice);
         if (Number.isFinite(parsedPrice)) {
           price = parsedPrice;
-        } else {
+      } else {
           rowReasons.push(`価格「${String(rawPrice)}」は不正のため空値で補完しました`);
         }
       }
 
       const rawQuantity = row.getCell(8).value;
+      const parsedQuantity = parseStrictPositiveIntegerCell(rawQuantity);
       let quantity = 1;
-      if (rawQuantity !== null && rawQuantity !== undefined && String(rawQuantity).trim() !== '') {
-        const parsedQuantity = Number(rawQuantity);
-        if (Number.isFinite(parsedQuantity) && parsedQuantity > 0) {
-          quantity = Math.max(1, Math.floor(parsedQuantity));
-        } else {
-          rowReasons.push(`数量「${String(rawQuantity)}」は不正のため1で補完しました`);
-        }
+      if (parsedQuantity.kind === 'value') {
+        quantity = parsedQuantity.value;
+      } else {
+        const raw = parsedQuantity.kind === 'invalid' ? `「${parsedQuantity.raw}」` : '空欄';
+        rowReasons.push(`購入予定量${raw}は不正のため1で補完しました`);
       }
 
       if (!Number.isInteger(quantity)) {
@@ -430,19 +452,36 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         }
       }
 
-      // 担当者背番号の値を取得（列15）
-      const assignedToValue = String(row.getCell(15).value ?? '').trim();
-      let assignedTo: string | undefined;
-      if (assignedToValue) {
-        const parsed = Number(assignedToValue);
-        if (Number.isFinite(parsed) && parsed > 0) {
-          assignedTo = String(Math.floor(parsed));
-        } else {
-          rowReasons.push(`担当者背番号「${assignedToValue}」は不正のためスキップしました`);
+      // 手動ホールIDを取得（列15、後方互換: 古いファイルは空）
+      const manualHallValue = String(row.getCell(15).value ?? '').trim();
+      const manualHallId = manualHallValue || undefined;
+      const parsedLimitedPurchasedQuantity = parseStrictPositiveIntegerCell(row.getCell(16).value);
+      let limitedPurchasedQuantity: number | undefined;
+
+      if (parsedLimitedPurchasedQuantity.kind === 'value') {
+        limitedPurchasedQuantity = parsedLimitedPurchasedQuantity.value;
+      } else if (parsedLimitedPurchasedQuantity.kind === 'invalid') {
+        rowReasons.push(
+          `限数実購入数「${parsedLimitedPurchasedQuantity.raw}」は不正のため未入力にしました`,
+        );
+      }
+
+      if (purchaseStatus === 'LimitedPurchase' && limitedPurchasedQuantity !== undefined) {
+        const validation = validateLimitedPurchaseQuantities(limitedPurchasedQuantity, quantity);
+        if (!validation.ok) {
+          rowReasons.push(
+            `限数実購入数「${limitedPurchasedQuantity}」は購入予定量「${quantity}」に対して不正のため未入力にしました`,
+          );
+          limitedPurchasedQuantity = undefined;
         }
       }
 
-      const item: ShoppingItem = {
+      if (purchaseStatus !== 'LimitedPurchase' && limitedPurchasedQuantity !== undefined) {
+        rowReasons.push('限数以外の限数実購入数は無視しました');
+        limitedPurchasedQuantity = undefined;
+      }
+
+      const item: ShoppingItem = normalizeLimitedPurchaseFields({
         id: itemId,
         circle,
         eventDate,
@@ -457,8 +496,9 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         priorityLevel,
         protectionLevel,
         source,
-        assignedTo,
-      };
+        manualHallId,
+        ...(limitedPurchasedQuantity !== undefined ? { limitedPurchasedQuantity } : {}),
+      });
 
       if (item.circle || item.title) {
         items.push(item);
@@ -590,31 +630,6 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
       }
       if (Object.keys(hallRouteSettings).length > 0) {
         result.hallRouteSettings = hallRouteSettings;
-      }
-    }
-
-    // 6. メンバー情報シートを読み込み
-    const membersSheet = workbook.getWorksheet('メンバー情報');
-    if (membersSheet) {
-      const members: ExportMemberInfo[] = [];
-
-      membersSheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return; // ヘッダーをスキップ
-        const jerseyNumber = Number(row.getCell(1).value);
-        const displayName = String(row.getCell(2).value ?? '');
-        const color = String(row.getCell(3).value ?? '#3B82F6');
-
-        if (Number.isFinite(jerseyNumber) && jerseyNumber > 0 && displayName) {
-          members.push({
-            jerseyNumber: Math.floor(jerseyNumber),
-            displayName,
-            color,
-          });
-        }
-      });
-
-      if (members.length > 0) {
-        result.members = members;
       }
     }
 

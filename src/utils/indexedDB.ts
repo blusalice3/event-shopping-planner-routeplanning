@@ -3,8 +3,10 @@
  * localStorageの代わりに大容量データを保存するためのラッパー
  */
 
+import type { AssignmentMemberProfile } from '../types/item';
+
 const DB_NAME = 'EventShoppingPlannerDB';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 // ストア名
 const STORES = {
@@ -19,6 +21,8 @@ const STORES = {
   HALL_ROUTE_SETTINGS: 'hallRouteSettings',
   MAP_VIEWPORT_SETTINGS: 'mapViewportSettings',
   SYNC_QUEUE: 'syncQueue',
+  SHARING_SESSIONS: 'sharingSessions',
+  SHARING_SNAPSHOT_STAGING: 'sharingSnapshotStaging',
 } as const;
 
 type StoreName = (typeof STORES)[keyof typeof STORES];
@@ -279,6 +283,41 @@ export interface AppData {
   mapViewportSettings: Record<string, Record<string, unknown>>;
 }
 
+export interface SharingSessionMetadata {
+  sessionId: string;
+  roomId: string;
+  roomMemberId: string;
+  eventName: string;
+  role: 'host' | 'member';
+  status: 'active' | 'paused' | 'expired' | 'leaving' | 'localizing';
+  startedAt: string;
+  expiresAt: string;
+  itemsVersion: number;
+  routeOrderVersions: Record<string, number>;
+  lastSnapshotReceiptId?: string;
+  lastAckAt?: string;
+  lastProcessedEventCreatedAt?: string | null;
+  lastProcessedEventId?: string | null;
+  memberProfileSnapshot?: AssignmentMemberProfile[];
+}
+
+export interface SharingSnapshotCommitInput {
+  appData: AppData;
+  session: SharingSessionMetadata;
+  staging: {
+    snapshotReceiptId: string;
+    roomId: string;
+    roomMemberId: string;
+    receivedAt: string;
+    payload: unknown;
+  };
+}
+
+export interface SharingLocalizeCommitInput {
+  eventLists: Record<string, unknown[]>;
+  session: SharingSessionMetadata;
+}
+
 const resolveLoadResultData = <T extends Record<string, unknown>>(
   storeName: StoreName,
   result: LoadResult<T>,
@@ -515,6 +554,110 @@ export const db = {
   },
   async loadSyncQueue(): Promise<LoadResult<unknown[]>> {
     return loadData(STORES.SYNC_QUEUE, 'data');
+  },
+
+  async saveSharingSession(session: SharingSessionMetadata): Promise<void> {
+    await saveData(STORES.SHARING_SESSIONS, session.sessionId, session);
+  },
+  async loadSharingSession(sessionId: string): Promise<LoadResult<SharingSessionMetadata>> {
+    return loadData(STORES.SHARING_SESSIONS, sessionId);
+  },
+  async deleteSharingSession(sessionId: string): Promise<void> {
+    const database = await openDB();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(STORES.SHARING_SESSIONS, 'readwrite');
+      const store = transaction.objectStore(STORES.SHARING_SESSIONS);
+
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => {
+        reject(transaction.error ?? new Error('IndexedDB sharing session deletion failed.'));
+      };
+      transaction.onabort = () => {
+        reject(transaction.error ?? new Error('IndexedDB sharing session deletion aborted.'));
+      };
+
+      store.delete(sessionId);
+    });
+  },
+
+  async commitSharingSnapshot(input: SharingSnapshotCommitInput): Promise<void> {
+    const database = await openDB();
+    const storeNames = [
+      STORES.EVENT_LISTS,
+      STORES.EVENT_METADATA,
+      STORES.EXECUTE_MODE_ITEMS,
+      STORES.DAY_MODES,
+      STORES.MAP_DATA,
+      STORES.MAP_ROTATION_SETTINGS,
+      STORES.ROUTE_SETTINGS,
+      STORES.HALL_DEFINITIONS,
+      STORES.HALL_ROUTE_SETTINGS,
+      STORES.MAP_VIEWPORT_SETTINGS,
+      STORES.SHARING_SESSIONS,
+      STORES.SHARING_SNAPSHOT_STAGING,
+    ];
+
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(storeNames, 'readwrite');
+      const rejectWithTransactionError = () => {
+        reject(transaction.error ?? new Error('IndexedDB sharing snapshot transaction failed.'));
+      };
+
+      transaction.oncomplete = () => {
+        resolve();
+      };
+      transaction.onerror = rejectWithTransactionError;
+      transaction.onabort = rejectWithTransactionError;
+
+      transaction.objectStore(STORES.SHARING_SNAPSHOT_STAGING).put(
+        input.staging,
+        input.staging.snapshotReceiptId,
+      );
+      transaction.objectStore(STORES.EVENT_LISTS).put(input.appData.eventLists, 'data');
+      transaction.objectStore(STORES.EVENT_METADATA).put(input.appData.eventMetadata, 'data');
+      transaction
+        .objectStore(STORES.EXECUTE_MODE_ITEMS)
+        .put(input.appData.executeModeItems, 'data');
+      transaction.objectStore(STORES.DAY_MODES).put(input.appData.dayModes, 'data');
+      transaction.objectStore(STORES.MAP_DATA).put(input.appData.mapData, 'data');
+      transaction
+        .objectStore(STORES.MAP_ROTATION_SETTINGS)
+        .put(input.appData.mapRotationSettings, 'data');
+      transaction.objectStore(STORES.ROUTE_SETTINGS).put(input.appData.routeSettings, 'data');
+      transaction
+        .objectStore(STORES.HALL_DEFINITIONS)
+        .put(input.appData.hallDefinitions, 'data');
+      transaction
+        .objectStore(STORES.HALL_ROUTE_SETTINGS)
+        .put(input.appData.hallRouteSettings, 'data');
+      transaction
+        .objectStore(STORES.MAP_VIEWPORT_SETTINGS)
+        .put(input.appData.mapViewportSettings, 'data');
+      transaction.objectStore(STORES.SHARING_SESSIONS).put(input.session, input.session.sessionId);
+    });
+  },
+
+  async commitSharingLocalize(input: SharingLocalizeCommitInput): Promise<void> {
+    const database = await openDB();
+
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        [STORES.EVENT_LISTS, STORES.SHARING_SESSIONS],
+        'readwrite',
+      );
+      const rejectWithTransactionError = () => {
+        reject(transaction.error ?? new Error('IndexedDB sharing localize transaction failed.'));
+      };
+
+      transaction.oncomplete = () => {
+        resolve();
+      };
+      transaction.onerror = rejectWithTransactionError;
+      transaction.onabort = rejectWithTransactionError;
+
+      transaction.objectStore(STORES.EVENT_LISTS).put(input.eventLists, 'data');
+      transaction.objectStore(STORES.SHARING_SESSIONS).put(input.session, input.session.sessionId);
+    });
   },
 
   // localStorageからの移行

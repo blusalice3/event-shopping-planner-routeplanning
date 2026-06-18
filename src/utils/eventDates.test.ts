@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { extractEventDates } from './eventDates';
-import { ShoppingItem } from '../types';
+import { ShoppingItem } from '../types/item';
 
 const createItem = (eventDate: string, id: string): ShoppingItem => ({
   id,

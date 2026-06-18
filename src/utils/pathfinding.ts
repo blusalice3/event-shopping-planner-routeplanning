@@ -1,4 +1,10 @@
-import { CellData, PathNode, RouteSegment, DayMapData } from '../types';
+import {
+  CellData,
+  PathNode,
+  RouteSegment,
+  DayMapData,
+  RoutePathConstraint,
+} from '../types/map';
 
 // サブセル解像度: 各セルをN×Nに分割
 const SUB_CELL_RESOLUTION = 3;
@@ -251,6 +257,11 @@ function isSubCellInCell(sr: number, sc: number, cellRow: number, cellCol: numbe
 }
 
 // サブセルグリッド上のA*探索（Theta*ライクなline-of-sight最適化付き）
+export type PathfindingResult = {
+  path: { row: number; col: number }[];
+  usedFallback: boolean;
+};
+
 function findSubCellPath(
   cellsMap: Map<string, CellData>,
   maxRow: number,
@@ -261,7 +272,7 @@ function findSubCellPath(
   endCol: number,
   usedSubCells?: Map<string, number>,
   bufferCostMap?: Map<number, number>,
-): { row: number; col: number }[] {
+): PathfindingResult {
   const N = SUB_CELL_RESOLUTION;
   const maxSubRow = maxRow * N;
   const maxSubCol = maxCol * N;
@@ -353,7 +364,10 @@ function findSubCellPath(
       const optimized = mergeCollinearPoints(subPath);
 
       // 小数row/col座標に変換
-      return optimized.map((p) => subCellToFractional(p.sr, p.sc));
+      return {
+        path: optimized.map((p) => subCellToFractional(p.sr, p.sc)),
+        usedFallback: false,
+      };
     }
 
     // 隣接ノードを探索
@@ -413,11 +427,14 @@ function findSubCellPath(
   }
 
   // 経路が見つからない場合はL字で結ぶ（小数座標、直交ルーティング維持）
-  return [
-    subCellToFractional(start.sr, start.sc),
-    subCellToFractional(start.sr, goalSc),
-    subCellToFractional(goalSr, goalSc),
-  ];
+  return {
+    path: [
+      subCellToFractional(start.sr, start.sc),
+      subCellToFractional(start.sr, goalSc),
+      subCellToFractional(goalSr, goalSc),
+    ],
+    usedFallback: true,
+  };
 }
 
 // 直交コリニアマージ: 同一方向の連続ポイントを除去し、曲がり角のみ残す
@@ -499,13 +516,37 @@ export function findPath(
   return findSubCellPath(
     cellsMap, mapData.maxRow, mapData.maxCol,
     startRow, startCol, endRow, endCol,
-  );
+  ).path;
+}
+
+export type RouteVisitPoint = {
+  row: number;
+  col: number;
+  priorityLevel?: 'none' | 'priority' | 'highest';
+  itemId?: string;
+  order?: number;
+};
+
+export type GenerateRouteSegmentsResult =
+  | { ok: true; segments: RouteSegment[] }
+  | {
+      ok: false;
+      segments: RouteSegment[];
+      failedSegment: {
+        from: RouteVisitPoint;
+        to: RouteVisitPoint;
+        fromIndex: number;
+      };
+    };
+
+export interface GenerateRouteSegmentsStrictOptions {
+  pathConstraint?: RoutePathConstraint;
 }
 
 // 訪問先間のルートセグメントを生成（重複回避付き）
 export function generateRouteSegments(
   mapData: DayMapData,
-  visitPoints: { row: number; col: number; priorityLevel?: 'none' | 'priority' | 'highest' }[],
+  visitPoints: RouteVisitPoint[],
 ): RouteSegment[] {
   if (visitPoints.length < 2) return [];
 
@@ -522,12 +563,13 @@ export function generateRouteSegments(
     const from = visitPoints[i];
     const to = visitPoints[i + 1];
 
-    const path = findSubCellPath(
+    const result = findSubCellPath(
       cellsMap, mapData.maxRow, mapData.maxCol,
       from.row, from.col, to.row, to.col,
       usedSubCells,
       bufferCostMap,
     );
+    const path = result.path;
 
     // この経路のサブセルを使用済みとしてマーク
     markPathSubCells(path, usedSubCells);
@@ -540,10 +582,68 @@ export function generateRouteSegments(
       path,
       fromPriority: from.priorityLevel || 'none',
       toPriority: to.priorityLevel || 'none',
+      fromItemId: from.itemId,
+      toItemId: to.itemId,
+      fromOrder: from.order,
+      toOrder: to.order,
     });
   }
 
   return segments;
+}
+
+export function generateRouteSegmentsStrict(
+  mapData: DayMapData,
+  visitPoints: RouteVisitPoint[],
+  options?: GenerateRouteSegmentsStrictOptions,
+): GenerateRouteSegmentsResult {
+  if (visitPoints.length < 2) return { ok: true, segments: [] };
+
+  const cellsMap = new Map<string, CellData>();
+  mapData.cells.forEach((cell) => {
+    cellsMap.set(`${cell.row}-${cell.col}`, cell);
+  });
+
+  const segments: RouteSegment[] = [];
+  const usedSubCells = new Map<string, number>();
+  const bufferCostMap = buildBufferCostMap(cellsMap, mapData.maxRow, mapData.maxCol);
+
+  for (let i = 0; i < visitPoints.length - 1; i++) {
+    const from = visitPoints[i];
+    const to = visitPoints[i + 1];
+    const result = findSubCellPath(
+      cellsMap, mapData.maxRow, mapData.maxCol,
+      from.row, from.col, to.row, to.col,
+      usedSubCells,
+      bufferCostMap,
+    );
+    const path = result.path;
+
+    if (result.usedFallback || options?.pathConstraint?.isPathAllowed(path) === false) {
+      return {
+        ok: false,
+        segments,
+        failedSegment: { from, to, fromIndex: i },
+      };
+    }
+
+    markPathSubCells(path, usedSubCells);
+    segments.push({
+      fromRow: from.row,
+      fromCol: from.col,
+      toRow: to.row,
+      toCol: to.col,
+      path,
+      fromPriority: from.priorityLevel || 'none',
+      toPriority: to.priorityLevel || 'none',
+      fromItemId: from.itemId,
+      toItemId: to.itemId,
+      fromOrder: from.order,
+      toOrder: to.order,
+    });
+  }
+
+  return { ok: true, segments };
 }
 
 // 経路を簡略化（Douglas-Peuckerアルゴリズムベース）

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { findPath, generateRouteSegments, simplifyPath } from './pathfinding';
-import { DayMapData, CellData } from '../types';
+import {
+  findPath,
+  generateRouteSegments,
+  generateRouteSegmentsStrict,
+  simplifyPath,
+} from './pathfinding';
+import { DayMapData, CellData } from '../types/map';
 
 const createMapData = (
   maxRow: number,
@@ -25,7 +30,7 @@ const createMapData = (
   blocks: [],
 });
 
-// 直交性チェックヘルパー: 連続する2点がrow一致 or col一致
+// Orthogonality check helper: each consecutive segment must share row or col.
 function assertOrthogonal(path: { row: number; col: number }[]) {
   for (let i = 1; i < path.length; i++) {
     const sameRow = Math.abs(path[i].row - path[i - 1].row) < 0.01;
@@ -39,15 +44,14 @@ describe('pathfinding utilities', () => {
     const mapData = createMapData(3, 3, []);
     const path = findPath(mapData, 1, 1, 3, 3);
 
-    // サブセルグリッド+コリニアマージにより小数座標が返る
-    // 始���・終点はセル中心の小数座標
+    // The sub-cell grid and margin can return decimal coordinates.
+    // Start and end points are decimal coordinates at cell centers.
     expect(path.length).toBeGreaterThanOrEqual(2);
     expect(path[0].row).toBeCloseTo(1, 1);
     expect(path[0].col).toBeCloseTo(1, 1);
     expect(path[path.length - 1].row).toBeCloseTo(3, 1);
     expect(path[path.length - 1].col).toBeCloseTo(3, 1);
 
-    // 直交性チェック
     assertOrthogonal(path);
   });
 
@@ -55,14 +59,13 @@ describe('pathfinding utilities', () => {
     const mapData = createMapData(3, 3, [{ row: 2, col: 2, value: 100 }]);
     const path = findPath(mapData, 1, 1, 3, 3);
 
-    // ブロックされたセル(2,2)の範囲の中心を通らないことを確認
+    // Confirm the path does not pass through the blocked cell center (2,2).
     expect(path.length).toBeGreaterThanOrEqual(2);
     const passesBlockedCenter = path.some(
       (point) => Math.abs(point.row - 2) < 0.2 && Math.abs(point.col - 2) < 0.2,
     );
     expect(passesBlockedCenter).toBe(false);
 
-    // 直交性チェック
     assertOrthogonal(path);
   });
 
@@ -73,14 +76,13 @@ describe('pathfinding utilities', () => {
     ]);
 
     const path = findPath(mapData, 1, 1, 2, 2);
-    // フォールバック: L字パス（始点→中間→終点）
+    // Fallback path: L shape (start -> midpoint -> end).
     expect(path.length).toBe(3);
     expect(path[0].row).toBeCloseTo(1, 1);
     expect(path[0].col).toBeCloseTo(1, 1);
     expect(path[path.length - 1].row).toBeCloseTo(2, 1);
     expect(path[path.length - 1].col).toBeCloseTo(2, 1);
 
-    // 直交性チェック
     assertOrthogonal(path);
   });
 
@@ -104,9 +106,89 @@ describe('pathfinding utilities', () => {
     expect(segments[1].fromPriority).toBe('none');
     expect(segments[1].toPriority).toBe('priority');
 
-    // 全セグメントの直交性チェック
+    // Check all route segments are orthogonal.
     for (const seg of segments) {
       assertOrthogonal(seg.path);
+    }
+  });
+
+  it('preserves item metadata on route segments and after path simplification', () => {
+    const mapData = createMapData(3, 3, []);
+    const visitPoints = [
+      { row: 1, col: 1, itemId: 'a', order: 0 },
+      { row: 1, col: 3, itemId: 'b', order: 1 },
+    ];
+
+    const segments = generateRouteSegments(mapData, visitPoints);
+    expect(segments[0]).toMatchObject({
+      fromItemId: 'a',
+      toItemId: 'b',
+      fromOrder: 0,
+      toOrder: 1,
+    });
+
+    const simplified = segments.map((segment) => ({
+      ...segment,
+      path: simplifyPath(segment.path),
+    }));
+
+    expect(simplified[0]).toMatchObject({
+      fromItemId: 'a',
+      toItemId: 'b',
+      fromOrder: 0,
+      toOrder: 1,
+    });
+  });
+
+  it('returns ok false from strict route generation when fallback would be used', () => {
+    const mapData = createMapData(2, 2, [
+      { row: 1, col: 2, value: 1 },
+      { row: 2, col: 1, value: 1 },
+    ]);
+
+    const result = generateRouteSegmentsStrict(mapData, [
+      { row: 1, col: 1, itemId: 'a', order: 0 },
+      { row: 2, col: 2, itemId: 'b', order: 1 },
+    ]);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.segments).toEqual([]);
+      expect(result.failedSegment.fromIndex).toBe(0);
+      expect(result.failedSegment.from.itemId).toBe('a');
+      expect(result.failedSegment.to.itemId).toBe('b');
+    }
+  });
+
+  it('returns ok false from strict route generation when path constraint rejects a path', () => {
+    const mapData = createMapData(3, 3, []);
+
+    const result = generateRouteSegmentsStrict(
+      mapData,
+      [
+        { row: 1, col: 1, itemId: 'a', order: 0 },
+        { row: 1, col: 2, itemId: 'b', order: 1 },
+        { row: 2, col: 2, itemId: 'c', order: 2 },
+      ],
+      {
+        pathConstraint: {
+          isPathAllowed: (path) => path[path.length - 1].row < 2,
+        },
+      },
+    );
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.segments).toHaveLength(1);
+      expect(result.segments[0]).toMatchObject({
+        fromItemId: 'a',
+        toItemId: 'b',
+        fromOrder: 0,
+        toOrder: 1,
+      });
+      expect(result.failedSegment.fromIndex).toBe(1);
+      expect(result.failedSegment.from.itemId).toBe('b');
+      expect(result.failedSegment.to.itemId).toBe('c');
     }
   });
 
@@ -134,14 +216,14 @@ describe('pathfinding utilities', () => {
       { row: 3, col: 3 },
     ];
 
-    // 直交パスは直交ガードによりそのまま返される
+    // Orthogonal paths are returned as-is by the orthogonality guard.
     const simplified = simplifyPath(path, 0);
     expect(simplified.length).toBeGreaterThan(2);
 
-    // 高toleranceでもL字パスが斜めに潰されないことを確認（コリニア中間点は除去される）
+    // Even with a high tolerance, the L-shaped path must not collapse diagonally.
     const highTol = simplifyPath(path, 10);
     assertOrthogonal(highTol);
-    // 曲がり角は保持、コリニア中間点(2,2)は除去される
+    // Bend points are preserved, while the collinear midpoint (2,2) is removed.
     expect(highTol).toEqual([
       { row: 1, col: 1 },
       { row: 2, col: 1 },
@@ -154,7 +236,7 @@ describe('pathfinding utilities', () => {
     const mapData = createMapData(3, 5, []);
     const path = findPath(mapData, 2, 1, 2, 5);
 
-    // 同一行なのでターンは不���
+    // Same-row points need no turn.
     expect(path.length).toBe(2);
     expect(path[0].row).toBeCloseTo(path[1].row, 1);
 
@@ -165,7 +247,7 @@ describe('pathfinding utilities', () => {
     const mapData = createMapData(5, 3, []);
     const path = findPath(mapData, 1, 2, 5, 2);
 
-    // 同一列なのでターンは不要
+    // Same-column points need no turn.
     expect(path.length).toBe(2);
     expect(path[0].col).toBeCloseTo(path[1].col, 1);
 
