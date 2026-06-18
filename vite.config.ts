@@ -6,7 +6,7 @@ export default defineConfig({
   plugins: [
     react(),
     VitePWA({
-      registerType: 'autoUpdate',
+      registerType: 'prompt',
       includeAssets: ['icons/*.png', 'icons/*.svg'],
       manifest: {
         name: '即売会 購入巡回表',
@@ -44,8 +44,6 @@ export default defineConfig({
       workbox: {
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
         cleanupOutdatedCaches: true, // 追加: 古いキャッシュを自動削除
-        skipWaiting: true, // 追加: 新しいService Workerを即座にアクティブ化
-        clientsClaim: true, // 追加: アクティブ化後すぐに制御を開始
         runtimeCaching: [
           {
             urlPattern: /^https:\/\/cdn\.tailwindcss\.com\/.*/i,
