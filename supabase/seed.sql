@@ -1,0 +1,2 @@
+-- MVP-0a intentionally has no seed data.
+-- Add disposable local fixtures only after the baseline schema is available.
