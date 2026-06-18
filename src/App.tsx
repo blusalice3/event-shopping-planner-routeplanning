@@ -1,14 +1,16 @@
-﻿import React, { useState, useEffect, useCallback, useMemo, useRef, Suspense } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ShoppingItem,
+  AssignmentMemberProfile,
   PurchaseStatus,
   EventMetadata,
   ViewMode,
   DayModeState,
   ExecuteModeItems,
+} from './types/item';
+import {
   MapDataStore,
   RouteSettingsStore,
-  ExportOptions,
   BlockDefinition,
   HallDefinition,
   HallRouteSettings,
@@ -16,38 +18,18 @@ import {
   HallRouteSettingsStore,
   DayMapData,
   BlockDetectionSettings,
-  FocusModeSessionState,
   MapRotationSettingsStore,
   MapViewportSettingsStore,
   MapViewportState,
-} from './types';
-const ImportScreen = React.lazy(() => import('./components/ImportScreen'));
-import ShoppingList from './components/ShoppingList';
-import SummaryBar from './components/SummaryBar';
-import EventListScreen from './components/EventListScreen';
-import DeleteConfirmationModal from './components/DeleteConfirmationModal';
-import ZoomControl from './components/ZoomControl';
-import BulkActionControls from './components/BulkActionControls';
-import UpdateConfirmationModal from './components/UpdateConfirmationModal';
-import UrlUpdateDialog from './components/UrlUpdateDialog';
-import EventRenameDialog from './components/EventRenameDialog';
-import ExportOptionsDialog from './components/ExportOptionsDialog';
-import SortAscendingIcon from './components/icons/SortAscendingIcon';
-import SortDescendingIcon from './components/icons/SortDescendingIcon';
-import SearchBar from './components/SearchBar';
-import {
-  MapView,
-  BlockDefinitionPanel,
-  HallDefinitionPanel,
-  isPointInPolygon,
-  MapImportDialog,
-  loadBlockDetectionSettings,
-  saveBlockDetectionSettings,
-} from './components/map';
-import VisitListPanel from './components/VisitListPanel';
-const FocusModeContainer = React.lazy(() => import('./features/map/components/FocusModeContainer'));
+} from './types/map';
+import { ExportOptions } from './types/export';
+import { FocusModeSessionState } from './types/focus';
+import { MAPLESS_HALL_KEY, getMaplessKey } from './types/map';
+import { resolveHallByBlockName, resolveManualHallId, findHallsByBlockName } from './utils/hallFallback';
+import { buildMergedHallRouteSettings } from './utils/mergedHallRouteSettings';
+import { isPointInPolygon, saveBlockDetectionSettings } from './components/map';
 import { extractEventDates } from './utils/eventDates';
-import { getSpaceKey, getBaseNumber } from './utils/spaceGrouping';
+import { getSpaceKey } from './utils/spaceGrouping';
 import { importFromXlsx, downloadBlob, type ItemFallbackWarning } from './utils/exportImport';
 import {
   buildBulkAddUiPlan,
@@ -75,34 +57,42 @@ import {
   computeUpdateItem,
   computeDeleteItem,
   computeAddItemFromFocusMode,
-  computeAddToExecuteListFromMap,
-  computeAddToExecuteListFromMapAtPosition,
+  computeAddToExecuteListFromMapWithResult,
   computeRemoveFromExecuteListFromMap,
   computeMoveToExecuteColumn,
   computeRemoveFromExecuteColumn,
   computeMoveItem,
   computeMoveItemVertical,
   computeUpdateItemPriority,
+  computeHallOrderForPriorityChange,
+  computeInsertIntoExecuteAtPosition,
+  expandExecuteRemovalItemIds,
+  expandSameSpacePriorityItemIds,
+  reorderExecuteIdsForSpaceAdjacency,
 } from './features/events/itemOps';
 import {
   buildImportCompletionMessage,
   resolveEventListTab,
 } from './features/events/uiOrchestration';
-import { useSharing } from './features/sharing/components/SharingProvider';
-import CreateRoomDialog from './features/sharing/components/CreateRoomDialog';
-import JoinRoomDialog from './features/sharing/components/JoinRoomDialog';
-import MemberListPanel from './features/sharing/components/MemberListPanel';
-import QRCodeDisplay from './features/sharing/components/QRCodeDisplay';
-import NotificationToast from './features/sharing/components/NotificationToast';
-import SyncStatusIndicator from './features/sharing/components/SyncStatusIndicator';
-import BulkTransferDialog from './features/sharing/components/BulkTransferDialog';
-import HelpRequestDialog from './features/sharing/components/HelpRequestDialog';
-import AutoAssignmentDialog from './features/sharing/components/AutoAssignmentDialog';
-import ItemTransferDialog from './features/sharing/components/ItemTransferDialog';
-import { supabase as supabaseClient } from './lib/supabase';
-import { getRoomItemsAsShoppingItems } from './features/sharing/services/roomService';
-import { downloadMapData as downloadMapDataDirect } from './features/sharing/services/mapSyncService';
+import {
+  cloneHallsForDates,
+  emptyHallRouteSettings,
+  getCombinedHallRouteSettingsForDate,
+  getGlobalHallItemCount as computeGlobalHallItemCount,
+  remapHallRouteSettings,
+  reorderExecuteIdsByHallOrder,
+  splitGlobalHallRouteSettings,
+  splitHallsForStorage,
+  updateHallDefinitionsForHalls,
+  updateHallRouteSettingsForHalls,
+  updateMaplessHallDefinitions,
+  updateMaplessHallRouteSettings,
+} from './features/map/domain/hallOperations';
 import { useMapSelectors } from './features/map/hooks/useMapSelectors';
+import { useListInteractionState } from './features/lists/hooks/useListInteractionState';
+import AppHeaderShell from './features/app-shell/components/AppHeaderShell';
+import AppMainContent from './features/app-shell/components/AppMainContent';
+import AppOverlayLayer from './features/app-shell/components/AppOverlayLayer';
 import { useThemeMode } from './hooks/useThemeMode';
 import {
   DEFAULT_UI_VISIBILITY,
@@ -110,13 +100,83 @@ import {
   type UIVisibilitySettings,
 } from './hooks/useUIVisibilitySettings';
 import { useNumberCellOutlineStyle } from './hooks/useNumberCellOutlineStyle';
+import { useDisablePriceUndefinedCheck } from './hooks/useDisablePriceUndefinedCheck';
+import { useDisableLimitedPurchaseQuantityCheck } from './hooks/useDisableLimitedPurchaseQuantityCheck';
+import {
+  DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY,
+  useSkipLimitedPurchaseForSingleQuantity,
+} from './hooks/useSkipLimitedPurchaseForSingleQuantity';
+import { usePurchaseStatusControlMode } from './hooks/usePurchaseStatusControlMode';
 import { useIndexedDbPersistence } from './hooks/useIndexedDbPersistence';
-import MapRotationControls from './components/map/MapRotationControls';
+import SharingMvp0cPanel from './features/sharing/SharingMvp0cPanel';
+import {
+  SHARING_STRUCTURE_LOCK_MESSAGE,
+  buildCurrentSharingAppData,
+  buildRoomEventPayloadForEvent,
+  findActiveSharingSessionForEvent,
+  isSharingSessionActive,
+  type SharingAppState,
+} from './features/sharing/appIntegration';
+import {
+  ackRoomSyncProgress,
+  ackRoomRouteOrderVersions,
+  applyRoomItemChangesToItems,
+  assignRoomItem,
+  bulkAssignRoomItems,
+  commitSnapshotThenAck,
+  createClientRoomId,
+  createSharingRoom,
+  generateMemberKey,
+  getAllNotificationsAfterWatermark,
+  getNotificationList,
+  getRoomItemChangesSince,
+  getRoomMembersForDisplay,
+  getRoomSnapshot,
+  getRoomVersions,
+  getRouteOrderByDate,
+  heartbeatRoomSession,
+  hideNotification,
+  joinPreparedRoom,
+  leaveRoom,
+  loadMemberKey,
+  markNotificationRead,
+  mergeSnapshotRoomItemIntoShoppingItem,
+  pauseRoomSession,
+  prepareJoinRoom,
+  prepareRestoreRoom,
+  restorePreparedRoom,
+  roomSnapshotToAppData,
+  subscribeToRoomSync,
+  updateRoomItemWithPurchase,
+  updateRouteOrder,
+  type NotificationListItem,
+  type ProcessedSyncEvent,
+  type RoomNotification,
+  type SnapshotRoomItem,
+  forgetMemberKey,
+} from './features/sharing/client';
+import { getSharingAvailability } from './lib/supabase';
+import type { SmartInsertMode, SortState } from './features/app-shell/types';
+import { normalizeSmartInsertMode } from './utils/smartInsertMode';
+import {
+  clearLimitedPurchase,
+  getLimitedPurchaseCounts,
+  matchesPurchaseStatusFilter,
+} from './utils/purchaseQuantity';
+import { db, type AppData, type SharingSessionMetadata } from './utils/indexedDB';
 
 type ActiveTab = 'eventList' | 'import' | string;
-type SortState = 'Manual' | 'Postpone' | 'Late' | 'Absent' | 'SoldOut' | 'None' | 'Purchased';
 export type BulkSortDirection = 'asc' | 'desc';
 type BlockSortDirection = 'asc' | 'desc';
+type SharingMutableItemFields = {
+  price?: number | null;
+  quantity?: number | null;
+  actualPurchaseQuantity?: number | null;
+  remarks?: string | null;
+  url?: string | null;
+};
+
+const EMPTY_ASSIGNMENT_MEMBERS: AssignmentMemberProfile[] = [];
 
 const sortCycle: SortState[] = [
   'Manual',
@@ -126,7 +186,101 @@ const sortCycle: SortState[] = [
   'SoldOut',
   'None',
   'Purchased',
+  'LimitedPurchase',
 ];
+
+const hasUnsupportedSharingItemChange = (
+  currentItem: ShoppingItem,
+  updatedItem: ShoppingItem,
+): boolean =>
+  currentItem.circle !== updatedItem.circle ||
+  currentItem.title !== updatedItem.title ||
+  currentItem.eventDate !== updatedItem.eventDate ||
+  currentItem.block !== updatedItem.block ||
+  currentItem.number !== updatedItem.number ||
+  currentItem.priorityLevel !== updatedItem.priorityLevel ||
+  currentItem.protectionLevel !== updatedItem.protectionLevel ||
+  currentItem.source !== updatedItem.source ||
+  currentItem.manualHallId !== updatedItem.manualHallId ||
+  currentItem.orderIndex !== updatedItem.orderIndex ||
+  currentItem.assignedTo !== updatedItem.assignedTo ||
+  currentItem.securedBy !== updatedItem.securedBy;
+
+const buildSharingMutableItemFields = (
+  currentItem: ShoppingItem,
+  updatedItem: ShoppingItem,
+): SharingMutableItemFields => {
+  const fields: SharingMutableItemFields = {};
+  if (currentItem.price !== updatedItem.price) fields.price = updatedItem.price;
+  if (currentItem.quantity !== updatedItem.quantity) fields.quantity = updatedItem.quantity;
+  if (
+    currentItem.purchaseStatus === updatedItem.purchaseStatus &&
+    currentItem.limitedPurchasedQuantity !== updatedItem.limitedPurchasedQuantity
+  ) {
+    fields.actualPurchaseQuantity =
+      updatedItem.purchaseStatus === 'LimitedPurchase'
+        ? updatedItem.limitedPurchasedQuantity ?? null
+        : null;
+  }
+  if (currentItem.remarks !== updatedItem.remarks) fields.remarks = updatedItem.remarks;
+  if ((currentItem.url ?? undefined) !== (updatedItem.url ?? undefined)) {
+    fields.url = updatedItem.url ?? null;
+  }
+  return fields;
+};
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+
+const sharingFieldLabels: Record<string, string> = {
+  price: '価格',
+  quantity: '数量',
+  remarks: '備考',
+  url: 'URL',
+  purchaseStatus: '購入状態',
+  actualPurchaseQuantity: '実購入数',
+  securedBy: '購入確保',
+  assignedTo: '担当者',
+  postponed: '後回し',
+  routeOrderByDate: '巡回順',
+};
+
+const buildSharingNotificationMessage = (
+  notification: RoomNotification,
+  items: ShoppingItem[],
+  currentRoomMemberId: string,
+): string | null => {
+  const payload = asRecord(notification.payload);
+  if (payload.updatedByMemberId === currentRoomMemberId) return null;
+
+  const localItemId = typeof payload.localItemId === 'string' ? payload.localItemId : null;
+  const item = localItemId ? items.find((candidate) => candidate.id === localItemId) : null;
+  const itemLabel = item ? `${item.block}-${item.number} ${item.circle}`.trim() : '共有アイテム';
+  const updatedFields = Array.isArray(payload.updatedFields)
+    ? payload.updatedFields.filter((field): field is string => typeof field === 'string')
+    : [];
+  const label =
+    updatedFields.length > 0
+      ? updatedFields.map((field) => sharingFieldLabels[field] ?? field).join('、')
+      : '内容';
+
+  if (notification.notificationType === 'item_claimed') {
+    return `${itemLabel} が他の参加者によって購入済みに更新されました。`;
+  }
+  if (notification.notificationType === 'item_claim_failed') {
+    return `${itemLabel} は他の参加者が先に購入確保しました。最新状態を同期します。`;
+  }
+  if (notification.notificationType === 'item_assigned') {
+    return `${itemLabel} の担当者を同期しました。`;
+  }
+  if (notification.notificationType === 'route_order_updated') {
+    const eventDate = typeof payload.eventDate === 'string' ? payload.eventDate : '対象日';
+    return `${eventDate} の巡回順を同期しました。`;
+  }
+  return `${itemLabel} の${label}を同期しました。`;
+};
 const sortLabels: Record<SortState, string> = {
   Manual: '巡回順',
   Postpone: '後回し',
@@ -135,13 +289,12 @@ const sortLabels: Record<SortState, string> = {
   SoldOut: '売切',
   None: '未購入',
   Purchased: '購入済',
+  LimitedPurchase: '\u9650\u6570',
 };
 
-// 集中モードのセッションキーは「イベント名::日付」で統一する。
 const buildFocusSessionKey = (eventName: string, eventDate: string): string =>
   `${eventName}::${eventDate}`;
 
-// イベント削除時に、対象イベントに紐づく集中モードセッションをまとめて除外する。
 const removeFocusModeSessionByEvent = (
   sessions: Record<string, FocusModeSessionState>,
   eventName: string,
@@ -160,7 +313,6 @@ const removeFocusModeSessionByEvent = (
   return changed ? next : sessions;
 };
 
-// イベント名変更時に、セッションキーの先頭だけを新しい名前へ差し替える。
 const renameFocusModeSessionKeys = (
   sessions: Record<string, FocusModeSessionState>,
   oldEventName: string,
@@ -187,22 +339,38 @@ const areStringArraysEqual = (a: string[], b: string[]): boolean => {
   return a.every((value, index) => value === b[index]);
 };
 
-// 集中モード再開可否の判定に使う比較関数。
 const isFocusModeSessionStateEqual = (
   a: FocusModeSessionState | undefined,
   b: FocusModeSessionState,
 ): boolean => {
   if (!a) return false;
-  return (
-    a.phase === b.phase &&
-    a.phaseIndex === b.phaseIndex &&
-    a.isCompleted === b.isCompleted &&
-    a.savedPhaseIndices.normal === b.savedPhaseIndices.normal &&
-    a.savedPhaseIndices.postponed === b.savedPhaseIndices.postponed &&
-    a.savedPhaseIndices.late === b.savedPhaseIndices.late &&
-    areStringArraysEqual(a.postponedItemIds, b.postponedItemIds) &&
-    areStringArraysEqual(a.lateItemIds, b.lateItemIds)
-  );
+  if (
+    a.phase !== b.phase ||
+    a.phaseIndex !== b.phaseIndex ||
+    a.isCompleted !== b.isCompleted ||
+    a.savedPhaseIndices.normal !== b.savedPhaseIndices.normal ||
+    a.savedPhaseIndices.postponed !== b.savedPhaseIndices.postponed ||
+    a.savedPhaseIndices.late !== b.savedPhaseIndices.late ||
+    !areStringArraysEqual(a.postponedItemIds, b.postponedItemIds) ||
+    !areStringArraysEqual(a.lateItemIds, b.lateItemIds)
+  ) {
+    return false;
+  }
+
+  const lpcA = a.lastPurchaseChangeAt ?? null;
+  const lpcB = b.lastPurchaseChangeAt ?? null;
+  if ((lpcA === null) !== (lpcB === null)) return false;
+  if (
+    lpcA &&
+    lpcB &&
+    (lpcA.phase !== lpcB.phase ||
+      lpcA.phaseIndex !== lpcB.phaseIndex ||
+      lpcA.visitKey !== lpcB.visitKey)
+  ) {
+    return false;
+  }
+
+  return true;
 };
 
 const normalizeRotationAngle = (angle: number): number => {
@@ -240,19 +408,52 @@ const resolveDayMapRotationState = (
 };
 
 const App: React.FC = () => {
-  const sharing = useSharing();
-
-  // イベント単位で保持する主要データ。
   const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>({});
   const [eventMetadata, setEventMetadata] = useState<Record<string, EventMetadata>>({});
   const [executeModeItems, setExecuteModeItems] = useState<Record<string, ExecuteModeItems>>({});
+  const executeModeItemsRef = useRef<Record<string, ExecuteModeItems>>({});
+  const commitExecuteModeItems = useCallback((nextAllEvents: Record<string, ExecuteModeItems>) => {
+    executeModeItemsRef.current = nextAllEvents;
+    setExecuteModeItems(nextAllEvents);
+  }, []);
+  const updateExecuteModeItems = useCallback(
+    (
+      updater: (
+        current: Record<string, ExecuteModeItems>,
+      ) => Record<string, ExecuteModeItems>,
+    ) => {
+      const nextAllEvents = updater(executeModeItemsRef.current);
+      commitExecuteModeItems(nextAllEvents);
+      return nextAllEvents;
+    },
+    [commitExecuteModeItems],
+  );
+  const setExecuteModeItemsCommitted = useCallback(
+    (next: React.SetStateAction<Record<string, ExecuteModeItems>>) => {
+      const nextAllEvents =
+        typeof next === 'function'
+          ? (next as (current: Record<string, ExecuteModeItems>) => Record<string, ExecuteModeItems>)(
+              executeModeItemsRef.current,
+            )
+          : next;
+      commitExecuteModeItems(nextAllEvents);
+    },
+    [commitExecuteModeItems],
+  );
+  const commitExecuteModeItemsForEvent = useCallback(
+    (eventName: string, nextEventItems: ExecuteModeItems) => {
+      commitExecuteModeItems({
+        ...executeModeItemsRef.current,
+        [eventName]: nextEventItems,
+      });
+    },
+    [commitExecuteModeItems],
+  );
   const [dayModes, setDayModes] = useState<Record<string, DayModeState>>({});
 
-  // 画面表示と選択状態。
   const [activeEventName, setActiveEventName] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<ActiveTab>('eventList');
   const [mapViewActive, setMapViewActive] = useState(false);
-  const autoAdvanceTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const mapToggleLongPressRef = React.useRef<number | null>(null);
   const mapToggleLongPressFiredRef = React.useRef(false);
   const mapToggleButtonRef = React.useRef<HTMLButtonElement>(null);
@@ -260,36 +461,43 @@ const App: React.FC = () => {
   const [sortState, setSortState] = useState<SortState>('Manual');
   const [blockSortDirection, setBlockSortDirection] = useState<BlockSortDirection | null>(null);
   const [itemToEdit, setItemToEdit] = useState<ShoppingItem | null>(null);
+  const [editDialogItem, setEditDialogItem] = useState<ShoppingItem | null>(null);
   const [itemToDelete, setItemToDelete] = useState<ShoppingItem | null>(null);
   const [zoomLevel, setZoomLevel] = useState(100);
-  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
-  const [selectedBlockFilters, setSelectedBlockFilters] = useState<Set<string>>(new Set());
   const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
-  const [priceAlertItemIds, setPriceAlertItemIds] = useState<Set<string>>(new Set());
-  const [userInteractedSpaces, setUserInteractedSpaces] = useState<Set<string>>(new Set());
-  const [completionToast, setCompletionToast] = useState<{ countdown: number } | null>(null);
-  const completionToastTimerRef = React.useRef<ReturnType<typeof setInterval> | null>(null);
-  const completionCountdownRef = React.useRef(0);
-  const lastChangedItemIdRef = React.useRef<string | null>(null);
-  const [rangeStart, setRangeStart] = useState<{
-    itemId: string;
-    columnType: 'execute' | 'candidate';
-    sourceType?: 'item' | 'spaceHeader';
-  } | null>(null);
-  const [rangeEnd, setRangeEnd] = useState<{
-    itemId: string;
-    columnType: 'execute' | 'candidate';
-    sourceType?: 'item' | 'spaceHeader';
-  } | null>(null);
+  const {
+    selectedItemIds,
+    setSelectedItemIds,
+    selectedBlockFilters,
+    setSelectedBlockFilters,
+    rangeStart,
+    setRangeStart,
+    rangeEnd,
+    setRangeEnd,
+    spaceGroupingEnabled,
+    setSpaceGroupingEnabled,
+    collapsedSpaces,
+    setCollapsedSpaces,
+    executeSpaceGroupingEnabled,
+    setExecuteSpaceGroupingEnabled,
+    executeCollapsedSpaces,
+    setExecuteCollapsedSpaces,
+    clearSelection,
+    clearBlockFilters,
+    toggleBlockFilter,
+    toggleCollapsedSpace,
+    toggleExecuteCollapsedSpace,
+    selectItemForRange,
+    selectSpaceGroupForRange,
+    toggleCurrentRangeSelection,
+  } = useListInteractionState();
 
-  // 新規追加フォームに引き継ぐ既定値。
   const [newItemDefaults, setNewItemDefaults] = useState<{
     eventDate: string;
     block: string;
     number: string;
   } | null>(null);
 
-  // 更新・名称変更まわりのダイアログ状態。
   const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
   const [updateData, setUpdateData] = useState<EventUpdateDiff | null>(null);
   const [updateEventName, setUpdateEventName] = useState<string | null>(null);
@@ -298,17 +506,29 @@ const App: React.FC = () => {
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [eventToRename, setEventToRename] = useState<string | null>(null);
 
-  // 検索 UI の状態。
   const [searchKeyword, setSearchKeyword] = useState('');
   const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
   const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
 
-  // レイアウト・表示設定・集中モード表示状態。
   const [layoutMode, setLayoutMode] = useState<'pc' | 'smartphone'>(() =>
     typeof window !== 'undefined' && window.innerWidth < 768 ? 'smartphone' : 'pc',
   );
   const { uiVisibilitySettings, setUiVisibilitySettings } = useUIVisibilitySettings();
   const { numberCellOutlineStyle, setNumberCellOutlineStyle, DEFAULT_OUTLINE_STYLE } = useNumberCellOutlineStyle();
+  const { disablePriceUndefinedCheck, setDisablePriceUndefinedCheck } = useDisablePriceUndefinedCheck();
+  const {
+    disableLimitedPurchaseQuantityCheck,
+    setDisableLimitedPurchaseQuantityCheck,
+  } = useDisableLimitedPurchaseQuantityCheck();
+  const {
+    purchaseStatusControlMode,
+    setPurchaseStatusControlMode,
+    DEFAULT_PURCHASE_STATUS_CONTROL_MODE,
+  } = usePurchaseStatusControlMode();
+  const {
+    skipLimitedPurchaseForSingleQuantity,
+    setSkipLimitedPurchaseForSingleQuantity,
+  } = useSkipLimitedPurchaseForSingleQuantity();
   const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
   const [uiSettingsPanelOpen, setUiSettingsPanelOpen] = useState(false);
   const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
@@ -318,19 +538,19 @@ const App: React.FC = () => {
 
   const { themeMode, setThemeMode } = useThemeMode();
 
-  // マップ・ホール関連の永続データ。
   const [mapData, setMapData] = useState<MapDataStore>({});
   const [mapRotationSettings, setMapRotationSettings] = useState<MapRotationSettingsStore>({});
   const [mapViewportSettings, setMapViewportSettings] = useState<MapViewportSettingsStore>({});
   const [routeSettings, setRouteSettings] = useState<RouteSettingsStore>({});
   const [hallDefinitions, setHallDefinitions] = useState<HallDefinitionsStore>({});
   const [hallRouteSettings, setHallRouteSettings] = useState<HallRouteSettingsStore>({});
+  const [simpleHallDefinitionMode, setSimpleHallDefinitionMode] = useState(false);
+  const [globalHallOrderPanelOpen, setGlobalHallOrderPanelOpen] = useState(false);
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [exportEventName, setExportEventName] = useState<string | null>(null);
   const mapFileInputRef = useRef<HTMLInputElement>(null);
   const exportFileInputRef = useRef<HTMLInputElement>(null);
 
-  // マップ取り込みダイアログの一時データ。
   const [mapImportDialogOpen, setMapImportDialogOpen] = useState(false);
   const [mapImportPendingFile, setMapImportPendingFile] = useState<File | null>(null);
   const [mapImportPendingEventName, setMapImportPendingEventName] = useState<string>('');
@@ -350,7 +570,7 @@ const App: React.FC = () => {
     setters: {
       setEventLists,
       setEventMetadata,
-      setExecuteModeItems,
+      setExecuteModeItems: setExecuteModeItemsCommitted,
       setDayModes,
       setMapData,
       setMapRotationSettings,
@@ -361,111 +581,1126 @@ const App: React.FC = () => {
     },
   });
 
-  // 共有ルームからのリモート更新ハンドラ登録
+  const [sharingSessions, setSharingSessions] = useState<Record<string, SharingSessionMetadata>>({});
+  const [sharingBusy, setSharingBusy] = useState(false);
+  const [sharingStatusMessage, setSharingStatusMessage] = useState<string | null>(null);
+  const [sharingErrorMessage, setSharingErrorMessage] = useState<string | null>(null);
+  const [sharingNotificationList, setSharingNotificationList] = useState<NotificationListItem[]>([]);
+  const [sharingAssignedOnly, setSharingAssignedOnly] = useState(false);
+  const sharingSessionsRef = useRef<Record<string, SharingSessionMetadata>>({});
+  const eventListsRef = useRef<Record<string, ShoppingItem[]>>({});
+  const sharingSyncInFlightRef = useRef(false);
+  const sharingSyncPendingRef = useRef(false);
+
   useEffect(() => {
-    if (!sharing?.registerRemoteUpdateHandler) return;
-    sharing.registerRemoteUpdateHandler((update) => {
-      // activeEventNameに関係なく、全イベントのアイテムを検索してマージ
-      setEventLists((prev) => {
-        const newLists = { ...prev };
-        for (const eventName of Object.keys(newLists)) {
-          const items = newLists[eventName];
-          const idx = items.findIndex((item) => item.id === update.localItemId);
-          if (idx !== -1) {
-            const updatedItem = { ...items[idx] };
-            if (update.purchaseStatus !== undefined) updatedItem.purchaseStatus = update.purchaseStatus;
-            if (update.assignedTo !== undefined) updatedItem.assignedTo = update.assignedTo ?? undefined;
-            if (update.price !== undefined) updatedItem.price = update.price;
-            if (update.quantity !== undefined) updatedItem.quantity = update.quantity;
-            if (update.postponed !== undefined) updatedItem.postponed = update.postponed;
-            if (update.orderIndex !== undefined) updatedItem.orderIndex = update.orderIndex;
-            updatedItem.lastSyncedAt = new Date().toISOString();
-            newLists[eventName] = [...items.slice(0, idx), updatedItem, ...items.slice(idx + 1)];
-            break;
+    sharingSessionsRef.current = sharingSessions;
+  }, [sharingSessions]);
+
+  useEffect(() => {
+    eventListsRef.current = eventLists;
+  }, [eventLists]);
+
+  const buildSharingAppState = useCallback(
+    (): SharingAppState => ({
+      eventLists,
+      eventMetadata,
+      executeModeItems,
+      dayModes,
+      mapData,
+      mapRotationSettings,
+      routeSettings,
+      hallDefinitions,
+      hallRouteSettings,
+      mapViewportSettings,
+    }),
+    [
+      eventLists,
+      eventMetadata,
+      executeModeItems,
+      dayModes,
+      mapData,
+      mapRotationSettings,
+      routeSettings,
+      hallDefinitions,
+      hallRouteSettings,
+      mapViewportSettings,
+    ],
+  );
+
+  const applySharingAppData = useCallback(
+    (appData: AppData) => {
+      setEventLists(appData.eventLists as Record<string, ShoppingItem[]>);
+      setEventMetadata(appData.eventMetadata as Record<string, EventMetadata>);
+      commitExecuteModeItems(appData.executeModeItems as Record<string, ExecuteModeItems>);
+      setDayModes(appData.dayModes as Record<string, DayModeState>);
+      setMapData(appData.mapData as MapDataStore);
+      setMapRotationSettings(appData.mapRotationSettings as MapRotationSettingsStore);
+      setRouteSettings(appData.routeSettings as RouteSettingsStore);
+      setHallDefinitions(appData.hallDefinitions as HallDefinitionsStore);
+      setHallRouteSettings(appData.hallRouteSettings as HallRouteSettingsStore);
+      setMapViewportSettings(appData.mapViewportSettings as MapViewportSettingsStore);
+    },
+    [commitExecuteModeItems],
+  );
+
+  const refreshSharingSessions = useCallback(async () => {
+    const sessions = await db.getAllData<SharingSessionMetadata>(db.STORES.SHARING_SESSIONS);
+    setSharingSessions(sessions);
+    return sessions;
+  }, []);
+
+  useEffect(() => {
+    if (!isInitialized) return;
+    void refreshSharingSessions();
+  }, [isInitialized, refreshSharingSessions]);
+
+  const activeSharingSession = useMemo(
+    () => findActiveSharingSessionForEvent(sharingSessions, activeEventName),
+    [sharingSessions, activeEventName],
+  );
+
+  const activeSharingAssignmentMembers = useMemo(
+    () => activeSharingSession?.memberProfileSnapshot ?? EMPTY_ASSIGNMENT_MEMBERS,
+    [activeSharingSession?.memberProfileSnapshot],
+  );
+  const activeSharingNotificationEntries = useMemo(
+    () =>
+      activeSharingSession
+        ? sharingNotificationList.map((notification) => ({
+            notification,
+            message:
+              buildSharingNotificationMessage(
+                notification,
+                eventLists[activeSharingSession.eventName] ?? [],
+                activeSharingSession.roomMemberId,
+              ) ?? `${notification.notificationType} を受信しました。`,
+          }))
+        : [],
+    [activeSharingSession, eventLists, sharingNotificationList],
+  );
+  const activeSharingAssignedOnlyMemberId =
+    activeSharingSession && sharingAssignedOnly ? activeSharingSession.roomMemberId : null;
+  const filterAssignedOnlyItems = useCallback(
+    (sourceItems: ShoppingItem[]): ShoppingItem[] =>
+      activeSharingAssignedOnlyMemberId
+        ? sourceItems.filter((item) => item.assignedTo === activeSharingAssignedOnlyMemberId)
+        : sourceItems,
+    [activeSharingAssignedOnlyMemberId],
+  );
+  const canAssignSharingItem = useCallback(
+    (item: ShoppingItem): boolean =>
+      !!activeSharingSession &&
+      (activeSharingSession.role === 'host' || item.assignedTo === activeSharingSession.roomMemberId),
+    [activeSharingSession],
+  );
+
+  const isEventSharingLocked = useCallback(
+    (eventName: string | null | undefined): boolean =>
+      !!findActiveSharingSessionForEvent(sharingSessions, eventName),
+    [sharingSessions],
+  );
+
+  const hasAnyActiveSharingSession = useMemo(
+    () => Object.values(sharingSessions).some((session) => isSharingSessionActive(session)),
+    [sharingSessions],
+  );
+
+  const guardSharingStructureMutation = useCallback(
+    (eventName: string | null | undefined): boolean => {
+      if (!isEventSharingLocked(eventName)) return false;
+      alert(SHARING_STRUCTURE_LOCK_MESSAGE);
+      return true;
+    },
+    [isEventSharingLocked],
+  );
+
+  const sharingEventNames = useMemo(
+    () =>
+      Object.keys(eventLists).sort((a, b) =>
+        a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' }),
+      ),
+    [eventLists],
+  );
+  const sharingAvailability = useMemo(() => getSharingAvailability(), []);
+
+  const applySnapshotAndAck = useCallback(
+    async (roomId: string) => {
+      const snapshotEnvelope = await getRoomSnapshot(roomId);
+      if (!snapshotEnvelope.ok) {
+        setSharingErrorMessage(`snapshotの取得に失敗しました: ${snapshotEnvelope.error.code}`);
+        return;
+      }
+
+      const currentAppData = buildCurrentSharingAppData(buildSharingAppState());
+      const ack = await commitSnapshotThenAck(snapshotEnvelope.data, currentAppData);
+      const nextAppData = roomSnapshotToAppData(snapshotEnvelope.data, currentAppData);
+      applySharingAppData(nextAppData);
+      await refreshSharingSessions();
+
+      const eventName = snapshotEnvelope.data.room.eventName;
+      setActiveEventName(eventName);
+      setSelectedItemIds(new Set());
+      setSelectedBlockFilters(new Set());
+
+      const nextTab = resolveEventListTab(nextAppData.eventLists[eventName] as ShoppingItem[]);
+      setActiveTab(nextTab ?? 'eventList');
+
+      if (!ack.ok) {
+        setSharingErrorMessage(`snapshotの保存後ackに失敗しました: ${ack.error.code}`);
+        return;
+      }
+      setSharingErrorMessage(null);
+    },
+    [
+      applySharingAppData,
+      buildSharingAppState,
+      refreshSharingSessions,
+      setSelectedBlockFilters,
+      setSelectedItemIds,
+    ],
+  );
+
+  const saveSharingSessionState = useCallback(async (session: SharingSessionMetadata) => {
+    await db.saveSharingSession(session);
+    setSharingSessions((prev) => ({
+      ...prev,
+      [session.sessionId]: session,
+    }));
+  }, []);
+
+  const expireSharingSession = useCallback(
+    async (session: SharingSessionMetadata) => {
+      const expiredSession: SharingSessionMetadata = {
+        ...session,
+        status: 'expired',
+      };
+      await saveSharingSessionState(expiredSession);
+      setSharingStatusMessage(`${session.eventName} の共有期限が切れました。`);
+    },
+    [saveSharingSessionState],
+  );
+
+  const synchronizeSharingSession = useCallback(
+    async (sessionId: string, reason: 'initial' | 'realtime' | 'queued' | 'manual' = 'manual') => {
+      const startSession = sharingSessionsRef.current[sessionId];
+      if (!startSession || !isSharingSessionActive(startSession)) return;
+
+      if (sharingSyncInFlightRef.current) {
+        sharingSyncPendingRef.current = true;
+        return;
+      }
+
+      sharingSyncInFlightRef.current = true;
+      try {
+        let session = sharingSessionsRef.current[sessionId] ?? startSession;
+        const versions = await getRoomVersions(session.roomId);
+        if (!versions.ok) {
+          if (versions.error.code === 'ROOM_EXPIRED') {
+            await expireSharingSession(session);
+          } else if (reason !== 'realtime') {
+            setSharingErrorMessage(`共有同期の確認に失敗しました: ${versions.error.code}`);
+          }
+          return;
+        }
+
+        if (!versions.data.isActive) {
+          await expireSharingSession(session);
+          return;
+        }
+
+        let nextItemsVersion = session.itemsVersion;
+        let nextRouteOrderVersions = { ...(session.routeOrderVersions ?? {}) };
+        if (versions.data.itemsVersion > session.itemsVersion) {
+          const changes = await getRoomItemChangesSince(session.roomId, session.itemsVersion);
+          if (!changes.ok) {
+            if (
+              changes.error.code === 'ITEM_DIFF_EXPIRED' ||
+              changes.error.code === 'FULL_ITEM_REFRESH_REQUIRED'
+            ) {
+              await applySnapshotAndAck(session.roomId);
+            } else {
+              setSharingErrorMessage(`共有差分の取得に失敗しました: ${changes.error.code}`);
+            }
+            return;
+          }
+
+          const changedItemIds = new Set(
+            changes.data.changes
+              .filter((change) =>
+                change.updatedFields.some((field) =>
+                  ['purchaseStatus', 'actualPurchaseQuantity', 'quantity', 'assignedTo'].includes(field),
+                ),
+              )
+              .map((change) => change.localItemId),
+          );
+
+          if (changes.data.changes.length > 0) {
+            setEventLists((prev) => ({
+              ...prev,
+              [session.eventName]: applyRoomItemChangesToItems(
+                prev[session.eventName] ?? [],
+                changes.data.changes,
+              ),
+            }));
+          }
+
+          if (changedItemIds.size > 0) {
+            setRecentlyChangedItemIds((prevIds) => {
+              const next = new Set(prevIds);
+              changedItemIds.forEach((itemId) => next.add(itemId));
+              return next;
+            });
+          }
+
+          nextItemsVersion = changes.data.itemsVersion;
+        }
+
+        const serverRouteOrderVersions = versions.data.routeOrderVersions ?? {};
+        if (versions.data.routeOrderVersion !== null) {
+          const eventRouteOrders = executeModeItemsRef.current[session.eventName] ?? {};
+          const candidateDates = new Set([
+            ...Object.keys(serverRouteOrderVersions),
+            ...Object.keys(eventRouteOrders),
+          ]);
+          const changedRouteDates = [...candidateDates].filter(
+            (eventDate) =>
+              (serverRouteOrderVersions[eventDate] ?? 0) !==
+              (nextRouteOrderVersions[eventDate] ?? 0),
+          );
+
+          if (changedRouteDates.length > 0) {
+            const nextEventRouteOrders = { ...eventRouteOrders };
+            for (const eventDate of changedRouteDates) {
+              const route = await getRouteOrderByDate(session.roomId, eventDate);
+              if (!route.ok) {
+                if (route.error.code === 'ROOM_EXPIRED') {
+                  await expireSharingSession(session);
+                  return;
+                }
+                if (reason !== 'realtime') {
+                  setSharingErrorMessage(`巡回順の取得に失敗しました: ${route.error.code}`);
+                }
+                return;
+              }
+
+              nextEventRouteOrders[eventDate] = route.data.itemIds;
+              nextRouteOrderVersions = {
+                ...nextRouteOrderVersions,
+                [eventDate]: route.data.dateRouteOrderVersion,
+              };
+            }
+
+            updateExecuteModeItems((prev) => ({
+              ...prev,
+              [session.eventName]: {
+                ...(prev[session.eventName] ?? {}),
+                ...nextEventRouteOrders,
+              },
+            }));
+
+            const routeAck = await ackRoomRouteOrderVersions(
+              session.roomId,
+              nextRouteOrderVersions,
+            );
+            if (!routeAck.ok && reason !== 'realtime') {
+              setSharingErrorMessage(`巡回順の同期ackに失敗しました: ${routeAck.error.code}`);
+            }
           }
         }
-        return newLists;
-      });
-    });
-  }, [sharing]);
 
-  // マップデータのリモート更新ハンドラ登録
-  useEffect(() => {
-    if (!sharing?.registerMapDataUpdateHandler) return;
-    sharing.registerMapDataUpdateHandler((update) => {
-      // ルームのイベント名を使ってマップデータを更新
-      const eventName = sharing.activeRoom?.eventName;
+        let lastProcessedEventCreatedAt = session.lastProcessedEventCreatedAt ?? null;
+        let lastProcessedEventId = session.lastProcessedEventId ?? null;
+        const processedEventIds: ProcessedSyncEvent[] = [];
+        const notifications = await getAllNotificationsAfterWatermark(
+          session.roomId,
+          lastProcessedEventCreatedAt,
+          lastProcessedEventId,
+        );
+
+        if (notifications.ok) {
+          const delivered = notifications.data.events ?? notifications.data.notifications;
+          const processedAt = new Date().toISOString();
+          processedEventIds.push(
+            ...delivered.map((notification) => ({
+              event_id: notification.eventId,
+              processed_at: processedAt,
+            })),
+          );
+          const latest = delivered[delivered.length - 1];
+          if (latest) {
+            lastProcessedEventCreatedAt =
+              notifications.data.nextWatermarkCreatedAt ?? latest.createdAt;
+            lastProcessedEventId = notifications.data.nextWatermarkId ?? latest.id;
+
+            const message = delivered
+              .map((notification) =>
+                buildSharingNotificationMessage(
+                  notification,
+                  eventListsRef.current[session.eventName] ?? [],
+                  session.roomMemberId,
+                ),
+              )
+              .filter((value): value is string => value !== null)
+              .at(-1);
+            if (message) {
+              setSharingStatusMessage(message);
+            } else if (reason === 'initial' && nextItemsVersion > session.itemsVersion) {
+              setSharingStatusMessage('共有の最新状態を同期しました。');
+            }
+          }
+        } else if (notifications.error.code === 'FULL_NOTIFICATION_REFRESH_REQUIRED') {
+          lastProcessedEventCreatedAt = null;
+          lastProcessedEventId = null;
+        } else if (reason !== 'realtime') {
+          setSharingErrorMessage(`共有通知の取得に失敗しました: ${notifications.error.code}`);
+        }
+
+        const ack = await ackRoomSyncProgress(
+          session.roomId,
+          nextItemsVersion,
+          lastProcessedEventCreatedAt,
+          lastProcessedEventId,
+          processedEventIds,
+        );
+        session = sharingSessionsRef.current[sessionId] ?? session;
+        const updatedSession: SharingSessionMetadata = {
+          ...session,
+          itemsVersion: ack.ok ? ack.data.itemsVersion : nextItemsVersion,
+          routeOrderVersions: nextRouteOrderVersions,
+          lastProcessedEventCreatedAt: ack.ok
+            ? ack.data.lastProcessedEventCreatedAt
+            : lastProcessedEventCreatedAt,
+          lastProcessedEventId: ack.ok ? ack.data.lastProcessedEventId : lastProcessedEventId,
+          lastAckAt: new Date().toISOString(),
+        };
+        await saveSharingSessionState(updatedSession);
+
+        if (!ack.ok && reason !== 'realtime') {
+          setSharingErrorMessage(`共有同期ackに失敗しました: ${ack.error.code}`);
+        } else if (ack.ok) {
+          setSharingErrorMessage(null);
+        }
+      } catch (error) {
+        console.error('Sharing sync error:', error);
+        if (reason !== 'realtime') {
+          setSharingErrorMessage('共有同期に失敗しました。通信状態を確認してください。');
+        }
+      } finally {
+        sharingSyncInFlightRef.current = false;
+        if (sharingSyncPendingRef.current) {
+          sharingSyncPendingRef.current = false;
+          window.setTimeout(() => {
+            void synchronizeSharingSession(sessionId, 'queued');
+          }, 0);
+        }
+      }
+    },
+    [applySnapshotAndAck, expireSharingSession, saveSharingSessionState, updateExecuteModeItems],
+  );
+
+  const handleCreateSharingRoom = useCallback(
+    async (eventName: string, displayName: string) => {
       if (!eventName) return;
-
-      if (update.dataType === 'mapData') {
-        setMapData((prev) => ({
-          ...prev,
-          [eventName]: {
-            ...(prev[eventName] || {}),
-            [update.mapName]: update.data as import('./types').DayMapData,
-          },
-        }));
-      } else if (update.dataType === 'hallDefinitions') {
-        setHallDefinitions((prev) => ({
-          ...prev,
-          [eventName]: {
-            ...(prev[eventName] || {}),
-            [update.mapName]: update.data as import('./types').HallDefinition[],
-          },
-        }));
+      if (isEventSharingLocked(eventName)) {
+        alert('このイベントは既に共有中です。');
+        return;
       }
-    });
-  }, [sharing]);
 
-  // 共有ダイアログ状態
-  const [sharingDialog, setSharingDialog] = useState<
-    | { type: 'create'; eventName: string }
-    | { type: 'join'; initialCode?: string }
-    | { type: 'members' }
-    | { type: 'invite' }
-    | { type: 'bulkTransfer' }
-    | { type: 'helpRequest' }
-    | { type: 'autoAssign' }
-    | null
-  >(null);
+      setSharingBusy(true);
+      setSharingStatusMessage('共有ルームを作成しています。');
+      setSharingErrorMessage(null);
+      try {
+        const roomId = createClientRoomId();
+        const memberKey = generateMemberKey();
+        const payload = buildRoomEventPayloadForEvent({
+          ...buildSharingAppState(),
+          eventName,
+        });
+        const created = await createSharingRoom({
+          roomId,
+          displayName: displayName.trim() || '主催',
+          rawRoomEventDataJson: payload.rawJson,
+          itemCount: payload.itemCount,
+          memberKey,
+        });
+        if (!created.ok) {
+          setSharingErrorMessage(`共有ルームの作成に失敗しました: ${created.error.code}`);
+          return;
+        }
 
-  // URLディープリンク検出 (/join/{roomCode})
-  useEffect(() => {
-    const match = window.location.pathname.match(/^\/join\/([A-Z0-9]{5})$/i);
-    if (match) {
-      const code = match[1].toUpperCase();
-      window.history.replaceState({}, '', '/');
-      setSharingDialog({ type: 'join', initialCode: code });
+        await applySnapshotAndAck(created.data.roomId);
+        setSharingStatusMessage(`共有ルームを作成しました。ルームコード: ${created.data.roomCode}`);
+      } catch (error) {
+        console.error('Sharing create error:', error);
+        setSharingErrorMessage('共有ルームの作成に失敗しました。設定または通信状態を確認してください。');
+      } finally {
+        setSharingBusy(false);
+      }
+    },
+    [applySnapshotAndAck, buildSharingAppState, isEventSharingLocked],
+  );
+
+  const handleJoinSharingRoom = useCallback(
+    async (roomCode: string, displayName: string) => {
+      setSharingBusy(true);
+      setSharingStatusMessage('共有ルームへ参加しています。');
+      setSharingErrorMessage(null);
+      try {
+        const prepared = await prepareJoinRoom(roomCode.trim());
+        if (!prepared.ok) {
+          setSharingErrorMessage(`共有ルームの参加準備に失敗しました: ${prepared.error.code}`);
+          return;
+        }
+
+        const memberKey = generateMemberKey();
+        const joined = await joinPreparedRoom(
+          prepared.data,
+          displayName.trim() || '参加者',
+          memberKey,
+        );
+        if (!joined.ok) {
+          setSharingErrorMessage(`共有ルームへの参加に失敗しました: ${joined.error.code}`);
+          return;
+        }
+
+        await applySnapshotAndAck(joined.data.roomId);
+        setSharingStatusMessage('共有ルームへ参加しました。');
+      } catch (error) {
+        console.error('Sharing join error:', error);
+        setSharingErrorMessage('共有ルームへの参加に失敗しました。設定または通信状態を確認してください。');
+      } finally {
+        setSharingBusy(false);
+      }
+    },
+    [applySnapshotAndAck],
+  );
+
+  const handleRestoreSharingRoom = useCallback(
+    async (roomId: string) => {
+      const normalizedRoomId = roomId.trim();
+      const memberKey = loadMemberKey(normalizedRoomId);
+      if (!memberKey) {
+        setSharingErrorMessage('この端末に復元キーがありません。以前参加した同じ端末で復元してください。');
+        return;
+      }
+
+      setSharingBusy(true);
+      setSharingStatusMessage('共有ルームを復元しています。');
+      setSharingErrorMessage(null);
+      try {
+        const prepared = await prepareRestoreRoom(normalizedRoomId);
+        if (!prepared.ok) {
+          setSharingErrorMessage(`共有ルームの復元準備に失敗しました: ${prepared.error.code}`);
+          return;
+        }
+
+        const restored = await restorePreparedRoom(prepared.data, memberKey);
+        if (!restored.ok) {
+          setSharingErrorMessage(`共有ルームの復元に失敗しました: ${restored.error.code}`);
+          return;
+        }
+
+        await applySnapshotAndAck(restored.data.roomId);
+        setSharingStatusMessage('共有ルームを復元しました。');
+      } catch (error) {
+        console.error('Sharing restore error:', error);
+        setSharingErrorMessage('共有ルームの復元に失敗しました。設定または通信状態を確認してください。');
+      } finally {
+        setSharingBusy(false);
+      }
+    },
+    [applySnapshotAndAck],
+  );
+
+  const applySharingMutationItems = useCallback(
+    (eventName: string, mutationItems: SnapshotRoomItem[]) => {
+      if (mutationItems.length === 0) return;
+      setEventLists((prev) => ({
+        ...prev,
+        [eventName]: (prev[eventName] ?? []).map((item) => {
+          const mutationItem = mutationItems.find((candidate) => candidate.localItemId === item.id);
+          return mutationItem ? mergeSnapshotRoomItemIntoShoppingItem(item, mutationItem) : item;
+        }),
+      }));
+    },
+    [],
+  );
+
+  const saveSharingMutationVersion = useCallback(
+    async (session: SharingSessionMetadata, itemsVersion: number) => {
+      const latestSession = sharingSessionsRef.current[session.sessionId] ?? session;
+      await saveSharingSessionState({
+        ...latestSession,
+        itemsVersion: Math.max(latestSession.itemsVersion, itemsVersion),
+        lastAckAt: new Date().toISOString(),
+      });
+    },
+    [saveSharingSessionState],
+  );
+
+  const handleAssignSharingItem = useCallback(
+    async (localItemId: string, assignedToMemberId: string) => {
+      const session = activeSharingSession;
+      if (!session || sharingBusy) return;
+
+      const item = eventListsRef.current[session.eventName]?.find(
+        (candidate) => candidate.id === localItemId,
+      );
+      if (!item) {
+        setSharingErrorMessage('担当変更対象のアイテムが見つかりません。');
+        return;
+      }
+      if (!canAssignSharingItem(item)) {
+        setSharingErrorMessage('通常メンバーは自分が担当しているアイテムだけ譲渡できます。');
+        return;
+      }
+
+      setSharingBusy(true);
+      setSharingErrorMessage(null);
+      try {
+        const result = await assignRoomItem({
+          roomId: session.roomId,
+          localItemId,
+          assignedToMemberId,
+        });
+        if (!result.ok) {
+          setSharingErrorMessage(`担当変更に失敗しました: ${result.error.code}`);
+          return;
+        }
+
+        applySharingMutationItems(session.eventName, [result.data.item]);
+        await saveSharingMutationVersion(session, result.data.itemsVersion);
+        setSharingStatusMessage('担当者を更新しました。');
+      } catch (error) {
+        console.error('Sharing assignment error:', error);
+        setSharingErrorMessage('担当変更に失敗しました。通信状態を確認してください。');
+      } finally {
+        setSharingBusy(false);
+      }
+    },
+    [
+      activeSharingSession,
+      applySharingMutationItems,
+      canAssignSharingItem,
+      saveSharingMutationVersion,
+      sharingBusy,
+    ],
+  );
+
+  const handleBulkAssignSelectedSharingItems = useCallback(
+    async (assignedToMemberId: string) => {
+      const session = activeSharingSession;
+      if (!session || sharingBusy) return;
+
+      const eventItems = eventListsRef.current[session.eventName] ?? [];
+      const selectedItems = eventItems.filter((item) => selectedItemIds.has(item.id));
+      if (selectedItems.length === 0) {
+        setSharingErrorMessage('一括譲渡するアイテムを選択してください。');
+        return;
+      }
+
+      if (selectedItems.some((item) => !canAssignSharingItem(item))) {
+        setSharingErrorMessage('通常メンバーは自分が担当しているアイテムだけ一括譲渡できます。');
+        return;
+      }
+
+      setSharingBusy(true);
+      setSharingErrorMessage(null);
+      try {
+        const result = await bulkAssignRoomItems({
+          roomId: session.roomId,
+          localItemIds: selectedItems.map((item) => item.id),
+          assignedToMemberId,
+        });
+        if (!result.ok) {
+          setSharingErrorMessage(`一括譲渡に失敗しました: ${result.error.code}`);
+          return;
+        }
+
+        applySharingMutationItems(
+          session.eventName,
+          result.data.changedItems.map((change) => change.item),
+        );
+        await saveSharingMutationVersion(session, result.data.itemsVersion);
+        setSharingStatusMessage(`${selectedItems.length}件の担当者を更新しました。`);
+        setSelectedItemIds(new Set());
+      } catch (error) {
+        console.error('Sharing bulk assignment error:', error);
+        setSharingErrorMessage('一括譲渡に失敗しました。通信状態を確認してください。');
+      } finally {
+        setSharingBusy(false);
+      }
+    },
+    [
+      activeSharingSession,
+      applySharingMutationItems,
+      canAssignSharingItem,
+      saveSharingMutationVersion,
+      selectedItemIds,
+      setSelectedItemIds,
+      sharingBusy,
+    ],
+  );
+
+  const refreshSharingNotifications = useCallback(async () => {
+    const session = activeSharingSession;
+    if (!session) {
+      setSharingNotificationList([]);
+      return;
     }
-  }, []);
 
-  // 集中モードからの共有ダイアログトリガー
-  // 投げつけダイアログstate（集中モード用）
-  const [focusTransferItem, setFocusTransferItem] = useState<ShoppingItem | null>(null);
+    const result = await getNotificationList(session.roomId, 50, false);
+    if (!result.ok) {
+      setSharingErrorMessage(`通知一覧の取得に失敗しました: ${result.error.code}`);
+      return;
+    }
+    setSharingNotificationList(result.data.notifications);
+  }, [activeSharingSession]);
+
+  const handleMarkSharingNotificationRead = useCallback(
+    async (notificationId: string) => {
+      const session = activeSharingSession;
+      if (!session) return;
+      const result = await markNotificationRead(session.roomId, notificationId, true);
+      if (!result.ok) {
+        setSharingErrorMessage(`通知の既読化に失敗しました: ${result.error.code}`);
+        return;
+      }
+      await refreshSharingNotifications();
+    },
+    [activeSharingSession, refreshSharingNotifications],
+  );
+
+  const handleHideSharingNotification = useCallback(
+    async (notificationId: string) => {
+      const session = activeSharingSession;
+      if (!session) return;
+      const result = await hideNotification(session.roomId, notificationId, true);
+      if (!result.ok) {
+        setSharingErrorMessage(`通知の非表示に失敗しました: ${result.error.code}`);
+        return;
+      }
+      await refreshSharingNotifications();
+    },
+    [activeSharingSession, refreshSharingNotifications],
+  );
+
+  const buildLocalizedSharingEventLists = useCallback(
+    (eventName: string): Record<string, ShoppingItem[]> => ({
+      ...eventListsRef.current,
+      [eventName]: (eventListsRef.current[eventName] ?? []).map((item) => ({
+        ...item,
+        assignedTo: undefined,
+        securedBy: undefined,
+      })),
+    }),
+    [],
+  );
+
+  const commitLocalizedSharingSession = useCallback(async (session: SharingSessionMetadata) => {
+    const localizedEventLists = buildLocalizedSharingEventLists(session.eventName);
+    await db.commitSharingLocalize({
+      eventLists: localizedEventLists as Record<string, unknown[]>,
+      session,
+    });
+    eventListsRef.current = localizedEventLists;
+    setEventLists(localizedEventLists);
+    sharingSessionsRef.current = {
+      ...sharingSessionsRef.current,
+      [session.sessionId]: session,
+    };
+    setSharingSessions((prev) => ({
+      ...prev,
+      [session.sessionId]: session,
+    }));
+  }, [buildLocalizedSharingEventLists]);
+
+  const recoverSharingSessionAfterLeaveFailure = useCallback(
+    async (session: SharingSessionMetadata) => {
+      await saveSharingSessionState({
+        ...session,
+        status: 'active',
+      });
+    },
+    [saveSharingSessionState],
+  );
+
+  const localizeCommittedSharingSession = useCallback(async (session: SharingSessionMetadata) => {
+    await commitLocalizedSharingSession(session);
+    forgetMemberKey(session.roomId);
+  }, [commitLocalizedSharingSession]);
+
+  const refreshSharingMemberProfiles = useCallback(
+    async (session: SharingSessionMetadata): Promise<SharingSessionMetadata> => {
+      const result = await getRoomMembersForDisplay(session.roomId);
+      if (!result.ok) return session;
+
+      const latestSession = sharingSessionsRef.current[session.sessionId] ?? session;
+      const updatedSession: SharingSessionMetadata = {
+        ...latestSession,
+        memberProfileSnapshot: result.data.members,
+      };
+      await saveSharingSessionState(updatedSession);
+      return updatedSession;
+    },
+    [saveSharingSessionState],
+  );
+
+  const handlePauseSharingSession = useCallback(
+    async (session: SharingSessionMetadata) => {
+      if (sharingBusy) return;
+
+      setSharingBusy(true);
+      setSharingStatusMessage('共有から一時離脱しています。');
+      setSharingErrorMessage(null);
+      try {
+        const result = await pauseRoomSession(session.roomId);
+        if (!result.ok) {
+          setSharingErrorMessage(`一時離脱に失敗しました: ${result.error.code}`);
+          return;
+        }
+
+        const latestSession = sharingSessionsRef.current[session.sessionId] ?? session;
+        await saveSharingSessionState({
+          ...latestSession,
+          status: 'paused',
+        });
+        setSharingStatusMessage('一時離脱しました。再開するまで共有同期を停止します。');
+      } catch (error) {
+        console.error('Sharing pause error:', error);
+        setSharingErrorMessage('一時離脱に失敗しました。通信状態を確認してください。');
+      } finally {
+        setSharingBusy(false);
+      }
+    },
+    [saveSharingSessionState, sharingBusy],
+  );
+
+  const handleResumeSharingSession = useCallback(
+    async (session: SharingSessionMetadata) => {
+      if (sharingBusy) return;
+
+      setSharingBusy(true);
+      setSharingStatusMessage('共有を再開しています。');
+      setSharingErrorMessage(null);
+      try {
+        const result = await heartbeatRoomSession(session.roomId);
+        if (!result.ok) {
+          if (result.error.code === 'ROOM_EXPIRED') {
+            await expireSharingSession(session);
+          } else {
+            setSharingErrorMessage(`共有の再開に失敗しました: ${result.error.code}`);
+          }
+          return;
+        }
+
+        const latestSession = sharingSessionsRef.current[session.sessionId] ?? session;
+        await saveSharingSessionState({
+          ...latestSession,
+          status: 'active',
+          lastAckAt: new Date().toISOString(),
+        });
+        setSharingStatusMessage('共有を再開しました。');
+        void synchronizeSharingSession(session.sessionId, 'manual');
+      } catch (error) {
+        console.error('Sharing resume error:', error);
+        setSharingErrorMessage('共有の再開に失敗しました。通信状態を確認してください。');
+      } finally {
+        setSharingBusy(false);
+      }
+    },
+    [expireSharingSession, saveSharingSessionState, sharingBusy, synchronizeSharingSession],
+  );
+
+  const handleLocalizeSharingSession = useCallback(
+    async (session: SharingSessionMetadata) => {
+      if (sharingBusy) return;
+
+      setSharingBusy(true);
+      setSharingErrorMessage(null);
+      try {
+        const sessionWithProfiles = await refreshSharingMemberProfiles(session);
+        await localizeCommittedSharingSession({
+          ...sessionWithProfiles,
+          status: 'localizing',
+        });
+        setSharingAssignedOnly(false);
+        setSharingStatusMessage(`${sessionWithProfiles.eventName} をローカル編集に切り替えました。`);
+      } catch (error) {
+        console.error('Sharing localize error:', error);
+        setSharingErrorMessage('ローカル化に失敗しました。もう一度お試しください。');
+      } finally {
+        setSharingBusy(false);
+      }
+    },
+    [localizeCommittedSharingSession, refreshSharingMemberProfiles, sharingBusy],
+  );
+
+  const handleLeaveSharingSession = useCallback(
+    async (session: SharingSessionMetadata) => {
+      if (sharingBusy) return;
+      if (session.role === 'host') {
+        setSharingErrorMessage('ホストは初回実装では退出できません。');
+        return;
+      }
+      if (!window.confirm('この共有から退出します。担当/確保者の履歴は残りますが、この端末の復元キーは削除されます。')) {
+        return;
+      }
+
+      setSharingBusy(true);
+      setSharingStatusMessage('共有から退出しています。');
+      setSharingErrorMessage(null);
+      let sessionWithProfiles: SharingSessionMetadata | null = null;
+      let serverLeaveSucceeded = false;
+      try {
+        sessionWithProfiles = await refreshSharingMemberProfiles(session);
+        const leavingSession: SharingSessionMetadata = {
+          ...sessionWithProfiles,
+          status: 'leaving',
+        };
+        await saveSharingSessionState(leavingSession);
+
+        const result = await leaveRoom(session.roomId);
+        if (!result.ok) {
+          await recoverSharingSessionAfterLeaveFailure(sessionWithProfiles);
+          setSharingErrorMessage(`退出に失敗しました: ${result.error.code}`);
+          return;
+        }
+        serverLeaveSucceeded = true;
+
+        await localizeCommittedSharingSession({
+          ...sessionWithProfiles,
+          status: 'localizing',
+          lastAckAt: new Date().toISOString(),
+        });
+        setSharingAssignedOnly(false);
+        setSharingStatusMessage(`${sessionWithProfiles.eventName} の共有から退出しました。`);
+      } catch (error) {
+        console.error('Sharing leave error:', error);
+        if (!serverLeaveSucceeded && sessionWithProfiles) {
+          try {
+            await recoverSharingSessionAfterLeaveFailure(sessionWithProfiles);
+          } catch (recoveryError) {
+            console.error('Sharing leave recovery error:', recoveryError);
+          }
+        }
+        setSharingErrorMessage('退出に失敗しました。通信状態を確認してください。');
+      } finally {
+        setSharingBusy(false);
+      }
+    },
+    [
+      localizeCommittedSharingSession,
+      refreshSharingMemberProfiles,
+      recoverSharingSessionAfterLeaveFailure,
+      setSharingAssignedOnly,
+      sharingBusy,
+    ],
+  );
 
   useEffect(() => {
-    const handleBulkTransfer = () => setSharingDialog({ type: 'bulkTransfer' });
-    const handleHelpRequest = () => setSharingDialog({ type: 'helpRequest' });
-    const handleTransferRequest = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (detail?.item) {
-        setFocusTransferItem(detail.item as ShoppingItem);
+    if (!isInitialized) return;
+    const intervalId = window.setInterval(() => {
+      const nowMs = Date.now();
+      const locallyExpiredSessions = Object.values(sharingSessions).filter(
+        (session) =>
+          (session.status === 'active' || session.status === 'paused') &&
+          Date.parse(session.expiresAt) <= nowMs,
+      );
+      locallyExpiredSessions.forEach((session) => {
+        const expiredSession: SharingSessionMetadata = {
+          ...session,
+          status: 'expired',
+        };
+        void db.saveSharingSession(expiredSession).then(() => {
+          setSharingSessions((prev) => ({
+            ...prev,
+            [session.sessionId]: expiredSession,
+          }));
+          setSharingStatusMessage(`${session.eventName} の共有期限が切れました。`);
+        });
+      });
+
+      const activeSessions = Object.values(sharingSessions).filter((session) =>
+        isSharingSessionActive(session, nowMs),
+      );
+      activeSessions.forEach((session) => {
+        void heartbeatRoomSession(session.roomId).then(async (result) => {
+          if (result.ok) return;
+          if (result.error.code !== 'ROOM_EXPIRED') return;
+
+          const expiredSession: SharingSessionMetadata = {
+            ...session,
+            status: 'expired',
+          };
+          await db.saveSharingSession(expiredSession);
+          setSharingSessions((prev) => ({
+            ...prev,
+            [session.sessionId]: expiredSession,
+          }));
+          setSharingStatusMessage(`${session.eventName} の共有期限が切れました。`);
+        });
+      });
+    }, 60000);
+
+    return () => window.clearInterval(intervalId);
+  }, [isInitialized, sharingSessions]);
+
+  useEffect(() => {
+    if (!isInitialized || !activeSharingSession || !sharingAvailability.enabled) return;
+
+    const sessionId = activeSharingSession.sessionId;
+    let liveReady = false;
+    let liveQueued = false;
+    let disposed = false;
+
+    const catchUpThenStartLive = async () => {
+      await synchronizeSharingSession(sessionId, 'initial');
+      if (disposed) return;
+      liveReady = true;
+      if (liveQueued) {
+        liveQueued = false;
+        void synchronizeSharingSession(sessionId, 'queued');
       }
     };
-    window.addEventListener('sharing:bulkTransfer', handleBulkTransfer);
-    window.addEventListener('sharing:helpRequest', handleHelpRequest);
-    window.addEventListener('sharing:transferRequest', handleTransferRequest);
+
+    const subscription = subscribeToRoomSync(
+      activeSharingSession.roomId,
+      (event) => {
+        if (event.table === 'room_members') {
+          if (event.eventType === 'INSERT') {
+            void applySnapshotAndAck(activeSharingSession.roomId);
+          } else if (event.eventType === 'UPDATE') {
+            void refreshSharingMemberProfiles(activeSharingSession);
+          }
+          return;
+        }
+        if (!liveReady) {
+          liveQueued = true;
+          return;
+        }
+        void synchronizeSharingSession(sessionId, 'realtime');
+      },
+      (status) => {
+        if (status === 'SUBSCRIBED') {
+          void catchUpThenStartLive();
+          return;
+        }
+        if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          setSharingErrorMessage('共有のライブ同期が一時的に切断されました。差分同期で復旧を試みます。');
+          void synchronizeSharingSession(sessionId, 'manual');
+        }
+      },
+    );
+
     return () => {
-      window.removeEventListener('sharing:bulkTransfer', handleBulkTransfer);
-      window.removeEventListener('sharing:helpRequest', handleHelpRequest);
-      window.removeEventListener('sharing:transferRequest', handleTransferRequest);
+      disposed = true;
+      subscription.unsubscribe();
     };
-  }, []);
+  }, [
+    activeSharingSession?.roomId,
+    activeSharingSession?.sessionId,
+    applySnapshotAndAck,
+    isInitialized,
+    refreshSharingMemberProfiles,
+    sharingAvailability.enabled,
+    synchronizeSharingSession,
+  ]);
+
+  const hallDefinitionsMigratedRef = useRef(false);
+  useEffect(() => {
+    if (!isInitialized || hallDefinitionsMigratedRef.current) return;
+    hallDefinitionsMigratedRef.current = true;
+
+    setHallDefinitions((prev) => {
+      let changed = false;
+      const next: HallDefinitionsStore = {};
+      for (const eventName of Object.keys(prev)) {
+        const byTab = { ...prev[eventName] };
+
+        const maplessById = new Map<string, HallDefinition>();
+        for (const h of byTab[MAPLESS_HALL_KEY] ?? []) {
+          maplessById.set(h.id, h);
+        }
+        for (const tabName of Object.keys(byTab)) {
+          if (tabName === MAPLESS_HALL_KEY || tabName.startsWith(MAPLESS_HALL_KEY + ':')) continue;
+          const original = byTab[tabName] || [];
+          const keep: HallDefinition[] = [];
+          for (const h of original) {
+            const isMapless =
+              (!h.vertices || h.vertices.length < 4) && !!h.blockNames?.length;
+            if (isMapless) {
+              if (!maplessById.has(h.id)) maplessById.set(h.id, h);
+              changed = true;
+            } else {
+              keep.push(h);
+            }
+          }
+          if (keep.length !== original.length) {
+            byTab[tabName] = keep;
+          }
+        }
+
+        const collectedMapless = Array.from(maplessById.values());
+        if (collectedMapless.length > 0) {
+          const eventItems = eventLists[eventName] || [];
+          const dates = extractEventDates(eventItems);
+          if (dates.length > 0) {
+            for (const date of dates) {
+              const dateKey = getMaplessKey(date);
+              if (!byTab[dateKey] || byTab[dateKey].length === 0) {
+                byTab[dateKey] = collectedMapless.map((h) => ({ ...h }));
+                changed = true;
+              }
+            }
+          }
+        }
+        if (byTab[MAPLESS_HALL_KEY] != null) {
+          delete byTab[MAPLESS_HALL_KEY];
+          changed = true;
+        }
+
+        next[eventName] = byTab;
+      }
+      return changed ? next : prev;
+    });
+
+    setHallRouteSettings((prev) => {
+      let changed = false;
+      const next: HallRouteSettingsStore = {};
+      for (const eventName of Object.keys(prev)) {
+        const byTab = { ...prev[eventName] };
+        const oldSettings = byTab[MAPLESS_HALL_KEY];
+        if (oldSettings != null) {
+          const eventItems = eventLists[eventName] || [];
+          const dates = extractEventDates(eventItems);
+          for (const date of dates) {
+            const dateKey = getMaplessKey(date);
+            if (!byTab[dateKey]) {
+              byTab[dateKey] = {
+                hallOrder: [...oldSettings.hallOrder],
+                hallVisitLists: oldSettings.hallVisitLists.map((vl) => ({
+                  hallId: vl.hallId,
+                  itemIds: [...vl.itemIds],
+                })),
+              };
+              changed = true;
+            }
+          }
+          delete byTab[MAPLESS_HALL_KEY];
+          changed = true;
+        }
+        next[eventName] = byTab;
+      }
+      return changed ? next : prev;
+    });
+  }, [isInitialized, eventLists]);
 
   const items = useMemo(
     () => (activeEventName ? eventLists[activeEventName] || [] : []),
     [activeEventName, eventLists],
   );
+
 
   const eventDates = useMemo(() => extractEventDates(items), [items]);
   const activeEventDate = useMemo(
@@ -562,23 +1797,26 @@ const App: React.FC = () => {
   const getItemHallId = useCallback(
     (item: ShoppingItem, eventDate: string): string | null => {
       const halls = getHallsForDate(eventDate);
+      if (!halls.length) return null;
+
+      const manual = resolveManualHallId(item.manualHallId, halls);
+      if (manual) return manual;
+
       const mapDataForDate = getMapDataForDate(eventDate);
-      if (!halls.length || !mapDataForDate) return null;
-
-
-      const block = mapDataForDate.blocks.find((b) => b.name === item.block);
-      if (!block) return null;
-
-      const centerRow = (block.startRow + block.endRow) / 2;
-      const centerCol = (block.startCol + block.endCol) / 2;
-
-
-      for (const hall of halls) {
-        if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
-          return hall.id;
+      if (mapDataForDate) {
+        const block = mapDataForDate.blocks.find((b) => b.name === item.block);
+        if (block) {
+          const centerRow = (block.startRow + block.endRow) / 2;
+          const centerCol = (block.startCol + block.endCol) / 2;
+          for (const hall of halls) {
+            if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
+              return hall.id;
+            }
+          }
         }
       }
-      return null;
+
+      return resolveHallByBlockName(item.block, halls);
     },
     [getHallsForDate, getMapDataForDate],
   );
@@ -588,16 +1826,40 @@ const App: React.FC = () => {
     (itemId1: string, itemId2: string, eventDate: string): boolean => {
       const item1 = items.find((i) => i.id === itemId1);
       const item2 = items.find((i) => i.id === itemId2);
-      if (!item1 || !item2) return true; // 判定材料が不足する場合は並び替えを妨げない。
+      if (!item1 || !item2) return true;
       const halls = getHallsForDate(eventDate);
-      if (!halls.length) return true; // 判定材料が不足する場合は並び替えを妨げない。
+      if (!halls.length) return true;
       const hallId1 = getItemHallId(item1, eventDate);
       const hallId2 = getItemHallId(item2, eventDate);
 
+      if (hallId1 === null || hallId2 === null) return true;
+
+      const priority1 = item1.priorityLevel || 'none';
+      const priority2 = item2.priorityLevel || 'none';
+      if (hallId1 !== hallId2 || priority1 !== priority2) return false;
+
+      const spaceKey1 = getSpaceKey(item1.block, item1.number);
+      const spaceKey2 = getSpaceKey(item2.block, item2.number);
+      return spaceKey1 === spaceKey2;
+    },
+    [items, getHallsForDate, getItemHallId],
+  );
+
+  const areItemsInSameHallGroup = useCallback(
+    (itemId1: string, itemId2: string, eventDate: string): boolean => {
+      const item1 = items.find((i) => i.id === itemId1);
+      const item2 = items.find((i) => i.id === itemId2);
+      if (!item1 || !item2) return true;
+      const halls = getHallsForDate(eventDate);
+      if (!halls.length) return true;
+      const hallId1 = getItemHallId(item1, eventDate);
+      const hallId2 = getItemHallId(item2, eventDate);
 
       if (hallId1 === null || hallId2 === null) return true;
 
-      return hallId1 === hallId2;
+      const priority1 = item1.priorityLevel || 'none';
+      const priority2 = item2.priorityLevel || 'none';
+      return hallId1 === hallId2 && priority1 === priority2;
     },
     [items, getHallsForDate, getItemHallId],
   );
@@ -643,6 +1905,31 @@ const App: React.FC = () => {
     },
     [currentFocusSessionKey],
   );
+
+  const validFocusSessionKeys = useMemo(() => {
+    const keys = new Set<string>();
+    Object.entries(eventLists).forEach(([eventName, eventItems]) => {
+      extractEventDates(eventItems).forEach((eventDate) => {
+        keys.add(buildFocusSessionKey(eventName, eventDate));
+      });
+    });
+    return keys;
+  }, [eventLists]);
+
+  useEffect(() => {
+    setFocusModeSessions((prev) => {
+      let changed = false;
+      const next: Record<string, FocusModeSessionState> = {};
+      Object.entries(prev).forEach(([key, value]) => {
+        if (validFocusSessionKeys.has(key)) {
+          next[key] = value;
+        } else {
+          changed = true;
+        }
+      });
+      return changed ? next : prev;
+    });
+  }, [validFocusSessionKeys]);
 
   const currentFocusEventDate = useMemo(() => activeEventDate, [activeEventDate]);
 
@@ -703,20 +1990,21 @@ const App: React.FC = () => {
   const handleMapTabRotationAngleChange = useCallback(
     (angle: number) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
       updateMapRotationAngle(activeEventName, currentMapTabName, 'mapTab', angle);
     },
-    [activeEventName, isMapTab, currentMapTabName, updateMapRotationAngle],
+    [activeEventName, isMapTab, currentMapTabName, updateMapRotationAngle, guardSharingStructureMutation],
   );
 
   const handleFocusMapRotationAngleChange = useCallback(
     (angle: number) => {
       if (!activeEventName || !currentFocusMapName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
       updateMapRotationAngle(activeEventName, currentFocusMapName, 'focusMode', angle);
     },
-    [activeEventName, currentFocusMapName, updateMapRotationAngle],
+    [activeEventName, currentFocusMapName, updateMapRotationAngle, guardSharingStructureMutation],
   );
 
-  // マップビューポート状態の取得・更新
   const currentMapTabViewport = useMemo((): MapViewportState | undefined => {
     if (!activeEventName || !isMapTab || !currentMapTabName) return undefined;
     return mapViewportSettings[activeEventName]?.[currentMapTabName];
@@ -725,6 +2013,7 @@ const App: React.FC = () => {
   const handleMapViewportChange = useCallback(
     (viewport: MapViewportState) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
       setMapViewportSettings((prev: MapViewportSettingsStore) => {
         const eventSettings = prev[activeEventName] || {};
         const current = eventSettings[currentMapTabName];
@@ -745,7 +2034,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, isMapTab, currentMapTabName],
+    [activeEventName, isMapTab, currentMapTabName, guardSharingStructureMutation],
   );
 
   const { showHeaderBar, showTabBar, rawHideSomething } = useMemo(() => {
@@ -793,7 +2082,6 @@ const App: React.FC = () => {
           [field]: value,
         },
       }));
-      // 設定変更を即時反映するため、強制表示モードを解除する。
       setUiVisibilityOverride(false);
     },
     [setUiVisibilitySettings],
@@ -805,6 +2093,7 @@ const App: React.FC = () => {
       newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[],
       metadata?: BulkAddMetadata,
     ) => {
+      if (eventLists[eventName] && guardSharingStructureMutation(eventName)) return;
       const newItems = buildBulkAddItems(newItemsData, metadata);
       const isNewEvent = !eventLists[eventName];
 
@@ -817,7 +2106,7 @@ const App: React.FC = () => {
           ...prevLists,
           [eventName]: sortedItems,
         }));
-        setExecuteModeItems((prev) => ({
+        updateExecuteModeItems((prev) => ({
           ...prev,
           [eventName]: executeModeItems,
         }));
@@ -848,7 +2137,7 @@ const App: React.FC = () => {
 
         if (!hasBulkAddLayoutInfo(metadata)) {
           const initialExecuteItems = buildInitialExecuteItemsForBulkAdd(newItems);
-          setExecuteModeItems((prev) => ({
+          updateExecuteModeItems((prev) => ({
             ...prev,
             [eventName]: initialExecuteItems,
           }));
@@ -870,152 +2159,133 @@ const App: React.FC = () => {
         setActiveTab(uiPlan.nextActiveTab);
       }
     },
-    [eventLists],
+    [eventLists, guardSharingStructureMutation],
   );
 
   const handleUpdateItem = useCallback(
-    (updatedItem: ShoppingItem) => {
+    async (updatedItem: ShoppingItem) => {
       if (!activeEventName) return;
+      const sharingSession = activeSharingSession;
 
-      const currentItems = eventLists[activeEventName] || [];
-      const currentItem = currentItems.find((item) => item.id === updatedItem.id);
+      if (sharingSession) {
+        const currentItems = eventLists[activeEventName] || [];
+        const currentItem = currentItems.find((item) => item.id === updatedItem.id);
+        if (!currentItem) return;
+
+        if (hasUnsupportedSharingItemChange(currentItem, updatedItem)) {
+          alert(
+            '共有中は価格、数量、実購入数、備考、URL、購入状態だけを同期できます。サークル名や配置などの構造項目は共有終了後に編集してください。',
+          );
+          return;
+        }
+
+        const fields = buildSharingMutableItemFields(currentItem, updatedItem);
+        const purchaseChanged = currentItem.purchaseStatus !== updatedItem.purchaseStatus;
+        const hasFieldChanges = Object.keys(fields).length > 0;
+        if (!hasFieldChanges && !purchaseChanged) return;
+
+        setSharingBusy(true);
+        setSharingStatusMessage('共有アイテムを更新しています。');
+        setSharingErrorMessage(null);
+        try {
+          const result = await updateRoomItemWithPurchase({
+            roomId: sharingSession.roomId,
+            localItemId: updatedItem.id,
+            fields,
+            status: purchaseChanged ? updatedItem.purchaseStatus : null,
+            actualPurchaseQuantity:
+              purchaseChanged && updatedItem.purchaseStatus === 'LimitedPurchase'
+                ? updatedItem.limitedPurchasedQuantity ?? null
+                : null,
+          });
+
+          if (!result.ok) {
+            if (result.error.code === 'PERMISSION_DENIED') {
+              setSharingErrorMessage(
+                '他の参加者が先に購入確保しました。価格変更も含めて反映せず、最新状態を取得しました。',
+              );
+              await applySnapshotAndAck(sharingSession.roomId);
+              return;
+            }
+            setSharingErrorMessage(`共有アイテムの更新に失敗しました: ${result.error.code}`);
+            return;
+          }
+
+          setEventLists((prev) => {
+            const items = prev[activeEventName] || [];
+            return {
+              ...prev,
+              [activeEventName]: items.map((item) =>
+                item.id === updatedItem.id
+                  ? mergeSnapshotRoomItemIntoShoppingItem(item, result.data.item)
+                  : item,
+              ),
+            };
+          });
+
+          if (
+            result.data.changedFields.includes('purchaseStatus') ||
+            result.data.changedFields.includes('actualPurchaseQuantity') ||
+            result.data.changedFields.includes('quantity')
+          ) {
+            setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
+          }
+
+          const updatedSession: SharingSessionMetadata = {
+            ...sharingSession,
+            itemsVersion: result.data.itemsVersion,
+          };
+          await db.saveSharingSession(updatedSession);
+          setSharingSessions((prev) => ({
+            ...prev,
+            [updatedSession.sessionId]: updatedSession,
+          }));
+          setSharingStatusMessage('共有アイテムを更新しました。');
+        } catch (error) {
+          console.error('Sharing item update error:', error);
+          setSharingErrorMessage('共有アイテムの更新に失敗しました。通信状態を確認してください。');
+        } finally {
+          setSharingBusy(false);
+        }
+        return;
+      }
+
+      if (guardSharingStructureMutation(activeEventName)) return;
+
       const currentEventDate = activeEventDate;
       const currentMode = dayModes[activeEventName]?.[currentEventDate];
 
-      const result = computeUpdateItem(
-        currentItems,
-        updatedItem,
-        currentMode as ViewMode | undefined,
-        currentItem?.protectionLevel,
-        currentItem?.source,
-      );
-
-      if (result.purchaseStatusChanged) {
-        setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
-        lastChangedItemIdRef.current = updatedItem.id;
-        // 自動進行用: ユーザー操作フラグ設定（実行モード時）
-        if (currentMode === 'execute') {
-          const spaceKey = getSpaceKey(updatedItem.block, updatedItem.number);
-          setUserInteractedSpaces((prev) => new Set(prev).add(spaceKey));
-        }
-      }
-
-      // 価格が入力されたらpriceAlertから除去
-      if (currentItem && updatedItem.price != null && updatedItem.price > 0 && priceAlertItemIds.has(updatedItem.id)) {
-        setPriceAlertItemIds((prev) => {
-          const next = new Set(prev);
-          next.delete(updatedItem.id);
-          return next;
-        });
-      }
-
-      setEventLists((prev) => ({
-        ...prev,
-        [activeEventName]: result.items,
-      }));
-
-      // 共有ルーム参加中かつステータス変更時はSupabaseに同期
-      if (sharing?.activeRoom && result.purchaseStatusChanged && currentItem) {
-        sharing.syncPurchaseStatus(
-          updatedItem.id,
-          updatedItem.purchaseStatus,
-          currentItem,
-          (rollbackItem) => {
-            setEventLists((prev) => ({
-              ...prev,
-              [activeEventName]: (prev[activeEventName] || []).map((item) =>
-                item.id === rollbackItem.id ? rollbackItem : item,
-              ),
-            }));
-          },
-        ).then((claimResult) => {
-          if (!claimResult.success && claimResult.claimedBy) {
-            alert(`${claimResult.claimedBy}さんが既に確保しました`);
-          }
-        });
-      }
-    },
-    [activeEventName, activeTab, eventDates, dayModes, eventLists, sharing, priceAlertItemIds],
-  );
-
-  const handleBulkSetPurchaseStatus = useCallback(
-    (itemIds: string[], status: PurchaseStatus) => {
-      if (!activeEventName) return;
-      const targetIdSet = new Set(itemIds);
-
-      // 価格チェック（Purchased時）
-      if (status === 'Purchased') {
-        const currentItems = eventLists[activeEventName] || [];
-        const noPriceItems = itemIds
-          .map((id) => currentItems.find((i) => i.id === id))
-          .filter((item) => item && (item.price == null || item.price === 0));
-        if (noPriceItems.length > 0) {
-          setPriceAlertItemIds((prev) => {
-            const next = new Set(prev);
-            noPriceItems.forEach((item) => { if (item) next.add(item.id); });
-            return next;
-          });
-        }
-      }
-
-      // 全アイテムのステータスを一括更新（setEventListsで直接更新）
       setEventLists((prev) => {
         const currentItems = prev[activeEventName] || [];
-        const updatedItems = currentItems.map((item) =>
-          targetIdSet.has(item.id) ? { ...item, purchaseStatus: status } : item,
+        const currentItem = currentItems.find((item) => item.id === updatedItem.id);
+
+        const result = computeUpdateItem(
+          currentItems,
+          updatedItem,
+          currentMode as ViewMode | undefined,
+          currentItem?.protectionLevel,
+          currentItem?.source,
         );
-        return { ...prev, [activeEventName]: updatedItems };
+
+        if (result.purchaseStatusChanged || result.purchaseQuantityChanged) {
+          setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
+        }
+
+        return {
+          ...prev,
+          [activeEventName]: result.items,
+        };
       });
-
-      // recentlyChangedItemIdsに追加
-      setRecentlyChangedItemIds((prev) => {
-        const next = new Set(prev);
-        itemIds.forEach((id) => next.add(id));
-        return next;
-      });
-      if (itemIds.length > 0) {
-        lastChangedItemIdRef.current = itemIds[itemIds.length - 1];
-      }
-
-      // 自動進行用: ユーザー操作フラグ設定
-      {
-        const currentItemsForSpace = eventLists[activeEventName] || [];
-        const spaceKeys = new Set<string>();
-        itemIds.forEach((id) => {
-          const item = currentItemsForSpace.find((i) => i.id === id);
-          if (item) spaceKeys.add(getSpaceKey(item.block, item.number));
-        });
-        setUserInteractedSpaces((prev) => {
-          const next = new Set(prev);
-          spaceKeys.forEach((key) => next.add(key));
-          return next;
-        });
-      }
-
-      // 共有ルーム参加中はSupabaseに同期
-      if (sharing?.activeRoom) {
-        const currentItems = eventLists[activeEventName] || [];
-        itemIds.forEach((id) => {
-          const item = currentItems.find((i) => i.id === id);
-          if (item) {
-            sharing.syncPurchaseStatus(
-              id,
-              status,
-              item,
-              (rollbackItem) => {
-                setEventLists((prev) => ({
-                  ...prev,
-                  [activeEventName]: (prev[activeEventName] || []).map((i) =>
-                    i.id === rollbackItem.id ? rollbackItem : i,
-                  ),
-                }));
-              },
-            );
-          }
-        });
-      }
     },
-    [activeEventName, eventLists, sharing],
+    [
+      activeEventName,
+      activeSharingSession,
+      activeEventDate,
+      applySnapshotAndAck,
+      dayModes,
+      eventLists,
+      guardSharingStructureMutation,
+    ],
   );
 
   const handleMoveItem = useCallback(
@@ -1026,6 +2296,7 @@ const App: React.FC = () => {
       sourceColumn?: 'execute' | 'candidate',
     ) => {
       if (!activeEventName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
       setSortState('Manual');
       setBlockSortDirection(null);
 
@@ -1038,9 +2309,26 @@ const App: React.FC = () => {
         : selectedItemIds;
       spaceGroupDragItemIdsRef.current = null;
 
-      const currentExecuteItems = executeModeItems[activeEventName]?.[currentEventDate]
-        ? { ...executeModeItems[activeEventName], [currentEventDate]: [...(executeModeItems[activeEventName]?.[currentEventDate] || [])] }
-        : (executeModeItems[activeEventName] || {});
+      const currentEventExecuteItems = executeModeItemsRef.current[activeEventName] || {};
+      const currentExecuteItems = currentEventExecuteItems[currentEventDate]
+        ? {
+            ...currentEventExecuteItems,
+            [currentEventDate]: [...(currentEventExecuteItems[currentEventDate] || [])],
+          }
+        : currentEventExecuteItems;
+
+      const selectionSpansMultipleSpaces = (() => {
+        if (effectiveSelectedIds.size <= 1) return false;
+        const spaceKeys = new Set<string>();
+        effectiveSelectedIds.forEach((id) => {
+          const item = (eventLists[activeEventName] || []).find((i) => i.id === id);
+          if (item) spaceKeys.add(getSpaceKey(item.block, item.number));
+        });
+        return spaceKeys.size > 1;
+      })();
+      const hallCheck = (spaceGroupIds || selectionSpansMultipleSpaces)
+        ? (id1: string, id2: string) => areItemsInSameHallGroup(id1, id2, currentEventDate)
+        : (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate);
 
       const result = computeMoveItem({
         dragId,
@@ -1053,13 +2341,14 @@ const App: React.FC = () => {
         executeModeItems: currentExecuteItems,
         dayName: currentEventDate,
         selectedBlockFilters,
+        areItemsInSameHall: hallCheck,
       });
 
       if (result.eventListItems) {
         setEventLists((prev) => ({ ...prev, [activeEventName]: result.eventListItems! }));
       }
       if (result.executeModeItems) {
-        setExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems! }));
+        updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems! }));
       }
     },
     [
@@ -1071,21 +2360,98 @@ const App: React.FC = () => {
       eventDates,
       selectedBlockFilters,
       eventLists,
+      areItemsInSameHall,
+      areItemsInSameHallGroup,
+      guardSharingStructureMutation,
     ],
   );
   const handleMoveItemVerticalInternal = useCallback(
     (direction: 'up' | 'down', itemId: string, targetColumn?: 'execute' | 'candidate') => {
       if (!activeEventName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
       setSortState('Manual');
       setBlockSortDirection(null);
 
       const currentEventDate = activeEventDate;
       const mode = dayModes[activeEventName]?.[currentEventDate];
+      const currentEventExecuteItems = executeModeItemsRef.current[activeEventName] || {};
 
       const spaceGroupIds = spaceGroupDragItemIdsRef.current;
+      const isSpaceGroupMove = !!spaceGroupIds;
+
+      if (mode === 'edit' && targetColumn === 'execute') {
+        const dayItems = [...(currentEventExecuteItems[currentEventDate] || [])];
+        const getItemSpacePriorityKey = (id: string): string => {
+          const item = items.find((i) => i.id === id);
+          return item ? `${getSpaceKey(item.block, item.number)}::${item.priorityLevel || 'none'}` : '';
+        };
+
+        const effectiveIds = spaceGroupIds ? new Set(spaceGroupIds) : selectedItemIds;
+        const movingGroupKeys = new Set<string>();
+        movingGroupKeys.add(getItemSpacePriorityKey(itemId));
+        effectiveIds.forEach((id) => {
+          if (dayItems.includes(id)) {
+            movingGroupKeys.add(getItemSpacePriorityKey(id));
+          }
+        });
+
+        const movingIndices = dayItems
+          .map((id, idx) => movingGroupKeys.has(getItemSpacePriorityKey(id)) ? idx : -1)
+          .filter((idx) => idx >= 0);
+
+        if (movingIndices.length > 0) {
+          const movingStart = movingIndices[0];
+          const movingEnd = movingIndices[movingIndices.length - 1];
+
+          const adjacentIndex = direction === 'up' ? movingStart - 1 : movingEnd + 1;
+          if (adjacentIndex >= 0 && adjacentIndex < dayItems.length) {
+            const adjacentId = dayItems[adjacentIndex];
+            const adjacentGroupKey = getItemSpacePriorityKey(adjacentId);
+
+            if (!movingGroupKeys.has(adjacentGroupKey)) {
+              let adjStart = adjacentIndex;
+              let adjEnd = adjacentIndex;
+              while (adjStart > 0 && getItemSpacePriorityKey(dayItems[adjStart - 1]) === adjacentGroupKey) adjStart--;
+              while (adjEnd < dayItems.length - 1 && getItemSpacePriorityKey(dayItems[adjEnd + 1]) === adjacentGroupKey) adjEnd++;
+
+              const movingBlock = dayItems.slice(movingStart, movingEnd + 1);
+              const remaining = [...dayItems.slice(0, movingStart), ...dayItems.slice(movingEnd + 1)];
+
+              const adjItemIdx = remaining.findIndex((id) => id === adjacentId);
+              if (adjItemIdx >= 0) {
+                let insertIdx: number;
+                if (direction === 'up') {
+                  let targetStart = adjItemIdx;
+                  while (targetStart > 0 && getItemSpacePriorityKey(remaining[targetStart - 1]) === adjacentGroupKey) targetStart--;
+                  insertIdx = targetStart;
+                } else {
+                  let targetEnd = adjItemIdx;
+                  while (targetEnd < remaining.length - 1 && getItemSpacePriorityKey(remaining[targetEnd + 1]) === adjacentGroupKey) targetEnd++;
+                  insertIdx = targetEnd + 1;
+                }
+
+                remaining.splice(insertIdx, 0, ...movingBlock);
+
+                updateExecuteModeItems((prev) => ({
+                  ...prev,
+                  [activeEventName]: {
+                    ...prev[activeEventName],
+                    [currentEventDate]: remaining,
+                  },
+                }));
+                return;
+              }
+            }
+          }
+        }
+      }
+
       const effectiveSelectedIds = spaceGroupIds
         ? new Set(spaceGroupIds)
         : selectedItemIds;
+      const hallCheck = spaceGroupIds
+        ? (id1: string, id2: string) => areItemsInSameHallGroup(id1, id2, currentEventDate)
+        : (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate);
 
       const result = computeMoveItemVertical(
         direction,
@@ -1094,16 +2460,16 @@ const App: React.FC = () => {
         mode as ViewMode | undefined,
         effectiveSelectedIds,
         eventLists[activeEventName] || [],
-        executeModeItems[activeEventName] || {},
+        currentEventExecuteItems,
         currentEventDate,
-        (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate),
+        hallCheck,
       );
 
       if (result.eventListItems) {
         setEventLists((prev) => ({ ...prev, [activeEventName]: result.eventListItems! }));
       }
       if (result.executeModeItems) {
-        setExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems! }));
+        updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems! }));
       }
     },
     [
@@ -1114,7 +2480,10 @@ const App: React.FC = () => {
       executeModeItems,
       eventDates,
       eventLists,
+      items,
       areItemsInSameHall,
+      areItemsInSameHallGroup,
+      guardSharingStructureMutation,
     ],
   );
 
@@ -1130,38 +2499,46 @@ const App: React.FC = () => {
     [handleMoveItemVerticalInternal],
   );
 
+  const expandToFullSpaceGroups = useCallback(
+    (itemIds: string[]): string[] => {
+      return expandSameSpacePriorityItemIds(itemIds, items);
+    },
+    [items],
+  );
+
   const handleMoveToExecuteColumn = useCallback(
     (itemIds: string[]) => {
       if (!activeEventName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       const currentEventDate = activeEventDate;
 
+      const expandedIds = expandToFullSpaceGroups(itemIds);
+
       if (
         rangeStart &&
-        itemIds.includes(rangeStart.itemId) &&
+        expandedIds.includes(rangeStart.itemId) &&
         rangeStart.columnType === 'candidate'
       ) {
         setRangeStart(null);
         setRangeEnd(null);
       } else if (
         rangeEnd &&
-        itemIds.includes(rangeEnd.itemId) &&
+        expandedIds.includes(rangeEnd.itemId) &&
         rangeEnd.columnType === 'candidate'
       ) {
         setRangeEnd(null);
       }
 
-      const newExecuteItems = computeMoveToExecuteColumn(
-        itemIds,
-        currentEventDate,
-        items,
-        executeModeItems[activeEventName] || {},
-        selectedBlockFilters,
-      );
-
-      setExecuteModeItems((prev) => ({
+      updateExecuteModeItems((prev) => ({
         ...prev,
-        [activeEventName]: newExecuteItems,
+        [activeEventName]: computeMoveToExecuteColumn(
+          expandedIds,
+          currentEventDate,
+          items,
+          prev[activeEventName] || {},
+          selectedBlockFilters,
+        ),
       }));
 
       setSelectedItemIds(new Set());
@@ -1175,47 +2552,51 @@ const App: React.FC = () => {
       items,
       executeModeItems,
       selectedBlockFilters,
+      expandToFullSpaceGroups,
+      guardSharingStructureMutation,
     ],
   );
   const handleRemoveFromExecuteColumn = useCallback(
     (itemIds: string[]) => {
       if (!activeEventName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       const currentEventDate = activeEventDate;
 
+      const expandedIds = expandToFullSpaceGroups(itemIds);
+
       if (
         rangeStart &&
-        itemIds.includes(rangeStart.itemId) &&
+        expandedIds.includes(rangeStart.itemId) &&
         rangeStart.columnType === 'execute'
       ) {
         setRangeStart(null);
         setRangeEnd(null);
       } else if (
         rangeEnd &&
-        itemIds.includes(rangeEnd.itemId) &&
+        expandedIds.includes(rangeEnd.itemId) &&
         rangeEnd.columnType === 'execute'
       ) {
         setRangeEnd(null);
       }
 
-      const newExecuteItems = computeRemoveFromExecuteColumn(
-        itemIds,
-        executeModeItems[activeEventName] || {},
-        currentEventDate,
-      );
-
-      setExecuteModeItems((prev) => ({
+      updateExecuteModeItems((prev) => ({
         ...prev,
-        [activeEventName]: newExecuteItems,
+        [activeEventName]: computeRemoveFromExecuteColumn(
+          expandedIds,
+          prev[activeEventName] || {},
+          currentEventDate,
+        ),
       }));
 
       setSelectedItemIds(new Set());
     },
-    [activeEventName, activeTab, eventDates, rangeStart, rangeEnd, executeModeItems],
+    [activeEventName, activeTab, eventDates, rangeStart, rangeEnd, executeModeItems, expandToFullSpaceGroups, guardSharingStructureMutation],
   );
 
   const handleToggleMode = useCallback(() => {
     if (!activeEventName) return;
+    if (guardSharingStructureMutation(activeEventName)) return;
 
     const currentEventDate = activeEventDate;
     if (!currentEventDate) {
@@ -1240,15 +2621,15 @@ const App: React.FC = () => {
 
     setSelectedItemIds(new Set());
     setCandidateNumberSortDirection(null);
-  }, [activeEventName, activeTab, dayModes, eventDates]);
+  }, [activeEventName, activeTab, dayModes, eventDates, guardSharingStructureMutation]);
 
 
   const handleSetViewMode = useCallback(
     (mode: ViewMode, scrollToItemId?: string) => {
       if (!activeEventName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       const currentEventDate = activeEventDate;
-
       setDayModes((prev) => ({
         ...prev,
         [activeEventName]: {
@@ -1263,15 +2644,6 @@ const App: React.FC = () => {
 
       if (mode !== 'focus') {
         setFocusModeMapVisible(false);
-        if (currentEventDate) {
-          const sessionKey = buildFocusSessionKey(activeEventName, currentEventDate);
-          setFocusModeSessions((prev) => {
-            if (!prev[sessionKey]) return prev;
-            const next = { ...prev };
-            delete next[sessionKey];
-            return next;
-          });
-        }
       }
       setUiVisibilityOverride(false);
       setUiSettingsPanelOpen(false);
@@ -1286,7 +2658,7 @@ const App: React.FC = () => {
         }, 100);
       }
     },
-    [activeEventName, activeTab, eventDates],
+    [activeEventName, activeEventDate, activeTab, eventDates, guardSharingStructureMutation],
   );
 
   const handleSelectEvent = useCallback(
@@ -1308,9 +2680,10 @@ const App: React.FC = () => {
 
   const handleDeleteEvent = useCallback(
     (eventName: string) => {
+      if (guardSharingStructureMutation(eventName)) return;
       setEventLists((prev) => removeRecordKey(prev, eventName));
       setEventMetadata((prev) => removeRecordKey(prev, eventName));
-      setExecuteModeItems((prev) => removeRecordKey(prev, eventName));
+      updateExecuteModeItems((prev) => removeRecordKey(prev, eventName));
       setDayModes((prev) => removeRecordKey(prev, eventName));
       setMapData((prev) => removeRecordKey(prev, eventName));
       setMapRotationSettings((prev) => removeRecordKey(prev, eventName));
@@ -1323,17 +2696,19 @@ const App: React.FC = () => {
         setActiveTab('eventList');
       }
     },
-    [activeEventName],
+    [activeEventName, guardSharingStructureMutation],
   );
 
   const handleRenameEvent = useCallback((oldName: string) => {
+    if (guardSharingStructureMutation(oldName)) return;
     setEventToRename(oldName);
     setShowRenameDialog(true);
-  }, []);
+  }, [guardSharingStructureMutation]);
 
   const handleConfirmRename = useCallback(
     (newName: string) => {
       if (!eventToRename) return;
+      if (guardSharingStructureMutation(eventToRename)) return;
 
       if (eventToRename === newName) {
         setShowRenameDialog(false);
@@ -1352,7 +2727,7 @@ const App: React.FC = () => {
 
       setDayModes((prev) => renameRecordKey(prev, eventToRename, newName));
 
-      setExecuteModeItems((prev) => renameRecordKey(prev, eventToRename, newName));
+      updateExecuteModeItems((prev) => renameRecordKey(prev, eventToRename, newName));
 
 
       setMapData((prev) => renameRecordKey(prev, eventToRename, newName));
@@ -1375,20 +2750,13 @@ const App: React.FC = () => {
       setShowRenameDialog(false);
       setEventToRename(null);
     },
-    [eventToRename, eventLists, activeEventName],
+    [eventToRename, eventLists, activeEventName, guardSharingStructureMutation],
   );
 
   const handleSortToggle = () => {
     setSelectedItemIds(new Set());
     setBlockSortDirection(null);
     setRecentlyChangedItemIds(new Set());
-    // 完了トーストが表示中ならキャンセル
-    if (completionToastTimerRef.current) {
-      clearInterval(completionToastTimerRef.current);
-      completionToastTimerRef.current = null;
-      completionCountdownRef.current = 0;
-      setCompletionToast(null);
-    }
     const currentIndex = sortCycle.indexOf(sortState);
     const nextIndex = (currentIndex + 1) % sortCycle.length;
     setSortState(sortCycle[nextIndex]);
@@ -1396,6 +2764,7 @@ const App: React.FC = () => {
 
   const handleBlockSortToggle = () => {
     if (!activeEventName) return;
+    if (guardSharingStructureMutation(activeEventName)) return;
 
     const nextDirection = blockSortDirection === 'asc' ? 'desc' : 'asc';
     const currentEventDate = activeEventDate;
@@ -1436,6 +2805,7 @@ const App: React.FC = () => {
 
   const handleBlockSortToggleCandidate = () => {
     if (!activeEventName) return;
+    if (guardSharingStructureMutation(activeEventName)) return;
 
     const nextDirection = blockSortDirection === 'asc' ? 'desc' : 'asc';
     const currentEventDate = activeEventDate;
@@ -1488,18 +2858,19 @@ const App: React.FC = () => {
   };
 
   const handleEditRequest = (item: ShoppingItem) => {
-    setItemToEdit(item);
-    setActiveTab('import');
+    setEditDialogItem(item);
   };
 
   const handleDeleteRequest = useCallback((item: ShoppingItem) => {
+    if (guardSharingStructureMutation(activeEventName)) return;
     setItemToDelete(item);
-  }, []);
+  }, [activeEventName, guardSharingStructureMutation]);
 
   const handleDeleteItemFromMap = useCallback((itemId: string) => {
+    if (guardSharingStructureMutation(activeEventName)) return;
     const item = items.find((i) => i.id === itemId);
     if (item) setItemToDelete(item);
-  }, [items]);
+  }, [items, activeEventName, guardSharingStructureMutation]);
 
   const handleClearNewItemDefaults = useCallback(() => {
     setNewItemDefaults(null);
@@ -1512,15 +2883,16 @@ const App: React.FC = () => {
 
   const handleConfirmDelete = () => {
     if (!itemToDelete || !activeEventName) return;
+    if (guardSharingStructureMutation(activeEventName)) return;
 
     const result = computeDeleteItem(
       eventLists[activeEventName] || [],
       itemToDelete.id,
-      executeModeItems[activeEventName] || {},
+      executeModeItemsRef.current[activeEventName] || {},
     );
 
     setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
-    setExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
+    updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
     setItemToDelete(null);
   };
 
@@ -1534,6 +2906,28 @@ const App: React.FC = () => {
       setActiveTab('eventList');
     }
   };
+
+  const getListColumnItems = useCallback(
+    (columnType: 'execute' | 'candidate', currentEventDate: string): ShoppingItem[] => {
+      if (!activeEventName) return [];
+
+      if (columnType === 'execute') {
+        const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+        const itemsMap = new Map(items.map((item) => [item.id, item]));
+        return executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+      }
+
+      const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+      let filtered = items.filter(
+        (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
+      );
+      if (selectedBlockFilters.size > 0) {
+        filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
+      }
+      return filtered;
+    },
+    [activeEventName, executeModeItems, items, selectedBlockFilters],
+  );
 
   const handleSelectItem = useCallback(
     (itemId: string, columnType?: 'execute' | 'candidate') => {
@@ -1549,192 +2943,41 @@ const App: React.FC = () => {
             : 'candidate'
           : 'execute');
 
-
-      let currentItems: ShoppingItem[] = [];
-      if (activeEventName) {
-        if (currentColumnType === 'execute') {
-          const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
-          const itemsMap = new Map(items.map((item) => [item.id, item]));
-          currentItems = executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
-        } else {
-          const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-          let filtered = items.filter(
-            (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
-          );
-          if (selectedBlockFilters.size > 0) {
-            filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
-          }
-          currentItems = filtered;
-        }
-      }
-
-      setSelectedItemIds((prev) => {
-        const newSet = new Set(prev);
-        const wasSelected = newSet.has(itemId);
-
-        if (wasSelected) {
-          newSet.delete(itemId);
-          if (rangeStart?.itemId === itemId && rangeStart.columnType === currentColumnType) {
-            setRangeStart(null);
-            setRangeEnd(null);
-          } else if (rangeEnd?.itemId === itemId && rangeEnd.columnType === currentColumnType) {
-            setRangeEnd(null);
-          }
-        } else {
-          newSet.add(itemId);
-
-
-          if (!rangeStart || rangeStart.columnType !== currentColumnType || rangeStart.sourceType === 'spaceHeader') {
-            setRangeStart({ itemId, columnType: currentColumnType, sourceType: 'item' });
-            setRangeEnd(null);
-          } else {
-            const startIndex = currentItems.findIndex((item) => item.id === rangeStart.itemId);
-            const currentIndex = currentItems.findIndex((item) => item.id === itemId);
-
-
-            if (startIndex !== -1 && currentIndex !== -1) {
-              const isAdjacent = Math.abs(startIndex - currentIndex) === 1;
-              if (!isAdjacent) {
-                setRangeEnd({ itemId, columnType: currentColumnType, sourceType: 'item' });
-              } else {
-                setRangeEnd(null);
-              }
-            }
-          }
-        }
-
-        return newSet;
-      });
+      selectItemForRange(itemId, currentColumnType, getListColumnItems(currentColumnType, currentEventDate));
     },
     [
       activeTab,
       activeEventName,
       executeModeItems,
       eventDates,
-      rangeStart,
-      rangeEnd,
-      items,
-      selectedBlockFilters,
+      getListColumnItems,
+      selectItemForRange,
     ],
   );
 
-  // 折りたたみスペースグループのチェックボックス用：範囲選択対応
   const handleSelectSpaceGroupForRange = useCallback(
     (firstItemId: string, allItemIds: string[], columnType: 'execute' | 'candidate') => {
       setSortState('Manual');
       setBlockSortDirection(null);
 
-      // 隣接グループ判定用：現在のカラムのアイテムからスペースグループ順を算出
       const currentEventDate = activeEventDate;
-      let currentItems: ShoppingItem[] = [];
-      if (activeEventName) {
-        if (columnType === 'execute') {
-          const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
-          const itemsMap = new Map(items.map((item) => [item.id, item]));
-          currentItems = executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
-        } else {
-          const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-          let filtered = items.filter(
-            (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
-          );
-          if (selectedBlockFilters.size > 0) {
-            filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
-          }
-          currentItems = filtered;
-        }
-      }
-
-      // スペースグループ順序を構築
-      const groupOrder: string[] = [];
-      const groupFirstItemMap = new Map<string, string>();
-      for (const item of currentItems) {
-        const key = getSpaceKey(item.block, item.number);
-        if (!groupFirstItemMap.has(key)) {
-          groupOrder.push(key);
-          groupFirstItemMap.set(key, item.id);
-        }
-      }
-
-      setSelectedItemIds((prev) => {
-        const newSet = new Set(prev);
-        const allSelected = allItemIds.every((id) => newSet.has(id));
-
-        if (allSelected) {
-          // 全解除
-          allItemIds.forEach((id) => newSet.delete(id));
-          if (rangeStart && allItemIds.includes(rangeStart.itemId)) {
-            setRangeStart(null);
-            setRangeEnd(null);
-          } else if (rangeEnd && allItemIds.includes(rangeEnd.itemId)) {
-            setRangeEnd(null);
-          }
-        } else {
-          // 全選択
-          allItemIds.forEach((id) => newSet.add(id));
-          // rangeStart/rangeEndは先頭アイテムIDで設定
-          // rangeStartがアイテムカード由来の場合はスペースヘッダーとの混在を防ぐ
-          if (!rangeStart || rangeStart.columnType !== columnType || rangeStart.sourceType === 'item') {
-            setRangeStart({ itemId: firstItemId, columnType, sourceType: 'spaceHeader' });
-            setRangeEnd(null);
-          } else {
-            // 隣接グループチェック：隣接なら rangeEnd を設定しない
-            const startKey = (() => {
-              const startItem = currentItems.find((item) => item.id === rangeStart.itemId);
-              return startItem ? getSpaceKey(startItem.block, startItem.number) : null;
-            })();
-            const currentKey = (() => {
-              const currentItem = currentItems.find((item) => item.id === firstItemId);
-              return currentItem ? getSpaceKey(currentItem.block, currentItem.number) : null;
-            })();
-
-            if (startKey && currentKey) {
-              const startGroupIdx = groupOrder.indexOf(startKey);
-              const currentGroupIdx = groupOrder.indexOf(currentKey);
-              const isAdjacent = startGroupIdx !== -1 && currentGroupIdx !== -1 &&
-                Math.abs(startGroupIdx - currentGroupIdx) === 1;
-              if (!isAdjacent) {
-                setRangeEnd({ itemId: firstItemId, columnType, sourceType: 'spaceHeader' });
-              } else {
-                setRangeEnd(null);
-              }
-            } else {
-              setRangeEnd({ itemId: firstItemId, columnType, sourceType: 'spaceHeader' });
-            }
-          }
-        }
-        return newSet;
-      });
+      selectSpaceGroupForRange(
+        firstItemId,
+        allItemIds,
+        columnType,
+        getListColumnItems(columnType, currentEventDate),
+      );
     },
-    [rangeStart, rangeEnd, activeEventDate, activeEventName, executeModeItems, items, selectedBlockFilters],
+    [activeEventDate, getListColumnItems, selectSpaceGroupForRange],
   );
 
-  const handleToggleBlockFilter = useCallback((block: string) => {
-    setSelectedBlockFilters((prev) => {
-      const newSet = new Set(prev);
-      if (newSet.has(block)) {
-        newSet.delete(block);
-      } else {
-        newSet.add(block);
-      }
-      return newSet;
-    });
-  }, []);
-
-  const handleClearBlockFilters = useCallback(() => {
-    setSelectedBlockFilters(new Set());
-  }, []);
-
-  // スペース別グループ化の状態。
-  const [spaceGroupingEnabled, setSpaceGroupingEnabled] = useState(false);
-  const [collapsedSpaces, setCollapsedSpaces] = useState<Set<string>>(new Set());
-  const [collapsedHalls, setCollapsedHalls] = useState<Set<string>>(new Set());
-
-  // 日付切替時にホール折りたたみ状態をリセット
-  React.useEffect(() => {
-    setCollapsedHalls(new Set());
-  }, [activeEventDate]);
-
   const spaceGroupDragItemIdsRef = useRef<string[] | null>(null);
+
+  const [showPostponeFilterButton, setShowPostponeFilterButton] = useState(false);
+  const [showLateFilterButton, setShowLateFilterButton] = useState(false);
+  const executeSpaceGroupOrderRef = useRef<string[]>([]);
+  const executeColumnItemsRef = useRef<ShoppingItem[]>([]);
+  const recentlyChangedItemIdsRef = useRef<Set<string>>(new Set());
 
   const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
     'asc' | 'desc' | null
@@ -1836,73 +3079,262 @@ const App: React.FC = () => {
     eventDates,
   ]);
 
-  const handleClearSelection = useCallback(() => {
-    setSelectedItemIds(new Set());
-    setRangeStart(null);
-    setRangeEnd(null);
-  }, []);
+  const handleClearSelection = clearSelection;
+  const handleToggleBlockFilter = toggleBlockFilter;
+  const handleClearBlockFilters = clearBlockFilters;
 
   const handleToggleSpaceCollapse = useCallback((spaceKey: string) => {
-    // 自動進行タイマーをキャンセル
-    if (autoAdvanceTimerRef.current) {
-      clearTimeout(autoAdvanceTimerRef.current);
-      autoAdvanceTimerRef.current = null;
-    }
-    setCollapsedSpaces((prev) => {
-      const next = new Set(prev);
-      if (next.has(spaceKey)) {
-        next.delete(spaceKey);
-      } else {
-        next.add(spaceKey);
-        // 折りたたんだスペースの操作フラグをクリア
-        setUserInteractedSpaces((p) => {
-          const n = new Set(p);
-          n.delete(spaceKey);
-          return n;
-        });
-      }
-      return next;
-    });
-  }, []);
+    toggleCollapsedSpace(spaceKey);
+  }, [toggleCollapsedSpace]);
 
   const handleToggleAllSpaceCollapse = useCallback((collapse: boolean) => {
-    // 自動進行タイマーをキャンセル
-    if (autoAdvanceTimerRef.current) {
-      clearTimeout(autoAdvanceTimerRef.current);
-      autoAdvanceTimerRef.current = null;
-    }
     if (!collapse) {
       setCollapsedSpaces(new Set());
-      setCollapsedHalls(new Set());
     } else {
-      // 全ホールを折りたたむ
-      const hallDefs = getHallsForDate(activeEventDate);
-      if (hallDefs.length > 0) {
-        setCollapsedHalls(new Set(hallDefs.map((h) => h.id)));
-      }
-      const allSpaceKeys = new Set<string>();
+      const allGroupKeys = new Set<string>();
       items
         .filter((item) => item.eventDate === activeEventDate)
         .forEach((item) => {
-          allSpaceKeys.add(getSpaceKey(item.block, item.number));
+          const spaceKey = getSpaceKey(item.block, item.number);
+          const priority = item.priorityLevel || 'none';
+          const groupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
+          allGroupKeys.add(groupKey);
         });
-      setCollapsedSpaces(allSpaceKeys);
+      setCollapsedSpaces(allGroupKeys);
     }
   }, [items, activeEventDate]);
 
-  const handleToggleHallCollapse = useCallback((hallId: string) => {
-    setCollapsedHalls((prev) => {
-      const next = new Set(prev);
-      if (next.has(hallId)) next.delete(hallId);
-      else next.add(hallId);
-      return next;
-    });
+  const handleExecuteToggleSpaceCollapse = useCallback((spaceKey: string) => {
+    toggleExecuteCollapsedSpace(spaceKey);
+  }, [toggleExecuteCollapsedSpace]);
+
+  const handleExecuteToggleAllSpaceCollapse = useCallback((collapse: boolean) => {
+    if (!collapse) {
+      setExecuteCollapsedSpaces(new Set());
+    } else {
+      if (!activeEventName) return;
+      const currentEventDate = activeEventDate;
+      const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+      const itemsMap = new Map(items.map((item) => [item.id, item]));
+      const allGroupKeys = new Set<string>();
+      executeIds.forEach((id) => {
+        const item = itemsMap.get(id);
+        if (!item) return;
+        const spaceKey = getSpaceKey(item.block, item.number);
+        const priority = item.priorityLevel || 'none';
+        const groupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
+        allGroupKeys.add(groupKey);
+      });
+      setExecuteCollapsedSpaces(allGroupKeys);
+    }
+  }, [activeEventName, activeEventDate, executeModeItems, items]);
+
+  const handleBulkStatusChange = useCallback(
+    async (groupKey: string, targetStatus: PurchaseStatus, groupItems: ShoppingItem[]) => {
+      if (!activeEventName) return;
+      const allAlready = groupItems.every((item) => item.purchaseStatus === targetStatus);
+      const newStatus: PurchaseStatus = allAlready ? 'None' : targetStatus;
+      const targets = groupItems.filter(
+        (item) => targetStatus !== 'LimitedPurchase' && item.purchaseStatus !== 'LimitedPurchase',
+      );
+      const changedItems = targets.filter((item) => item.purchaseStatus !== newStatus);
+
+      const applyBulkProgressUi = (itemsToMark: ShoppingItem[]) => {
+        setRecentlyChangedItemIds((prevIds) => {
+          const next = new Set(prevIds);
+          itemsToMark.forEach((item) => next.add(item.id));
+          return next;
+        });
+
+        if (sortState === 'Manual' && newStatus !== 'None') {
+          const groupOrder = executeSpaceGroupOrderRef.current;
+          if (groupOrder.length > 0 && groupKey === groupOrder[groupOrder.length - 1]) {
+            const currentItems = executeColumnItemsRef.current;
+            const groupItemIds = new Set(itemsToMark.map((item) => item.id));
+            const allNonNone = currentItems.every(
+              (item) => groupItemIds.has(item.id) || item.purchaseStatus !== 'None',
+            );
+            if (allNonNone) setShowPostponeFilterButton(true);
+          }
+        }
+
+        if (sortState === 'Postpone' && newStatus !== 'None') {
+          const groupOrder = executeSpaceGroupOrderRef.current;
+          if (groupOrder.length > 0 && groupKey === groupOrder[groupOrder.length - 1]) {
+            const currentItems = executeColumnItemsRef.current;
+            const groupItemIds = new Set(itemsToMark.map((item) => item.id));
+            const recentIds = recentlyChangedItemIdsRef.current;
+            const allVisibleNonNone = currentItems.every((item) => {
+              if (groupItemIds.has(item.id)) return true;
+              if (item.purchaseStatus !== 'Postpone' && !recentIds.has(item.id)) return true;
+              return item.purchaseStatus !== 'None';
+            });
+            if (allVisibleNonNone) setShowLateFilterButton(true);
+          }
+        }
+      };
+
+      if (changedItems.length === 0) return;
+
+      const sharingSession = activeSharingSession;
+      if (sharingSession) {
+        setSharingBusy(true);
+        setSharingStatusMessage('共有アイテムをまとめて更新しています。');
+        setSharingErrorMessage(null);
+        try {
+          const updatedItems: SnapshotRoomItem[] = [];
+          let latestItemsVersion = sharingSession.itemsVersion;
+
+          for (const item of changedItems) {
+            const result = await updateRoomItemWithPurchase({
+              roomId: sharingSession.roomId,
+              localItemId: item.id,
+              fields: {},
+              status: newStatus,
+              actualPurchaseQuantity: null,
+            });
+
+            if (!result.ok) {
+              if (result.error.code === 'PERMISSION_DENIED') {
+                setSharingErrorMessage(
+                  '他の参加者が先に購入確保しました。まとめ変更を中断し、最新状態を取得しました。',
+                );
+                await applySnapshotAndAck(sharingSession.roomId);
+                return;
+              }
+              setSharingErrorMessage(`共有アイテムのまとめ更新に失敗しました: ${result.error.code}`);
+              return;
+            }
+
+            updatedItems.push(result.data.item);
+            latestItemsVersion = result.data.itemsVersion;
+          }
+
+          setEventLists((prev) => ({
+            ...prev,
+            [activeEventName]: (prev[activeEventName] ?? []).map((item) => {
+              const updatedItem = updatedItems.find((candidate) => candidate.localItemId === item.id);
+              return updatedItem ? mergeSnapshotRoomItemIntoShoppingItem(item, updatedItem) : item;
+            }),
+          }));
+
+          await saveSharingSessionState({
+            ...sharingSession,
+            itemsVersion: latestItemsVersion,
+          });
+          applyBulkProgressUi(changedItems);
+          setSharingStatusMessage('共有アイテムをまとめて更新しました。');
+        } catch (error) {
+          console.error('Sharing bulk status update error:', error);
+          setSharingErrorMessage('共有アイテムのまとめ更新に失敗しました。通信状態を確認してください。');
+        } finally {
+          setSharingBusy(false);
+        }
+        return;
+      }
+
+      setEventLists((prev) => {
+        const allItems = [...(prev[activeEventName] || [])];
+        const groupItemIds = new Set(changedItems.map((item) => item.id));
+        return {
+          ...prev,
+          [activeEventName]: allItems.map((item) => {
+            if (!groupItemIds.has(item.id)) return item;
+            return clearLimitedPurchase({ ...item, purchaseStatus: newStatus });
+          }),
+        };
+      });
+      applyBulkProgressUi(changedItems);
+    },
+    [
+      activeEventName,
+      activeSharingSession,
+      applySnapshotAndAck,
+      saveSharingSessionState,
+      sortState,
+    ],
+  );
+
+  const handleExecuteItemUpdate = useCallback(
+    (updatedItem: ShoppingItem) => {
+      handleUpdateItem(updatedItem);
+
+      if (sortState !== 'Manual' && sortState !== 'Postpone') return;
+      if (updatedItem.purchaseStatus === 'None') return;
+
+      const groupOrder = executeSpaceGroupOrderRef.current;
+      if (groupOrder.length === 0) return;
+      const lastGroupKey = groupOrder[groupOrder.length - 1];
+
+      const spaceKey = getSpaceKey(updatedItem.block, updatedItem.number);
+      const priority = updatedItem.priorityLevel || 'none';
+      const itemGroupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
+      if (itemGroupKey !== lastGroupKey) return;
+
+      const currentItems = executeColumnItemsRef.current;
+
+      if (sortState === 'Manual') {
+        const lastGroupItems = currentItems.filter((item) => {
+          const sk = getSpaceKey(item.block, item.number);
+          const p = item.priorityLevel || 'none';
+          return (p !== 'none' ? `${sk}:${p}` : sk) === lastGroupKey;
+        });
+        if (lastGroupItems[lastGroupItems.length - 1]?.id !== updatedItem.id) return;
+
+        const allNonNone = currentItems.every(
+          (item) => item.id === updatedItem.id || item.purchaseStatus !== 'None',
+        );
+        if (allNonNone) setShowPostponeFilterButton(true);
+      } else {
+        const recentIds = recentlyChangedItemIdsRef.current;
+        const visibleLastGroupItems = currentItems.filter((item) => {
+          const sk = getSpaceKey(item.block, item.number);
+          const p = item.priorityLevel || 'none';
+          const gk = p !== 'none' ? `${sk}:${p}` : sk;
+          if (gk !== lastGroupKey) return false;
+          return item.purchaseStatus === 'Postpone' || recentIds.has(item.id);
+        });
+        if (visibleLastGroupItems[visibleLastGroupItems.length - 1]?.id !== updatedItem.id) return;
+
+        const allVisibleNonNone = currentItems.every((item) => {
+          if (item.id === updatedItem.id) return true;
+          if (item.purchaseStatus !== 'Postpone' && !recentIds.has(item.id)) return true;
+          return item.purchaseStatus !== 'None';
+        });
+        if (allVisibleNonNone) setShowLateFilterButton(true);
+      }
+    },
+    [handleUpdateItem, sortState],
+  );
+
+  const handleActivatePostponeFilter = useCallback(() => {
+    setRecentlyChangedItemIds(new Set());
+    setSortState('Postpone');
+    setShowPostponeFilterButton(false);
   }, []);
 
-  const handleToggleHallSpacesCollapse = useCallback((spaceKeys: string[], collapse: boolean) => {
-    setCollapsedSpaces((prev) => {
+  const handleActivateLateFilter = useCallback(() => {
+    setRecentlyChangedItemIds(new Set());
+    setSortState('Late');
+    setShowLateFilterButton(false);
+  }, []);
+
+  const handleExecuteSpaceGroupOrderChange = useCallback((orderedGroupKeys: string[]) => {
+    executeSpaceGroupOrderRef.current = orderedGroupKeys;
+  }, []);
+
+  const handleCollapseAndOpenNext = useCallback((currentGroupKey: string) => {
+    const order = executeSpaceGroupOrderRef.current;
+    const currentIndex = order.indexOf(currentGroupKey);
+    const nextKey = currentIndex >= 0 && currentIndex < order.length - 1
+      ? order[currentIndex + 1]
+      : null;
+    setExecuteCollapsedSpaces((prev) => {
       const next = new Set(prev);
-      spaceKeys.forEach((key) => collapse ? next.add(key) : next.delete(key));
+      next.add(currentGroupKey);
+      if (nextKey) {
+        next.delete(nextKey);
+      }
       return next;
     });
   }, []);
@@ -1913,251 +3345,28 @@ const App: React.FC = () => {
 
   const handleToggleRangeSelection = useCallback(
     (columnType: 'execute' | 'candidate') => {
-      if (
-        !rangeStart ||
-        rangeStart.columnType !== columnType ||
-        !rangeEnd ||
-        rangeEnd.columnType !== columnType
-      ) {
-        return;
-      }
-
       if (!activeEventName) return;
 
       const currentEventDate = activeEventDate;
-
-
-      let currentItems: ShoppingItem[] = [];
-      if (columnType === 'execute') {
-        const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
-        const itemsMap = new Map(items.map((item) => [item.id, item]));
-        currentItems = executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
-      } else {
-        const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-        let filtered = items.filter(
-          (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
-        );
-        if (selectedBlockFilters.size > 0) {
-          filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
-        }
-        currentItems = filtered;
-      }
-
-
-      // スペースグループ化有効時の範囲選択
-      if (spaceGroupingEnabled) {
-        const startItem = currentItems.find((item) => item.id === rangeStart.itemId);
-        const endItem = currentItems.find((item) => item.id === rangeEnd.itemId);
-        if (!startItem || !endItem) return;
-
-        const startKey = getSpaceKey(startItem.block, startItem.number);
-        const endKey = getSpaceKey(endItem.block, endItem.number);
-
-        let rangeItems: ShoppingItem[];
-
-        if (startKey === endKey) {
-          // 同一スペース内の範囲選択
-          const groupItems = currentItems.filter(
-            (item) => getSpaceKey(item.block, item.number) === startKey,
-          );
-          const startIndex = groupItems.findIndex((item) => item.id === rangeStart.itemId);
-          const endIndex = groupItems.findIndex((item) => item.id === rangeEnd.itemId);
-          if (startIndex === -1 || endIndex === -1) return;
-          const minIndex = Math.min(startIndex, endIndex);
-          const maxIndex = Math.max(startIndex, endIndex);
-          rangeItems = groupItems.slice(minIndex, maxIndex + 1);
-        } else {
-          // クロスグループ範囲選択：開始・終了スペース間の全スペースの全アイテムを対象にする
-          // スペースグループの出現順を構築
-          const groupOrder: string[] = [];
-          for (const item of currentItems) {
-            const key = getSpaceKey(item.block, item.number);
-            if (!groupOrder.includes(key)) {
-              groupOrder.push(key);
-            }
-          }
-          const startGrpIdx = groupOrder.indexOf(startKey);
-          const endGrpIdx = groupOrder.indexOf(endKey);
-          if (startGrpIdx === -1 || endGrpIdx === -1) return;
-          const minGrpIdx = Math.min(startGrpIdx, endGrpIdx);
-          const maxGrpIdx = Math.max(startGrpIdx, endGrpIdx);
-          const rangeSpaceKeys = new Set(groupOrder.slice(minGrpIdx, maxGrpIdx + 1));
-          rangeItems = currentItems.filter((item) =>
-            rangeSpaceKeys.has(getSpaceKey(item.block, item.number)),
-          );
-        }
-
-        setSelectedItemIds((prev) => {
-          const allSelected = rangeItems.every((item) => prev.has(item.id));
-          const newSet = new Set(prev);
-          if (allSelected) {
-            rangeItems.forEach((item) => newSet.delete(item.id));
-            setRangeStart(null);
-            setRangeEnd(null);
-          } else {
-            rangeItems.forEach((item) => newSet.add(item.id));
-          }
-          return newSet;
-        });
-        return;
-      }
-
-      const halls = getHallsForDate(currentEventDate);
-      const currentMapData = getMapDataForDate(currentEventDate);
-
-
-      if (halls.length > 0 && currentMapData) {
-        const getHallIdForItem = (item: ShoppingItem): string | null => {
-          const block = currentMapData.blocks.find((b) => b.name === item.block);
-          if (!block) return null;
-
-          const numMatch = item.number?.match(/\d+/);
-          if (!numMatch) return null;
-          const num = parseInt(numMatch[0], 10);
-
-          const cell = block.numberCells.find(
-            (nc: { row: number; col: number; value: number }) => nc.value === num,
-          );
-          if (!cell) return null;
-
-
-          const isPointInPoly = (
-            row: number,
-            col: number,
-            vertices: { row: number; col: number }[],
-          ): boolean => {
-            if (vertices.length < 3) return false;
-            let inside = false;
-            for (let i = 0, j = vertices.length - 1; i < vertices.length; j = i++) {
-              const xi = vertices[i].col,
-                yi = vertices[i].row;
-              const xj = vertices[j].col,
-                yj = vertices[j].row;
-              if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
-                inside = !inside;
-              }
-            }
-            return inside;
-          };
-
-          for (const hall of halls) {
-            for (const vertex of hall.vertices) {
-              if (vertex.row === cell.row && vertex.col === cell.col) {
-                return hall.id;
-              }
-            }
-            if (isPointInPoly(cell.row, cell.col, hall.vertices)) {
-              return hall.id;
-            }
-          }
-          return null;
-        };
-
-
-        const buildGroupId = (
-          hallId: string | null,
-          priority: 'none' | 'priority' | 'highest',
-        ): string | null => {
-          if (hallId === null) {
-            if (priority === 'highest') return 'undefined:highest';
-            if (priority === 'priority') return 'undefined:priority';
-            return null;
-          }
-          if (priority === 'highest') return `${hallId}:highest`;
-          if (priority === 'priority') return `${hallId}:priority`;
-          return hallId;
-        };
-
-        const getItemGroupId = (item: ShoppingItem): string | null => {
-          const hallId = getHallIdForItem(item);
-          const priority = item.priorityLevel || 'none';
-          return buildGroupId(hallId, priority);
-        };
-
-
-        const startItem = currentItems.find((item) => item.id === rangeStart.itemId);
-        const endItem = currentItems.find((item) => item.id === rangeEnd.itemId);
-
-        if (!startItem || !endItem) return;
-
-        const startGroupId = getItemGroupId(startItem);
-        const endGroupId = getItemGroupId(endItem);
-
-
-        if (startGroupId !== endGroupId) {
-          return;
-        }
-
-
-        const groupItems = currentItems.filter((item) => getItemGroupId(item) === startGroupId);
-
-        const startIndex = groupItems.findIndex((item) => item.id === rangeStart.itemId);
-        const endIndex = groupItems.findIndex((item) => item.id === rangeEnd.itemId);
-
-        if (startIndex === -1 || endIndex === -1) return;
-
-        const minIndex = Math.min(startIndex, endIndex);
-        const maxIndex = Math.max(startIndex, endIndex);
-        const rangeItems = groupItems.slice(minIndex, maxIndex + 1);
-
-
-        setSelectedItemIds((prev) => {
-          const allSelected = rangeItems.every((item) => prev.has(item.id));
-          const newSet = new Set(prev);
-          if (allSelected) {
-            rangeItems.forEach((item) => newSet.delete(item.id));
-            setRangeStart(null);
-            setRangeEnd(null);
-          } else {
-            rangeItems.forEach((item) => newSet.add(item.id));
-          }
-          return newSet;
-        });
-        return;
-      }
-
-
-      const startIndex = currentItems.findIndex((item) => item.id === rangeStart.itemId);
-      const endIndex = currentItems.findIndex((item) => item.id === rangeEnd.itemId);
-
-      if (startIndex === -1 || endIndex === -1) return;
-
-      const minIndex = Math.min(startIndex, endIndex);
-      const maxIndex = Math.max(startIndex, endIndex);
-      const rangeItems = currentItems.slice(minIndex, maxIndex + 1);
-
-
-      setSelectedItemIds((prev) => {
-        const allSelected = rangeItems.every((item) => prev.has(item.id));
-        const newSet = new Set(prev);
-        if (allSelected) {
-          rangeItems.forEach((item) => newSet.delete(item.id));
-          setRangeStart(null);
-          setRangeEnd(null);
-        } else {
-          rangeItems.forEach((item) => newSet.add(item.id));
-        }
-        return newSet;
+      toggleCurrentRangeSelection(columnType, getListColumnItems(columnType, currentEventDate), {
+        halls: getHallsForDate(currentEventDate),
+        currentMapData: getMapDataForDate(currentEventDate),
       });
     },
     [
-      rangeStart,
-      rangeEnd,
-      activeTab,
       activeEventName,
-      eventDates,
-      executeModeItems,
-      items,
-      selectedBlockFilters,
-      spaceGroupingEnabled,
+      activeEventDate,
+      getListColumnItems,
       getHallsForDate,
       getMapDataForDate,
+      toggleCurrentRangeSelection,
     ],
   );
 
   const handleBulkSort = useCallback(
     (direction: BulkSortDirection) => {
       if (!activeEventName || selectedItemIds.size === 0) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
       setSortState('Manual');
       setBlockSortDirection(null);
       const currentEventDate = activeEventDate;
@@ -2170,7 +3379,7 @@ const App: React.FC = () => {
         const isInCandidateColumn = selectedItems.some((item) => !executeIds.has(item.id));
 
         if (isInExecuteColumn && !isInCandidateColumn) {
-          setExecuteModeItems((prev) => {
+          updateExecuteModeItems((prev) => {
             const eventItems = prev[activeEventName] || {};
             const dayItems = [...(eventItems[currentEventDate] || [])];
 
@@ -2275,7 +3484,7 @@ const App: React.FC = () => {
         });
       }
     },
-    [activeEventName, selectedItemIds, items, activeTab, dayModes, executeModeItems, eventDates],
+    [activeEventName, selectedItemIds, items, activeTab, dayModes, executeModeItems, eventDates, guardSharingStructureMutation],
   );
 
 
@@ -2346,6 +3555,10 @@ const App: React.FC = () => {
       if (!file) return;
 
       e.target.value = '';
+      if (hasAnyActiveSharingSession) {
+        alert(SHARING_STRUCTURE_LOCK_MESSAGE);
+        return;
+      }
 
       try {
         const result = await importFromXlsx(file);
@@ -2440,7 +3653,7 @@ const App: React.FC = () => {
 
         if (importedData.executeModeItems) {
           const executeItems = importedData.executeModeItems;
-          setExecuteModeItems((prev) => upsertRecordKey(prev, eventName, executeItems));
+          updateExecuteModeItems((prev) => upsertRecordKey(prev, eventName, executeItems));
         }
         if (importedData.dayModes) {
           const importedDayModes = importedData.dayModes;
@@ -2496,12 +3709,13 @@ const App: React.FC = () => {
         alert('アイテムの取り込みに失敗しました。ファイル形式を確認してください。');
       }
     },
-    [eventLists],
+    [eventLists, hasAnyActiveSharingSession],
   );
 
 
   const handleUpdateEvent = useCallback(
     async (eventName: string, urlOverride?: { url: string; sheetName: string }) => {
+      if (guardSharingStructureMutation(eventName)) return;
       const metadata = eventMetadata[eventName];
       const source = resolveSpreadsheetSource(metadata, urlOverride);
 
@@ -2523,11 +3737,12 @@ const App: React.FC = () => {
         setShowUrlUpdateDialog(true);
       }
     },
-    [eventLists, eventMetadata],
+    [eventLists, eventMetadata, guardSharingStructureMutation],
   );
 
   const handleConfirmUpdate = () => {
     if (!updateData || !updateEventName) return;
+    if (guardSharingStructureMutation(updateEventName)) return;
 
     const { itemsToDelete, itemsToUpdate, itemsToAdd } = updateData;
     const eventName = updateEventName;
@@ -2542,7 +3757,7 @@ const App: React.FC = () => {
     });
 
 
-    setExecuteModeItems((prev) => {
+    updateExecuteModeItems((prev) => {
       const eventItems = prev[eventName];
       if (!eventItems) return prev;
 
@@ -2565,6 +3780,7 @@ const App: React.FC = () => {
     (newUrl: string, sheetName: string) => {
       setShowUrlUpdateDialog(false);
       if (!pendingUpdateEventName) return;
+      if (guardSharingStructureMutation(pendingUpdateEventName)) return;
 
       const eventName = pendingUpdateEventName;
       const currentMetadata = eventMetadata[eventName];
@@ -2581,16 +3797,17 @@ const App: React.FC = () => {
       setPendingUpdateEventName(null);
       handleUpdateEvent(eventName, { url: newUrl, sheetName: normalizedSheetName });
     },
-    [pendingUpdateEventName, eventMetadata, handleUpdateEvent],
+    [pendingUpdateEventName, eventMetadata, handleUpdateEvent, guardSharingStructureMutation],
   );
 
 
   const handleImportMapData = useCallback(async (eventName: string) => {
+    if (guardSharingStructureMutation(eventName)) return;
     if (mapFileInputRef.current) {
       mapFileInputRef.current.dataset.eventName = eventName;
       mapFileInputRef.current.click();
     }
-  }, []);
+  }, [guardSharingStructureMutation]);
 
   const handleMapFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -2615,6 +3832,7 @@ const App: React.FC = () => {
     ) => {
       const eventName = mapImportPendingEventName;
       if (!eventName) return;
+      if (guardSharingStructureMutation(eventName)) return;
 
       saveBlockDetectionSettings(eventName, settings);
 
@@ -2688,7 +3906,7 @@ const App: React.FC = () => {
         alert(messages.join('\n'));
       }
     },
-    [eventLists, mapImportPendingEventName],
+    [eventLists, mapImportPendingEventName, guardSharingStructureMutation],
   );
 
 
@@ -2701,7 +3919,8 @@ const App: React.FC = () => {
 
   const handleAddToExecuteListFromMap = useCallback(
     (itemId: string) => {
-      if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return;
+      if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return [];
+      if (guardSharingStructureMutation(activeEventName)) return [];
 
       const dayName = activeEventDate;
       const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
@@ -2711,98 +3930,190 @@ const App: React.FC = () => {
       };
       const currentMapData = mapData[activeEventName]?.[currentMapTabName];
 
-      setExecuteModeItems((prev) => {
-        const newExecuteItems = computeAddToExecuteListFromMap(
-          itemId,
-          dayName,
-          items,
-          prev[activeEventName] || {},
-          halls,
-          hallRouteSettingsForMap,
-          currentMapData,
-        );
-        return { ...prev, [activeEventName]: newExecuteItems };
-      });
+      const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
+      const result = computeAddToExecuteListFromMapWithResult(
+        itemId,
+        dayName,
+        items,
+        currentForEvent,
+        halls,
+        hallRouteSettingsForMap,
+        currentMapData,
+      );
+
+      if (!result.accepted) return [];
+      commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
+      return result.insertedItemIds;
     },
-    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData],
+    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, commitExecuteModeItemsForEvent, guardSharingStructureMutation],
   );
 
 
   const handleAddToExecuteListFromMapAtPosition = useCallback(
     (itemId: string, referenceItemId: string, position: 'before' | 'after') => {
-      if (!activeEventName || !isMapTab || !activeEventDate) return;
+      if (!activeEventName || !isMapTab || !activeEventDate) return [];
+      if (guardSharingStructureMutation(activeEventName)) return [];
 
       const dayName = activeEventDate;
+      const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
+      const result = computeInsertIntoExecuteAtPosition(
+        [itemId],
+        referenceItemId,
+        position,
+        currentForEvent,
+        dayName,
+        items,
+        {
+          canInsertWithReference: (insertedItemId, refId) =>
+            areItemsInSameHallGroup(insertedItemId, refId, dayName),
+        },
+      );
+      if (!result.accepted) return [];
 
-      setExecuteModeItems((prev) => {
-        const newExecuteItems = computeAddToExecuteListFromMapAtPosition(
-          itemId,
-          referenceItemId,
-          position,
-          prev[activeEventName] || {},
-          dayName,
-        );
-        return { ...prev, [activeEventName]: newExecuteItems };
-      });
+      commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
+      return result.insertedItemIds;
     },
-    [activeEventName, activeEventDate, isMapTab],
+    [activeEventName, activeEventDate, isMapTab, items, areItemsInSameHallGroup, commitExecuteModeItemsForEvent, guardSharingStructureMutation],
   );
 
 
   const handleRemoveFromExecuteListFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab || !activeEventDate) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       const dayName = activeEventDate;
+      const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
+      const removeIds = expandExecuteRemovalItemIds([itemId], dayName, items, currentForEvent);
+      const newExecuteItems = computeRemoveFromExecuteListFromMap(
+        itemId,
+        currentForEvent,
+        dayName,
+        items,
+      );
 
-      setExecuteModeItems((prev) => {
-        const newExecuteItems = computeRemoveFromExecuteListFromMap(
-          itemId,
-          prev[activeEventName] || {},
-          dayName,
-        );
-        return { ...prev, [activeEventName]: newExecuteItems };
-      });
+      commitExecuteModeItemsForEvent(activeEventName, newExecuteItems);
+      return removeIds;
     },
-    [activeEventName, activeEventDate, isMapTab],
+    [activeEventName, activeEventDate, isMapTab, items, commitExecuteModeItemsForEvent, guardSharingStructureMutation],
+  );
+
+
+  const handleBatchAddToExecuteListFromMap = useCallback(
+    (itemIds: string[]) => {
+      if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return [];
+      if (guardSharingStructureMutation(activeEventName)) return [];
+      const dayName = activeEventDate;
+      const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+      const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
+        hallOrder: [],
+        hallVisitLists: [],
+      };
+      const currentMap = mapData[activeEventName]?.[currentMapTabName];
+
+      {
+        let current = executeModeItemsRef.current[activeEventName] || {};
+        const insertedItemIds: string[] = [];
+        for (const id of itemIds) {
+          const result = computeAddToExecuteListFromMapWithResult(id, dayName, items, current, halls, hallRouteSettingsForMap, currentMap);
+          if (result.accepted) {
+            current = result.executeModeItems;
+            insertedItemIds.push(...result.insertedItemIds);
+          }
+        }
+        commitExecuteModeItemsForEvent(activeEventName, current);
+        return insertedItemIds;
+      }
+    },
+    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, commitExecuteModeItemsForEvent, guardSharingStructureMutation],
+  );
+
+
+  const handleBatchAddToExecuteListFromMapAtPosition = useCallback(
+    (itemIds: string[], referenceItemId: string, position: 'before' | 'after') => {
+      if (!activeEventName || !isMapTab || !activeEventDate) return [];
+      if (guardSharingStructureMutation(activeEventName)) return [];
+      const dayName = activeEventDate;
+
+      const current = executeModeItemsRef.current[activeEventName] || {};
+      const result = computeInsertIntoExecuteAtPosition(
+        itemIds,
+        referenceItemId,
+        position,
+        current,
+        dayName,
+        items,
+        {
+          canInsertWithReference: (insertedItemId, refId) =>
+            areItemsInSameHallGroup(insertedItemId, refId, dayName),
+        },
+      );
+      if (!result.accepted) return [];
+      commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
+      return result.insertedItemIds;
+    },
+    [activeEventName, activeEventDate, isMapTab, items, areItemsInSameHallGroup, commitExecuteModeItemsForEvent, guardSharingStructureMutation],
+  );
+
+
+  const handleBatchRemoveFromExecuteListFromMap = useCallback(
+    (itemIds: string[]) => {
+      if (!activeEventName || !isMapTab || !activeEventDate) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
+      const dayName = activeEventDate;
+
+      let current = executeModeItemsRef.current[activeEventName] || {};
+      const removedItemIds: string[] = [];
+      for (const id of itemIds) {
+        const removeIds = expandExecuteRemovalItemIds([id], dayName, items, current);
+        current = computeRemoveFromExecuteListFromMap(id, current, dayName, items);
+        removedItemIds.push(...removeIds.filter((removeId) => !removedItemIds.includes(removeId)));
+      }
+      commitExecuteModeItemsForEvent(activeEventName, current);
+      return removedItemIds;
+    },
+    [activeEventName, activeEventDate, isMapTab, items, commitExecuteModeItemsForEvent, guardSharingStructureMutation],
   );
 
 
   const handleAddNewItemFromMap = useCallback(
     (eventDate: string, block: string, number: string) => {
+      if (guardSharingStructureMutation(activeEventName)) return;
       setNewItemDefaults({ eventDate, block, number });
       setItemToEdit(null);
       setActiveTab('import');
     },
-    [],
+    [activeEventName, guardSharingStructureMutation],
   );
 
 
   const handleAddItemFromFocusMode = useCallback(
     (newItem: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => {
       if (!activeEventName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       const result = computeAddItemFromFocusMode(
         eventLists[activeEventName] || [],
         newItem,
-        executeModeItems[activeEventName] || {},
+        executeModeItemsRef.current[activeEventName] || {},
       );
 
       setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
-      setExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
+      updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
     },
-    [activeEventName, eventLists, executeModeItems],
+    [activeEventName, eventLists, executeModeItems, guardSharingStructureMutation],
   );
 
 
   const handleMoveToFirstFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       if (!activeEventDate) return;
       const dayName = activeEventDate;
 
-      setExecuteModeItems((prev) => {
+      updateExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
         const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
 
@@ -2815,18 +4126,19 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeEventDate, isMapTab],
+    [activeEventName, activeEventDate, isMapTab, guardSharingStructureMutation],
   );
 
 
   const handleMoveToLastFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       if (!activeEventDate) return;
       const dayName = activeEventDate;
 
-      setExecuteModeItems((prev) => {
+      updateExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
         const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
 
@@ -2839,7 +4151,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeEventDate, isMapTab],
+    [activeEventName, activeEventDate, isMapTab, guardSharingStructureMutation],
   );
 
 
@@ -2854,8 +4166,8 @@ const App: React.FC = () => {
 
   const currentTabItems = useMemo(() => {
     if (!activeEventName || !eventDates.includes(activeTab)) return [];
-    return items.filter((item) => item.eventDate === activeTab);
-  }, [items, activeTab, activeEventName, eventDates]);
+    return filterAssignedOnlyItems(items.filter((item) => item.eventDate === activeTab));
+  }, [items, activeTab, activeEventName, eventDates, filterAssignedOnlyItems]);
 
 
   const [mapTabMenuOpen, setMapTabMenuOpen] = useState<string | null>(null);
@@ -2864,7 +4176,6 @@ const App: React.FC = () => {
     top: 0,
   });
 
-  // ヘッダーマップトグルボタンの長押しメニュー外クリックで閉じる
   React.useEffect(() => {
     if (mapTabMenuOpen !== 'mapToggle') return;
     const handleClickOutside = (e: MouseEvent) => {
@@ -2900,17 +4211,16 @@ const App: React.FC = () => {
   const [mapSmartInsertEnabled, setMapSmartInsertEnabled] = useState<boolean>(() => {
     try {
       const saved = localStorage.getItem('mapSmartInsertEnabled');
-      return saved !== null ? saved === 'true' : true; // 保存値が存在しない場合は有効を既定値として扱う。
+      return saved !== null ? saved === 'true' : true;
     } catch {
       return true;
     }
   });
-  const [mapSmartInsertMode, setMapSmartInsertMode] = useState<'card' | 'preview'>(() => {
+  const [mapSmartInsertMode, setMapSmartInsertMode] = useState<SmartInsertMode>(() => {
     try {
-      const saved = localStorage.getItem('mapSmartInsertMode');
-      return saved === 'card' || saved === 'preview' ? saved : 'card';
+      return normalizeSmartInsertMode(localStorage.getItem('mapSmartInsertMode'));
     } catch {
-      return 'card';
+      return 'map';
     }
   });
   const [smartInsertToast, setSmartInsertToast] = useState<string | null>(null);
@@ -3017,6 +4327,7 @@ const App: React.FC = () => {
   const handleVisitListOrderUpdate = useCallback(
     (newOrderItems: ShoppingItem[]) => {
       if (!visitListPanelMapTab || !activeEventName) return;
+      if (!activeSharingSession && guardSharingStructureMutation(activeEventName)) return;
 
       const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
@@ -3026,7 +4337,7 @@ const App: React.FC = () => {
       const newIds = newOrderItems.map((item) => item.id);
 
 
-      setExecuteModeItems((prev) => ({
+      updateExecuteModeItems((prev) => ({
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
@@ -3035,18 +4346,63 @@ const App: React.FC = () => {
       }));
       setVisitListHasUnsavedChanges(true);
     },
-    [visitListPanelMapTab, activeEventName],
+    [visitListPanelMapTab, activeEventName, activeSharingSession, guardSharingStructureMutation],
   );
 
 
-  const handleVisitListConfirm = useCallback(() => {
+  const handleVisitListConfirm = useCallback(async () => {
+    if (
+      visitListHasUnsavedChanges &&
+      visitListPanelMapTab &&
+      activeEventName &&
+      activeSharingSession?.eventName === activeEventName
+    ) {
+      const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
+      if (dayMatch) {
+        const dayName = dayMatch[1];
+        const itemIds = executeModeItemsRef.current[activeEventName]?.[dayName] || [];
+        const expectedVersion = activeSharingSession.routeOrderVersions[dayName] ?? 0;
+        setSharingBusy(true);
+        const result = await updateRouteOrder({
+          roomId: activeSharingSession.roomId,
+          eventDate: dayName,
+          itemIds,
+          expectedVersion,
+        });
+        setSharingBusy(false);
+
+        if (!result.ok) {
+          setSharingErrorMessage(`巡回順の更新に失敗しました: ${result.error.code}`);
+          if (result.error.code === 'ROUTE_ORDER_CONFLICT') {
+            void synchronizeSharingSession(activeSharingSession.sessionId, 'manual');
+          }
+          return;
+        }
+
+        await saveSharingSessionState({
+          ...activeSharingSession,
+          routeOrderVersions: result.data.routeOrderVersions,
+          lastAckAt: new Date().toISOString(),
+        });
+        setSharingStatusMessage(`${dayName} の巡回順を更新しました。`);
+        setSharingErrorMessage(null);
+      }
+    }
     setVisitListHasUnsavedChanges(false);
     setVisitListOriginalOrder([]);
-  }, []);
+  }, [
+    activeEventName,
+    activeSharingSession,
+    saveSharingSessionState,
+    synchronizeSharingSession,
+    visitListHasUnsavedChanges,
+    visitListPanelMapTab,
+  ]);
 
 
   const handleVisitListCancel = useCallback(() => {
     if (!visitListPanelMapTab || !activeEventName) return;
+    if (!activeSharingSession && guardSharingStructureMutation(activeEventName)) return;
 
     const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
     if (!dayMatch) return;
@@ -3054,7 +4410,7 @@ const App: React.FC = () => {
 
 
     if (visitListOriginalOrder.length > 0) {
-      setExecuteModeItems((prev) => ({
+      updateExecuteModeItems((prev) => ({
         ...prev,
         [activeEventName]: {
           ...prev[activeEventName],
@@ -3064,7 +4420,7 @@ const App: React.FC = () => {
     }
     setVisitListHasUnsavedChanges(false);
     setVisitListOriginalOrder([]);
-  }, [visitListOriginalOrder, visitListPanelMapTab, activeEventName]);
+  }, [visitListOriginalOrder, visitListPanelMapTab, activeEventName, activeSharingSession, guardSharingStructureMutation]);
 
 
   const handleVisitListClose = useCallback(() => {
@@ -3117,6 +4473,7 @@ const App: React.FC = () => {
   const handleUpdateItemPriority = useCallback(
     (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
       if (!activeEventName || !visitListPanelMapTab) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       const halls = hallDefinitions[activeEventName]?.[visitListPanelMapTab] || [];
       const mapDataForTab = mapData[activeEventName]?.[visitListPanelMapTab];
@@ -3142,8 +4499,187 @@ const App: React.FC = () => {
           [visitListPanelMapTab]: result.hallRouteSettings,
         },
       }));
+
+      const item = items.find((i) => i.id === itemId);
+      if (item) {
+        const dayName = item.eventDate;
+        updateExecuteModeItems((prev) => {
+          const currentExecItems = prev[activeEventName] || {};
+          const reordered = reorderExecuteIdsForSpaceAdjacency(
+            itemId,
+            result.items,
+            currentExecItems,
+            dayName,
+          );
+          return {
+            ...prev,
+            [activeEventName]: reordered,
+          };
+        });
+      }
     },
-    [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData, hallRouteSettings],
+    [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData, hallRouteSettings, guardSharingStructureMutation],
+  );
+
+  const handleUpdateItemPriorityFromEdit = useCallback(
+    (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
+      if (!activeEventName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
+
+      const currentItems = eventLists[activeEventName] || [];
+      const item = currentItems.find((i) => i.id === itemId);
+      if (!item) return;
+
+      const resolvedHallId = getItemHallId(item, item.eventDate);
+      const mapTabForItem = getMapTabForDate(item.eventDate);
+      const mapHallIds = new Set(
+        mapTabForItem
+          ? (hallDefinitions[activeEventName]?.[mapTabForItem] || []).map((h) => h.id)
+          : [],
+      );
+      const targetKey: string =
+        resolvedHallId && mapHallIds.has(resolvedHallId)
+          ? (mapTabForItem as string)
+          : getMaplessKey(item.eventDate);
+
+      const targetHalls = hallDefinitions[activeEventName]?.[targetKey] || [];
+      const targetMapData =
+        targetKey.startsWith(MAPLESS_HALL_KEY)
+          ? undefined
+          : mapData[activeEventName]?.[targetKey];
+      const targetSettings = hallRouteSettings[activeEventName]?.[targetKey] || {
+        hallOrder: [],
+        hallVisitLists: [],
+      };
+
+      const result = computeUpdateItemPriority(
+        itemId,
+        priorityLevel,
+        currentItems,
+        targetHalls,
+        targetMapData,
+        targetSettings,
+      );
+
+      setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
+      setHallRouteSettings((prev) => ({
+        ...prev,
+        [activeEventName]: {
+          ...prev[activeEventName],
+          [targetKey]: result.hallRouteSettings,
+        },
+      }));
+
+      const dayName = item.eventDate;
+      updateExecuteModeItems((prev) => {
+        const currentExecItems = prev[activeEventName] || {};
+        const reordered = reorderExecuteIdsForSpaceAdjacency(
+          itemId,
+          result.items,
+          currentExecItems,
+          dayName,
+        );
+        return {
+          ...prev,
+          [activeEventName]: reordered,
+        };
+      });
+    },
+    [
+      activeEventName,
+      eventLists,
+      hallDefinitions,
+      mapData,
+      hallRouteSettings,
+      getItemHallId,
+      getMapTabForDate,
+      guardSharingStructureMutation,
+    ],
+  );
+
+  const handleUpdateHallOrderForPriorityChangeFromEdit = useCallback(
+    (
+      itemId: string,
+      newPriorityLevel: 'none' | 'priority' | 'highest',
+      oldPriorityLevel: 'none' | 'priority' | 'highest',
+    ) => {
+      if (!activeEventName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
+
+      const currentItems = eventLists[activeEventName] || [];
+      const item = currentItems.find((i) => i.id === itemId);
+      if (!item) return;
+
+      const resolvedHallId = getItemHallId(item, item.eventDate);
+
+      const mapTabForItem = getMapTabForDate(item.eventDate);
+      const mapHallIds = new Set(
+        mapTabForItem
+          ? (hallDefinitions[activeEventName]?.[mapTabForItem] || []).map((h) => h.id)
+          : [],
+      );
+      const targetKey: string =
+        resolvedHallId && mapHallIds.has(resolvedHallId)
+          ? (mapTabForItem as string)
+          : getMaplessKey(item.eventDate);
+
+      const targetHalls = hallDefinitions[activeEventName]?.[targetKey] || [];
+      const targetMapData =
+        targetKey.startsWith(MAPLESS_HALL_KEY)
+          ? undefined
+          : mapData[activeEventName]?.[targetKey];
+      const targetSettings = hallRouteSettings[activeEventName]?.[targetKey] || {
+        hallOrder: [],
+        hallVisitLists: [],
+      };
+
+      const itemsAfter = currentItems.map((i) =>
+        i.id === itemId ? { ...i, priorityLevel: newPriorityLevel } : i,
+      );
+
+      const nextSettings = computeHallOrderForPriorityChange(
+        itemId,
+        newPriorityLevel,
+        oldPriorityLevel,
+        itemsAfter,
+        targetHalls,
+        targetMapData,
+        targetSettings,
+      );
+
+      setHallRouteSettings((prev) => ({
+        ...prev,
+        [activeEventName]: {
+          ...prev[activeEventName],
+          [targetKey]: nextSettings,
+        },
+      }));
+
+      const dayName = item.eventDate;
+      updateExecuteModeItems((prev) => {
+        const currentExecItems = prev[activeEventName] || {};
+        const reordered = reorderExecuteIdsForSpaceAdjacency(
+          itemId,
+          itemsAfter,
+          currentExecItems,
+          dayName,
+        );
+        return {
+          ...prev,
+          [activeEventName]: reordered,
+        };
+      });
+    },
+    [
+      activeEventName,
+      eventLists,
+      hallDefinitions,
+      mapData,
+      hallRouteSettings,
+      getItemHallId,
+      getMapTabForDate,
+      guardSharingStructureMutation,
+    ],
   );
 
   const handleTabChangeWithVisitListCheck = (newTab: string): boolean => {
@@ -3181,6 +4717,7 @@ const App: React.FC = () => {
   const handleUpdateBlocks = useCallback(
     (blocks: BlockDefinition[]) => {
       if (!activeEventName || !isMapTab || !currentMapData || !currentMapTabName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       setMapData((prev) => ({
         ...prev,
@@ -3193,48 +4730,48 @@ const App: React.FC = () => {
         },
       }));
     },
-    [activeEventName, isMapTab, currentMapTabName, currentMapData],
+    [activeEventName, isMapTab, currentMapTabName, currentMapData, guardSharingStructureMutation],
   );
 
 
   const handleUpdateHalls = useCallback(
     (halls: HallDefinition[]) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
 
-      setHallDefinitions((prev) => ({
-        ...prev,
-        [activeEventName]: {
-          ...prev[activeEventName],
-          [currentMapTabName]: halls,
-        },
-      }));
+      const { polygonHalls, maplessHalls } = splitHallsForStorage(halls);
+      const maplessKey = activeEventDate ? getMaplessKey(activeEventDate) : null;
 
+      setHallDefinitions((prev) =>
+        updateHallDefinitionsForHalls({
+          previous: prev,
+          eventName: activeEventName,
+          mapTabName: currentMapTabName,
+          maplessKey,
+          polygonHalls,
+          maplessHalls,
+        }),
+      );
 
-      const existingOrder = currentHallRouteSettings.hallOrder;
-      const newHallIds = halls.map((h) => h.id);
-      const updatedOrder = [
-        ...existingOrder.filter((id) => newHallIds.includes(id)),
-        ...newHallIds.filter((id) => !existingOrder.includes(id)),
-      ];
-
-      setHallRouteSettings((prev) => ({
-        ...prev,
-        [activeEventName]: {
-          ...prev[activeEventName],
-          [currentMapTabName]: {
-            ...currentHallRouteSettings,
-            hallOrder: updatedOrder,
-          },
-        },
-      }));
+      setHallRouteSettings((prev) =>
+        updateHallRouteSettingsForHalls({
+          previous: prev,
+          eventName: activeEventName,
+          mapTabName: currentMapTabName,
+          maplessKey,
+          polygonHalls,
+          maplessHalls,
+        }),
+      );
     },
-    [activeEventName, isMapTab, currentMapTabName, currentHallRouteSettings],
+    [activeEventName, activeEventDate, isMapTab, currentMapTabName, guardSharingStructureMutation],
   );
 
 
   const handleUpdateHallRouteSettings = useCallback(
     (settings: HallRouteSettings) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       setHallRouteSettings((prev) => ({
         ...prev,
@@ -3244,114 +4781,262 @@ const App: React.FC = () => {
         },
       }));
     },
-    [activeEventName, isMapTab, currentMapTabName],
+    [activeEventName, isMapTab, currentMapTabName, guardSharingStructureMutation],
+  );
+
+  const handleUpdateMaplessHalls = useCallback(
+    (halls: HallDefinition[]) => {
+      if (!activeEventName || !activeEventDate) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
+
+      const maplessKey = getMaplessKey(activeEventDate);
+
+      setHallDefinitions((prev) =>
+        updateMaplessHallDefinitions({
+          previous: prev,
+          eventName: activeEventName,
+          maplessKey,
+          halls,
+        }),
+      );
+
+      setHallRouteSettings((prev) =>
+        updateMaplessHallRouteSettings({
+          previous: prev,
+          eventName: activeEventName,
+          maplessKey,
+          halls,
+        }),
+      );
+    },
+    [activeEventName, activeEventDate, guardSharingStructureMutation],
+  );
+
+  const mapTabDates = useMemo(
+    () => eventDates.filter((date) => !!getMapTabForDate(date)),
+    [eventDates, getMapTabForDate],
+  );
+
+  const handleSyncMaplessHallsToOtherDates = useCallback(
+    (targetDates: string[]) => {
+      if (!activeEventName || !activeEventDate) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
+
+      const sourceKey = getMaplessKey(activeEventDate);
+      const sourceHalls = hallDefinitions[activeEventName]?.[sourceKey] || [];
+      if (sourceHalls.length === 0) return;
+
+      const clonedByDate = cloneHallsForDates(sourceHalls, targetDates);
+
+      setHallDefinitions((prev) => {
+        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        for (const date of targetDates) {
+          const targetKey = getMaplessKey(date);
+          updated[activeEventName][targetKey] = clonedByDate.get(date)!.halls;
+        }
+        return updated;
+      });
+
+      setHallRouteSettings((prev) => {
+        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        for (const date of targetDates) {
+          const targetKey = getMaplessKey(date);
+          const { idMap } = clonedByDate.get(date)!;
+          const sourceSettings = prev[activeEventName]?.[sourceKey] || emptyHallRouteSettings();
+          updated[activeEventName][targetKey] = remapHallRouteSettings(sourceSettings, idMap);
+        }
+        return updated;
+      });
+    },
+    [activeEventName, activeEventDate, hallDefinitions, hallRouteSettings, guardSharingStructureMutation],
+  );
+
+  const handleSyncPolygonHallsToOtherDates = useCallback(
+    (targetDates: string[]) => {
+      if (!activeEventName || !isMapTab || !currentMapTabName) return;
+
+      const sourceHalls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+      if (sourceHalls.length === 0) return;
+
+      const targetMapTabsByDate = new Map<string, string>();
+      for (const date of targetDates) {
+        const targetMapTab = getMapTabForDate(date);
+        if (!targetMapTab) continue;
+        targetMapTabsByDate.set(date, targetMapTab);
+      }
+      const clonedByDate = cloneHallsForDates(sourceHalls, Array.from(targetMapTabsByDate.keys()));
+
+      setHallDefinitions((prev) => {
+        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        for (const [date, { halls }] of clonedByDate) {
+          const targetMapTab = targetMapTabsByDate.get(date)!;
+          updated[activeEventName][targetMapTab] = halls;
+        }
+        return updated;
+      });
+
+      setHallRouteSettings((prev) => {
+        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        for (const [date, { idMap }] of clonedByDate) {
+          const targetMapTab = targetMapTabsByDate.get(date)!;
+          const sourceSettings =
+            prev[activeEventName]?.[currentMapTabName] || emptyHallRouteSettings();
+          updated[activeEventName][targetMapTab] = remapHallRouteSettings(sourceSettings, idMap);
+        }
+        return updated;
+      });
+    },
+    [activeEventName, isMapTab, currentMapTabName, hallDefinitions, hallRouteSettings, getMapTabForDate],
+  );
+
+
+  const globalHallOrderMapTabName = useMemo(
+    () => (activeEventDate ? getMapTabForDate(activeEventDate) : null),
+    [activeEventDate, getMapTabForDate],
+  );
+
+  const hasUndefinedPriorityItems = useMemo((): boolean => {
+    if (!activeEventName || !activeEventDate) return false;
+    const ids = executeModeItems[activeEventName]?.[activeEventDate] || [];
+    return ids.some((id) => {
+      const it = items.find((i) => i.id === id);
+      if (!it) return false;
+      const p = it.priorityLevel || 'none';
+      return p === 'priority' || p === 'highest';
+    });
+  }, [activeEventName, activeEventDate, executeModeItems, items]);
+
+  const globalHallOrderHalls = useMemo((): HallDefinition[] => {
+    if (!activeEventName) return [];
+    const hasMap = !!globalHallOrderMapTabName;
+    const mapHalls = hasMap
+      ? hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []
+      : [];
+    const maplessKey = activeEventDate ? getMaplessKey(activeEventDate) : null;
+    const maplessHalls = maplessKey ? hallDefinitions[activeEventName]?.[maplessKey] || [] : [];
+    return [...mapHalls, ...maplessHalls];
+  }, [activeEventName, activeEventDate, globalHallOrderMapTabName, hallDefinitions]);
+
+  const globalHallOrderRouteSettings = useMemo((): HallRouteSettings => {
+    const executeIds =
+      activeEventName && activeEventDate
+        ? executeModeItems[activeEventName]?.[activeEventDate] || []
+        : [];
+    return buildMergedHallRouteSettings({
+      eventName: activeEventName,
+      dayName: activeEventDate,
+      mapTabName: globalHallOrderMapTabName,
+      hallDefinitionsStore: hallDefinitions,
+      hallRouteSettingsStore: hallRouteSettings,
+      executeIds,
+      items,
+      mapDataStore: mapData,
+    }).mergedSettings;
+  }, [
+    activeEventName,
+    activeEventDate,
+    globalHallOrderMapTabName,
+    hallDefinitions,
+    hallRouteSettings,
+    executeModeItems,
+    items,
+    mapData,
+  ]);
+
+  // 統合順序の保存: hallIDごとにmap側/mapless側を判別して分離保存
+  const handleUpdateGlobalHallRouteSettings = useCallback(
+    (settings: HallRouteSettings) => {
+      if (!activeEventName) return;
+
+      const mapHallIds = new Set<string>(
+        globalHallOrderMapTabName
+          ? (hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []).map(
+              (h) => h.id,
+            )
+          : [],
+      );
+      const maplessKey = activeEventDate ? getMaplessKey(activeEventDate) : null;
+      const maplessHallIds = new Set<string>(
+        (maplessKey ? hallDefinitions[activeEventName]?.[maplessKey] || [] : []).map((h) => h.id),
+      );
+
+      const { mapSettings, maplessSettings } = splitGlobalHallRouteSettings({
+        settings,
+        mapHallIds,
+        maplessHallIds,
+        hasMapTab: !!globalHallOrderMapTabName,
+      });
+
+      setHallRouteSettings((prev) => {
+        const eventSettings = { ...(prev[activeEventName] || {}) };
+        if (globalHallOrderMapTabName) {
+          eventSettings[globalHallOrderMapTabName] = mapSettings;
+        }
+        if (maplessKey) eventSettings[maplessKey] = maplessSettings;
+        return {
+          ...prev,
+          [activeEventName]: eventSettings,
+        };
+      });
+    },
+    [activeEventName, activeEventDate, globalHallOrderMapTabName, hallDefinitions],
+  );
+
+  const getGlobalHallItemCount = useCallback(
+    (groupId: string): number => {
+      if (!activeEventName || !activeEventDate) return 0;
+      const executeIds =
+        executeModeItems[activeEventName]?.[activeEventDate] || [];
+      return computeGlobalHallItemCount({
+        groupId,
+        executeIds,
+        items,
+        getItemHallId,
+      });
+    },
+    [activeEventName, activeEventDate, executeModeItems, items, getItemHallId],
   );
 
 
   const handleReorderExecuteListByHallOrder = useCallback(
     (hallOrder: string[]) => {
-      if (!activeEventName || !isMapTab || !currentMapTabName) return;
+      if (!activeEventName) return;
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       if (!activeEventDate) return;
       const dayName = activeEventDate;
 
-      const currentMapData = mapData[activeEventName]?.[currentMapTabName];
-      const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
-      const currentHallRouteSettings = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
-        hallOrder: [],
-        hallVisitLists: [],
-      };
+      const mapTabForDate = getMapTabForDate(dayName);
+      const currentMapData = mapTabForDate
+        ? mapData[activeEventName]?.[mapTabForDate]
+        : undefined;
+      const mapHalls = mapTabForDate
+        ? hallDefinitions[activeEventName]?.[mapTabForDate] || []
+        : [];
+      const maplessKey = getMaplessKey(dayName);
+      const maplessHalls = hallDefinitions[activeEventName]?.[maplessKey] || [];
+      const halls = [...mapHalls, ...maplessHalls];
+      const currentHallRouteSettings = getCombinedHallRouteSettingsForDate({
+        eventName: activeEventName,
+        dayName,
+        mapTabName: mapTabForDate,
+        hallRouteSettings,
+      });
 
-      if (!currentMapData || halls.length === 0) return;
 
-      setExecuteModeItems((prev) => {
+      updateExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
         const dayItems = [...(eventItems[dayName] || [])];
 
         if (dayItems.length === 0) return prev;
 
-
-        const itemsMap = new Map(items.map((i) => [i.id, i]));
-        const getHallIdForItem = (itemId: string): string | null => {
-          const item = itemsMap.get(itemId);
-          if (!item || !currentMapData) return null;
-
-          const blockName = item.block?.trim() || '';
-          let block = currentMapData.blocks.find((b) => b.name === blockName);
-          if (!block) {
-            const candidates = currentMapData.blocks.filter(
-              (b) => b.name.toLowerCase() === blockName.toLowerCase(),
-            );
-            if (candidates.length === 1) {
-              block = candidates[0];
-            }
-          }
-          if (!block) return null;
-
-          const centerRow = (block.startRow + block.endRow) / 2;
-          const centerCol = (block.startCol + block.endCol) / 2;
-
-          for (const hall of halls) {
-            if (
-              hall.vertices.length >= 4 &&
-              isPointInPolygon(centerRow, centerCol, hall.vertices)
-            ) {
-              return hall.id;
-            }
-          }
-          return null;
-        };
-
-
-        const itemsByHall = new Map<string | null, Set<string>>();
-        dayItems.forEach((itemId) => {
-          const hallId = getHallIdForItem(itemId);
-          if (!itemsByHall.has(hallId)) {
-            itemsByHall.set(hallId, new Set());
-          }
-          itemsByHall.get(hallId)!.add(itemId);
-        });
-
-
-        const visitOrderMap = new Map<string, number>();
-        currentHallRouteSettings.hallVisitLists.forEach((list) => {
-          list.itemIds.forEach((itemId, index) => {
-            visitOrderMap.set(itemId, index);
-          });
-        });
-
-
-        const sortItemsInHall = (itemIds: Set<string>): string[] => {
-          const itemsArray = Array.from(itemIds);
-          return itemsArray.sort((a, b) => {
-            const orderA = visitOrderMap.get(a);
-            const orderB = visitOrderMap.get(b);
-
-
-            if (orderA !== undefined && orderB !== undefined) {
-              return orderA - orderB;
-            }
-            if (orderA !== undefined) return -1;
-            if (orderB !== undefined) return 1;
-            return dayItems.indexOf(a) - dayItems.indexOf(b);
-          });
-        };
-
-
-        const reorderedItems: string[] = [];
-
-        hallOrder.forEach((hallId) => {
-          const hallItems = itemsByHall.get(hallId);
-          if (hallItems && hallItems.size > 0) {
-            reorderedItems.push(...sortItemsInHall(hallItems));
-            itemsByHall.delete(hallId);
-          }
-        });
-
-        itemsByHall.forEach((hallItems) => {
-          if (hallItems.size > 0) {
-            reorderedItems.push(...sortItemsInHall(hallItems));
-          }
+        const reorderedItems = reorderExecuteIdsByHallOrder({
+          hallOrder,
+          dayItems,
+          items,
+          halls,
+          mapData: currentMapData,
+          hallRouteSettings: currentHallRouteSettings,
         });
 
         return {
@@ -3363,7 +5048,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, isMapTab, currentMapTabName, activeEventDate, mapData, hallDefinitions, hallRouteSettings, items],
+    [activeEventName, activeEventDate, getMapTabForDate, mapData, hallDefinitions, hallRouteSettings, items, guardSharingStructureMutation],
   );
 
 
@@ -3414,6 +5099,7 @@ const App: React.FC = () => {
 
 
   const handleConfirmVertexSelection = useCallback(() => {
+    if (guardSharingStructureMutation(activeEventName)) return;
     if (vertexSelectionMode) {
       const sorted = sortVerticesNonCrossing(vertexSelectionMode.clickedVertices);
       setPendingVertexSelection({
@@ -3423,7 +5109,7 @@ const App: React.FC = () => {
     }
     setVertexSelectionMode(null);
     setHallDefinitionMode(true);
-  }, [sortVerticesNonCrossing, vertexSelectionMode]);
+  }, [sortVerticesNonCrossing, vertexSelectionMode, activeEventName, guardSharingStructureMutation]);
 
 
   const handleCancelVertexSelection = useCallback(() => {
@@ -3478,13 +5164,14 @@ const App: React.FC = () => {
   const handleStartCellSelection = useCallback(
     (type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual', editingData?: unknown) => {
       setCellSelectionMode({ type, clickedCells: [], editingBlockData: editingData });
-      setBlockDefinitionMode(false); // セル選択モード中はブロック定義パネルを閉じる。
+      setBlockDefinitionMode(false);
     },
     [],
   );
 
 
   const handleConfirmCellSelection = useCallback(() => {
+    if (guardSharingStructureMutation(activeEventName)) return;
     if (cellSelectionMode) {
       setPendingCellSelection({
         type: cellSelectionMode.type,
@@ -3493,20 +5180,20 @@ const App: React.FC = () => {
       });
     }
     setCellSelectionMode(null);
-    setBlockDefinitionMode(true); // セル選択を確定したらブロック定義パネルを再表示する。
-  }, [cellSelectionMode]);
+    setBlockDefinitionMode(true);
+  }, [cellSelectionMode, activeEventName, guardSharingStructureMutation]);
 
 
   const handleCancelCellSelection = useCallback(() => {
     if (cellSelectionMode?.editingBlockData) {
       setPendingCellSelection({
-        type: 'cancelled', // 編集キャンセルとして確認ダイアログへ引き渡す。
+        type: 'cancelled',
         cells: [],
         editingData: cellSelectionMode.editingBlockData,
       });
     }
     setCellSelectionMode(null);
-    setBlockDefinitionMode(true); // セル選択を終了したらブロック定義パネルを再表示する。
+    setBlockDefinitionMode(true);
   }, [cellSelectionMode]);
 
 
@@ -3609,10 +5296,24 @@ const App: React.FC = () => {
     const currentEventDate = activeEventDate;
     const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
     const itemsMap = new Map(items.map((item) => [item.id, item]));
-    return executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
-  }, [activeEventName, activeTab, executeModeItems, items, eventDates]);
+    const orderedItems = executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+    return filterAssignedOnlyItems(orderedItems);
+  }, [activeEventName, activeTab, executeModeItems, items, eventDates, filterAssignedOnlyItems]);
 
-  const visibleItems = useMemo(() => {
+  useEffect(() => {
+    executeColumnItemsRef.current = executeColumnItems;
+  }, [executeColumnItems]);
+
+  useEffect(() => {
+    recentlyChangedItemIdsRef.current = recentlyChangedItemIds;
+  }, [recentlyChangedItemIds]);
+
+  useEffect(() => {
+    setShowPostponeFilterButton(false);
+    setShowLateFilterButton(false);
+  }, [currentMode, sortState]);
+
+  const baseFilteredItems = useMemo(() => {
     const currentEventDate = activeEventDate;
     const itemsForTab = currentTabItems;
 
@@ -3620,32 +5321,16 @@ const App: React.FC = () => {
 
     const mode = dayModes[activeEventName]?.[currentEventDate];
 
-    let result: ShoppingItem[];
     if (mode === 'execute') {
       if (sortState === 'Manual') {
-        result = executeColumnItems;
-      } else {
-        const filterStatus = sortState as Exclude<SortState, 'Manual'>;
-        result = executeColumnItems.filter(
-          (item) => item.purchaseStatus === filterStatus || recentlyChangedItemIds.has(item.id),
-        );
+        return executeColumnItems;
       }
-    } else {
-      result = itemsForTab;
+      const filterStatus = sortState as Exclude<SortState, 'Manual'>;
+      return executeColumnItems.filter((item) => matchesPurchaseStatusFilter(item, filterStatus));
     }
 
-    // 「自分のアイテムのみ」フィルタ（共有ルーム参加中 + フィルタON時）
-    if (sharing?.myItemsOnly && sharing.userId) {
-      const myJerseyStr = sharing.members.find((m) => m.userId === sharing.userId)?.jerseyNumber;
-      const myJersey = myJerseyStr != null ? String(myJerseyStr) : null;
-      if (myJersey) {
-        result = result.filter(
-          (item) => !item.assignedTo || item.assignedTo === myJersey,
-        );
-      }
-    }
 
-    return result;
+    return itemsForTab;
   }, [
     activeTab,
     currentTabItems,
@@ -3654,152 +5339,92 @@ const App: React.FC = () => {
     dayModes,
     executeColumnItems,
     eventDates,
-    recentlyChangedItemIds,
-    sharing?.myItemsOnly,
-    sharing?.userId,
-    sharing?.members,
   ]);
 
-  // Feature 3: スペース内全アイテム処理後の自動進行
-  React.useEffect(() => {
-    if (!spaceGroupingEnabled || currentMode !== 'execute') {
-      if (autoAdvanceTimerRef.current) {
-        clearTimeout(autoAdvanceTimerRef.current);
-        autoAdvanceTimerRef.current = null;
-      }
-      return;
+  const baseFilteredItemIds = useMemo(
+    () => new Set(baseFilteredItems.map((item) => item.id)),
+    [baseFilteredItems],
+  );
+
+  const temporaryVisibleItems = useMemo(() => {
+    if (!activeEventName) return [];
+    const mode = dayModes[activeEventName]?.[activeEventDate];
+    if (mode !== 'execute' || sortState === 'Manual') return [];
+
+    return executeColumnItems.filter(
+      (item) => recentlyChangedItemIds.has(item.id) && !baseFilteredItemIds.has(item.id),
+    );
+  }, [
+    activeEventDate,
+    activeEventName,
+    baseFilteredItemIds,
+    dayModes,
+    executeColumnItems,
+    recentlyChangedItemIds,
+    sortState,
+  ]);
+
+  const temporaryVisibleCount = temporaryVisibleItems.length;
+  const limitedCounts = useMemo(() => getLimitedPurchaseCounts(baseFilteredItems), [baseFilteredItems]);
+
+  const sortDisplayLabel = useMemo(() => {
+    const buildTemporaryLabel = (baseLabel: string): string =>
+      temporaryVisibleCount > 0
+        ? `${baseLabel}\uFF08\u4E00\u6642\u8868\u793A${temporaryVisibleCount}\u4EF6\uFF09`
+        : baseLabel;
+
+    if (sortState !== 'LimitedPurchase') {
+      return buildTemporaryLabel(sortLabels[sortState]);
     }
 
-    // スペースグループを構築
-    const groupMap = new Map<string, ShoppingItem[]>();
-    const groupOrder: string[] = [];
-    executeColumnItems.forEach((item) => {
-      const key = getSpaceKey(item.block, item.number);
-      if (!groupMap.has(key)) {
-        groupMap.set(key, []);
-        groupOrder.push(key);
-      }
-      groupMap.get(key)!.push(item);
-    });
+    const details = [
+      limitedCounts.missing > 0 ? `\u672A\u5165\u529B${limitedCounts.missing}` : null,
+      temporaryVisibleCount > 0
+        ? `\u4E00\u6642\u8868\u793A${temporaryVisibleCount}`
+        : null,
+    ].filter(Boolean);
 
-    // 展開中スペースで全アイテム処理済のものを探す
-    let completedSpaceKey: string | null = null;
-    for (const key of groupOrder) {
-      if (collapsedSpaces.has(key)) continue;
-      const spaceItems = groupMap.get(key)!;
-      if (spaceItems.length === 0) continue;
+    return details.length > 0
+      ? `\u9650\u6570 ${limitedCounts.total}\u4EF6\uFF08${details.join('\u30FB')}\uFF09`
+      : `\u9650\u6570 ${limitedCounts.total}\u4EF6`;
+  }, [limitedCounts.missing, limitedCounts.total, sortState, temporaryVisibleCount]);
 
-      const allProcessed = spaceItems.every((item) => {
-        if (item.purchaseStatus === 'None') return false;
-        if (item.purchaseStatus === 'Purchased' && (item.price == null || item.price === 0)) return false;
-        return true;
-      });
-
-      if (allProcessed && userInteractedSpaces.has(key)) {
-        completedSpaceKey = key;
-        break;
-      }
+  const visibleItemIds = useMemo(() => {
+    const currentEventDate = activeEventDate;
+    if (!activeEventName) return new Set(baseFilteredItems.map((item) => item.id));
+    const mode = dayModes[activeEventName]?.[currentEventDate];
+    if (mode !== 'execute' || sortState === 'Manual') {
+      return new Set(baseFilteredItems.map((item) => item.id));
     }
 
-    if (completedSpaceKey) {
-      if (autoAdvanceTimerRef.current) return;
-      const targetKey = completedSpaceKey;
-      autoAdvanceTimerRef.current = setTimeout(() => {
-        autoAdvanceTimerRef.current = null;
-        // フラグクリア
-        setUserInteractedSpaces((prev) => {
-          const next = new Set(prev);
-          next.delete(targetKey);
-          return next;
-        });
-        setCollapsedSpaces((prev) => {
-          const next = new Set(prev);
-          next.add(targetKey);
-          const currentIndex = groupOrder.indexOf(targetKey);
-          if (currentIndex < groupOrder.length - 1) {
-            next.delete(groupOrder[currentIndex + 1]);
-          }
-          return next;
-        });
-      }, 5000);
-    } else {
-      if (autoAdvanceTimerRef.current) {
-        clearTimeout(autoAdvanceTimerRef.current);
-        autoAdvanceTimerRef.current = null;
-      }
+    return new Set([
+      ...baseFilteredItems.map((item) => item.id),
+      ...temporaryVisibleItems.map((item) => item.id),
+    ]);
+  }, [activeEventDate, activeEventName, baseFilteredItems, dayModes, sortState, temporaryVisibleItems]);
+
+  const visibleItems = useMemo(() => {
+    if (!activeEventName) return currentTabItems;
+    const mode = dayModes[activeEventName]?.[activeEventDate];
+    if (mode === 'execute') {
+      return executeColumnItems.filter((item) => visibleItemIds.has(item.id));
     }
-  }, [spaceGroupingEnabled, currentMode, executeColumnItems, collapsedSpaces, userInteractedSpaces]);
+    return baseFilteredItems;
+  }, [
+    activeEventDate,
+    activeEventName,
+    baseFilteredItems,
+    currentTabItems,
+    dayModes,
+    executeColumnItems,
+    visibleItemIds,
+  ]);
 
-  // Feature 4: 全アイテム処理完了検知 → トースト表示 → 自動フィルタ切替
-  // ユーザーが購入状態を変更した結果として全アイテムが完了した時のみ発火
-  React.useEffect(() => {
-    if (currentMode !== 'execute') {
-      return () => {
-        if (completionToastTimerRef.current) {
-          clearInterval(completionToastTimerRef.current);
-          completionToastTimerRef.current = null;
-          completionCountdownRef.current = 0;
-          setCompletionToast(null);
-        }
-      };
-    }
+  const focusModeItems = useMemo(
+    () => filterAssignedOnlyItems(items),
+    [filterAssignedOnlyItems, items],
+  );
 
-    // ユーザーが操作していない場合はスキップ（モード切替・画面遷移で誤発火しない）
-    if (recentlyChangedItemIds.size === 0) {
-      return;
-    }
-
-    const allCompleted = executeColumnItems.length > 0 &&
-      executeColumnItems.every((item) => item.purchaseStatus !== 'None');
-
-    // 最下段アイテムの変更時のみカウントダウン開始
-    // スペース別表示: 最後のスペースの最後のアイテム、通常表示: リスト最後のアイテム
-    let isLastItemChanged = false;
-    if (lastChangedItemIdRef.current && executeColumnItems.length > 0) {
-      if (spaceGroupingEnabled) {
-        // スペース別: 最後のスペースの最後のアイテムかチェック
-        const lastItem = executeColumnItems[executeColumnItems.length - 1];
-        isLastItemChanged = lastItem != null && lastItem.id === lastChangedItemIdRef.current;
-      } else {
-        // 通常表示: リスト最後のアイテムかチェック
-        const lastItem = executeColumnItems[executeColumnItems.length - 1];
-        isLastItemChanged = lastItem.id === lastChangedItemIdRef.current;
-      }
-    }
-
-    if (allCompleted && isLastItemChanged && !completionToastTimerRef.current) {
-      // カウントダウン開始（refでカウント管理、setState呼び出しはcallback直下）
-      completionCountdownRef.current = 6;
-      setCompletionToast({ countdown: 6 });
-      completionToastTimerRef.current = setInterval(() => {
-        completionCountdownRef.current -= 1;
-        if (completionCountdownRef.current <= 0) {
-          clearInterval(completionToastTimerRef.current!);
-          completionToastTimerRef.current = null;
-          setCompletionToast(null);
-          setRecentlyChangedItemIds(new Set());
-          setSortState('Postpone');
-        } else {
-          setCompletionToast({ countdown: completionCountdownRef.current });
-        }
-      }, 1000);
-    } else if (!allCompleted && completionToastTimerRef.current) {
-      // 未購入アイテムが出現したらタイマーキャンセル
-      clearInterval(completionToastTimerRef.current);
-      completionToastTimerRef.current = null;
-      completionCountdownRef.current = 0;
-      setCompletionToast(null);
-    }
-
-    return () => {
-      if (completionToastTimerRef.current) {
-        clearInterval(completionToastTimerRef.current);
-        completionToastTimerRef.current = null;
-        completionCountdownRef.current = 0;
-        setCompletionToast(null);
-      }
-    };
-  }, [currentMode, executeColumnItems, recentlyChangedItemIds, spaceGroupingEnabled]);
 
   const searchMatches = useMemo(() => {
     if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
@@ -3892,6 +5517,24 @@ const App: React.FC = () => {
     });
   }, [activeEventName, activeTab, executeModeItems, currentTabItems, eventDates]);
 
+  const allBlocksForHallDefinition = useMemo(() => {
+    if (!activeEventName) return [];
+    const blocks = new Set(currentTabItems.map((item) => item.block).filter(Boolean));
+    return Array.from(blocks).sort((a, b) => {
+      const numA = Number(a);
+      const numB = Number(b);
+      if (!isNaN(numA) && !isNaN(numB)) {
+        return numA - numB;
+      }
+      return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
+    });
+  }, [activeEventName, currentTabItems]);
+
+  const currentMaplessHalls = useMemo(() => {
+    if (!activeEventName || !activeEventDate) return [];
+    return hallDefinitions[activeEventName]?.[getMaplessKey(activeEventDate)] || [];
+  }, [activeEventName, activeEventDate, hallDefinitions]);
+
   const candidateColumnItems = useMemo(() => {
     if (!activeEventName) return [];
     const currentEventDate = activeEventDate;
@@ -3903,7 +5546,22 @@ const App: React.FC = () => {
       filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
     }
 
-    return filtered;
+    if (candidateNumberSortDirection !== null) {
+      return filtered;
+    }
+
+    return [...filtered].sort((a, b) => {
+      const blockComparison = a.block.localeCompare(b.block, 'ja', {
+        numeric: true,
+        sensitivity: 'base',
+      });
+      if (blockComparison !== 0) return blockComparison;
+
+      return a.number.localeCompare(b.number, 'ja', {
+        numeric: true,
+        sensitivity: 'base',
+      });
+    });
   }, [
     activeEventName,
     activeTab,
@@ -3911,6 +5569,7 @@ const App: React.FC = () => {
     currentTabItems,
     selectedBlockFilters,
     eventDates,
+    candidateNumberSortDirection,
   ]);
 
 
@@ -4035,848 +5694,122 @@ const App: React.FC = () => {
   const mainContentVisible = eventDates.includes(activeTab);
 
   const handleZoomChange = (newZoom: number) => {
-    setZoomLevel(Math.max(30, Math.min(150, newZoom)));
+    setZoomLevel(Math.max(15, Math.min(150, newZoom)));
   };
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-900 dark:text-slate-200 font-sans">
-      {(showHeaderBar || showTabBar) && (
-        <header className="bg-white dark:bg-slate-800 shadow-sm sticky top-0 z-10">
-          {showHeaderBar && (
-            <div className="max-w-7xl mx-auto py-2 px-4 sm:px-6 lg:px-8 flex justify-between items-center">
-              <div>
-                <div className="flex items-center gap-2 flex-wrap">
-                  <h1 className="text-lg font-bold text-slate-900 dark:text-white truncate max-w-[200px]">
-                    {activeEventName || '即売会購入巡回表'}
-                  </h1>
-                  {activeEventName &&
-                    mainContentVisible &&
-                    items.length > 0 &&
-                    currentMode === 'execute' && (
-                      <button
-                        onClick={handleBlockSortToggle}
-                        className={`p-2 rounded-md transition-colors duration-200 ${
-                          blockSortDirection
-                            ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
-                            : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400'
-                        }`}
-                        title={
-                          blockSortDirection === 'desc'
-                            ? 'ブロックを降順で並べ替え'
-                            : blockSortDirection === 'asc'
-                              ? 'ブロックを昇順で並べ替え'
-                              : 'ブロック番号で並べ替え'
-                        }
-                      >
-                        {blockSortDirection === 'desc' ? (
-                          <SortDescendingIcon className="w-5 h-5" />
-                        ) : (
-                          <SortAscendingIcon className="w-5 h-5" />
-                        )}
-                      </button>
-                    )}
-                  {activeEventName &&
-                    mainContentVisible &&
-                    items.length > 0 &&
-                    currentMode === 'edit' && (
-                      <button
-                        onClick={handleBlockSortToggleCandidate}
-                        className={`p-2 rounded-md transition-colors duration-200 ${
-                          blockSortDirection
-                            ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
-                            : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400'
-                        }`}
-                        title={
-                          blockSortDirection === 'desc'
-                            ? '候補ブロックを降順で並べ替え'
-                            : blockSortDirection === 'asc'
-                              ? '候補ブロックを昇順で並べ替え'
-                              : '候補ブロックを番号で並べ替え'
-                        }
-                      >
-                        {blockSortDirection === 'desc' ? (
-                          <SortDescendingIcon className="w-5 h-5" />
-                        ) : (
-                          <SortAscendingIcon className="w-5 h-5" />
-                        )}
-                      </button>
-                    )}
-                  {activeEventName &&
-                    mainContentVisible &&
-                    getMapTabForDate(activeEventDate || '') && (
-                        <div className="relative">
-                          <button
-                            ref={mapToggleButtonRef}
-                            onClick={() => {
-                              if (mapToggleLongPressFiredRef.current) {
-                                mapToggleLongPressFiredRef.current = false;
-                                return;
-                              }
-                              setMapViewActive((prev) => !prev);
-                            }}
-                            onPointerDown={(e) => {
-                              if (!mapViewActive) return;
-                              const target = e.currentTarget as HTMLButtonElement;
-                              const rect = target.getBoundingClientRect();
-                              const menuLeft = rect.left + rect.width / 2;
-                              const menuTop = rect.bottom + 4;
-                              mapToggleLongPressRef.current = window.setTimeout(() => {
-                                mapToggleLongPressFiredRef.current = true;
-                                setMapTabMenuPosition({ left: menuLeft, top: menuTop });
-                                setMapTabMenuOpen('mapToggle');
-                                mapToggleLongPressRef.current = null;
-                              }, 500);
-                            }}
-                            onPointerUp={() => {
-                              if (mapToggleLongPressRef.current) {
-                                clearTimeout(mapToggleLongPressRef.current);
-                                mapToggleLongPressRef.current = null;
-                              }
-                            }}
-                            onPointerCancel={() => {
-                              if (mapToggleLongPressRef.current) {
-                                clearTimeout(mapToggleLongPressRef.current);
-                                mapToggleLongPressRef.current = null;
-                              }
-                            }}
-                            className={`p-2 rounded-md transition-colors duration-200 ${
-                              mapViewActive
-                                ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
-                                : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400'
-                            }`}
-                            title={mapViewActive ? 'リスト表示に切り替え' : 'マップ表示に切り替え'}
-                          >
-                            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l5.447 2.724A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7" />
-                            </svg>
-                          </button>
-                          {mapTabMenuOpen === 'mapToggle' && (
-                            <div
-                              ref={mapToggleMenuRef}
-                              className="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 min-w-[160px]"
-                              style={{
-                                left: `${mapTabMenuPosition.left}px`,
-                                top: `${mapTabMenuPosition.top}px`,
-                                transform: 'translateX(-50%)',
-                              }}
-                            >
-                              <div className="py-1">
-                                <button
-                                  onClick={() => {
-                                    setMapTabMenuOpen(null);
-                                    if (currentMapTabName) openVisitListPanel(currentMapTabName);
-                                  }}
-                                  className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
-                                >
-                                  <span>📍</span> 訪問リスト
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setMapTabMenuOpen(null);
-                                    setBlockDefinitionMode(true);
-                                  }}
-                                  className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
-                                >
-                                  <span>🔲</span> ブロック定義
-                                </button>
-                                <button
-                                  onClick={() => {
-                                    setMapTabMenuOpen(null);
-                                    setHallDefinitionMode(true);
-                                  }}
-                                  className="w-full text-left px-4 py-2 text-sm text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 flex items-center gap-2"
-                                >
-                                  <span>🏛️</span> ホール定義
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                    )}
-                  {/* 表示処理の補足 */}
-                  <div className="relative">
-                    <button
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        setUiSettingsPanelOpen(!uiSettingsPanelOpen);
-                      }}
-                      className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                        uiSettingsPanelOpen
-                          ? 'bg-slate-200 dark:bg-slate-700'
-                          : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
-                      }`}
-                      title="表示項目の設定"
-                      style={{
-                        WebkitTapHighlightColor: 'transparent',
-                        minWidth: '44px',
-                        minHeight: '44px',
-                      }}
-                      type="button"
-                    >
-                      <svg
-                        className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none"
-                        fill="none"
-                        stroke="currentColor"
-                        viewBox="0 0 24 24"
-                      >
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
-                        />
-                        <path
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          strokeWidth={2}
-                          d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-                        />
-                      </svg>
-                    </button>
+      <AppHeaderShell
+        activeEventDate={activeEventDate}
+        activeEventName={activeEventName}
+        activeTab={activeTab}
+        blockSortDirection={blockSortDirection}
+        currentHalls={currentHalls}
+        currentMapData={currentMapData}
+        currentMapTabName={currentMapTabName}
+        currentMapTabRotationState={currentMapTabRotationState}
+        currentMode={currentMode}
+        currentSearchIndex={currentSearchIndex}
+        DEFAULT_OUTLINE_STYLE={DEFAULT_OUTLINE_STYLE}
+        DEFAULT_PURCHASE_STATUS_CONTROL_MODE={DEFAULT_PURCHASE_STATUS_CONTROL_MODE}
+        DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY={
+          DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY
+        }
+        DEFAULT_UI_VISIBILITY={DEFAULT_UI_VISIBILITY}
+        disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+        disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
+        skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
+        eventDates={eventDates}
+        executeSpaceGroupingEnabled={executeSpaceGroupingEnabled}
+        getHallExecuteCount={getHallExecuteCount}
+        getHallTotalItemCount={getHallTotalItemCount}
+        getMapTabForDate={getMapTabForDate}
+        globalHallOrderHalls={globalHallOrderHalls}
+        globalHallOrderMapTabName={globalHallOrderMapTabName}
+        handleBlockSortToggle={handleBlockSortToggle}
+        handleBlockSortToggleCandidate={handleBlockSortToggleCandidate}
+        handleBulkSort={handleBulkSort}
+        handleClearSelection={handleClearSelection}
+        handleMapTabRotationAngleChange={handleMapTabRotationAngleChange}
+        handleMoveToExecuteColumn={handleMoveToExecuteColumn}
+        handleRemoveFromExecuteColumn={handleRemoveFromExecuteColumn}
+        handleSearchNext={handleSearchNext}
+        handleSetViewMode={handleSetViewMode}
+        handleSortToggle={handleSortToggle}
+        hasCandidateSelection={hasCandidateSelection}
+        hasExecuteSelection={hasExecuteSelection}
+        hasUndefinedPriorityItems={hasUndefinedPriorityItems}
+        isMapTab={isMapTab}
+        items={items}
+        itemToEdit={itemToEdit}
+        layoutMode={layoutMode}
+        mainContentVisible={mainContentVisible}
+        mapHallSelectorOpen={mapHallSelectorOpen}
+        mapIsRouteVisible={mapIsRouteVisible}
+        mapSelectedHallId={mapSelectedHallId}
+        mapSmartInsertEnabled={mapSmartInsertEnabled}
+        mapSmartInsertMode={mapSmartInsertMode}
+        mapTabMenuOpen={mapTabMenuOpen}
+        mapTabMenuPosition={mapTabMenuPosition}
+        mapToggleButtonRef={mapToggleButtonRef}
+        mapToggleLongPressFiredRef={mapToggleLongPressFiredRef}
+        mapToggleLongPressRef={mapToggleLongPressRef}
+        mapToggleMenuRef={mapToggleMenuRef}
+        mapViewActive={mapViewActive}
+        numberCellOutlineStyle={numberCellOutlineStyle}
+        openVisitListPanel={openVisitListPanel}
+        purchaseStatusControlMode={purchaseStatusControlMode}
+        searchKeyword={searchKeyword}
+        selectedItemIds={selectedItemIds}
+        setActiveEventName={setActiveEventName}
+        setActiveTab={setActiveTab}
+        setBlockDefinitionMode={setBlockDefinitionMode}
+        setExecuteCollapsedSpaces={setExecuteCollapsedSpaces}
+        setExecuteSpaceGroupingEnabled={setExecuteSpaceGroupingEnabled}
+        setGlobalHallOrderPanelOpen={setGlobalHallOrderPanelOpen}
+        setHallDefinitionMode={setHallDefinitionMode}
+        setItemToEdit={setItemToEdit}
+        setLayoutMode={setLayoutMode}
+        setMapHallSelectorOpen={setMapHallSelectorOpen}
+        setMapIsHallOrderOpen={setMapIsHallOrderOpen}
+        setMapIsRouteVisible={setMapIsRouteVisible}
+        setMapSelectedHallId={setMapSelectedHallId}
+        setMapSmartInsertEnabled={setMapSmartInsertEnabled}
+        setMapSmartInsertMode={setMapSmartInsertMode}
+        setMapTabMenuOpen={setMapTabMenuOpen}
+        setMapTabMenuPosition={setMapTabMenuPosition}
+        setMapViewActive={setMapViewActive}
+        setDisablePriceUndefinedCheck={setDisablePriceUndefinedCheck}
+        setDisableLimitedPurchaseQuantityCheck={setDisableLimitedPurchaseQuantityCheck}
+        setSkipLimitedPurchaseForSingleQuantity={setSkipLimitedPurchaseForSingleQuantity}
+        setNumberCellOutlineStyle={setNumberCellOutlineStyle}
+        setPurchaseStatusControlMode={setPurchaseStatusControlMode}
+        setSearchKeyword={setSearchKeyword}
+        setSelectedBlockFilters={setSelectedBlockFilters}
+        setSelectedItemIds={setSelectedItemIds}
+        setSimpleHallDefinitionMode={setSimpleHallDefinitionMode}
+        setThemeMode={setThemeMode}
+        setUiSettingsPanelOpen={setUiSettingsPanelOpen}
+        setUiVisibilityOverride={setUiVisibilityOverride}
+        setUiVisibilitySettings={setUiVisibilitySettings}
+        showHeaderBar={showHeaderBar}
+        showMoveButtons={showMoveButtons}
+        showSmartInsertToast={showSmartInsertToast}
+        showTabBar={showTabBar}
+        smartInsertLongPressRef={smartInsertLongPressRef}
+        smartInsertLongPressTriggeredRef={smartInsertLongPressTriggeredRef}
+        sortLabels={sortLabels}
+        sortDisplayLabel={sortDisplayLabel}
+        sortState={sortState}
+        TabButton={TabButton}
+        themeMode={themeMode}
+        uiSettingsPanelOpen={uiSettingsPanelOpen}
+        uiVisibilitySettings={uiVisibilitySettings}
+        updateUIVisibilityConfig={updateUIVisibilityConfig}
+        visibleSearchMatches={visibleSearchMatches}
+      />
 
-                    {/* 表示処理の補足 */}
-                    {uiSettingsPanelOpen && (
-                      <>
-                        <div
-                          className="fixed inset-0 z-40"
-                          onClick={() => setUiSettingsPanelOpen(false)}
-                        />
-                        <div className="absolute left-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 p-4 min-w-[320px] max-h-[70vh] overflow-y-auto">
-                          {/* テーマ切替 */}
-                          <div className="mb-3 flex items-center justify-between">
-                            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">テーマ</span>
-                            <button
-                              onClick={(e) => {
-                                e.preventDefault();
-                                e.stopPropagation();
-                                setThemeMode((prev) => {
-                                  const next =
-                                    prev === 'system' ? 'light' : prev === 'light' ? 'dark' : 'system';
-                                  return next;
-                                });
-                              }}
-                              className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
-                              title={
-                                themeMode === 'system'
-                                  ? 'システム設定 → ライトモードへ'
-                                  : themeMode === 'light'
-                                    ? 'ライトモード → ダークモードへ'
-                                    : 'ダークモード → システム設定へ'
-                              }
-                              style={{ WebkitTapHighlightColor: 'transparent' }}
-                              type="button"
-                            >
-                              {themeMode === 'system' ? (
-                                <svg className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                </svg>
-                              ) : themeMode === 'light' ? (
-                                <svg className="w-5 h-5 text-amber-500 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707M16 12a4 4 0 11-8 0 4 4 0 018 0z" />
-                                </svg>
-                              ) : (
-                                <svg className="w-5 h-5 text-indigo-400 pointer-events-none" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20.354 15.354A9 9 0 018.646 3.646 9.003 9.003 0 0012 21a9.003 9.003 0 008.354-5.646z" />
-                                </svg>
-                              )}
-                            </button>
-                          </div>
 
-                          {/* レイアウト切替 */}
-                          <div className="mb-3 pb-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-                            <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">レイアウト</span>
-                            <button
-                              onClick={() => setLayoutMode(layoutMode === 'pc' ? 'smartphone' : 'pc')}
-                              className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                                layoutMode === 'smartphone'
-                                  ? 'bg-blue-600 text-white'
-                                  : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'
-                              }`}
-                              title={layoutMode === 'pc' ? 'スマートフォンモードに切替' : 'タブレット/PCモードに切替'}
-                              style={{ WebkitTapHighlightColor: 'transparent' }}
-                              type="button"
-                            >
-                              {layoutMode === 'smartphone' ? (
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 18h.01M8 21h8a2 2 0 002-2V5a2 2 0 00-2-2H8a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                                </svg>
-                              ) : (
-                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
-                                </svg>
-                              )}
-                            </button>
-                          </div>
-
-                          <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3">
-                            ヘッダー/タブバー表示設定
-                          </h3>
-
-                          {/* 表示処理の補足 */}
-                          <div className="mb-3">
-                            <h4 className="text-xs font-semibold text-purple-600 dark:text-purple-400 mb-2">
-                              集中モード
-                            </h4>
-                            <div className="space-y-2">
-                              {(
-                                [
-                                  ['focus_sp_mapOn', 'スマホ・マップ表示'],
-                                  ['focus_sp_mapOff', 'スマホ・マップ非表示'],
-                                  ['focus_pc_mapOn', 'パソコン・マップ表示'],
-                                  ['focus_pc_mapOff', 'パソコン・マップ非表示'],
-                                ] as [keyof typeof uiVisibilitySettings, string][]
-                              ).map(([key, label]) => (
-                                <div
-                                  key={key}
-                                  className="flex items-center justify-between text-xs"
-                                >
-                                  <span className="text-slate-600 dark:text-slate-400 min-w-[110px]">
-                                    {label}
-                                  </span>
-                                  <div className="flex items-center gap-3">
-                                    <label className="flex items-center gap-1 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={uiVisibilitySettings[key].header}
-                                        onChange={(e) =>
-                                          updateUIVisibilityConfig(key, 'header', e.target.checked)
-                                        }
-                                        className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                      />
-                                      <span className="text-slate-500 dark:text-slate-400">
-                                        ヘッダー
-                                      </span>
-                                    </label>
-                                    <label className="flex items-center gap-1 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={uiVisibilitySettings[key].tabBar}
-                                        onChange={(e) =>
-                                          updateUIVisibilityConfig(key, 'tabBar', e.target.checked)
-                                        }
-                                        className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                      />
-                                      <span className="text-slate-500 dark:text-slate-400">
-                                        タブバー
-                                      </span>
-                                    </label>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* 表示処理の補足 */}
-                          <div className="mb-3">
-                            <h4 className="text-xs font-semibold text-green-600 dark:text-green-400 mb-2">
-                              実行モード
-                            </h4>
-                            <div className="space-y-2">
-                              {(
-                                [
-                                  ['execute_sp', 'スマートフォン'],
-                                  ['execute_pc', 'パソコン / タブレット'],
-                                ] as [keyof typeof uiVisibilitySettings, string][]
-                              ).map(([key, label]) => (
-                                <div
-                                  key={key}
-                                  className="flex items-center justify-between text-xs"
-                                >
-                                  <span className="text-slate-600 dark:text-slate-400 min-w-[110px]">
-                                    {label}
-                                  </span>
-                                  <div className="flex items-center gap-3">
-                                    <label className="flex items-center gap-1 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={uiVisibilitySettings[key].header}
-                                        onChange={(e) =>
-                                          updateUIVisibilityConfig(key, 'header', e.target.checked)
-                                        }
-                                        className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                      />
-                                      <span className="text-slate-500 dark:text-slate-400">
-                                        ヘッダー
-                                      </span>
-                                    </label>
-                                    <label className="flex items-center gap-1 cursor-pointer">
-                                      <input
-                                        type="checkbox"
-                                        checked={uiVisibilitySettings[key].tabBar}
-                                        onChange={(e) =>
-                                          updateUIVisibilityConfig(key, 'tabBar', e.target.checked)
-                                        }
-                                        className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                      />
-                                      <span className="text-slate-500 dark:text-slate-400">
-                                        タブバー
-                                      </span>
-                                    </label>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* セル輪郭スタイル */}
-                          <div className="mb-3 pt-3 border-t border-slate-200 dark:border-slate-700">
-                            <h4 className="text-xs font-semibold text-orange-600 dark:text-orange-400 mb-2">
-                              セル輪郭スタイル
-                            </h4>
-                            <div className="space-y-1">
-                              {([
-                                ['rounded', '角丸（デフォルト）'],
-                                ['square', '直角'],
-                                ['dashed', '破線'],
-                                ['none', '輪郭なし'],
-                              ] as [import('./types').NumberCellOutlineStyle, string][]).map(([value, label]) => (
-                                <label key={value} className="flex items-center gap-2 cursor-pointer text-xs">
-                                  <input
-                                    type="radio"
-                                    name="numberCellOutlineStyle"
-                                    value={value}
-                                    checked={numberCellOutlineStyle === value}
-                                    onChange={() => setNumberCellOutlineStyle(value)}
-                                    className="text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                                  />
-                                  <span className="text-slate-600 dark:text-slate-400">{label}</span>
-                                </label>
-                              ))}
-                            </div>
-                          </div>
-
-                          {/* 表示処理の補足 */}
-                          <button
-                            onClick={() => {
-                              setUiVisibilitySettings(DEFAULT_UI_VISIBILITY);
-                              setUiVisibilityOverride(false);
-                              setNumberCellOutlineStyle(DEFAULT_OUTLINE_STYLE);
-                            }}
-                            className="w-full mt-1 px-3 py-1.5 text-xs text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
-                          >
-                            デフォルトに戻す
-                          </button>
-                        </div>
-                      </>
-                    )}
-                  </div>
-
-                  {/* 表示処理の補足 */}
-                  {activeEventName && mainContentVisible && !mapViewActive && (
-                    <div className="flex items-center gap-1 ml-2 border-l border-slate-300 dark:border-slate-600 pl-2">
-                      {/* 表示処理の補足 */}
-                      <button
-                        onClick={() => handleSetViewMode('edit')}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                          currentMode === 'edit'
-                            ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400'
-                            : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
-                        }`}
-                        title="編集モード"
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          minWidth: '40px',
-                          minHeight: '40px',
-                        }}
-                        type="button"
-                      >
-                        <span className="text-lg">📝</span>
-                      </button>
-
-                      {/* 表示処理の補足 */}
-                      <button
-                        onClick={() => handleSetViewMode('execute')}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                          currentMode === 'execute'
-                            ? 'bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400'
-                            : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
-                        }`}
-                        title="実行モード"
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          minWidth: '40px',
-                          minHeight: '40px',
-                        }}
-                        type="button"
-                      >
-                        <span className="text-lg">🏃‍♂️</span>
-                      </button>
-
-                      {/* 表示処理の補足 */}
-                      <button
-                        onClick={() => handleSetViewMode('focus')}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                          currentMode === 'focus'
-                            ? 'bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400'
-                            : 'hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400'
-                        }`}
-                        title="集中モード"
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          minWidth: '40px',
-                          minHeight: '40px',
-                        }}
-                        type="button"
-                      >
-                        <span className="text-lg">🔍</span>
-                      </button>
-                    </div>
-                  )}
-
-                  {/* 表示処理の補足 */}
-                  {activeEventName && isMapTab && currentMapData && (
-                    <>
-                      {currentHalls.length > 0 && (
-                        <>
-                          {/* 表示処理の補足 */}
-                          <div className="relative">
-                            <button
-                              onClick={() => setMapHallSelectorOpen(!mapHallSelectorOpen)}
-                              className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                                mapHallSelectorOpen
-                                  ? 'bg-slate-200 dark:bg-slate-700'
-                                  : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
-                              }`}
-                              title={`表示ホール: ${mapSelectedHallId === 'all' ? '全ホール' : currentHalls.find((h) => h.id === mapSelectedHallId)?.name || ''}`}
-                              style={{
-                                WebkitTapHighlightColor: 'transparent',
-                                minWidth: '44px',
-                                minHeight: '44px',
-                              }}
-                              type="button"
-                            >
-                              {/* 表示処理の補足 */}
-                              <svg
-                                className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none"
-                                viewBox="0 0 24 24"
-                                fill="currentColor"
-                              >
-                                <path d="M2 18h3v-4h2v4h2v-6H7l-2-4-2 4H2v6zm5-8h2V8h2V6h2v2h2v2h2v8h-3v-4h-2v4h-3v-8z" />
-                                <path d="M14 10h2v2h-2zM14 14h2v2h-2zM18 10h2v2h-2zM18 14h2v2h-2z" />
-                              </svg>
-                            </button>
-                            {mapSelectedHallId !== 'all' && (
-                              <span className="absolute -top-1 -right-1 w-3 h-3 bg-blue-500 rounded-full"></span>
-                            )}
-
-                            {/* 表示処理の補足 */}
-                            {mapHallSelectorOpen && (
-                              <>
-                                {/* 表示処理の補足 */}
-                                <div
-                                  className="fixed inset-0 z-40"
-                                  onClick={() => setMapHallSelectorOpen(false)}
-                                />
-                                <div className="absolute right-0 top-full mt-1 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-lg border border-slate-200 dark:border-slate-700 py-1 min-w-[200px]">
-                                  <button
-                                    onClick={() => {
-                                      setMapSelectedHallId('all');
-                                      setMapHallSelectorOpen(false);
-                                    }}
-                                    className={`w-full px-4 py-2 text-left text-sm transition-colors ${
-                                      mapSelectedHallId === 'all'
-                                        ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
-                                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-                                    }`}
-                                  >
-                                    全ホール
-                                  </button>
-                                  {currentHalls.map((hall) => {
-                                    const executeCount = getHallExecuteCount(hall.id);
-                                    const totalCount = getHallTotalItemCount(hall.id);
-                                    return (
-                                      <button
-                                        key={hall.id}
-                                        onClick={() => {
-                                          setMapSelectedHallId(hall.id);
-                                          setMapHallSelectorOpen(false);
-                                        }}
-                                        className={`w-full px-4 py-2 text-left text-sm transition-colors flex justify-between items-center ${
-                                          mapSelectedHallId === hall.id
-                                            ? 'bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300'
-                                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700'
-                                        }`}
-                                      >
-                                        <span>{hall.name}</span>
-                                        <span className="text-xs text-slate-500 dark:text-slate-400 ml-2">
-                                          ({executeCount}/{totalCount}件)
-                                        </span>
-                                      </button>
-                                    );
-                                  })}
-                                </div>
-                              </>
-                            )}
-                          </div>
-
-                          {/* 表示処理の補足 */}
-                          <button
-                            onClick={() => setMapIsHallOrderOpen(true)}
-                            className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
-                            title="ホール順を編集"
-                            style={{
-                              WebkitTapHighlightColor: 'transparent',
-                              minWidth: '44px',
-                              minHeight: '44px',
-                            }}
-                            type="button"
-                          >
-                            <svg
-                              className="w-5 h-5 text-slate-600 dark:text-slate-400 pointer-events-none"
-                              fill="none"
-                              stroke="currentColor"
-                              viewBox="0 0 24 24"
-                            >
-                              <path
-                                strokeLinecap="round"
-                                strokeLinejoin="round"
-                                strokeWidth={2}
-                                d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"
-                              />
-                            </svg>
-                          </button>
-                        </>
-                      )}
-
-                      {/* 表示処理の補足 */}
-                      <button
-                        onClick={() => setMapIsRouteVisible(!mapIsRouteVisible)}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
-                          mapIsRouteVisible
-                            ? 'bg-blue-100 dark:bg-blue-900/50 hover:bg-blue-200 dark:hover:bg-blue-800'
-                            : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
-                        }`}
-                        title={mapIsRouteVisible ? 'ルート表示: 有効' : 'ルート表示: 無効'}
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          minWidth: '44px',
-                          minHeight: '44px',
-                        }}
-                        type="button"
-                      >
-                        {/* 表示処理の補足 */}
-                        <svg
-                          className={`w-5 h-5 pointer-events-none ${mapIsRouteVisible ? 'text-blue-600 dark:text-blue-400' : 'text-slate-600 dark:text-slate-400'}`}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <circle cx="6" cy="6" r="2" strokeWidth={2} />
-                          <circle cx="18" cy="18" r="2" strokeWidth={2} />
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M6 8v4a4 4 0 004 4h4M14 12l4 4m0 0l-4 4"
-                          />
-                        </svg>
-                      </button>
-
-                      {/* 表示処理の補足 */}
-                      <button
-                        onPointerDown={() => {
-                          smartInsertLongPressTriggeredRef.current = false;
-                          smartInsertLongPressRef.current = setTimeout(() => {
-                            smartInsertLongPressTriggeredRef.current = true;
-                            const newMode = mapSmartInsertMode === 'card' ? 'preview' : 'card';
-                            setMapSmartInsertMode(newMode);
-                            showSmartInsertToast(
-                              newMode === 'preview'
-                                ? 'プレビューモードに切り替え'
-                                : 'カードモードに切り替え',
-                            );
-                          }, 500);
-                        }}
-                        onPointerUp={() => {
-                          if (smartInsertLongPressRef.current) {
-                            clearTimeout(smartInsertLongPressRef.current);
-                            smartInsertLongPressRef.current = null;
-                          }
-                        }}
-                        onPointerLeave={() => {
-                          if (smartInsertLongPressRef.current) {
-                            clearTimeout(smartInsertLongPressRef.current);
-                            smartInsertLongPressRef.current = null;
-                          }
-                        }}
-                        onClick={() => {
-                          if (smartInsertLongPressTriggeredRef.current) {
-                            smartInsertLongPressTriggeredRef.current = false;
-                            return;
-                          }
-                          setMapSmartInsertEnabled(!mapSmartInsertEnabled);
-                        }}
-                        className={`relative p-2 rounded-md transition-colors touch-manipulation select-none ${
-                          mapSmartInsertEnabled
-                            ? 'bg-green-100 dark:bg-green-900/50 hover:bg-green-200 dark:hover:bg-green-800'
-                            : 'hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600'
-                        }`}
-                        title={`スマート挿入: ${mapSmartInsertEnabled ? '有効' : '無効'}（${mapSmartInsertMode === 'card' ? 'カード' : 'プレビュー'}）`}
-                        style={{
-                          WebkitTapHighlightColor: 'transparent',
-                          minWidth: '44px',
-                          minHeight: '44px',
-                        }}
-                        type="button"
-                      >
-                        <svg
-                          className={`w-5 h-5 pointer-events-none ${mapSmartInsertEnabled ? 'text-green-600 dark:text-green-400' : 'text-slate-600 dark:text-slate-400'}`}
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M12 4v16m0-8l-4-4m4 4l4-4"
-                          />
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={2}
-                            d="M5 12h14"
-                          />
-                        </svg>
-                        {/* 表示処理の補足 */}
-                        {mapSmartInsertEnabled && (
-                          <div className="absolute -bottom-0.5 left-1/2 -translate-x-1/2 text-[8px] font-bold leading-none text-green-600 dark:text-green-400">
-                            {mapSmartInsertMode === 'preview' ? 'P' : 'C'}
-                          </div>
-                        )}
-                      </button>
-                    </>
-                  )}
-                  {activeEventName && isMapTab && currentMapData && (
-                    <MapRotationControls
-                      angle={currentMapTabRotationState.mapTabAngle}
-                      initialAngle={currentMapTabRotationState.initialAngle}
-                      onAngleChange={handleMapTabRotationAngleChange}
-                      showHint={true}
-                    />
-                  )}
-                </div>
-              </div>
-              <div className="flex items-center gap-4">
-                {activeEventName &&
-                  mainContentVisible &&
-                  items.length > 0 &&
-                  selectedItemIds.size > 0 &&
-                  layoutMode !== 'smartphone' && (
-                    <>
-                      <BulkActionControls onSort={handleBulkSort} onClear={handleClearSelection} />
-                      {showMoveButtons && hasCandidateSelection && (
-                        <button
-                          onClick={() => handleMoveToExecuteColumn(Array.from(selectedItemIds))}
-                          className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
-                        >
-                          選択したアイテムを実行列に移動 ({selectedItemIds.size}件)
-                        </button>
-                      )}
-                      {showMoveButtons && hasExecuteSelection && (
-                        <button
-                          onClick={() => handleRemoveFromExecuteColumn(Array.from(selectedItemIds))}
-                          className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
-                        >
-                          選択したアイテムを実行列から戻す ({selectedItemIds.size}件)
-                        </button>
-                      )}
-                    </>
-                  )}
-                {activeEventName &&
-                  mainContentVisible &&
-                  items.length > 0 &&
-                  currentMode === 'execute' &&
-                  !mapViewActive &&
-                  layoutMode !== 'smartphone' && (
-                    <>
-                      <button
-                        onClick={() => {
-                          setSpaceGroupingEnabled((prev) => !prev);
-                          setCollapsedSpaces(new Set());
-                          setCollapsedHalls(new Set());
-                          setUserInteractedSpaces(new Set());
-                        }}
-                        className={`px-2 py-1 text-xs font-medium rounded transition-colors flex-shrink-0 ${
-                          spaceGroupingEnabled
-                            ? 'bg-blue-600 text-white dark:bg-blue-500'
-                            : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
-                        }`}
-                      >
-                        スペース別
-                      </button>
-                      <button
-                        onClick={handleSortToggle}
-                        className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 flex-shrink-0"
-                      >
-                        {sortLabels[sortState]}
-                      </button>
-                    </>
-                  )}
-              </div>
-            </div>
-          )}
-          {showTabBar && (
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 border-t border-slate-200 dark:border-slate-700">
-              <div className="flex space-x-2 pt-2 pb-2 overflow-x-auto">
-                <TabButton
-                  tab="eventList"
-                  label="イベント一覧"
-                  onClick={() => {
-                    setActiveEventName(null);
-                    setItemToEdit(null);
-                    setSelectedItemIds(new Set());
-                    setSelectedBlockFilters(new Set());
-                    setActiveTab('eventList');
-                  }}
-                />
-                {activeEventName ? (
-                  <>
-                    {eventDates.map((eventDate) => {
-                      const count = items.filter((item) => item.eventDate === eventDate).length;
-                      return (
-                        <React.Fragment key={eventDate}>
-                          <TabButton tab={eventDate} label={eventDate} count={count} />
-                        </React.Fragment>
-                      );
-                    })}
-                    <TabButton
-                      tab="import"
-                      label={itemToEdit ? 'アイテム編集' : 'アイテム追加'}
-                    />
-                    {activeEventName && (mainContentVisible || isMapTab) && (
-                      <SearchBar
-                        searchKeyword={searchKeyword}
-                        onSearchKeywordChange={setSearchKeyword}
-                        onSearchNext={handleSearchNext}
-                        matchCount={visibleSearchMatches.length}
-                        currentMatchIndex={currentSearchIndex}
-                      />
-                    )}
-                  </>
-                ) : (
-                  <button
-                    onClick={() => {
-                      setItemToEdit(null);
-                      setActiveTab('import');
-                    }}
-                    className={`px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 whitespace-nowrap ${
-                      activeTab === 'import'
-                        ? 'bg-blue-600 text-white'
-                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    新規リスト作成
-                  </button>
-                )}
-              </div>
-            </div>
-          )}
-        </header>
-      )}
-
-      {/* 表示処理の補足 */}
       {rawHideSomething &&
         activeEventName &&
         (currentMode === 'focus' || currentMode === 'execute') && (
@@ -4932,1003 +5865,301 @@ const App: React.FC = () => {
           </button>
         )}
 
-      <main className="max-w-7xl mx-auto p-4 sm:p-6 lg:p-8">
-        {activeTab === 'eventList' && (
-          <EventListScreen
-            eventNames={Object.keys(eventLists).sort()}
-            onSelect={handleSelectEvent}
-            onDelete={handleDeleteEvent}
-            onExport={handleExportEvent}
-            onUpdate={handleUpdateEvent}
-            onRename={(oldName) => handleRenameEvent(oldName)}
-            onImportMap={handleImportMapData}
-            onImportExportFile={() => exportFileInputRef.current?.click()}
-            onCreateRoom={sharing ? (name) => setSharingDialog({ type: 'create', eventName: name }) : undefined}
-            onJoinRoom={sharing ? () => setSharingDialog({ type: 'join' }) : undefined}
-            onShowMembers={sharing?.activeRoom ? () => setSharingDialog({ type: 'members' }) : undefined}
-            onInviteToRoom={sharing?.activeRoom ? () => setSharingDialog({ type: 'invite' }) : undefined}
-            onAutoAssign={sharing?.activeRoom ? (eventName: string) => {
-              setActiveEventName(eventName);
-              setSharingDialog({ type: 'autoAssign' });
-            } : undefined}
-            onLeaveRoom={sharing?.activeRoom ? () => { sharing.leaveRoom(); } : undefined}
-            activeRoomCode={sharing?.activeRoom?.roomCode ?? null}
-          />
-        )}
-        {activeTab === 'import' && (
-          <Suspense fallback={<div className="flex justify-center p-8"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}>
-            <ImportScreen
-              onBulkAdd={handleBulkAdd}
-              activeEventName={activeEventName}
-              itemToEdit={itemToEdit}
-              onUpdateItem={handleUpdateItem}
-              onDoneEditing={handleDoneEditing}
-              newItemDefaults={newItemDefaults}
-              onClearNewItemDefaults={handleClearNewItemDefaults}
-            />
-          </Suspense>
-        )}
-        {/* 表示処理の補足 */}
-        {activeEventName && isMapTab && currentMapData && currentMapTabName && (
-          <MapView
-            mapData={currentMapData}
-            mapName={currentMapTabName}
-            items={items}
-            executeModeItemIds={currentMapExecuteItemIds}
-            onAddToExecuteList={handleAddToExecuteListFromMap}
-            onAddToExecuteListAtPosition={handleAddToExecuteListFromMapAtPosition}
-            onRemoveFromExecuteList={handleRemoveFromExecuteListFromMap}
-            onMoveToFirst={handleMoveToFirstFromMap}
-            onMoveToLast={handleMoveToLastFromMap}
-            onUpdateItem={handleUpdateItem}
-            onDeleteItem={handleDeleteItemFromMap}
-            onAddNewItem={handleAddNewItemFromMap}
-            onAddItem={handleAddItemFromFocusMode}
-            halls={currentHalls}
-            hallRouteSettings={currentHallRouteSettings}
-            onUpdateHallRouteSettings={handleUpdateHallRouteSettings}
-            onReorderExecuteList={handleReorderExecuteListByHallOrder}
-            vertexSelectionMode={vertexSelectionMode}
-            cellSelectionMode={cellSelectionMode}
-            highlightedCell={visitListPanelOpen ? highlightedMapCell : null}
-            externalSelectedHallId={mapSelectedHallId}
-            onSelectedHallIdChange={setMapSelectedHallId}
-            externalIsRouteVisible={mapIsRouteVisible}
-            onRouteVisibleChange={setMapIsRouteVisible}
-            externalIsHallOrderOpen={mapIsHallOrderOpen}
-            onHallOrderOpenChange={setMapIsHallOrderOpen}
-            hideInternalControls={true}
-            smartInsertEnabled={mapSmartInsertEnabled}
-            smartInsertMode={mapSmartInsertMode}
-            rotationAngle={currentMapTabRotationState.mapTabAngle}
-            onRotationAngleChange={handleMapTabRotationAngleChange}
-            selectionGuideOptions={vertexGuideOptions}
-            initialViewport={currentMapTabViewport}
-            onViewportChange={handleMapViewportChange}
-            numberCellOutlineStyle={numberCellOutlineStyle}
-          />
-        )}
-        {activeEventName && mainContentVisible && !isMapTab && (
-          <div
-            style={{
-              transform: `scale(${zoomLevel / 100})`,
-              transformOrigin: 'top left',
-              width: `${100 * (100 / zoomLevel)}%`,
-            }}
-          >
-            {currentMode === 'edit' ? (
-              <div className="grid grid-cols-2 gap-4">
-                {/* 表示処理の補足 */}
-                <div className="space-y-2">
-                  <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg p-3">
-                    <div className="flex items-center justify-between mb-2">
-                      <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100">
-                        実行リストアイテム
-                      </h3>
-                      <button
-                        onClick={() => {
-                          setSpaceGroupingEnabled((prev) => !prev);
-                          setCollapsedSpaces(new Set());
-                          setCollapsedHalls(new Set());
-                          setUserInteractedSpaces(new Set());
-                        }}
-                        className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
-                          spaceGroupingEnabled
-                            ? 'bg-blue-600 text-white dark:bg-blue-500'
-                            : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
-                        }`}
-                      >
-                        スペース別
-                      </button>
-                    </div>
-                    <p className="text-xs text-blue-700 dark:text-blue-300 mb-3">
-                      実行対象として選択中のアイテムを管理します。
-                    </p>
-                  </div>
-                  <ShoppingList
-                    items={executeColumnItems}
-                    onUpdateItem={handleUpdateItem}
-                    onMoveItem={handleMoveItem}
-                    onEditRequest={handleEditRequest}
-                    onDeleteRequest={handleDeleteRequest}
-                    selectedItemIds={selectedItemIds}
-                    onSelectItem={handleSelectItem}
-                    onRemoveFromColumn={handleRemoveFromExecuteColumn}
-                    onMoveToColumn={handleMoveToExecuteColumn}
-                    columnType="execute"
-                    currentDay={activeEventDate}
-                    onMoveItemUp={handleMoveItemUp}
-                    onMoveItemDown={handleMoveItemDown}
-                    rangeStart={rangeStart}
-                    rangeEnd={rangeEnd}
-                    onToggleRangeSelection={handleToggleRangeSelection}
-                    duplicateCircleItemIds={duplicateCircleItemIds}
-                    highlightedItemId={highlightedItemId}
-                    layoutMode={layoutMode}
-                    viewMode="edit"
-                    showHallGroups={!spaceGroupingEnabled}
-                    hallDefinitions={getHallsForDate(
-                      activeEventDate,
-                    )}
-                    hallOrder={getHallOrderForDate(
-                      activeEventDate,
-                    )}
-                    mapData={getMapDataForDate(
-                      activeEventDate,
-                    )}
-                    showSpaceGroups={spaceGroupingEnabled}
-                    collapsedSpaces={collapsedSpaces}
-                    onToggleSpaceCollapse={handleToggleSpaceCollapse}
-                    onToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
-                    onSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
-                    onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
-                    onAddItem={handleAddItemFromFocusMode}
-                    collapsedHalls={collapsedHalls}
-                    onToggleHallCollapse={handleToggleHallCollapse}
-                    onToggleHallSpacesCollapse={handleToggleHallSpacesCollapse}
-                  />
-                </div>
-
-                {/* 表示処理の補足 */}
-                <div className="space-y-2">
-                  <div className="bg-slate-100 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg p-3">
-                    <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
-                      候補アイテム
-                    </h3>
-                    <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
-                      このリストから選択したアイテムを実行リストへ移動します。
-                    </p>
-                    {availableBlocks.length > 0 && (
-                      <div className="mt-3">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                            ブロックでフィルタ:
-                          </span>
-                          <div className="flex items-center gap-2">
-                            {selectedBlockFilters.size > 0 && (
-                              <>
-                                <button
-                                  onClick={handleCandidateNumberSort}
-                                  className={`p-1.5 rounded-md transition-colors ${
-                                    candidateNumberSortDirection
-                                      ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/50 dark:text-blue-300'
-                                      : 'bg-white dark:bg-slate-700 hover:bg-slate-100 dark:hover:bg-slate-600 text-slate-500 dark:text-slate-400 border border-slate-300 dark:border-slate-600'
-                                  }`}
-                                  title={
-                                    candidateNumberSortDirection === 'desc'
-                                      ? '番号を降順で並べ替え'
-                                      : candidateNumberSortDirection === 'asc'
-                                        ? '番号を昇順で並べ替え'
-                                        : '番号で並べ替え'
-                                  }
-                                >
-                                  {candidateNumberSortDirection === 'desc' ? (
-                                    <SortDescendingIcon className="w-4 h-4" />
-                                  ) : (
-                                    <SortAscendingIcon className="w-4 h-4" />
-                                  )}
-                                </button>
-                                <button
-                                  onClick={handleClearBlockFilters}
-                                  className="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 underline"
-                                >
-                                  すべて解除
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                        <div className="flex flex-wrap gap-2">
-                          {availableBlocks.map((block) => (
-                            <button
-                              key={block}
-                              onClick={() => handleToggleBlockFilter(block)}
-                              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
-                                selectedBlockFilters.has(block)
-                                  ? 'bg-blue-600 text-white dark:bg-blue-500'
-                                  : blocksWithPriorityRemarks.has(block)
-                                    ? 'bg-yellow-300 dark:bg-yellow-600 text-slate-700 dark:text-slate-300 hover:bg-yellow-400 dark:hover:bg-yellow-500 border border-slate-300 dark:border-slate-600'
-                                    : 'bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600'
-                              }`}
-                            >
-                              {block}
-                            </button>
-                          ))}
-                        </div>
-                        {selectedBlockFilters.size > 0 && (
-                          <p className="text-xs text-slate-600 dark:text-slate-400 mt-2">
-                            選択中: {selectedBlockFilters.size}件のブロック
-                          </p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  <ShoppingList
-                    items={candidateColumnItems}
-                    onUpdateItem={handleUpdateItem}
-                    onMoveItem={handleMoveItem}
-                    onEditRequest={handleEditRequest}
-                    onDeleteRequest={handleDeleteRequest}
-                    selectedItemIds={selectedItemIds}
-                    onSelectItem={handleSelectItem}
-                    onMoveToColumn={handleMoveToExecuteColumn}
-                    onRemoveFromColumn={handleRemoveFromExecuteColumn}
-                    columnType="candidate"
-                    currentDay={activeEventDate}
-                    onMoveItemUp={handleMoveItemUp}
-                    onMoveItemDown={handleMoveItemDown}
-                    rangeStart={rangeStart}
-                    rangeEnd={rangeEnd}
-                    onToggleRangeSelection={handleToggleRangeSelection}
-                    duplicateCircleItemIds={duplicateCircleItemIds}
-                    highlightedItemId={highlightedItemId}
-                    layoutMode={layoutMode}
-                    viewMode="edit"
-                    showSpaceGroups={spaceGroupingEnabled}
-                    collapsedSpaces={collapsedSpaces}
-                    onToggleSpaceCollapse={handleToggleSpaceCollapse}
-                    onToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
-                    onSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
-                    onSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
-                    onAddItem={handleAddItemFromFocusMode}
-                  />
-                </div>
-              </div>
-            ) : currentMode === 'focus' ? (
-              <Suspense fallback={<div className="flex justify-center p-8"><div className="animate-spin h-8 w-8 border-4 border-blue-500 border-t-transparent rounded-full" /></div>}>
-                <FocusModeContainer
-                  key={currentFocusSessionKey || 'focus-mode'}
-                  activeEventName={activeEventName}
-                  activeTab={activeTab}
-                  eventDates={eventDates}
-                  items={items}
-                  executeModeItems={executeModeItems}
-                  mapData={mapData}
-                  hallDefinitions={hallDefinitions}
-                  onUpdateItem={handleUpdateItem}
-                  onModeChange={handleModeChangeFromFocus}
-                  layoutMode={layoutMode}
-                  onLayoutModeChange={setLayoutMode}
-                  onMapVisibilityChange={setFocusModeMapVisible}
-                  onAddItem={handleAddItemFromFocusMode}
-                  onEditRequest={handleEditRequest}
-                  onDeleteRequest={handleDeleteRequest}
-                  appZoomLevel={zoomLevel}
-                  resumeState={currentFocusResumeState}
-                  onSessionStateChange={handleFocusSessionStateChange}
-                  mapRotationAngle={currentFocusMapRotationState.focusModeAngle}
-                  mapInitialRotationAngle={currentFocusMapRotationState.initialAngle}
-                  onMapRotationAngleChange={handleFocusMapRotationAngleChange}
-                  numberCellOutlineStyle={numberCellOutlineStyle}
-                />
-              </Suspense>
-            ) : (
-              <ShoppingList
-                items={visibleItems}
-                onUpdateItem={handleUpdateItem}
-                onMoveItem={handleMoveItem}
-                onEditRequest={handleEditRequest}
-                onDeleteRequest={handleDeleteRequest}
-                selectedItemIds={selectedItemIds}
-                onSelectItem={handleSelectItem}
-                columnType="execute"
-                currentDay={activeEventDate}
-                onMoveItemUp={handleMoveItemUp}
-                onMoveItemDown={handleMoveItemDown}
-                rangeStart={rangeStart}
-                rangeEnd={rangeEnd}
-                onToggleRangeSelection={handleToggleRangeSelection}
-                duplicateCircleItemIds={duplicateCircleItemIds}
-                highlightedItemId={highlightedItemId}
-                layoutMode={layoutMode}
-                viewMode="execute"
-                showSpaceGroups={spaceGroupingEnabled}
-                collapsedSpaces={collapsedSpaces}
-                onToggleSpaceCollapse={handleToggleSpaceCollapse}
-                onToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
-                onBulkSetPurchaseStatus={handleBulkSetPurchaseStatus}
-                priceAlertItemIds={priceAlertItemIds}
-                onAddItem={handleAddItemFromFocusMode}
-                hallDefinitions={getHallsForDate(activeEventDate)}
-                hallOrder={getHallOrderForDate(activeEventDate)}
-                mapData={getMapDataForDate(activeEventDate)}
-                collapsedHalls={collapsedHalls}
-              />
-            )}
-          </div>
-        )}
-      </main>
-
-      {itemToDelete && (
-        <DeleteConfirmationModal
-          item={itemToDelete}
-          onConfirm={handleConfirmDelete}
-          onCancel={() => setItemToDelete(null)}
+      {(activeTab === 'eventList' || activeSharingSession) && (
+        <SharingMvp0cPanel
+          eventNames={sharingEventNames}
+          activeEventName={activeEventName}
+          sessions={sharingSessions}
+          busy={sharingBusy}
+          availability={sharingAvailability}
+          statusMessage={sharingStatusMessage}
+          errorMessage={sharingErrorMessage}
+          onCreateRoom={handleCreateSharingRoom}
+          onJoinRoom={handleJoinSharingRoom}
+          onRestoreRoom={handleRestoreSharingRoom}
+          assignmentMembers={activeSharingAssignmentMembers}
+          selectedItemCount={selectedItemIds.size}
+          assignedOnly={sharingAssignedOnly}
+          onAssignedOnlyChange={setSharingAssignedOnly}
+          onBulkAssignSelected={handleBulkAssignSelectedSharingItems}
+          onPauseSession={handlePauseSharingSession}
+          onResumeSession={handleResumeSharingSession}
+          onLeaveSession={handleLeaveSharingSession}
+          onLocalizeSession={handleLocalizeSharingSession}
+          notifications={activeSharingNotificationEntries}
+          onRefreshNotifications={refreshSharingNotifications}
+          onMarkNotificationRead={handleMarkSharingNotificationRead}
+          onHideNotification={handleHideSharingNotification}
         />
       )}
 
-      {showUpdateConfirmation && updateData && (
-        <UpdateConfirmationModal
-          itemsToDelete={updateData.itemsToDelete}
-          itemsToUpdate={updateData.itemsToUpdate}
-          itemsToAdd={updateData.itemsToAdd}
-          protectedFromDelete={updateData.protectedFromDelete}
-          protectedFromUpdate={updateData.protectedFromUpdate}
-          onConfirm={handleConfirmUpdate}
-          onCancel={() => {
-            setShowUpdateConfirmation(false);
-            setUpdateData(null);
-            setUpdateEventName(null);
-          }}
-        />
-      )}
-
-      {showUrlUpdateDialog && (
-        <UrlUpdateDialog
-          currentUrl={
-            pendingUpdateEventName
-              ? eventMetadata[pendingUpdateEventName]?.spreadsheetUrl || ''
-              : ''
-          }
-          onConfirm={handleUrlUpdate}
-          onCancel={() => {
-            setShowUrlUpdateDialog(false);
-            setPendingUpdateEventName(null);
-            setActiveEventName(null);
-            setActiveTab('eventList');
-          }}
-        />
-      )}
-
-      {showRenameDialog && eventToRename && (
-        <EventRenameDialog
-          currentName={eventToRename}
-          onConfirm={handleConfirmRename}
-          onCancel={() => {
-            setShowRenameDialog(false);
-            setEventToRename(null);
-          }}
-        />
-      )}
-
-      {/* 表示処理の補足 */}
-      {showExportOptions && exportEventName && (
-        <ExportOptionsDialog
-          isOpen={showExportOptions}
-          onClose={() => {
-            setShowExportOptions(false);
-            setExportEventName(null);
-          }}
-          onExport={handleConfirmExport}
-          hasMapData={
-            !!(
-              exportEventName &&
-              mapData[exportEventName] &&
-              Object.keys(mapData[exportEventName]).length > 0
-            )
-          }
-        />
-      )}
-
-      {/* 表示処理の補足 */}
-      {blockDefinitionMode && currentMapData && (
-        <BlockDefinitionPanel
-          isOpen={blockDefinitionMode}
-          onClose={() => {
-            setBlockDefinitionMode(false);
-            setPendingCellSelection(null);
-          }}
-          mapData={currentMapData}
-          onUpdateBlocks={handleUpdateBlocks}
-          onStartCellSelection={handleStartCellSelection}
-          pendingCellSelection={pendingCellSelection}
-          onClearPendingCellSelection={() => setPendingCellSelection(null)}
-        />
-      )}
-
-      {/* 表示処理の補足 */}
-      {cellSelectionMode && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-4 min-w-80">
-          <div className="text-center mb-3">
-            <div className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-1">
-              {(() => {
-                const data = cellSelectionMode.editingBlockData as { block?: { name?: string } } | undefined;
-                const name = data?.block?.name?.trim();
-                return name ? `「${name}」設定中` : '「名称不明ブロック」設定中';
-              })()}
-            </div>
-            <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
-              {cellSelectionMode.type === 'corner' &&
-                `セルをクリックして角を選択 (${cellSelectionMode.clickedCells.length}/4)`}
-              {cellSelectionMode.type === 'multiCorner' &&
-                `セルをクリックして角を選択 (${cellSelectionMode.clickedCells.length}/4)`}
-              {cellSelectionMode.type === 'rangeStart' &&
-                `対角の2セルをクリック (${cellSelectionMode.clickedCells.length}/2)`}
-              {cellSelectionMode.type === 'individual' &&
-                `対象セルをクリック (${cellSelectionMode.clickedCells.length}セル選択中)`}
-            </div>
-            {cellSelectionMode.clickedCells.length > 0 && (
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                選択: {cellSelectionMode.clickedCells.map((c) => `(${c.row},${c.col})`).join(', ')}
-              </div>
-            )}
-            <div className="text-xs text-blue-500 dark:text-blue-400 mt-1">
-              マーカーをクリックで選択解除
-            </div>
-          </div>
-          <div className="flex gap-2 justify-center">
-            <button
-              onClick={handleConfirmCellSelection}
-              disabled={
-                ((cellSelectionMode.type === 'corner' ||
-                  cellSelectionMode.type === 'multiCorner') &&
-                  cellSelectionMode.clickedCells.length < 4) ||
-                (cellSelectionMode.type === 'rangeStart' &&
-                  cellSelectionMode.clickedCells.length < 2) ||
-                (cellSelectionMode.type === 'individual' &&
-                  cellSelectionMode.clickedCells.length === 0)
-              }
-              className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              選択を確定
-            </button>
-            <button
-              onClick={handleCancelCellSelection}
-              className="px-4 py-2 text-sm font-medium rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
-            >
-              キャンセル
-            </button>
-          </div>
+      {activeSharingSession && (
+        <div className="mx-4 mt-3 border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900 md:mx-6">
+          {activeSharingSession.eventName} は共有中です。追加・削除などの構造変更を停止し、価格・数量・備考・URL・購入状態・担当者・巡回順を同期しています。
         </div>
       )}
 
-      {/* 表示処理の補足 */}
-      {hallDefinitionMode && currentMapData && (
-        <HallDefinitionPanel
-          isOpen={hallDefinitionMode}
-          onClose={() => {
-            setHallDefinitionMode(false);
-            setPendingVertexSelection(null);
-          }}
-          mapData={currentMapData}
-          halls={currentHalls}
-          onUpdateHalls={handleUpdateHalls}
-          onStartVertexSelection={handleStartVertexSelection}
-          pendingVertexSelection={pendingVertexSelection}
-          onClearPendingVertexSelection={() => setPendingVertexSelection(null)}
-        />
-      )}
-
-      {/* 表示処理の補足 */}
-      {visitListPanelOpen && currentMapData && (
-        <VisitListPanel
-          isOpen={visitListPanelOpen}
-          onClose={handleVisitListClose}
-          items={visitListItems}
-          onUpdateOrder={handleVisitListOrderUpdate}
-          mapData={currentMapData}
-          hallDefinitions={currentHalls}
-          hallOrder={visitListHallOrder}
-          layoutMode={layoutMode}
-          onHighlightCell={handleHighlightMapCell}
-          onClearHighlight={handleClearMapCellHighlight}
-          hasUnsavedChanges={visitListHasUnsavedChanges}
-          onConfirm={handleVisitListConfirm}
-          onCancel={handleVisitListCancel}
-          onUpdateItemPriority={handleUpdateItemPriority}
-        />
-      )}
-
-      {/* 表示処理の補足 */}
-      {showVisitListConfirmDialog && (
-        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50">
-          <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-bold text-slate-900 dark:text-slate-100 mb-3">
-              変更を保存しますか？
-            </h3>
-            <p className="text-sm text-slate-600 dark:text-slate-400 mb-6">
-              訪問リストに未保存の変更があります。保存して確定するか、キャンセルして破棄してください。
-            </p>
-            <div className="flex justify-end gap-3">
-              <button
-                onClick={handleVisitListDialogCancel}
-                className="px-4 py-2 text-sm font-semibold rounded-md bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
-              >
-                キャンセル（破棄）
-              </button>
-              <button
-                onClick={handleVisitListDialogConfirm}
-                className="px-4 py-2 text-sm font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700"
-              >
-                保存して確定
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 表示処理の補足 */}
-      {vertexSelectionMode && (
-        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 p-4 min-w-80">
-          <div className="text-center mb-3">
-            <div className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-1">
-              {(() => {
-                const data = vertexSelectionMode.editingData as { hall?: { name?: string } } | undefined;
-                const name = data?.hall?.name?.trim();
-                return name ? `「${name}」設定中` : '「名称不明ホール」設定中';
-              })()}
-            </div>
-            <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
-              ホールの頂点をクリック ({vertexSelectionMode.clickedVertices.length}
-              /6)
-            </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
-              クリック順に多角形を作成します。
-            </div>
-            {vertexSelectionMode.clickedVertices.length > 0 && (
-              <div className="text-xs text-slate-500 dark:text-slate-400">
-                選択:{' '}
-                {vertexSelectionMode.clickedVertices.map((v) => `(${v.row},${v.col})`).join(' → ')}
-              </div>
-            )}
-          </div>
-          <div className="flex gap-2 justify-center mb-3">
-            <button
-              onClick={() =>
-                setVertexGuideOptions((prev) => ({ ...prev, showGrid: !prev.showGrid }))
-              }
-              className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                vertexGuideOptions.showGrid
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-              }`}
-            >
-              補助グリッド {vertexGuideOptions.showGrid ? 'ON' : 'OFF'}
-            </button>
-            <button
-              onClick={() =>
-                setVertexGuideOptions((prev) => ({ ...prev, showRuler: !prev.showRuler }))
-              }
-              className={`px-3 py-1.5 text-xs rounded transition-colors ${
-                vertexGuideOptions.showRuler
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
-              }`}
-            >
-              座標尺 {vertexGuideOptions.showRuler ? 'ON' : 'OFF'}
-            </button>
-          </div>
-          <div className="flex gap-2 justify-center">
-            <button
-              onClick={handleConfirmVertexSelection}
-              disabled={vertexSelectionMode.clickedVertices.length < 4}
-              className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              確定
-            </button>
-            <button
-              onClick={handleCancelVertexSelection}
-              className="px-4 py-2 text-sm font-medium rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600"
-            >
-              キャンセル
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 表示処理の補足 */}
-      <input
-        type="file"
-        ref={mapFileInputRef}
-        accept=".xlsx"
-        onChange={handleMapFileChange}
-        style={{ display: 'none' }}
+      <AppMainContent
+        activeEventDate={activeEventDate}
+        activeEventName={activeEventName}
+        activeTab={activeTab}
+        availableBlocks={availableBlocks}
+        blocksWithPriorityRemarks={blocksWithPriorityRemarks}
+        candidateColumnItems={candidateColumnItems}
+        candidateNumberSortDirection={candidateNumberSortDirection}
+        cellSelectionMode={cellSelectionMode}
+        collapsedSpaces={collapsedSpaces}
+        currentFocusMapRotationState={currentFocusMapRotationState}
+        currentFocusResumeState={currentFocusResumeState}
+        currentFocusSessionKey={currentFocusSessionKey}
+        currentHallRouteSettings={currentHallRouteSettings}
+        currentHalls={currentHalls}
+        currentMapData={currentMapData}
+        currentMapExecuteItemIds={currentMapExecuteItemIds}
+        currentMapTabName={currentMapTabName}
+        currentMapTabRotationState={currentMapTabRotationState}
+        currentMapTabViewport={currentMapTabViewport}
+        currentMode={currentMode}
+        disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+        disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
+        skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
+        duplicateCircleItemIds={duplicateCircleItemIds}
+        eventDates={eventDates}
+        eventLists={eventLists}
+        executeCollapsedSpaces={executeCollapsedSpaces}
+        executeColumnItems={executeColumnItems}
+        executeModeItems={executeModeItems}
+        executeSpaceGroupingEnabled={executeSpaceGroupingEnabled}
+        focusModeItems={focusModeItems}
+        exportFileInputRef={exportFileInputRef}
+        getHallOrderForDate={getHallOrderForDate}
+        getHallsForDate={getHallsForDate}
+        getMapDataForDate={getMapDataForDate}
+        hallDefinitions={hallDefinitions}
+        hallRouteSettings={hallRouteSettings}
+        handleActivateLateFilter={handleActivateLateFilter}
+        handleActivatePostponeFilter={handleActivatePostponeFilter}
+        handleAddItemFromFocusMode={handleAddItemFromFocusMode}
+        handleAddNewItemFromMap={handleAddNewItemFromMap}
+        handleAddToExecuteListFromMap={handleAddToExecuteListFromMap}
+        handleAddToExecuteListFromMapAtPosition={handleAddToExecuteListFromMapAtPosition}
+        handleBatchAddToExecuteListFromMap={handleBatchAddToExecuteListFromMap}
+        handleBatchAddToExecuteListFromMapAtPosition={handleBatchAddToExecuteListFromMapAtPosition}
+        handleBatchRemoveFromExecuteListFromMap={handleBatchRemoveFromExecuteListFromMap}
+        handleBulkAdd={handleBulkAdd}
+        handleBulkStatusChange={handleBulkStatusChange}
+        handleCandidateNumberSort={handleCandidateNumberSort}
+        handleClearBlockFilters={handleClearBlockFilters}
+        handleClearNewItemDefaults={handleClearNewItemDefaults}
+        handleCollapseAndOpenNext={handleCollapseAndOpenNext}
+        handleDeleteEvent={handleDeleteEvent}
+        handleDeleteItemFromMap={handleDeleteItemFromMap}
+        handleDeleteRequest={handleDeleteRequest}
+        handleDoneEditing={handleDoneEditing}
+        handleEditRequest={handleEditRequest}
+        handleExecuteItemUpdate={handleExecuteItemUpdate}
+        handleExecuteSpaceGroupOrderChange={handleExecuteSpaceGroupOrderChange}
+        handleExecuteToggleAllSpaceCollapse={handleExecuteToggleAllSpaceCollapse}
+        handleExecuteToggleSpaceCollapse={handleExecuteToggleSpaceCollapse}
+        handleExportEvent={handleExportEvent}
+        handleFocusMapRotationAngleChange={handleFocusMapRotationAngleChange}
+        handleFocusSessionStateChange={handleFocusSessionStateChange}
+        handleImportMapData={handleImportMapData}
+        handleMapTabRotationAngleChange={handleMapTabRotationAngleChange}
+        handleMapViewportChange={handleMapViewportChange}
+        handleModeChangeFromFocus={handleModeChangeFromFocus}
+        handleMoveItem={handleMoveItem}
+        handleMoveItemDown={handleMoveItemDown}
+        handleMoveItemUp={handleMoveItemUp}
+        handleMoveToExecuteColumn={handleMoveToExecuteColumn}
+        handleMoveToFirstFromMap={handleMoveToFirstFromMap}
+        handleMoveToLastFromMap={handleMoveToLastFromMap}
+        handleRemoveFromExecuteColumn={handleRemoveFromExecuteColumn}
+        handleRemoveFromExecuteListFromMap={handleRemoveFromExecuteListFromMap}
+        handleRenameEvent={handleRenameEvent}
+        handleReorderExecuteListByHallOrder={handleReorderExecuteListByHallOrder}
+        handleSelectEvent={handleSelectEvent}
+        handleSelectItem={handleSelectItem}
+        handleSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
+        handleSetSpaceGroupDragItemIds={handleSetSpaceGroupDragItemIds}
+        handleToggleAllSpaceCollapse={handleToggleAllSpaceCollapse}
+        handleToggleBlockFilter={handleToggleBlockFilter}
+        handleToggleRangeSelection={handleToggleRangeSelection}
+        handleToggleSpaceCollapse={handleToggleSpaceCollapse}
+        handleUpdateEvent={handleUpdateEvent}
+        handleUpdateHallRouteSettings={handleUpdateHallRouteSettings}
+        handleUpdateItem={handleUpdateItem}
+        handleUpdateItemPriorityFromEdit={handleUpdateItemPriorityFromEdit}
+        highlightedItemId={highlightedItemId}
+        highlightedMapCell={highlightedMapCell}
+        isMapTab={isMapTab}
+        items={items}
+        itemToEdit={itemToEdit}
+        layoutMode={layoutMode}
+        mainContentVisible={mainContentVisible}
+        mapData={mapData}
+        mapIsHallOrderOpen={mapIsHallOrderOpen}
+        mapIsRouteVisible={mapIsRouteVisible}
+        mapSelectedHallId={mapSelectedHallId}
+        mapSmartInsertEnabled={mapSmartInsertEnabled}
+        mapSmartInsertMode={mapSmartInsertMode}
+        newItemDefaults={newItemDefaults}
+        numberCellOutlineStyle={numberCellOutlineStyle}
+        purchaseStatusControlMode={purchaseStatusControlMode}
+        rangeEnd={rangeEnd}
+        rangeStart={rangeStart}
+        selectedBlockFilters={selectedBlockFilters}
+        selectedItemIds={selectedItemIds}
+        setCollapsedSpaces={setCollapsedSpaces}
+        setFocusModeMapVisible={setFocusModeMapVisible}
+        setLayoutMode={setLayoutMode}
+        setMapIsHallOrderOpen={setMapIsHallOrderOpen}
+        setMapIsRouteVisible={setMapIsRouteVisible}
+        setMapSelectedHallId={setMapSelectedHallId}
+        setSpaceGroupingEnabled={setSpaceGroupingEnabled}
+        showLateFilterButton={showLateFilterButton}
+        showPostponeFilterButton={showPostponeFilterButton}
+        spaceGroupingEnabled={spaceGroupingEnabled}
+        vertexGuideOptions={vertexGuideOptions}
+        vertexSelectionMode={vertexSelectionMode}
+        visibleItems={visibleItems}
+        visitListPanelOpen={visitListPanelOpen}
+        zoomLevel={zoomLevel}
+        assignmentMembers={activeSharingAssignmentMembers}
+        canAssignItem={canAssignSharingItem}
+        onAssignItem={handleAssignSharingItem}
       />
 
-      {/* 表示処理の補足 */}
-      <MapImportDialog
-        isOpen={mapImportDialogOpen}
-        file={mapImportPendingFile}
-        eventName={mapImportPendingEventName}
-        savedSettings={
-          mapImportPendingEventName ? loadBlockDetectionSettings(mapImportPendingEventName) : null
-        }
-        onImport={handleMapImportConfirm}
-        onClose={handleMapImportClose}
+      <AppOverlayLayer
+        editDialogItem={editDialogItem}
+        items={items}
+        getHallsForDate={getHallsForDate}
+        handleUpdateItem={handleUpdateItem}
+        handleUpdateHallOrderForPriorityChangeFromEdit={handleUpdateHallOrderForPriorityChangeFromEdit}
+        setEditDialogItem={setEditDialogItem}
+        itemToDelete={itemToDelete}
+        handleConfirmDelete={handleConfirmDelete}
+        setItemToDelete={setItemToDelete}
+        showUpdateConfirmation={showUpdateConfirmation}
+        updateData={updateData}
+        handleConfirmUpdate={handleConfirmUpdate}
+        setShowUpdateConfirmation={setShowUpdateConfirmation}
+        setUpdateData={setUpdateData}
+        setUpdateEventName={setUpdateEventName}
+        showUrlUpdateDialog={showUrlUpdateDialog}
+        pendingUpdateEventName={pendingUpdateEventName}
+        eventMetadata={eventMetadata}
+        handleUrlUpdate={handleUrlUpdate}
+        setShowUrlUpdateDialog={setShowUrlUpdateDialog}
+        setPendingUpdateEventName={setPendingUpdateEventName}
+        setActiveEventName={setActiveEventName}
+        setActiveTab={setActiveTab}
+        showRenameDialog={showRenameDialog}
+        eventToRename={eventToRename}
+        handleConfirmRename={handleConfirmRename}
+        setShowRenameDialog={setShowRenameDialog}
+        setEventToRename={setEventToRename}
+        showExportOptions={showExportOptions}
+        exportEventName={exportEventName}
+        setShowExportOptions={setShowExportOptions}
+        setExportEventName={setExportEventName}
+        handleConfirmExport={handleConfirmExport}
+        mapData={mapData}
+        blockDefinitionMode={blockDefinitionMode}
+        currentMapData={currentMapData}
+        setBlockDefinitionMode={setBlockDefinitionMode}
+        setPendingCellSelection={setPendingCellSelection}
+        handleUpdateBlocks={handleUpdateBlocks}
+        handleStartCellSelection={handleStartCellSelection}
+        pendingCellSelection={pendingCellSelection}
+        cellSelectionMode={cellSelectionMode}
+        handleConfirmCellSelection={handleConfirmCellSelection}
+        handleCancelCellSelection={handleCancelCellSelection}
+        simpleHallDefinitionMode={simpleHallDefinitionMode}
+        setSimpleHallDefinitionMode={setSimpleHallDefinitionMode}
+        currentMaplessHalls={currentMaplessHalls}
+        handleUpdateMaplessHalls={handleUpdateMaplessHalls}
+        allBlocksForHallDefinition={allBlocksForHallDefinition}
+        eventDates={eventDates}
+        activeEventDate={activeEventDate}
+        handleSyncMaplessHallsToOtherDates={handleSyncMaplessHallsToOtherDates}
+        globalHallOrderPanelOpen={globalHallOrderPanelOpen}
+        setGlobalHallOrderPanelOpen={setGlobalHallOrderPanelOpen}
+        globalHallOrderHalls={globalHallOrderHalls}
+        globalHallOrderRouteSettings={globalHallOrderRouteSettings}
+        handleUpdateGlobalHallRouteSettings={handleUpdateGlobalHallRouteSettings}
+        getGlobalHallItemCount={getGlobalHallItemCount}
+        handleReorderExecuteListByHallOrder={handleReorderExecuteListByHallOrder}
+        hallDefinitionMode={hallDefinitionMode}
+        setHallDefinitionMode={setHallDefinitionMode}
+        setPendingVertexSelection={setPendingVertexSelection}
+        currentHalls={currentHalls}
+        handleUpdateHalls={handleUpdateHalls}
+        handleStartVertexSelection={handleStartVertexSelection}
+        pendingVertexSelection={pendingVertexSelection}
+        mapTabDates={mapTabDates}
+        handleSyncPolygonHallsToOtherDates={handleSyncPolygonHallsToOtherDates}
+        visitListPanelOpen={visitListPanelOpen}
+        handleVisitListClose={handleVisitListClose}
+        visitListItems={visitListItems}
+        handleVisitListOrderUpdate={handleVisitListOrderUpdate}
+        visitListHallOrder={visitListHallOrder}
+        layoutMode={layoutMode}
+        handleHighlightMapCell={handleHighlightMapCell}
+        handleClearMapCellHighlight={handleClearMapCellHighlight}
+        visitListHasUnsavedChanges={visitListHasUnsavedChanges}
+        handleVisitListConfirm={handleVisitListConfirm}
+        handleVisitListCancel={handleVisitListCancel}
+        handleUpdateItemPriority={handleUpdateItemPriority}
+        showVisitListConfirmDialog={showVisitListConfirmDialog}
+        handleVisitListDialogCancel={handleVisitListDialogCancel}
+        handleVisitListDialogConfirm={handleVisitListDialogConfirm}
+        vertexSelectionMode={vertexSelectionMode}
+        vertexGuideOptions={vertexGuideOptions}
+        setVertexGuideOptions={setVertexGuideOptions}
+        handleConfirmVertexSelection={handleConfirmVertexSelection}
+        handleCancelVertexSelection={handleCancelVertexSelection}
+        mapFileInputRef={mapFileInputRef}
+        handleMapFileChange={handleMapFileChange}
+        mapImportDialogOpen={mapImportDialogOpen}
+        mapImportPendingFile={mapImportPendingFile}
+        mapImportPendingEventName={mapImportPendingEventName}
+        handleMapImportConfirm={handleMapImportConfirm}
+        handleMapImportClose={handleMapImportClose}
+        exportFileInputRef={exportFileInputRef}
+        handleExportFileImport={handleExportFileImport}
+        activeEventName={activeEventName}
+        mainContentVisible={mainContentVisible}
+        currentMode={currentMode}
+        visibleItems={visibleItems}
+        showHeaderBar={showHeaderBar}
+        sortLabels={sortLabels}
+        sortDisplayLabel={sortDisplayLabel}
+        sortState={sortState}
+        handleSortToggle={handleSortToggle}
+        zoomLevel={zoomLevel}
+        handleZoomChange={handleZoomChange}
+        selectedItemIds={selectedItemIds}
+        handleBulkSort={handleBulkSort}
+        handleClearSelection={handleClearSelection}
+        showMoveButtons={showMoveButtons}
+        hasCandidateSelection={hasCandidateSelection}
+        handleMoveToExecuteColumn={handleMoveToExecuteColumn}
+        hasExecuteSelection={hasExecuteSelection}
+        handleRemoveFromExecuteColumn={handleRemoveFromExecuteColumn}
+        smartInsertToast={smartInsertToast}
+        smartInsertToastType={smartInsertToastType}
       />
-
-      {/* 表示処理の補足 */}
-      <input
-        type="file"
-        ref={exportFileInputRef}
-        accept=".xlsx"
-        onChange={handleExportFileImport}
-        style={{ display: 'none' }}
-      />
-
-      {activeEventName && items.length > 0 && mainContentVisible && (
-        <>
-          {currentMode === 'execute' && (
-            <SummaryBar
-              items={visibleItems}
-              filterLabel={layoutMode === 'smartphone' || !showHeaderBar ? sortLabels[sortState] : undefined}
-              onFilterToggle={layoutMode === 'smartphone' || !showHeaderBar ? handleSortToggle : undefined}
-              isInRoom={!!sharing?.activeRoom}
-              onHelpRequest={sharing?.activeRoom ? () => setSharingDialog({ type: 'helpRequest' }) : undefined}
-              myItemsOnly={sharing?.myItemsOnly}
-              onToggleMyItems={sharing?.activeRoom ? sharing.toggleMyItemsFilter : undefined}
-              spaceGroupingEnabled={spaceGroupingEnabled}
-              onToggleSpaceGrouping={layoutMode === 'smartphone' || !showHeaderBar ? () => {
-                setSpaceGroupingEnabled((prev) => !prev);
-                setCollapsedSpaces(new Set());
-                setCollapsedHalls(new Set());
-                setUserInteractedSpaces(new Set());
-              } : undefined}
-            />
-          )}
-        </>
-      )}
-      {activeEventName && items.length > 0 && mainContentVisible && (
-        <ZoomControl zoomLevel={zoomLevel} onZoomChange={handleZoomChange} />
-      )}
-
-      {/* スマホ時：選択アイテム操作の下部固定バー */}
-      {layoutMode === 'smartphone' &&
-        activeEventName &&
-        mainContentVisible &&
-        items.length > 0 &&
-        selectedItemIds.size > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-lg px-3 py-2">
-            <div className="flex items-center justify-between gap-2">
-              <BulkActionControls onSort={handleBulkSort} onClear={handleClearSelection} />
-              <div className="flex items-center gap-2">
-                {showMoveButtons && hasCandidateSelection && (
-                  <button
-                    onClick={() => handleMoveToExecuteColumn(Array.from(selectedItemIds))}
-                    className="px-3 py-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors"
-                  >
-                    ⇦実行列へ ({selectedItemIds.size})
-                  </button>
-                )}
-                {showMoveButtons && hasExecuteSelection && (
-                  <button
-                    onClick={() => handleRemoveFromExecuteColumn(Array.from(selectedItemIds))}
-                    className="px-3 py-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors"
-                  >
-                    ⇨候補へ ({selectedItemIds.size})
-                  </button>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-      {/* 表示処理の補足 */}
-      {smartInsertToast && (
-        <div
-          className={`fixed top-16 left-1/2 transform -translate-x-1/2 z-[10000] text-white px-5 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-pulse ${
-            smartInsertToastType === 'error' ? 'bg-red-600' : 'bg-green-600'
-          }`}
-        >
-          {smartInsertToast}
-        </div>
-      )}
-      {completionToast && (
-        <div className="fixed top-16 left-1/2 transform -translate-x-1/2 z-[10000] text-white px-5 py-2.5 rounded-lg shadow-lg text-sm font-medium bg-blue-600">
-          {`全アイテム処理完了！残り${completionToast.countdown}秒後に後回しアイテムを表示します`}
-        </div>
-      )}
-      {/* 共有ダイアログ */}
-      {sharingDialog?.type === 'create' && sharing && (
-        <CreateRoomDialog
-          eventName={sharingDialog.eventName}
-          onClose={() => setSharingDialog(null)}
-          onCreateRoom={async (displayName, expiresAt) => {
-            const room = await sharing.createRoom(sharingDialog.eventName, displayName, expiresAt);
-            return { roomCode: room.roomCode };
-          }}
-          onMigrateItems={async () => {
-            const currentItems = eventLists[sharingDialog.eventName] || [];
-            if (currentItems.length > 0) {
-              await sharing.uploadItemsToRoom(currentItems);
-            }
-            // マップデータとホール定義もアップロード
-            const eventMapData = mapData[sharingDialog.eventName];
-            const eventHallDefs = hallDefinitions[sharingDialog.eventName];
-            if (eventMapData || eventHallDefs) {
-              await sharing.uploadMapDataToRoom(
-                sharingDialog.eventName,
-                eventMapData,
-                eventHallDefs,
-              );
-            }
-          }}
-        />
-      )}
-      {sharingDialog?.type === 'join' && sharing && (
-        <JoinRoomDialog
-          onClose={() => setSharingDialog(null)}
-          onJoinRoom={async (roomCode, displayName) => {
-            const room = await sharing.joinRoom(roomCode, displayName);
-            // ルーム参加は成功。データダウンロードは失敗してもダイアログを閉じる
-            try {
-              if (supabaseClient) {
-                const roomItems = await getRoomItemsAsShoppingItems(supabaseClient, room.id);
-                if (roomItems.length > 0) {
-                  setEventLists((prev) => ({
-                    ...prev,
-                    [room.eventName]: roomItems,
-                  }));
-                }
-                // マップデータもダウンロード（room.idを直接使用、activeRoom stateに依存しない）
-                const mapResult = await downloadMapDataDirect(supabaseClient, room.id);
-                console.log('[debug] mapResult keys:', Object.keys(mapResult), 'mapData maps:', mapResult.mapData ? Object.keys(mapResult.mapData) : 'none');
-                if (mapResult.mapData) {
-                  setMapData((prev) => ({
-                    ...prev,
-                    [room.eventName]: mapResult.mapData as Record<string, import('./types').DayMapData>,
-                  }));
-                }
-                if (mapResult.hallDefinitions) {
-                  setHallDefinitions((prev) => ({
-                    ...prev,
-                    [room.eventName]: mapResult.hallDefinitions as Record<string, import('./types').HallDefinition[]>,
-                  }));
-                }
-              }
-            } catch (e) {
-              console.warn('データダウンロードに失敗:', e);
-            }
-            setActiveEventName(room.eventName);
-            setSharingDialog(null);
-          }}
-          onRejoinRoom={async (roomCode, displayName, jerseyNumber) => {
-            const room = await sharing.rejoinRoom(roomCode, displayName, jerseyNumber);
-            try {
-              if (supabaseClient) {
-                const roomItems = await getRoomItemsAsShoppingItems(supabaseClient, room.id);
-                if (roomItems.length > 0) {
-                  setEventLists((prev) => ({
-                    ...prev,
-                    [room.eventName]: roomItems,
-                  }));
-                }
-                // マップデータもダウンロード（room.idを直接使用、activeRoom stateに依存しない）
-                const mapResult = await downloadMapDataDirect(supabaseClient, room.id);
-                if (mapResult.mapData) {
-                  setMapData((prev) => ({
-                    ...prev,
-                    [room.eventName]: mapResult.mapData as Record<string, import('./types').DayMapData>,
-                  }));
-                }
-                if (mapResult.hallDefinitions) {
-                  setHallDefinitions((prev) => ({
-                    ...prev,
-                    [room.eventName]: mapResult.hallDefinitions as Record<string, import('./types').HallDefinition[]>,
-                  }));
-                }
-              }
-            } catch (e) {
-              console.warn('データダウンロードに失敗:', e);
-            }
-            setActiveEventName(room.eventName);
-            setSharingDialog(null);
-          }}
-          onFetchExistingMembers={async (roomCode) => {
-            return sharing.getRoomMembersForRejoin(roomCode);
-          }}
-          initialCode={sharingDialog.initialCode}
-        />
-      )}
-      {sharingDialog?.type === 'members' && sharing?.activeRoom && (
-        <MemberListPanel
-          members={sharing.members}
-          hostUserId={sharing.activeRoom.createdBy}
-          currentUserId={sharing.userId}
-          roomCode={sharing.activeRoom.roomCode}
-          onClose={() => setSharingDialog(null)}
-        />
-      )}
-      {sharingDialog?.type === 'invite' && sharing?.activeRoom && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div
-            className="bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 w-[90vw] max-w-md overflow-hidden"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
-              <h3 className="text-sm font-semibold text-slate-800 dark:text-white">
-                ゲストを招待
-              </h3>
-            </div>
-            <div className="p-4">
-              <QRCodeDisplay roomCode={sharing.activeRoom.roomCode} />
-            </div>
-            <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900">
-              <button
-                onClick={() => setSharingDialog(null)}
-                className="w-full py-2 text-sm text-slate-600 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200 transition-colors"
-              >
-                閉じる
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {/* 投げつけダイアログ */}
-      {sharingDialog?.type === 'bulkTransfer' && sharing?.activeRoom && (
-        <BulkTransferDialog
-          items={items}
-          members={sharing.members}
-          currentUserId={sharing.userId}
-          currentJerseyNumber={sharing.members.find((m) => m.userId === sharing.userId)?.jerseyNumber ?? null}
-          onTransfer={async (itemIds, targetJerseyNumber) => {
-            await sharing.bulkAssignItems(itemIds, targetJerseyNumber);
-            // ローカルも更新
-            setEventLists((prev) => {
-              if (!activeEventName) return prev;
-              return {
-                ...prev,
-                [activeEventName]: (prev[activeEventName] || []).map((item) =>
-                  itemIds.includes(item.id) ? { ...item, assignedTo: String(targetJerseyNumber) } : item,
-                ),
-              };
-            });
-          }}
-          onClose={() => setSharingDialog(null)}
-        />
-      )}
-      {/* ヘルプ要請ダイアログ */}
-      {sharingDialog?.type === 'helpRequest' && sharing?.activeRoom && (
-        <HelpRequestDialog
-          onRequestHelp={async (circleName) => {
-            const currentMember = sharing.members.find((m) => m.userId === sharing.userId);
-            if (!currentMember) return;
-            const myJersey = String(currentMember.jerseyNumber);
-            const remaining = items.filter(
-              (item) =>
-                (item.assignedTo === myJersey || !item.assignedTo) &&
-                item.purchaseStatus === 'None',
-            ).length;
-            // useMemberStatus経由の代わりに直接memberStatusServiceを呼ぶ
-            const { requestHelp } = await import('./features/sharing/services/memberStatusService');
-            if (supabaseClient) {
-              await requestHelp(
-                supabaseClient,
-                sharing.activeRoom!.id,
-                sharing.userId!,
-                currentMember.displayName,
-                circleName,
-                remaining,
-              );
-            }
-          }}
-          onClose={() => setSharingDialog(null)}
-          items={items}
-        />
-      )}
-      {/* 自動割り振りダイアログ */}
-      {sharingDialog?.type === 'autoAssign' && sharing?.activeRoom && (
-        <AutoAssignmentDialog
-          items={items}
-          members={sharing.members}
-          halls={(() => {
-            // マップタブ以外でもホール定義を取得
-            if (currentHalls && currentHalls.length > 0) return currentHalls;
-            if (!activeEventName) return [];
-            const eventHalls = hallDefinitions[activeEventName];
-            if (!eventHalls) return [];
-            // 最初に見つかったマップタブのホール定義を使用
-            const firstMapTab = Object.keys(eventHalls)[0];
-            return firstMapTab ? (eventHalls[firstMapTab] as HallDefinition[]) ?? [] : [];
-          })()}
-          mapData={(() => {
-            if (currentMapData) return currentMapData;
-            if (!activeEventName) return undefined;
-            const eventMaps = mapData[activeEventName];
-            if (!eventMaps) return undefined;
-            const firstMapTab = Object.keys(eventMaps)[0];
-            return firstMapTab ? eventMaps[firstMapTab] as DayMapData : undefined;
-          })()}
-          onApply={async (assignments, clearItemIds) => {
-            for (const { jerseyNumber, itemIds } of assignments) {
-              await sharing.bulkAssignItems(itemIds, jerseyNumber);
-            }
-            // 未割当アイテムのassignedToをクリア
-            if (clearItemIds.length > 0) {
-              await sharing.bulkAssignItems(clearItemIds, null);
-            }
-            // ローカルも更新
-            setEventLists((prev) => {
-              if (!activeEventName) return prev;
-              const assignMap = new Map<string, string | null>();
-              for (const { jerseyNumber, itemIds } of assignments) {
-                for (const id of itemIds) {
-                  assignMap.set(id, String(jerseyNumber));
-                }
-              }
-              for (const id of clearItemIds) {
-                assignMap.set(id, null);
-              }
-              return {
-                ...prev,
-                [activeEventName]: (prev[activeEventName] || []).map((item) => {
-                  const targetId = assignMap.get(item.id);
-                  if (targetId === undefined) return item;
-                  return targetId === null
-                    ? { ...item, assignedTo: undefined }
-                    : { ...item, assignedTo: targetId };
-                }),
-              };
-            });
-          }}
-          onClose={() => setSharingDialog(null)}
-        />
-      )}
-      {/* 同期ステータスインジケーター */}
-      {sharing?.activeRoom && (
-        <div className="fixed bottom-16 right-4 z-10">
-          <SyncStatusIndicator
-            status={sharing.syncStatus}
-            pendingCount={sharing.pendingQueueSize}
-          />
-        </div>
-      )}
-      {/* 集中モード投げつけダイアログ */}
-      {focusTransferItem && sharing?.activeRoom && (
-        <ItemTransferDialog
-          item={focusTransferItem}
-          spaceItems={items.filter(
-            (i) =>
-              i.block === focusTransferItem.block &&
-              getBaseNumber(i.number) === getBaseNumber(focusTransferItem.number) &&
-              (i.purchaseStatus === 'None' || i.purchaseStatus === 'Postpone'),
-          )}
-          members={sharing.members}
-          currentUserId={sharing.userId}
-          onTransfer={async (transferItems, targetJerseyNumber) => {
-            for (const { itemId, quantity } of transferItems) {
-              const item = items.find((i) => i.id === itemId);
-              if (item) {
-                handleUpdateItem({ ...item, assignedTo: String(targetJerseyNumber), quantity });
-                await sharing.assignItem(itemId, targetJerseyNumber);
-              }
-            }
-            setFocusTransferItem(null);
-          }}
-          onClose={() => setFocusTransferItem(null)}
-        />
-      )}
-      {/* 通知トースト */}
-      {sharing?.latestToast && (
-        <NotificationToast
-          notification={sharing.latestToast}
-          onDismiss={() => sharing.dismissToast()}
-        />
-      )}
     </div>
   );
 };
 
 export default App;
+
+
+
+
+
+
 
 

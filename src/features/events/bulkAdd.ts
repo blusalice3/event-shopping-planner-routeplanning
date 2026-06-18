@@ -1,4 +1,9 @@
-import type { DayModeState, EventMetadata, ExecuteModeItems, ShoppingItem } from '../../types';
+import type {
+  DayModeState,
+  EventMetadata,
+  ExecuteModeItems,
+  ShoppingItem,
+} from '../../types/item';
 import { extractEventDates } from '../../utils/eventDates';
 import { getItemKey } from '../../utils/itemComparison';
 import { resolveBulkAddTab } from './uiOrchestration';

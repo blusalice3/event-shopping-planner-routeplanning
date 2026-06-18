@@ -1,4 +1,4 @@
-import type { EventMetadata, ShoppingItem } from '../../types';
+import type { EventMetadata, ShoppingItem } from '../../types/item';
 import { fetchEventItemsFromSpreadsheet } from './sheetImport';
 import { createEventUpdateDiff, normalizeSheetItemsUrls, type EventUpdateDiff } from './updateDiff';
 

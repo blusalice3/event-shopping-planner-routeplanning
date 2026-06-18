@@ -1,4 +1,4 @@
-import { ShoppingItem } from '../../types';
+import { ShoppingItem } from '../../types/item';
 import { getItemKey, getItemKeyWithoutTitle } from '../../utils/itemComparison';
 
 export type SheetItem = Omit<ShoppingItem, 'id' | 'purchaseStatus'>;
