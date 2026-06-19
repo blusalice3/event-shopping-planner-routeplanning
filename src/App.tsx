@@ -168,6 +168,7 @@ import { db, type AppData, type SharingSessionMetadata } from './utils/indexedDB
 type ActiveTab = 'eventList' | 'import' | string;
 export type BulkSortDirection = 'asc' | 'desc';
 type BlockSortDirection = 'asc' | 'desc';
+type SharingPanelMode = 'join' | 'invite' | 'status';
 type SharingMutableItemFields = {
   price?: number | null;
   quantity?: number | null;
@@ -587,6 +588,9 @@ const App: React.FC = () => {
   const [sharingErrorMessage, setSharingErrorMessage] = useState<string | null>(null);
   const [sharingNotificationList, setSharingNotificationList] = useState<NotificationListItem[]>([]);
   const [sharingAssignedOnly, setSharingAssignedOnly] = useState(false);
+  const [initialJoinRoomCode, setInitialJoinRoomCode] = useState<string | null>(null);
+  const [sharingPanelMode, setSharingPanelMode] = useState<SharingPanelMode | null>(null);
+  const [sharingPanelEventName, setSharingPanelEventName] = useState<string | null>(null);
   const sharingSessionsRef = useRef<Record<string, SharingSessionMetadata>>({});
   const eventListsRef = useRef<Record<string, ShoppingItem[]>>({});
   const sharingSyncInFlightRef = useRef(false);
@@ -654,6 +658,18 @@ const App: React.FC = () => {
     void refreshSharingSessions();
   }, [isInitialized, refreshSharingSessions]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const match = window.location.pathname.match(/^\/join\/([^/?#]+)$/i);
+    if (!match) return;
+
+    setInitialJoinRoomCode(decodeURIComponent(match[1]).trim().toUpperCase());
+    setSharingPanelMode('join');
+    setSharingPanelEventName(null);
+    setActiveTab('eventList');
+    setSharingStatusMessage('参加URLを読み取りました。表示名を確認して参加してください。');
+  }, []);
+
   const activeSharingSession = useMemo(
     () => findActiveSharingSessionForEvent(sharingSessions, activeEventName),
     [sharingSessions, activeEventName],
@@ -700,6 +716,15 @@ const App: React.FC = () => {
     [sharingSessions],
   );
 
+  const hasSharingSessionForEvent = useCallback(
+    (eventName: string | null | undefined): boolean =>
+      !!eventName &&
+      Object.values(sharingSessions).some(
+        (session) => session.eventName === eventName && session.status !== 'localizing',
+      ),
+    [sharingSessions],
+  );
+
   const hasAnyActiveSharingSession = useMemo(
     () => Object.values(sharingSessions).some((session) => isSharingSessionActive(session)),
     [sharingSessions],
@@ -724,7 +749,12 @@ const App: React.FC = () => {
   const sharingAvailability = useMemo(() => getSharingAvailability(), []);
 
   const applySnapshotAndAck = useCallback(
-    async (roomId: string) => {
+    async (roomId: string, roomCode?: string) => {
+      const rememberedRoomCode =
+        roomCode ??
+        sharingSessionsRef.current[roomId]?.roomCode ??
+        Object.values(sharingSessionsRef.current).find((session) => session.roomId === roomId)
+          ?.roomCode;
       const snapshotEnvelope = await getRoomSnapshot(roomId);
       if (!snapshotEnvelope.ok) {
         setSharingErrorMessage(`snapshotの取得に失敗しました: ${snapshotEnvelope.error.code}`);
@@ -735,7 +765,24 @@ const App: React.FC = () => {
       const ack = await commitSnapshotThenAck(snapshotEnvelope.data, currentAppData);
       const nextAppData = roomSnapshotToAppData(snapshotEnvelope.data, currentAppData);
       applySharingAppData(nextAppData);
-      await refreshSharingSessions();
+      const refreshedSessions = await refreshSharingSessions();
+
+      if (rememberedRoomCode) {
+        const sessionWithRoomCode = Object.values(refreshedSessions).find(
+          (session) => session.roomId === roomId,
+        );
+        if (sessionWithRoomCode) {
+          const nextSession: SharingSessionMetadata = {
+            ...sessionWithRoomCode,
+            roomCode: rememberedRoomCode,
+          };
+          await db.saveSharingSession(nextSession);
+          setSharingSessions((prev) => ({
+            ...prev,
+            [nextSession.sessionId]: nextSession,
+          }));
+        }
+      }
 
       const eventName = snapshotEnvelope.data.room.eventName;
       setActiveEventName(eventName);
@@ -1028,8 +1075,10 @@ const App: React.FC = () => {
           return;
         }
 
-        await applySnapshotAndAck(created.data.roomId);
-        setSharingStatusMessage(`共有ルームを作成しました。ルームコード: ${created.data.roomCode}`);
+        await applySnapshotAndAck(created.data.roomId, created.data.roomCode);
+        setSharingPanelEventName(eventName);
+        setSharingPanelMode('invite');
+        setSharingStatusMessage('共有ルームを作成しました。参加URLとQRコードを表示しています。');
       } catch (error) {
         console.error('Sharing create error:', error);
         setSharingErrorMessage('共有ルームの作成に失敗しました。設定または通信状態を確認してください。');
@@ -1042,11 +1091,12 @@ const App: React.FC = () => {
 
   const handleJoinSharingRoom = useCallback(
     async (roomCode: string, displayName: string) => {
+      const normalizedRoomCode = roomCode.trim().toUpperCase();
       setSharingBusy(true);
       setSharingStatusMessage('共有ルームへ参加しています。');
       setSharingErrorMessage(null);
       try {
-        const prepared = await prepareJoinRoom(roomCode.trim());
+        const prepared = await prepareJoinRoom(normalizedRoomCode);
         if (!prepared.ok) {
           setSharingErrorMessage(`共有ルームの参加準備に失敗しました: ${prepared.error.code}`);
           return;
@@ -1063,7 +1113,10 @@ const App: React.FC = () => {
           return;
         }
 
-        await applySnapshotAndAck(joined.data.roomId);
+        await applySnapshotAndAck(joined.data.roomId, normalizedRoomCode);
+        setInitialJoinRoomCode(null);
+        setSharingPanelMode(null);
+        setSharingPanelEventName(null);
         setSharingStatusMessage('共有ルームへ参加しました。');
       } catch (error) {
         console.error('Sharing join error:', error);
@@ -1074,6 +1127,35 @@ const App: React.FC = () => {
     },
     [applySnapshotAndAck],
   );
+
+  const handleCreateSharingRoomFromMenu = useCallback(
+    (eventName: string) => {
+      const displayName = window.prompt('共有で使う表示名を入力してください。', '主催');
+      if (displayName === null) return;
+      void handleCreateSharingRoom(eventName, displayName);
+    },
+    [handleCreateSharingRoom],
+  );
+
+  const handleOpenSharingJoinPanel = useCallback(() => {
+    setSharingPanelMode('join');
+    setSharingPanelEventName(null);
+  }, []);
+
+  const handleOpenSharingInvitePanel = useCallback((eventName: string) => {
+    setSharingPanelMode('invite');
+    setSharingPanelEventName(eventName);
+  }, []);
+
+  const handleOpenSharingStatusPanel = useCallback((eventName: string) => {
+    setSharingPanelMode('status');
+    setSharingPanelEventName(eventName);
+  }, []);
+
+  const handleCloseSharingPanel = useCallback(() => {
+    setSharingPanelMode(null);
+    setSharingPanelEventName(null);
+  }, []);
 
   const handleRestoreSharingRoom = useCallback(
     async (roomId: string) => {
@@ -5865,8 +5947,10 @@ const App: React.FC = () => {
           </button>
         )}
 
-      {(activeTab === 'eventList' || activeSharingSession) && (
+      {sharingPanelMode && (
         <SharingMvp0cPanel
+          mode={sharingPanelMode}
+          eventName={sharingPanelEventName}
           eventNames={sharingEventNames}
           activeEventName={activeEventName}
           sessions={sharingSessions}
@@ -5874,6 +5958,7 @@ const App: React.FC = () => {
           availability={sharingAvailability}
           statusMessage={sharingStatusMessage}
           errorMessage={sharingErrorMessage}
+          initialJoinRoomCode={initialJoinRoomCode}
           onCreateRoom={handleCreateSharingRoom}
           onJoinRoom={handleJoinSharingRoom}
           onRestoreRoom={handleRestoreSharingRoom}
@@ -5890,6 +5975,7 @@ const App: React.FC = () => {
           onRefreshNotifications={refreshSharingNotifications}
           onMarkNotificationRead={handleMarkSharingNotificationRead}
           onHideNotification={handleHideSharingNotification}
+          onClose={handleCloseSharingPanel}
         />
       )}
 
@@ -5965,6 +6051,14 @@ const App: React.FC = () => {
         handleFocusMapRotationAngleChange={handleFocusMapRotationAngleChange}
         handleFocusSessionStateChange={handleFocusSessionStateChange}
         handleImportMapData={handleImportMapData}
+        handleCreateSharingRoomFromMenu={
+          sharingAvailability.enabled ? handleCreateSharingRoomFromMenu : undefined
+        }
+        handleJoinSharingRoomFromMenu={
+          sharingAvailability.enabled ? handleOpenSharingJoinPanel : undefined
+        }
+        handleShowSharingInviteFromMenu={handleOpenSharingInvitePanel}
+        handleShowSharingStatusFromMenu={handleOpenSharingStatusPanel}
         handleMapTabRotationAngleChange={handleMapTabRotationAngleChange}
         handleMapViewportChange={handleMapViewportChange}
         handleModeChangeFromFocus={handleModeChangeFromFocus}
@@ -5990,6 +6084,7 @@ const App: React.FC = () => {
         handleUpdateHallRouteSettings={handleUpdateHallRouteSettings}
         handleUpdateItem={handleUpdateItem}
         handleUpdateItemPriorityFromEdit={handleUpdateItemPriorityFromEdit}
+        isSharingActiveForEvent={hasSharingSessionForEvent}
         highlightedItemId={highlightedItemId}
         highlightedMapCell={highlightedMapCell}
         isMapTab={isMapTab}
