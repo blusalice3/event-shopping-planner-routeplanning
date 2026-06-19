@@ -179,6 +179,7 @@ type SharingMutableItemFields = {
 
 const EMPTY_ASSIGNMENT_MEMBERS: AssignmentMemberProfile[] = [];
 const SHARING_MEMBER_PROFILE_REFRESH_INTERVAL_MS = 10_000;
+const SHARING_ITEM_SYNC_REFRESH_INTERVAL_MS = 10_000;
 
 const areAssignmentMemberProfilesEqual = (
   left: AssignmentMemberProfile[] | undefined,
@@ -726,9 +727,7 @@ const App: React.FC = () => {
     [activeSharingAssignedOnlyMemberId],
   );
   const canAssignSharingItem = useCallback(
-    (item: ShoppingItem): boolean =>
-      !!activeSharingSession &&
-      (activeSharingSession.role === 'host' || item.assignedTo === activeSharingSession.roomMemberId),
+    (_item: ShoppingItem): boolean => !!activeSharingSession,
     [activeSharingSession],
   );
 
@@ -1255,7 +1254,7 @@ const App: React.FC = () => {
         return;
       }
       if (!canAssignSharingItem(item)) {
-        setSharingErrorMessage('通常メンバーは自分が担当しているアイテムだけ譲渡できます。');
+        setSharingErrorMessage('共有中の有効メンバーだけが担当者を変更できます。');
         return;
       }
 
@@ -1304,7 +1303,7 @@ const App: React.FC = () => {
       }
 
       if (selectedItems.some((item) => !canAssignSharingItem(item))) {
-        setSharingErrorMessage('通常メンバーは自分が担当しているアイテムだけ一括譲渡できます。');
+        setSharingErrorMessage('共有中の有効メンバーだけが一括譲渡できます。');
         return;
       }
 
@@ -1741,6 +1740,24 @@ const App: React.FC = () => {
     applySnapshotAndAck,
     isInitialized,
     refreshSharingMemberProfiles,
+    sharingAvailability.enabled,
+    synchronizeSharingSession,
+  ]);
+
+  useEffect(() => {
+    if (!isInitialized || !activeSharingSession || !sharingAvailability.enabled) return;
+
+    const sessionId = activeSharingSession.sessionId;
+    const timerId = window.setInterval(() => {
+      const currentSession = sharingSessionsRef.current[sessionId];
+      if (!currentSession || !isSharingSessionActive(currentSession)) return;
+      void synchronizeSharingSession(sessionId, 'realtime');
+    }, SHARING_ITEM_SYNC_REFRESH_INTERVAL_MS);
+
+    return () => window.clearInterval(timerId);
+  }, [
+    activeSharingSession?.sessionId,
+    isInitialized,
     sharingAvailability.enabled,
     synchronizeSharingSession,
   ]);
