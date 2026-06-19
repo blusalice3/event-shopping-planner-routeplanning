@@ -44,6 +44,11 @@ interface EventListScreenProps {
   onRename?: (oldName: string) => void;
   onImportMap?: (name: string) => void;
   onImportExportFile?: () => void;
+  onCreateSharingRoom?: (name: string) => void;
+  onJoinSharingRoom?: () => void;
+  onShowSharingInvite?: (name: string) => void;
+  onShowSharingStatus?: (name: string) => void;
+  isSharingActiveForEvent?: (name: string) => boolean;
 }
 
 const EventListScreen: React.FC<EventListScreenProps> = ({
@@ -55,6 +60,11 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
   onRename,
   onImportMap,
   onImportExportFile,
+  onCreateSharingRoom,
+  onJoinSharingRoom,
+  onShowSharingInvite,
+  onShowSharingStatus,
+  isSharingActiveForEvent,
 }) => {
   const [menuVisibleFor, setMenuVisibleFor] = useState<string | null>(null);
 
@@ -211,6 +221,61 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
                 >
                   <span className="text-lg">🗺️</span>
                   <span>マップデータ取り込み</span>
+                </button>
+              )}
+              {(onCreateSharingRoom || onJoinSharingRoom || onShowSharingInvite || onShowSharingStatus) && (
+                <div className="border-t border-slate-200 dark:border-slate-700 my-2" />
+              )}
+              {onCreateSharingRoom && !isSharingActiveForEvent?.(menuVisibleFor) && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onCreateSharingRoom(menuVisibleFor);
+                    setMenuVisibleFor(null);
+                  }}
+                  className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <span className="text-lg">👥</span>
+                  <span>共有を開始</span>
+                </button>
+              )}
+              {onJoinSharingRoom && !isSharingActiveForEvent?.(menuVisibleFor) && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onJoinSharingRoom();
+                    setMenuVisibleFor(null);
+                  }}
+                  className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <span className="text-lg">🔗</span>
+                  <span>共有URL/コードで参加</span>
+                </button>
+              )}
+              {onShowSharingInvite && isSharingActiveForEvent?.(menuVisibleFor) && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onShowSharingInvite(menuVisibleFor);
+                    setMenuVisibleFor(null);
+                  }}
+                  className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <span className="text-lg">📲</span>
+                  <span>参加URL/QRを表示</span>
+                </button>
+              )}
+              {onShowSharingStatus && isSharingActiveForEvent?.(menuVisibleFor) && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onShowSharingStatus(menuVisibleFor);
+                    setMenuVisibleFor(null);
+                  }}
+                  className="flex items-center space-x-3 w-full px-4 py-3 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+                >
+                  <span className="text-lg">⚙️</span>
+                  <span>共有状態</span>
                 </button>
               )}
               <div className="border-t border-slate-200 dark:border-slate-700 my-2" />
