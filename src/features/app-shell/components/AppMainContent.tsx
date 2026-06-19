@@ -112,6 +112,10 @@ type AppMainContentProps = {
   handleFocusMapRotationAngleChange: (angle: number) => void;
   handleFocusSessionStateChange: (state: FocusModeSessionState) => void;
   handleImportMapData: NonNullable<EventListScreenProps['onImportMap']>;
+  handleCreateSharingRoomFromMenu?: NonNullable<EventListScreenProps['onCreateSharingRoom']>;
+  handleJoinSharingRoomFromMenu?: NonNullable<EventListScreenProps['onJoinSharingRoom']>;
+  handleShowSharingInviteFromMenu?: NonNullable<EventListScreenProps['onShowSharingInvite']>;
+  handleShowSharingStatusFromMenu?: NonNullable<EventListScreenProps['onShowSharingStatus']>;
   handleMapTabRotationAngleChange: (angle: number) => void;
   handleMapViewportChange: (viewport: MapViewportState) => void;
   handleModeChangeFromFocus: (mode: 'edit' | 'execute', lastItemId?: string) => void;
@@ -137,6 +141,7 @@ type AppMainContentProps = {
   handleUpdateHallRouteSettings: MapViewProps['onUpdateHallRouteSettings'];
   handleUpdateItem: ShoppingListProps['onUpdateItem'];
   handleUpdateItemPriorityFromEdit: NonNullable<MapViewProps['onUpdateItemPriority']>;
+  isSharingActiveForEvent?: NonNullable<EventListScreenProps['isSharingActiveForEvent']>;
   highlightedItemId: string | null;
   highlightedMapCell: { row: number; col: number } | null;
   isMapTab: boolean;
@@ -244,6 +249,10 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     handleFocusMapRotationAngleChange,
     handleFocusSessionStateChange,
     handleImportMapData,
+    handleCreateSharingRoomFromMenu,
+    handleJoinSharingRoomFromMenu,
+    handleShowSharingInviteFromMenu,
+    handleShowSharingStatusFromMenu,
     handleMapTabRotationAngleChange,
     handleMapViewportChange,
     handleModeChangeFromFocus,
@@ -269,6 +278,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     handleUpdateHallRouteSettings,
     handleUpdateItem,
     handleUpdateItemPriorityFromEdit,
+    isSharingActiveForEvent,
     highlightedItemId,
     highlightedMapCell,
     isMapTab,
@@ -342,6 +352,11 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
             onRename={(oldName) => handleRenameEvent(oldName)}
             onImportMap={handleImportMapData}
             onImportExportFile={() => exportFileInputRef.current?.click()}
+            onCreateSharingRoom={handleCreateSharingRoomFromMenu}
+            onJoinSharingRoom={handleJoinSharingRoomFromMenu}
+            onShowSharingInvite={handleShowSharingInviteFromMenu}
+            onShowSharingStatus={handleShowSharingStatusFromMenu}
+            isSharingActiveForEvent={isSharingActiveForEvent}
           />
         )}
         {activeTab === 'import' && (

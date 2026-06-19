@@ -4,9 +4,16 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import SharingMvp0cPanel from './SharingMvp0cPanel';
+import SharingMvp0cPanel, { getJoinRoomCodeFromInput } from './SharingMvp0cPanel';
+
+vi.mock('qrcode', () => ({
+  default: {
+    toCanvas: vi.fn().mockResolvedValue(undefined),
+  },
+}));
 
 const baseProps = {
+  mode: 'join' as const,
   eventNames: ['テストイベント'],
   activeEventName: 'テストイベント',
   sessions: {},
@@ -19,6 +26,12 @@ const baseProps = {
 };
 
 describe('SharingMvp0cPanel', () => {
+  it('extracts a room code from a join URL', () => {
+    expect(getJoinRoomCodeFromInput('https://example.test/join/AB123')).toBe('AB123');
+    expect(getJoinRoomCodeFromInput('/join/cd456')).toBe('CD456');
+    expect(getJoinRoomCodeFromInput('ef789')).toBe('EF789');
+  });
+
   it('closes create, join, and restore controls when sharing is unavailable', () => {
     render(
       <SharingMvp0cPanel
@@ -28,12 +41,10 @@ describe('SharingMvp0cPanel', () => {
     );
 
     expect(screen.getByText('Supabase未設定のため共有は利用できません。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '共有を作成' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '参加' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: '復元' })).toBeDisabled();
   });
 
-  it('opens MVP-0c controls for local or limited sharing', () => {
+  it('opens join controls for local or limited sharing', () => {
     render(
       <SharingMvp0cPanel
         {...baseProps}
@@ -41,7 +52,7 @@ describe('SharingMvp0cPanel', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: '共有を作成' })).toBeEnabled();
+    expect(screen.getByPlaceholderText('参加URLまたはルームコード')).toBeEnabled();
   });
 
   it('opens MVP-0c controls for configured public Guard sharing', () => {
@@ -53,7 +64,58 @@ describe('SharingMvp0cPanel', () => {
     );
 
     expect(screen.getByText('public Guard経由で共有します。')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '共有を作成' })).toBeEnabled();
+    expect(screen.getByPlaceholderText('参加URLまたはルームコード')).toBeEnabled();
+  });
+
+  it('prefills a join code from a shared URL route', async () => {
+    const user = userEvent.setup();
+    const onJoinRoom = vi.fn().mockResolvedValue(undefined);
+
+    render(
+      <SharingMvp0cPanel
+        {...baseProps}
+        availability={{ enabled: true, mode: 'local_or_limited' }}
+        initialJoinRoomCode="AB123"
+        onJoinRoom={onJoinRoom}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: '参加' }));
+
+    expect(screen.getByDisplayValue('AB123')).toBeInTheDocument();
+    expect(onJoinRoom).toHaveBeenCalledWith('AB123', '参加者');
+  });
+
+  it('shows a guest join URL for active sessions with a room code', () => {
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+    render(
+      <SharingMvp0cPanel
+        {...baseProps}
+        mode="invite"
+        availability={{ enabled: true, mode: 'local_or_limited' }}
+        sessions={{
+          activeHost: {
+            sessionId: 'activeHost',
+            roomId: 'room-host',
+            roomCode: 'AB123',
+            roomMemberId: 'member-host',
+            eventName: 'Host Event',
+            role: 'host',
+            status: 'active',
+            startedAt: past,
+            expiresAt: future,
+            itemsVersion: 0,
+            routeOrderVersions: {},
+          },
+        }}
+      />,
+    );
+
+    const urlInput = screen.getByLabelText('Host Eventの参加URL') as HTMLInputElement;
+    expect(urlInput.value).toMatch(/\/join\/AB123$/);
+    expect(screen.getByRole('button', { name: '参加URLをコピー' })).toBeInTheDocument();
   });
 
   it('exposes the MVP-2a assigned-only filter and bulk assignment action for active members', async () => {
@@ -64,6 +126,7 @@ describe('SharingMvp0cPanel', () => {
     render(
       <SharingMvp0cPanel
         {...baseProps}
+        mode="status"
         availability={{ enabled: true, mode: 'local_or_limited' }}
         assignmentMembers={[
           {
@@ -118,6 +181,7 @@ describe('SharingMvp0cPanel', () => {
     render(
       <SharingMvp0cPanel
         {...baseProps}
+        mode="status"
         availability={{ enabled: true, mode: 'local_or_limited' }}
         sessions={{
           activeMember: {
@@ -213,6 +277,7 @@ describe('SharingMvp0cPanel', () => {
     render(
       <SharingMvp0cPanel
         {...baseProps}
+        mode="status"
         availability={{ enabled: true, mode: 'local_or_limited' }}
         notifications={[
           {
