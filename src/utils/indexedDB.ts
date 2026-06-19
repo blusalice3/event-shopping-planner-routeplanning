@@ -286,6 +286,7 @@ export interface AppData {
 export interface SharingSessionMetadata {
   sessionId: string;
   roomId: string;
+  roomCode?: string;
   roomMemberId: string;
   eventName: string;
   role: 'host' | 'member';
