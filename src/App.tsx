@@ -178,6 +178,28 @@ type SharingMutableItemFields = {
 };
 
 const EMPTY_ASSIGNMENT_MEMBERS: AssignmentMemberProfile[] = [];
+const SHARING_MEMBER_PROFILE_REFRESH_INTERVAL_MS = 10_000;
+
+const areAssignmentMemberProfilesEqual = (
+  left: AssignmentMemberProfile[] | undefined,
+  right: AssignmentMemberProfile[] | undefined,
+): boolean => {
+  const leftMembers = left ?? EMPTY_ASSIGNMENT_MEMBERS;
+  const rightMembers = right ?? EMPTY_ASSIGNMENT_MEMBERS;
+  if (leftMembers.length !== rightMembers.length) return false;
+
+  return leftMembers.every((member, index) => {
+    const other = rightMembers[index];
+    return (
+      other !== undefined &&
+      member.roomMemberId === other.roomMemberId &&
+      member.displayName === other.displayName &&
+      member.color === other.color &&
+      member.role === other.role &&
+      member.membershipStatus === other.membershipStatus
+    );
+  });
+};
 
 const sortCycle: SortState[] = [
   'Manual',
@@ -1418,6 +1440,12 @@ const App: React.FC = () => {
       if (!result.ok) return session;
 
       const latestSession = sharingSessionsRef.current[session.sessionId] ?? session;
+      if (
+        areAssignmentMemberProfilesEqual(latestSession.memberProfileSnapshot, result.data.members)
+      ) {
+        return latestSession;
+      }
+
       const updatedSession: SharingSessionMetadata = {
         ...latestSession,
         memberProfileSnapshot: result.data.members,
@@ -1427,6 +1455,34 @@ const App: React.FC = () => {
     },
     [saveSharingSessionState],
   );
+
+  useEffect(() => {
+    if (!isInitialized || !activeSharingSession || !sharingAvailability.enabled) return;
+
+    const sessionId = activeSharingSession.sessionId;
+    let disposed = false;
+    const refreshCurrentMemberProfiles = () => {
+      const currentSession = sharingSessionsRef.current[sessionId];
+      if (!currentSession || !isSharingSessionActive(currentSession) || disposed) return;
+      void refreshSharingMemberProfiles(currentSession);
+    };
+
+    refreshCurrentMemberProfiles();
+    const timerId = window.setInterval(
+      refreshCurrentMemberProfiles,
+      SHARING_MEMBER_PROFILE_REFRESH_INTERVAL_MS,
+    );
+
+    return () => {
+      disposed = true;
+      window.clearInterval(timerId);
+    };
+  }, [
+    activeSharingSession?.sessionId,
+    isInitialized,
+    refreshSharingMemberProfiles,
+    sharingAvailability.enabled,
+  ]);
 
   const handlePauseSharingSession = useCallback(
     async (session: SharingSessionMetadata) => {
