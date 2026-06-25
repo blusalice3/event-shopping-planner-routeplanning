@@ -502,9 +502,9 @@ select isnt(
 
 select has_function(
   'public',
-  'claim_item',
-  array['uuid', 'text', 'text', 'integer'],
-  'sharing_mvp1_gate_progression: claim_item is opened by the MVP-1 migration'
+  'update_room_item_with_purchase',
+  array['uuid', 'text', 'jsonb', 'text', 'integer', 'jsonb'],
+  'sharing_mvp1_gate_progression: v2 item purchase mutation RPC is available'
 );
 
 select ok(

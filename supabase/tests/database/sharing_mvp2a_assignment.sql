@@ -195,17 +195,16 @@ select ok(
 );
 
 insert into mvp2a_results(key, value)
-select 'guest_steal_denied',
+select 'guest_reassign_host_item',
        public.assign_item(
          (select value::uuid from mvp2a_values where key = 'room_id'),
          'item-2',
          ((select value from mvp2a_results where key = 'join_room') #>> '{data,roomMemberId}')::uuid
        );
 
-select is(
-  (select value #>> '{error,code}' from mvp2a_results where key = 'guest_steal_denied'),
-  'PERMISSION_DENIED',
-  'sharing_mvp2a_assignment: member cannot take an item assigned to someone else'
+select ok(
+  ((select value from mvp2a_results where key = 'guest_reassign_host_item') ->> 'ok')::boolean,
+  'sharing_mvp2a_assignment: member can reassign an item assigned to someone else'
 );
 
 select set_config('request.jwt.claim.sub', (select value from mvp2a_values where key = 'host_auth'), true);
@@ -230,8 +229,8 @@ select ok(
 
 select is(
   (select value #>> '{data,itemsVersion}' from mvp2a_results where key = 'host_assign_item_1'),
-  '1',
-  'sharing_mvp2a_assign_item: single assignment allocates version 1'
+  '2',
+  'sharing_mvp2a_assign_item: single assignment allocates version 2 after member reassignment'
 );
 
 select ok(
@@ -240,7 +239,7 @@ select ok(
     from public.room_item_change_log log
     where log.room_id = (select value::uuid from mvp2a_values where key = 'room_id')
       and log.local_item_id = 'item-1'
-      and log.items_version = 1
+      and log.items_version = 2
       and log.changed_fields = array['assignedTo']
       and log.changed_values ->> 'assignedTo' =
         ((select value from mvp2a_results where key = 'join_room') #>> '{data,roomMemberId}')
@@ -283,8 +282,8 @@ select ok(
 
 select is(
   (select value #>> '{data,itemsVersion}' from mvp2a_results where key = 'guest_transfer_own'),
-  '2',
-  'sharing_mvp2a_assign_item: member transfer allocates version 2'
+  '3',
+  'sharing_mvp2a_assign_item: member transfer allocates version 3'
 );
 
 select set_config('request.jwt.claim.sub', (select value from mvp2a_values where key = 'host_auth'), true);
@@ -318,9 +317,9 @@ select is(
     select string_agg(log.items_version::text, ',' order by log.items_version)
     from public.room_item_change_log log
     where log.room_id = (select value::uuid from mvp2a_values where key = 'room_id')
-      and log.items_version between 3 and 5
+      and log.items_version between 4 and 5
   ),
-  '3,4,5',
+  '4,5',
   'sharing_mvp2a_bulk_assign_items: bulk change log versions are contiguous'
 );
 
@@ -343,7 +342,7 @@ select is(
       and n.notification_type = 'item_assigned'
       and n.payload ->> 'assignmentMode' = 'bulk'
   ),
-  '3',
+  '2',
   'sharing_mvp2a_bulk_assign_items: bulk assignment creates one sync notification per changed item'
 );
 

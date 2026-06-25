@@ -9,7 +9,7 @@
 ```env
 VITE_SHARING_PUBLIC_GATE_ENABLED=true
 VITE_SHARING_EDGE_GUARD_URL=http://127.0.0.1:54321/functions/v1
-VITE_SHARING_CONTRACT_VERSION=1
+VITE_SHARING_CONTRACT_VERSION=2
 SHARING_PUBLIC_GUARD_RELEASE_CHECKLIST_ACK=true
 SHARING_PUBLIC_GUARD_MUTATING_CHECK_ACK=true
 ```
@@ -22,12 +22,12 @@ SHARING_PUBLIC_GUARD_MUTATING_CHECK_ACK=true
 
 ## API 契約
 
-全リクエストは `Authorization: Bearer <Supabase access token>`、`Content-Type: application/json`、`X-Sharing-Contract-Version: 1` を送ります。本文にも `contract_version: 1` を含めます。
+全リクエストは `Authorization: Bearer <Supabase access token>`、`Content-Type: application/json`、`X-Sharing-Contract-Version: 2` を送ります。本文にも `contract_version: 2` を含めます。
 
 成功:
 
 ```json
-{ "ok": true, "data": {}, "contract_version": 1 }
+{ "ok": true, "data": {}, "contract_version": 2 }
 ```
 
 失敗:
@@ -38,7 +38,7 @@ SHARING_PUBLIC_GUARD_MUTATING_CHECK_ACK=true
   "error": {
     "code": "GUARD_UNAVAILABLE",
     "retry_after_seconds": 300,
-    "contract_version": 1,
+    "contract_version": 2,
     "request_id": "..."
   }
 }
@@ -80,7 +80,7 @@ npm run sharing:public-guard:check
 
 ## Release Checklist
 
-- Guard API contract version が `1` である。
+- Guard API contract version が `2` である。
 - Supabase JWT 検証が有効で、未認証は `AUTH_REQUIRED` になる。
 - IP/端末/セッション横断 rate limit が有効で、超過時は `RATE_LIMITED` と `retry_after_seconds` を返す。
 - `app.sharing_public_mode = 'public'` でブラウザ相当の直接 bootstrap RPC が `GUARD_REQUIRED` になる。

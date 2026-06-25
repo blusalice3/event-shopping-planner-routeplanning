@@ -1,6 +1,6 @@
 begin;
 
-select plan(33);
+select plan(40);
 
 select has_table('public', 'room_route_order_versions', 'mvp2c creates route-order version table');
 select has_table('public', 'notification_reads', 'mvp2c creates member notification read table');
@@ -124,6 +124,40 @@ select is(
   'sharing_mvp2c_route: create_room returns the enabled route version'
 );
 
+select is(
+  (
+    select accepted_contract_version::text
+    from public.room_members
+    where id = ((select value from mvp2c_results where key = 'create_room') #>> '{data,hostMemberId}')::uuid
+  ),
+  '2',
+  'sharing_mvp2c_contract: host member stores accepted contract v2'
+);
+
+update public.room_members
+set accepted_contract_version = null
+where id = ((select value from mvp2c_results where key = 'create_room') #>> '{data,hostMemberId}')::uuid;
+
+insert into mvp2c_results(key, value)
+select 'legacy_host_versions',
+       public.get_room_versions((select value::uuid from mvp2c_values where key = 'room_id'));
+
+select is(
+  (select value ->> 'ok' from mvp2c_results where key = 'legacy_host_versions'),
+  'false',
+  'sharing_mvp2c_contract: legacy member cannot call sync RPCs'
+);
+
+select is(
+  public.can_select_room_sync_rows((select value::uuid from mvp2c_values where key = 'room_id'))::text,
+  'false',
+  'sharing_mvp2c_contract: legacy member cannot select sync rows'
+);
+
+update public.room_members
+set accepted_contract_version = 2
+where id = ((select value from mvp2c_results where key = 'create_room') #>> '{data,hostMemberId}')::uuid;
+
 select set_config('request.jwt.claim.sub', (select value from mvp2c_values where key = 'guest_auth'), true);
 select set_config(
   'request.jwt.claims',
@@ -149,6 +183,77 @@ select ok(
   ((select value from mvp2c_results where key = 'join_room') ->> 'ok')::boolean,
   'sharing_mvp2c_route: guest joins before route update'
 );
+
+select is(
+  (
+    select accepted_contract_version::text
+    from public.room_members
+    where id = ((select value from mvp2c_results where key = 'join_room') #>> '{data,roomMemberId}')::uuid
+  ),
+  '2',
+  'sharing_mvp2c_contract: joined member stores accepted contract v2'
+);
+
+update public.room_members
+set accepted_contract_version = null
+where id = ((select value from mvp2c_results where key = 'join_room') #>> '{data,roomMemberId}')::uuid;
+
+select set_config('request.jwt.claim.sub', (select value from mvp2c_values where key = 'guest_auth'), true);
+select set_config(
+  'request.jwt.claims',
+  '{"role":"authenticated","sub":"22222222-2222-4222-8222-222222222222"}',
+  true
+);
+
+select is(
+  public.can_select_room_sync_rows((select value::uuid from mvp2c_values where key = 'room_id'))::text,
+  'false',
+  'sharing_mvp2c_contract: legacy joined member cannot select sync rows'
+);
+
+insert into public.notifications(
+  id,
+  room_id,
+  idempotency_key,
+  notification_type,
+  payload
+) values (
+  '33333333-3333-4333-8333-333333333333',
+  (select value::uuid from mvp2c_values where key = 'room_id'),
+  'mvp2c-legacy-delivery-test',
+  'item_updated',
+  '{}'::jsonb
+);
+
+select private.create_room_notification_delivery(
+  '33333333-3333-4333-8333-333333333333',
+  (select value::uuid from mvp2c_values where key = 'room_id')
+);
+
+select is(
+  (
+    select count(*)::text
+    from public.notification_delivery_state
+    where notification_id = '33333333-3333-4333-8333-333333333333'
+  ),
+  '1',
+  'sharing_mvp2c_contract: room notification delivery skips legacy members'
+);
+
+select is(
+  (
+    select count(*)::text
+    from public.notification_delivery_state
+    where notification_id = '33333333-3333-4333-8333-333333333333'
+      and room_member_id = ((select value from mvp2c_results where key = 'join_room') #>> '{data,roomMemberId}')::uuid
+  ),
+  '0',
+  'sharing_mvp2c_contract: legacy joined member receives no notification delivery'
+);
+
+update public.room_members
+set accepted_contract_version = 2
+where id = ((select value from mvp2c_results where key = 'join_room') #>> '{data,roomMemberId}')::uuid;
 
 select set_config('request.jwt.claim.sub', (select value from mvp2c_values where key = 'host_auth'), true);
 select set_config(

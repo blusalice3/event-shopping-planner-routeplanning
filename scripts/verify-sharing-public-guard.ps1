@@ -34,7 +34,7 @@ Assert-FileContains -RelativePath 'package.json' -RequiredFragments @(
 Assert-FileContains -RelativePath '.env.example' -RequiredFragments @(
   'VITE_SHARING_PUBLIC_GATE_ENABLED=false',
   'VITE_SHARING_EDGE_GUARD_URL=',
-  'VITE_SHARING_CONTRACT_VERSION=1',
+  'VITE_SHARING_CONTRACT_VERSION=2',
   'SHARING_PUBLIC_GUARD_RELEASE_CHECKLIST_ACK=false',
   'SHARING_PUBLIC_GUARD_MUTATING_CHECK_ACK=false'
 )
@@ -169,7 +169,8 @@ Assert-FileContains -RelativePath '.github/workflows/sharing-public-guard.yml' -
   'public-guard-static',
   'public-guard-db-boundary',
   'public-guard-live',
-  'sharing_guard_public_edge_integration'
+  'sharing_guard_public_edge_integration',
+  "VITE_SHARING_CONTRACT_VERSION: '2'"
 )
 
 $reviewPath = Join-Path $PSScriptRoot '..\docs\sharing-public-guard-review.md'
@@ -243,8 +244,8 @@ if ([string]::IsNullOrWhiteSpace($env:VITE_SHARING_EDGE_GUARD_URL)) {
   throw 'VITE_SHARING_EDGE_GUARD_URL is required when VITE_SHARING_PUBLIC_GATE_ENABLED=true.'
 }
 
-if ($env:VITE_SHARING_CONTRACT_VERSION -ne '1') {
-  throw 'VITE_SHARING_CONTRACT_VERSION must be 1 for the current sharing Guard contract.'
+if ($env:VITE_SHARING_CONTRACT_VERSION -ne '2') {
+  throw 'VITE_SHARING_CONTRACT_VERSION must be 2 for the current sharing Guard contract.'
 }
 
 if ($env:SHARING_PUBLIC_GUARD_RELEASE_CHECKLIST_ACK -ne 'true') {
@@ -384,7 +385,7 @@ function Assert-EnvelopeErrorCode {
 
   if ($Response.Json.ok -ne $false -or
       $Response.Json.error.code -ne $ExpectedCode -or
-      [int]$Response.Json.error.contract_version -ne 1) {
+      [int]$Response.Json.error.contract_version -ne 2) {
     throw "Expected $ExpectedCode envelope from $Uri but received: $($Response.Content)"
   }
 }
@@ -398,7 +399,7 @@ function Assert-EnvelopeSuccess {
   if ($Response.StatusCode -lt 200 -or
       $Response.StatusCode -ge 300 -or
       $Response.Json.ok -ne $true -or
-      [int]$Response.Json.contract_version -ne 1) {
+      [int]$Response.Json.contract_version -ne 2) {
     throw "Expected success envelope from $Uri but received: $($Response.Content)"
   }
 }
@@ -443,9 +444,9 @@ foreach ($endpoint in $guardEndpoints) {
     -Uri $uri `
     -Headers @{
       'Content-Type' = 'application/json'
-      'X-Sharing-Contract-Version' = '1'
+      'X-Sharing-Contract-Version' = '2'
     } `
-    -Body @{ contract_version = 1 }
+    -Body @{ contract_version = 2 }
 
   if ($response.StatusCode -ne 401) {
     throw "Public Guard unauthenticated smoke expected HTTP 401 from $uri but received $($response.StatusCode)."
@@ -458,7 +459,7 @@ $deviceId = "public-guard-check-$([guid]::NewGuid().ToString('N'))"
 $guardHeaders = @{
   Authorization = "Bearer $accessToken"
   'Content-Type' = 'application/json'
-  'X-Sharing-Contract-Version' = '1'
+  'X-Sharing-Contract-Version' = '2'
   'X-Sharing-Device-Id' = $deviceId
 }
 
@@ -470,7 +471,7 @@ $badFingerprintResponse = Invoke-JsonRequest `
   -Uri $createGuardUri `
   -Headers $guardHeaders `
   -Body @{
-    contract_version = 1
+    contract_version = 2
     room_id = $roomId
     canonical_payload = $canonicalPayload
     plaintext_fingerprint = ('A' * 43)
@@ -484,7 +485,7 @@ $createGuardResponse = Invoke-JsonRequest `
   -Uri $createGuardUri `
   -Headers $guardHeaders `
   -Body @{
-    contract_version = 1
+    contract_version = 2
     room_id = $roomId
     canonical_payload = $canonicalPayload
     plaintext_fingerprint = $fingerprint
@@ -552,7 +553,7 @@ $joinGuardResponse = Invoke-JsonRequest `
   -Uri $joinGuardUri `
   -Headers $guardHeaders `
   -Body @{
-    contract_version = 1
+    contract_version = 2
     room_code = $roomCode
   }
 
@@ -579,7 +580,7 @@ $restoreGuardResponse = Invoke-JsonRequest `
   -Uri $restoreGuardUri `
   -Headers $guardHeaders `
   -Body @{
-    contract_version = 1
+    contract_version = 2
     room_id = $roomId
   }
 
@@ -623,7 +624,7 @@ $rateLimitToken = New-AnonymousAccessToken
 $rateLimitHeaders = @{
   Authorization = "Bearer $rateLimitToken"
   'Content-Type' = 'application/json'
-  'X-Sharing-Contract-Version' = '1'
+  'X-Sharing-Contract-Version' = '2'
   'X-Sharing-Device-Id' = "public-guard-rate-limit-$([guid]::NewGuid().ToString('N'))"
 }
 $rateLimited = $false
@@ -632,7 +633,7 @@ for ($attempt = 1; $attempt -le 12; $attempt++) {
     -Uri $restoreGuardUri `
     -Headers $rateLimitHeaders `
     -Body @{
-      contract_version = 1
+      contract_version = 2
       room_id = [guid]::NewGuid().ToString()
     }
 

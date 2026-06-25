@@ -354,9 +354,9 @@ select is(
 
 select has_function(
   'public',
-  'claim_item',
-  array['uuid', 'text', 'text', 'integer'],
-  'sharing_mvp1_gate_progression: purchase mutation is opened by the MVP-1 migration'
+  'update_room_item_with_purchase',
+  array['uuid', 'text', 'jsonb', 'text', 'integer', 'jsonb'],
+  'sharing_mvp1_gate_progression: v2 purchase mutation is available'
 );
 
 select ok(

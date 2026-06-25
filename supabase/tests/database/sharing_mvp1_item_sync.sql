@@ -6,9 +6,9 @@ select has_table('public', 'room_item_change_log', 'mvp1 creates item change log
 select has_table('public', 'notification_delivery_state', 'mvp1 creates notification delivery state');
 select has_function(
   'public',
-  'update_room_item_fields',
-  array['uuid', 'text', 'jsonb'],
-  'mvp1 update_room_item_fields RPC exists'
+  'update_room_item_with_purchase',
+  array['uuid', 'text', 'jsonb', 'text', 'integer', 'jsonb'],
+  'mvp1 v2 item field and purchase RPC exists'
 );
 select has_function(
   'public',
@@ -18,9 +18,9 @@ select has_function(
 );
 select has_function(
   'public',
-  'update_room_item_with_purchase',
-  array['uuid', 'text', 'jsonb', 'text', 'integer'],
-  'mvp1 combined item field and purchase RPC exists'
+  'bulk_update_room_items_with_purchase',
+  array['uuid', 'jsonb'],
+  'mvp1 v2 bulk item field and purchase RPC exists'
 );
 
 insert into private.sharing_secret_versions(
@@ -69,6 +69,22 @@ create temp table mvp1_results(
   key text primary key,
   value jsonb not null
 ) on commit drop;
+
+create function pg_temp.mvp1_expected_clocks(
+  p_room_id uuid,
+  p_local_item_id text,
+  p_fields text[]
+)
+returns jsonb
+language sql
+stable
+as $$
+  select coalesce(jsonb_object_agg(field_name, ri.field_clocks -> field_name), '{}'::jsonb)
+  from public.room_items ri
+  cross join unnest(coalesce(p_fields, array[]::text[])) as field_name
+  where ri.room_id = p_room_id
+    and ri.local_item_id = p_local_item_id;
+$$;
 
 select set_config('request.jwt.claim.sub', (select value from mvp1_values where key = 'host_auth'), true);
 select set_config(
@@ -137,21 +153,28 @@ select set_config(
 
 insert into mvp1_results(key, value)
 select 'field_update',
-       public.update_room_item_fields(
+       public.update_room_item_with_purchase(
          (select value::uuid from mvp1_values where key = 'room_id'),
          'item-1',
-         '{"price":1500,"remarks":"updated memo"}'::jsonb
+         '{"price":1500,"remarks":"updated memo"}'::jsonb,
+         null,
+         null,
+         pg_temp.mvp1_expected_clocks(
+           (select value::uuid from mvp1_values where key = 'room_id'),
+           'item-1',
+           array['price', 'remarks']
+         )
        );
 
 select ok(
   ((select value from mvp1_results where key = 'field_update') ->> 'ok')::boolean,
-  'sharing_mvp1_update_room_item_fields: price and remarks update succeeds'
+  'sharing_mvp1_update_room_item_with_purchase: price and remarks update succeeds'
 );
 
 select is(
   (select value #>> '{data,itemsVersion}' from mvp1_results where key = 'field_update'),
   '1',
-  'sharing_mvp1_update_room_item_fields: first mutation allocates items_version 1'
+  'sharing_mvp1_update_room_item_with_purchase: first mutation allocates items_version 1'
 );
 
 select ok(
@@ -163,7 +186,7 @@ select ok(
       and changed_fields = array['price', 'remarks']
       and changed_values ->> 'remarks' = 'updated memo'
   ),
-  'sharing_mvp1_update_room_item_fields: change log captures exact changed fields'
+  'sharing_mvp1_update_room_item_with_purchase: change log captures exact changed fields'
 );
 
 select ok(
@@ -307,16 +330,22 @@ select set_config(
 
 insert into mvp1_results(key, value)
 select 'host_claim',
-       public.claim_item(
+       public.update_room_item_with_purchase(
          (select value::uuid from mvp1_values where key = 'room_id'),
          'item-1',
+         '{}'::jsonb,
          'Purchased',
-         null
+         null,
+         pg_temp.mvp1_expected_clocks(
+           (select value::uuid from mvp1_values where key = 'room_id'),
+           'item-1',
+           array['purchaseStatus', 'securedBy']
+         )
        );
 
 select ok(
   ((select value from mvp1_results where key = 'host_claim') ->> 'ok')::boolean,
-  'sharing_mvp1_claim_item: host purchase claim succeeds'
+  'sharing_mvp1_update_room_item_with_purchase: host purchase claim succeeds'
 );
 
 select ok(
@@ -329,7 +358,7 @@ select ok(
       and ri.purchase_status = 'Purchased'
       and rm.user_id = (select value::uuid from mvp1_values where key = 'host_auth')
   ),
-  'sharing_mvp1_claim_item: purchased item is secured by the executing member'
+  'sharing_mvp1_update_room_item_with_purchase: purchased item is secured by the executing member'
 );
 
 select set_config('request.jwt.claim.sub', (select value from mvp1_values where key = 'guest_auth'), true);
@@ -340,14 +369,16 @@ select set_config(
 );
 
 select is(
-  public.claim_item(
+  public.update_room_item_with_purchase(
     (select value::uuid from mvp1_values where key = 'room_id'),
     'item-1',
+    '{}'::jsonb,
     'Purchased',
-    null
+    null,
+    '{}'::jsonb
   ) #>> '{error,code}',
   'PERMISSION_DENIED',
-  'sharing_mvp1_claim_item: double purchase claim is rejected for the losing member'
+  'sharing_mvp1_update_room_item_with_purchase: double purchase claim is rejected for the losing member'
 );
 
 select is(
@@ -356,7 +387,8 @@ select is(
     'item-1',
     '{"price":999}'::jsonb,
     'Purchased',
-    null
+    null,
+    '{}'::jsonb
   ) #>> '{error,code}',
   'PERMISSION_DENIED',
   'sharing_mvp1_combined_update: double purchase rejects the whole combined update'
@@ -380,7 +412,7 @@ select is(
     where id = (select value::uuid from mvp1_values where key = 'room_id')
   ),
   '2',
-  'sharing_mvp1_claim_item: failed double claim does not allocate a new item version'
+  'sharing_mvp1_update_room_item_with_purchase: failed double claim does not allocate a new item version'
 );
 
 select ok(
@@ -393,7 +425,7 @@ select ok(
       and n.target_member_id = ((select value from mvp1_results where key = 'join_room') #>> '{data,roomMemberId}')::uuid
       and ds.room_member_id = n.target_member_id
   ),
-  'sharing_mvp1_claim_item: double purchase failure creates targeted notification'
+  'sharing_mvp1_update_room_item_with_purchase: double purchase failure creates targeted notification'
 );
 
 insert into mvp1_results(key, value)
@@ -403,7 +435,12 @@ select 'guest_field_only_after_claim',
          'item-1',
          '{"price":1600}'::jsonb,
          null,
-         null
+         null,
+         pg_temp.mvp1_expected_clocks(
+           (select value::uuid from mvp1_values where key = 'room_id'),
+           'item-1',
+           array['price']
+         )
        );
 
 select ok(
@@ -433,16 +470,22 @@ select set_config(
 
 insert into mvp1_results(key, value)
 select 'host_clear_claim',
-       public.claim_item(
+       public.update_room_item_with_purchase(
          (select value::uuid from mvp1_values where key = 'room_id'),
          'item-1',
+         '{}'::jsonb,
          'None',
-         null
+         null,
+         pg_temp.mvp1_expected_clocks(
+           (select value::uuid from mvp1_values where key = 'room_id'),
+           'item-1',
+           array['purchaseStatus', 'securedBy']
+         )
        );
 
 select ok(
   ((select value from mvp1_results where key = 'host_clear_claim') ->> 'ok')::boolean,
-  'sharing_mvp1_claim_item: clearing purchase status succeeds'
+  'sharing_mvp1_update_room_item_with_purchase: clearing purchase status succeeds'
 );
 
 select ok(
@@ -454,7 +497,7 @@ select ok(
       and purchase_status = 'None'
       and secured_by is null
   ),
-  'sharing_mvp1_claim_item: clearing non-purchase status clears secured_by'
+  'sharing_mvp1_update_room_item_with_purchase: clearing non-purchase status clears secured_by'
 );
 
 insert into mvp1_results(key, value)
@@ -484,7 +527,12 @@ select 'combined_price_purchase',
          'item-1',
          '{"price":1800}'::jsonb,
          'Purchased',
-         null
+         null,
+         pg_temp.mvp1_expected_clocks(
+           (select value::uuid from mvp1_values where key = 'room_id'),
+           'item-1',
+           array['price', 'purchaseStatus', 'securedBy']
+         )
        );
 
 select ok(
@@ -507,29 +555,42 @@ select ok(
 
 insert into mvp1_results(key, value)
 select 'host_limited_item2',
-       public.claim_item(
+       public.update_room_item_with_purchase(
          (select value::uuid from mvp1_values where key = 'room_id'),
          'item-2',
+         '{}'::jsonb,
          'LimitedPurchase',
-         1
+         1,
+         pg_temp.mvp1_expected_clocks(
+           (select value::uuid from mvp1_values where key = 'room_id'),
+           'item-2',
+           array['purchaseStatus', 'actualPurchaseQuantity', 'securedBy']
+         )
        );
 
 select ok(
   ((select value from mvp1_results where key = 'host_limited_item2') ->> 'ok')::boolean,
-  'sharing_mvp1_claim_item: limited purchase claim succeeds for second item'
+  'sharing_mvp1_update_room_item_with_purchase: limited purchase claim succeeds for second item'
 );
 
 insert into mvp1_results(key, value)
 select 'host_actual_quantity_item2',
-       public.update_room_item_fields(
+       public.update_room_item_with_purchase(
          (select value::uuid from mvp1_values where key = 'room_id'),
          'item-2',
-         '{"actualPurchaseQuantity":2}'::jsonb
+         '{"actualPurchaseQuantity":2}'::jsonb,
+         null,
+         null,
+         pg_temp.mvp1_expected_clocks(
+           (select value::uuid from mvp1_values where key = 'room_id'),
+           'item-2',
+           array['actualPurchaseQuantity']
+         )
        );
 
 select ok(
   ((select value from mvp1_results where key = 'host_actual_quantity_item2') ->> 'ok')::boolean,
-  'sharing_mvp1_update_room_item_fields: actual purchase quantity update succeeds'
+  'sharing_mvp1_update_room_item_with_purchase: actual purchase quantity update succeeds'
 );
 
 select ok(
@@ -648,13 +709,16 @@ select is(
 reset role;
 
 select is(
-  public.update_room_item_fields(
+  public.update_room_item_with_purchase(
     (select value::uuid from mvp1_values where key = 'room_id'),
     'item-1',
-    '{"purchaseStatus":"SoldOut"}'::jsonb
+    '{"purchaseStatus":"SoldOut"}'::jsonb,
+    null,
+    null,
+    '{}'::jsonb
   ) #>> '{error,code}',
   'INVALID_REQUEST',
-  'sharing_mvp1_update_room_item_fields: unsupported fields are rejected'
+  'sharing_mvp1_update_room_item_with_purchase: unsupported fields are rejected'
 );
 
 select set_config('request.jwt.claim.sub', (select value from mvp1_values where key = 'wrong_auth'), true);
@@ -665,13 +729,16 @@ select set_config(
 );
 
 select is(
-  public.update_room_item_fields(
+  public.update_room_item_with_purchase(
     (select value::uuid from mvp1_values where key = 'room_id'),
     'item-1',
-    '{"price":900}'::jsonb
+    '{"price":900}'::jsonb,
+    null,
+    null,
+    '{}'::jsonb
   ) #>> '{error,code}',
   'ROOM_UNAVAILABLE',
-  'sharing_mvp1_rls_rpc: non-member cannot update item fields'
+  'sharing_mvp1_rls_rpc: non-member cannot update item fields through v2 RPC'
 );
 
 select isnt(

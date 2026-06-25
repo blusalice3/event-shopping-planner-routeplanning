@@ -27,7 +27,7 @@ The public release check must fail if any marker below is removed.
 - Fallback prohibition: `createSharingRoom`, `prepareJoinRoom`, and `prepareRestoreRoom` return `GUARD_UNAVAILABLE` when public Guard is required but unconfigured. They do not call DB bootstrap RPCs in that state.
 - DB direct RPC rejection: database tests cover `app.sharing_public_mode = 'public'` rejecting direct browser bootstrap with `GUARD_REQUIRED`, and Guard internal RPCs requiring service role JWT claims.
 - Edge Guard canonicalization: `src/features/sharing/publicGuardEdgeCanonical.test.ts` compares Guard-side JCS/NFC bytes and fingerprint against the client canonicalizer and verifies mismatched client fingerprint input returns `CHALLENGE_INVALID` before challenge creation.
-- Edge Guard integration: deploy check posts to `guard-create-room`, `guard-prepare-join`, and `guard-prepare-restore` and requires the stable unauthenticated envelope `{ ok: false, error: { code: "AUTH_REQUIRED", contract_version: 1 } }`. It then creates an anonymous Supabase session, creates one disposable sharing room through Guard, verifies Guard create/join/restore challenge success, verifies direct DB bootstrap RPC rejection with `GUARD_REQUIRED`, and verifies fingerprint mismatch, missing challenge, reused create challenge, wrong-purpose challenge, and public Guard rate limit rejection.
+- Edge Guard integration: deploy check posts to `guard-create-room`, `guard-prepare-join`, and `guard-prepare-restore` and requires the stable unauthenticated envelope `{ ok: false, error: { code: "AUTH_REQUIRED", contract_version: 2 } }`. It then creates an anonymous Supabase session, creates one disposable sharing room through Guard, verifies Guard create/join/restore challenge success, verifies direct DB bootstrap RPC rejection with `GUARD_REQUIRED`, and verifies fingerprint mismatch, missing challenge, reused create challenge, wrong-purpose challenge, and public Guard rate limit rejection.
 - Mutating release check: the public Guard release check intentionally creates one short-lived disposable room in the target Supabase project. This is the release equivalent of a real door test: the check is not considered complete if it only confirms the sign on the door.
 
 ## Commands
@@ -38,7 +38,7 @@ npm run sharing:public-guard:unit
 npm run db:test
 $env:VITE_SHARING_PUBLIC_GATE_ENABLED='true'
 $env:VITE_SHARING_EDGE_GUARD_URL='<deployed-or-local-functions-base-url>'
-$env:VITE_SHARING_CONTRACT_VERSION='1'
+$env:VITE_SHARING_CONTRACT_VERSION='2'
 $env:SHARING_PUBLIC_GUARD_RELEASE_CHECKLIST_ACK='true'
 $env:SHARING_PUBLIC_GUARD_MUTATING_CHECK_ACK='true'
 npm run sharing:public-guard:check

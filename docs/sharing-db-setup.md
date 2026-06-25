@@ -90,6 +90,23 @@ npm run db:lint
 
 ローカルSupabaseの `supabase/config.toml` では Anonymous sign-ins を有効化済みです。
 
+## 共有 v2 activation runbook
+
+v2 hard stop、旧 v1 challenge cleanup、旧 RPC revoke/drop は release gate 後だけ実行します。
+手順、preflight、rollback 境界は [sharing-activation-runbook.md](./sharing-activation-runbook.md) に固定しています。
+
+```powershell
+npm run sharing:activation-runbook:check
+npm run sharing:activation-audit
+npm run sharing:activation-audit:linked
+npm run sharing:activation-production:linked
+```
+
+linked cleanup は `SHARING_ACTIVATION_CONFIRMED=true` と `SHARING_ACTIVATION_RUNBOOK_ACK=true` を直前に設定し、
+監査 blocker が 0 件であることを確認してからだけ実行します。
+古い共有ルーム利用者がいないことを product/support が確認済みの場合だけ、
+`SHARING_ACTIVATION_LEGACY_MEMBER_BLOCKERS_ACK=true` と `-AllowLegacyMemberBlockers` で legacy member blocker を免除できます。
+
 ## 期限切れ共有データの定期cleanup
 
 MVP-2bの期限切れ共有データcleanupは、Supabase Cron / `pg_cron` で毎日自動実行します。

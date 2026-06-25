@@ -18,7 +18,7 @@ if ($config -notmatch '(?m)^\s*enable_anonymous_sign_ins\s*=\s*true\s*$') {
   throw 'Local supabase/config.toml does not enable anonymous sign-ins.'
 }
 
-if ($env:VITE_SHARING_CONTRACT_VERSION -and $env:VITE_SHARING_CONTRACT_VERSION -ne '1') {
+if ($env:VITE_SHARING_CONTRACT_VERSION -and $env:VITE_SHARING_CONTRACT_VERSION -ne '2') {
   throw "Unexpected VITE_SHARING_CONTRACT_VERSION: $env:VITE_SHARING_CONTRACT_VERSION"
 }
 

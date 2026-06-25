@@ -36,7 +36,7 @@ assertFileContains('package.json', [
 assertFileContains('.env.example', [
   'VITE_SHARING_PUBLIC_GATE_ENABLED=false',
   'VITE_SHARING_EDGE_GUARD_URL=',
-  'VITE_SHARING_CONTRACT_VERSION=1',
+  'VITE_SHARING_CONTRACT_VERSION=2',
   'SHARING_PUBLIC_GUARD_RELEASE_CHECKLIST_ACK=false',
   'SHARING_PUBLIC_GUARD_MUTATING_CHECK_ACK=false',
 ]);
@@ -172,6 +172,7 @@ assertFileContains('.github/workflows/sharing-public-guard.yml', [
   'public-guard-db-boundary',
   'public-guard-live',
   'sharing_guard_public_edge_integration',
+  "VITE_SHARING_CONTRACT_VERSION: '2'",
 ]);
 
 const reviewText = readUtf8('docs/sharing-public-guard-review.md');
@@ -242,8 +243,8 @@ const guardBaseUrl = requireEnv(
   'VITE_SHARING_EDGE_GUARD_URL is required when VITE_SHARING_PUBLIC_GATE_ENABLED=true.',
 ).replace(/\/+$/u, '');
 
-if (process.env.VITE_SHARING_CONTRACT_VERSION !== '1') {
-  throw new Error('VITE_SHARING_CONTRACT_VERSION must be 1 for the current sharing Guard contract.');
+if (process.env.VITE_SHARING_CONTRACT_VERSION !== '2') {
+  throw new Error('VITE_SHARING_CONTRACT_VERSION must be 2 for the current sharing Guard contract.');
 }
 
 if (process.env.SHARING_PUBLIC_GUARD_RELEASE_CHECKLIST_ACK !== 'true') {
@@ -300,7 +301,7 @@ const assertEnvelopeErrorCode = (response, uri, expectedCode) => {
   if (
     response.json?.ok !== false ||
     response.json?.error?.code !== expectedCode ||
-    Number(response.json?.error?.contract_version) !== 1
+    Number(response.json?.error?.contract_version) !== 2
   ) {
     throw new Error(`Expected ${expectedCode} envelope from ${uri} but received: ${response.content}`);
   }
@@ -311,7 +312,7 @@ const assertEnvelopeSuccess = (response, uri) => {
     response.statusCode < 200 ||
     response.statusCode >= 300 ||
     response.json?.ok !== true ||
-    Number(response.json?.contract_version) !== 1
+    Number(response.json?.contract_version) !== 2
   ) {
     throw new Error(`Expected success envelope from ${uri} but received: ${response.content}`);
   }
@@ -350,9 +351,9 @@ for (const endpoint of ['guard-create-room', 'guard-prepare-join', 'guard-prepar
   const response = await invokeJsonRequest(uri, {
     headers: {
       'Content-Type': 'application/json',
-      'X-Sharing-Contract-Version': '1',
+      'X-Sharing-Contract-Version': '2',
     },
-    body: { contract_version: 1 },
+    body: { contract_version: 2 },
   });
 
   if (response.statusCode !== 401) {
@@ -368,7 +369,7 @@ const deviceId = `public-guard-check-${randomUUID().replace(/-/gu, '')}`;
 const guardHeaders = {
   Authorization: `Bearer ${accessToken}`,
   'Content-Type': 'application/json',
-  'X-Sharing-Contract-Version': '1',
+  'X-Sharing-Contract-Version': '2',
   'X-Sharing-Device-Id': deviceId,
 };
 
@@ -381,7 +382,7 @@ const createGuardUri = `${guardBaseUrl}/guard-create-room`;
 const badFingerprintResponse = await invokeJsonRequest(createGuardUri, {
   headers: guardHeaders,
   body: {
-    contract_version: 1,
+    contract_version: 2,
     room_id: roomId,
     canonical_payload: canonicalPayload,
     plaintext_fingerprint: 'A'.repeat(43),
@@ -395,7 +396,7 @@ assertEnvelopeErrorCode(badFingerprintResponse, createGuardUri, 'CHALLENGE_INVAL
 const createGuardResponse = await invokeJsonRequest(createGuardUri, {
   headers: guardHeaders,
   body: {
-    contract_version: 1,
+    contract_version: 2,
     room_id: roomId,
     canonical_payload: canonicalPayload,
     plaintext_fingerprint: fingerprint,
@@ -464,7 +465,7 @@ const joinGuardUri = `${guardBaseUrl}/guard-prepare-join`;
 const joinGuardResponse = await invokeJsonRequest(joinGuardUri, {
   headers: guardHeaders,
   body: {
-    contract_version: 1,
+    contract_version: 2,
     room_code: roomCode,
   },
 });
@@ -489,7 +490,7 @@ const restoreGuardUri = `${guardBaseUrl}/guard-prepare-restore`;
 const restoreGuardResponse = await invokeJsonRequest(restoreGuardUri, {
   headers: guardHeaders,
   body: {
-    contract_version: 1,
+    contract_version: 2,
     room_id: roomId,
   },
 });
@@ -538,7 +539,7 @@ const rateLimitToken = await newAnonymousAccessToken();
 const rateLimitHeaders = {
   Authorization: `Bearer ${rateLimitToken}`,
   'Content-Type': 'application/json',
-  'X-Sharing-Contract-Version': '1',
+  'X-Sharing-Contract-Version': '2',
   'X-Sharing-Device-Id': `public-guard-rate-limit-${randomUUID().replace(/-/gu, '')}`,
 };
 
@@ -547,7 +548,7 @@ for (let attempt = 1; attempt <= 12; attempt += 1) {
   const rateLimitResponse = await invokeJsonRequest(restoreGuardUri, {
     headers: rateLimitHeaders,
     body: {
-      contract_version: 1,
+      contract_version: 2,
       room_id: randomUUID(),
     },
   });
