@@ -1,12 +1,5 @@
--- Fix v2 assignment writes routed through the canonical item update RPCs.
--- The previous v2 wrappers sent { assignedTo } to update_room_item_with_purchase,
--- but the SQL implementation did not include assignedTo in its changed-field set.
-
-alter function public.update_room_item_with_purchase(uuid, text, jsonb, text, integer, jsonb)
-  rename to update_room_item_with_purchase_without_assignment;
-
-alter function public.update_room_item_with_purchase_without_assignment(uuid, text, jsonb, text, integer, jsonb)
-  set schema private;
+-- Replace the assignment-aware RPC wrappers to avoid jsonb_object_length(),
+-- which is not available in the linked Supabase Postgres runtime.
 
 create or replace function public.update_room_item_with_purchase(
   p_room_id uuid,
@@ -243,12 +236,6 @@ $$;
 
 revoke all on function public.update_room_item_with_purchase(uuid, text, jsonb, text, integer, jsonb) from public;
 grant execute on function public.update_room_item_with_purchase(uuid, text, jsonb, text, integer, jsonb) to authenticated;
-
-alter function public.bulk_update_room_items_with_purchase(uuid, jsonb)
-  rename to bulk_update_room_items_with_purchase_without_assignment;
-
-alter function public.bulk_update_room_items_with_purchase_without_assignment(uuid, jsonb)
-  set schema private;
 
 create or replace function public.bulk_update_room_items_with_purchase(
   p_room_id uuid,
