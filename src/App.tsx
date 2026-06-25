@@ -2813,19 +2813,17 @@ const App: React.FC = () => {
   const handleMapTabRotationAngleChange = useCallback(
     (angle: number) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
       updateMapRotationAngle(activeEventName, currentMapTabName, 'mapTab', angle);
     },
-    [activeEventName, isMapTab, currentMapTabName, updateMapRotationAngle, guardSharingStructureMutation],
+    [activeEventName, isMapTab, currentMapTabName, updateMapRotationAngle],
   );
 
   const handleFocusMapRotationAngleChange = useCallback(
     (angle: number) => {
       if (!activeEventName || !currentFocusMapName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
       updateMapRotationAngle(activeEventName, currentFocusMapName, 'focusMode', angle);
     },
-    [activeEventName, currentFocusMapName, updateMapRotationAngle, guardSharingStructureMutation],
+    [activeEventName, currentFocusMapName, updateMapRotationAngle],
   );
 
   const currentMapTabViewport = useMemo((): MapViewportState | undefined => {
@@ -2836,7 +2834,6 @@ const App: React.FC = () => {
   const handleMapViewportChange = useCallback(
     (viewport: MapViewportState) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
       setMapViewportSettings((prev: MapViewportSettingsStore) => {
         const eventSettings = prev[activeEventName] || {};
         const current = eventSettings[currentMapTabName];
@@ -2857,7 +2854,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, isMapTab, currentMapTabName, guardSharingStructureMutation],
+    [activeEventName, isMapTab, currentMapTabName],
   );
 
   const { showHeaderBar, showTabBar, rawHideSomething } = useMemo(() => {
@@ -6895,7 +6892,6 @@ const App: React.FC = () => {
   const handleUpdateHallRouteSettings = useCallback(
     (settings: HallRouteSettings) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
 
       setHallRouteSettings((prev) => ({
         ...prev,
@@ -6905,7 +6901,7 @@ const App: React.FC = () => {
         },
       }));
     },
-    [activeEventName, isMapTab, currentMapTabName, guardSharingStructureMutation],
+    [activeEventName, isMapTab, currentMapTabName],
   );
 
   const handleUpdateMaplessHalls = useCallback(
