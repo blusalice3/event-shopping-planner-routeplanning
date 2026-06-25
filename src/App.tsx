@@ -46,6 +46,7 @@ import {
   applyEventUpdateToItems,
   removeDeletedIdsFromExecuteModeItems,
 } from './features/events/updateApply';
+import { reconcileFocusModeSessions } from './features/focus/focusModeSessionReconcile';
 import {
   buildEventUpdateDiffFromSpreadsheet,
   resolveSpreadsheetSource,
@@ -111,10 +112,20 @@ import { useIndexedDbPersistence } from './hooks/useIndexedDbPersistence';
 import SharingMvp0cPanel from './features/sharing/SharingMvp0cPanel';
 import {
   SHARING_STRUCTURE_LOCK_MESSAGE,
+  SHARING_SYNC_UPGRADE_REQUIRED_MESSAGE,
+  SHARING_SYNC_UNUSABLE_MESSAGE,
+  buildLocalizedSharingSessionForSyncUpgrade,
   buildCurrentSharingAppData,
   buildRoomEventPayloadForEvent,
+  clearSatisfiedRouteOrderAcks,
   findActiveSharingSessionForEvent,
+  isSharingSyncUpgradeRequiredErrorCode,
   isSharingSessionActive,
+  isSharingSessionOperational,
+  isSharingSessionSyncMetadataCompatible,
+  markPendingItemSyncAckAttempt,
+  markPendingRouteOrderAckAttempt,
+  mergePendingRouteOrderAcks,
   type SharingAppState,
 } from './features/sharing/appIntegration';
 import {
@@ -123,9 +134,11 @@ import {
   applyRoomItemChangesToItems,
   assignRoomItem,
   bulkAssignRoomItems,
+  bulkUpdateRoomItemsWithPurchase,
   commitSnapshotThenAck,
   createClientRoomId,
   createSharingRoom,
+  deleteRoomItemWithRoute,
   generateMemberKey,
   getAllNotificationsAfterWatermark,
   getNotificationList,
@@ -149,12 +162,16 @@ import {
   subscribeToRoomSync,
   updateRoomItemWithPurchase,
   updateRouteOrder,
+  upsertRoomItemWithRoute,
   type NotificationListItem,
   type ProcessedSyncEvent,
+  type RoomItemFieldClocks,
   type RoomNotification,
+  type RouteOrderUpdate,
   type SnapshotRoomItem,
   forgetMemberKey,
 } from './features/sharing/client';
+import { isRouteAffectingItemPlacementChange } from './features/sharing/routeAffecting';
 import { getSharingAvailability } from './lib/supabase';
 import type { SmartInsertMode, SortState } from './features/app-shell/types';
 import { normalizeSmartInsertMode } from './utils/smartInsertMode';
@@ -176,6 +193,24 @@ type SharingMutableItemFields = {
   remarks?: string | null;
   url?: string | null;
 };
+
+type SharingStructuralItemFields = {
+  circle?: string;
+  block?: string;
+  number?: string;
+  title?: string;
+  eventDate?: string;
+  priorityLevel?: 'none' | 'priority' | 'highest';
+  protectionLevel?: string | null;
+  source?: string | null;
+  manualHallId?: string | null;
+};
+
+type SharingCreateItemFields = SharingStructuralItemFields &
+  SharingMutableItemFields & {
+    purchaseStatus: PurchaseStatus;
+    actualPurchaseQuantity: null;
+  };
 
 const EMPTY_ASSIGNMENT_MEMBERS: AssignmentMemberProfile[] = [];
 const SHARING_MEMBER_PROFILE_REFRESH_INTERVAL_MS = 10_000;
@@ -213,22 +248,175 @@ const sortCycle: SortState[] = [
   'LimitedPurchase',
 ];
 
-const hasUnsupportedSharingItemChange = (
+const hasSharingRouteMembership = (item: ShoppingItem): boolean =>
+  item.orderIndex !== undefined && item.orderIndex !== null;
+
+const isSharingRouteDateMoveToCandidate = (
   currentItem: ShoppingItem,
   updatedItem: ShoppingItem,
 ): boolean =>
-  currentItem.circle !== updatedItem.circle ||
-  currentItem.title !== updatedItem.title ||
-  currentItem.eventDate !== updatedItem.eventDate ||
-  currentItem.block !== updatedItem.block ||
-  currentItem.number !== updatedItem.number ||
-  currentItem.priorityLevel !== updatedItem.priorityLevel ||
-  currentItem.protectionLevel !== updatedItem.protectionLevel ||
-  currentItem.source !== updatedItem.source ||
-  currentItem.manualHallId !== updatedItem.manualHallId ||
-  currentItem.orderIndex !== updatedItem.orderIndex ||
+  hasSharingRouteMembership(currentItem) &&
+  currentItem.eventDate !== updatedItem.eventDate;
+
+type CanonicalRouteOrder = {
+  eventDate: string;
+  itemIds: string[];
+};
+
+const applyCanonicalRouteOrderToItems = (
+  items: ShoppingItem[],
+  routeOrder: CanonicalRouteOrder,
+): ShoppingItem[] => {
+  const routeIndexByItemId = new Map(
+    routeOrder.itemIds.map((itemId, index) => [itemId, index]),
+  );
+  let changed = false;
+  const nextItems = items.map((item) => {
+    const canonicalIndex = routeIndexByItemId.get(item.id);
+    if (canonicalIndex === undefined && item.eventDate !== routeOrder.eventDate) {
+      return item;
+    }
+
+    const nextOrderIndex = canonicalIndex ?? undefined;
+    if ((item.orderIndex ?? null) === (nextOrderIndex ?? null)) {
+      return item;
+    }
+
+    changed = true;
+    return {
+      ...item,
+      orderIndex: nextOrderIndex,
+    };
+  });
+
+  return changed ? nextItems : items;
+};
+
+const applyCanonicalRouteOrdersToItems = (
+  items: ShoppingItem[],
+  routeOrders: CanonicalRouteOrder[],
+): ShoppingItem[] =>
+  routeOrders.reduce(
+    (nextItems, routeOrder) => applyCanonicalRouteOrderToItems(nextItems, routeOrder),
+    items,
+  );
+
+const routeOrdersReferenceMissingItems = (
+  items: ShoppingItem[],
+  routeOrders: CanonicalRouteOrder[],
+): boolean => {
+  const localItemIds = new Set(items.map((item) => item.id));
+  return routeOrders.some((routeOrder) =>
+    routeOrder.itemIds.some((itemId) => !localItemIds.has(itemId)),
+  );
+};
+
+const areRouteItemIdsEqual = (a: string[], b: string[]): boolean =>
+  a.length === b.length && a.every((itemId, index) => itemId === b[index]);
+
+const hasVisibleRouteItemsOutsideServerRouteVersions = (
+  eventRouteOrders: ExecuteModeItems,
+  serverRouteOrderVersions: Record<string, number>,
+): boolean =>
+  Object.entries(eventRouteOrders).some(
+    ([eventDate, itemIds]) => !(eventDate in serverRouteOrderVersions) && itemIds.length > 0,
+  );
+
+const removeRouteOrdersOutsideServerRouteVersions = (
+  eventRouteOrders: ExecuteModeItems,
+  serverRouteOrderVersions: Record<string, number>,
+): ExecuteModeItems =>
+  Object.fromEntries(
+    Object.entries(eventRouteOrders).filter(([eventDate]) => eventDate in serverRouteOrderVersions),
+  );
+
+const buildSharingStructuralRouteUpdates = (
+  currentItem: ShoppingItem,
+  updatedItem: ShoppingItem,
+  currentItems: ShoppingItem[],
+  currentExecuteModeItems: ExecuteModeItems,
+  routeOrderVersions: Record<string, number>,
+): RouteOrderUpdate[] => {
+  const placementGroupingChanged =
+    currentItem.block !== updatedItem.block ||
+    currentItem.number !== updatedItem.number ||
+    (currentItem.priorityLevel ?? 'none') !== (updatedItem.priorityLevel ?? 'none');
+
+  if (!placementGroupingChanged || !hasSharingRouteMembership(currentItem)) return [];
+  if (!updatedItem.eventDate || currentItem.eventDate !== updatedItem.eventDate) return [];
+
+  const currentRouteItemIds = currentExecuteModeItems[updatedItem.eventDate] ?? [];
+  const updatedItems = currentItems.map((item) =>
+    item.id === updatedItem.id ? updatedItem : item,
+  );
+  const reorderedExecuteModeItems = reorderExecuteIdsForSpaceAdjacency(
+    updatedItem.id,
+    updatedItems,
+    currentExecuteModeItems,
+    updatedItem.eventDate,
+  );
+  const nextRouteItemIds = reorderedExecuteModeItems[updatedItem.eventDate] ?? [];
+
+  if (areRouteItemIdsEqual(currentRouteItemIds, nextRouteItemIds)) return [];
+
+  return [
+    {
+      eventDate: updatedItem.eventDate,
+      itemIds: nextRouteItemIds,
+      expectedVersion: routeOrderVersions[updatedItem.eventDate] ?? 0,
+    },
+  ];
+};
+
+const hasSharingAssignmentOrLockChange = (
+  currentItem: ShoppingItem,
+  updatedItem: ShoppingItem,
+): boolean =>
   currentItem.assignedTo !== updatedItem.assignedTo ||
   currentItem.securedBy !== updatedItem.securedBy;
+
+const buildSharingStructuralItemFields = (
+  currentItem: ShoppingItem,
+  updatedItem: ShoppingItem,
+): SharingStructuralItemFields => {
+  const fields: SharingStructuralItemFields = {};
+  if (currentItem.circle !== updatedItem.circle) fields.circle = updatedItem.circle;
+  if (currentItem.block !== updatedItem.block) fields.block = updatedItem.block;
+  if (currentItem.number !== updatedItem.number) fields.number = updatedItem.number;
+  if (currentItem.title !== updatedItem.title) fields.title = updatedItem.title;
+  if (currentItem.eventDate !== updatedItem.eventDate) fields.eventDate = updatedItem.eventDate;
+  if ((currentItem.priorityLevel ?? 'none') !== (updatedItem.priorityLevel ?? 'none')) {
+    fields.priorityLevel = updatedItem.priorityLevel ?? 'none';
+  }
+  if ((currentItem.protectionLevel ?? null) !== (updatedItem.protectionLevel ?? null)) {
+    fields.protectionLevel = updatedItem.protectionLevel ?? null;
+  }
+  if ((currentItem.source ?? null) !== (updatedItem.source ?? null)) {
+    fields.source = updatedItem.source ?? null;
+  }
+  if ((currentItem.manualHallId ?? null) !== (updatedItem.manualHallId ?? null)) {
+    fields.manualHallId = updatedItem.manualHallId ?? null;
+  }
+  return fields;
+};
+
+const buildSharingCreateItemFields = (item: ShoppingItem): SharingCreateItemFields => ({
+  circle: item.circle,
+  block: item.block,
+  number: item.number,
+  title: item.title,
+  eventDate: item.eventDate,
+  priorityLevel: item.priorityLevel ?? 'none',
+  protectionLevel: item.protectionLevel ?? 'full',
+  source: item.source ?? 'app',
+  manualHallId: item.manualHallId ?? null,
+  price: item.price ?? null,
+  quantity: item.quantity ?? 1,
+  remarks: item.remarks ?? '',
+  url: item.url ?? null,
+  purchaseStatus: item.purchaseStatus,
+  actualPurchaseQuantity: null,
+});
 
 const buildSharingMutableItemFields = (
   currentItem: ShoppingItem,
@@ -253,22 +441,160 @@ const buildSharingMutableItemFields = (
   return fields;
 };
 
+const buildPurchaseExpectedClockFields = (
+  fields: SharingMutableItemFields,
+  status?: PurchaseStatus | null,
+): string[] => {
+  const fieldNames = Object.keys(fields);
+  if (status) {
+    fieldNames.push('purchaseStatus', 'actualPurchaseQuantity', 'securedBy');
+  }
+  return Array.from(new Set(fieldNames));
+};
+
+const pickExpectedFieldClocks = (
+  session: SharingSessionMetadata,
+  localItemId: string,
+  fieldNames: string[],
+): RoomItemFieldClocks | null => {
+  return pickExpectedFieldClocksFrom(session.fieldClocksByItemId?.[localItemId], fieldNames);
+};
+
+const pickExpectedFieldClocksFrom = (
+  itemClocks: RoomItemFieldClocks | undefined,
+  fieldNames: string[],
+): RoomItemFieldClocks | null => {
+  if (!itemClocks) return null;
+
+  const expectedFieldClocks: RoomItemFieldClocks = {};
+  for (const fieldName of fieldNames) {
+    const clock = itemClocks[fieldName];
+    if (!clock) return null;
+    expectedFieldClocks[fieldName] = clock;
+  }
+  return expectedFieldClocks;
+};
+
+const mergeFieldClocksFromChanges = (
+  current: SharingSessionMetadata['fieldClocksByItemId'],
+  changes: Parameters<typeof applyRoomItemChangesToItems>[1],
+): SharingSessionMetadata['fieldClocksByItemId'] => {
+  const next = { ...(current ?? {}) };
+  for (const change of changes) {
+    const clocks = change.item?.fieldClocks ?? change.fieldClocks;
+    if (!clocks) continue;
+    next[change.localItemId] = {
+      ...(next[change.localItemId] ?? {}),
+      ...clocks,
+    };
+  }
+  return next;
+};
+
+const mergeDeletedItemClocksFromChanges = (
+  current: SharingSessionMetadata['deletedItemClocks'],
+  changes: Parameters<typeof applyRoomItemChangesToItems>[1],
+): SharingSessionMetadata['deletedItemClocks'] => {
+  let next = current;
+  for (const change of changes) {
+    if (change.changeType !== 'delete' || !change.fieldClocks) continue;
+    const currentEntry = next?.[change.localItemId];
+    const deletedAt =
+      typeof change.updatedValues.deletedAt === 'string'
+        ? change.updatedValues.deletedAt
+        : currentEntry?.deletedAt ?? change.createdAt;
+    const deletedBy =
+      typeof change.updatedValues.deletedBy === 'string'
+        ? change.updatedValues.deletedBy
+        : currentEntry?.deletedBy ?? null;
+    next = {
+      ...(next ?? {}),
+      [change.localItemId]: {
+        deletedAt,
+        deletedBy,
+        fieldClocks: {
+          ...(currentEntry?.fieldClocks ?? {}),
+          ...change.fieldClocks,
+        },
+        itemVersion: change.itemsVersion,
+        updatedAt: change.createdAt,
+      },
+    };
+  }
+  return next;
+};
+
+const getDeletedLocalItemIdsFromChanges = (
+  changes: Parameters<typeof applyRoomItemChangesToItems>[1],
+): string[] =>
+  Array.from(
+    new Set(
+      changes
+        .filter((change) => change.changeType === 'delete')
+        .map((change) => change.localItemId),
+    ),
+  );
+
+const resolvePendingItemSyncAck = (
+  pending: SharingSessionMetadata['pendingItemSyncAck'],
+  ackedItemsVersion: number,
+): SharingSessionMetadata['pendingItemSyncAck'] =>
+  pending && ackedItemsVersion >= pending.targetItemsVersion ? undefined : pending;
+
+const isFullItemRefreshRequired = (code: string): boolean => code === 'FULL_ITEM_REFRESH_REQUIRED';
+
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
 
 const sharingFieldLabels: Record<string, string> = {
+  circle: 'サークル名',
+  circleName: 'サークル名',
+  circle_name: 'サークル名',
+  block: 'ブロック',
+  blockName: 'ブロック',
+  block_name: 'ブロック',
+  number: 'スペース番号',
+  boothNumber: 'スペース番号',
+  booth_number: 'スペース番号',
+  name: 'タイトル',
+  title: 'タイトル',
+  eventDate: '参加日',
+  event_date: '参加日',
+  priorityLevel: '優先度',
+  priority_level: '優先度',
+  protectionLevel: '保護レベル',
+  protection_level: '保護レベル',
+  source: '登録元',
+  manualHallId: '手動ホール',
+  manual_hall_id: '手動ホール',
   price: '価格',
   quantity: '数量',
   remarks: '備考',
   url: 'URL',
   purchaseStatus: '購入状態',
+  purchase_status: '購入状態',
   actualPurchaseQuantity: '実購入数',
+  actual_purchase_quantity: '実購入数',
   securedBy: '購入確保',
+  secured_by: '購入確保',
   assignedTo: '担当者',
+  assigned_to: '担当者',
+  deletedAt: '削除日時',
+  deleted_at: '削除日時',
+  deletedBy: '削除者',
+  deleted_by: '削除者',
   postponed: '後回し',
   routeOrderByDate: '巡回順',
+  route_order_by_date: '巡回順',
+  orderIndex: '巡回順',
+  order_index: '巡回順',
+};
+
+const formatSharingUpdatedFieldLabels = (fields: string[]): string => {
+  const labels = fields.map((field) => sharingFieldLabels[field] ?? '更新項目');
+  return Array.from(new Set(labels)).join('、');
 };
 
 const buildSharingNotificationMessage = (
@@ -285,10 +611,7 @@ const buildSharingNotificationMessage = (
   const updatedFields = Array.isArray(payload.updatedFields)
     ? payload.updatedFields.filter((field): field is string => typeof field === 'string')
     : [];
-  const label =
-    updatedFields.length > 0
-      ? updatedFields.map((field) => sharingFieldLabels[field] ?? field).join('、')
-      : '内容';
+  const label = updatedFields.length > 0 ? formatSharingUpdatedFieldLabels(updatedFields) : '内容';
 
   if (notification.notificationType === 'item_claimed') {
     return `${itemLabel} が他の参加者によって購入済みに更新されました。`;
@@ -298,6 +621,12 @@ const buildSharingNotificationMessage = (
   }
   if (notification.notificationType === 'item_assigned') {
     return `${itemLabel} の担当者を同期しました。`;
+  }
+  if (notification.notificationType === 'item_created') {
+    return `${itemLabel} が追加されました。`;
+  }
+  if (notification.notificationType === 'item_deleted') {
+    return `${itemLabel} が削除されました。`;
   }
   if (notification.notificationType === 'route_order_updated') {
     const eventDate = typeof payload.eventDate === 'string' ? payload.eventDate : '対象日';
@@ -486,6 +815,9 @@ const App: React.FC = () => {
   const [blockSortDirection, setBlockSortDirection] = useState<BlockSortDirection | null>(null);
   const [itemToEdit, setItemToEdit] = useState<ShoppingItem | null>(null);
   const [editDialogItem, setEditDialogItem] = useState<ShoppingItem | null>(null);
+  const [editFieldClockBaselineByItemId, setEditFieldClockBaselineByItemId] = useState<
+    Record<string, RoomItemFieldClocks>
+  >({});
   const [itemToDelete, setItemToDelete] = useState<ShoppingItem | null>(null);
   const [zoomLevel, setZoomLevel] = useState(100);
   const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
@@ -747,7 +1079,7 @@ const App: React.FC = () => {
   );
 
   const hasAnyActiveSharingSession = useMemo(
-    () => Object.values(sharingSessions).some((session) => isSharingSessionActive(session)),
+    () => Object.values(sharingSessions).some((session) => isSharingSessionOperational(session)),
     [sharingSessions],
   );
 
@@ -778,6 +1110,22 @@ const App: React.FC = () => {
           ?.roomCode;
       const snapshotEnvelope = await getRoomSnapshot(roomId);
       if (!snapshotEnvelope.ok) {
+        const sessionToStop = Object.values(sharingSessionsRef.current).find(
+          (session) => session.roomId === roomId && isSharingSessionActive(session),
+        );
+        if (sessionToStop && isFullItemRefreshRequired(snapshotEnvelope.error.code)) {
+          const localizedSession = buildLocalizedSharingSessionForSyncUpgrade(sessionToStop);
+          await db.saveSharingSession(localizedSession);
+          setSharingSessions((prev) => ({
+            ...prev,
+            [localizedSession.sessionId]: localizedSession,
+          }));
+          setSharingStatusMessage(
+            `${sessionToStop.eventName} の共有同期を停止し、ローカルデータとして保持しました。`,
+          );
+          setSharingErrorMessage(SHARING_SYNC_UNUSABLE_MESSAGE);
+          return;
+        }
         setSharingErrorMessage(`snapshotの取得に失敗しました: ${snapshotEnvelope.error.code}`);
         return;
       }
@@ -836,6 +1184,18 @@ const App: React.FC = () => {
     }));
   }, []);
 
+  const localizeSharingSessionForSyncUpgrade = useCallback(
+    async (session: SharingSessionMetadata) => {
+      const localizedSession = buildLocalizedSharingSessionForSyncUpgrade(session);
+      await saveSharingSessionState(localizedSession);
+      setSharingStatusMessage(
+        `${session.eventName} の共有同期を停止し、ローカルデータとして保持しました。`,
+      );
+      setSharingErrorMessage(SHARING_SYNC_UPGRADE_REQUIRED_MESSAGE);
+    },
+    [saveSharingSessionState],
+  );
+
   const expireSharingSession = useCallback(
     async (session: SharingSessionMetadata) => {
       const expiredSession: SharingSessionMetadata = {
@@ -848,10 +1208,50 @@ const App: React.FC = () => {
     [saveSharingSessionState],
   );
 
+  const cleanupDeletedSharedItemsFromUiState = useCallback(
+    (eventName: string, deletedItemIds: string[]) => {
+      if (deletedItemIds.length === 0) return;
+      const deletedIds = new Set(deletedItemIds);
+
+      updateExecuteModeItems((prev) => {
+        const eventItems = prev[eventName];
+        if (!eventItems) return prev;
+        return {
+          ...prev,
+          [eventName]: removeDeletedIdsFromExecuteModeItems(eventItems, deletedIds),
+        };
+      });
+
+      setSelectedItemIds((prev) => {
+        if (![...deletedIds].some((itemId) => prev.has(itemId))) return prev;
+        return new Set([...prev].filter((itemId) => !deletedIds.has(itemId)));
+      });
+      setRecentlyChangedItemIds((prev) => {
+        if (![...deletedIds].some((itemId) => prev.has(itemId))) return prev;
+        return new Set([...prev].filter((itemId) => !deletedIds.has(itemId)));
+      });
+      setItemToEdit((item) => (item && deletedIds.has(item.id) ? null : item));
+      setEditDialogItem((item) => (item && deletedIds.has(item.id) ? null : item));
+      setEditFieldClockBaselineByItemId((prev) => {
+        if (![...deletedIds].some((itemId) => itemId in prev)) return prev;
+        return Object.fromEntries(
+          Object.entries(prev).filter(([itemId]) => !deletedIds.has(itemId)),
+        );
+      });
+      setItemToDelete((item) => (item && deletedIds.has(item.id) ? null : item));
+      setHighlightedItemId((itemId) => (itemId && deletedIds.has(itemId) ? null : itemId));
+    },
+    [setSelectedItemIds, updateExecuteModeItems],
+  );
+
   const synchronizeSharingSession = useCallback(
     async (sessionId: string, reason: 'initial' | 'realtime' | 'queued' | 'manual' = 'manual') => {
       const startSession = sharingSessionsRef.current[sessionId];
       if (!startSession || !isSharingSessionActive(startSession)) return;
+      if (!isSharingSessionSyncMetadataCompatible(startSession)) {
+        await localizeSharingSessionForSyncUpgrade(startSession);
+        return;
+      }
 
       if (sharingSyncInFlightRef.current) {
         sharingSyncPendingRef.current = true;
@@ -865,6 +1265,8 @@ const App: React.FC = () => {
         if (!versions.ok) {
           if (versions.error.code === 'ROOM_EXPIRED') {
             await expireSharingSession(session);
+          } else if (isSharingSyncUpgradeRequiredErrorCode(versions.error.code)) {
+            await localizeSharingSessionForSyncUpgrade(session);
           } else if (reason !== 'realtime') {
             setSharingErrorMessage(`共有同期の確認に失敗しました: ${versions.error.code}`);
           }
@@ -878,6 +1280,11 @@ const App: React.FC = () => {
 
         let nextItemsVersion = session.itemsVersion;
         let nextRouteOrderVersions = { ...(session.routeOrderVersions ?? {}) };
+        let nextPendingRouteOrderAcks = session.pendingRouteOrderAcks;
+        let nextFieldClocksByItemId = session.fieldClocksByItemId;
+        let nextDeletedItemClocks = session.deletedItemClocks;
+        let nextPendingItemSyncAck = session.pendingItemSyncAck;
+        let nextEventItems = eventListsRef.current[session.eventName] ?? [];
         if (versions.data.itemsVersion > session.itemsVersion) {
           const changes = await getRoomItemChangesSince(session.roomId, session.itemsVersion);
           if (!changes.ok) {
@@ -903,6 +1310,11 @@ const App: React.FC = () => {
           );
 
           if (changes.data.changes.length > 0) {
+            const deletedItemIds = getDeletedLocalItemIdsFromChanges(changes.data.changes);
+            nextEventItems = applyRoomItemChangesToItems(
+              eventListsRef.current[session.eventName] ?? [],
+              changes.data.changes,
+            );
             setEventLists((prev) => ({
               ...prev,
               [session.eventName]: applyRoomItemChangesToItems(
@@ -910,6 +1322,15 @@ const App: React.FC = () => {
                 changes.data.changes,
               ),
             }));
+            cleanupDeletedSharedItemsFromUiState(session.eventName, deletedItemIds);
+            nextFieldClocksByItemId = mergeFieldClocksFromChanges(
+              nextFieldClocksByItemId,
+              changes.data.changes,
+            );
+            nextDeletedItemClocks = mergeDeletedItemClocksFromChanges(
+              nextDeletedItemClocks,
+              changes.data.changes,
+            );
           }
 
           if (changedItemIds.size > 0) {
@@ -926,23 +1347,40 @@ const App: React.FC = () => {
         const serverRouteOrderVersions = versions.data.routeOrderVersions ?? {};
         if (versions.data.routeOrderVersion !== null) {
           const eventRouteOrders = executeModeItemsRef.current[session.eventName] ?? {};
-          const candidateDates = new Set([
-            ...Object.keys(serverRouteOrderVersions),
-            ...Object.keys(eventRouteOrders),
-          ]);
-          const changedRouteDates = [...candidateDates].filter(
+          if (
+            hasVisibleRouteItemsOutsideServerRouteVersions(
+              eventRouteOrders,
+              serverRouteOrderVersions,
+            )
+          ) {
+            await applySnapshotAndAck(session.roomId);
+            return;
+          }
+
+          nextRouteOrderVersions = { ...serverRouteOrderVersions };
+          const nextEventRouteOrders = removeRouteOrdersOutsideServerRouteVersions(
+            eventRouteOrders,
+            serverRouteOrderVersions,
+          );
+          const removedLocalRouteOrderDate =
+            Object.keys(nextEventRouteOrders).length !== Object.keys(eventRouteOrders).length;
+          const changedRouteDates = Object.keys(serverRouteOrderVersions).filter(
             (eventDate) =>
               (serverRouteOrderVersions[eventDate] ?? 0) !==
-              (nextRouteOrderVersions[eventDate] ?? 0),
+              ((session.routeOrderVersions ?? {})[eventDate] ?? 0),
           );
 
-          if (changedRouteDates.length > 0) {
-            const nextEventRouteOrders = { ...eventRouteOrders };
+          if (changedRouteDates.length > 0 || removedLocalRouteOrderDate) {
+            const changedRouteOrders: CanonicalRouteOrder[] = [];
             for (const eventDate of changedRouteDates) {
               const route = await getRouteOrderByDate(session.roomId, eventDate);
               if (!route.ok) {
                 if (route.error.code === 'ROOM_EXPIRED') {
                   await expireSharingSession(session);
+                  return;
+                }
+                if (isSharingSyncUpgradeRequiredErrorCode(route.error.code)) {
+                  await localizeSharingSessionForSyncUpgrade(session);
                   return;
                 }
                 if (reason !== 'realtime') {
@@ -952,27 +1390,68 @@ const App: React.FC = () => {
               }
 
               nextEventRouteOrders[eventDate] = route.data.itemIds;
+              changedRouteOrders.push({
+                eventDate,
+                itemIds: route.data.itemIds,
+              });
               nextRouteOrderVersions = {
                 ...nextRouteOrderVersions,
                 [eventDate]: route.data.dateRouteOrderVersion,
               };
             }
 
+            if (routeOrdersReferenceMissingItems(nextEventItems, changedRouteOrders)) {
+              await applySnapshotAndAck(session.roomId);
+              return;
+            }
+
             updateExecuteModeItems((prev) => ({
               ...prev,
-              [session.eventName]: {
-                ...(prev[session.eventName] ?? {}),
-                ...nextEventRouteOrders,
-              },
+              [session.eventName]: nextEventRouteOrders,
             }));
+            setEventLists((prev) => {
+              const items = prev[session.eventName] ?? [];
+              const nextItems = applyCanonicalRouteOrdersToItems(items, changedRouteOrders);
+              return nextItems === items
+                ? prev
+                : {
+                    ...prev,
+                    [session.eventName]: nextItems,
+                  };
+            });
 
             const routeAck = await ackRoomRouteOrderVersions(
               session.roomId,
               nextRouteOrderVersions,
             );
-            if (!routeAck.ok && reason !== 'realtime') {
+            if (routeAck.ok) {
+              nextRouteOrderVersions = routeAck.data.routeOrderVersions;
+              nextPendingRouteOrderAcks = clearSatisfiedRouteOrderAcks(
+                nextPendingRouteOrderAcks,
+                routeAck.data.routeOrderVersions,
+                new Date().toISOString(),
+              );
+            } else if (reason !== 'realtime') {
               setSharingErrorMessage(`巡回順の同期ackに失敗しました: ${routeAck.error.code}`);
             }
+          }
+        }
+
+        if (nextPendingRouteOrderAcks && Object.keys(nextPendingRouteOrderAcks).length > 0) {
+          nextPendingRouteOrderAcks = markPendingRouteOrderAckAttempt(
+            nextPendingRouteOrderAcks,
+            new Date().toISOString(),
+          );
+          const routeAck = await ackRoomRouteOrderVersions(session.roomId, nextRouteOrderVersions);
+          if (routeAck.ok) {
+            nextRouteOrderVersions = routeAck.data.routeOrderVersions;
+            nextPendingRouteOrderAcks = clearSatisfiedRouteOrderAcks(
+              nextPendingRouteOrderAcks,
+              routeAck.data.routeOrderVersions,
+              new Date().toISOString(),
+            );
+          } else if (reason !== 'realtime') {
+            setSharingErrorMessage(`巡回順の同期ackに失敗しました: ${routeAck.error.code}`);
           }
         }
 
@@ -1023,6 +1502,13 @@ const App: React.FC = () => {
           setSharingErrorMessage(`共有通知の取得に失敗しました: ${notifications.error.code}`);
         }
 
+        if (nextPendingItemSyncAck) {
+          nextPendingItemSyncAck = markPendingItemSyncAckAttempt(
+            nextPendingItemSyncAck,
+            new Date().toISOString(),
+          );
+        }
+
         const ack = await ackRoomSyncProgress(
           session.roomId,
           nextItemsVersion,
@@ -1031,10 +1517,20 @@ const App: React.FC = () => {
           processedEventIds,
         );
         session = sharingSessionsRef.current[sessionId] ?? session;
+        if (ack.ok) {
+          nextPendingItemSyncAck = resolvePendingItemSyncAck(
+            nextPendingItemSyncAck,
+            ack.data.itemsVersion,
+          );
+        }
         const updatedSession: SharingSessionMetadata = {
           ...session,
           itemsVersion: ack.ok ? ack.data.itemsVersion : nextItemsVersion,
           routeOrderVersions: nextRouteOrderVersions,
+          fieldClocksByItemId: nextFieldClocksByItemId,
+          deletedItemClocks: nextDeletedItemClocks,
+          pendingItemSyncAck: nextPendingItemSyncAck,
+          pendingRouteOrderAcks: nextPendingRouteOrderAcks,
           lastProcessedEventCreatedAt: ack.ok
             ? ack.data.lastProcessedEventCreatedAt
             : lastProcessedEventCreatedAt,
@@ -1063,7 +1559,14 @@ const App: React.FC = () => {
         }
       }
     },
-    [applySnapshotAndAck, expireSharingSession, saveSharingSessionState, updateExecuteModeItems],
+    [
+      applySnapshotAndAck,
+      cleanupDeletedSharedItemsFromUiState,
+      expireSharingSession,
+      localizeSharingSessionForSyncUpgrade,
+      saveSharingSessionState,
+      updateExecuteModeItems,
+    ],
   );
 
   const handleCreateSharingRoom = useCallback(
@@ -1230,13 +1733,114 @@ const App: React.FC = () => {
   );
 
   const saveSharingMutationVersion = useCallback(
-    async (session: SharingSessionMetadata, itemsVersion: number) => {
-      const latestSession = sharingSessionsRef.current[session.sessionId] ?? session;
+    async (
+      session: SharingSessionMetadata,
+      itemsVersion: number,
+      mutationItems: SnapshotRoomItem[],
+      sessionPatch: Partial<SharingSessionMetadata> = {},
+    ) => {
+      const latestSession = {
+        ...(sharingSessionsRef.current[session.sessionId] ?? session),
+        ...sessionPatch,
+      };
+      const affectedLocalItemIds = Array.from(
+        new Set(mutationItems.map((item) => item.localItemId).filter(Boolean)),
+      );
+      const fieldClocksByItemId = { ...(latestSession.fieldClocksByItemId ?? {}) };
+      let deletedItemClocks = latestSession.deletedItemClocks;
+      for (const item of mutationItems) {
+        fieldClocksByItemId[item.localItemId] = {
+          ...(fieldClocksByItemId[item.localItemId] ?? {}),
+          ...item.fieldClocks,
+        };
+        if (item.deletedAt) {
+          const currentEntry = deletedItemClocks?.[item.localItemId];
+          deletedItemClocks = {
+            ...(deletedItemClocks ?? {}),
+            [item.localItemId]: {
+              deletedAt: item.deletedAt,
+              deletedBy: item.deletedBy,
+              fieldClocks: {
+                ...(currentEntry?.fieldClocks ?? {}),
+                ...item.fieldClocks,
+              },
+              itemVersion: item.itemVersion,
+              updatedAt: item.updatedAt,
+            },
+          };
+        }
+      }
+
+      const existingPendingAck = latestSession.pendingItemSyncAck;
+      const targetItemsVersion = Math.max(
+        existingPendingAck?.targetItemsVersion ?? latestSession.itemsVersion,
+        itemsVersion,
+      );
+      const pendingAffectedLocalItemIds = Array.from(
+        new Set([...(existingPendingAck?.affectedLocalItemIds ?? []), ...affectedLocalItemIds]),
+      );
+
       await saveSharingSessionState({
         ...latestSession,
-        itemsVersion: Math.max(latestSession.itemsVersion, itemsVersion),
-        lastAckAt: new Date().toISOString(),
+        fieldClocksByItemId,
+        deletedItemClocks,
+        pendingItemSyncAck:
+          targetItemsVersion > latestSession.itemsVersion
+            ? {
+                fromItemsVersion:
+                  existingPendingAck?.fromItemsVersion ?? latestSession.itemsVersion,
+                targetItemsVersion,
+                affectedLocalItemIds: pendingAffectedLocalItemIds,
+                retryCount: existingPendingAck?.retryCount ?? 0,
+                lastTriedAt: existingPendingAck?.lastTriedAt,
+                updatedAt: new Date().toISOString(),
+              }
+            : existingPendingAck,
       });
+    },
+    [saveSharingSessionState],
+  );
+
+  const ackSavedRouteOrderVersions = useCallback(
+    async (
+      session: SharingSessionMetadata,
+      routeOrderVersions: Record<string, number>,
+      pendingRouteOrderAcks: SharingSessionMetadata['pendingRouteOrderAcks'],
+    ) => {
+      if (!pendingRouteOrderAcks || Object.keys(pendingRouteOrderAcks).length === 0) return;
+
+      const attemptedAt = new Date().toISOString();
+      const attemptedPendingRouteOrderAcks = markPendingRouteOrderAckAttempt(
+        pendingRouteOrderAcks,
+        attemptedAt,
+      );
+      if (!attemptedPendingRouteOrderAcks) return;
+
+      const latestBeforeAck = sharingSessionsRef.current[session.sessionId] ?? session;
+      await saveSharingSessionState({
+        ...latestBeforeAck,
+        routeOrderVersions,
+        pendingRouteOrderAcks: attemptedPendingRouteOrderAcks,
+        lastAckAt: attemptedAt,
+      });
+
+      const routeAck = await ackRoomRouteOrderVersions(session.roomId, routeOrderVersions);
+      const latestAfterAck = sharingSessionsRef.current[session.sessionId] ?? latestBeforeAck;
+      if (routeAck.ok) {
+        await saveSharingSessionState({
+          ...latestAfterAck,
+          routeOrderVersions: routeAck.data.routeOrderVersions,
+          pendingRouteOrderAcks: clearSatisfiedRouteOrderAcks(
+            attemptedPendingRouteOrderAcks,
+            routeAck.data.routeOrderVersions,
+            new Date().toISOString(),
+          ),
+          lastAckAt: new Date().toISOString(),
+        });
+        return;
+      }
+
+      setSharingErrorMessage(`巡回順の同期ackに失敗しました: ${routeAck.error.code}`);
     },
     [saveSharingSessionState],
   );
@@ -1258,6 +1862,13 @@ const App: React.FC = () => {
         return;
       }
 
+      const expectedFieldClocks = pickExpectedFieldClocks(session, localItemId, ['assignedTo']);
+      if (!expectedFieldClocks) {
+        setSharingErrorMessage('共有アイテムの同期基準が不足しています。最新状態を取得します。');
+        await applySnapshotAndAck(session.roomId);
+        return;
+      }
+
       setSharingBusy(true);
       setSharingErrorMessage(null);
       try {
@@ -1265,14 +1876,27 @@ const App: React.FC = () => {
           roomId: session.roomId,
           localItemId,
           assignedToMemberId,
+          expectedFieldClocks,
         });
         if (!result.ok) {
+          if (isFullItemRefreshRequired(result.error.code)) {
+            setSharingErrorMessage('共有アイテムの最新状態を全体再取得しています。');
+            await applySnapshotAndAck(session.roomId);
+            return;
+          }
+          if (result.error.code === 'FIELD_CLOCK_CONFLICT') {
+            setSharingErrorMessage(
+              '他の参加者が同じ担当者欄を先に更新しました。最新状態を取得しました。',
+            );
+            await applySnapshotAndAck(session.roomId);
+            return;
+          }
           setSharingErrorMessage(`担当変更に失敗しました: ${result.error.code}`);
           return;
         }
 
         applySharingMutationItems(session.eventName, [result.data.item]);
-        await saveSharingMutationVersion(session, result.data.itemsVersion);
+        await saveSharingMutationVersion(session, result.data.itemsVersion, [result.data.item]);
         setSharingStatusMessage('担当者を更新しました。');
       } catch (error) {
         console.error('Sharing assignment error:', error);
@@ -1283,6 +1907,7 @@ const App: React.FC = () => {
     },
     [
       activeSharingSession,
+      applySnapshotAndAck,
       applySharingMutationItems,
       canAssignSharingItem,
       saveSharingMutationVersion,
@@ -1307,24 +1932,45 @@ const App: React.FC = () => {
         return;
       }
 
+      const assignments = [];
+      for (const item of selectedItems) {
+        const expectedFieldClocks = pickExpectedFieldClocks(session, item.id, ['assignedTo']);
+        if (!expectedFieldClocks) {
+          setSharingErrorMessage('共有アイテムの同期基準が不足しています。最新状態を取得します。');
+          await applySnapshotAndAck(session.roomId);
+          return;
+        }
+        assignments.push({ localItemId: item.id, expectedFieldClocks });
+      }
+
       setSharingBusy(true);
       setSharingErrorMessage(null);
       try {
         const result = await bulkAssignRoomItems({
           roomId: session.roomId,
-          localItemIds: selectedItems.map((item) => item.id),
           assignedToMemberId,
+          assignments,
         });
         if (!result.ok) {
+          if (isFullItemRefreshRequired(result.error.code)) {
+            setSharingErrorMessage('共有アイテムの最新状態を全体再取得しています。');
+            await applySnapshotAndAck(session.roomId);
+            return;
+          }
+          if (result.error.code === 'FIELD_CLOCK_CONFLICT') {
+            setSharingErrorMessage(
+              '他の参加者が同じ担当者欄を先に更新しました。一括譲渡を中断し、最新状態を取得しました。',
+            );
+            await applySnapshotAndAck(session.roomId);
+            return;
+          }
           setSharingErrorMessage(`一括譲渡に失敗しました: ${result.error.code}`);
           return;
         }
 
-        applySharingMutationItems(
-          session.eventName,
-          result.data.changedItems.map((change) => change.item),
-        );
-        await saveSharingMutationVersion(session, result.data.itemsVersion);
+        const mutationItems = result.data.changedItems.map((change) => change.item);
+        applySharingMutationItems(session.eventName, mutationItems);
+        await saveSharingMutationVersion(session, result.data.itemsVersion, mutationItems);
         setSharingStatusMessage(`${selectedItems.length}件の担当者を更新しました。`);
         setSelectedItemIds(new Set());
       } catch (error) {
@@ -1336,6 +1982,7 @@ const App: React.FC = () => {
     },
     [
       activeSharingSession,
+      applySnapshotAndAck,
       applySharingMutationItems,
       canAssignSharingItem,
       saveSharingMutationVersion,
@@ -2073,18 +2720,14 @@ const App: React.FC = () => {
 
   useEffect(() => {
     setFocusModeSessions((prev) => {
-      let changed = false;
-      const next: Record<string, FocusModeSessionState> = {};
-      Object.entries(prev).forEach(([key, value]) => {
-        if (validFocusSessionKeys.has(key)) {
-          next[key] = value;
-        } else {
-          changed = true;
-        }
-      });
-      return changed ? next : prev;
+      return reconcileFocusModeSessions(
+        prev,
+        eventLists,
+        executeModeItems,
+        validFocusSessionKeys,
+      );
     });
-  }, [validFocusSessionKeys]);
+  }, [eventLists, executeModeItems, validFocusSessionKeys]);
 
   const currentFocusEventDate = useMemo(() => activeEventDate, [activeEventDate]);
 
@@ -2243,14 +2886,76 @@ const App: React.FC = () => {
   );
 
   const handleBulkAdd = useCallback(
-    (
+    async (
       eventName: string,
       newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[],
       metadata?: BulkAddMetadata,
     ) => {
-      if (eventLists[eventName] && guardSharingStructureMutation(eventName)) return;
-      const newItems = buildBulkAddItems(newItemsData, metadata);
+      const sharingSession =
+        activeSharingSession?.eventName === eventName ? activeSharingSession : null;
       const isNewEvent = !eventLists[eventName];
+      const isSharedSingleAppCreate =
+        !!sharingSession &&
+        !isNewEvent &&
+        newItemsData.length === 1 &&
+        metadata?.source === 'app' &&
+        !metadata.url &&
+        !hasBulkAddLayoutInfo(metadata);
+
+      if (eventLists[eventName] && !isSharedSingleAppCreate && guardSharingStructureMutation(eventName)) return;
+      const newItems = buildBulkAddItems(newItemsData, metadata);
+
+      if (sharingSession && isSharedSingleAppCreate) {
+        const createdItem = newItems[0];
+        if (!createdItem) return;
+
+        setSharingBusy(true);
+        setSharingStatusMessage('共有アイテムを追加しています。');
+        setSharingErrorMessage(null);
+        try {
+          const mutation = await upsertRoomItemWithRoute({
+            roomId: sharingSession.roomId,
+            localItemId: createdItem.id,
+            fields: buildSharingCreateItemFields(createdItem),
+            routeUpdates: [],
+            expectedFieldClocks: {},
+          });
+
+          if (!mutation.ok) {
+            setSharingErrorMessage(`共有アイテムの追加に失敗しました: ${mutation.error.code}`);
+            return;
+          }
+
+          setEventLists((prevLists) => {
+            const currentItems: ShoppingItem[] = prevLists[eventName] || [];
+            return {
+              ...prevLists,
+              [eventName]: [
+                ...currentItems,
+                mergeSnapshotRoomItemIntoShoppingItem(createdItem, mutation.data.item),
+              ],
+            };
+          });
+
+          await saveSharingMutationVersion(sharingSession, mutation.data.itemsVersion, [
+            mutation.data.item,
+          ], {
+            routeOrderVersions: mutation.data.routeOrderVersions ?? sharingSession.routeOrderVersions,
+          });
+
+          const uiPlan = buildBulkAddUiPlan(eventName, [createdItem], false, eventLists[eventName] || []);
+          setSharingStatusMessage('共有アイテムを追加しました。');
+          if (uiPlan.nextActiveTab) {
+            setActiveTab(uiPlan.nextActiveTab);
+          }
+        } catch (error) {
+          console.error('Sharing single item add error:', error);
+          setSharingErrorMessage('共有アイテムの追加に失敗しました。通信状態を確認してください。');
+        } finally {
+          setSharingBusy(false);
+        }
+        return;
+      }
 
       if (hasBulkAddLayoutInfo(metadata) && isNewEvent) {
         const { sortedItems, executeModeItems } = buildLayoutAppliedEventItems(
@@ -2314,7 +3019,12 @@ const App: React.FC = () => {
         setActiveTab(uiPlan.nextActiveTab);
       }
     },
-    [eventLists, guardSharingStructureMutation],
+    [
+      activeSharingSession,
+      eventLists,
+      guardSharingStructureMutation,
+      saveSharingMutationVersion,
+    ],
   );
 
   const handleUpdateItem = useCallback(
@@ -2326,18 +3036,199 @@ const App: React.FC = () => {
         const currentItems = eventLists[activeEventName] || [];
         const currentItem = currentItems.find((item) => item.id === updatedItem.id);
         if (!currentItem) return;
+        const editBaselineItem =
+          editDialogItem?.id === updatedItem.id ? editDialogItem : currentItem;
+        const editBaselineFieldClocks =
+          editFieldClockBaselineByItemId[updatedItem.id] ??
+          sharingSession.fieldClocksByItemId?.[updatedItem.id];
 
-        if (hasUnsupportedSharingItemChange(currentItem, updatedItem)) {
+        if (hasSharingAssignmentOrLockChange(editBaselineItem, updatedItem)) {
           alert(
-            '共有中は価格、数量、実購入数、備考、URL、購入状態だけを同期できます。サークル名や配置などの構造項目は共有終了後に編集してください。',
+            '共有中の担当者や購入確保は専用の操作から変更してください。',
           );
           return;
         }
 
-        const fields = buildSharingMutableItemFields(currentItem, updatedItem);
-        const purchaseChanged = currentItem.purchaseStatus !== updatedItem.purchaseStatus;
+        const structuralFields = buildSharingStructuralItemFields(editBaselineItem, updatedItem);
+        const hasStructuralChanges = Object.keys(structuralFields).length > 0;
+        const routeDateMoveToCandidate = isSharingRouteDateMoveToCandidate(
+          currentItem,
+          updatedItem,
+        );
+        if (
+          isRouteAffectingItemPlacementChange(currentItem, updatedItem) &&
+          !routeDateMoveToCandidate
+        ) {
+          alert(
+            '巡回順への追加・削除は、巡回順の操作から変更してください。',
+          );
+          return;
+        }
+
+        const fields = buildSharingMutableItemFields(editBaselineItem, updatedItem);
+        const purchaseChanged = editBaselineItem.purchaseStatus !== updatedItem.purchaseStatus;
         const hasFieldChanges = Object.keys(fields).length > 0;
+
+        if (hasStructuralChanges && (hasFieldChanges || purchaseChanged)) {
+          alert(
+            '共有中は構造項目と購入・価格項目を同時に保存できません。どちらか一方ずつ保存してください。',
+          );
+          return;
+        }
+
+        if (hasStructuralChanges) {
+          const expectedFieldClocks = pickExpectedFieldClocksFrom(
+            editBaselineFieldClocks,
+            Object.keys(structuralFields),
+          );
+          if (!expectedFieldClocks) {
+            setSharingErrorMessage('共有アイテムの同期基準が不足しています。最新状態を取得します。');
+            await applySnapshotAndAck(sharingSession.roomId);
+            return;
+          }
+
+          const routeUpdates = routeDateMoveToCandidate
+            ? (() => {
+                if (!currentItem.eventDate) return null;
+                const currentRouteItemIds =
+                  executeModeItemsRef.current[activeEventName]?.[currentItem.eventDate] ?? [];
+                return [
+                  {
+                    eventDate: currentItem.eventDate,
+                    itemIds: currentRouteItemIds.filter((itemId) => itemId !== currentItem.id),
+                    expectedVersion: sharingSession.routeOrderVersions[currentItem.eventDate] ?? 0,
+                  },
+                ];
+              })()
+            : buildSharingStructuralRouteUpdates(
+                currentItem,
+                updatedItem,
+                currentItems,
+                executeModeItemsRef.current[activeEventName] || {},
+                sharingSession.routeOrderVersions,
+              );
+
+          if (routeUpdates === null) {
+            setSharingErrorMessage('巡回順に入っている共有アイテムの日付が不明です。最新状態を取得します。');
+            await applySnapshotAndAck(sharingSession.roomId);
+            return;
+          }
+
+          setSharingBusy(true);
+          setSharingStatusMessage('共有アイテムを更新しています。');
+          setSharingErrorMessage(null);
+          try {
+            const result = await upsertRoomItemWithRoute({
+              roomId: sharingSession.roomId,
+              localItemId: updatedItem.id,
+              fields: structuralFields,
+              routeUpdates,
+              expectedFieldClocks,
+            });
+
+            if (!result.ok) {
+              if (isFullItemRefreshRequired(result.error.code)) {
+                setSharingErrorMessage('共有アイテムの最新状態を全体再取得しています。');
+                await applySnapshotAndAck(sharingSession.roomId);
+                return;
+              }
+              if (
+                result.error.code === 'FIELD_CLOCK_CONFLICT' ||
+                result.error.code === 'ROUTE_ORDER_CONFLICT'
+              ) {
+                setSharingErrorMessage(
+                  '他の参加者が先に更新しました。最新状態を取得しました。',
+                );
+                await applySnapshotAndAck(sharingSession.roomId);
+                return;
+              }
+              setSharingErrorMessage(`共有アイテムの更新に失敗しました: ${result.error.code}`);
+              return;
+            }
+
+            setEventLists((prev) => {
+              const items = prev[activeEventName] || [];
+              const changedRouteOrders = result.data.changedRouteOrders ?? [];
+              const updatedItems = items.map((item) =>
+                item.id === updatedItem.id
+                  ? mergeSnapshotRoomItemIntoShoppingItem(item, result.data.item)
+                  : item,
+              );
+              const nextItems = applyCanonicalRouteOrdersToItems(updatedItems, changedRouteOrders);
+              return {
+                ...prev,
+                [activeEventName]: nextItems,
+              };
+            });
+
+            const changedRouteOrders = result.data.changedRouteOrders ?? [];
+            if (changedRouteOrders.length > 0) {
+              updateExecuteModeItems((prev) => ({
+                ...prev,
+                [activeEventName]: {
+                  ...(prev[activeEventName] ?? {}),
+                  ...Object.fromEntries(
+                    changedRouteOrders.map((routeOrder) => [
+                      routeOrder.eventDate,
+                      routeOrder.itemIds,
+                    ]),
+                  ),
+                },
+              }));
+            }
+            const changedRouteOrderAcks = Object.fromEntries(
+              changedRouteOrders.map((routeOrder) => [
+                routeOrder.eventDate,
+                routeOrder.dateRouteOrderVersion,
+              ]),
+            );
+            const pendingRouteOrderAcks = mergePendingRouteOrderAcks(
+              sharingSession.pendingRouteOrderAcks,
+              changedRouteOrderAcks,
+              'mutation',
+              new Date().toISOString(),
+            );
+            await saveSharingMutationVersion(sharingSession, result.data.itemsVersion, [
+              result.data.item,
+            ], {
+              routeOrderVersions: result.data.routeOrderVersions ?? sharingSession.routeOrderVersions,
+              pendingRouteOrderAcks,
+            });
+            if (changedRouteOrders.length > 0) {
+              await ackSavedRouteOrderVersions(
+                sharingSession,
+                result.data.routeOrderVersions ?? sharingSession.routeOrderVersions,
+                pendingRouteOrderAcks,
+              );
+            }
+            setSharingStatusMessage(
+              routeDateMoveToCandidate
+                ? '共有アイテムを新しい参加日の候補へ移動しました。'
+                : '共有アイテムを更新しました。',
+            );
+          } catch (error) {
+            console.error('Sharing item structural update error:', error);
+            setSharingErrorMessage('共有アイテムの更新に失敗しました。通信状態を確認してください。');
+          } finally {
+            setSharingBusy(false);
+          }
+          return;
+        }
+
         if (!hasFieldChanges && !purchaseChanged) return;
+
+        const expectedFieldClocks = pickExpectedFieldClocksFrom(
+          editBaselineFieldClocks,
+          buildPurchaseExpectedClockFields(
+            fields,
+            purchaseChanged ? updatedItem.purchaseStatus : null,
+          ),
+        );
+        if (!expectedFieldClocks) {
+          setSharingErrorMessage('共有アイテムの同期基準が不足しています。最新状態を取得します。');
+          await applySnapshotAndAck(sharingSession.roomId);
+          return;
+        }
 
         setSharingBusy(true);
         setSharingStatusMessage('共有アイテムを更新しています。');
@@ -2352,12 +3243,25 @@ const App: React.FC = () => {
               purchaseChanged && updatedItem.purchaseStatus === 'LimitedPurchase'
                 ? updatedItem.limitedPurchasedQuantity ?? null
                 : null,
+            expectedFieldClocks,
           });
 
           if (!result.ok) {
+            if (isFullItemRefreshRequired(result.error.code)) {
+              setSharingErrorMessage('共有アイテムの最新状態を全体再取得しています。');
+              await applySnapshotAndAck(sharingSession.roomId);
+              return;
+            }
             if (result.error.code === 'PERMISSION_DENIED') {
               setSharingErrorMessage(
                 '他の参加者が先に購入確保しました。価格変更も含めて反映せず、最新状態を取得しました。',
+              );
+              await applySnapshotAndAck(sharingSession.roomId);
+              return;
+            }
+            if (result.error.code === 'FIELD_CLOCK_CONFLICT') {
+              setSharingErrorMessage(
+                '他の参加者が同じ項目を先に更新しました。最新状態を取得しました。',
               );
               await applySnapshotAndAck(sharingSession.roomId);
               return;
@@ -2386,15 +3290,9 @@ const App: React.FC = () => {
             setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
           }
 
-          const updatedSession: SharingSessionMetadata = {
-            ...sharingSession,
-            itemsVersion: result.data.itemsVersion,
-          };
-          await db.saveSharingSession(updatedSession);
-          setSharingSessions((prev) => ({
-            ...prev,
-            [updatedSession.sessionId]: updatedSession,
-          }));
+          await saveSharingMutationVersion(sharingSession, result.data.itemsVersion, [
+            result.data.item,
+          ]);
           setSharingStatusMessage('共有アイテムを更新しました。');
         } catch (error) {
           console.error('Sharing item update error:', error);
@@ -2436,22 +3334,120 @@ const App: React.FC = () => {
       activeEventName,
       activeSharingSession,
       activeEventDate,
+      ackSavedRouteOrderVersions,
       applySnapshotAndAck,
       dayModes,
+      editDialogItem,
+      editFieldClockBaselineByItemId,
       eventLists,
       guardSharingStructureMutation,
+      saveSharingMutationVersion,
+      updateExecuteModeItems,
+    ],
+  );
+
+  const saveSharingRouteOrderMutation = useCallback(
+    async (
+      session: SharingSessionMetadata,
+      eventName: string,
+      eventDate: string,
+      itemIds: string[],
+      successMessage: string,
+    ): Promise<boolean> => {
+      const expectedVersion = session.routeOrderVersions[eventDate] ?? 0;
+      setSharingBusy(true);
+      setSharingErrorMessage(null);
+      try {
+        const result = await updateRouteOrder({
+          roomId: session.roomId,
+          eventDate,
+          itemIds,
+          expectedVersion,
+        });
+
+        if (!result.ok) {
+          if (isFullItemRefreshRequired(result.error.code)) {
+            setSharingErrorMessage('共有アイテムの最新状態を全体再取得しています。');
+            await applySnapshotAndAck(session.roomId);
+            return false;
+          }
+          setSharingErrorMessage(`巡回順の更新に失敗しました: ${result.error.code}`);
+          if (result.error.code === 'ROUTE_ORDER_CONFLICT') {
+            void synchronizeSharingSession(session.sessionId, 'manual');
+          }
+          return false;
+        }
+
+        const confirmedRouteOrder = {
+          eventDate: result.data.eventDate,
+          itemIds: result.data.itemIds,
+        };
+        updateExecuteModeItems((prev) => ({
+          ...prev,
+          [eventName]: {
+            ...(prev[eventName] ?? {}),
+            [confirmedRouteOrder.eventDate]: confirmedRouteOrder.itemIds,
+          },
+        }));
+        setEventLists((prev) => {
+          const items = prev[eventName] ?? [];
+          const nextItems = applyCanonicalRouteOrderToItems(items, confirmedRouteOrder);
+          return nextItems === items
+            ? prev
+            : {
+                ...prev,
+                [eventName]: nextItems,
+              };
+        });
+
+        const latestSession = sharingSessionsRef.current[session.sessionId] ?? session;
+        const pendingRouteOrderAcks = mergePendingRouteOrderAcks(
+          latestSession.pendingRouteOrderAcks,
+          { [confirmedRouteOrder.eventDate]: result.data.dateRouteOrderVersion },
+          'reorder',
+          new Date().toISOString(),
+        );
+        await saveSharingSessionState({
+          ...latestSession,
+          routeOrderVersions: result.data.routeOrderVersions,
+          pendingRouteOrderAcks,
+          lastAckAt: new Date().toISOString(),
+        });
+        await ackSavedRouteOrderVersions(
+          latestSession,
+          result.data.routeOrderVersions,
+          pendingRouteOrderAcks,
+        );
+        setSharingStatusMessage(successMessage);
+        return true;
+      } catch (error) {
+        console.error('Sharing route order update error:', error);
+        setSharingErrorMessage('巡回順の更新に失敗しました。通信状態を確認してください。');
+        return false;
+      } finally {
+        setSharingBusy(false);
+      }
+    },
+    [
+      ackSavedRouteOrderVersions,
+      applySnapshotAndAck,
+      saveSharingSessionState,
+      synchronizeSharingSession,
+      updateExecuteModeItems,
     ],
   );
 
   const handleMoveItem = useCallback(
-    (
+    async (
       dragId: string,
       hoverId: string,
       targetColumn?: 'execute' | 'candidate',
       sourceColumn?: 'execute' | 'candidate',
     ) => {
       if (!activeEventName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
       setSortState('Manual');
       setBlockSortDirection(null);
 
@@ -2499,6 +3495,22 @@ const App: React.FC = () => {
         areItemsInSameHall: hallCheck,
       });
 
+      if (sharingSession && result.executeModeItems) {
+        const nextItemIds = result.executeModeItems[currentEventDate] ?? [];
+        await saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          currentEventDate,
+          nextItemIds,
+          sourceColumn === 'candidate' && targetColumn === 'execute'
+            ? '共有アイテムを巡回順に追加しました。'
+            : sourceColumn === 'execute' && targetColumn === 'candidate'
+              ? '共有アイテムを候補へ移動しました。'
+              : '巡回順を更新しました。',
+        );
+        return;
+      }
+
       if (result.eventListItems) {
         setEventLists((prev) => ({ ...prev, [activeEventName]: result.eventListItems! }));
       }
@@ -2517,13 +3529,17 @@ const App: React.FC = () => {
       eventLists,
       areItemsInSameHall,
       areItemsInSameHallGroup,
+      activeSharingSession,
       guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
     ],
   );
   const handleMoveItemVerticalInternal = useCallback(
-    (direction: 'up' | 'down', itemId: string, targetColumn?: 'execute' | 'candidate') => {
+    async (direction: 'up' | 'down', itemId: string, targetColumn?: 'execute' | 'candidate') => {
       if (!activeEventName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
       setSortState('Manual');
       setBlockSortDirection(null);
 
@@ -2587,13 +3603,23 @@ const App: React.FC = () => {
 
                 remaining.splice(insertIdx, 0, ...movingBlock);
 
-                updateExecuteModeItems((prev) => ({
-                  ...prev,
-                  [activeEventName]: {
-                    ...prev[activeEventName],
-                    [currentEventDate]: remaining,
-                  },
-                }));
+                if (sharingSession) {
+                  await saveSharingRouteOrderMutation(
+                    sharingSession,
+                    activeEventName,
+                    currentEventDate,
+                    remaining,
+                    '巡回順を更新しました。',
+                  );
+                } else {
+                  updateExecuteModeItems((prev) => ({
+                    ...prev,
+                    [activeEventName]: {
+                      ...prev[activeEventName],
+                      [currentEventDate]: remaining,
+                    },
+                  }));
+                }
                 return;
               }
             }
@@ -2620,6 +3646,17 @@ const App: React.FC = () => {
         hallCheck,
       );
 
+      if (sharingSession && result.executeModeItems) {
+        await saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          currentEventDate,
+          result.executeModeItems[currentEventDate] ?? [],
+          '巡回順を更新しました。',
+        );
+        return;
+      }
+
       if (result.eventListItems) {
         setEventLists((prev) => ({ ...prev, [activeEventName]: result.eventListItems! }));
       }
@@ -2638,7 +3675,9 @@ const App: React.FC = () => {
       items,
       areItemsInSameHall,
       areItemsInSameHallGroup,
+      activeSharingSession,
       guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
     ],
   );
 
@@ -2662,9 +3701,11 @@ const App: React.FC = () => {
   );
 
   const handleMoveToExecuteColumn = useCallback(
-    (itemIds: string[]) => {
+    async (itemIds: string[]) => {
       if (!activeEventName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
 
       const currentEventDate = activeEventDate;
 
@@ -2685,16 +3726,35 @@ const App: React.FC = () => {
         setRangeEnd(null);
       }
 
-      updateExecuteModeItems((prev) => ({
-        ...prev,
-        [activeEventName]: computeMoveToExecuteColumn(
-          expandedIds,
+      const nextExecuteModeItems = computeMoveToExecuteColumn(
+        expandedIds,
+        currentEventDate,
+        items,
+        executeModeItemsRef.current[activeEventName] || {},
+        selectedBlockFilters,
+      );
+
+      if (sharingSession) {
+        const saved = await saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
           currentEventDate,
-          items,
-          prev[activeEventName] || {},
-          selectedBlockFilters,
-        ),
-      }));
+          nextExecuteModeItems[currentEventDate] ?? [],
+          '共有アイテムを巡回順に追加しました。',
+        );
+        if (!saved) return;
+      } else {
+        updateExecuteModeItems((prev) => ({
+          ...prev,
+          [activeEventName]: computeMoveToExecuteColumn(
+            expandedIds,
+            currentEventDate,
+            items,
+            prev[activeEventName] || {},
+            selectedBlockFilters,
+          ),
+        }));
+      }
 
       setSelectedItemIds(new Set());
     },
@@ -2708,13 +3768,17 @@ const App: React.FC = () => {
       executeModeItems,
       selectedBlockFilters,
       expandToFullSpaceGroups,
+      activeSharingSession,
       guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
     ],
   );
   const handleRemoveFromExecuteColumn = useCallback(
-    (itemIds: string[]) => {
+    async (itemIds: string[]) => {
       if (!activeEventName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
 
       const currentEventDate = activeEventDate;
 
@@ -2735,23 +3799,50 @@ const App: React.FC = () => {
         setRangeEnd(null);
       }
 
-      updateExecuteModeItems((prev) => ({
-        ...prev,
-        [activeEventName]: computeRemoveFromExecuteColumn(
-          expandedIds,
-          prev[activeEventName] || {},
+      const nextExecuteModeItems = computeRemoveFromExecuteColumn(
+        expandedIds,
+        executeModeItemsRef.current[activeEventName] || {},
+        currentEventDate,
+      );
+
+      if (sharingSession) {
+        const saved = await saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
           currentEventDate,
-        ),
-      }));
+          nextExecuteModeItems[currentEventDate] ?? [],
+          '共有アイテムを候補へ移動しました。',
+        );
+        if (!saved) return;
+      } else {
+        updateExecuteModeItems((prev) => ({
+          ...prev,
+          [activeEventName]: computeRemoveFromExecuteColumn(
+            expandedIds,
+            prev[activeEventName] || {},
+            currentEventDate,
+          ),
+        }));
+      }
 
       setSelectedItemIds(new Set());
     },
-    [activeEventName, activeTab, eventDates, rangeStart, rangeEnd, executeModeItems, expandToFullSpaceGroups, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeTab,
+      eventDates,
+      rangeStart,
+      rangeEnd,
+      executeModeItems,
+      expandToFullSpaceGroups,
+      activeSharingSession,
+      guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
+    ],
   );
 
   const handleToggleMode = useCallback(() => {
     if (!activeEventName) return;
-    if (guardSharingStructureMutation(activeEventName)) return;
 
     const currentEventDate = activeEventDate;
     if (!currentEventDate) {
@@ -2776,13 +3867,12 @@ const App: React.FC = () => {
 
     setSelectedItemIds(new Set());
     setCandidateNumberSortDirection(null);
-  }, [activeEventName, activeTab, dayModes, eventDates, guardSharingStructureMutation]);
+  }, [activeEventName, activeEventDate, dayModes]);
 
 
   const handleSetViewMode = useCallback(
     (mode: ViewMode, scrollToItemId?: string) => {
       if (!activeEventName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
 
       const currentEventDate = activeEventDate;
       setDayModes((prev) => ({
@@ -2813,7 +3903,7 @@ const App: React.FC = () => {
         }, 100);
       }
     },
-    [activeEventName, activeEventDate, activeTab, eventDates, guardSharingStructureMutation],
+    [activeEventName, activeEventDate],
   );
 
   const handleSelectEvent = useCallback(
@@ -3013,19 +4103,39 @@ const App: React.FC = () => {
   };
 
   const handleEditRequest = (item: ShoppingItem) => {
+    const sharingSession =
+      activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+    const fieldClockBaseline = sharingSession?.fieldClocksByItemId?.[item.id];
+    if (fieldClockBaseline) {
+      setEditFieldClockBaselineByItemId((prev) => ({
+        ...prev,
+        [item.id]: { ...fieldClockBaseline },
+      }));
+    } else {
+      setEditFieldClockBaselineByItemId((prev) => {
+        if (!(item.id in prev)) return prev;
+        return Object.fromEntries(
+          Object.entries(prev).filter(([itemId]) => itemId !== item.id),
+        );
+      });
+    }
     setEditDialogItem(item);
   };
 
   const handleDeleteRequest = useCallback((item: ShoppingItem) => {
-    if (guardSharingStructureMutation(activeEventName)) return;
+    const sharingSession =
+      activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+    if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
     setItemToDelete(item);
-  }, [activeEventName, guardSharingStructureMutation]);
+  }, [activeEventName, activeSharingSession, guardSharingStructureMutation]);
 
   const handleDeleteItemFromMap = useCallback((itemId: string) => {
-    if (guardSharingStructureMutation(activeEventName)) return;
+    const sharingSession =
+      activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+    if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
     const item = items.find((i) => i.id === itemId);
     if (item) setItemToDelete(item);
-  }, [items, activeEventName, guardSharingStructureMutation]);
+  }, [items, activeEventName, activeSharingSession, guardSharingStructureMutation]);
 
   const handleClearNewItemDefaults = useCallback(() => {
     setNewItemDefaults(null);
@@ -3036,8 +4146,130 @@ const App: React.FC = () => {
     [handleSetViewMode],
   );
 
-  const handleConfirmDelete = () => {
+  const handleConfirmDelete = async () => {
     if (!itemToDelete || !activeEventName) return;
+    const sharingSession = activeSharingSession;
+
+    if (sharingSession?.eventName === activeEventName) {
+      const expectedFieldClocks = pickExpectedFieldClocks(
+        sharingSession,
+        itemToDelete.id,
+        ['deletedAt', 'deletedBy'],
+      );
+      if (!expectedFieldClocks) {
+        setSharingErrorMessage('共有アイテムの同期基準が不足しています。最新状態を取得します。');
+        await applySnapshotAndAck(sharingSession.roomId);
+        return;
+      }
+
+      const routeUpdates = hasSharingRouteMembership(itemToDelete)
+        ? (() => {
+            if (!itemToDelete.eventDate) return null;
+            const currentRouteItemIds =
+              executeModeItemsRef.current[activeEventName]?.[itemToDelete.eventDate] ?? [];
+            return [
+              {
+                eventDate: itemToDelete.eventDate,
+                itemIds: currentRouteItemIds.filter((itemId) => itemId !== itemToDelete.id),
+                expectedVersion: sharingSession.routeOrderVersions[itemToDelete.eventDate] ?? 0,
+              },
+            ];
+          })()
+        : [];
+
+      if (routeUpdates === null) {
+        setSharingErrorMessage('巡回順に入っている共有アイテムの日付が不明です。最新状態を取得します。');
+        await applySnapshotAndAck(sharingSession.roomId);
+        return;
+      }
+
+      setSharingBusy(true);
+      setSharingStatusMessage('共有アイテムを削除しています。');
+      setSharingErrorMessage(null);
+      try {
+        const result = await deleteRoomItemWithRoute({
+          roomId: sharingSession.roomId,
+          localItemId: itemToDelete.id,
+          routeUpdates,
+          expectedFieldClocks,
+        });
+
+        if (!result.ok) {
+          if (isFullItemRefreshRequired(result.error.code)) {
+            setSharingErrorMessage('共有アイテムの最新状態を全体再取得しています。');
+            await applySnapshotAndAck(sharingSession.roomId);
+            return;
+          }
+          if (
+            result.error.code === 'FIELD_CLOCK_CONFLICT' ||
+            result.error.code === 'ROUTE_ORDER_CONFLICT'
+          ) {
+            setSharingErrorMessage('他の参加者が先に更新しました。最新状態を取得しました。');
+            await applySnapshotAndAck(sharingSession.roomId);
+            return;
+          }
+          setSharingErrorMessage(`共有アイテムの削除に失敗しました: ${result.error.code}`);
+          return;
+        }
+
+        const deleteResult = computeDeleteItem(
+          eventLists[activeEventName] || [],
+          itemToDelete.id,
+          executeModeItemsRef.current[activeEventName] || {},
+        );
+        const changedRouteOrders = result.data.changedRouteOrders ?? [];
+        const canonicalExecuteModeItems = {
+          ...deleteResult.executeModeItems,
+          ...Object.fromEntries(
+            changedRouteOrders.map((routeOrder) => [routeOrder.eventDate, routeOrder.itemIds]),
+          ),
+        };
+        const canonicalDeleteItems = applyCanonicalRouteOrdersToItems(
+          deleteResult.items,
+          changedRouteOrders,
+        );
+        setEventLists((prev) => ({ ...prev, [activeEventName]: canonicalDeleteItems }));
+        updateExecuteModeItems((prev) => ({
+          ...prev,
+          [activeEventName]: canonicalExecuteModeItems,
+        }));
+
+        const changedRouteOrderAcks = Object.fromEntries(
+          changedRouteOrders.map((routeOrder) => [
+            routeOrder.eventDate,
+            routeOrder.dateRouteOrderVersion,
+          ]),
+        );
+        const pendingRouteOrderAcks = mergePendingRouteOrderAcks(
+          sharingSession.pendingRouteOrderAcks,
+          changedRouteOrderAcks,
+          'mutation',
+          new Date().toISOString(),
+        );
+        await saveSharingMutationVersion(sharingSession, result.data.itemsVersion, [
+          result.data.item,
+        ], {
+          routeOrderVersions: result.data.routeOrderVersions ?? sharingSession.routeOrderVersions,
+          pendingRouteOrderAcks,
+        });
+        if (changedRouteOrders.length > 0) {
+          await ackSavedRouteOrderVersions(
+            sharingSession,
+            result.data.routeOrderVersions ?? sharingSession.routeOrderVersions,
+            pendingRouteOrderAcks,
+          );
+        }
+        setItemToDelete(null);
+        setSharingStatusMessage('共有アイテムを削除しました。');
+      } catch (error) {
+        console.error('Sharing item delete error:', error);
+        setSharingErrorMessage('共有アイテムの削除に失敗しました。通信状態を確認してください。');
+      } finally {
+        setSharingBusy(false);
+      }
+      return;
+    }
+
     if (guardSharingStructureMutation(activeEventName)) return;
 
     const result = computeDeleteItem(
@@ -3337,33 +4569,58 @@ const App: React.FC = () => {
         setSharingStatusMessage('共有アイテムをまとめて更新しています。');
         setSharingErrorMessage(null);
         try {
-          const updatedItems: SnapshotRoomItem[] = [];
-          let latestItemsVersion = sharingSession.itemsVersion;
-
+          const mutations = [];
           for (const item of changedItems) {
-            const result = await updateRoomItemWithPurchase({
-              roomId: sharingSession.roomId,
+            const expectedFieldClocks = pickExpectedFieldClocks(
+              sharingSession,
+              item.id,
+              buildPurchaseExpectedClockFields({}, newStatus),
+            );
+            if (!expectedFieldClocks) {
+              setSharingErrorMessage('共有アイテムの同期基準が不足しています。最新状態を取得します。');
+              await applySnapshotAndAck(sharingSession.roomId);
+              return;
+            }
+
+            mutations.push({
               localItemId: item.id,
               fields: {},
               status: newStatus,
               actualPurchaseQuantity: null,
+              expectedFieldClocks,
             });
+          }
 
-            if (!result.ok) {
-              if (result.error.code === 'PERMISSION_DENIED') {
-                setSharingErrorMessage(
-                  '他の参加者が先に購入確保しました。まとめ変更を中断し、最新状態を取得しました。',
-                );
-                await applySnapshotAndAck(sharingSession.roomId);
-                return;
-              }
-              setSharingErrorMessage(`共有アイテムのまとめ更新に失敗しました: ${result.error.code}`);
+          const result = await bulkUpdateRoomItemsWithPurchase({
+            roomId: sharingSession.roomId,
+            mutations,
+          });
+
+          if (!result.ok) {
+            if (isFullItemRefreshRequired(result.error.code)) {
+              setSharingErrorMessage('共有アイテムの最新状態を全体再取得しています。');
+              await applySnapshotAndAck(sharingSession.roomId);
               return;
             }
-
-            updatedItems.push(result.data.item);
-            latestItemsVersion = result.data.itemsVersion;
+            if (result.error.code === 'PERMISSION_DENIED') {
+              setSharingErrorMessage(
+                '他の参加者が先に購入確保しました。まとめ変更を中断し、最新状態を取得しました。',
+              );
+              await applySnapshotAndAck(sharingSession.roomId);
+              return;
+            }
+            if (result.error.code === 'FIELD_CLOCK_CONFLICT') {
+              setSharingErrorMessage(
+                '他の参加者が同じ項目を先に更新しました。まとめ変更を中断し、最新状態を取得しました。',
+              );
+              await applySnapshotAndAck(sharingSession.roomId);
+              return;
+            }
+            setSharingErrorMessage(`共有アイテムのまとめ更新に失敗しました: ${result.error.code}`);
+            return;
           }
+
+          const updatedItems = result.data.changedItems.map((change) => change.item);
 
           setEventLists((prev) => ({
             ...prev,
@@ -3373,10 +4630,7 @@ const App: React.FC = () => {
             }),
           }));
 
-          await saveSharingSessionState({
-            ...sharingSession,
-            itemsVersion: latestItemsVersion,
-          });
+          await saveSharingMutationVersion(sharingSession, result.data.itemsVersion, updatedItems);
           applyBulkProgressUi(changedItems);
           setSharingStatusMessage('共有アイテムをまとめて更新しました。');
         } catch (error) {
@@ -3404,8 +4658,9 @@ const App: React.FC = () => {
     [
       activeEventName,
       activeSharingSession,
+      ackSavedRouteOrderVersions,
       applySnapshotAndAck,
-      saveSharingSessionState,
+      saveSharingMutationVersion,
       sortState,
     ],
   );
@@ -3521,11 +4776,68 @@ const App: React.FC = () => {
   const handleBulkSort = useCallback(
     (direction: BulkSortDirection) => {
       if (!activeEventName || selectedItemIds.size === 0) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
       setSortState('Manual');
       setBlockSortDirection(null);
       const currentEventDate = activeEventDate;
+      if (!currentEventDate) return;
       const mode = dayModes[activeEventName]?.[currentEventDate];
+
+      if (sharingSession) {
+        if (mode !== 'edit') {
+          setSharingErrorMessage('共有中の一括番号ソートは、巡回列だけで使用してください。');
+          return;
+        }
+
+        const currentDayItems =
+          executeModeItemsRef.current[activeEventName]?.[currentEventDate] || [];
+        const executeIds = new Set(currentDayItems);
+        const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
+        const isInExecuteColumn = selectedItems.some((item) => executeIds.has(item.id));
+        const isInCandidateColumn = selectedItems.some((item) => !executeIds.has(item.id));
+
+        if (!isInExecuteColumn || isInCandidateColumn) {
+          setSharingErrorMessage('共有中の候補列の一括番号ソートは同期対象外です。巡回列だけで選択してください。');
+          return;
+        }
+
+        const itemsMap = new Map(items.map((item) => [item.id, item]));
+        const selectedExecuteItems = currentDayItems
+          .filter((id) => selectedItemIds.has(id))
+          .map((id) => itemsMap.get(id)!)
+          .filter(Boolean);
+        const firstSelectedIndex = currentDayItems.findIndex((id) => selectedItemIds.has(id));
+        if (firstSelectedIndex === -1) return;
+
+        const otherItems = currentDayItems.filter((id) => !selectedItemIds.has(id));
+        selectedExecuteItems.sort((a, b) => {
+          const comparison = a.number.localeCompare(b.number, undefined, {
+            numeric: true,
+            sensitivity: 'base',
+          });
+          return direction === 'asc' ? comparison : -comparison;
+        });
+        const newDayItems = [...otherItems];
+        newDayItems.splice(firstSelectedIndex, 0, ...selectedExecuteItems.map((item) => item.id));
+
+        updateExecuteModeItems((prev) => ({
+          ...prev,
+          [activeEventName]: {
+            ...(prev[activeEventName] || {}),
+            [currentEventDate]: newDayItems,
+          },
+        }));
+        void saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          currentEventDate,
+          newDayItems,
+          '共有アイテムの巡回順を更新しました。',
+        );
+        return;
+      }
 
       if (mode === 'edit') {
         const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
@@ -3639,7 +4951,20 @@ const App: React.FC = () => {
         });
       }
     },
-    [activeEventName, selectedItemIds, items, activeTab, dayModes, executeModeItems, eventDates, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeEventDate,
+      activeSharingSession,
+      selectedItemIds,
+      items,
+      activeTab,
+      dayModes,
+      executeModeItems,
+      eventDates,
+      guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
+      updateExecuteModeItems,
+    ],
   );
 
 
@@ -4075,7 +5400,9 @@ const App: React.FC = () => {
   const handleAddToExecuteListFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return [];
-      if (guardSharingStructureMutation(activeEventName)) return [];
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return [];
 
       const dayName = activeEventDate;
       const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
@@ -4098,16 +5425,40 @@ const App: React.FC = () => {
 
       if (!result.accepted) return [];
       commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
+      if (sharingSession) {
+        void saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          result.executeModeItems[dayName] ?? [],
+          '共有アイテムを巡回順に追加しました。',
+        );
+      }
       return result.insertedItemIds;
     },
-    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, commitExecuteModeItemsForEvent, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeEventDate,
+      activeSharingSession,
+      currentMapTabName,
+      isMapTab,
+      items,
+      hallDefinitions,
+      hallRouteSettings,
+      mapData,
+      commitExecuteModeItemsForEvent,
+      guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
+    ],
   );
 
 
   const handleAddToExecuteListFromMapAtPosition = useCallback(
     (itemId: string, referenceItemId: string, position: 'before' | 'after') => {
       if (!activeEventName || !isMapTab || !activeEventDate) return [];
-      if (guardSharingStructureMutation(activeEventName)) return [];
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return [];
 
       const dayName = activeEventDate;
       const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
@@ -4126,16 +5477,37 @@ const App: React.FC = () => {
       if (!result.accepted) return [];
 
       commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
+      if (sharingSession) {
+        void saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          result.executeModeItems[dayName] ?? [],
+          '共有アイテムを巡回順に追加しました。',
+        );
+      }
       return result.insertedItemIds;
     },
-    [activeEventName, activeEventDate, isMapTab, items, areItemsInSameHallGroup, commitExecuteModeItemsForEvent, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeEventDate,
+      activeSharingSession,
+      isMapTab,
+      items,
+      areItemsInSameHallGroup,
+      commitExecuteModeItemsForEvent,
+      guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
+    ],
   );
 
 
   const handleRemoveFromExecuteListFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab || !activeEventDate) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
 
       const dayName = activeEventDate;
       const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
@@ -4148,16 +5520,36 @@ const App: React.FC = () => {
       );
 
       commitExecuteModeItemsForEvent(activeEventName, newExecuteItems);
+      if (sharingSession) {
+        void saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          newExecuteItems[dayName] ?? [],
+          '共有アイテムを候補へ移動しました。',
+        );
+      }
       return removeIds;
     },
-    [activeEventName, activeEventDate, isMapTab, items, commitExecuteModeItemsForEvent, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeEventDate,
+      activeSharingSession,
+      isMapTab,
+      items,
+      commitExecuteModeItemsForEvent,
+      guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
+    ],
   );
 
 
   const handleBatchAddToExecuteListFromMap = useCallback(
     (itemIds: string[]) => {
       if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return [];
-      if (guardSharingStructureMutation(activeEventName)) return [];
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return [];
       const dayName = activeEventDate;
       const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
       const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
@@ -4177,17 +5569,41 @@ const App: React.FC = () => {
           }
         }
         commitExecuteModeItemsForEvent(activeEventName, current);
+        if (sharingSession) {
+          void saveSharingRouteOrderMutation(
+            sharingSession,
+            activeEventName,
+            dayName,
+            current[dayName] ?? [],
+            '共有アイテムを巡回順に追加しました。',
+          );
+        }
         return insertedItemIds;
       }
     },
-    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, commitExecuteModeItemsForEvent, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeEventDate,
+      activeSharingSession,
+      currentMapTabName,
+      isMapTab,
+      items,
+      hallDefinitions,
+      hallRouteSettings,
+      mapData,
+      commitExecuteModeItemsForEvent,
+      guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
+    ],
   );
 
 
   const handleBatchAddToExecuteListFromMapAtPosition = useCallback(
     (itemIds: string[], referenceItemId: string, position: 'before' | 'after') => {
       if (!activeEventName || !isMapTab || !activeEventDate) return [];
-      if (guardSharingStructureMutation(activeEventName)) return [];
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return [];
       const dayName = activeEventDate;
 
       const current = executeModeItemsRef.current[activeEventName] || {};
@@ -4205,16 +5621,37 @@ const App: React.FC = () => {
       );
       if (!result.accepted) return [];
       commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
+      if (sharingSession) {
+        void saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          result.executeModeItems[dayName] ?? [],
+          '共有アイテムを巡回順に追加しました。',
+        );
+      }
       return result.insertedItemIds;
     },
-    [activeEventName, activeEventDate, isMapTab, items, areItemsInSameHallGroup, commitExecuteModeItemsForEvent, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeEventDate,
+      activeSharingSession,
+      isMapTab,
+      items,
+      areItemsInSameHallGroup,
+      commitExecuteModeItemsForEvent,
+      guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
+    ],
   );
 
 
   const handleBatchRemoveFromExecuteListFromMap = useCallback(
     (itemIds: string[]) => {
       if (!activeEventName || !isMapTab || !activeEventDate) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
       const dayName = activeEventDate;
 
       let current = executeModeItemsRef.current[activeEventName] || {};
@@ -4225,27 +5662,70 @@ const App: React.FC = () => {
         removedItemIds.push(...removeIds.filter((removeId) => !removedItemIds.includes(removeId)));
       }
       commitExecuteModeItemsForEvent(activeEventName, current);
+      if (sharingSession) {
+        void saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          current[dayName] ?? [],
+          '共有アイテムを候補へ移動しました。',
+        );
+      }
       return removedItemIds;
     },
-    [activeEventName, activeEventDate, isMapTab, items, commitExecuteModeItemsForEvent, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeEventDate,
+      activeSharingSession,
+      isMapTab,
+      items,
+      commitExecuteModeItemsForEvent,
+      guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
+    ],
   );
 
 
   const handleAddNewItemFromMap = useCallback(
     (eventDate: string, block: string, number: string) => {
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
       setNewItemDefaults({ eventDate, block, number });
       setItemToEdit(null);
       setActiveTab('import');
     },
-    [activeEventName, guardSharingStructureMutation],
+    [activeEventName, activeSharingSession, guardSharingStructureMutation],
   );
 
 
   const handleAddItemFromFocusMode = useCallback(
-    (newItem: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => {
+    async (newItem: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => {
       if (!activeEventName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
+
+      const requestedStatus = newItem.purchaseStatus ?? 'None';
+      if (
+        sharingSession &&
+        (requestedStatus === 'Purchased' || requestedStatus === 'LimitedPurchase')
+      ) {
+        setSharingErrorMessage(
+          '共有中の新規追加では、購入済み・限数購入済みを初期状態にできません。追加後に購入状態を保存してください。',
+        );
+        return;
+      }
+      if (
+        sharingSession &&
+        (requestedStatus === 'Postpone' || requestedStatus === 'Late') &&
+        !newItem.eventDate
+      ) {
+        setSharingErrorMessage(
+          '共有中に延期・後回しのアイテムを追加するには、参加日を選択してください。',
+        );
+        return;
+      }
 
       const result = computeAddItemFromFocusMode(
         eventLists[activeEventName] || [],
@@ -4253,60 +5733,215 @@ const App: React.FC = () => {
         executeModeItemsRef.current[activeEventName] || {},
       );
 
+      if (sharingSession) {
+        const createdItem = result.items.find((item) => item.id === result.newItemId);
+        if (!createdItem) return;
+
+        const routeUpdates =
+          createdItem.purchaseStatus === 'Postpone' || createdItem.purchaseStatus === 'Late'
+            ? [
+                {
+                  eventDate: createdItem.eventDate,
+                  itemIds: result.executeModeItems[createdItem.eventDate] ?? [],
+                  expectedVersion: sharingSession.routeOrderVersions[createdItem.eventDate] ?? 0,
+                },
+              ]
+            : [];
+
+        setSharingBusy(true);
+        setSharingStatusMessage('共有アイテムを追加しています。');
+        setSharingErrorMessage(null);
+        try {
+          const mutation = await upsertRoomItemWithRoute({
+            roomId: sharingSession.roomId,
+            localItemId: createdItem.id,
+            fields: buildSharingCreateItemFields(createdItem),
+            routeUpdates,
+            expectedFieldClocks: {},
+          });
+
+          if (!mutation.ok) {
+            if (isFullItemRefreshRequired(mutation.error.code)) {
+              setSharingErrorMessage('共有アイテムの最新状態を全体再取得しています。');
+              await applySnapshotAndAck(sharingSession.roomId);
+              return;
+            }
+            if (mutation.error.code === 'ROUTE_ORDER_CONFLICT') {
+              setSharingErrorMessage('他の参加者が先に巡回順を更新しました。最新状態を取得しました。');
+              await applySnapshotAndAck(sharingSession.roomId);
+              return;
+            }
+            setSharingErrorMessage(`共有アイテムの追加に失敗しました: ${mutation.error.code}`);
+            return;
+          }
+
+          const changedRouteOrders = mutation.data.changedRouteOrders ?? [];
+          setEventLists((prev) => {
+            const currentItems = prev[activeEventName] ?? [];
+            const nextCreatedItem = mergeSnapshotRoomItemIntoShoppingItem(
+              createdItem,
+              mutation.data.item,
+            );
+            const nextItems = [...currentItems, nextCreatedItem];
+            return {
+              ...prev,
+              [activeEventName]: applyCanonicalRouteOrdersToItems(nextItems, changedRouteOrders),
+            };
+          });
+
+          if (changedRouteOrders.length > 0) {
+            updateExecuteModeItems((prev) => ({
+              ...prev,
+              [activeEventName]: {
+                ...(prev[activeEventName] ?? {}),
+                ...Object.fromEntries(
+                  changedRouteOrders.map((routeOrder) => [
+                    routeOrder.eventDate,
+                    routeOrder.itemIds,
+                  ]),
+                ),
+              },
+            }));
+          }
+
+          const changedRouteOrderAcks = Object.fromEntries(
+            changedRouteOrders.map((routeOrder) => [
+              routeOrder.eventDate,
+              routeOrder.dateRouteOrderVersion,
+            ]),
+          );
+          const pendingRouteOrderAcks = mergePendingRouteOrderAcks(
+            sharingSession.pendingRouteOrderAcks,
+            changedRouteOrderAcks,
+            'mutation',
+            new Date().toISOString(),
+          );
+          await saveSharingMutationVersion(sharingSession, mutation.data.itemsVersion, [
+            mutation.data.item,
+          ], {
+            routeOrderVersions: mutation.data.routeOrderVersions ?? sharingSession.routeOrderVersions,
+            pendingRouteOrderAcks,
+          });
+          if (changedRouteOrders.length > 0) {
+            await ackSavedRouteOrderVersions(
+              sharingSession,
+              mutation.data.routeOrderVersions ?? sharingSession.routeOrderVersions,
+              pendingRouteOrderAcks,
+            );
+          }
+          setSharingStatusMessage('共有アイテムを追加しました。');
+        } catch (error) {
+          console.error('Sharing item create error:', error);
+          setSharingErrorMessage('共有アイテムの追加に失敗しました。通信状態を確認してください。');
+        } finally {
+          setSharingBusy(false);
+        }
+        return;
+      }
+
       setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
       updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
     },
-    [activeEventName, eventLists, executeModeItems, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeSharingSession,
+      applySnapshotAndAck,
+      eventLists,
+      executeModeItems,
+      guardSharingStructureMutation,
+      saveSharingMutationVersion,
+      updateExecuteModeItems,
+    ],
   );
 
 
   const handleMoveToFirstFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
 
       if (!activeEventDate) return;
       const dayName = activeEventDate;
+      const eventItems = executeModeItemsRef.current[activeEventName] || {};
+      const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
+      const nextItemIds = [itemId, ...dayItems];
 
       updateExecuteModeItems((prev) => {
-        const eventItems = prev[activeEventName] || {};
-        const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
-
+        const prevEventItems = prev[activeEventName] || {};
         return {
           ...prev,
           [activeEventName]: {
-            ...eventItems,
-            [dayName]: [itemId, ...dayItems],
+            ...prevEventItems,
+            [dayName]: nextItemIds,
           },
         };
       });
+      if (sharingSession) {
+        void saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          nextItemIds,
+          '共有アイテムの巡回順を更新しました。',
+        );
+      }
     },
-    [activeEventName, activeEventDate, isMapTab, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeEventDate,
+      activeSharingSession,
+      isMapTab,
+      guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
+      updateExecuteModeItems,
+    ],
   );
 
 
   const handleMoveToLastFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
 
       if (!activeEventDate) return;
       const dayName = activeEventDate;
+      const eventItems = executeModeItemsRef.current[activeEventName] || {};
+      const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
+      const nextItemIds = [...dayItems, itemId];
 
       updateExecuteModeItems((prev) => {
-        const eventItems = prev[activeEventName] || {};
-        const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
-
+        const prevEventItems = prev[activeEventName] || {};
         return {
           ...prev,
           [activeEventName]: {
-            ...eventItems,
-            [dayName]: [...dayItems, itemId],
+            ...prevEventItems,
+            [dayName]: nextItemIds,
           },
         };
       });
+      if (sharingSession) {
+        void saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          nextItemIds,
+          '共有アイテムの巡回順を更新しました。',
+        );
+      }
     },
-    [activeEventName, activeEventDate, isMapTab, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeEventDate,
+      activeSharingSession,
+      isMapTab,
+      guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
+      updateExecuteModeItems,
+    ],
   );
 
 
@@ -4527,6 +6162,11 @@ const App: React.FC = () => {
         setSharingBusy(false);
 
         if (!result.ok) {
+          if (isFullItemRefreshRequired(result.error.code)) {
+            setSharingErrorMessage('共有アイテムの最新状態を全体再取得しています。');
+            await applySnapshotAndAck(activeSharingSession.roomId);
+            return;
+          }
           setSharingErrorMessage(`巡回順の更新に失敗しました: ${result.error.code}`);
           if (result.error.code === 'ROUTE_ORDER_CONFLICT') {
             void synchronizeSharingSession(activeSharingSession.sessionId, 'manual');
@@ -4534,11 +6174,45 @@ const App: React.FC = () => {
           return;
         }
 
+        const confirmedRouteOrder = {
+          eventDate: result.data.eventDate,
+          itemIds: result.data.itemIds,
+        };
+        updateExecuteModeItems((prev) => ({
+          ...prev,
+          [activeEventName]: {
+            ...(prev[activeEventName] ?? {}),
+            [confirmedRouteOrder.eventDate]: confirmedRouteOrder.itemIds,
+          },
+        }));
+        setEventLists((prev) => {
+          const items = prev[activeEventName] ?? [];
+          const nextItems = applyCanonicalRouteOrderToItems(items, confirmedRouteOrder);
+          return nextItems === items
+            ? prev
+            : {
+                ...prev,
+                [activeEventName]: nextItems,
+              };
+        });
+
+        const pendingRouteOrderAcks = mergePendingRouteOrderAcks(
+          activeSharingSession.pendingRouteOrderAcks,
+          { [dayName]: result.data.dateRouteOrderVersion },
+          'reorder',
+          new Date().toISOString(),
+        );
         await saveSharingSessionState({
           ...activeSharingSession,
           routeOrderVersions: result.data.routeOrderVersions,
+          pendingRouteOrderAcks,
           lastAckAt: new Date().toISOString(),
         });
+        await ackSavedRouteOrderVersions(
+          activeSharingSession,
+          result.data.routeOrderVersions,
+          pendingRouteOrderAcks,
+        );
         setSharingStatusMessage(`${dayName} の巡回順を更新しました。`);
         setSharingErrorMessage(null);
       }
@@ -4548,8 +6222,10 @@ const App: React.FC = () => {
   }, [
     activeEventName,
     activeSharingSession,
+    ackSavedRouteOrderVersions,
     saveSharingSessionState,
     synchronizeSharingSession,
+    updateExecuteModeItems,
     visitListHasUnsavedChanges,
     visitListPanelMapTab,
   ]);
@@ -4628,6 +6304,15 @@ const App: React.FC = () => {
   const handleUpdateItemPriority = useCallback(
     (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
       if (!activeEventName || !visitListPanelMapTab) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (sharingSession) {
+        const item = items.find((i) => i.id === itemId);
+        if (item) {
+          void handleUpdateItem({ ...item, priorityLevel });
+        }
+        return;
+      }
       if (guardSharingStructureMutation(activeEventName)) return;
 
       const halls = hallDefinitions[activeEventName]?.[visitListPanelMapTab] || [];
@@ -4673,17 +6358,35 @@ const App: React.FC = () => {
         });
       }
     },
-    [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData, hallRouteSettings, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeSharingSession,
+      visitListPanelMapTab,
+      items,
+      hallDefinitions,
+      mapData,
+      hallRouteSettings,
+      guardSharingStructureMutation,
+      handleUpdateItem,
+    ],
   );
 
   const handleUpdateItemPriorityFromEdit = useCallback(
     (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
       if (!activeEventName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
 
       const currentItems = eventLists[activeEventName] || [];
       const item = currentItems.find((i) => i.id === itemId);
       if (!item) return;
+
+      if (sharingSession) {
+        void handleUpdateItem({ ...item, priorityLevel });
+        return;
+      }
+
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       const resolvedHallId = getItemHallId(item, item.eventDate);
       const mapTabForItem = getMapTabForDate(item.eventDate);
@@ -4749,6 +6452,8 @@ const App: React.FC = () => {
       getItemHallId,
       getMapTabForDate,
       guardSharingStructureMutation,
+      activeSharingSession,
+      handleUpdateItem,
     ],
   );
 
@@ -4759,11 +6464,16 @@ const App: React.FC = () => {
       oldPriorityLevel: 'none' | 'priority' | 'highest',
     ) => {
       if (!activeEventName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
 
       const currentItems = eventLists[activeEventName] || [];
       const item = currentItems.find((i) => i.id === itemId);
       if (!item) return;
+
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (sharingSession) return;
+
+      if (guardSharingStructureMutation(activeEventName)) return;
 
       const resolvedHallId = getItemHallId(item, item.eventDate);
 
@@ -4834,6 +6544,7 @@ const App: React.FC = () => {
       getItemHallId,
       getMapTabForDate,
       guardSharingStructureMutation,
+      activeSharingSession,
     ],
   );
 
@@ -5156,7 +6867,9 @@ const App: React.FC = () => {
   const handleReorderExecuteListByHallOrder = useCallback(
     (hallOrder: string[]) => {
       if (!activeEventName) return;
-      if (guardSharingStructureMutation(activeEventName)) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
 
       if (!activeEventDate) return;
       const dayName = activeEventDate;
@@ -5178,22 +6891,20 @@ const App: React.FC = () => {
         hallRouteSettings,
       });
 
+      const currentEventItems = executeModeItemsRef.current[activeEventName] || {};
+      const currentDayItems = [...(currentEventItems[dayName] || [])];
+      if (currentDayItems.length === 0) return;
+      const reorderedItems = reorderExecuteIdsByHallOrder({
+        hallOrder,
+        dayItems: currentDayItems,
+        items,
+        halls,
+        mapData: currentMapData,
+        hallRouteSettings: currentHallRouteSettings,
+      });
 
       updateExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
-        const dayItems = [...(eventItems[dayName] || [])];
-
-        if (dayItems.length === 0) return prev;
-
-        const reorderedItems = reorderExecuteIdsByHallOrder({
-          hallOrder,
-          dayItems,
-          items,
-          halls,
-          mapData: currentMapData,
-          hallRouteSettings: currentHallRouteSettings,
-        });
-
         return {
           ...prev,
           [activeEventName]: {
@@ -5202,8 +6913,29 @@ const App: React.FC = () => {
           },
         };
       });
+      if (sharingSession) {
+        void saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          reorderedItems,
+          '共有アイテムの巡回順を更新しました。',
+        );
+      }
     },
-    [activeEventName, activeEventDate, getMapTabForDate, mapData, hallDefinitions, hallRouteSettings, items, guardSharingStructureMutation],
+    [
+      activeEventName,
+      activeEventDate,
+      activeSharingSession,
+      getMapTabForDate,
+      mapData,
+      hallDefinitions,
+      hallRouteSettings,
+      items,
+      guardSharingStructureMutation,
+      saveSharingRouteOrderMutation,
+      updateExecuteModeItems,
+    ],
   );
 
 
@@ -6054,7 +7786,7 @@ const App: React.FC = () => {
 
       {activeSharingSession && (
         <div className="mx-4 mt-3 border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-900 md:mx-6">
-          {activeSharingSession.eventName} は共有中です。追加・削除などの構造変更を停止し、価格・数量・備考・URL・購入状態・担当者・巡回順を同期しています。
+          {activeSharingSession.eventName} は共有中です。アイテム変更と巡回順を共有同期中です。イベント設定・マップ・会場などの構造変更は停止しています。
         </div>
       )}
 
