@@ -1,4 +1,4 @@
-export const SHARING_CONTRACT_VERSION = 1 as const;
+export const SHARING_CONTRACT_VERSION = 2 as const;
 export const ROOM_EVENT_DATA_SCHEMA_VERSION = 1 as const;
 
 export const MAX_ROOM_MEMBERS = 20;
@@ -28,6 +28,7 @@ export const SHARING_ERROR_CODES = [
   'RESTORE_REQUIRED',
   'ITEM_DIFF_EXPIRED',
   'FULL_ITEM_REFRESH_REQUIRED',
+  'FIELD_CLOCK_CONFLICT',
   'NOTIFICATION_CATCHUP_EXPIRED',
   'FULL_NOTIFICATION_REFRESH_REQUIRED',
   'ROUTE_ORDER_CONFLICT',
@@ -36,6 +37,10 @@ export const SHARING_ERROR_CODES = [
 ] as const;
 
 export type SharingErrorCode = (typeof SHARING_ERROR_CODES)[number];
+
+export const isSharingErrorCode = (value: unknown): value is SharingErrorCode =>
+  typeof value === 'string' &&
+  (SHARING_ERROR_CODES as readonly string[]).includes(value);
 
 export type SharingErrorEnvelope = {
   ok: false;

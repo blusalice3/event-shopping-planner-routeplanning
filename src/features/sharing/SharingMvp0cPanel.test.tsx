@@ -25,6 +25,12 @@ const baseProps = {
   onRestoreRoom: vi.fn(),
 };
 
+const currentSyncMetadata = {
+  contractVersion: 2,
+  metadataSchemaVersion: 2,
+  fieldClocksByItemId: {},
+};
+
 describe('SharingMvp0cPanel', () => {
   it('extracts a room code from a join URL', () => {
     expect(getJoinRoomCodeFromInput('https://example.test/join/AB123')).toBe('AB123');
@@ -108,6 +114,7 @@ describe('SharingMvp0cPanel', () => {
             expiresAt: future,
             itemsVersion: 0,
             routeOrderVersions: {},
+            ...currentSyncMetadata,
           },
         }}
       />,
@@ -116,6 +123,38 @@ describe('SharingMvp0cPanel', () => {
     const urlInput = screen.getByLabelText('Host Eventの参加URL') as HTMLInputElement;
     expect(urlInput.value).toMatch(/\/join\/AB123$/);
     expect(screen.getByRole('button', { name: '参加URLをコピー' })).toBeInTheDocument();
+  });
+
+  it('does not expose invite controls for active sessions with legacy sync metadata', () => {
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+    render(
+      <SharingMvp0cPanel
+        {...baseProps}
+        mode="invite"
+        availability={{ enabled: true, mode: 'local_or_limited' }}
+        sessions={{
+          legacyActiveHost: {
+            sessionId: 'legacyActiveHost',
+            roomId: 'room-host',
+            roomCode: 'AB123',
+            roomMemberId: 'member-host',
+            eventName: 'Host Event',
+            role: 'host',
+            status: 'active',
+            startedAt: past,
+            expiresAt: future,
+            itemsVersion: 0,
+            routeOrderVersions: {},
+            contractVersion: 1,
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText('共有中のルームがありません。')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Host Eventの参加URL')).not.toBeInTheDocument();
   });
 
   it('exposes the MVP-2a assigned-only filter and bulk assignment action for active members', async () => {
@@ -175,6 +214,8 @@ describe('SharingMvp0cPanel', () => {
     const onResumeSession = vi.fn().mockResolvedValue(undefined);
     const onLeaveSession = vi.fn().mockResolvedValue(undefined);
     const onLocalizeSession = vi.fn().mockResolvedValue(undefined);
+    const onCreateRoom = vi.fn().mockResolvedValue(undefined);
+    const promptSpy = vi.spyOn(window, 'prompt').mockReturnValue('再共有主催');
     const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
@@ -195,6 +236,7 @@ describe('SharingMvp0cPanel', () => {
             expiresAt: future,
             itemsVersion: 0,
             routeOrderVersions: {},
+            ...currentSyncMetadata,
           },
           activeHost: {
             sessionId: 'activeHost',
@@ -207,6 +249,7 @@ describe('SharingMvp0cPanel', () => {
             expiresAt: future,
             itemsVersion: 0,
             routeOrderVersions: {},
+            ...currentSyncMetadata,
           },
           paused: {
             sessionId: 'paused',
@@ -244,7 +287,20 @@ describe('SharingMvp0cPanel', () => {
             itemsVersion: 0,
             routeOrderVersions: {},
           },
+          localizing: {
+            sessionId: 'localizing',
+            roomId: 'room-localizing',
+            roomMemberId: 'member-localizing',
+            eventName: 'Localized Event',
+            role: 'host',
+            status: 'localizing',
+            startedAt: past,
+            expiresAt: future,
+            itemsVersion: 0,
+            routeOrderVersions: {},
+          },
         }}
+        onCreateRoom={onCreateRoom}
         onPauseSession={onPauseSession}
         onResumeSession={onResumeSession}
         onLeaveSession={onLeaveSession}
@@ -255,17 +311,58 @@ describe('SharingMvp0cPanel', () => {
     expect(screen.getByText('Paused Event: 一時離脱 / room room-paused')).toBeInTheDocument();
     expect(screen.getByText('Expired Event: 期限切れ / room room-expired')).toBeInTheDocument();
     expect(screen.getByText('Leaving Event: 退出中 / room room-leaving')).toBeInTheDocument();
+    expect(screen.getByText('Localized Event: ローカル化済み / room room-localizing')).toBeInTheDocument();
+    expect(
+      screen.getByText('ローカルデータは保持されています。同期を再開する場合は、このイベントから新しい共有ルームを作成してください。'),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'ホスト退出不可' })).toBeDisabled();
 
     await user.click(screen.getAllByRole('button', { name: '一時離脱' })[0]);
     await user.click(screen.getByRole('button', { name: '再開' }));
     await user.click(screen.getByRole('button', { name: '退出' }));
     await user.click(screen.getByRole('button', { name: 'ローカル化' }));
+    await user.click(screen.getByRole('button', { name: '新規共有' }));
 
     expect(onPauseSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'activeMember' }));
     expect(onResumeSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'paused' }));
     expect(onLeaveSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'activeMember' }));
     expect(onLocalizeSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'expired' }));
+    expect(onCreateRoom).toHaveBeenCalledWith('Localized Event', '再共有主催');
+    promptSpy.mockRestore();
+  });
+
+  it('marks active legacy sessions as requiring an update instead of exposing active controls', () => {
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const past = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+    render(
+      <SharingMvp0cPanel
+        {...baseProps}
+        mode="status"
+        availability={{ enabled: true, mode: 'local_or_limited' }}
+        sessions={{
+          legacyActiveMember: {
+            sessionId: 'legacyActiveMember',
+            roomId: 'room-legacy',
+            roomMemberId: 'member-legacy',
+            eventName: 'Legacy Event',
+            role: 'member',
+            status: 'active',
+            startedAt: past,
+            expiresAt: future,
+            itemsVersion: 0,
+            routeOrderVersions: {},
+            contractVersion: 1,
+          },
+        }}
+        onPauseSession={vi.fn().mockResolvedValue(undefined)}
+        onLeaveSession={vi.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByText('Legacy Event: 要更新 / room room-legacy')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '一時離脱' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '退出' })).not.toBeInTheDocument();
   });
 
   it('exposes MVP-2c notification refresh, read, and hide actions', async () => {

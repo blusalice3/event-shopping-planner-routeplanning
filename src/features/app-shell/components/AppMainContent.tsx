@@ -652,6 +652,9 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                   assignmentMembers={assignmentMembers}
                   canAssignItem={canAssignItem}
                   onAssignItem={onAssignItem}
+                  isSharingActive={Boolean(
+                    activeEventName && isSharingActiveForEvent?.(activeEventName),
+                  )}
                 />
               </Suspense>
             ) : (

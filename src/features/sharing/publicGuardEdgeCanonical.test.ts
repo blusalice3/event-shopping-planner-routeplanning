@@ -33,7 +33,7 @@ describe('public Guard Edge canonicalization', () => {
         },
       },
       {
-        contract_version: 1,
+        contract_version: 2,
         room_id: roomId,
         canonical_payload:
           '{"eventMetadata":{"eventName":"Public Guard"},"itemSnapshots":{},"schemaVersion":1}',
@@ -48,7 +48,7 @@ describe('public Guard Edge canonicalization', () => {
       ok: false,
       error: {
         code: 'CHALLENGE_INVALID',
-        contract_version: 1,
+        contract_version: 2,
       },
     });
   });

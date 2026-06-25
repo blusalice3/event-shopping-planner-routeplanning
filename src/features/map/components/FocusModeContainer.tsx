@@ -58,6 +58,7 @@ type FocusModeContainerProps = {
   assignmentMembers?: AssignmentMemberProfile[];
   canAssignItem?: (item: ShoppingItem) => boolean;
   onAssignItem?: (itemId: string, assignedToMemberId: string) => void;
+  isSharingActive?: boolean;
 };
 
 const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
@@ -91,6 +92,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   assignmentMembers,
   canAssignItem,
   onAssignItem,
+  isSharingActive = false,
 }) => {
   // 現在表示中の日付（タブ名が日付と一致すればそれ、そうでなければ先頭日）
   const currentDay = useMemo(
@@ -371,6 +373,7 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       assignmentMembers={assignmentMembers}
       canAssignItem={canAssignItem}
       onAssignItem={onAssignItem}
+      isSharingActive={isSharingActive}
     />
   );
 };

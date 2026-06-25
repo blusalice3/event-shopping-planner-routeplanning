@@ -1,11 +1,19 @@
 import { getSharingAvailability, supabase } from '../../lib/supabase';
 import type { AppData, SharingSessionMetadata } from '../../utils/indexedDB';
 import { db } from '../../utils/indexedDB';
-import type { AssignmentMemberProfile, PurchaseStatus, ShoppingItem } from '../../types/item';
+import {
+  ItemSources,
+  ProtectionLevels,
+  PurchaseStatuses,
+  type AssignmentMemberProfile,
+  type PurchaseStatus,
+  type ShoppingItem,
+} from '../../types/item';
 import type { Json } from '../../lib/database.types';
 import {
   ROOM_EVENT_DATA_SCHEMA_VERSION,
   SHARING_CONTRACT_VERSION,
+  isSharingErrorCode,
   type SharingEnvelope,
   type SharingErrorEnvelope,
   type SharingSuccessEnvelope,
@@ -29,6 +37,14 @@ import type { SharingAvailability } from '../../lib/supabase';
 const MEMBER_KEY_STORAGE_PREFIX = 'sharing.memberKey.v1';
 
 type RpcJson = Json | undefined;
+
+type CreateRoomChallenge = {
+  challengeId: string;
+  roomId: string;
+};
+
+// Supabase typegen marks RPC args without defaults as non-null, while Postgres accepts explicit nulls.
+const nullableRpcArg = <T>(value: T | null): T => value as T;
 
 const publicGuardUnavailableEnvelope = <T>(): SharingEnvelope<T> => ({
   ok: false,
@@ -79,10 +95,35 @@ export type JoinSharingRoomResult = {
   tokenContext: string;
 };
 
+export type RoomItemFieldClock = {
+  itemsVersion: number;
+  updatedAt: string;
+};
+
+export type RoomItemFieldClocks = Record<string, RoomItemFieldClock>;
+
+export type DeletedItemClockMetadata = {
+  deletedAt: string;
+  deletedBy: string | null;
+  fieldClocks: RoomItemFieldClocks;
+  itemVersion: number;
+  updatedAt: string;
+};
+
+type DeletedItemClockSnapshotEntry = DeletedItemClockMetadata | RoomItemFieldClocks;
+
 export type SnapshotRoomItem = {
   localItemId: string;
+  circle: string;
+  block: string;
+  number: string;
+  title: string;
   eventDate: string | null;
-  name: string;
+  name?: string;
+  priorityLevel: ShoppingItem['priorityLevel'] | null;
+  protectionLevel: ShoppingItem['protectionLevel'] | null;
+  source: ShoppingItem['source'] | null;
+  manualHallId: string | null;
   purchaseStatus: PurchaseStatus;
   price: number | null;
   quantity: number | null;
@@ -94,8 +135,11 @@ export type SnapshotRoomItem = {
   securedBy: string | null;
   orderIndex: number | null;
   postponed: boolean;
+  deletedAt: string | null;
+  deletedBy: string | null;
   itemVersion: number;
   updatedAt: string;
+  fieldClocks: RoomItemFieldClocks;
 };
 
 export type RoomSnapshot = {
@@ -128,6 +172,7 @@ export type RoomSnapshot = {
     itemsVersion: number;
     routeOrderVersion: number | null;
     routeOrderVersions: Record<string, number>;
+    deletedItemClocks?: Record<string, DeletedItemClockSnapshotEntry>;
     notificationWatermarkCreatedAt: string | null;
     notificationWatermarkId: string | null;
     createdAt: string;
@@ -172,6 +217,7 @@ export type RoomItemMutationResult = {
   changedFields: string[];
   updatedValues: Record<string, Json>;
   fieldUpdatedAt: Record<string, string>;
+  fieldClocks?: RoomItemFieldClocks;
   notificationId?: string;
   item: SnapshotRoomItem;
 };
@@ -192,31 +238,80 @@ export type UpdateRoomItemFieldsInput = {
     actualPurchaseQuantity?: number | null;
     remarks?: string | null;
     url?: string | null;
+    assignedTo?: string | null;
   };
-};
-
-export type ClaimRoomItemInput = {
-  roomId: string;
-  localItemId: string;
-  status: PurchaseStatus;
-  actualPurchaseQuantity?: number | null;
 };
 
 export type UpdateRoomItemWithPurchaseInput = UpdateRoomItemFieldsInput & {
   status?: PurchaseStatus | null;
   actualPurchaseQuantity?: number | null;
+  expectedFieldClocks: RoomItemFieldClocks;
+};
+
+export type RouteOrderUpdate = {
+  eventDate: string;
+  itemIds: string[];
+  expectedVersion: number;
+};
+
+export type UpsertRoomItemWithRouteInput = {
+  roomId: string;
+  localItemId: string;
+  fields: Record<string, Json>;
+  routeUpdates: RouteOrderUpdate[];
+  expectedFieldClocks: RoomItemFieldClocks;
+};
+
+export type DeleteRoomItemWithRouteInput = {
+  roomId: string;
+  localItemId: string;
+  routeUpdates: RouteOrderUpdate[];
+  expectedFieldClocks: RoomItemFieldClocks;
+};
+
+export type BulkUpdateRoomItemsWithPurchaseInput = {
+  roomId: string;
+  mutations: Array<{
+    localItemId: string;
+    fields: Record<string, Json>;
+    status?: PurchaseStatus | null;
+    actualPurchaseQuantity?: number | null;
+    expectedFieldClocks: RoomItemFieldClocks;
+  }>;
+};
+
+export type RouteAwareRoomItemMutationResult = RoomItemMutationResult & {
+  routeOrderVersion?: number | null;
+  routeOrderVersions?: Record<string, number>;
+  changedRouteOrders?: Array<{
+    eventDate: string;
+    itemIds: string[];
+    dateRouteOrderVersion: number;
+  }>;
+  itemNotificationId?: string | null;
+  routeNotificationId?: string | null;
+};
+
+export type BulkRoomItemPurchaseResult = {
+  roomId: string;
+  itemsVersion: number;
+  changedItems: RoomItemMutationResult[];
 };
 
 export type AssignRoomItemInput = {
   roomId: string;
   localItemId: string;
   assignedToMemberId: string;
+  expectedFieldClocks: RoomItemFieldClocks;
 };
 
 export type BulkAssignRoomItemsInput = {
   roomId: string;
-  localItemIds: string[];
   assignedToMemberId: string;
+  assignments: Array<{
+    localItemId: string;
+    expectedFieldClocks: RoomItemFieldClocks;
+  }>;
 };
 
 export type RoomVersions = {
@@ -252,10 +347,13 @@ export type UpdateRouteOrderResult = RouteOrderByDateResult & {
 export type RoomItemChange = {
   changeId: string;
   localItemId: string;
+  changeType?: 'create' | 'update' | 'delete';
   itemsVersion: number;
   updatedFields: string[];
   updatedValues: Record<string, Json>;
   fieldUpdatedAt: Record<string, string>;
+  fieldClocks?: RoomItemFieldClocks;
+  item?: SnapshotRoomItem;
   updatedByMemberId: string | null;
   notificationId: string | null;
   createdAt: string;
@@ -356,7 +454,11 @@ const applyRoomItemUpdatedValue = (
   switch (field) {
     case 'purchaseStatus':
       return typeof value === 'string'
-        ? { ...item, purchaseStatus: value as PurchaseStatus }
+        ? {
+            ...item,
+            purchaseStatus: value as PurchaseStatus,
+            postponed: value === 'Postpone',
+          }
         : item;
     case 'price':
       return typeof value === 'number' || value === null
@@ -390,12 +492,65 @@ const applyRoomItemUpdatedValue = (
       return typeof value === 'string'
         ? { ...item, assignedTo: value }
         : { ...item, assignedTo: undefined };
-    case 'postponed':
-      return typeof value === 'boolean' ? { ...item, postponed: value } : item;
+    case 'circle':
+      return typeof value === 'string' ? { ...item, circle: value } : item;
+    case 'block':
+      return typeof value === 'string' ? { ...item, block: value } : item;
+    case 'number':
+      return typeof value === 'string' ? { ...item, number: value } : item;
+    case 'title':
+    case 'name':
+      return typeof value === 'string' ? { ...item, title: value } : item;
+    case 'eventDate':
+      return typeof value === 'string'
+        ? { ...item, eventDate: value }
+        : value === null
+          ? { ...item, eventDate: '' }
+          : item;
+    case 'priorityLevel':
+      return typeof value === 'string' || value === null
+        ? { ...item, priorityLevel: value as ShoppingItem['priorityLevel'] }
+        : item;
+    case 'protectionLevel':
+      return typeof value === 'string' || value === null
+        ? { ...item, protectionLevel: value as ShoppingItem['protectionLevel'] }
+        : item;
+    case 'source':
+      return typeof value === 'string' || value === null
+        ? { ...item, source: value as ShoppingItem['source'] }
+        : item;
+    case 'manualHallId':
+      return typeof value === 'string'
+        ? { ...item, manualHallId: value }
+        : { ...item, manualHallId: undefined };
     default:
       return item;
   }
 };
+
+const snapshotRoomItemToShoppingItem = (snapshot: SnapshotRoomItem): ShoppingItem => ({
+  id: snapshot.localItemId,
+  circle: snapshot.circle,
+  eventDate: snapshot.eventDate ?? '',
+  block: snapshot.block,
+  number: snapshot.number,
+  title: snapshot.title,
+  price: snapshot.price,
+  purchaseStatus: snapshot.purchaseStatus,
+  quantity: snapshot.quantity ?? 1,
+  limitedPurchasedQuantity: snapshot.actualPurchaseQuantity ?? undefined,
+  remarks: snapshot.remarks ?? '',
+  url: snapshot.url ?? undefined,
+  priorityLevel: snapshot.priorityLevel ?? undefined,
+  protectionLevel: snapshot.protectionLevel ?? undefined,
+  source: snapshot.source ?? undefined,
+  assignedTo: snapshot.assignedTo ?? undefined,
+  securedBy: snapshot.securedBy ?? undefined,
+  lastSyncedAt: snapshot.updatedAt,
+  orderIndex: snapshot.orderIndex ?? undefined,
+  postponed: snapshot.purchaseStatus === 'Postpone',
+  manualHallId: snapshot.manualHallId ?? undefined,
+});
 
 export const applyRoomItemChangesToItems = (
   items: ShoppingItem[],
@@ -403,33 +558,44 @@ export const applyRoomItemChangesToItems = (
 ): ShoppingItem[] => {
   if (changes.length === 0) return items;
 
-  const changesByItem = changes.reduce<Record<string, RoomItemChange[]>>(
-    (acc, change) => {
-      acc[change.localItemId] = [...(acc[change.localItemId] ?? []), change];
-      return acc;
-    },
-    {},
-  );
+  const itemsById = new Map(items.map((item) => [item.id, item]));
+  let itemOrder = items.map((item) => item.id);
 
-  return items.map((item) => {
-    const itemChanges = changesByItem[item.id];
-    if (!itemChanges) return item;
+  changes
+    .slice()
+    .sort((a, b) => a.itemsVersion - b.itemsVersion)
+    .forEach((change) => {
+      if (change.changeType === 'delete') {
+        itemsById.delete(change.localItemId);
+        itemOrder = itemOrder.filter((itemId) => itemId !== change.localItemId);
+        return;
+      }
 
-    return itemChanges
-      .slice()
-      .sort((a, b) => a.itemsVersion - b.itemsVersion)
-      .reduce((current, change) => {
-        const patched = change.updatedFields.reduce(
-          (next, field) =>
-            applyRoomItemUpdatedValue(next, field, change.updatedValues[field]),
-          current,
-        );
-        return {
-          ...patched,
-          lastSyncedAt: change.createdAt,
-        };
-      }, item);
-  });
+      if (change.changeType === 'create') {
+        if (!change.item) return;
+        const createdItem = snapshotRoomItemToShoppingItem(change.item);
+        itemsById.set(createdItem.id, createdItem);
+        if (!itemOrder.includes(createdItem.id)) {
+          itemOrder = [...itemOrder, createdItem.id];
+        }
+        return;
+      }
+
+      const currentItem = itemsById.get(change.localItemId);
+      if (!currentItem) return;
+      const patched = change.updatedFields.reduce(
+        (next, field) => applyRoomItemUpdatedValue(next, field, change.updatedValues[field]),
+        currentItem,
+      );
+      itemsById.set(change.localItemId, {
+        ...patched,
+        lastSyncedAt: change.createdAt,
+      });
+    });
+
+  return itemOrder
+    .map((itemId) => itemsById.get(itemId))
+    .filter((item): item is ShoppingItem => item !== undefined);
 };
 
 export const mergeSnapshotRoomItemIntoShoppingItem = (
@@ -437,17 +603,26 @@ export const mergeSnapshotRoomItemIntoShoppingItem = (
   snapshot: SnapshotRoomItem,
 ): ShoppingItem => ({
   ...item,
+  circle: snapshot.circle,
+  eventDate: snapshot.eventDate ?? '',
+  block: snapshot.block,
+  number: snapshot.number,
+  title: snapshot.title,
   price: snapshot.price,
   purchaseStatus: snapshot.purchaseStatus,
   quantity: snapshot.quantity ?? 1,
   limitedPurchasedQuantity: snapshot.actualPurchaseQuantity ?? undefined,
   remarks: snapshot.remarks ?? '',
   url: snapshot.url ?? undefined,
+  priorityLevel: snapshot.priorityLevel ?? undefined,
+  protectionLevel: snapshot.protectionLevel ?? undefined,
+  source: snapshot.source ?? undefined,
   assignedTo: snapshot.assignedTo ?? undefined,
   securedBy: snapshot.securedBy ?? undefined,
   lastSyncedAt: snapshot.updatedAt,
   orderIndex: snapshot.orderIndex ?? undefined,
-  postponed: snapshot.postponed,
+  postponed: snapshot.purchaseStatus === 'Postpone',
+  manualHallId: snapshot.manualHallId ?? undefined,
 });
 
 export class SharingClientError extends Error {
@@ -488,35 +663,1018 @@ const asObject = (value: unknown): Record<string, unknown> =>
     ? (value as Record<string, unknown>)
     : {};
 
+const isPlainObject = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+const isNullableString = (value: unknown): value is string | null =>
+  value === null || typeof value === 'string';
+
+const isNonEmptyString = (value: unknown): value is string =>
+  typeof value === 'string' && value.trim().length > 0;
+
+const isNullableNumber = (value: unknown): value is number | null =>
+  value === null || (typeof value === 'number' && Number.isFinite(value));
+
+const isNonNegativeInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isInteger(value) && value >= 0;
+
+const isRecordOfNonNegativeIntegers = (value: unknown): value is Record<string, number> =>
+  isPlainObject(value) && Object.values(value).every(isNonNegativeInteger);
+
+const isUniqueNonEmptyStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) &&
+  value.every(isNonEmptyString) &&
+  new Set(value).size === value.length;
+
+const isUniqueStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) &&
+  value.every((entry) => typeof entry === 'string') &&
+  new Set(value).size === value.length;
+
+const parseClockUpdatedAtMs = (value: unknown): number | null => {
+  if (typeof value !== 'string' || value.trim().length === 0) return null;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : null;
+};
+
+const isNullableTimestampString = (value: unknown): value is string | null =>
+  value === null || parseClockUpdatedAtMs(value) !== null;
+
+const isRoomItemFieldClock = (value: unknown): value is RoomItemFieldClock => {
+  const clock = asObject(value);
+  return isNonNegativeInteger(clock.itemsVersion) && parseClockUpdatedAtMs(clock.updatedAt) !== null;
+};
+
+const hasMonotonicRoomItemFieldClocks = (fieldClocks: RoomItemFieldClocks): boolean => {
+  const clocks = Object.values(fieldClocks).map((clock) => ({
+    itemsVersion: clock.itemsVersion,
+    updatedAtMs: parseClockUpdatedAtMs(clock.updatedAt) ?? 0,
+  }));
+
+  return clocks.every((clock, index) =>
+    clocks.every(
+      (other, otherIndex) =>
+        index === otherIndex ||
+        clock.itemsVersion >= other.itemsVersion ||
+        clock.updatedAtMs <= other.updatedAtMs,
+    ),
+  );
+};
+
+const isRoomItemFieldClocks = (value: unknown): value is RoomItemFieldClocks => {
+  if (!isPlainObject(value)) return false;
+  return (
+    Object.values(value).every(isRoomItemFieldClock) &&
+    hasMonotonicRoomItemFieldClocks(value as RoomItemFieldClocks)
+  );
+};
+
+const hasFieldClockEntriesForUpdatedFields = (
+  updatedFields: string[],
+  fieldClocks: RoomItemFieldClocks,
+): boolean =>
+  updatedFields.every((fieldName) =>
+    Object.prototype.hasOwnProperty.call(fieldClocks, fieldName),
+  );
+
+const hasUpdatedValueEntriesForUpdatedFields = (
+  updatedFields: string[],
+  updatedValues: Record<string, unknown>,
+): boolean =>
+  updatedFields.every((fieldName) =>
+    Object.prototype.hasOwnProperty.call(updatedValues, fieldName),
+  );
+
+const hasFieldUpdatedAtEntriesForUpdatedFields = (
+  updatedFields: string[],
+  fieldUpdatedAt: Record<string, unknown>,
+): boolean =>
+  updatedFields.every((fieldName) => parseClockUpdatedAtMs(fieldUpdatedAt[fieldName]) !== null);
+
+const hasConsistentFieldClockUpdatedAt = (
+  updatedFields: string[],
+  fieldUpdatedAt: Record<string, unknown>,
+  fieldClocks: RoomItemFieldClocks,
+): boolean =>
+  updatedFields.every((fieldName) => {
+    const updatedAtMs = parseClockUpdatedAtMs(fieldUpdatedAt[fieldName]);
+    const clockUpdatedAtMs = parseClockUpdatedAtMs(fieldClocks[fieldName]?.updatedAt);
+    return updatedAtMs !== null && updatedAtMs === clockUpdatedAtMs;
+  });
+
+const hasConsistentFieldClockItemsVersion = (
+  updatedFields: string[],
+  itemsVersion: number,
+  fieldClocks: RoomItemFieldClocks,
+): boolean =>
+  updatedFields.every((fieldName) => fieldClocks[fieldName]?.itemsVersion === itemsVersion);
+
+const isDeletedItemClockMetadataValue = (value: unknown): value is DeletedItemClockMetadata => {
+  const metadata = asObject(value);
+  return (
+    parseClockUpdatedAtMs(metadata.deletedAt) !== null &&
+    isNullableString(metadata.deletedBy) &&
+    isRoomItemFieldClocks(metadata.fieldClocks) &&
+    isNonNegativeInteger(metadata.itemVersion) &&
+    parseClockUpdatedAtMs(metadata.updatedAt) !== null
+  );
+};
+
+const isDeletedItemClockMetadataRecord = (
+  value: unknown,
+): value is Record<string, DeletedItemClockMetadata> =>
+  value === undefined ||
+  (isPlainObject(value) && Object.values(value).every(isDeletedItemClockMetadataValue));
+
+const isSnapshotRoomItem = (value: unknown): value is SnapshotRoomItem => {
+  const item = asObject(value);
+  return (
+    typeof item.localItemId === 'string' &&
+    typeof item.circle === 'string' &&
+    typeof item.block === 'string' &&
+    typeof item.number === 'string' &&
+    typeof item.title === 'string' &&
+    isNullableString(item.eventDate) &&
+    (item.name === undefined || typeof item.name === 'string') &&
+    (item.priorityLevel === null ||
+      item.priorityLevel === 'none' ||
+      item.priorityLevel === 'priority' ||
+      item.priorityLevel === 'highest') &&
+    (item.protectionLevel === null || ProtectionLevels.includes(item.protectionLevel as never)) &&
+    (item.source === null || ItemSources.includes(item.source as never)) &&
+    isNullableString(item.manualHallId) &&
+    PurchaseStatuses.includes(item.purchaseStatus as never) &&
+    isNullableNumber(item.price) &&
+    isNullableNumber(item.quantity) &&
+    isNullableNumber(item.limitQuantity) &&
+    isNullableNumber(item.actualPurchaseQuantity) &&
+    isNullableString(item.remarks) &&
+    isNullableString(item.url) &&
+    isNullableString(item.assignedTo) &&
+    isNullableString(item.securedBy) &&
+    isNullableNumber(item.orderIndex) &&
+    item.postponed === (item.purchaseStatus === 'Postpone') &&
+    (item.deletedAt === null || parseClockUpdatedAtMs(item.deletedAt) !== null) &&
+    isNullableString(item.deletedBy) &&
+    isNonNegativeInteger(item.itemVersion) &&
+    parseClockUpdatedAtMs(item.updatedAt) !== null &&
+    isRoomItemFieldClocks(item.fieldClocks)
+  );
+};
+
+const isRoomItemChange = (value: unknown): value is RoomItemChange => {
+  const change = asObject(value);
+  const changeType = change.changeType ?? 'update';
+  const updatedFields = change.updatedFields;
+  const fieldUpdatedAt = asObject(change.fieldUpdatedAt);
+  const hasValidTopLevelFieldClocks =
+    change.fieldClocks !== undefined && isRoomItemFieldClocks(change.fieldClocks);
+
+  if (
+    typeof change.changeId !== 'string' ||
+    typeof change.localItemId !== 'string' ||
+    (changeType !== 'create' && changeType !== 'update' && changeType !== 'delete') ||
+    !isNonNegativeInteger(change.itemsVersion) ||
+    !isUniqueStringArray(updatedFields) ||
+    !isPlainObject(change.updatedValues) ||
+    !hasUpdatedValueEntriesForUpdatedFields(updatedFields, change.updatedValues) ||
+    !isPlainObject(change.fieldUpdatedAt) ||
+    !hasFieldUpdatedAtEntriesForUpdatedFields(updatedFields, fieldUpdatedAt) ||
+    !isNullableString(change.updatedByMemberId) ||
+    !isNullableString(change.notificationId) ||
+    parseClockUpdatedAtMs(change.createdAt) === null
+  ) {
+    return false;
+  }
+
+  if (changeType === 'create') {
+    return (
+      isSnapshotRoomItem(change.item) &&
+      hasValidTopLevelFieldClocks &&
+      hasFieldClockEntriesForUpdatedFields(
+        updatedFields,
+        change.fieldClocks as RoomItemFieldClocks,
+      ) &&
+      hasConsistentFieldClockUpdatedAt(
+        updatedFields,
+        fieldUpdatedAt,
+        change.fieldClocks as RoomItemFieldClocks,
+      ) &&
+      hasConsistentFieldClockItemsVersion(
+        updatedFields,
+        change.itemsVersion,
+        change.fieldClocks as RoomItemFieldClocks,
+      )
+    );
+  }
+
+  return (
+    hasValidTopLevelFieldClocks &&
+    hasFieldClockEntriesForUpdatedFields(updatedFields, change.fieldClocks as RoomItemFieldClocks) &&
+    hasConsistentFieldClockUpdatedAt(
+      updatedFields,
+      fieldUpdatedAt,
+      change.fieldClocks as RoomItemFieldClocks,
+    ) &&
+    hasConsistentFieldClockItemsVersion(
+      updatedFields,
+      change.itemsVersion,
+      change.fieldClocks as RoomItemFieldClocks,
+    )
+  );
+};
+
+const isRoomItemChangesResult = (value: unknown): value is RoomItemChangesResult => {
+  const result = asObject(value);
+  const changes = Array.isArray(result.changes) ? result.changes : [];
+  const fromItemsVersion = result.fromItemsVersion;
+  const itemsVersion = result.itemsVersion;
+  const hasChangesWithinVersionRange =
+    isNonNegativeInteger(fromItemsVersion) &&
+    isNonNegativeInteger(itemsVersion) &&
+    itemsVersion >= fromItemsVersion &&
+    changes.every((change) => {
+      const itemChange = asObject(change);
+      return (
+        isNonNegativeInteger(itemChange.itemsVersion) &&
+        itemChange.itemsVersion > fromItemsVersion &&
+        itemChange.itemsVersion <= itemsVersion
+      );
+    });
+
+  return (
+    typeof result.roomId === 'string' &&
+    isNonNegativeInteger(fromItemsVersion) &&
+    isNonNegativeInteger(itemsVersion) &&
+    Array.isArray(result.changes) &&
+    hasChangesWithinVersionRange &&
+    result.changes.every(isRoomItemChange)
+  );
+};
+
+const isRoomItemMutationResult = (value: unknown): value is RoomItemMutationResult => {
+  const result = asObject(value);
+  const changedFields = result.changedFields;
+  const fieldUpdatedAt = asObject(result.fieldUpdatedAt);
+  const hasValidFieldClocks =
+    Array.isArray(changedFields) &&
+    (changedFields.length === 0 ||
+      (isRoomItemFieldClocks(result.fieldClocks) &&
+        hasFieldClockEntriesForUpdatedFields(changedFields, result.fieldClocks) &&
+        hasConsistentFieldClockUpdatedAt(changedFields, fieldUpdatedAt, result.fieldClocks) &&
+        hasConsistentFieldClockItemsVersion(
+          changedFields,
+          result.itemsVersion as number,
+          result.fieldClocks,
+        )));
+  return (
+    typeof result.roomId === 'string' &&
+    isNonNegativeInteger(result.itemsVersion) &&
+    isUniqueStringArray(changedFields) &&
+    isPlainObject(result.updatedValues) &&
+    hasUpdatedValueEntriesForUpdatedFields(changedFields, result.updatedValues) &&
+    isPlainObject(result.fieldUpdatedAt) &&
+    hasFieldUpdatedAtEntriesForUpdatedFields(changedFields, fieldUpdatedAt) &&
+    hasValidFieldClocks &&
+    (result.notificationId === undefined || isNullableString(result.notificationId)) &&
+    isSnapshotRoomItem(result.item)
+  );
+};
+
+const isCanonicalRouteOrderResult = (value: unknown): boolean => {
+  const routeOrder = asObject(value);
+  return (
+    isNonEmptyString(routeOrder.eventDate) &&
+    isUniqueNonEmptyStringArray(routeOrder.itemIds) &&
+    isNonNegativeInteger(routeOrder.dateRouteOrderVersion)
+  );
+};
+
+const hasConsistentChangedRouteVersions = (
+  routeOrderVersions: unknown,
+  changedRouteOrders: unknown,
+): boolean => {
+  if (routeOrderVersions === undefined || changedRouteOrders === undefined) return true;
+  if (!isRecordOfNonNegativeIntegers(routeOrderVersions) || !Array.isArray(changedRouteOrders)) {
+    return false;
+  }
+
+  return changedRouteOrders.every((entry) => {
+    const routeOrder = asObject(entry);
+    return (
+      isNonEmptyString(routeOrder.eventDate) &&
+      routeOrderVersions[routeOrder.eventDate] === routeOrder.dateRouteOrderVersion
+    );
+  });
+};
+
+const isRoomVersions = (value: unknown): value is RoomVersions => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    isNonNegativeInteger(result.itemsVersion) &&
+    (result.routeOrderVersion === null || isNonNegativeInteger(result.routeOrderVersion)) &&
+    isRecordOfNonNegativeIntegers(result.routeOrderVersions) &&
+    (result.roomEventDataUpdatedAt === undefined ||
+      isNullableTimestampString(result.roomEventDataUpdatedAt)) &&
+    parseClockUpdatedAtMs(result.expiresAt) !== null &&
+    typeof result.isActive === 'boolean'
+  );
+};
+
+const isRouteOrderByDateResult = (value: unknown): value is RouteOrderByDateResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    isNonEmptyString(result.eventDate) &&
+    isUniqueNonEmptyStringArray(result.itemIds) &&
+    isNonNegativeInteger(result.dateRouteOrderVersion) &&
+    isNonNegativeInteger(result.routeOrderVersion)
+  );
+};
+
+const isUpdateRouteOrderResult = (value: unknown): value is UpdateRouteOrderResult => {
+  const result = asObject(value);
+  return (
+    isRouteOrderByDateResult(value) &&
+    isRecordOfNonNegativeIntegers(result.routeOrderVersions) &&
+    isNullableString(result.notificationId)
+  );
+};
+
+const isAckRoomSnapshotResult = (value: unknown): value is AckRoomSnapshotResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    typeof result.roomMemberId === 'string' &&
+    typeof result.snapshotReceiptId === 'string' &&
+    isNonNegativeInteger(result.itemsVersion) &&
+    isRecordOfNonNegativeIntegers(result.routeOrderVersions)
+  );
+};
+
+const isAckRoomSyncProgressResult = (
+  value: unknown,
+): value is AckRoomSyncProgressResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    typeof result.roomMemberId === 'string' &&
+    isNonNegativeInteger(result.itemsVersion) &&
+    isNullableString(result.lastProcessedEventCreatedAt) &&
+    isNullableString(result.lastProcessedEventId)
+  );
+};
+
+const isAckRoomRouteOrderVersionsResult = (
+  value: unknown,
+): value is AckRoomRouteOrderVersionsResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    typeof result.roomMemberId === 'string' &&
+    isRecordOfNonNegativeIntegers(result.routeOrderVersions)
+  );
+};
+
+const isRoomNotification = (value: unknown): value is RoomNotification => {
+  const notification = asObject(value);
+  return (
+    typeof notification.id === 'string' &&
+    typeof notification.eventId === 'string' &&
+    typeof notification.idempotencyKey === 'string' &&
+    typeof notification.notificationType === 'string' &&
+    isNullableString(notification.targetMemberId) &&
+    notification.payload !== undefined &&
+    parseClockUpdatedAtMs(notification.createdAt) !== null
+  );
+};
+
+const isNotificationListItem = (value: unknown): value is NotificationListItem => {
+  const notification = asObject(value);
+  return (
+    isRoomNotification(value) &&
+    isNullableTimestampString(notification.readAt) &&
+    isNullableTimestampString(notification.hiddenAt)
+  );
+};
+
+const isRoomNotificationsResult = (value: unknown): value is RoomNotificationsResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    isNonNegativeInteger(result.limit) &&
+    (result.events === undefined ||
+      (Array.isArray(result.events) && result.events.every(isRoomNotification))) &&
+    Array.isArray(result.notifications) &&
+    result.notifications.every(isRoomNotification) &&
+    isNullableTimestampString(result.nextWatermarkCreatedAt) &&
+    isNullableString(result.nextWatermarkId) &&
+    typeof result.hasMore === 'boolean' &&
+    isNullableTimestampString(result.serverHighWatermarkCreatedAt) &&
+    isNullableString(result.serverHighWatermarkId)
+  );
+};
+
+const isNotificationListResult = (value: unknown): value is NotificationListResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    isNonNegativeInteger(result.limit) &&
+    Array.isArray(result.notifications) &&
+    result.notifications.every(isNotificationListItem)
+  );
+};
+
+const isNotificationReadStateResult = (
+  value: unknown,
+): value is NotificationReadStateResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    typeof result.notificationId === 'string' &&
+    isNullableTimestampString(result.readAt) &&
+    isNullableTimestampString(result.hiddenAt)
+  );
+};
+
+const isPreparedMemberToken = (value: unknown): value is PreparedMemberToken => {
+  const result = asObject(value);
+  return (
+    typeof result.challengeId === 'string' &&
+    typeof result.roomId === 'string' &&
+    typeof result.tokenContext === 'string' &&
+    parseClockUpdatedAtMs(result.expiresAt) !== null
+  );
+};
+
+const isJoinSharingRoomResult = (value: unknown): value is JoinSharingRoomResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    typeof result.roomMemberId === 'string' &&
+    typeof result.tokenContext === 'string'
+  );
+};
+
+const isHeartbeatRoomSessionResult = (
+  value: unknown,
+): value is HeartbeatRoomSessionResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    typeof result.roomMemberId === 'string' &&
+    parseClockUpdatedAtMs(result.lastSeenAt) !== null
+  );
+};
+
+const isPauseRoomSessionResult = (value: unknown): value is PauseRoomSessionResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    typeof result.roomMemberId === 'string' &&
+    parseClockUpdatedAtMs(result.pausedAt) !== null
+  );
+};
+
+const isLeaveRoomResult = (value: unknown): value is LeaveRoomResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    typeof result.roomMemberId === 'string' &&
+    result.membershipStatus === 'left' &&
+    parseClockUpdatedAtMs(result.leftAt) !== null
+  );
+};
+
+const isAssignmentMemberProfile = (value: unknown): value is AssignmentMemberProfile => {
+  const member = asObject(value);
+  return (
+    typeof member.roomMemberId === 'string' &&
+    typeof member.displayName === 'string' &&
+    (member.color === undefined || isNullableString(member.color)) &&
+    (member.role === 'host' || member.role === 'member') &&
+    (member.membershipStatus === 'active' || member.membershipStatus === 'left')
+  );
+};
+
+const isRoomMembersForDisplayResult = (
+  value: unknown,
+): value is RoomMembersForDisplayResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    Array.isArray(result.members) &&
+    result.members.every(isAssignmentMemberProfile)
+  );
+};
+
+const isRouteAwareRoomItemMutationResult = (
+  value: unknown,
+): value is RouteAwareRoomItemMutationResult => {
+  const result = asObject(value);
+  return (
+    isRoomItemMutationResult(value) &&
+    (result.routeOrderVersion === undefined ||
+      result.routeOrderVersion === null ||
+      isNonNegativeInteger(result.routeOrderVersion)) &&
+    (result.routeOrderVersions === undefined ||
+      isRecordOfNonNegativeIntegers(result.routeOrderVersions)) &&
+    (result.changedRouteOrders === undefined ||
+      (Array.isArray(result.changedRouteOrders) &&
+        result.changedRouteOrders.every(isCanonicalRouteOrderResult))) &&
+    hasConsistentChangedRouteVersions(result.routeOrderVersions, result.changedRouteOrders) &&
+    (result.itemNotificationId === undefined || isNullableString(result.itemNotificationId)) &&
+    (result.routeNotificationId === undefined || isNullableString(result.routeNotificationId))
+  );
+};
+
+const isBulkRoomItemPurchaseResult = (value: unknown): value is BulkRoomItemPurchaseResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    isNonNegativeInteger(result.itemsVersion) &&
+    Array.isArray(result.changedItems) &&
+    result.changedItems.every(isRoomItemMutationResult)
+  );
+};
+
+const isCreateRoomChallenge = (value: unknown): value is CreateRoomChallenge => {
+  const result = asObject(value);
+  return typeof result.challengeId === 'string' && typeof result.roomId === 'string';
+};
+
+const isCreateSharingRoomResult = (value: unknown): value is CreateSharingRoomResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    typeof result.roomCode === 'string' &&
+    typeof result.hostMemberId === 'string' &&
+    parseClockUpdatedAtMs(result.expiresAt) !== null &&
+    isNonNegativeInteger(result.itemsVersion) &&
+    (result.routeOrderVersion === null || isNonNegativeInteger(result.routeOrderVersion)) &&
+    isRecordOfNonNegativeIntegers(result.routeOrderVersions) &&
+    typeof result.tokenContext === 'string'
+  );
+};
+
+export const validateRoomSnapshot = (value: unknown): value is RoomSnapshot => {
+  const snapshot = asObject(value);
+  const room = asObject(snapshot.room);
+  const currentMember = asObject(snapshot.currentMember);
+  const snapshotMetadata = asObject(snapshot.snapshot);
+
+  return (
+    typeof room.roomId === 'string' &&
+    typeof room.eventName === 'string' &&
+    typeof room.hostMemberId === 'string' &&
+    isNonNegativeInteger(room.itemsVersion) &&
+    (room.routeOrderVersion === null || isNonNegativeInteger(room.routeOrderVersion)) &&
+    parseClockUpdatedAtMs(room.expiresAt) !== null &&
+    room.sharingStatus === 'active' &&
+    typeof currentMember.roomMemberId === 'string' &&
+    typeof currentMember.displayName === 'string' &&
+    isNullableString(currentMember.color) &&
+    (currentMember.role === 'host' || currentMember.role === 'member') &&
+    Array.isArray(snapshot.members) &&
+    snapshot.members.every((member) => {
+      const value = asObject(member);
+      return (
+        typeof value.roomMemberId === 'string' &&
+        typeof value.displayName === 'string' &&
+        isNullableString(value.color) &&
+        (value.role === 'host' || value.role === 'member') &&
+        (value.membershipStatus === 'active' || value.membershipStatus === 'left')
+      );
+    }) &&
+    Array.isArray(snapshot.items) &&
+    snapshot.items.every(isSnapshotRoomItem) &&
+    typeof snapshotMetadata.receiptId === 'string' &&
+    isNonNegativeInteger(snapshotMetadata.itemsVersion) &&
+    (snapshotMetadata.routeOrderVersion === null ||
+      isNonNegativeInteger(snapshotMetadata.routeOrderVersion)) &&
+    isRecordOfNonNegativeIntegers(snapshotMetadata.routeOrderVersions) &&
+    isDeletedItemClockMetadataRecord(snapshotMetadata.deletedItemClocks) &&
+    isNullableTimestampString(snapshotMetadata.notificationWatermarkCreatedAt) &&
+    isNullableString(snapshotMetadata.notificationWatermarkId) &&
+    parseClockUpdatedAtMs(snapshotMetadata.createdAt) !== null
+  );
+};
+
+const fullItemRefreshRequiredEnvelope = <T>(): SharingEnvelope<T> => ({
+  ok: false,
+  error: {
+    code: 'FULL_ITEM_REFRESH_REQUIRED',
+    contract_version: SHARING_CONTRACT_VERSION,
+  },
+});
+
+const fullNotificationRefreshRequiredEnvelope = <T>(): SharingEnvelope<T> => ({
+  ok: false,
+  error: {
+    code: 'FULL_NOTIFICATION_REFRESH_REQUIRED',
+    contract_version: SHARING_CONTRACT_VERSION,
+  },
+});
+
+const normalizeRoomItemMutationEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<RoomItemMutationResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isRoomItemMutationResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<RoomItemMutationResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeRouteAwareRoomItemMutationEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<RouteAwareRoomItemMutationResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isRouteAwareRoomItemMutationResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<RouteAwareRoomItemMutationResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeBulkRoomItemPurchaseEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<BulkRoomItemPurchaseResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isBulkRoomItemPurchaseResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<BulkRoomItemPurchaseResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const malformedSharingRpcEnvelope = <T>(): SharingEnvelope<T> =>
+  normalizeEnvelope<T>(undefined);
+
+const normalizeCreateRoomChallengeEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<CreateRoomChallenge> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isCreateRoomChallenge(envelope.data)) {
+    return malformedSharingRpcEnvelope<CreateRoomChallenge>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const validateCreateRoomChallengeEnvelope = (
+  envelope: SharingEnvelope<CreateRoomChallenge>,
+): SharingEnvelope<CreateRoomChallenge> => {
+  if (!envelope.ok) return envelope;
+  if (!isCreateRoomChallenge(envelope.data)) {
+    return malformedSharingRpcEnvelope<CreateRoomChallenge>();
+  }
+  return envelope;
+};
+
+const normalizeCreateSharingRoomEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<CreateSharingRoomResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isCreateSharingRoomResult(envelope.data)) {
+    return malformedSharingRpcEnvelope<CreateSharingRoomResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeRoomVersionsEnvelope = (value: RpcJson): SharingEnvelope<RoomVersions> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isRoomVersions(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<RoomVersions>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeRouteOrderByDateEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<RouteOrderByDateResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isRouteOrderByDateResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<RouteOrderByDateResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeUpdateRouteOrderEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<UpdateRouteOrderResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isUpdateRouteOrderResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<UpdateRouteOrderResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeAckRoomSnapshotEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<AckRoomSnapshotResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isAckRoomSnapshotResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<AckRoomSnapshotResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeAckRoomSyncProgressEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<AckRoomSyncProgressResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isAckRoomSyncProgressResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<AckRoomSyncProgressResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeAckRoomRouteOrderVersionsEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<AckRoomRouteOrderVersionsResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isAckRoomRouteOrderVersionsResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<AckRoomRouteOrderVersionsResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeRoomNotificationsEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<RoomNotificationsResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isRoomNotificationsResult(envelope.data)) {
+    return fullNotificationRefreshRequiredEnvelope<RoomNotificationsResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeNotificationListEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<NotificationListResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isNotificationListResult(envelope.data)) {
+    return fullNotificationRefreshRequiredEnvelope<NotificationListResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeNotificationReadStateEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<NotificationReadStateResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isNotificationReadStateResult(envelope.data)) {
+    return fullNotificationRefreshRequiredEnvelope<NotificationReadStateResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizePreparedMemberTokenEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<PreparedMemberToken> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isPreparedMemberToken(envelope.data)) {
+    return malformedSharingRpcEnvelope<PreparedMemberToken>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeJoinSharingRoomEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<JoinSharingRoomResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isJoinSharingRoomResult(envelope.data)) {
+    return malformedSharingRpcEnvelope<JoinSharingRoomResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeHeartbeatRoomSessionEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<HeartbeatRoomSessionResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isHeartbeatRoomSessionResult(envelope.data)) {
+    return malformedSharingRpcEnvelope<HeartbeatRoomSessionResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizePauseRoomSessionEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<PauseRoomSessionResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isPauseRoomSessionResult(envelope.data)) {
+    return malformedSharingRpcEnvelope<PauseRoomSessionResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeLeaveRoomEnvelope = (value: RpcJson): SharingEnvelope<LeaveRoomResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isLeaveRoomResult(envelope.data)) {
+    return malformedSharingRpcEnvelope<LeaveRoomResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeRoomMembersForDisplayEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<RoomMembersForDisplayResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isRoomMembersForDisplayResult(envelope.data)) {
+    return malformedSharingRpcEnvelope<RoomMembersForDisplayResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const isDeletedItemClockMetadata = (
+  entry: DeletedItemClockSnapshotEntry,
+): entry is DeletedItemClockMetadata => {
+  const value = entry as DeletedItemClockMetadata;
+  return (
+    typeof value.deletedAt === 'string' &&
+    value.fieldClocks !== undefined &&
+    typeof value.fieldClocks === 'object' &&
+    typeof value.itemVersion === 'number' &&
+    typeof value.updatedAt === 'string'
+  );
+};
+
+const latestFieldClock = (
+  fieldClocks: RoomItemFieldClocks,
+): RoomItemFieldClock | undefined =>
+  Object.values(fieldClocks).reduce<RoomItemFieldClock | undefined>(
+    (latest, clock) =>
+      !latest || clock.itemsVersion > latest.itemsVersion ? clock : latest,
+    undefined,
+  );
+
+const normalizeDeletedItemClockMetadata = (
+  entry: DeletedItemClockSnapshotEntry,
+): DeletedItemClockMetadata => {
+  if (isDeletedItemClockMetadata(entry)) return entry;
+
+  const fieldClocks = entry as RoomItemFieldClocks;
+  const fallbackClock = fieldClocks.deletedAt ?? latestFieldClock(fieldClocks);
+  return {
+    deletedAt: fieldClocks.deletedAt?.updatedAt ?? fallbackClock?.updatedAt ?? '',
+    deletedBy: null,
+    fieldClocks,
+    itemVersion: fallbackClock?.itemsVersion ?? 0,
+    updatedAt: fallbackClock?.updatedAt ?? '',
+  };
+};
+
 const normalizeEnvelope = <T>(value: RpcJson): SharingEnvelope<T> => {
   const envelope = asObject(value);
   if (envelope.ok === true) {
+    const contractVersion =
+      typeof envelope.contract_version === 'number'
+        ? envelope.contract_version
+        : SHARING_CONTRACT_VERSION;
+    if (contractVersion !== SHARING_CONTRACT_VERSION) {
+      return {
+        ok: false,
+        error: {
+          code: 'CONTRACT_VERSION_MISMATCH',
+          contract_version: SHARING_CONTRACT_VERSION,
+        },
+      };
+    }
+
     return {
       ok: true,
       data: envelope.data as T,
-      contract_version:
-        typeof envelope.contract_version === 'number'
-          ? envelope.contract_version
-          : SHARING_CONTRACT_VERSION,
+      contract_version: contractVersion,
     } satisfies SharingSuccessEnvelope<T>;
   }
 
   const errorObject = asObject(envelope.error);
+  const errorContractVersion =
+    typeof errorObject.contract_version === 'number'
+      ? errorObject.contract_version
+      : SHARING_CONTRACT_VERSION;
+  if (errorContractVersion !== SHARING_CONTRACT_VERSION) {
+    return {
+      ok: false,
+      error: {
+        code: 'CONTRACT_VERSION_MISMATCH',
+        contract_version: SHARING_CONTRACT_VERSION,
+      },
+    };
+  }
+
+  const errorCode = isSharingErrorCode(errorObject.code)
+    ? errorObject.code
+    : 'SHARING_INTERNAL_ERROR';
   return {
     ok: false,
     error: {
-      code:
-        typeof errorObject.code === 'string'
-          ? (errorObject.code as SharingErrorEnvelope['error']['code'])
-          : 'SHARING_INTERNAL_ERROR',
+      code: errorCode,
       retry_after_seconds:
         typeof errorObject.retry_after_seconds === 'number'
           ? errorObject.retry_after_seconds
           : undefined,
-      contract_version:
-        typeof errorObject.contract_version === 'number'
-          ? errorObject.contract_version
-          : SHARING_CONTRACT_VERSION,
+      contract_version: errorContractVersion,
       request_id:
         typeof errorObject.request_id === 'string'
           ? errorObject.request_id
@@ -697,6 +1855,29 @@ export const canonicalizeRoomEventDataForCreate = async (
     },
   });
 
+const prepareCreateRoomChallengeDirect = async ({
+  canonical,
+  client,
+  input,
+}: {
+  canonical: CanonicalCreateRoomPayload;
+  client: ReturnType<typeof requireSupabase>;
+  input: CreateSharingRoomInput;
+}): Promise<SharingEnvelope<CreateRoomChallenge>> => {
+  const result = await client.rpc('prepare_create_room_challenge', {
+    p_client_room_id: input.roomId,
+    p_canonical_payload: canonical.canonicalText,
+    p_plaintext_fingerprint: canonical.fingerprint,
+    p_item_count: input.itemCount,
+    p_canonical_schema_version: ROOM_EVENT_DATA_SCHEMA_VERSION,
+    p_payload_protection_mode: 'encrypted',
+  });
+  if (result.error) {
+    return malformedSharingRpcEnvelope<CreateRoomChallenge>();
+  }
+  return normalizeCreateRoomChallengeEnvelope(result.data);
+};
+
 export const createSharingRoom = async (
   input: CreateSharingRoomInput,
 ): Promise<SharingEnvelope<CreateSharingRoomResult>> => {
@@ -714,29 +1895,21 @@ export const createSharingRoom = async (
   const canonical = await canonicalizeRoomEventDataForCreate(input.rawRoomEventDataJson);
   const prepared =
     availability.enabled && availability.mode === 'public_guard'
-      ? await prepareCreateRoomViaPublicGuard({
-          roomId: input.roomId,
-          canonicalPayload: canonical.canonicalText,
-          plaintextFingerprint: canonical.fingerprint,
-          itemCount: input.itemCount,
-          canonicalSchemaVersion: ROOM_EVENT_DATA_SCHEMA_VERSION,
-          payloadProtectionMode: 'encrypted',
-        })
-      : normalizeEnvelope<{
-          challengeId: string;
-          roomId: string;
-        }>(
-          (
-            await client.rpc('prepare_create_room_challenge', {
-              p_client_room_id: input.roomId,
-              p_canonical_payload: canonical.canonicalText,
-              p_plaintext_fingerprint: canonical.fingerprint,
-              p_item_count: input.itemCount,
-              p_canonical_schema_version: ROOM_EVENT_DATA_SCHEMA_VERSION,
-              p_payload_protection_mode: 'encrypted',
-            })
-          ).data,
-        );
+      ? validateCreateRoomChallengeEnvelope(
+          await prepareCreateRoomViaPublicGuard({
+            roomId: input.roomId,
+            canonicalPayload: canonical.canonicalText,
+            plaintextFingerprint: canonical.fingerprint,
+            itemCount: input.itemCount,
+            canonicalSchemaVersion: ROOM_EVENT_DATA_SCHEMA_VERSION,
+            payloadProtectionMode: 'encrypted',
+          }),
+        )
+      : await prepareCreateRoomChallengeDirect({
+          client,
+          input,
+          canonical,
+        });
   if (!prepared.ok) {
     return prepared;
   }
@@ -753,7 +1926,7 @@ export const createSharingRoom = async (
     return normalizeEnvelope<CreateSharingRoomResult>(undefined);
   }
 
-  const envelope = normalizeEnvelope<CreateSharingRoomResult>(createResult.data);
+  const envelope = normalizeCreateSharingRoomEnvelope(createResult.data);
   if (envelope.ok) {
     saveMemberKey(input.roomId, input.memberKey);
   }
@@ -783,7 +1956,7 @@ export const prepareJoinRoom = async (
   if (result.error) {
     return normalizeEnvelope<PreparedMemberToken>(undefined);
   }
-  return normalizeEnvelope<PreparedMemberToken>(result.data);
+  return normalizePreparedMemberTokenEnvelope(result.data);
 };
 
 export const joinPreparedRoom = async (
@@ -804,7 +1977,7 @@ export const joinPreparedRoom = async (
     return normalizeEnvelope<JoinSharingRoomResult>(undefined);
   }
 
-  const envelope = normalizeEnvelope<JoinSharingRoomResult>(result.data);
+  const envelope = normalizeJoinSharingRoomEnvelope(result.data);
   if (envelope.ok) {
     saveMemberKey(envelope.data.roomId, memberKey);
   }
@@ -834,7 +2007,7 @@ export const prepareRestoreRoom = async (
   if (result.error) {
     return normalizeEnvelope<PreparedMemberToken>(undefined);
   }
-  return normalizeEnvelope<PreparedMemberToken>(result.data);
+  return normalizePreparedMemberTokenEnvelope(result.data);
 };
 
 export const restorePreparedRoom = async (
@@ -852,15 +2025,16 @@ export const restorePreparedRoom = async (
   if (result.error) {
     return normalizeEnvelope<JoinSharingRoomResult>(undefined);
   }
-  return normalizeEnvelope<JoinSharingRoomResult>(result.data);
+  return normalizeJoinSharingRoomEnvelope(result.data);
 };
 
-const toRoomSnapshot = (value: unknown): RoomSnapshot => {
+const toRoomSnapshot = (value: unknown): RoomSnapshot | null => {
   const snapshot = value as RoomSnapshot;
-  return {
+  const parsedSnapshot = {
     ...snapshot,
     eventData: parseRoomEventData(snapshot.eventData),
   };
+  return validateRoomSnapshot(parsedSnapshot) ? parsedSnapshot : null;
 };
 
 export const getRoomSnapshot = async (
@@ -878,9 +2052,14 @@ export const getRoomSnapshot = async (
     return envelope;
   }
 
+  const snapshot = toRoomSnapshot(envelope.data);
+  if (!snapshot) {
+    return fullItemRefreshRequiredEnvelope<RoomSnapshot>();
+  }
+
   return {
     ok: true,
-    data: toRoomSnapshot(envelope.data),
+    data: snapshot,
     contract_version: envelope.contract_version,
   };
 };
@@ -896,7 +2075,7 @@ export const ackRoomSnapshot = async (
   if (result.error) {
     return normalizeEnvelope<AckRoomSnapshotResult>(undefined);
   }
-  return normalizeEnvelope<AckRoomSnapshotResult>(result.data);
+  return normalizeAckRoomSnapshotEnvelope(result.data);
 };
 
 export const heartbeatRoomSession = async (
@@ -908,7 +2087,7 @@ export const heartbeatRoomSession = async (
   if (result.error) {
     return normalizeEnvelope<HeartbeatRoomSessionResult>(undefined);
   }
-  return normalizeEnvelope<HeartbeatRoomSessionResult>(result.data);
+  return normalizeHeartbeatRoomSessionEnvelope(result.data);
 };
 
 export const pauseRoomSession = async (
@@ -920,7 +2099,7 @@ export const pauseRoomSession = async (
   if (result.error) {
     return normalizeEnvelope<PauseRoomSessionResult>(undefined);
   }
-  return normalizeEnvelope<PauseRoomSessionResult>(result.data);
+  return normalizePauseRoomSessionEnvelope(result.data);
 };
 
 export const leaveRoom = async (
@@ -933,7 +2112,7 @@ export const leaveRoom = async (
   if (result.error) {
     return normalizeEnvelope<LeaveRoomResult>(undefined);
   }
-  return normalizeEnvelope<LeaveRoomResult>(result.data);
+  return normalizeLeaveRoomEnvelope(result.data);
 };
 
 export const getRoomMembersForDisplay = async (
@@ -945,36 +2124,7 @@ export const getRoomMembersForDisplay = async (
   if (result.error) {
     return normalizeEnvelope<RoomMembersForDisplayResult>(undefined);
   }
-  return normalizeEnvelope<RoomMembersForDisplayResult>(result.data);
-};
-
-export const updateRoomItemFields = async (
-  input: UpdateRoomItemFieldsInput,
-): Promise<SharingEnvelope<RoomItemMutationResult>> => {
-  const result = await requireSupabase().rpc('update_room_item_fields', {
-    p_room_id: input.roomId,
-    p_local_item_id: input.localItemId,
-    p_fields: input.fields,
-  });
-  if (result.error) {
-    return normalizeEnvelope<RoomItemMutationResult>(undefined);
-  }
-  return normalizeEnvelope<RoomItemMutationResult>(result.data);
-};
-
-export const claimRoomItem = async (
-  input: ClaimRoomItemInput,
-): Promise<SharingEnvelope<RoomItemMutationResult>> => {
-  const result = await requireSupabase().rpc('claim_item', {
-    p_room_id: input.roomId,
-    p_local_item_id: input.localItemId,
-    p_status: input.status,
-    p_actual_purchase_quantity: input.actualPurchaseQuantity ?? undefined,
-  });
-  if (result.error) {
-    return normalizeEnvelope<RoomItemMutationResult>(undefined);
-  }
-  return normalizeEnvelope<RoomItemMutationResult>(result.data);
+  return normalizeRoomMembersForDisplayEnvelope(result.data);
 };
 
 export const updateRoomItemWithPurchase = async (
@@ -984,41 +2134,105 @@ export const updateRoomItemWithPurchase = async (
     p_room_id: input.roomId,
     p_local_item_id: input.localItemId,
     p_fields: input.fields,
-    p_status: input.status ?? undefined,
-    p_actual_purchase_quantity: input.actualPurchaseQuantity ?? undefined,
+    p_status: nullableRpcArg(input.status ?? null),
+    p_actual_purchase_quantity: nullableRpcArg(input.actualPurchaseQuantity ?? null),
+    p_expected_field_clocks: input.expectedFieldClocks as Json,
   });
   if (result.error) {
     return normalizeEnvelope<RoomItemMutationResult>(undefined);
   }
-  return normalizeEnvelope<RoomItemMutationResult>(result.data);
+  return normalizeRoomItemMutationEnvelope(result.data);
+};
+
+export const upsertRoomItemWithRoute = async (
+  input: UpsertRoomItemWithRouteInput,
+): Promise<SharingEnvelope<RouteAwareRoomItemMutationResult>> => {
+  const result = await requireSupabase().rpc('upsert_room_item_with_route', {
+    p_room_id: input.roomId,
+    p_local_item_id: input.localItemId,
+    p_fields: input.fields as Json,
+    p_route_updates: input.routeUpdates as Json,
+    p_expected_field_clocks: input.expectedFieldClocks as Json,
+  });
+  if (result.error) {
+    return normalizeEnvelope<RouteAwareRoomItemMutationResult>(undefined);
+  }
+  return normalizeRouteAwareRoomItemMutationEnvelope(result.data);
+};
+
+export const deleteRoomItemWithRoute = async (
+  input: DeleteRoomItemWithRouteInput,
+): Promise<SharingEnvelope<RouteAwareRoomItemMutationResult>> => {
+  const result = await requireSupabase().rpc('delete_room_item_with_route', {
+    p_room_id: input.roomId,
+    p_local_item_id: input.localItemId,
+    p_route_updates: input.routeUpdates as Json,
+    p_expected_field_clocks: input.expectedFieldClocks as Json,
+  });
+  if (result.error) {
+    return normalizeEnvelope<RouteAwareRoomItemMutationResult>(undefined);
+  }
+  return normalizeRouteAwareRoomItemMutationEnvelope(result.data);
+};
+
+export const bulkUpdateRoomItemsWithPurchase = async (
+  input: BulkUpdateRoomItemsWithPurchaseInput,
+): Promise<SharingEnvelope<BulkRoomItemPurchaseResult>> => {
+  const result = await requireSupabase().rpc('bulk_update_room_items_with_purchase', {
+    p_room_id: input.roomId,
+    p_mutations: input.mutations as Json,
+  });
+  if (result.error) {
+    return normalizeEnvelope<BulkRoomItemPurchaseResult>(undefined);
+  }
+  return normalizeBulkRoomItemPurchaseEnvelope(result.data);
 };
 
 export const assignRoomItem = async (
   input: AssignRoomItemInput,
 ): Promise<SharingEnvelope<RoomItemMutationResult>> => {
-  const result = await requireSupabase().rpc('assign_item', {
+  const result = await requireSupabase().rpc('update_room_item_with_purchase', {
     p_room_id: input.roomId,
     p_local_item_id: input.localItemId,
-    p_assigned_to: input.assignedToMemberId,
+    p_fields: { assignedTo: input.assignedToMemberId },
+    p_status: nullableRpcArg<PurchaseStatus>(null),
+    p_actual_purchase_quantity: nullableRpcArg<number>(null),
+    p_expected_field_clocks: input.expectedFieldClocks as Json,
   });
   if (result.error) {
     return normalizeEnvelope<RoomItemMutationResult>(undefined);
   }
-  return normalizeEnvelope<RoomItemMutationResult>(result.data);
+  return normalizeRoomItemMutationEnvelope(result.data);
 };
 
 export const bulkAssignRoomItems = async (
   input: BulkAssignRoomItemsInput,
 ): Promise<SharingEnvelope<BulkRoomItemAssignmentResult>> => {
-  const result = await requireSupabase().rpc('bulk_assign_items', {
+  const result = await requireSupabase().rpc('bulk_update_room_items_with_purchase', {
     p_room_id: input.roomId,
-    p_local_item_ids: input.localItemIds,
-    p_assigned_to: input.assignedToMemberId,
+    p_mutations: input.assignments.map((assignment) => ({
+      localItemId: assignment.localItemId,
+      fields: { assignedTo: input.assignedToMemberId },
+      status: null,
+      actualPurchaseQuantity: null,
+      expectedFieldClocks: assignment.expectedFieldClocks,
+    })) as Json,
   });
   if (result.error) {
     return normalizeEnvelope<BulkRoomItemAssignmentResult>(undefined);
   }
-  return normalizeEnvelope<BulkRoomItemAssignmentResult>(result.data);
+  const normalized = normalizeBulkRoomItemPurchaseEnvelope(result.data);
+  if (!normalized.ok) {
+    return normalized;
+  }
+  return {
+    ok: true,
+    contract_version: normalized.contract_version,
+    data: {
+      ...normalized.data,
+      assignedToMemberId: input.assignedToMemberId,
+    },
+  };
 };
 
 export const getRoomVersions = async (
@@ -1030,7 +2244,7 @@ export const getRoomVersions = async (
   if (result.error) {
     return normalizeEnvelope<RoomVersions>(undefined);
   }
-  return normalizeEnvelope<RoomVersions>(result.data);
+  return normalizeRoomVersionsEnvelope(result.data);
 };
 
 export const getRouteOrderByDate = async (
@@ -1044,7 +2258,7 @@ export const getRouteOrderByDate = async (
   if (result.error) {
     return normalizeEnvelope<RouteOrderByDateResult>(undefined);
   }
-  return normalizeEnvelope<RouteOrderByDateResult>(result.data);
+  return normalizeRouteOrderByDateEnvelope(result.data);
 };
 
 export const updateRouteOrder = async (
@@ -1059,7 +2273,7 @@ export const updateRouteOrder = async (
   if (result.error) {
     return normalizeEnvelope<UpdateRouteOrderResult>(undefined);
   }
-  return normalizeEnvelope<UpdateRouteOrderResult>(result.data);
+  return normalizeUpdateRouteOrderEnvelope(result.data);
 };
 
 export const getRoomItemChangesSince = async (
@@ -1073,7 +2287,18 @@ export const getRoomItemChangesSince = async (
   if (result.error) {
     return normalizeEnvelope<RoomItemChangesResult>(undefined);
   }
-  return normalizeEnvelope<RoomItemChangesResult>(result.data);
+  const envelope = normalizeEnvelope<unknown>(result.data);
+  if (!envelope.ok) {
+    return envelope;
+  }
+  if (!isRoomItemChangesResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<RoomItemChangesResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
 };
 
 export const getNotificationsAfterWatermark = async (
@@ -1091,7 +2316,7 @@ export const getNotificationsAfterWatermark = async (
   if (result.error) {
     return normalizeEnvelope<RoomNotificationsResult>(undefined);
   }
-  return normalizeEnvelope<RoomNotificationsResult>(result.data);
+  return normalizeRoomNotificationsEnvelope(result.data);
 };
 
 export const getNotificationList = async (
@@ -1107,7 +2332,7 @@ export const getNotificationList = async (
   if (result.error) {
     return normalizeEnvelope<NotificationListResult>(undefined);
   }
-  return normalizeEnvelope<NotificationListResult>(result.data);
+  return normalizeNotificationListEnvelope(result.data);
 };
 
 export const markNotificationRead = async (
@@ -1123,7 +2348,7 @@ export const markNotificationRead = async (
   if (result.error) {
     return normalizeEnvelope<NotificationReadStateResult>(undefined);
   }
-  return normalizeEnvelope<NotificationReadStateResult>(result.data);
+  return normalizeNotificationReadStateEnvelope(result.data);
 };
 
 export const hideNotification = async (
@@ -1139,7 +2364,7 @@ export const hideNotification = async (
   if (result.error) {
     return normalizeEnvelope<NotificationReadStateResult>(undefined);
   }
-  return normalizeEnvelope<NotificationReadStateResult>(result.data);
+  return normalizeNotificationReadStateEnvelope(result.data);
 };
 
 const compareWatermarks = (
@@ -1317,7 +2542,7 @@ export const ackRoomSyncProgress = async (
   if (result.error) {
     return normalizeEnvelope<AckRoomSyncProgressResult>(undefined);
   }
-  return normalizeEnvelope<AckRoomSyncProgressResult>(result.data);
+  return normalizeAckRoomSyncProgressEnvelope(result.data);
 };
 
 export const ackRoomRouteOrderVersions = async (
@@ -1331,7 +2556,7 @@ export const ackRoomRouteOrderVersions = async (
   if (result.error) {
     return normalizeEnvelope<AckRoomRouteOrderVersionsResult>(undefined);
   }
-  return normalizeEnvelope<AckRoomRouteOrderVersionsResult>(result.data);
+  return normalizeAckRoomRouteOrderVersionsEnvelope(result.data);
 };
 
 const getString = (
@@ -1356,33 +2581,70 @@ const normalizeSnapshotItem = (
   staticSnapshot: Record<string, RoomEventJson> | undefined,
 ): ShoppingItem => ({
   id: item.localItemId,
-  circle: getString(staticSnapshot, 'circle', item.name),
+  circle: item.circle ?? getString(staticSnapshot, 'circle', item.name ?? ''),
   eventDate: item.eventDate ?? getString(staticSnapshot, 'eventDate'),
-  block: getString(staticSnapshot, 'block'),
-  number: getString(staticSnapshot, 'number'),
-  title: getString(staticSnapshot, 'title', item.name),
+  block: item.block ?? getString(staticSnapshot, 'block'),
+  number: item.number ?? getString(staticSnapshot, 'number'),
+  title: item.title ?? getString(staticSnapshot, 'title', item.name ?? ''),
   price: item.price,
   purchaseStatus: item.purchaseStatus,
   quantity: item.quantity ?? 1,
   limitedPurchasedQuantity: item.actualPurchaseQuantity ?? undefined,
   remarks: item.remarks ?? '',
   url: item.url ?? undefined,
-  priorityLevel: getStringOrUndefined(staticSnapshot, 'priorityLevel') as
-    | ShoppingItem['priorityLevel']
-    | undefined,
-  protectionLevel: getStringOrUndefined(staticSnapshot, 'protectionLevel') as
-    | ShoppingItem['protectionLevel']
-    | undefined,
-  source: getStringOrUndefined(staticSnapshot, 'source') as
-    | ShoppingItem['source']
-    | undefined,
+  priorityLevel:
+    item.priorityLevel ??
+    (getStringOrUndefined(staticSnapshot, 'priorityLevel') as
+      | ShoppingItem['priorityLevel']
+      | undefined),
+  protectionLevel:
+    item.protectionLevel ??
+    (getStringOrUndefined(staticSnapshot, 'protectionLevel') as
+      | ShoppingItem['protectionLevel']
+      | undefined),
+  source:
+    item.source ??
+    (getStringOrUndefined(staticSnapshot, 'source') as
+      | ShoppingItem['source']
+      | undefined),
   assignedTo: item.assignedTo ?? undefined,
   securedBy: item.securedBy ?? undefined,
   lastSyncedAt: item.updatedAt,
   orderIndex: item.orderIndex ?? undefined,
-  postponed: item.postponed,
-  manualHallId: getStringOrUndefined(staticSnapshot, 'manualHallId'),
+  postponed: item.purchaseStatus === 'Postpone',
+  manualHallId: item.manualHallId ?? getStringOrUndefined(staticSnapshot, 'manualHallId'),
 });
+
+const buildCanonicalRouteOrderByDateFromSnapshotItems = (
+  items: SnapshotRoomItem[],
+): Record<string, string[]> => {
+  const grouped = new Map<string, Array<{ itemId: string; orderIndex: number }>>();
+
+  items.forEach((item) => {
+    if (item.orderIndex === null || !item.eventDate) return;
+    const entries = grouped.get(item.eventDate) ?? [];
+    entries.push({
+      itemId: item.localItemId,
+      orderIndex: item.orderIndex,
+    });
+    grouped.set(item.eventDate, entries);
+  });
+
+  return Object.fromEntries(
+    [...grouped.entries()]
+      .sort(([a], [b]) => a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' }))
+      .map(([eventDate, entries]) => [
+        eventDate,
+        entries
+          .sort(
+            (a, b) =>
+              a.orderIndex - b.orderIndex ||
+              a.itemId.localeCompare(b.itemId, 'ja', { numeric: true, sensitivity: 'base' }),
+          )
+          .map((entry) => entry.itemId),
+      ]),
+  );
+};
 
 export const roomSnapshotToAppData = (
   snapshot: RoomSnapshot,
@@ -1405,7 +2667,7 @@ export const roomSnapshotToAppData = (
     },
     executeModeItems: {
       ...(currentAppData?.executeModeItems ?? {}),
-      [eventName]: snapshot.eventData.routeOrderByDate,
+      [eventName]: buildCanonicalRouteOrderByDateFromSnapshotItems(snapshot.items),
     },
     dayModes: {
       ...(currentAppData?.dayModes ?? {}),
@@ -1440,30 +2702,53 @@ export const roomSnapshotToAppData = (
 
 export const buildSharingSessionMetadata = (
   snapshot: RoomSnapshot,
-): SharingSessionMetadata => ({
-  sessionId: snapshot.room.roomId,
-  roomId: snapshot.room.roomId,
-  roomMemberId: snapshot.currentMember.roomMemberId,
-  eventName: snapshot.room.eventName,
-  role: snapshot.currentMember.role,
-  status: 'active',
-  startedAt: snapshot.snapshot.createdAt,
-  expiresAt: snapshot.room.expiresAt,
-  itemsVersion: snapshot.snapshot.itemsVersion,
-  routeOrderVersions: snapshot.snapshot.routeOrderVersions,
-  lastSnapshotReceiptId: snapshot.snapshot.receiptId,
-  lastProcessedEventCreatedAt: snapshot.snapshot.notificationWatermarkCreatedAt,
-  lastProcessedEventId: snapshot.snapshot.notificationWatermarkId,
-  memberProfileSnapshot: snapshot.members.map(
-    (member): AssignmentMemberProfile => ({
-      roomMemberId: member.roomMemberId,
-      displayName: member.displayName,
-      color: member.color,
-      role: member.role,
-      membershipStatus: member.membershipStatus,
-    }),
-  ),
-});
+): SharingSessionMetadata => {
+  const deletedItemClocks = Object.fromEntries(
+    Object.entries(snapshot.snapshot.deletedItemClocks ?? {}).map(([localItemId, metadata]) => [
+      localItemId,
+      normalizeDeletedItemClockMetadata(metadata),
+    ]),
+  );
+
+  return {
+    sessionId: snapshot.room.roomId,
+    roomId: snapshot.room.roomId,
+    roomMemberId: snapshot.currentMember.roomMemberId,
+    contractVersion: SHARING_CONTRACT_VERSION,
+    metadataSchemaVersion: 2,
+    eventName: snapshot.room.eventName,
+    role: snapshot.currentMember.role,
+    status: 'active',
+    startedAt: snapshot.snapshot.createdAt,
+    expiresAt: snapshot.room.expiresAt,
+    itemsVersion: snapshot.snapshot.itemsVersion,
+    routeOrderVersions: snapshot.snapshot.routeOrderVersions,
+    fieldClocksByItemId: {
+      ...Object.fromEntries(
+        snapshot.items.map((item) => [item.localItemId, item.fieldClocks]),
+      ),
+      ...Object.fromEntries(
+        Object.entries(deletedItemClocks).map(([localItemId, metadata]) => [
+          localItemId,
+          metadata.fieldClocks,
+        ]),
+      ),
+    },
+    deletedItemClocks,
+    lastSnapshotReceiptId: snapshot.snapshot.receiptId,
+    lastProcessedEventCreatedAt: snapshot.snapshot.notificationWatermarkCreatedAt,
+    lastProcessedEventId: snapshot.snapshot.notificationWatermarkId,
+    memberProfileSnapshot: snapshot.members.map(
+      (member): AssignmentMemberProfile => ({
+        roomMemberId: member.roomMemberId,
+        displayName: member.displayName,
+        color: member.color,
+        role: member.role,
+        membershipStatus: member.membershipStatus,
+      }),
+    ),
+  };
+};
 
 export const commitSnapshotThenAck = async (
   snapshot: RoomSnapshot,

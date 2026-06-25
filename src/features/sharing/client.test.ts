@@ -8,6 +8,7 @@ import {
   mergeSnapshotRoomItemIntoShoppingItem,
   roomSnapshotToAppData,
   summarizeNotificationCatchUpPage,
+  validateRoomSnapshot,
   type RoomItemChange,
   type RoomNotification,
   type RoomNotificationsResult,
@@ -15,6 +16,97 @@ import {
   type RoomSnapshot,
 } from './client';
 import type { ShoppingItem } from '../../types/item';
+
+const buildValidRoomSnapshot = (): RoomSnapshot => ({
+  room: {
+    roomId: 'room-1',
+    eventName: 'テストイベント',
+    hostMemberId: 'member-host',
+    itemsVersion: 1,
+    routeOrderVersion: 1,
+    expiresAt: '2026-08-01T00:00:00.000Z',
+    sharingStatus: 'active',
+  },
+  currentMember: {
+    roomMemberId: 'member-host',
+    displayName: 'Host',
+    color: null,
+    role: 'host',
+  },
+  members: [
+    {
+      roomMemberId: 'member-host',
+      displayName: 'Host',
+      color: '#0ea5e9',
+      role: 'host',
+      membershipStatus: 'active',
+    },
+  ],
+  items: [
+    {
+      localItemId: 'item-1',
+      circle: 'Circle',
+      block: 'A',
+      number: '01',
+      title: 'Book title',
+      eventDate: '2026-08-15',
+      name: 'Book title',
+      priorityLevel: null,
+      protectionLevel: null,
+      source: 'spreadsheet',
+      manualHallId: null,
+      purchaseStatus: 'None',
+      price: 1200,
+      quantity: 2,
+      limitQuantity: null,
+      actualPurchaseQuantity: null,
+      remarks: 'memo',
+      url: null,
+      assignedTo: 'member-host',
+      securedBy: null,
+      orderIndex: null,
+      postponed: false,
+      deletedAt: null,
+      deletedBy: null,
+      itemVersion: 1,
+      updatedAt: '2026-08-01T00:00:01.000Z',
+      fieldClocks: {
+        title: {
+          itemsVersion: 1,
+          updatedAt: '2026-08-01T00:00:01.000Z',
+        },
+      },
+    },
+  ],
+  eventData: {
+    schemaVersion: 1,
+    eventMetadata: { eventName: 'テストイベント' },
+    executeModeItems: {},
+    dayModes: {},
+    mapData: {},
+    mapRotationSettings: {},
+    routeSettings: {},
+    hallDefinitions: {},
+    hallRouteSettings: {},
+    mapViewportSettings: {},
+    routeOrderByDate: {},
+    itemSnapshots: {
+      'item-1': {
+        title: 'Legacy fallback title',
+      },
+    },
+  },
+  snapshot: {
+    receiptId: 'receipt-1',
+    itemsVersion: 1,
+    routeOrderVersion: 1,
+    routeOrderVersions: { '2026-08-15': 1 },
+    deletedItemClocks: {},
+    notificationWatermarkCreatedAt: null,
+    notificationWatermarkId: null,
+    createdAt: '2026-08-01T00:00:00.000Z',
+  },
+});
 
 describe('sharing MVP-0c client helpers', () => {
   it('derives member_restore_token with the fixed MVP formula', async () => {
@@ -55,8 +147,16 @@ describe('sharing MVP-0c client helpers', () => {
       items: [
         {
           localItemId: 'item-1',
+          circle: 'Circle',
+          block: 'A',
+          number: '01',
+          title: 'Book title',
           eventDate: '2026-08-15',
           name: 'Book',
+          priorityLevel: null,
+          protectionLevel: null,
+          source: 'spreadsheet',
+          manualHallId: null,
           purchaseStatus: 'None',
           price: 1200,
           quantity: 2,
@@ -68,8 +168,16 @@ describe('sharing MVP-0c client helpers', () => {
           securedBy: null,
           orderIndex: null,
           postponed: false,
+          deletedAt: null,
+          deletedBy: null,
           itemVersion: 0,
           updatedAt: '2026-08-01T00:00:00.000Z',
+          fieldClocks: {
+            title: {
+              itemsVersion: 0,
+              updatedAt: '2026-08-01T00:00:00.000Z',
+            },
+          },
         },
       ],
       eventData: {
@@ -99,6 +207,24 @@ describe('sharing MVP-0c client helpers', () => {
         itemsVersion: 0,
         routeOrderVersion: 0,
         routeOrderVersions: {},
+        deletedItemClocks: {
+          'deleted-item-1': {
+            deletedAt: '2026-08-01T00:00:03.000Z',
+            deletedBy: 'member-host',
+            fieldClocks: {
+              deletedAt: {
+                itemsVersion: 3,
+                updatedAt: '2026-08-01T00:00:03.000Z',
+              },
+              deletedBy: {
+                itemsVersion: 3,
+                updatedAt: '2026-08-01T00:00:03.000Z',
+              },
+            },
+            itemVersion: 3,
+            updatedAt: '2026-08-01T00:00:03.000Z',
+          },
+        },
         notificationWatermarkCreatedAt: '2026-08-01T00:00:00.000Z',
         notificationWatermarkId: 'notification-0',
         createdAt: '2026-08-01T00:00:00.000Z',
@@ -135,8 +261,234 @@ describe('sharing MVP-0c client helpers', () => {
             membershipStatus: 'active',
           },
         ],
+        fieldClocksByItemId: expect.objectContaining({
+          'item-1': expect.objectContaining({
+            title: {
+              itemsVersion: 0,
+              updatedAt: '2026-08-01T00:00:00.000Z',
+            },
+          }),
+          'deleted-item-1': expect.objectContaining({
+            deletedAt: {
+              itemsVersion: 3,
+              updatedAt: '2026-08-01T00:00:03.000Z',
+            },
+          }),
+        }),
+        deletedItemClocks: {
+          'deleted-item-1': {
+            deletedAt: '2026-08-01T00:00:03.000Z',
+            deletedBy: 'member-host',
+            fieldClocks: {
+              deletedAt: {
+                itemsVersion: 3,
+                updatedAt: '2026-08-01T00:00:03.000Z',
+              },
+              deletedBy: {
+                itemsVersion: 3,
+                updatedAt: '2026-08-01T00:00:03.000Z',
+              },
+            },
+            itemVersion: 3,
+            updatedAt: '2026-08-01T00:00:03.000Z',
+          },
+        },
       }),
     );
+  });
+
+  it('rebuilds execute route order from canonical snapshot items instead of stale eventData mirrors', () => {
+    const snapshot = buildValidRoomSnapshot();
+    const routedItem = { ...snapshot.items[0], orderIndex: 1 };
+    const firstItem: SnapshotRoomItem = {
+      ...routedItem,
+      localItemId: 'item-0',
+      title: 'First',
+      orderIndex: 0,
+      fieldClocks: {
+        title: {
+          itemsVersion: 1,
+          updatedAt: '2026-08-01T00:00:01.000Z',
+        },
+      },
+    };
+    const nextDateItem: SnapshotRoomItem = {
+      ...routedItem,
+      localItemId: 'item-2',
+      title: 'Next date',
+      eventDate: '2026-08-16',
+      orderIndex: 0,
+      fieldClocks: {
+        title: {
+          itemsVersion: 1,
+          updatedAt: '2026-08-01T00:00:01.000Z',
+        },
+      },
+    };
+    const nonRouteItem: SnapshotRoomItem = {
+      ...routedItem,
+      localItemId: 'item-free',
+      title: 'Not routed',
+      orderIndex: null,
+    };
+
+    const appData = roomSnapshotToAppData({
+      ...snapshot,
+      items: [routedItem, firstItem, nextDateItem, nonRouteItem],
+      eventData: {
+        ...snapshot.eventData,
+        routeOrderByDate: {
+          '2026-08-15': ['stale-item', 'item-1'],
+          '2026-08-17': ['stale-other-date'],
+        },
+      },
+    });
+
+    expect(appData.executeModeItems['テストイベント']).toEqual({
+      '2026-08-15': ['item-0', 'item-1'],
+      '2026-08-16': ['item-2'],
+    });
+  });
+
+  it('rejects malformed v2 full snapshots instead of filling required item fields from legacy snapshots', () => {
+    const snapshot = buildValidRoomSnapshot();
+    expect(validateRoomSnapshot(snapshot)).toBe(true);
+
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        room: { ...snapshot.room, expiresAt: '' },
+      }),
+    ).toBe(false);
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        items: [{ ...snapshot.items[0], title: undefined }],
+      }),
+    ).toBe(false);
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        items: [{ ...snapshot.items[0], fieldClocks: undefined }],
+      }),
+    ).toBe(false);
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        items: [{ ...snapshot.items[0], updatedAt: '' }],
+      }),
+    ).toBe(false);
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        items: [{ ...snapshot.items[0], deletedAt: 'not-a-date' }],
+      }),
+    ).toBe(false);
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        items: [{ ...snapshot.items[0], purchaseStatus: 'None', postponed: true }],
+      }),
+    ).toBe(false);
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        items: [{ ...snapshot.items[0], purchaseStatus: 'Postpone', postponed: false }],
+      }),
+    ).toBe(false);
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        items: [
+          {
+            ...snapshot.items[0],
+            fieldClocks: {
+              title: {
+                itemsVersion: 1,
+                updatedAt: '',
+              },
+            },
+          },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        items: [
+          {
+            ...snapshot.items[0],
+            fieldClocks: {
+              title: {
+                itemsVersion: 2,
+                updatedAt: '2026-08-01T00:00:02.000Z',
+              },
+              remarks: {
+                itemsVersion: 3,
+                updatedAt: '2026-08-01T00:00:01.000Z',
+              },
+            },
+          },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        snapshot: {
+          ...snapshot.snapshot,
+          createdAt: 'not-a-date',
+        },
+      }),
+    ).toBe(false);
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        snapshot: {
+          ...snapshot.snapshot,
+          notificationWatermarkCreatedAt: '',
+          notificationWatermarkId: 'notification-0',
+        },
+      }),
+    ).toBe(false);
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        snapshot: {
+          ...snapshot.snapshot,
+          deletedItemClocks: {
+            'deleted-item': {
+              deletedAt: '2026-08-01T00:00:02.000Z',
+              deletedBy: null,
+              fieldClocks: {},
+              itemVersion: 2,
+            },
+          },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      validateRoomSnapshot({
+        ...snapshot,
+        snapshot: {
+          ...snapshot.snapshot,
+          deletedItemClocks: {
+            'deleted-item': {
+              deletedAt: '2026-08-01T00:00:02.000Z',
+              deletedBy: null,
+              fieldClocks: {
+                deletedAt: {
+                  itemsVersion: 2,
+                  updatedAt: '2026-08-01T00:00:02.000Z',
+                },
+              },
+              itemVersion: 2,
+              updatedAt: '',
+            },
+          },
+        },
+      }),
+    ).toBe(false);
   });
 
   it('applies MVP-1 item catch-up changes field-by-field without overwriting other fields', () => {
@@ -214,6 +566,141 @@ describe('sharing MVP-0c client helpers', () => {
     );
   });
 
+  it('derives postponed from purchaseStatus, accepts legacy name, and ignores orderIndex field diffs', () => {
+    const items: ShoppingItem[] = [
+      {
+        id: 'item-1',
+        circle: 'Circle',
+        eventDate: '2026-08-15',
+        block: 'A',
+        number: '01',
+        title: 'Book',
+        price: 1000,
+        purchaseStatus: 'None',
+        quantity: 1,
+        remarks: '',
+        orderIndex: 4,
+        postponed: false,
+      },
+    ];
+    const changes: RoomItemChange[] = [
+      {
+        changeId: 'change-postpone',
+        localItemId: 'item-1',
+        itemsVersion: 1,
+        updatedFields: ['purchaseStatus', 'postponed', 'orderIndex', 'name'],
+        updatedValues: {
+          purchaseStatus: 'Postpone',
+          postponed: false,
+          orderIndex: 0,
+          name: 'Legacy title',
+        },
+        fieldUpdatedAt: {
+          purchaseStatus: '2026-08-01T00:00:01.000Z',
+          name: '2026-08-01T00:00:01.000Z',
+        },
+        updatedByMemberId: 'member-a',
+        notificationId: 'notification-postpone',
+        createdAt: '2026-08-01T00:00:01.000Z',
+      },
+      {
+        changeId: 'change-unpostpone',
+        localItemId: 'item-1',
+        itemsVersion: 2,
+        updatedFields: ['purchaseStatus'],
+        updatedValues: {
+          purchaseStatus: 'None',
+        },
+        fieldUpdatedAt: {
+          purchaseStatus: '2026-08-01T00:00:02.000Z',
+        },
+        updatedByMemberId: 'member-a',
+        notificationId: 'notification-unpostpone',
+        createdAt: '2026-08-01T00:00:02.000Z',
+      },
+    ];
+
+    expect(applyRoomItemChangesToItems(items, changes)).toEqual([
+      expect.objectContaining({
+        title: 'Legacy title',
+        purchaseStatus: 'None',
+        postponed: false,
+        orderIndex: 4,
+      }),
+    ]);
+    expect(applyRoomItemChangesToItems(items, changes.slice(0, 1))).toEqual([
+      expect.objectContaining({
+        title: 'Legacy title',
+        purchaseStatus: 'Postpone',
+        postponed: true,
+        orderIndex: 4,
+      }),
+    ]);
+  });
+
+  it('keeps limitQuantity as payload metadata while mapping actualPurchaseQuantity to limitedPurchasedQuantity', () => {
+    const item: ShoppingItem = {
+      id: 'item-1',
+      circle: 'Circle',
+      eventDate: '2026-08-15',
+      block: 'A',
+      number: '01',
+      title: 'Book',
+      price: 1000,
+      purchaseStatus: 'None',
+      quantity: 3,
+      remarks: '',
+    };
+    const snapshot: SnapshotRoomItem = {
+      localItemId: 'item-1',
+      circle: 'Circle',
+      block: 'A',
+      number: '01',
+      title: 'Book',
+      eventDate: '2026-08-15',
+      priorityLevel: null,
+      protectionLevel: null,
+      source: 'app',
+      manualHallId: null,
+      purchaseStatus: 'LimitedPurchase',
+      price: 1000,
+      quantity: 3,
+      limitQuantity: 2,
+      actualPurchaseQuantity: 1,
+      remarks: '',
+      url: null,
+      assignedTo: null,
+      securedBy: 'member-a',
+      orderIndex: null,
+      postponed: false,
+      deletedAt: null,
+      deletedBy: null,
+      itemVersion: 4,
+      updatedAt: '2026-08-01T00:00:04.000Z',
+      fieldClocks: {
+        actualPurchaseQuantity: {
+          itemsVersion: 4,
+          updatedAt: '2026-08-01T00:00:04.000Z',
+        },
+        limitQuantity: {
+          itemsVersion: 4,
+          updatedAt: '2026-08-01T00:00:04.000Z',
+        },
+      },
+    };
+
+    const merged = mergeSnapshotRoomItemIntoShoppingItem(item, snapshot);
+
+    expect(merged).toEqual(
+      expect.objectContaining({
+        purchaseStatus: 'LimitedPurchase',
+        quantity: 3,
+        limitedPurchasedQuantity: 1,
+      }),
+    );
+    expect(merged).not.toHaveProperty('limitQuantity');
+  });
+
   it('applies MVP-2a assignment catch-up changes to assignedTo only', () => {
     const items: ShoppingItem[] = [
       {
@@ -238,6 +725,12 @@ describe('sharing MVP-0c client helpers', () => {
         updatedFields: ['assignedTo'],
         updatedValues: { assignedTo: 'member-guest' },
         fieldUpdatedAt: { assignedTo: '2026-08-01T00:00:04.000Z' },
+        fieldClocks: {
+          assignedTo: {
+            itemsVersion: 4,
+            updatedAt: '2026-08-01T00:00:04.000Z',
+          },
+        },
         updatedByMemberId: 'member-host',
         notificationId: 'notification-assign',
         createdAt: '2026-08-01T00:00:04.000Z',
@@ -255,7 +748,214 @@ describe('sharing MVP-0c client helpers', () => {
     );
   });
 
-  it('merges an RPC item payload into an existing shopping item without replacing static fields', () => {
+  it('applies v2 create and delete item changes', () => {
+    const items: ShoppingItem[] = [
+      {
+        id: 'item-1',
+        circle: 'Circle',
+        eventDate: '2026-08-15',
+        block: 'A',
+        number: '01',
+        title: 'Book',
+        price: 1000,
+        purchaseStatus: 'None',
+        quantity: 1,
+        remarks: '',
+      },
+    ];
+    const changes: RoomItemChange[] = [
+      {
+        changeId: 'change-delete',
+        localItemId: 'item-1',
+        changeType: 'delete',
+        itemsVersion: 5,
+        updatedFields: ['deletedAt', 'deletedBy'],
+        updatedValues: {
+          deletedAt: '2026-08-01T00:00:05.000Z',
+          deletedBy: 'member-host',
+        },
+        fieldUpdatedAt: {
+          deletedAt: '2026-08-01T00:00:05.000Z',
+          deletedBy: '2026-08-01T00:00:05.000Z',
+        },
+        fieldClocks: {
+          deletedAt: {
+            itemsVersion: 5,
+            updatedAt: '2026-08-01T00:00:05.000Z',
+          },
+        },
+        updatedByMemberId: 'member-host',
+        notificationId: 'notification-delete',
+        createdAt: '2026-08-01T00:00:05.000Z',
+      },
+      {
+        changeId: 'change-create',
+        localItemId: 'item-2',
+        changeType: 'create',
+        itemsVersion: 6,
+        updatedFields: ['title'],
+        updatedValues: { title: 'New book' },
+        fieldUpdatedAt: { title: '2026-08-01T00:00:06.000Z' },
+        fieldClocks: {
+          title: {
+            itemsVersion: 6,
+            updatedAt: '2026-08-01T00:00:06.000Z',
+          },
+        },
+        item: {
+          localItemId: 'item-2',
+          circle: 'New Circle',
+          block: 'B',
+          number: '02',
+          title: 'New book',
+          eventDate: null,
+          priorityLevel: null,
+          protectionLevel: null,
+          source: 'app',
+          manualHallId: null,
+          purchaseStatus: 'None',
+          price: null,
+          quantity: 1,
+          limitQuantity: null,
+          actualPurchaseQuantity: null,
+          remarks: null,
+          url: null,
+          assignedTo: null,
+          securedBy: null,
+          orderIndex: null,
+          postponed: false,
+          deletedAt: null,
+          deletedBy: null,
+          itemVersion: 6,
+          updatedAt: '2026-08-01T00:00:06.000Z',
+          fieldClocks: {
+            title: {
+              itemsVersion: 6,
+              updatedAt: '2026-08-01T00:00:06.000Z',
+            },
+          },
+        },
+        updatedByMemberId: 'member-host',
+        notificationId: 'notification-create',
+        createdAt: '2026-08-01T00:00:06.000Z',
+      },
+    ];
+
+    expect(applyRoomItemChangesToItems(items, changes)).toEqual([
+      expect.objectContaining({
+        id: 'item-2',
+        title: 'New book',
+        eventDate: '',
+      }),
+    ]);
+  });
+
+  it('restores an item when a later create-style change follows a delete in the same catch-up batch', () => {
+    const items: ShoppingItem[] = [
+      {
+        id: 'item-1',
+        circle: 'Circle',
+        eventDate: '2026-08-15',
+        block: 'A',
+        number: '01',
+        title: 'Book',
+        price: 1000,
+        purchaseStatus: 'None',
+        quantity: 1,
+        remarks: '',
+      },
+    ];
+    const restoredItem: SnapshotRoomItem = {
+      localItemId: 'item-1',
+      circle: 'Restored Circle',
+      block: 'C',
+      number: '03',
+      title: 'Restored book',
+      eventDate: '2026-08-16',
+      priorityLevel: null,
+      protectionLevel: null,
+      source: 'app',
+      manualHallId: null,
+      purchaseStatus: 'None',
+      price: 1200,
+      quantity: 2,
+      limitQuantity: null,
+      actualPurchaseQuantity: null,
+      remarks: 'restored',
+      url: null,
+      assignedTo: null,
+      securedBy: null,
+      orderIndex: null,
+      postponed: false,
+      deletedAt: null,
+      deletedBy: null,
+      itemVersion: 6,
+      updatedAt: '2026-08-01T00:00:06.000Z',
+      fieldClocks: {
+        title: {
+          itemsVersion: 6,
+          updatedAt: '2026-08-01T00:00:06.000Z',
+        },
+      },
+    };
+    const changes: RoomItemChange[] = [
+      {
+        changeId: 'change-delete',
+        localItemId: 'item-1',
+        changeType: 'delete',
+        itemsVersion: 5,
+        updatedFields: ['deletedAt', 'deletedBy'],
+        updatedValues: {
+          deletedAt: '2026-08-01T00:00:05.000Z',
+          deletedBy: 'member-host',
+        },
+        fieldUpdatedAt: {
+          deletedAt: '2026-08-01T00:00:05.000Z',
+          deletedBy: '2026-08-01T00:00:05.000Z',
+        },
+        updatedByMemberId: 'member-host',
+        notificationId: 'notification-delete',
+        createdAt: '2026-08-01T00:00:05.000Z',
+      },
+      {
+        changeId: 'change-restore',
+        localItemId: 'item-1',
+        changeType: 'create',
+        itemsVersion: 6,
+        updatedFields: ['title', 'deletedAt', 'deletedBy'],
+        updatedValues: {
+          title: 'Restored book',
+          deletedAt: null,
+          deletedBy: null,
+        },
+        fieldUpdatedAt: {
+          title: '2026-08-01T00:00:06.000Z',
+          deletedAt: '2026-08-01T00:00:06.000Z',
+          deletedBy: '2026-08-01T00:00:06.000Z',
+        },
+        fieldClocks: restoredItem.fieldClocks,
+        item: restoredItem,
+        updatedByMemberId: 'member-host',
+        notificationId: 'notification-restore',
+        createdAt: '2026-08-01T00:00:06.000Z',
+      },
+    ];
+
+    expect(applyRoomItemChangesToItems(items, changes)).toEqual([
+      expect.objectContaining({
+        id: 'item-1',
+        circle: 'Restored Circle',
+        eventDate: '2026-08-16',
+        title: 'Restored book',
+        price: 1200,
+        quantity: 2,
+        remarks: 'restored',
+        lastSyncedAt: '2026-08-01T00:00:06.000Z',
+      }),
+    ]);
+  });
+
+  it('merges a v2 RPC item payload into an existing shopping item', () => {
     const item: ShoppingItem = {
       id: 'item-1',
       circle: 'Circle',
@@ -272,8 +972,16 @@ describe('sharing MVP-0c client helpers', () => {
     };
     const snapshot: SnapshotRoomItem = {
       localItemId: 'item-1',
+      circle: 'Circle',
+      block: 'A',
+      number: '01',
+      title: 'Book',
       eventDate: '2026-08-15',
       name: 'DB name',
+      priorityLevel: 'priority',
+      protectionLevel: null,
+      source: null,
+      manualHallId: null,
       purchaseStatus: 'Purchased',
       price: 1800,
       quantity: 1,
@@ -285,8 +993,16 @@ describe('sharing MVP-0c client helpers', () => {
       securedBy: 'member-a',
       orderIndex: null,
       postponed: false,
+      deletedAt: null,
+      deletedBy: null,
       itemVersion: 4,
       updatedAt: '2026-08-01T00:00:04.000Z',
+      fieldClocks: {
+        purchaseStatus: {
+          itemsVersion: 4,
+          updatedAt: '2026-08-01T00:00:04.000Z',
+        },
+      },
     };
 
     expect(mergeSnapshotRoomItemIntoShoppingItem(item, snapshot)).toEqual(

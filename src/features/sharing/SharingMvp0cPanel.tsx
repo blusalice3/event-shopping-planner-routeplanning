@@ -4,7 +4,7 @@ import type { SharingAvailability } from '../../lib/supabase';
 import type { SharingSessionMetadata } from '../../utils/indexedDB';
 import type { AssignmentMemberProfile } from '../../types/item';
 import type { NotificationListItem } from './client';
-import { isSharingSessionActive } from './appIntegration';
+import { isSharingSessionActive, isSharingSessionOperational } from './appIntegration';
 
 type SharingPanelMode = 'join' | 'invite' | 'status';
 
@@ -42,7 +42,8 @@ type SharingMvp0cPanelProps = {
 };
 
 const formatSessionStatus = (session: SharingSessionMetadata): string => {
-  if (isSharingSessionActive(session)) return '共有中';
+  if (isSharingSessionOperational(session)) return '共有中';
+  if (isSharingSessionActive(session)) return '要更新';
   if (session.status === 'paused') return '一時離脱';
   if (session.status === 'expired') return '期限切れ';
   if (session.status === 'leaving') return '退出中';
@@ -169,6 +170,7 @@ const SharingMvp0cPanel: React.FC<SharingMvp0cPanelProps> = ({
   initialJoinRoomCode = null,
   onJoinRoom,
   onRestoreRoom,
+  onCreateRoom,
   assignmentMembers = [],
   selectedItemCount = 0,
   assignedOnly = false,
@@ -223,9 +225,14 @@ const SharingMvp0cPanel: React.FC<SharingMvp0cPanelProps> = ({
       : activeAssignmentMembers[0]?.roomMemberId || '';
   const canBulkAssign =
     selectedItemCount > 0 && !!selectedBulkMemberId && !controlsDisabled && !!onBulkAssignSelected;
-  const inviteSessions = sortedSessions.filter(isSharingSessionActive);
+  const inviteSessions = sortedSessions.filter(isSharingSessionOperational);
   const title =
     mode === 'join' ? '共有に参加' : mode === 'invite' ? '参加URL/QR' : '共有状態';
+  const handleCreateRoomFromLocalizedSession = async (session: SharingSessionMetadata) => {
+    const displayName = window.prompt('新しい共有で使う表示名を入力してください。', '主催');
+    if (displayName === null) return;
+    await onCreateRoom?.(session.eventName, displayName.trim() || '主催');
+  };
 
   return (
     <section className="mx-4 mt-4 border border-sky-200 bg-sky-50 px-4 py-3 text-slate-800 shadow-sm md:mx-6">
@@ -329,13 +336,13 @@ const SharingMvp0cPanel: React.FC<SharingMvp0cPanelProps> = ({
             sortedSessions.map((session) => (
               <div
                 key={session.sessionId}
-                className="flex flex-col gap-2 border border-sky-100 bg-white px-3 py-2 text-slate-700 md:flex-row md:items-center md:justify-between"
+                className="flex flex-col gap-2 border border-sky-100 bg-white px-3 py-2 text-slate-700 md:flex-row md:flex-wrap md:items-center md:justify-between"
               >
                 <span>
                   {session.eventName}: {formatSessionStatus(session)} / room {session.roomId}
                 </span>
                 <span className="flex flex-wrap gap-1">
-                  {isSharingSessionActive(session) && onPauseSession && (
+                  {isSharingSessionOperational(session) && onPauseSession && (
                     <button
                       type="button"
                       className="rounded border border-sky-200 bg-white px-2 py-1 text-xs font-semibold text-sky-800 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
@@ -355,7 +362,7 @@ const SharingMvp0cPanel: React.FC<SharingMvp0cPanelProps> = ({
                       再開
                     </button>
                   )}
-                  {isSharingSessionActive(session) && session.role === 'member' && onLeaveSession && (
+                  {isSharingSessionOperational(session) && session.role === 'member' && onLeaveSession && (
                     <button
                       type="button"
                       className="rounded border border-red-200 bg-white px-2 py-1 text-xs font-semibold text-red-700 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
@@ -365,7 +372,7 @@ const SharingMvp0cPanel: React.FC<SharingMvp0cPanelProps> = ({
                       退出
                     </button>
                   )}
-                  {isSharingSessionActive(session) && session.role === 'host' && (
+                  {isSharingSessionOperational(session) && session.role === 'host' && (
                     <button
                       type="button"
                       className="rounded border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500"
@@ -384,7 +391,22 @@ const SharingMvp0cPanel: React.FC<SharingMvp0cPanelProps> = ({
                       ローカル化
                     </button>
                   )}
+                  {session.status === 'localizing' && onCreateRoom && (
+                    <button
+                      type="button"
+                      className="rounded border border-emerald-200 bg-white px-2 py-1 text-xs font-semibold text-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                      disabled={busy || !availability.enabled}
+                      onClick={() => void handleCreateRoomFromLocalizedSession(session)}
+                    >
+                      新規共有
+                    </button>
+                  )}
                 </span>
+                {session.status === 'localizing' && (
+                  <div className="text-xs leading-relaxed text-amber-800 md:basis-full">
+                    ローカルデータは保持されています。同期を再開する場合は、このイベントから新しい共有ルームを作成してください。
+                  </div>
+                )}
               </div>
             ))
           )}

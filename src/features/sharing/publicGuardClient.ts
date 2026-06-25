@@ -1,6 +1,7 @@
 import { getSharingPublicGuardBaseUrl, supabase } from '../../lib/supabase';
 import {
   SHARING_CONTRACT_VERSION,
+  isSharingErrorCode,
   type SharingEnvelope,
   type SharingErrorEnvelope,
   type SharingSuccessEnvelope,
@@ -50,6 +51,30 @@ const asObject = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : {};
+
+const isTimestampString = (value: unknown): value is string => {
+  if (typeof value !== 'string' || value.trim().length === 0) return false;
+  return Number.isFinite(Date.parse(value));
+};
+
+const isPublicGuardCreateRoomChallenge = (
+  value: unknown,
+): value is PublicGuardCreateRoomChallenge => {
+  const challenge = asObject(value);
+  return typeof challenge.challengeId === 'string' && typeof challenge.roomId === 'string';
+};
+
+const isPublicGuardPreparedMemberToken = (
+  value: unknown,
+): value is PublicGuardPreparedMemberToken => {
+  const token = asObject(value);
+  return (
+    typeof token.challengeId === 'string' &&
+    typeof token.roomId === 'string' &&
+    typeof token.tokenContext === 'string' &&
+    isTimestampString(token.expiresAt)
+  );
+};
 
 const randomBase64Url = (length: number): string => {
   const bytes = new Uint8Array(length);
@@ -116,11 +141,15 @@ export const normalizePublicGuardEnvelope = <T>(
     typeof errorObject.contract_version === 'number'
       ? errorObject.contract_version
       : SHARING_CONTRACT_VERSION;
+  if (contractVersion !== SHARING_CONTRACT_VERSION) {
+    return stableGuardError('CONTRACT_VERSION_MISMATCH');
+  }
+
+  const errorCode = isSharingErrorCode(errorObject.code)
+    ? errorObject.code
+    : 'GUARD_UNAVAILABLE';
   const error: SharingErrorEnvelope['error'] = {
-    code:
-      typeof errorObject.code === 'string'
-        ? (errorObject.code as SharingErrorEnvelope['error']['code'])
-        : 'GUARD_UNAVAILABLE',
+    code: errorCode,
     contract_version: contractVersion,
   };
   if (typeof errorObject.retry_after_seconds === 'number') {
@@ -135,6 +164,37 @@ export const normalizePublicGuardEnvelope = <T>(
   };
 };
 
+const validatePublicGuardData = <T>(
+  envelope: SharingEnvelope<unknown>,
+  isData: (value: unknown) => value is T,
+): SharingEnvelope<T> => {
+  if (!envelope.ok) return envelope;
+  if (!isData(envelope.data)) {
+    return stableGuardError('GUARD_UNAVAILABLE');
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+export const normalizePublicGuardCreateRoomChallengeEnvelope = (
+  value: unknown,
+): SharingEnvelope<PublicGuardCreateRoomChallenge> =>
+  validatePublicGuardData(
+    normalizePublicGuardEnvelope<unknown>(value),
+    isPublicGuardCreateRoomChallenge,
+  );
+
+export const normalizePublicGuardPreparedMemberTokenEnvelope = (
+  value: unknown,
+): SharingEnvelope<PublicGuardPreparedMemberToken> =>
+  validatePublicGuardData(
+    normalizePublicGuardEnvelope<unknown>(value),
+    isPublicGuardPreparedMemberToken,
+  );
+
 const getAccessToken = async (): Promise<string | null> => {
   if (!supabase) return null;
   const session = await supabase.auth.getSession();
@@ -144,6 +204,7 @@ const getAccessToken = async (): Promise<string | null> => {
 const callPublicGuard = async <T>(
   endpoint: GuardEndpoint,
   body: Record<string, unknown>,
+  normalize: (value: unknown) => SharingEnvelope<T>,
 ): Promise<SharingEnvelope<T>> => {
   const baseUrl = getSharingPublicGuardBaseUrl();
   const accessToken = await getAccessToken();
@@ -161,7 +222,7 @@ const callPublicGuard = async <T>(
       }),
     });
     const payload = (await response.json().catch(() => null)) as unknown;
-    const envelope = normalizePublicGuardEnvelope<T>(payload);
+    const envelope = normalize(payload);
     if (!response.ok && envelope.ok) {
       return stableGuardError('GUARD_UNAVAILABLE');
     }
@@ -174,25 +235,37 @@ const callPublicGuard = async <T>(
 export const prepareCreateRoomViaPublicGuard = (
   input: PublicGuardCreateRoomInput,
 ): Promise<SharingEnvelope<PublicGuardCreateRoomChallenge>> =>
-  callPublicGuard<PublicGuardCreateRoomChallenge>('guard-create-room', {
-    room_id: input.roomId,
-    canonical_payload: input.canonicalPayload,
-    plaintext_fingerprint: input.plaintextFingerprint,
-    item_count: input.itemCount,
-    canonical_schema_version: input.canonicalSchemaVersion,
-    payload_protection_mode: input.payloadProtectionMode,
-  });
+  callPublicGuard<PublicGuardCreateRoomChallenge>(
+    'guard-create-room',
+    {
+      room_id: input.roomId,
+      canonical_payload: input.canonicalPayload,
+      plaintext_fingerprint: input.plaintextFingerprint,
+      item_count: input.itemCount,
+      canonical_schema_version: input.canonicalSchemaVersion,
+      payload_protection_mode: input.payloadProtectionMode,
+    },
+    normalizePublicGuardCreateRoomChallengeEnvelope,
+  );
 
 export const prepareJoinViaPublicGuard = (
   roomCode: string,
 ): Promise<SharingEnvelope<PublicGuardPreparedMemberToken>> =>
-  callPublicGuard<PublicGuardPreparedMemberToken>('guard-prepare-join', {
-    room_code: roomCode,
-  });
+  callPublicGuard<PublicGuardPreparedMemberToken>(
+    'guard-prepare-join',
+    {
+      room_code: roomCode,
+    },
+    normalizePublicGuardPreparedMemberTokenEnvelope,
+  );
 
 export const prepareRestoreViaPublicGuard = (
   roomId: string,
 ): Promise<SharingEnvelope<PublicGuardPreparedMemberToken>> =>
-  callPublicGuard<PublicGuardPreparedMemberToken>('guard-prepare-restore', {
-    room_id: roomId,
-  });
+  callPublicGuard<PublicGuardPreparedMemberToken>(
+    'guard-prepare-restore',
+    {
+      room_id: roomId,
+    },
+    normalizePublicGuardPreparedMemberTokenEnvelope,
+  );

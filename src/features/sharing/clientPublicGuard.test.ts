@@ -43,7 +43,7 @@ describe('sharing public Guard fallback boundary', () => {
       ok: false,
       error: {
         code: 'GUARD_UNAVAILABLE',
-        contract_version: 1,
+        contract_version: 2,
       },
     });
 
@@ -51,7 +51,7 @@ describe('sharing public Guard fallback boundary', () => {
       ok: false,
       error: {
         code: 'GUARD_UNAVAILABLE',
-        contract_version: 1,
+        contract_version: 2,
       },
     });
 
@@ -61,7 +61,7 @@ describe('sharing public Guard fallback boundary', () => {
       ok: false,
       error: {
         code: 'GUARD_UNAVAILABLE',
-        contract_version: 1,
+        contract_version: 2,
       },
     });
   });
