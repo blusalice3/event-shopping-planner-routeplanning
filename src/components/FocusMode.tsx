@@ -91,6 +91,7 @@ interface FocusModeProps {
   assignmentMembers?: AssignmentMemberProfile[];
   canAssignItem?: (item: ShoppingItem) => boolean;
   onAssignItem?: (itemId: string, assignedToMemberId: string) => void;
+  isSharingActive?: boolean;
 }
 // スワイプ判定の閾値
 const SWIPE_THRESHOLD = 50;
@@ -136,6 +137,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   assignmentMembers,
   canAssignItem,
   onAssignItem,
+  isSharingActive = false,
 }) => {
   const noopRotationHandler = useCallback(() => {}, []);
   const stableMapRotationHandler = onMapRotationAngleChange || noopRotationHandler;
@@ -213,7 +215,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     quantity: '1',
     remarks: '',
     url: '',
-    purchaseStatus: 'Purchased' as 'Purchased' | 'Postpone' | 'Late',
+    purchaseStatus: 'Purchased' as 'None' | 'Purchased' | 'Postpone' | 'Late',
   });
   // マップが利用可能かどうか
   const hasMapData = useMemo(() => {
@@ -1785,10 +1787,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
       quantity: '1',
       remarks: '',
       url: '',
-      purchaseStatus: 'Purchased',
+      purchaseStatus: isSharingActive ? 'None' : 'Purchased',
     });
     closeCellPopup();
-  }, [currentVisit, cellPopupState, closeCellPopup]);
+  }, [currentVisit, cellPopupState, closeCellPopup, isSharingActive]);
   const openAddItemDialogFromList = useCallback(() => {
     if (!currentVisit) return;
     const firstItem = currentVisit.items[0];
@@ -1807,9 +1809,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
       quantity: '1',
       remarks: '',
       url: '',
-      purchaseStatus: 'Purchased',
+      purchaseStatus: isSharingActive ? 'None' : 'Purchased',
     });
-  }, [currentVisit]);
+  }, [currentVisit, isSharingActive]);
   // アイテム追加ダイアログを閉じる
   const closeAddItemDialog = useCallback(() => {
     setAddItemDialog((prev) => ({ ...prev, isOpen: false }));
@@ -1836,7 +1838,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
         ? '候補リスト'
         : newItemForm.purchaseStatus === 'Postpone'
           ? '後回しフェーズ'
-          : '遅参フェーズ';
+          : newItemForm.purchaseStatus === 'Late'
+            ? '遅参フェーズ'
+            : '候補リスト';
     setNotification(`${addItemDialog.block}-${addItemDialog.number} を${statusText}に追加しました`);
     closeAddItemDialog();
   }, [onAddItem, addItemDialog, newItemForm, closeAddItemDialog]);
@@ -1997,6 +2001,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       priceOptions={priceOptions}
       onPriceInputChange={handlePriceInputChange}
       onPriceSelectChange={handlePriceSelectChange}
+      isSharingActive={isSharingActive}
       onClose={closeAddItemDialog}
       onSubmit={handleAddNewItem}
     />

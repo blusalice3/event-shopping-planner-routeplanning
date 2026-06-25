@@ -388,6 +388,13 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
 
   const handleEdit = () => {
     if (longPressItem) {
+      if (onEditRequest) {
+        const item = longPressItem;
+        setLongPressItem(null);
+        onClose();
+        onEditRequest(item);
+        return;
+      }
       setEditingItem({ ...longPressItem });
       setEditingQuantityText(String(getPlannedQuantity(longPressItem)));
       setQuantityError(null);

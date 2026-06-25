@@ -100,6 +100,39 @@ const expectCurrentVisitBlockedByLimited = async () => {
 };
 
 describe('FocusMode resume dialog - integration', () => {
+  it('uses a share-safe default when adding an item during sharing', () => {
+    const onAddItem = vi.fn();
+    render(
+      <FocusMode
+        {...minimalProps({
+          ...singleVisitNoneItemFixture,
+          onAddItem,
+          isSharingActive: true,
+        })}
+      />,
+    );
+
+    fireEvent.click(screen.getByTitle('新規アイテム追加'));
+
+    const comboboxes = screen.getAllByRole('combobox');
+    const statusSelect = comboboxes[comboboxes.length - 1];
+    expect(statusSelect).toHaveValue('None');
+    expect(within(statusSelect).getByRole('option', { name: '未購入' })).toBeInTheDocument();
+    expect(within(statusSelect).queryByRole('option', { name: '購入済' })).toBeNull();
+
+    fireEvent.change(screen.getByPlaceholderText('サークル名'), {
+      target: { value: '共有サークル' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'リストに追加' }));
+
+    expect(onAddItem).toHaveBeenCalledWith(
+      expect.objectContaining({
+        circle: '共有サークル',
+        purchaseStatus: 'None',
+      }),
+    );
+  });
+
   it('completed resume state with no visits renders the empty visit state', () => {
     render(<FocusMode {...minimalProps({ resumeState: completedFixture })} />);
 

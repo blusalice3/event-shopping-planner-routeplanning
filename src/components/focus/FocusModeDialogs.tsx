@@ -30,7 +30,7 @@ type AddItemFormState = {
   quantity: string;
   remarks: string;
   url: string;
-  purchaseStatus: 'Purchased' | 'Postpone' | 'Late';
+  purchaseStatus: 'None' | 'Purchased' | 'Postpone' | 'Late';
 };
 
 const formInputClass =
@@ -200,6 +200,7 @@ export function AddItemDialogView({
   priceOptions,
   onPriceInputChange,
   onPriceSelectChange,
+  isSharingActive = false,
   onClose,
   onSubmit,
 }: {
@@ -211,6 +212,7 @@ export function AddItemDialogView({
   priceOptions: number[];
   onPriceInputChange: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onPriceSelectChange: (e: React.ChangeEvent<HTMLSelectElement>) => void;
+  isSharingActive?: boolean;
   onClose: () => void;
   onSubmit: () => void;
 }) {
@@ -277,8 +279,8 @@ export function AddItemDialogView({
                   purchaseStatus: value as AddItemFormState['purchaseStatus'],
                 }))
               }
-              options={['Purchased', 'Postpone', 'Late']}
-              labels={{ Purchased: '購入済', Postpone: '後回し', Late: '遅参' }}
+              options={isSharingActive ? ['None', 'Postpone', 'Late'] : ['Purchased', 'Postpone', 'Late']}
+              labels={{ None: '未購入', Purchased: '購入済', Postpone: '後回し', Late: '遅参' }}
             />
           </div>
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { ShoppingItem } from '../../types/item';
@@ -54,6 +54,29 @@ describe('CellItemsPopup limited purchase actions', () => {
     expect(onAddToVisitList).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalledTimes(1);
     expect(onEditRequest).toHaveBeenCalledWith(limitedItem);
+  });
+
+  it('routes long-press edit through the parent edit dialog when available', () => {
+    vi.useFakeTimers();
+    try {
+      const { onClose, onEditRequest } = renderPopup();
+
+      const itemRow = screen.getByText('Limited Circle').closest('.cursor-pointer');
+      expect(itemRow).not.toBeNull();
+
+      fireEvent.pointerDown(itemRow!, { pointerId: 1 });
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+
+      const editButtons = screen.getAllByRole('button', { name: /編集/ });
+      fireEvent.click(editButtons[editButtons.length - 1]);
+
+      expect(onClose).toHaveBeenCalledTimes(1);
+      expect(onEditRequest).toHaveBeenCalledWith(limitedItem);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('shows MVP-2c assignment and secured-by member chips in the cell popup', () => {

@@ -91,6 +91,8 @@ export const minimalProps = (
     disableLimitedPurchaseQuantityCheck?: boolean;
     skipLimitedPurchaseForSingleQuantity?: boolean;
     purchaseStatusControlMode?: PurchaseStatusControlMode;
+    onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: ShoppingItem['purchaseStatus'] }) => void;
+    isSharingActive?: boolean;
   } = {},
 ) => ({
   items: overrides.items ?? [],
@@ -104,11 +106,13 @@ export const minimalProps = (
   hallOrder: [] as string[],
   resumeState: cloneSessionState(overrides.resumeState),
   onSessionStateChange: overrides.onSessionStateChange ?? (() => {}),
+  onAddItem: overrides.onAddItem,
   disablePriceUndefinedCheck: overrides.disablePriceUndefinedCheck ?? false,
   disableLimitedPurchaseQuantityCheck: overrides.disableLimitedPurchaseQuantityCheck ?? false,
   skipLimitedPurchaseForSingleQuantity:
     overrides.skipLimitedPurchaseForSingleQuantity ?? true,
   purchaseStatusControlMode: overrides.purchaseStatusControlMode ?? 'cycle',
+  isSharingActive: overrides.isSharingActive ?? false,
 });
 
 /**
