@@ -400,23 +400,30 @@ const buildSharingStructuralItemFields = (
   return fields;
 };
 
-const buildSharingCreateItemFields = (item: ShoppingItem): SharingCreateItemFields => ({
-  circle: item.circle,
-  block: item.block,
-  number: item.number,
-  title: item.title,
-  eventDate: item.eventDate,
-  priorityLevel: item.priorityLevel ?? 'none',
-  protectionLevel: item.protectionLevel ?? 'full',
-  source: item.source ?? 'app',
-  manualHallId: item.manualHallId ?? null,
-  price: item.price ?? null,
-  quantity: item.quantity ?? 1,
-  remarks: item.remarks ?? '',
-  url: item.url ?? null,
-  purchaseStatus: item.purchaseStatus,
-  actualPurchaseQuantity: null,
-});
+const buildSharingCreateItemFields = (item: ShoppingItem): SharingCreateItemFields => {
+  const fields: SharingCreateItemFields = {
+    circle: item.circle,
+    block: item.block,
+    number: item.number,
+    eventDate: item.eventDate,
+    priorityLevel: item.priorityLevel ?? 'none',
+    protectionLevel: item.protectionLevel ?? 'full',
+    source: item.source ?? 'app',
+    manualHallId: item.manualHallId ?? null,
+    price: item.price ?? null,
+    quantity: item.quantity ?? 1,
+    remarks: item.remarks ?? '',
+    url: item.url ?? null,
+    purchaseStatus: item.purchaseStatus,
+    actualPurchaseQuantity: null,
+  };
+
+  if (item.title.trim() !== '') {
+    fields.title = item.title;
+  }
+
+  return fields;
+};
 
 const createSpreadsheetShoppingItem = (
   itemData: EventUpdateDiff['itemsToAdd'][number],
