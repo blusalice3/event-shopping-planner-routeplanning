@@ -418,6 +418,24 @@ const buildSharingCreateItemFields = (item: ShoppingItem): SharingCreateItemFiel
   actualPurchaseQuantity: null,
 });
 
+const createSpreadsheetShoppingItem = (
+  itemData: EventUpdateDiff['itemsToAdd'][number],
+): ShoppingItem => ({
+  id: crypto.randomUUID(),
+  circle: itemData.circle,
+  eventDate: itemData.eventDate,
+  block: itemData.block,
+  number: itemData.number,
+  title: itemData.title,
+  price: itemData.price,
+  quantity: itemData.quantity ?? 1,
+  remarks: itemData.remarks,
+  purchaseStatus: 'None',
+  source: 'spreadsheet',
+  protectionLevel: 'none',
+  ...(itemData.url ? { url: itemData.url } : {}),
+});
+
 const buildSharingMutableItemFields = (
   currentItem: ShoppingItem,
   updatedItem: ShoppingItem,
@@ -2223,11 +2241,11 @@ const App: React.FC = () => {
   const handleLeaveSharingSession = useCallback(
     async (session: SharingSessionMetadata) => {
       if (sharingBusy) return;
-      if (session.role === 'host') {
-        setSharingErrorMessage('ホストは初回実装では退出できません。');
-        return;
-      }
-      if (!window.confirm('この共有から退出します。担当/確保者の履歴は残りますが、この端末の復元キーは削除されます。')) {
+      const confirmationMessage =
+        session.role === 'host'
+          ? '主催が退出すると、この共有ルームは終了します。ローカルデータは保持されます。退出しますか？'
+          : 'この共有から退出します。担当/確保者の履歴は残りますが、この端末の復元キーは削除されます。';
+      if (!window.confirm(confirmationMessage)) {
         return;
       }
 
@@ -5220,12 +5238,263 @@ const App: React.FC = () => {
     [eventLists, eventMetadata, guardSharingStructureMutation],
   );
 
-  const handleConfirmUpdate = () => {
+  const handleConfirmUpdate = async () => {
     if (!updateData || !updateEventName) return;
-    if (guardSharingStructureMutation(updateEventName)) return;
 
     const { itemsToDelete, itemsToUpdate, itemsToAdd } = updateData;
     const eventName = updateEventName;
+    const sharingSession =
+      activeSharingSession?.eventName === eventName ? activeSharingSession : null;
+
+    if (sharingSession) {
+      if (sharingSession.role !== 'host') {
+        setSharingErrorMessage('共有中のスプレッドシート更新は主催のみ実行できます。');
+        return;
+      }
+
+      setSharingBusy(true);
+      setSharingStatusMessage('スプレッドシートの更新を共有へ反映しています。');
+      setSharingErrorMessage(null);
+      try {
+        let workingItems = [...(eventLists[eventName] || [])];
+        let workingExecuteModeItems = {
+          ...(executeModeItemsRef.current[eventName] || {}),
+        };
+        let routeOrderVersions = { ...sharingSession.routeOrderVersions };
+
+        for (const itemToDelete of itemsToDelete) {
+          const expectedFieldClocks = pickExpectedFieldClocks(
+            sharingSession,
+            itemToDelete.id,
+            ['deletedAt', 'deletedBy'],
+          );
+          if (!expectedFieldClocks) {
+            setSharingErrorMessage('共有アイテムの同期基準が不足しています。最新状態を取得します。');
+            await applySnapshotAndAck(sharingSession.roomId);
+            return;
+          }
+
+          const routeUpdates = hasSharingRouteMembership(itemToDelete)
+            ? (() => {
+                if (!itemToDelete.eventDate) return null;
+                const currentRouteItemIds = workingExecuteModeItems[itemToDelete.eventDate] ?? [];
+                return [
+                  {
+                    eventDate: itemToDelete.eventDate,
+                    itemIds: currentRouteItemIds.filter((itemId) => itemId !== itemToDelete.id),
+                    expectedVersion: routeOrderVersions[itemToDelete.eventDate] ?? 0,
+                  },
+                ];
+              })()
+            : [];
+
+          if (routeUpdates === null) {
+            setSharingErrorMessage('巡回順に入っている共有アイテムの日付が不明です。最新状態を取得します。');
+            await applySnapshotAndAck(sharingSession.roomId);
+            return;
+          }
+
+          const result = await deleteRoomItemWithRoute({
+            roomId: sharingSession.roomId,
+            localItemId: itemToDelete.id,
+            routeUpdates,
+            expectedFieldClocks,
+          });
+
+          if (!result.ok) {
+            if (
+              isFullItemRefreshRequired(result.error.code) ||
+              result.error.code === 'FIELD_CLOCK_CONFLICT' ||
+              result.error.code === 'ROUTE_ORDER_CONFLICT'
+            ) {
+              setSharingErrorMessage('他の参加者が先に更新しました。最新状態を取得しました。');
+              await applySnapshotAndAck(sharingSession.roomId);
+              return;
+            }
+            setSharingErrorMessage(`共有アイテムの削除に失敗しました: ${result.error.code}`);
+            return;
+          }
+
+          const changedRouteOrders = result.data.changedRouteOrders ?? [];
+          workingItems = applyCanonicalRouteOrdersToItems(
+            workingItems.filter((item) => item.id !== itemToDelete.id),
+            changedRouteOrders,
+          );
+          if (changedRouteOrders.length > 0) {
+            workingExecuteModeItems = {
+              ...workingExecuteModeItems,
+              ...Object.fromEntries(
+                changedRouteOrders.map((routeOrder) => [
+                  routeOrder.eventDate,
+                  routeOrder.itemIds,
+                ]),
+              ),
+            };
+          }
+          routeOrderVersions = result.data.routeOrderVersions ?? routeOrderVersions;
+        }
+
+        for (const updatedItem of itemsToUpdate) {
+          let currentItem = workingItems.find((item) => item.id === updatedItem.id);
+          if (!currentItem) continue;
+
+          const structuralFields = buildSharingStructuralItemFields(currentItem, updatedItem);
+          if (Object.keys(structuralFields).length > 0) {
+            const expectedFieldClocks = pickExpectedFieldClocks(
+              sharingSession,
+              updatedItem.id,
+              Object.keys(structuralFields),
+            );
+            if (!expectedFieldClocks) {
+              setSharingErrorMessage('共有アイテムの同期基準が不足しています。最新状態を取得します。');
+              await applySnapshotAndAck(sharingSession.roomId);
+              return;
+            }
+
+            const routeUpdates = buildSharingStructuralRouteUpdates(
+              currentItem,
+              updatedItem,
+              workingItems,
+              workingExecuteModeItems,
+              routeOrderVersions,
+            );
+            const result = await upsertRoomItemWithRoute({
+              roomId: sharingSession.roomId,
+              localItemId: updatedItem.id,
+              fields: structuralFields,
+              routeUpdates,
+              expectedFieldClocks,
+            });
+
+            if (!result.ok) {
+              if (
+                isFullItemRefreshRequired(result.error.code) ||
+                result.error.code === 'FIELD_CLOCK_CONFLICT' ||
+                result.error.code === 'ROUTE_ORDER_CONFLICT'
+              ) {
+                setSharingErrorMessage('他の参加者が先に更新しました。最新状態を取得しました。');
+                await applySnapshotAndAck(sharingSession.roomId);
+                return;
+              }
+              setSharingErrorMessage(`共有アイテムの更新に失敗しました: ${result.error.code}`);
+              return;
+            }
+
+            const changedRouteOrders = result.data.changedRouteOrders ?? [];
+            workingItems = applyCanonicalRouteOrdersToItems(
+              workingItems.map((item) =>
+                item.id === updatedItem.id
+                  ? mergeSnapshotRoomItemIntoShoppingItem(item, result.data.item)
+                  : item,
+              ),
+              changedRouteOrders,
+            );
+            if (changedRouteOrders.length > 0) {
+              workingExecuteModeItems = {
+                ...workingExecuteModeItems,
+                ...Object.fromEntries(
+                  changedRouteOrders.map((routeOrder) => [
+                    routeOrder.eventDate,
+                    routeOrder.itemIds,
+                  ]),
+                ),
+              };
+            }
+            routeOrderVersions = result.data.routeOrderVersions ?? routeOrderVersions;
+            currentItem =
+              workingItems.find((item) => item.id === updatedItem.id) ?? currentItem;
+          }
+
+          const mutableFields = buildSharingMutableItemFields(currentItem, updatedItem);
+          if (Object.keys(mutableFields).length > 0) {
+            const expectedFieldClocks = pickExpectedFieldClocks(
+              sharingSession,
+              updatedItem.id,
+              buildPurchaseExpectedClockFields(mutableFields, null),
+            );
+            if (!expectedFieldClocks) {
+              setSharingErrorMessage('共有アイテムの同期基準が不足しています。最新状態を取得します。');
+              await applySnapshotAndAck(sharingSession.roomId);
+              return;
+            }
+
+            const result = await updateRoomItemWithPurchase({
+              roomId: sharingSession.roomId,
+              localItemId: updatedItem.id,
+              fields: mutableFields,
+              status: null,
+              actualPurchaseQuantity: null,
+              expectedFieldClocks,
+            });
+
+            if (!result.ok) {
+              if (
+                isFullItemRefreshRequired(result.error.code) ||
+                result.error.code === 'FIELD_CLOCK_CONFLICT'
+              ) {
+                setSharingErrorMessage('他の参加者が先に更新しました。最新状態を取得しました。');
+                await applySnapshotAndAck(sharingSession.roomId);
+                return;
+              }
+              setSharingErrorMessage(`共有アイテムの更新に失敗しました: ${result.error.code}`);
+              return;
+            }
+
+            workingItems = workingItems.map((item) =>
+              item.id === updatedItem.id
+                ? mergeSnapshotRoomItemIntoShoppingItem(item, result.data.item)
+                : item,
+            );
+          }
+        }
+
+        for (const itemToAdd of itemsToAdd) {
+          const createdItem = createSpreadsheetShoppingItem(itemToAdd);
+          const result = await upsertRoomItemWithRoute({
+            roomId: sharingSession.roomId,
+            localItemId: createdItem.id,
+            fields: buildSharingCreateItemFields(createdItem),
+            routeUpdates: [],
+            expectedFieldClocks: {},
+          });
+
+          if (!result.ok) {
+            if (
+              isFullItemRefreshRequired(result.error.code) ||
+              result.error.code === 'FIELD_CLOCK_CONFLICT' ||
+              result.error.code === 'ROUTE_ORDER_CONFLICT'
+            ) {
+              setSharingErrorMessage('他の参加者が先に更新しました。最新状態を取得しました。');
+              await applySnapshotAndAck(sharingSession.roomId);
+              return;
+            }
+            setSharingErrorMessage(`共有アイテムの追加に失敗しました: ${result.error.code}`);
+            return;
+          }
+
+          workingItems = [
+            ...workingItems,
+            mergeSnapshotRoomItemIntoShoppingItem(createdItem, result.data.item),
+          ];
+          routeOrderVersions = result.data.routeOrderVersions ?? routeOrderVersions;
+        }
+
+        await applySnapshotAndAck(sharingSession.roomId);
+        setShowUpdateConfirmation(false);
+        setUpdateData(null);
+        setUpdateEventName(null);
+        setSharingStatusMessage('スプレッドシートの更新を共有へ反映しました。');
+        alert('アイテムを更新しました。');
+      } catch (error) {
+        console.error('Sharing spreadsheet update error:', error);
+        setSharingErrorMessage('スプレッドシート更新の共有反映に失敗しました。通信状態を確認してください。');
+      } finally {
+        setSharingBusy(false);
+      }
+      return;
+    }
+
+    if (guardSharingStructureMutation(updateEventName)) return;
 
     setEventLists((prev) => {
       const newItems = applyEventUpdateToItems(prev[eventName] || [], {

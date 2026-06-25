@@ -362,7 +362,7 @@ const SharingMvp0cPanel: React.FC<SharingMvp0cPanelProps> = ({
                       再開
                     </button>
                   )}
-                  {isSharingSessionOperational(session) && session.role === 'member' && onLeaveSession && (
+                  {isSharingSessionOperational(session) && onLeaveSession && (
                     <button
                       type="button"
                       className="rounded border border-red-200 bg-white px-2 py-1 text-xs font-semibold text-red-700 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
@@ -370,15 +370,6 @@ const SharingMvp0cPanel: React.FC<SharingMvp0cPanelProps> = ({
                       onClick={() => onLeaveSession(session)}
                     >
                       退出
-                    </button>
-                  )}
-                  {isSharingSessionOperational(session) && session.role === 'host' && (
-                    <button
-                      type="button"
-                      className="rounded border border-slate-200 bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-500"
-                      disabled
-                    >
-                      ホスト退出不可
                     </button>
                   )}
                   {session.status === 'expired' && onLocalizeSession && (

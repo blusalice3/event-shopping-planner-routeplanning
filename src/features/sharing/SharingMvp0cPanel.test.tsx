@@ -315,17 +315,20 @@ describe('SharingMvp0cPanel', () => {
     expect(
       screen.getByText('ローカルデータは保持されています。同期を再開する場合は、このイベントから新しい共有ルームを作成してください。'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'ホスト退出不可' })).toBeDisabled();
+    const leaveButtons = screen.getAllByRole('button', { name: '退出' });
+    expect(leaveButtons).toHaveLength(2);
 
     await user.click(screen.getAllByRole('button', { name: '一時離脱' })[0]);
     await user.click(screen.getByRole('button', { name: '再開' }));
-    await user.click(screen.getByRole('button', { name: '退出' }));
+    await user.click(leaveButtons[0]);
+    await user.click(leaveButtons[1]);
     await user.click(screen.getByRole('button', { name: 'ローカル化' }));
     await user.click(screen.getByRole('button', { name: '新規共有' }));
 
     expect(onPauseSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'activeMember' }));
     expect(onResumeSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'paused' }));
     expect(onLeaveSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'activeMember' }));
+    expect(onLeaveSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'activeHost' }));
     expect(onLocalizeSession).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'expired' }));
     expect(onCreateRoom).toHaveBeenCalledWith('Localized Event', '再共有主催');
     promptSpy.mockRestore();
