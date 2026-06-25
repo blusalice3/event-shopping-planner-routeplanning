@@ -5671,7 +5671,6 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return [];
       const sharingSession =
         activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
-      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return [];
 
       const dayName = activeEventDate;
       const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
@@ -5716,7 +5715,6 @@ const App: React.FC = () => {
       hallRouteSettings,
       mapData,
       commitExecuteModeItemsForEvent,
-      guardSharingStructureMutation,
       saveSharingRouteOrderMutation,
     ],
   );
@@ -5727,7 +5725,6 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !activeEventDate) return [];
       const sharingSession =
         activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
-      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return [];
 
       const dayName = activeEventDate;
       const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
@@ -5765,7 +5762,6 @@ const App: React.FC = () => {
       items,
       areItemsInSameHallGroup,
       commitExecuteModeItemsForEvent,
-      guardSharingStructureMutation,
       saveSharingRouteOrderMutation,
     ],
   );
@@ -5776,7 +5772,6 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !activeEventDate) return;
       const sharingSession =
         activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
-      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
 
       const dayName = activeEventDate;
       const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
@@ -5807,7 +5802,6 @@ const App: React.FC = () => {
       isMapTab,
       items,
       commitExecuteModeItemsForEvent,
-      guardSharingStructureMutation,
       saveSharingRouteOrderMutation,
     ],
   );
@@ -5818,7 +5812,6 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return [];
       const sharingSession =
         activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
-      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return [];
       const dayName = activeEventDate;
       const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
       const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
@@ -5861,7 +5854,6 @@ const App: React.FC = () => {
       hallRouteSettings,
       mapData,
       commitExecuteModeItemsForEvent,
-      guardSharingStructureMutation,
       saveSharingRouteOrderMutation,
     ],
   );
@@ -5872,7 +5864,6 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !activeEventDate) return [];
       const sharingSession =
         activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
-      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return [];
       const dayName = activeEventDate;
 
       const current = executeModeItemsRef.current[activeEventName] || {};
@@ -5909,7 +5900,6 @@ const App: React.FC = () => {
       items,
       areItemsInSameHallGroup,
       commitExecuteModeItemsForEvent,
-      guardSharingStructureMutation,
       saveSharingRouteOrderMutation,
     ],
   );
@@ -5920,7 +5910,6 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !activeEventDate) return;
       const sharingSession =
         activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
-      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
       const dayName = activeEventDate;
 
       let current = executeModeItemsRef.current[activeEventName] || {};
@@ -5949,7 +5938,6 @@ const App: React.FC = () => {
       isMapTab,
       items,
       commitExecuteModeItemsForEvent,
-      guardSharingStructureMutation,
       saveSharingRouteOrderMutation,
     ],
   );
@@ -6129,7 +6117,6 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab) return;
       const sharingSession =
         activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
-      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
 
       if (!activeEventDate) return;
       const dayName = activeEventDate;
@@ -6162,7 +6149,6 @@ const App: React.FC = () => {
       activeEventDate,
       activeSharingSession,
       isMapTab,
-      guardSharingStructureMutation,
       saveSharingRouteOrderMutation,
       updateExecuteModeItems,
     ],
@@ -6174,7 +6160,6 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab) return;
       const sharingSession =
         activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
-      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
 
       if (!activeEventDate) return;
       const dayName = activeEventDate;
@@ -6207,7 +6192,6 @@ const App: React.FC = () => {
       activeEventDate,
       activeSharingSession,
       isMapTab,
-      guardSharingStructureMutation,
       saveSharingRouteOrderMutation,
       updateExecuteModeItems,
     ],
@@ -6386,7 +6370,6 @@ const App: React.FC = () => {
   const handleVisitListOrderUpdate = useCallback(
     (newOrderItems: ShoppingItem[]) => {
       if (!visitListPanelMapTab || !activeEventName) return;
-      if (!activeSharingSession && guardSharingStructureMutation(activeEventName)) return;
 
       const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
@@ -6405,7 +6388,7 @@ const App: React.FC = () => {
       }));
       setVisitListHasUnsavedChanges(true);
     },
-    [visitListPanelMapTab, activeEventName, activeSharingSession, guardSharingStructureMutation],
+    [visitListPanelMapTab, activeEventName],
   );
 
 
@@ -6502,7 +6485,6 @@ const App: React.FC = () => {
 
   const handleVisitListCancel = useCallback(() => {
     if (!visitListPanelMapTab || !activeEventName) return;
-    if (!activeSharingSession && guardSharingStructureMutation(activeEventName)) return;
 
     const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
     if (!dayMatch) return;
@@ -6520,7 +6502,7 @@ const App: React.FC = () => {
     }
     setVisitListHasUnsavedChanges(false);
     setVisitListOriginalOrder([]);
-  }, [visitListOriginalOrder, visitListPanelMapTab, activeEventName, activeSharingSession, guardSharingStructureMutation]);
+  }, [visitListOriginalOrder, visitListPanelMapTab, activeEventName, updateExecuteModeItems]);
 
 
   const handleVisitListClose = useCallback(() => {
@@ -7138,7 +7120,6 @@ const App: React.FC = () => {
       if (!activeEventName) return;
       const sharingSession =
         activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
-      if (!sharingSession && guardSharingStructureMutation(activeEventName)) return;
 
       if (!activeEventDate) return;
       const dayName = activeEventDate;
@@ -7201,7 +7182,6 @@ const App: React.FC = () => {
       hallDefinitions,
       hallRouteSettings,
       items,
-      guardSharingStructureMutation,
       saveSharingRouteOrderMutation,
       updateExecuteModeItems,
     ],
