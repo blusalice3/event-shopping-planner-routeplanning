@@ -5,6 +5,26 @@
 
 import type { AssignmentMemberProfile } from '../types/item';
 
+type SharingFieldClocks = Record<string, { itemsVersion: number; updatedAt: string }>;
+
+type SharingDeletedItemClockMetadata = {
+  deletedAt: string;
+  deletedBy: string | null;
+  fieldClocks: SharingFieldClocks;
+  itemVersion: number;
+  updatedAt: string;
+};
+
+export type SharingPendingRouteOrderAckSource = 'mutation' | 'reorder' | 'sync';
+
+export type SharingPendingRouteOrderAckMetadata = {
+  version: number;
+  source: SharingPendingRouteOrderAckSource;
+  retryCount: number;
+  lastTriedAt?: string;
+  updatedAt: string;
+};
+
 const DB_NAME = 'EventShoppingPlannerDB';
 const DB_VERSION = 5;
 
@@ -288,6 +308,8 @@ export interface SharingSessionMetadata {
   roomId: string;
   roomCode?: string;
   roomMemberId: string;
+  contractVersion?: number;
+  metadataSchemaVersion?: number;
   eventName: string;
   role: 'host' | 'member';
   status: 'active' | 'paused' | 'expired' | 'leaving' | 'localizing';
@@ -295,6 +317,20 @@ export interface SharingSessionMetadata {
   expiresAt: string;
   itemsVersion: number;
   routeOrderVersions: Record<string, number>;
+  fieldClocksByItemId?: Record<
+    string,
+    Record<string, { itemsVersion: number; updatedAt: string }>
+  >;
+  deletedItemClocks?: Record<string, SharingDeletedItemClockMetadata>;
+  pendingItemSyncAck?: {
+    fromItemsVersion: number;
+    targetItemsVersion: number;
+    affectedLocalItemIds?: string[];
+    retryCount?: number;
+    lastTriedAt?: string;
+    updatedAt: string;
+  };
+  pendingRouteOrderAcks?: Record<string, SharingPendingRouteOrderAckMetadata>;
   lastSnapshotReceiptId?: string;
   lastAckAt?: string;
   lastProcessedEventCreatedAt?: string | null;
