@@ -129,6 +129,11 @@ import {
   type SharingAppState,
 } from './features/sharing/appIntegration';
 import {
+  buildAssignmentRouteGroups,
+  normalizeExecuteIdsByAssignmentRouteLock,
+  reorderExecuteIdsByAssignmentRouteOrder,
+} from './features/sharing/assignmentRouteOrder';
+import {
   ackRoomSyncProgress,
   ackRoomRouteOrderVersions,
   applyRoomItemChangesToItems,
@@ -211,6 +216,7 @@ type SharingCreateItemFields = SharingStructuralItemFields &
     purchaseStatus: PurchaseStatus;
     actualPurchaseQuantity: null;
   };
+type SharingRouteOrderLockMode = 'reject' | 'normalize' | 'allow';
 
 const EMPTY_ASSIGNMENT_MEMBERS: AssignmentMemberProfile[] = [];
 const SHARING_MEMBER_PROFILE_REFRESH_INTERVAL_MS = 10_000;
@@ -355,7 +361,11 @@ const buildSharingStructuralRouteUpdates = (
     currentExecuteModeItems,
     updatedItem.eventDate,
   );
-  const nextRouteItemIds = reorderedExecuteModeItems[updatedItem.eventDate] ?? [];
+  const nextRouteItemIds = normalizeExecuteIdsByAssignmentRouteLock(
+    currentRouteItemIds,
+    reorderedExecuteModeItems[updatedItem.eventDate] ?? [],
+    updatedItems,
+  );
 
   if (areRouteItemIdsEqual(currentRouteItemIds, nextRouteItemIds)) return [];
 
@@ -3375,7 +3385,34 @@ const App: React.FC = () => {
       eventDate: string,
       itemIds: string[],
       successMessage: string,
+      assignmentRouteLockMode: SharingRouteOrderLockMode = 'reject',
     ): Promise<boolean> => {
+      const resolvedItemIds = (() => {
+        if (assignmentRouteLockMode === 'allow') return itemIds;
+
+        const currentRouteItemIds =
+          executeModeItemsRef.current[eventName]?.[eventDate] ?? [];
+        const eventItems = eventListsRef.current[eventName] ?? [];
+        const normalizedItemIds = normalizeExecuteIdsByAssignmentRouteLock(
+          currentRouteItemIds,
+          itemIds,
+          eventItems,
+        );
+
+        if (
+          assignmentRouteLockMode === 'reject' &&
+          !areStringArraysEqual(itemIds, normalizedItemIds)
+        ) {
+          setSharingErrorMessage(
+            '担当者ルートをまたぐ個別移動はできません。担当ルート順序から変更してください。',
+          );
+          return null;
+        }
+
+        return normalizedItemIds;
+      })();
+      if (!resolvedItemIds) return false;
+
       const expectedVersion = session.routeOrderVersions[eventDate] ?? 0;
       setSharingBusy(true);
       setSharingErrorMessage(null);
@@ -3383,7 +3420,7 @@ const App: React.FC = () => {
         const result = await updateRouteOrder({
           roomId: session.roomId,
           eventDate,
-          itemIds,
+          itemIds: resolvedItemIds,
           expectedVersion,
         });
 
@@ -3529,6 +3566,11 @@ const App: React.FC = () => {
             : sourceColumn === 'execute' && targetColumn === 'candidate'
               ? '共有アイテムを候補へ移動しました。'
               : '巡回順を更新しました。',
+          sourceColumn === 'candidate' && targetColumn === 'execute'
+            ? 'normalize'
+            : sourceColumn === 'execute' && targetColumn === 'candidate'
+              ? 'normalize'
+              : 'reject',
         );
         return;
       }
@@ -3763,6 +3805,7 @@ const App: React.FC = () => {
           currentEventDate,
           nextExecuteModeItems[currentEventDate] ?? [],
           '共有アイテムを巡回順に追加しました。',
+          'normalize',
         );
         if (!saved) return;
       } else {
@@ -3834,6 +3877,7 @@ const App: React.FC = () => {
           currentEventDate,
           nextExecuteModeItems[currentEventDate] ?? [],
           '共有アイテムを候補へ移動しました。',
+          'normalize',
         );
         if (!saved) return;
       } else {
@@ -4844,13 +4888,6 @@ const App: React.FC = () => {
         const newDayItems = [...otherItems];
         newDayItems.splice(firstSelectedIndex, 0, ...selectedExecuteItems.map((item) => item.id));
 
-        updateExecuteModeItems((prev) => ({
-          ...prev,
-          [activeEventName]: {
-            ...(prev[activeEventName] || {}),
-            [currentEventDate]: newDayItems,
-          },
-        }));
         void saveSharingRouteOrderMutation(
           sharingSession,
           activeEventName,
@@ -5704,6 +5741,7 @@ const App: React.FC = () => {
           dayName,
           result.executeModeItems[dayName] ?? [],
           '共有アイテムを巡回順に追加しました。',
+          'normalize',
         );
       }
       return result.insertedItemIds;
@@ -5754,6 +5792,7 @@ const App: React.FC = () => {
           dayName,
           result.executeModeItems[dayName] ?? [],
           '共有アイテムを巡回順に追加しました。',
+          'normalize',
         );
       }
       return result.insertedItemIds;
@@ -5795,6 +5834,7 @@ const App: React.FC = () => {
           dayName,
           newExecuteItems[dayName] ?? [],
           '共有アイテムを候補へ移動しました。',
+          'normalize',
         );
       }
       return removeIds;
@@ -5842,6 +5882,7 @@ const App: React.FC = () => {
             dayName,
             current[dayName] ?? [],
             '共有アイテムを巡回順に追加しました。',
+            'normalize',
           );
         }
         return insertedItemIds;
@@ -5892,6 +5933,7 @@ const App: React.FC = () => {
           dayName,
           result.executeModeItems[dayName] ?? [],
           '共有アイテムを巡回順に追加しました。',
+          'normalize',
         );
       }
       return result.insertedItemIds;
@@ -5931,6 +5973,7 @@ const App: React.FC = () => {
           dayName,
           current[dayName] ?? [],
           '共有アイテムを候補へ移動しました。',
+          'normalize',
         );
       }
       return removedItemIds;
@@ -6128,6 +6171,17 @@ const App: React.FC = () => {
       const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
       const nextItemIds = [itemId, ...dayItems];
 
+      if (sharingSession) {
+        void saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          nextItemIds,
+          '共有アイテムの巡回順を更新しました。',
+        );
+        return;
+      }
+
       updateExecuteModeItems((prev) => {
         const prevEventItems = prev[activeEventName] || {};
         return {
@@ -6138,15 +6192,6 @@ const App: React.FC = () => {
           },
         };
       });
-      if (sharingSession) {
-        void saveSharingRouteOrderMutation(
-          sharingSession,
-          activeEventName,
-          dayName,
-          nextItemIds,
-          '共有アイテムの巡回順を更新しました。',
-        );
-      }
     },
     [
       activeEventName,
@@ -6171,6 +6216,17 @@ const App: React.FC = () => {
       const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
       const nextItemIds = [...dayItems, itemId];
 
+      if (sharingSession) {
+        void saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          nextItemIds,
+          '共有アイテムの巡回順を更新しました。',
+        );
+        return;
+      }
+
       updateExecuteModeItems((prev) => {
         const prevEventItems = prev[activeEventName] || {};
         return {
@@ -6181,15 +6237,6 @@ const App: React.FC = () => {
           },
         };
       });
-      if (sharingSession) {
-        void saveSharingRouteOrderMutation(
-          sharingSession,
-          activeEventName,
-          dayName,
-          nextItemIds,
-          '共有アイテムの巡回順を更新しました。',
-        );
-      }
     },
     [
       activeEventName,
@@ -6209,6 +6256,60 @@ const App: React.FC = () => {
 
     return executeModeItems[activeEventName]?.[dayName] || [];
   }, [activeEventName, activeEventDate, isMapTab, executeModeItems]);
+
+  const sharingAssignmentRouteGroups = useMemo(() => {
+    if (!activeEventName || !activeEventDate) return [];
+    if (activeSharingSession?.eventName !== activeEventName) return [];
+
+    const routeItemIds = executeModeItems[activeEventName]?.[activeEventDate] || [];
+    return buildAssignmentRouteGroups(routeItemIds, items, activeSharingAssignmentMembers);
+  }, [
+    activeEventName,
+    activeEventDate,
+    activeSharingSession?.eventName,
+    activeSharingAssignmentMembers,
+    executeModeItems,
+    items,
+  ]);
+
+  const handleApplySharingAssignmentRouteOrder = useCallback(
+    async (groupOrder: string[]) => {
+      if (!activeEventName || !activeEventDate) return;
+      const sharingSession =
+        activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
+      if (!sharingSession) return;
+
+      const currentRouteItemIds =
+        executeModeItemsRef.current[activeEventName]?.[activeEventDate] || [];
+      const eventItems = eventListsRef.current[activeEventName] || items;
+      const nextRouteItemIds = reorderExecuteIdsByAssignmentRouteOrder(
+        currentRouteItemIds,
+        eventItems,
+        groupOrder,
+      );
+      if (areStringArraysEqual(currentRouteItemIds, nextRouteItemIds)) return;
+
+      const saved = await saveSharingRouteOrderMutation(
+        sharingSession,
+        activeEventName,
+        activeEventDate,
+        nextRouteItemIds,
+        '担当ルート順序で全体共有ルートを更新しました。',
+        'allow',
+      );
+      if (saved) {
+        setSelectedItemIds(new Set());
+      }
+    },
+    [
+      activeEventName,
+      activeEventDate,
+      activeSharingSession,
+      items,
+      saveSharingRouteOrderMutation,
+      setSelectedItemIds,
+    ],
+  );
 
 
   const currentTabItems = useMemo(() => {
@@ -7156,6 +7257,17 @@ const App: React.FC = () => {
         hallRouteSettings: currentHallRouteSettings,
       });
 
+      if (sharingSession) {
+        void saveSharingRouteOrderMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          reorderedItems,
+          '共有アイテムの巡回順を更新しました。',
+        );
+        return;
+      }
+
       updateExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
         return {
@@ -7166,15 +7278,6 @@ const App: React.FC = () => {
           },
         };
       });
-      if (sharingSession) {
-        void saveSharingRouteOrderMutation(
-          sharingSession,
-          activeEventName,
-          dayName,
-          reorderedItems,
-          '共有アイテムの巡回順を更新しました。',
-        );
-      }
     },
     [
       activeEventName,
@@ -8180,6 +8283,10 @@ const App: React.FC = () => {
         assignmentMembers={activeSharingAssignmentMembers}
         canAssignItem={canAssignSharingItem}
         onAssignItem={handleAssignSharingItem}
+        sharingAssignmentRouteGroups={sharingAssignmentRouteGroups}
+        onApplySharingAssignmentRouteOrder={
+          activeSharingSession ? handleApplySharingAssignmentRouteOrder : undefined
+        }
       />
 
       <AppOverlayLayer

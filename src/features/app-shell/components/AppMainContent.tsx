@@ -4,8 +4,10 @@ import ShoppingList from '../../../components/ShoppingList';
 import SortAscendingIcon from '../../../components/icons/SortAscendingIcon';
 import SortDescendingIcon from '../../../components/icons/SortDescendingIcon';
 import { MapView } from '../../../components/map';
+import AssignmentRouteOrderPanel from '../../sharing/AssignmentRouteOrderPanel';
 import { getSpaceKey } from '../../../utils/spaceGrouping';
 import type { BulkAddMetadata } from '../../../features/events/bulkAdd';
+import type { AssignmentRouteGroup } from '../../sharing/assignmentRouteOrder';
 import type {
   DayMapData,
   DayMapRotationState,
@@ -180,6 +182,8 @@ type AppMainContentProps = {
   assignmentMembers?: AssignmentMemberProfile[];
   canAssignItem?: (item: ShoppingItem) => boolean;
   onAssignItem?: (itemId: string, assignedToMemberId: string) => void;
+  sharingAssignmentRouteGroups?: AssignmentRouteGroup[];
+  onApplySharingAssignmentRouteOrder?: (groupOrder: string[]) => void;
 };
 
 const AppMainContent: React.FC<AppMainContentProps> = (props) => {
@@ -317,7 +321,10 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     assignmentMembers,
     canAssignItem,
     onAssignItem,
+    sharingAssignmentRouteGroups = [],
+    onApplySharingAssignmentRouteOrder,
   } = props;
+  const [assignmentRouteOrderPanelOpen, setAssignmentRouteOrderPanelOpen] = React.useState(false);
 
   const currentMapRouteHallOrder = React.useMemo(
     () => (activeEventDate ? getHallOrderForDate(activeEventDate) : []),
@@ -456,6 +463,15 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                             className="text-xs px-2 py-1 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors"
                           >
                             {allEditSpaceGroupsCollapsed ? '全て展開' : '全て折りたたむ'}
+                          </button>
+                        )}
+                        {onApplySharingAssignmentRouteOrder && sharingAssignmentRouteGroups.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={() => setAssignmentRouteOrderPanelOpen(true)}
+                            className="rounded bg-white px-2 py-1 text-xs font-medium text-blue-700 ring-1 ring-blue-300 transition-colors hover:bg-blue-100 dark:bg-slate-700 dark:text-blue-200 dark:ring-blue-700 dark:hover:bg-slate-600"
+                          >
+                            担当ルート順序
                           </button>
                         )}
                       </div>
@@ -708,6 +724,12 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                 onAssignItem={onAssignItem}
               />
             )}
+            <AssignmentRouteOrderPanel
+              isOpen={assignmentRouteOrderPanelOpen}
+              onClose={() => setAssignmentRouteOrderPanelOpen(false)}
+              groups={sharingAssignmentRouteGroups}
+              onApplyOrder={(groupOrder) => onApplySharingAssignmentRouteOrder?.(groupOrder)}
+            />
           </div>
         )}
       </main>
