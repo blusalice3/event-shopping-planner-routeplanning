@@ -22,7 +22,10 @@ import type {
 import type {
   AssignmentMemberProfile,
   ExecuteModeItems,
+  MapRouteDisplayMode,
+  MemberRouteCandidateFilter,
   PurchaseStatusControlMode,
+  RouteScope,
   ShoppingItem,
   ViewMode,
 } from '../../../types/item';
@@ -51,6 +54,7 @@ type AppMainContentProps = {
   availableBlocks: string[];
   blocksWithPriorityRemarks: Set<string>;
   candidateColumnItems: ShoppingItem[];
+  candidateInoperableItemIds: Set<string>;
   candidateNumberSortDirection: 'asc' | 'desc' | null;
   cellSelectionMode: CellSelectionMode;
   collapsedSpaces: Set<string>;
@@ -61,6 +65,7 @@ type AppMainContentProps = {
   currentHalls: HallDefinition[];
   currentMapData: DayMapData | null;
   currentMapExecuteItemIds: string[];
+  currentMapMemberRouteItems: Record<string, string[]>;
   currentMapTabName: string | null;
   currentMapTabRotationState: DayMapRotationState;
   currentMapTabViewport: MapViewportState | undefined;
@@ -76,6 +81,9 @@ type AppMainContentProps = {
   executeModeItems: Record<string, ExecuteModeItems>;
   executeSpaceGroupingEnabled: boolean;
   focusModeItems: ShoppingItem[];
+  routeScope: RouteScope;
+  routeMemberId: string | null;
+  routeCandidateFilter: MemberRouteCandidateFilter;
   exportFileInputRef: React.RefObject<HTMLInputElement | null>;
   getHallOrderForDate: (eventDate: string) => string[];
   getHallsForDate: (eventDate: string) => HallDefinition[];
@@ -153,6 +161,7 @@ type AppMainContentProps = {
   mainContentVisible: boolean;
   mapData: MapDataStore;
   mapIsHallOrderOpen: boolean;
+  mapRouteDisplayMode: MapRouteDisplayMode;
   mapIsRouteVisible: boolean;
   mapSelectedHallId: string;
   mapSmartInsertEnabled: boolean;
@@ -181,9 +190,13 @@ type AppMainContentProps = {
   zoomLevel: number;
   assignmentMembers?: AssignmentMemberProfile[];
   canAssignItem?: (item: ShoppingItem) => boolean;
-  onAssignItem?: (itemId: string, assignedToMemberId: string) => void;
+  onAssignItem?: (itemId: string, assignedToMemberId: string | null) => void;
   sharingAssignmentRouteGroups?: AssignmentRouteGroup[];
   onApplySharingAssignmentRouteOrder?: (groupOrder: string[]) => void;
+  onRouteScopeChange?: (scope: RouteScope) => void;
+  onRouteMemberChange?: (roomMemberId: string) => void;
+  onRouteCandidateFilterChange?: (filter: MemberRouteCandidateFilter) => void;
+  onMapRouteDisplayModeChange?: (mode: MapRouteDisplayMode) => void;
 };
 
 const AppMainContent: React.FC<AppMainContentProps> = (props) => {
@@ -194,6 +207,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     availableBlocks,
     blocksWithPriorityRemarks,
     candidateColumnItems,
+    candidateInoperableItemIds,
     candidateNumberSortDirection,
     cellSelectionMode,
     collapsedSpaces,
@@ -204,6 +218,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     currentHalls,
     currentMapData,
     currentMapExecuteItemIds,
+    currentMapMemberRouteItems,
     currentMapTabName,
     currentMapTabRotationState,
     currentMapTabViewport,
@@ -219,6 +234,9 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     executeModeItems,
     executeSpaceGroupingEnabled,
     focusModeItems,
+    routeScope,
+    routeMemberId,
+    routeCandidateFilter,
     exportFileInputRef,
     getHallOrderForDate,
     getHallsForDate,
@@ -292,6 +310,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     mainContentVisible,
     mapData,
     mapIsHallOrderOpen,
+    mapRouteDisplayMode,
     mapIsRouteVisible,
     mapSelectedHallId,
     mapSmartInsertEnabled,
@@ -318,11 +337,15 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     visibleItems,
     visitListPanelOpen,
     zoomLevel,
-    assignmentMembers,
+    assignmentMembers = [],
     canAssignItem,
     onAssignItem,
     sharingAssignmentRouteGroups = [],
     onApplySharingAssignmentRouteOrder,
+    onRouteScopeChange,
+    onRouteMemberChange,
+    onRouteCandidateFilterChange,
+    onMapRouteDisplayModeChange,
   } = props;
   const [assignmentRouteOrderPanelOpen, setAssignmentRouteOrderPanelOpen] = React.useState(false);
 
@@ -381,50 +404,70 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
         )}
         {/* 表示処理の補足 */}
         {activeEventName && isMapTab && currentMapData && currentMapTabName && (
-          <MapView
-            mapData={currentMapData}
-            mapName={currentMapTabName}
-            items={items}
-            executeModeItemIds={currentMapExecuteItemIds}
-            routeHallOrder={currentMapRouteHallOrder}
-            onAddToExecuteList={handleAddToExecuteListFromMap}
-            onAddToExecuteListAtPosition={handleAddToExecuteListFromMapAtPosition}
-            onRemoveFromExecuteList={handleRemoveFromExecuteListFromMap}
-            onBatchAddToExecuteList={handleBatchAddToExecuteListFromMap}
-            onBatchAddToExecuteListAtPosition={handleBatchAddToExecuteListFromMapAtPosition}
-            onBatchRemoveFromExecuteList={handleBatchRemoveFromExecuteListFromMap}
-            onMoveToFirst={handleMoveToFirstFromMap}
-            onMoveToLast={handleMoveToLastFromMap}
-            onUpdateItem={handleUpdateItem}
-            onUpdateItemPriority={handleUpdateItemPriorityFromEdit}
-            onDeleteItem={handleDeleteItemFromMap}
-            onEditRequest={handleEditRequest}
-            onAddNewItem={handleAddNewItemFromMap}
-            onAddItem={handleAddItemFromFocusMode}
-            halls={currentHalls}
-            hallRouteSettings={currentHallRouteSettings}
-            onUpdateHallRouteSettings={handleUpdateHallRouteSettings}
-            onReorderExecuteList={handleReorderExecuteListByHallOrder}
-            vertexSelectionMode={vertexSelectionMode}
-            cellSelectionMode={cellSelectionMode}
-            highlightedCell={visitListPanelOpen ? highlightedMapCell : null}
-            externalSelectedHallId={mapSelectedHallId}
-            onSelectedHallIdChange={setMapSelectedHallId}
-            externalIsRouteVisible={mapIsRouteVisible}
-            onRouteVisibleChange={setMapIsRouteVisible}
-            externalIsHallOrderOpen={mapIsHallOrderOpen}
-            onHallOrderOpenChange={setMapIsHallOrderOpen}
-            hideInternalControls={true}
-            smartInsertEnabled={mapSmartInsertEnabled}
-            smartInsertMode={mapSmartInsertMode}
-            rotationAngle={currentMapTabRotationState.mapTabAngle}
-            onRotationAngleChange={handleMapTabRotationAngleChange}
-            selectionGuideOptions={vertexGuideOptions}
-            initialViewport={currentMapTabViewport}
-            onViewportChange={handleMapViewportChange}
-            numberCellOutlineStyle={numberCellOutlineStyle}
-            assignmentMembers={assignmentMembers}
-          />
+          <div className="space-y-2">
+            {assignmentMembers.length > 0 && onMapRouteDisplayModeChange && (
+              <div className="flex justify-end">
+                <select
+                  value={mapRouteDisplayMode}
+                  onChange={(event) =>
+                    onMapRouteDisplayModeChange(event.target.value as MapRouteDisplayMode)
+                  }
+                  className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs text-slate-800 dark:border-emerald-700 dark:bg-slate-800 dark:text-slate-100"
+                >
+                  <option value="global">地図: 全体</option>
+                  <option value="member">地図: 個人</option>
+                  <option value="allMembers">地図: 全員</option>
+                </select>
+              </div>
+            )}
+            <MapView
+              mapData={currentMapData}
+              mapName={currentMapTabName}
+              items={items}
+              executeModeItemIds={currentMapExecuteItemIds}
+              routeHallOrder={currentMapRouteHallOrder}
+              onAddToExecuteList={handleAddToExecuteListFromMap}
+              onAddToExecuteListAtPosition={handleAddToExecuteListFromMapAtPosition}
+              onRemoveFromExecuteList={handleRemoveFromExecuteListFromMap}
+              onBatchAddToExecuteList={handleBatchAddToExecuteListFromMap}
+              onBatchAddToExecuteListAtPosition={handleBatchAddToExecuteListFromMapAtPosition}
+              onBatchRemoveFromExecuteList={handleBatchRemoveFromExecuteListFromMap}
+              onMoveToFirst={handleMoveToFirstFromMap}
+              onMoveToLast={handleMoveToLastFromMap}
+              onUpdateItem={handleUpdateItem}
+              onUpdateItemPriority={handleUpdateItemPriorityFromEdit}
+              onDeleteItem={handleDeleteItemFromMap}
+              onEditRequest={handleEditRequest}
+              onAddNewItem={handleAddNewItemFromMap}
+              onAddItem={handleAddItemFromFocusMode}
+              halls={currentHalls}
+              hallRouteSettings={currentHallRouteSettings}
+              onUpdateHallRouteSettings={handleUpdateHallRouteSettings}
+              onReorderExecuteList={handleReorderExecuteListByHallOrder}
+              vertexSelectionMode={vertexSelectionMode}
+              cellSelectionMode={cellSelectionMode}
+              highlightedCell={visitListPanelOpen ? highlightedMapCell : null}
+              externalSelectedHallId={mapSelectedHallId}
+              onSelectedHallIdChange={setMapSelectedHallId}
+              externalIsRouteVisible={mapIsRouteVisible}
+              routeDisplayMode={mapRouteDisplayMode}
+              memberRouteItemsForDate={currentMapMemberRouteItems}
+              selectedRouteMemberId={routeMemberId}
+              onRouteVisibleChange={setMapIsRouteVisible}
+              externalIsHallOrderOpen={mapIsHallOrderOpen}
+              onHallOrderOpenChange={setMapIsHallOrderOpen}
+              hideInternalControls={true}
+              smartInsertEnabled={mapSmartInsertEnabled}
+              smartInsertMode={mapSmartInsertMode}
+              rotationAngle={currentMapTabRotationState.mapTabAngle}
+              onRotationAngleChange={handleMapTabRotationAngleChange}
+              selectionGuideOptions={vertexGuideOptions}
+              initialViewport={currentMapTabViewport}
+              onViewportChange={handleMapViewportChange}
+              numberCellOutlineStyle={numberCellOutlineStyle}
+              assignmentMembers={assignmentMembers}
+            />
+          </div>
         )}
       {activeEventName && mainContentVisible && !isMapTab && (
           <div
@@ -476,6 +519,77 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                         )}
                       </div>
                     </div>
+                    {assignmentMembers.length > 0 && onRouteScopeChange && (
+                      <div className="mb-3 flex flex-wrap items-center gap-2">
+                        <div className="inline-flex overflow-hidden rounded-md border border-blue-300 bg-white text-xs dark:border-blue-700 dark:bg-slate-800">
+                          <button
+                            type="button"
+                            onClick={() => onRouteScopeChange('global')}
+                            className={`px-2 py-1 font-medium transition-colors ${
+                              routeScope === 'global'
+                                ? 'bg-blue-600 text-white dark:bg-blue-500'
+                                : 'text-blue-700 hover:bg-blue-50 dark:text-blue-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            全体ルート
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onRouteScopeChange('member')}
+                            className={`px-2 py-1 font-medium transition-colors ${
+                              routeScope === 'member'
+                                ? 'bg-blue-600 text-white dark:bg-blue-500'
+                                : 'text-blue-700 hover:bg-blue-50 dark:text-blue-200 dark:hover:bg-slate-700'
+                            }`}
+                          >
+                            個人ルート
+                          </button>
+                        </div>
+                        {routeScope === 'member' && (
+                          <>
+                            <select
+                              value={routeMemberId ?? ''}
+                              onChange={(event) => onRouteMemberChange?.(event.target.value)}
+                              className="rounded-md border border-blue-300 bg-white px-2 py-1 text-xs text-slate-800 dark:border-blue-700 dark:bg-slate-800 dark:text-slate-100"
+                            >
+                              {assignmentMembers.map((member) => (
+                                <option key={member.roomMemberId} value={member.roomMemberId}>
+                                  {member.displayName}
+                                </option>
+                              ))}
+                            </select>
+                            <select
+                              value={routeCandidateFilter}
+                              onChange={(event) =>
+                                onRouteCandidateFilterChange?.(
+                                  event.target.value as MemberRouteCandidateFilter,
+                                )
+                              }
+                              className="rounded-md border border-slate-300 bg-white px-2 py-1 text-xs text-slate-800 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
+                            >
+                              <option value="assignedOnly">担当のみ</option>
+                              <option value="includeUnassigned">担当+未担当</option>
+                              <option value="all">すべて</option>
+                            </select>
+                          </>
+                        )}
+                        {onMapRouteDisplayModeChange && (
+                          <select
+                            value={mapRouteDisplayMode}
+                            onChange={(event) =>
+                              onMapRouteDisplayModeChange(
+                                event.target.value as MapRouteDisplayMode,
+                              )
+                            }
+                            className="rounded-md border border-emerald-300 bg-white px-2 py-1 text-xs text-slate-800 dark:border-emerald-700 dark:bg-slate-800 dark:text-slate-100"
+                          >
+                            <option value="global">地図: 全体</option>
+                            <option value="member">地図: 個人</option>
+                            <option value="allMembers">地図: 全員</option>
+                          </select>
+                        )}
+                      </div>
+                    )}
                     <p className="text-xs text-blue-700 dark:text-blue-300 mb-3">
                       実行対象として選択中のアイテムを管理します。
                     </p>
@@ -631,6 +745,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                     assignmentMembers={assignmentMembers}
                     canAssignItem={canAssignItem}
                     onAssignItem={onAssignItem}
+                    inoperableItemIds={candidateInoperableItemIds}
                   />
                 </div>
               </div>

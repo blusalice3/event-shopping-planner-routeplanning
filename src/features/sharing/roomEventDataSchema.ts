@@ -24,6 +24,7 @@ const roomEventJsonSchema: z.ZodType<RoomEventJson> = z.lazy(() =>
 );
 
 const stringArrayRecordSchema = z.record(z.string(), z.array(z.string()));
+const memberRouteItemsSchema = z.record(z.string(), stringArrayRecordSchema);
 const jsonRecordSchema = z.record(z.string(), roomEventJsonSchema);
 
 export const roomEventDataSchema = z
@@ -31,6 +32,8 @@ export const roomEventDataSchema = z
     schemaVersion: z.literal(ROOM_EVENT_DATA_SCHEMA_VERSION),
     eventMetadata: jsonRecordSchema,
     executeModeItems: stringArrayRecordSchema,
+    memberRouteItems: memberRouteItemsSchema.default({}),
+    memberProfilesSnapshot: z.array(jsonRecordSchema).default([]),
     dayModes: z.record(z.string(), z.string()),
     mapData: jsonRecordSchema,
     mapRotationSettings: jsonRecordSchema,

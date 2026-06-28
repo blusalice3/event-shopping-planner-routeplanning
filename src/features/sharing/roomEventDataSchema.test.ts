@@ -9,6 +9,8 @@ const validPayload = {
   schemaVersion: 1,
   eventMetadata: { eventName: 'テストイベント' },
   executeModeItems: { '2026-08-15': ['item-1'] },
+  memberRouteItems: {},
+  memberProfilesSnapshot: [],
   dayModes: { '2026-08-15': 'circle' },
   mapData: {},
   mapRotationSettings: {},

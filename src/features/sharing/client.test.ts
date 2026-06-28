@@ -82,6 +82,8 @@ const buildValidRoomSnapshot = (): RoomSnapshot => ({
     schemaVersion: 1,
     eventMetadata: { eventName: 'テストイベント' },
     executeModeItems: {},
+    memberRouteItems: {},
+    memberProfilesSnapshot: [],
     dayModes: {},
     mapData: {},
     mapRotationSettings: {},
@@ -184,6 +186,12 @@ describe('sharing MVP-0c client helpers', () => {
         schemaVersion: 1,
         eventMetadata: { eventName: 'テストイベント' },
         executeModeItems: {},
+        memberRouteItems: {
+          '2026-08-15': {
+            'member-host': ['item-1'],
+          },
+        },
+        memberProfilesSnapshot: [],
         dayModes: {},
         mapData: {},
         mapRotationSettings: {},
@@ -246,6 +254,11 @@ describe('sharing MVP-0c client helpers', () => {
       }),
     ]);
     expect(appData.executeModeItems['テストイベント']).toEqual({});
+    expect(appData.memberRouteItems['テストイベント']).toEqual({
+      '2026-08-15': {
+        'member-host': ['item-1'],
+      },
+    });
 
     expect(buildSharingSessionMetadata(snapshot)).toEqual(
       expect.objectContaining({

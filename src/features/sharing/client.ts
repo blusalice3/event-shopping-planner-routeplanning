@@ -314,11 +314,29 @@ export type BulkAssignRoomItemsInput = {
   }>;
 };
 
+export type MemberRouteOrderUpdate = {
+  eventDate: string;
+  routeMemberId: string;
+  itemIds: string[];
+  expectedVersion: number;
+};
+
+export type UpdateRoomItemAssignmentWithMemberRoutesInput = {
+  roomId: string;
+  assignments: Array<{
+    localItemId: string;
+    assignedToMemberId: string | null;
+    expectedFieldClocks: RoomItemFieldClocks;
+  }>;
+  memberRouteUpdates: MemberRouteOrderUpdate[];
+};
+
 export type RoomVersions = {
   roomId: string;
   itemsVersion: number;
   routeOrderVersion: number | null;
   routeOrderVersions?: Record<string, number>;
+  memberRouteOrderVersions?: MemberRouteOrderVersions;
   roomEventDataUpdatedAt?: string | null;
   expiresAt: string;
   isActive: boolean;
@@ -342,6 +360,47 @@ export type UpdateRouteOrderInput = {
 export type UpdateRouteOrderResult = RouteOrderByDateResult & {
   routeOrderVersions: Record<string, number>;
   notificationId: string | null;
+};
+
+export type MemberRouteOrderVersions = Record<string, Record<string, number>>;
+
+export type MemberRouteOrderByDateResult = {
+  roomId: string;
+  eventDate: string;
+  routeMemberId: string;
+  itemIds: string[];
+  dateMemberRouteOrderVersion: number;
+  routeOrderVersion: number;
+  memberRouteOrderVersions: MemberRouteOrderVersions;
+};
+
+export type UpdateMemberRouteOrderInput = {
+  roomId: string;
+  eventDate: string;
+  routeMemberId: string;
+  itemIds: string[];
+  expectedVersion: number;
+};
+
+export type UpdateMemberRouteOrderResult = MemberRouteOrderByDateResult & {
+  changedMemberRouteOrders: Array<{
+    eventDate: string;
+    routeMemberId: string;
+    itemIds: string[];
+    dateMemberRouteOrderVersion: number;
+  }>;
+  notificationId: string | null;
+};
+
+export type AssignmentWithMemberRoutesResult = BulkRoomItemPurchaseResult & {
+  routeOrderVersion: number | null;
+  memberRouteOrderVersions: MemberRouteOrderVersions;
+  changedMemberRouteOrders: Array<{
+    eventDate: string;
+    routeMemberId: string;
+    itemIds: string[];
+    dateMemberRouteOrderVersion: number;
+  }>;
 };
 
 export type RoomItemChange = {
@@ -430,8 +489,19 @@ export type AckRoomRouteOrderVersionsResult = {
   routeOrderVersions: Record<string, number>;
 };
 
+export type AckRoomMemberRouteOrderVersionsResult = {
+  roomId: string;
+  roomMemberId: string;
+  memberRouteOrderVersions: MemberRouteOrderVersions;
+};
+
 export type RoomSyncRealtimeEvent = {
-  table: 'room_items' | 'notifications' | 'room_members' | 'room_route_order_versions';
+  table:
+    | 'room_items'
+    | 'notifications'
+    | 'room_members'
+    | 'room_route_order_versions'
+    | 'room_member_route_order_versions';
   eventType: string;
   roomId: string;
   id: string | null;
@@ -439,6 +509,7 @@ export type RoomSyncRealtimeEvent = {
   createdAt?: string | null;
   targetMemberId?: string | null;
   eventDate?: string | null;
+  routeMemberId?: string | null;
   routeOrderVersion?: number | null;
 };
 
@@ -680,6 +751,11 @@ const isNonNegativeInteger = (value: unknown): value is number =>
 
 const isRecordOfNonNegativeIntegers = (value: unknown): value is Record<string, number> =>
   isPlainObject(value) && Object.values(value).every(isNonNegativeInteger);
+
+const isNestedRecordOfNonNegativeIntegers = (
+  value: unknown,
+): value is Record<string, Record<string, number>> =>
+  isPlainObject(value) && Object.values(value).every(isRecordOfNonNegativeIntegers);
 
 const isUniqueNonEmptyStringArray = (value: unknown): value is string[] =>
   Array.isArray(value) &&
@@ -975,6 +1051,8 @@ const isRoomVersions = (value: unknown): value is RoomVersions => {
     isNonNegativeInteger(result.itemsVersion) &&
     (result.routeOrderVersion === null || isNonNegativeInteger(result.routeOrderVersion)) &&
     isRecordOfNonNegativeIntegers(result.routeOrderVersions) &&
+    (result.memberRouteOrderVersions === undefined ||
+      isNestedRecordOfNonNegativeIntegers(result.memberRouteOrderVersions)) &&
     (result.roomEventDataUpdatedAt === undefined ||
       isNullableTimestampString(result.roomEventDataUpdatedAt)) &&
     parseClockUpdatedAtMs(result.expiresAt) !== null &&
@@ -999,6 +1077,56 @@ const isUpdateRouteOrderResult = (value: unknown): value is UpdateRouteOrderResu
     isRouteOrderByDateResult(value) &&
     isRecordOfNonNegativeIntegers(result.routeOrderVersions) &&
     isNullableString(result.notificationId)
+  );
+};
+
+const isMemberRouteOrderByDateResult = (
+  value: unknown,
+): value is MemberRouteOrderByDateResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    isNonEmptyString(result.eventDate) &&
+    isNonEmptyString(result.routeMemberId) &&
+    isUniqueNonEmptyStringArray(result.itemIds) &&
+    isNonNegativeInteger(result.dateMemberRouteOrderVersion) &&
+    isNonNegativeInteger(result.routeOrderVersion) &&
+    isNestedRecordOfNonNegativeIntegers(result.memberRouteOrderVersions)
+  );
+};
+
+const isCanonicalMemberRouteOrderResult = (value: unknown): boolean => {
+  const routeOrder = asObject(value);
+  return (
+    isNonEmptyString(routeOrder.eventDate) &&
+    isNonEmptyString(routeOrder.routeMemberId) &&
+    isUniqueNonEmptyStringArray(routeOrder.itemIds) &&
+    isNonNegativeInteger(routeOrder.dateMemberRouteOrderVersion)
+  );
+};
+
+const isUpdateMemberRouteOrderResult = (
+  value: unknown,
+): value is UpdateMemberRouteOrderResult => {
+  const result = asObject(value);
+  return (
+    isMemberRouteOrderByDateResult(value) &&
+    Array.isArray(result.changedMemberRouteOrders) &&
+    result.changedMemberRouteOrders.every(isCanonicalMemberRouteOrderResult) &&
+    isNullableString(result.notificationId)
+  );
+};
+
+const isAssignmentWithMemberRoutesResult = (
+  value: unknown,
+): value is AssignmentWithMemberRoutesResult => {
+  const result = asObject(value);
+  return (
+    isBulkRoomItemPurchaseResult(value) &&
+    (result.routeOrderVersion === null || isNonNegativeInteger(result.routeOrderVersion)) &&
+    isNestedRecordOfNonNegativeIntegers(result.memberRouteOrderVersions) &&
+    Array.isArray(result.changedMemberRouteOrders) &&
+    result.changedMemberRouteOrders.every(isCanonicalMemberRouteOrderResult)
   );
 };
 
@@ -1034,6 +1162,17 @@ const isAckRoomRouteOrderVersionsResult = (
     typeof result.roomId === 'string' &&
     typeof result.roomMemberId === 'string' &&
     isRecordOfNonNegativeIntegers(result.routeOrderVersions)
+  );
+};
+
+const isAckRoomMemberRouteOrderVersionsResult = (
+  value: unknown,
+): value is AckRoomMemberRouteOrderVersionsResult => {
+  const result = asObject(value);
+  return (
+    typeof result.roomId === 'string' &&
+    typeof result.roomMemberId === 'string' &&
+    isNestedRecordOfNonNegativeIntegers(result.memberRouteOrderVersions)
   );
 };
 
@@ -1408,6 +1547,51 @@ const normalizeUpdateRouteOrderEnvelope = (
   };
 };
 
+const normalizeMemberRouteOrderByDateEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<MemberRouteOrderByDateResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isMemberRouteOrderByDateResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<MemberRouteOrderByDateResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeUpdateMemberRouteOrderEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<UpdateMemberRouteOrderResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isUpdateMemberRouteOrderResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<UpdateMemberRouteOrderResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeAssignmentWithMemberRoutesEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<AssignmentWithMemberRoutesResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isAssignmentWithMemberRoutesResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<AssignmentWithMemberRoutesResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
 const normalizeAckRoomSnapshotEnvelope = (
   value: RpcJson,
 ): SharingEnvelope<AckRoomSnapshotResult> => {
@@ -1445,6 +1629,21 @@ const normalizeAckRoomRouteOrderVersionsEnvelope = (
   if (!envelope.ok) return envelope;
   if (!isAckRoomRouteOrderVersionsResult(envelope.data)) {
     return fullItemRefreshRequiredEnvelope<AckRoomRouteOrderVersionsResult>();
+  }
+  return {
+    ok: true,
+    data: envelope.data,
+    contract_version: envelope.contract_version,
+  };
+};
+
+const normalizeAckRoomMemberRouteOrderVersionsEnvelope = (
+  value: RpcJson,
+): SharingEnvelope<AckRoomMemberRouteOrderVersionsResult> => {
+  const envelope = normalizeEnvelope<unknown>(value);
+  if (!envelope.ok) return envelope;
+  if (!isAckRoomMemberRouteOrderVersionsResult(envelope.data)) {
+    return fullItemRefreshRequiredEnvelope<AckRoomMemberRouteOrderVersionsResult>();
   }
   return {
     ok: true,
@@ -1773,6 +1972,28 @@ export const subscribeToRoomSync = (
           roomId: typeof row.room_id === 'string' ? row.room_id : roomId,
           id: null,
           eventDate: typeof row.event_date === 'string' ? row.event_date : null,
+          routeOrderVersion: typeof row.version === 'number' ? row.version : null,
+        });
+      },
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'room_member_route_order_versions',
+        filter: `room_id=eq.${roomId}`,
+      },
+      (payload) => {
+        const row = asObject(payload.new);
+        onEvent({
+          table: 'room_member_route_order_versions',
+          eventType: payload.eventType,
+          roomId: typeof row.room_id === 'string' ? row.room_id : roomId,
+          id: null,
+          eventDate: typeof row.event_date === 'string' ? row.event_date : null,
+          routeMemberId:
+            typeof row.route_member_id === 'string' ? row.route_member_id : null,
           routeOrderVersion: typeof row.version === 'number' ? row.version : null,
         });
       },
@@ -2276,6 +2497,61 @@ export const updateRouteOrder = async (
   return normalizeUpdateRouteOrderEnvelope(result.data);
 };
 
+export const getMemberRouteOrderByDate = async (
+  roomId: string,
+  eventDate: string,
+  routeMemberId: string,
+): Promise<SharingEnvelope<MemberRouteOrderByDateResult>> => {
+  const result = await requireSupabase().rpc('get_member_route_order_by_date', {
+    p_room_id: roomId,
+    p_event_date: eventDate,
+    p_route_member_id: routeMemberId,
+  });
+  if (result.error) {
+    return normalizeEnvelope<MemberRouteOrderByDateResult>(undefined);
+  }
+  return normalizeMemberRouteOrderByDateEnvelope(result.data);
+};
+
+export const updateMemberRouteOrder = async (
+  input: UpdateMemberRouteOrderInput,
+): Promise<SharingEnvelope<UpdateMemberRouteOrderResult>> => {
+  const result = await requireSupabase().rpc('update_member_route_order', {
+    p_room_id: input.roomId,
+    p_event_date: input.eventDate,
+    p_route_member_id: input.routeMemberId,
+    p_item_ids: input.itemIds,
+    p_expected_version: input.expectedVersion,
+  });
+  if (result.error) {
+    return normalizeEnvelope<UpdateMemberRouteOrderResult>(undefined);
+  }
+  return normalizeUpdateMemberRouteOrderEnvelope(result.data);
+};
+
+export const updateRoomItemAssignmentWithMemberRoutes = async (
+  input: UpdateRoomItemAssignmentWithMemberRoutesInput,
+): Promise<SharingEnvelope<AssignmentWithMemberRoutesResult>> => {
+  const result = await requireSupabase().rpc('update_room_item_assignment_with_member_routes', {
+    p_room_id: input.roomId,
+    p_assignment_mutations: input.assignments.map((assignment) => ({
+      localItemId: assignment.localItemId,
+      assignedToMemberId: assignment.assignedToMemberId,
+      expectedFieldClocks: assignment.expectedFieldClocks,
+    })) as Json,
+    p_member_route_updates: input.memberRouteUpdates.map((routeUpdate) => ({
+      eventDate: routeUpdate.eventDate,
+      routeMemberId: routeUpdate.routeMemberId,
+      itemIds: routeUpdate.itemIds,
+      expectedVersion: routeUpdate.expectedVersion,
+    })) as Json,
+  });
+  if (result.error) {
+    return normalizeEnvelope<AssignmentWithMemberRoutesResult>(undefined);
+  }
+  return normalizeAssignmentWithMemberRoutesEnvelope(result.data);
+};
+
 export const getRoomItemChangesSince = async (
   roomId: string,
   sinceItemsVersion: number,
@@ -2559,6 +2835,20 @@ export const ackRoomRouteOrderVersions = async (
   return normalizeAckRoomRouteOrderVersionsEnvelope(result.data);
 };
 
+export const ackRoomMemberRouteOrderVersions = async (
+  roomId: string,
+  memberRouteOrderVersions: MemberRouteOrderVersions,
+): Promise<SharingEnvelope<AckRoomMemberRouteOrderVersionsResult>> => {
+  const result = await requireSupabase().rpc('ack_room_member_route_order_versions', {
+    p_room_id: roomId,
+    p_member_route_order_versions: memberRouteOrderVersions,
+  });
+  if (result.error) {
+    return normalizeEnvelope<AckRoomMemberRouteOrderVersionsResult>(undefined);
+  }
+  return normalizeAckRoomMemberRouteOrderVersionsEnvelope(result.data);
+};
+
 const getString = (
   value: Record<string, RoomEventJson> | undefined,
   key: string,
@@ -2669,6 +2959,10 @@ export const roomSnapshotToAppData = (
       ...(currentAppData?.executeModeItems ?? {}),
       [eventName]: buildCanonicalRouteOrderByDateFromSnapshotItems(snapshot.items),
     },
+    memberRouteItems: {
+      ...(currentAppData?.memberRouteItems ?? {}),
+      [eventName]: snapshot.eventData.memberRouteItems,
+    },
     dayModes: {
       ...(currentAppData?.dayModes ?? {}),
       [eventName]: snapshot.eventData.dayModes,
@@ -2723,6 +3017,7 @@ export const buildSharingSessionMetadata = (
     expiresAt: snapshot.room.expiresAt,
     itemsVersion: snapshot.snapshot.itemsVersion,
     routeOrderVersions: snapshot.snapshot.routeOrderVersions,
+    memberRouteOrderVersions: {},
     fieldClocksByItemId: {
       ...Object.fromEntries(
         snapshot.items.map((item) => [item.localItemId, item.fieldClocks]),

@@ -2,6 +2,7 @@ import type {
   DayModeState,
   EventMetadata,
   ExecuteModeItems,
+  MemberRouteItems,
   ShoppingItem,
 } from '../../types/item';
 import type {
@@ -50,6 +51,7 @@ export type SharingAppState = {
   eventLists: Record<string, ShoppingItem[]>;
   eventMetadata: Record<string, EventMetadata>;
   executeModeItems: Record<string, ExecuteModeItems>;
+  memberRouteItems: Record<string, MemberRouteItems>;
   dayModes: Record<string, DayModeState>;
   mapData: MapDataStore;
   mapRotationSettings: MapRotationSettingsStore;
@@ -93,6 +95,7 @@ export const buildCurrentSharingAppData = (state: SharingAppState): AppData => (
   eventLists: state.eventLists as unknown as Record<string, unknown[]>,
   eventMetadata: state.eventMetadata as unknown as Record<string, unknown>,
   executeModeItems: state.executeModeItems,
+  memberRouteItems: state.memberRouteItems,
   dayModes: state.dayModes,
   mapData: state.mapData as unknown as Record<string, Record<string, unknown>>,
   mapRotationSettings: state.mapRotationSettings as unknown as Record<string, Record<string, unknown>>,
@@ -107,6 +110,12 @@ export const buildRoomEventPayloadForEvent = (
 ): SharingRoomEventPayloadResult => {
   const eventItems = input.eventLists[input.eventName] ?? [];
   const eventExecuteModeItems = stringArrayRecord(input.executeModeItems[input.eventName]);
+  const eventMemberRouteItems = Object.fromEntries(
+    Object.entries(input.memberRouteItems[input.eventName] ?? {}).map(([eventDate, byMember]) => [
+      eventDate,
+      stringArrayRecord(byMember),
+    ]),
+  );
   const eventMetadata = {
     ...jsonRecord(input.eventMetadata[input.eventName] ?? {}),
     eventName: input.eventName,
@@ -116,6 +125,8 @@ export const buildRoomEventPayloadForEvent = (
     schemaVersion: ROOM_EVENT_DATA_SCHEMA_VERSION,
     eventMetadata,
     executeModeItems: eventExecuteModeItems,
+    memberRouteItems: eventMemberRouteItems,
+    memberProfilesSnapshot: [],
     dayModes: Object.fromEntries(
       Object.entries(input.dayModes[input.eventName] ?? {}).filter(
         ([, mode]) => typeof mode === 'string',
@@ -154,6 +165,11 @@ const isRouteOrderVersionRecord = (value: unknown): value is Record<string, numb
     (version) => typeof version === 'number' && Number.isInteger(version) && version >= 0,
   );
 
+const isNestedRouteOrderVersionRecord = (
+  value: unknown,
+): value is Record<string, Record<string, number>> =>
+  isPlainRecord(value) && Object.values(value).every(isRouteOrderVersionRecord);
+
 const isPendingRouteOrderAckRecord = (
   value: unknown,
 ): value is Record<string, number | SharingPendingRouteOrderAckMetadata> =>
@@ -173,6 +189,11 @@ const isPendingRouteOrderAckRecord = (
       typeof entry.updatedAt === 'string'
     );
   });
+
+const isNestedPendingRouteOrderAckRecord = (
+  value: unknown,
+): value is Record<string, Record<string, number | SharingPendingRouteOrderAckMetadata>> =>
+  isPlainRecord(value) && Object.values(value).every(isPendingRouteOrderAckRecord);
 
 const isPendingItemSyncAckMetadata = (
   value: unknown,
@@ -305,11 +326,15 @@ export const isSharingSessionSyncMetadataCompatible = (
   session.contractVersion === SHARING_CONTRACT_VERSION &&
   session.metadataSchemaVersion === SHARING_SYNC_METADATA_SCHEMA_VERSION &&
   isRouteOrderVersionRecord(session.routeOrderVersions) &&
+  (session.memberRouteOrderVersions === undefined ||
+    isNestedRouteOrderVersionRecord(session.memberRouteOrderVersions)) &&
   isPlainRecord(session.fieldClocksByItemId) &&
   (session.pendingItemSyncAck === undefined ||
     isPendingItemSyncAckMetadata(session.pendingItemSyncAck)) &&
   (session.pendingRouteOrderAcks === undefined ||
-    isPendingRouteOrderAckRecord(session.pendingRouteOrderAcks));
+    isPendingRouteOrderAckRecord(session.pendingRouteOrderAcks)) &&
+  (session.pendingMemberRouteOrderAcks === undefined ||
+    isNestedPendingRouteOrderAckRecord(session.pendingMemberRouteOrderAcks));
 
 export const isSharingSessionOperational = (
   session: SharingSessionMetadata,
@@ -325,10 +350,12 @@ export const buildLocalizedSharingSessionForSyncUpgrade = (
   ...session,
   status: 'localizing',
   routeOrderVersions: {},
+  memberRouteOrderVersions: {},
   fieldClocksByItemId: undefined,
   deletedItemClocks: undefined,
   pendingItemSyncAck: undefined,
   pendingRouteOrderAcks: undefined,
+  pendingMemberRouteOrderAcks: undefined,
   lastSnapshotReceiptId: undefined,
   lastProcessedEventCreatedAt: null,
   lastProcessedEventId: null,

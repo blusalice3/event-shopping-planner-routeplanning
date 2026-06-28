@@ -46,6 +46,7 @@ describe('buildRoomEventPayloadForEvent', () => {
           '1日目': ['item-1'],
         },
       },
+      memberRouteItems: {},
       dayModes: {
         テスト即売会: {
           '1日目': 'edit',
@@ -63,6 +64,8 @@ describe('buildRoomEventPayloadForEvent', () => {
     expect(result.payload.schemaVersion).toBe(1);
     expect(result.payload.eventMetadata.eventName).toBe('テスト即売会');
     expect(result.payload.executeModeItems).toEqual({ '1日目': ['item-1'] });
+    expect(result.payload.memberRouteItems).toEqual({});
+    expect(result.payload.memberProfilesSnapshot).toEqual([]);
     expect(result.payload.routeOrderByDate).toEqual({ '1日目': ['item-1'] });
     expect(result.payload.itemSnapshots['item-1']).toMatchObject({
       circle: 'サークルA',
@@ -348,10 +351,12 @@ describe('sync upgrade hard stop helpers', () => {
         ...baseSession,
         status: 'localizing',
         routeOrderVersions: {},
+        memberRouteOrderVersions: {},
         fieldClocksByItemId: undefined,
         deletedItemClocks: undefined,
         pendingItemSyncAck: undefined,
         pendingRouteOrderAcks: undefined,
+        pendingMemberRouteOrderAcks: undefined,
         lastSnapshotReceiptId: undefined,
         lastProcessedEventCreatedAt: null,
         lastProcessedEventId: null,
