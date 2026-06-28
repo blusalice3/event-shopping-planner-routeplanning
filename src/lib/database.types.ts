@@ -460,6 +460,7 @@ export type Database = {
           last_processed_event_id: string | null
           last_snapshot_ack_at: string | null
           last_snapshot_receipt_id: string | null
+          member_route_order_versions: Json
           processed_event_ids: Json
           room_id: string
           room_member_id: string
@@ -473,6 +474,7 @@ export type Database = {
           last_processed_event_id?: string | null
           last_snapshot_ack_at?: string | null
           last_snapshot_receipt_id?: string | null
+          member_route_order_versions?: Json
           processed_event_ids?: Json
           room_id: string
           room_member_id: string
@@ -486,6 +488,7 @@ export type Database = {
           last_processed_event_id?: string | null
           last_snapshot_ack_at?: string | null
           last_snapshot_receipt_id?: string | null
+          member_route_order_versions?: Json
           processed_event_ids?: Json
           room_id?: string
           room_member_id?: string
@@ -564,6 +567,58 @@ export type Database = {
             columns: ["room_id"]
             isOneToOne: false
             referencedRelation: "rooms"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      room_member_route_order_versions: {
+        Row: {
+          created_at: string
+          event_date: string
+          room_id: string
+          route_member_id: string
+          updated_at: string
+          updated_by: string | null
+          version: number
+        }
+        Insert: {
+          created_at?: string
+          event_date: string
+          room_id: string
+          route_member_id: string
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Update: {
+          created_at?: string
+          event_date?: string
+          room_id?: string
+          route_member_id?: string
+          updated_at?: string
+          updated_by?: string | null
+          version?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "room_member_route_order_versions_room_id_fkey"
+            columns: ["room_id"]
+            isOneToOne: false
+            referencedRelation: "rooms"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "room_member_route_order_versions_route_member_id_fkey"
+            columns: ["route_member_id"]
+            isOneToOne: false
+            referencedRelation: "room_members"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "room_member_route_order_versions_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "room_members"
             referencedColumns: ["id"]
           },
         ]
@@ -665,6 +720,10 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      ack_room_member_route_order_versions: {
+        Args: { p_member_route_order_versions: Json; p_room_id: string }
+        Returns: Json
+      }
       ack_room_route_order_versions: {
         Args: { p_room_id: string; p_route_order_versions: Json }
         Returns: Json
@@ -765,6 +824,14 @@ export type Database = {
       }
       get_room_snapshot: { Args: { p_room_id: string }; Returns: Json }
       get_room_versions: { Args: { p_room_id: string }; Returns: Json }
+      get_member_route_order_by_date: {
+        Args: {
+          p_event_date: string
+          p_room_id: string
+          p_route_member_id: string
+        }
+        Returns: Json
+      }
       get_route_order_by_date: {
         Args: { p_event_date: string; p_room_id: string }
         Returns: Json
@@ -879,6 +946,24 @@ export type Database = {
           p_event_date: string
           p_expected_version: number
           p_item_ids: string[]
+          p_room_id: string
+        }
+        Returns: Json
+      }
+      update_member_route_order: {
+        Args: {
+          p_event_date: string
+          p_expected_version: number
+          p_item_ids: string[]
+          p_room_id: string
+          p_route_member_id: string
+        }
+        Returns: Json
+      }
+      update_room_item_assignment_with_member_routes: {
+        Args: {
+          p_assignment_mutations: Json
+          p_member_route_updates: Json
           p_room_id: string
         }
         Returns: Json

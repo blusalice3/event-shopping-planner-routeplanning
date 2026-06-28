@@ -66,3 +66,11 @@ export interface DayModeState {
 export interface ExecuteModeItems {
   [eventDate: string]: string[];
 }
+
+export type MemberRouteItems = Record<string, Record<string, string[]>>;
+
+export type RouteScope = 'global' | 'member';
+
+export type MemberRouteCandidateFilter = 'assignedOnly' | 'includeUnassigned' | 'all';
+
+export type MapRouteDisplayMode = 'global' | 'member' | 'allMembers';

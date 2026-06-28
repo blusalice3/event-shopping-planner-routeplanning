@@ -3,6 +3,7 @@ import {
   DayModeState,
   EventMetadata,
   ExecuteModeItems,
+  MemberRouteItems,
   ShoppingItem,
 } from '../types/item';
 import { normalizeLimitedPurchaseFields } from '../utils/purchaseQuantity';
@@ -20,6 +21,7 @@ type PersistedStateValues = {
   eventLists: Record<string, ShoppingItem[]>;
   eventMetadata: Record<string, EventMetadata>;
   executeModeItems: Record<string, ExecuteModeItems>;
+  memberRouteItems: Record<string, MemberRouteItems>;
   dayModes: Record<string, DayModeState>;
   mapData: MapDataStore;
   mapRotationSettings: MapRotationSettingsStore;
@@ -33,6 +35,7 @@ type PersistedStateSetters = {
   setEventLists: Dispatch<SetStateAction<Record<string, ShoppingItem[]>>>;
   setEventMetadata: Dispatch<SetStateAction<Record<string, EventMetadata>>>;
   setExecuteModeItems: Dispatch<SetStateAction<Record<string, ExecuteModeItems>>>;
+  setMemberRouteItems: Dispatch<SetStateAction<Record<string, MemberRouteItems>>>;
   setDayModes: Dispatch<SetStateAction<Record<string, DayModeState>>>;
   setMapData: Dispatch<SetStateAction<MapDataStore>>;
   setMapRotationSettings: Dispatch<SetStateAction<MapRotationSettingsStore>>;
@@ -60,6 +63,7 @@ export function useIndexedDbPersistence({
     eventLists,
     eventMetadata,
     executeModeItems,
+    memberRouteItems,
     dayModes,
     mapData,
     mapRotationSettings,
@@ -72,6 +76,7 @@ export function useIndexedDbPersistence({
     setEventLists,
     setEventMetadata,
     setExecuteModeItems,
+    setMemberRouteItems,
     setDayModes,
     setMapData,
     setMapRotationSettings,
@@ -90,6 +95,7 @@ export function useIndexedDbPersistence({
           loadedEventLists,
           loadedMetadata,
           loadedExecuteItems,
+          loadedMemberRouteItems,
           loadedDayModes,
           loadedMapData,
           loadedMapRotationSettings,
@@ -101,6 +107,7 @@ export function useIndexedDbPersistence({
           db.loadEventLists(),
           db.loadEventMetadata(),
           db.loadExecuteModeItems(),
+          db.loadMemberRouteItems(),
           db.loadDayModes(),
           db.loadMapData(),
           db.loadMapRotationSettings(),
@@ -128,6 +135,10 @@ export function useIndexedDbPersistence({
         const resolvedEventLists = resolveLoadResult('eventLists', loadedEventLists);
         const resolvedMetadata = resolveLoadResult('eventMetadata', loadedMetadata);
         const resolvedExecuteItems = resolveLoadResult('executeModeItems', loadedExecuteItems);
+        const resolvedMemberRouteItems = resolveLoadResult(
+          'memberRouteItems',
+          loadedMemberRouteItems,
+        );
         const resolvedDayModes = resolveLoadResult('dayModes', loadedDayModes);
         const resolvedMapData = resolveLoadResult('mapData', loadedMapData);
         const resolvedMapRotationSettings = resolveLoadResult(
@@ -162,6 +173,7 @@ export function useIndexedDbPersistence({
         setEventLists(migratedLists);
         setEventMetadata(resolvedMetadata as Record<string, EventMetadata>);
         setExecuteModeItems(resolvedExecuteItems as Record<string, ExecuteModeItems>);
+        setMemberRouteItems(resolvedMemberRouteItems as Record<string, MemberRouteItems>);
         setDayModes(resolvedDayModes as Record<string, DayModeState>);
         setMapData(resolvedMapData as MapDataStore);
         setMapRotationSettings(resolvedMapRotationSettings as MapRotationSettingsStore);
@@ -188,6 +200,7 @@ export function useIndexedDbPersistence({
     setEventLists,
     setEventMetadata,
     setExecuteModeItems,
+    setMemberRouteItems,
     setHallDefinitions,
     setHallRouteSettings,
     setMapData,
@@ -206,6 +219,7 @@ export function useIndexedDbPersistence({
           db.saveEventLists(eventLists),
           db.saveEventMetadata(eventMetadata),
           db.saveExecuteModeItems(executeModeItems),
+          db.saveMemberRouteItems(memberRouteItems),
           db.saveDayModes(dayModes),
           db.saveMapData(mapData),
           db.saveMapRotationSettings(mapRotationSettings),
@@ -230,6 +244,7 @@ export function useIndexedDbPersistence({
     eventLists,
     eventMetadata,
     executeModeItems,
+    memberRouteItems,
     dayModes,
     mapData,
     mapRotationSettings,

@@ -26,13 +26,14 @@ export type SharingPendingRouteOrderAckMetadata = {
 };
 
 const DB_NAME = 'EventShoppingPlannerDB';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 // ストア名
 const STORES = {
   EVENT_LISTS: 'eventLists',
   EVENT_METADATA: 'eventMetadata',
   EXECUTE_MODE_ITEMS: 'executeModeItems',
+  MEMBER_ROUTE_ITEMS: 'memberRouteItems',
   DAY_MODES: 'dayModes',
   MAP_DATA: 'mapData',
   MAP_ROTATION_SETTINGS: 'mapRotationSettings',
@@ -294,6 +295,7 @@ export interface AppData {
   eventLists: Record<string, unknown[]>;
   eventMetadata: Record<string, unknown>;
   executeModeItems: Record<string, Record<string, string[]>>;
+  memberRouteItems: Record<string, Record<string, Record<string, string[]>>>;
   dayModes: Record<string, Record<string, string>>;
   mapData: Record<string, Record<string, unknown>>;
   mapRotationSettings: Record<string, Record<string, unknown>>;
@@ -317,6 +319,7 @@ export interface SharingSessionMetadata {
   expiresAt: string;
   itemsVersion: number;
   routeOrderVersions: Record<string, number>;
+  memberRouteOrderVersions?: Record<string, Record<string, number>>;
   fieldClocksByItemId?: Record<
     string,
     Record<string, { itemsVersion: number; updatedAt: string }>
@@ -331,6 +334,7 @@ export interface SharingSessionMetadata {
     updatedAt: string;
   };
   pendingRouteOrderAcks?: Record<string, SharingPendingRouteOrderAckMetadata>;
+  pendingMemberRouteOrderAcks?: Record<string, Record<string, SharingPendingRouteOrderAckMetadata>>;
   lastSnapshotReceiptId?: string;
   lastAckAt?: string;
   lastProcessedEventCreatedAt?: string | null;
@@ -422,6 +426,18 @@ export const db = {
     return loadData(STORES.EXECUTE_MODE_ITEMS, 'data');
   },
 
+  // メンバー別ルートアイテム
+  async saveMemberRouteItems(
+    data: Record<string, Record<string, Record<string, string[]>>>,
+  ): Promise<void> {
+    await saveData(STORES.MEMBER_ROUTE_ITEMS, 'data', data);
+  },
+  async loadMemberRouteItems(): Promise<
+    LoadResult<Record<string, Record<string, Record<string, string[]>>>>
+  > {
+    return loadData(STORES.MEMBER_ROUTE_ITEMS, 'data');
+  },
+
   // 日モード
   async saveDayModes(data: Record<string, Record<string, string>>): Promise<void> {
     await saveData(STORES.DAY_MODES, 'data', data);
@@ -499,6 +515,12 @@ export const db = {
         db.loadExecuteModeItems,
         db.saveExecuteModeItems,
       );
+      await removeEventFromStore(
+        eventName,
+        STORES.MEMBER_ROUTE_ITEMS,
+        db.loadMemberRouteItems,
+        db.saveMemberRouteItems,
+      );
       await removeEventFromStore(eventName, STORES.DAY_MODES, db.loadDayModes, db.saveDayModes);
       await removeEventFromStore(eventName, STORES.MAP_DATA, db.loadMapData, db.saveMapData);
       await removeEventFromStore(
@@ -542,6 +564,7 @@ export const db = {
       eventListsResult,
       eventMetadataResult,
       executeModeItemsResult,
+      memberRouteItemsResult,
       dayModesResult,
       mapDataResult,
       mapRotationSettingsResult,
@@ -553,6 +576,7 @@ export const db = {
       db.loadEventLists(),
       db.loadEventMetadata(),
       db.loadExecuteModeItems(),
+      db.loadMemberRouteItems(),
       db.loadDayModes(),
       db.loadMapData(),
       db.loadMapRotationSettings(),
@@ -566,6 +590,7 @@ export const db = {
       eventLists: resolveLoadResultData(STORES.EVENT_LISTS, eventListsResult),
       eventMetadata: resolveLoadResultData(STORES.EVENT_METADATA, eventMetadataResult),
       executeModeItems: resolveLoadResultData(STORES.EXECUTE_MODE_ITEMS, executeModeItemsResult),
+      memberRouteItems: resolveLoadResultData(STORES.MEMBER_ROUTE_ITEMS, memberRouteItemsResult),
       dayModes: resolveLoadResultData(STORES.DAY_MODES, dayModesResult),
       mapData: resolveLoadResultData(STORES.MAP_DATA, mapDataResult),
       mapRotationSettings: resolveLoadResultData(
@@ -623,6 +648,7 @@ export const db = {
       STORES.EVENT_LISTS,
       STORES.EVENT_METADATA,
       STORES.EXECUTE_MODE_ITEMS,
+      STORES.MEMBER_ROUTE_ITEMS,
       STORES.DAY_MODES,
       STORES.MAP_DATA,
       STORES.MAP_ROTATION_SETTINGS,
@@ -655,6 +681,9 @@ export const db = {
       transaction
         .objectStore(STORES.EXECUTE_MODE_ITEMS)
         .put(input.appData.executeModeItems, 'data');
+      transaction
+        .objectStore(STORES.MEMBER_ROUTE_ITEMS)
+        .put(input.appData.memberRouteItems, 'data');
       transaction.objectStore(STORES.DAY_MODES).put(input.appData.dayModes, 'data');
       transaction.objectStore(STORES.MAP_DATA).put(input.appData.mapData, 'data');
       transaction
