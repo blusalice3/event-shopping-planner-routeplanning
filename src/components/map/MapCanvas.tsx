@@ -29,6 +29,14 @@ import {
 } from '../../utils/routeRendering';
 import MapCanvasPresentation from './MapCanvasPresentation';
 
+export type MemberRouteOverlay = {
+  memberId: string;
+  label: string;
+  color: string;
+  routePoints: MapRoutePoint[];
+  routeSegments: RouteSegment[];
+};
+
 interface MapCanvasProps {
   mapData: DayMapData;
   mapName: string;
@@ -58,6 +66,7 @@ interface MapCanvasProps {
   numberCellOutlineStyle?: NumberCellOutlineStyle;
   routePointsOverride?: MapRoutePoint[];
   routeSegmentsOverride?: RouteSegment[];
+  memberRouteOverlays?: MemberRouteOverlay[];
   routeInsertMissMapDataOverride?: DayMapData;
   forceRouteVisible?: boolean;
   routeInsertSelectionActive?: boolean;
@@ -213,6 +222,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   numberCellOutlineStyle = 'rounded',
   routePointsOverride,
   routeSegmentsOverride,
+  memberRouteOverlays = [],
   routeInsertMissMapDataOverride,
   forceRouteVisible = false,
   routeInsertSelectionActive = false,
@@ -1520,6 +1530,89 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
     });
 
+    if (!isRotationInteracting && effectiveRouteVisible && memberRouteOverlays.length > 0) {
+      const overlayCount = memberRouteOverlays.length;
+      const routeMargin = cellSize * 2;
+      const visMinX = visibleMinX - routeMargin;
+      const visMaxX = visibleMaxX + routeMargin;
+      const visMinY = visibleMinY - routeMargin;
+      const visMaxY = visibleMaxY + routeMargin;
+      const lineWidth = Math.max(2.5, cellSize * 0.075);
+      const outlineWidth = lineWidth + Math.max(3, cellSize * 0.08);
+      const parallelOffset = Math.max(4, cellSize * 0.14);
+
+      const getOffsetPoints = (
+        px1: number,
+        py1: number,
+        px2: number,
+        py2: number,
+        offset: number,
+      ): { x1: number; y1: number; x2: number; y2: number } => {
+        const dx = px2 - px1;
+        const dy = py2 - py1;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (len === 0) return { x1: px1, y1: py1, x2: px2, y2: py2 };
+
+        const nx = -dy / len;
+        const ny = dx / len;
+
+        return {
+          x1: px1 + nx * offset,
+          y1: py1 + ny * offset,
+          x2: px2 + nx * offset,
+          y2: py2 + ny * offset,
+        };
+      };
+
+      const drawOverlayStroke = (
+        overlay: MemberRouteOverlay,
+        overlayIndex: number,
+        strokeStyle: string,
+        width: number,
+      ) => {
+        const offset = (overlayIndex - (overlayCount - 1) / 2) * parallelOffset;
+        ctx.beginPath();
+        ctx.strokeStyle = strokeStyle;
+        ctx.lineWidth = width;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        overlay.routeSegments.forEach((segment) => {
+          if (segment.path.length < 2) return;
+          for (let i = 0; i < segment.path.length - 1; i++) {
+            const p1 = segment.path[i];
+            const p2 = segment.path[i + 1];
+            const offsetted = getOffsetPoints(
+              (p1.col - 0.5) * cellSize,
+              (p1.row - 0.5) * cellSize,
+              (p2.col - 0.5) * cellSize,
+              (p2.row - 0.5) * cellSize,
+              offset,
+            );
+
+            if (offsetted.x1 < visMinX && offsetted.x2 < visMinX) continue;
+            if (offsetted.x1 > visMaxX && offsetted.x2 > visMaxX) continue;
+            if (offsetted.y1 < visMinY && offsetted.y2 < visMinY) continue;
+            if (offsetted.y1 > visMaxY && offsetted.y2 > visMaxY) continue;
+
+            ctx.moveTo(offsetted.x1, offsetted.y1);
+            ctx.lineTo(offsetted.x2, offsetted.y2);
+          }
+        });
+        ctx.stroke();
+      };
+
+      const outlineColor = isDarkMode ? 'rgba(15, 23, 42, 0.72)' : 'rgba(255, 255, 255, 0.82)';
+      memberRouteOverlays.forEach((overlay, overlayIndex) => {
+        if (overlay.routeSegments.length === 0) return;
+        drawOverlayStroke(overlay, overlayIndex, outlineColor, outlineWidth);
+      });
+      memberRouteOverlays.forEach((overlay, overlayIndex) => {
+        if (overlay.routeSegments.length === 0) return;
+        drawOverlayStroke(overlay, overlayIndex, overlay.color, lineWidth);
+      });
+    }
+
     if (!isRotationInteracting && effectiveRouteVisible && routeSegments.length > 0 && routeCrossingData) {
       const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
         switch (priority) {
@@ -2047,6 +2140,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     mapCenterY,
     numberCellOutlineStyle,
     routeCrossingData,
+    memberRouteOverlays,
   ]);
 
   // Keep drawCanvasRef current so rAF can call the latest draw function.

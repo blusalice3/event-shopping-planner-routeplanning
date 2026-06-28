@@ -122,7 +122,8 @@ interface ShoppingListProps {
   skipLimitedPurchaseForSingleQuantity: boolean;
   assignmentMembers?: AssignmentMemberProfile[];
   canAssignItem?: (item: ShoppingItem) => boolean;
-  onAssignItem?: (itemId: string, assignedToMemberId: string) => void;
+  onAssignItem?: (itemId: string, assignedToMemberId: string | null) => void;
+  inoperableItemIds?: Set<string>;
 }
 
 const getGroupDisplayName = (groupId: string | null, hallDefinitions: HallDefinition[]): string => {
@@ -308,6 +309,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   assignmentMembers,
   canAssignItem,
   onAssignItem,
+  inoperableItemIds,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<'execute' | 'candidate' | null>(null);
@@ -2238,6 +2240,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           canMoveDown={globalIndex < items.length - 1}
                           isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
                           isSearchMatch={highlightedItemId === item.id}
+                          isInoperableCandidate={columnType === 'candidate' && !!inoperableItemIds?.has(item.id)}
                           layoutMode={layoutMode}
                           viewMode={viewMode}
                           highlightPrice={priceHighlightItemIds.has(item.id)}
@@ -2769,6 +2772,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         canMoveDown={globalIndex < items.length - 1}
                         isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
                         isSearchMatch={highlightedItemId === item.id}
+                        isInoperableCandidate={columnType === 'candidate' && !!inoperableItemIds?.has(item.id)}
                         layoutMode={layoutMode}
                         viewMode={viewMode}
                         hallIndex={hallIndex}
@@ -2997,6 +3001,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               canMoveDown={index < items.length - 1}
               isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
               isSearchMatch={highlightedItemId === item.id}
+              isInoperableCandidate={columnType === 'candidate' && !!inoperableItemIds?.has(item.id)}
               layoutMode={layoutMode}
               viewMode={viewMode}
               highlightPrice={priceHighlightItemIds.has(item.id)}

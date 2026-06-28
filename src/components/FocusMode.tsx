@@ -90,7 +90,7 @@ interface FocusModeProps {
   purchaseStatusControlMode?: PurchaseStatusControlMode;
   assignmentMembers?: AssignmentMemberProfile[];
   canAssignItem?: (item: ShoppingItem) => boolean;
-  onAssignItem?: (itemId: string, assignedToMemberId: string) => void;
+  onAssignItem?: (itemId: string, assignedToMemberId: string | null) => void;
   isSharingActive?: boolean;
 }
 // スワイプ判定の閾値

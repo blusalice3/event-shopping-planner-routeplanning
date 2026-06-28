@@ -33,6 +33,8 @@ import {
   shouldSkipLimitedPurchaseForTransition,
 } from '../utils/purchaseQuantity';
 
+const UNASSIGNED_MEMBER_SELECT_VALUE = '__unassigned__';
+
 // 外部リンクアイコン
 const ExternalLinkIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <svg
@@ -66,6 +68,7 @@ export interface ShoppingItemCardProps {
   canMoveDown?: boolean;
   isDuplicateCircle?: boolean;
   isSearchMatch?: boolean;
+  isInoperableCandidate?: boolean;
   layoutMode?: 'pc' | 'smartphone';
   viewMode?: 'edit' | 'execute' | 'focus';
   hallIndex?: number;
@@ -79,7 +82,7 @@ export interface ShoppingItemCardProps {
   skipLimitedPurchaseForSingleQuantity: boolean;
   assignmentMembers?: AssignmentMemberProfile[];
   canAssignItem?: (item: ShoppingItem) => boolean;
-  onAssignItem?: (itemId: string, assignedToMemberId: string) => void;
+  onAssignItem?: (itemId: string, assignedToMemberId: string | null) => void;
 }
 
 const statusConfig: Record<
@@ -364,6 +367,7 @@ export const SHOPPING_ITEM_CARD_COMPARISON_KEYS = [
   'canMoveDown',
   'isDuplicateCircle',
   'isSearchMatch',
+  'isInoperableCandidate',
   'layoutMode',
   'viewMode',
   'hallIndex',
@@ -398,6 +402,7 @@ export const areSameShoppingItemCardProps = (
   prev.canMoveDown === next.canMoveDown &&
   prev.isDuplicateCircle === next.isDuplicateCircle &&
   prev.isSearchMatch === next.isSearchMatch &&
+  prev.isInoperableCandidate === next.isInoperableCandidate &&
   prev.layoutMode === next.layoutMode &&
   prev.viewMode === next.viewMode &&
   prev.hallIndex === next.hallIndex &&
@@ -428,6 +433,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   canMoveDown = true,
   isDuplicateCircle = false,
   isSearchMatch = false,
+  isInoperableCandidate = false,
   layoutMode = 'pc',
   viewMode = 'edit',
   hallIndex,
@@ -927,11 +933,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   const assignmentSelectValue =
     item.assignedTo && activeAssignmentMembers.some((member) => member.roomMemberId === item.assignedTo)
       ? item.assignedTo
-      : '';
+      : UNASSIGNED_MEMBER_SELECT_VALUE;
   const handleAssignmentChange = useCallback(
     (event: React.ChangeEvent<HTMLSelectElement>) => {
-      const nextMemberId = event.target.value;
-      if (!nextMemberId || nextMemberId === item.assignedTo) return;
+      const nextMemberId =
+        event.target.value === UNASSIGNED_MEMBER_SELECT_VALUE ? null : event.target.value;
+      if ((nextMemberId ?? null) === (item.assignedTo ?? null)) return;
       onAssignItem?.(item.id, nextMemberId);
     },
     [item.assignedTo, item.id, onAssignItem],
@@ -956,7 +963,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           aria-label="担当者を変更"
           className="max-w-[7.5rem] rounded border border-slate-200 bg-white px-1 py-0.5 text-xs text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100"
         >
-          {!assignmentSelectValue && <option value="">未解決</option>}
+          <option value={UNASSIGNED_MEMBER_SELECT_VALUE}>未担当</option>
           {activeAssignmentMembers.map((member) => (
             <option key={member.roomMemberId} value={member.roomMemberId}>
               {member.displayName}
@@ -1021,6 +1028,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     ${baseBg}
     ${currentStatus.dim ? 'opacity-60 dark:opacity-50' : 'opacity-100'}
     ${isSearchMatch ? 'ring-4 ring-red-500 ring-offset-2' : ''}
+    ${isInoperableCandidate ? 'outline outline-2 outline-red-500 outline-offset-2 dark:outline-red-400' : ''}
   `;
 
   const statusBgOverlay = isUnpurchased

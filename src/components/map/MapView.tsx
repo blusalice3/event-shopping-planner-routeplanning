@@ -12,8 +12,8 @@ import {
   MIN_ZOOM,
   MAX_ZOOM,
 } from '../../types/map';
-import { ShoppingItem, type AssignmentMemberProfile } from '../../types/item';
-import MapCanvas from './MapCanvas';
+import { ShoppingItem, type AssignmentMemberProfile, type MapRouteDisplayMode } from '../../types/item';
+import MapCanvas, { type MemberRouteOverlay } from './MapCanvas';
 import CellItemsPopup from './CellItemsPopup';
 import MapVisitListPanel from './MapVisitListPanel';
 import HallOrderPanel from './HallOrderPanel';
@@ -182,6 +182,9 @@ interface MapViewProps {
   onViewportChange?: (viewport: MapViewportState) => void;
   numberCellOutlineStyle?: import('../../types/map').NumberCellOutlineStyle;
   assignmentMembers?: AssignmentMemberProfile[];
+  routeDisplayMode?: MapRouteDisplayMode;
+  memberRouteItemsForDate?: Record<string, string[]>;
+  selectedRouteMemberId?: string | null;
 }
 
 const MapView: React.FC<MapViewProps> = ({
@@ -227,9 +230,13 @@ const MapView: React.FC<MapViewProps> = ({
   onViewportChange,
   numberCellOutlineStyle = 'rounded',
   assignmentMembers = [],
+  routeDisplayMode = 'global',
+  memberRouteItemsForDate = {},
+  selectedRouteMemberId: _selectedRouteMemberId = null,
 }) => {
   void _onMoveToFirst;
   void _onMoveToLast;
+  void _selectedRouteMemberId;
 
   const [zoomLevel, setZoomLevelState] = useState<number>(initialViewport?.zoomLevel ?? 100);
   const zoomLevelRef = useRef(zoomLevel);
@@ -568,6 +575,8 @@ const MapView: React.FC<MapViewProps> = ({
     selectedHallId === 'all' || halls.length === 0 ? mapData : strictFilteredMapData;
 
   const displayRouteExecuteModeItemIds = useMemo(() => {
+    if (routeDisplayMode === 'allMembers') return [];
+
     return buildMapRouteExecuteItemIds({
       executeModeItemIds: filteredExecuteModeItemIds,
       items: filteredItems,
@@ -584,6 +593,7 @@ const MapView: React.FC<MapViewProps> = ({
     effectiveRouteHallOrder,
     mapDayName,
     mapName,
+    routeDisplayMode,
   ]);
 
   const mapRouteResolutionItems = useMemo(() => {
@@ -694,6 +704,80 @@ const MapView: React.FC<MapViewProps> = ({
       path: simplifyPath(segment.path),
     }));
   }, [displayRoutePoints, displayRoutePathfindingMapData]);
+
+  const memberRouteOverlays = useMemo<MemberRouteOverlay[]>(() => {
+    if (routeDisplayMode !== 'allMembers') return [];
+
+    const dayName = mapDayName || normalizeDisplayText(mapName);
+    return assignmentMembers
+      .map((member) => {
+        const routeItemIds = memberRouteItemsForDate[member.roomMemberId] ?? [];
+        if (routeItemIds.length < 2) return null;
+
+        const hallFilteredItemIds =
+          selectedHallId === 'all' || halls.length === 0
+            ? routeItemIds
+            : routeItemIds.filter((itemId) => {
+                const item = items.find((candidate) => candidate.id === itemId);
+                return item ? isItemInHall(item, selectedHallId) : false;
+              });
+
+        const orderedItemIds = buildMapRouteExecuteItemIds({
+          executeModeItemIds: hallFilteredItemIds,
+          items: filteredItems,
+          mapData: filteredMapData,
+          hallDefinitions: halls,
+          hallOrder: effectiveRouteHallOrder,
+          dayName,
+          selectedHallId,
+        });
+
+        const routePoints = resolveMapRoutePoints({
+          itemIds: orderedItemIds,
+          items: filteredItems,
+          mapData: filteredMapData,
+          hallDefinitions: halls,
+          dayName,
+          selectedHallId,
+          requireCellInMap: false,
+          respectManualHallMismatch: false,
+        }).routePoints;
+
+        if (routePoints.length < 2) return null;
+
+        const routeSegments = generateRouteSegments(displayRoutePathfindingMapData, routePoints).map(
+          (segment) => ({
+            ...segment,
+            path: simplifyPath(segment.path),
+          }),
+        );
+
+        if (routeSegments.length === 0) return null;
+
+        return {
+          memberId: member.roomMemberId,
+          label: member.displayName,
+          color: member.color || '#2563EB',
+          routePoints,
+          routeSegments,
+        };
+      })
+      .filter((overlay): overlay is MemberRouteOverlay => overlay !== null);
+  }, [
+    assignmentMembers,
+    displayRoutePathfindingMapData,
+    effectiveRouteHallOrder,
+    filteredItems,
+    filteredMapData,
+    halls,
+    isItemInHall,
+    items,
+    mapDayName,
+    mapName,
+    memberRouteItemsForDate,
+    routeDisplayMode,
+    selectedHallId,
+  ]);
 
   const mapInsertRouteSegments = useMemo(() => {
     if (mapInsertRoutePoints.length < 2) return [];
@@ -1737,9 +1821,13 @@ const MapView: React.FC<MapViewProps> = ({
         items={filteredItems}
         executeModeItemIds={routeExecuteModeItemIds}
         zoomLevel={zoomLevel}
-        isRouteVisible={isRouteVisible && (halls.length === 0 || selectedHallId !== 'all')}
+        isRouteVisible={
+          isRouteVisible &&
+          (routeDisplayMode === 'allMembers' || halls.length === 0 || selectedHallId !== 'all')
+        }
         routePointsOverride={routePointsForCanvas}
         routeSegmentsOverride={routeSegmentsForCanvas}
+        memberRouteOverlays={memberRouteOverlays}
         routeInsertMissMapDataOverride={routeInsertMissMapDataForCanvas}
         forceRouteVisible={mapRouteInsertPending !== null}
         routeInsertSelectionActive={mapRouteInsertPending !== null}

@@ -30,7 +30,7 @@ interface FocusModeItemListProps {
   onLimitedPurchaseDefer?: (item: ShoppingItem) => void;
   assignmentMembers?: AssignmentMemberProfile[];
   canAssignItem?: (item: ShoppingItem) => boolean;
-  onAssignItem?: (itemId: string, assignedToMemberId: string) => void;
+  onAssignItem?: (itemId: string, assignedToMemberId: string | null) => void;
 }
 
 interface FocusModeHeaderProps {

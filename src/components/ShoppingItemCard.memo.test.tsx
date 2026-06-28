@@ -52,6 +52,7 @@ const representativeShoppingItemCardProps = {
   canMoveDown: true,
   isDuplicateCircle: false,
   isSearchMatch: false,
+  isInoperableCandidate: false,
   layoutMode: 'pc',
   viewMode: 'focus',
   hallIndex: 1,
