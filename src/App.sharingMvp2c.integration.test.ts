@@ -3,6 +3,10 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const appSource = () => readFileSync(resolve(process.cwd(), 'src/App.tsx'), 'utf8');
+const mapViewSource = () =>
+  readFileSync(resolve(process.cwd(), 'src/components/map/MapView.tsx'), 'utf8');
+const mapCanvasSource = () =>
+  readFileSync(resolve(process.cwd(), 'src/components/map/MapCanvas.tsx'), 'utf8');
 
 const sliceBetween = (source: string, startNeedle: string, endNeedle: string) => {
   const start = source.indexOf(startNeedle);
@@ -357,8 +361,77 @@ describe('App MVP-2c sharing integration', () => {
     expect(bulkMoveHandlers).toContain('saveSharingRouteOrderMutation(');
   });
 
+  it('auto assigns shared candidate additions to the operating member', () => {
+    const source = appSource();
+    const assignmentHelper = sliceBetween(
+      source,
+      'const assignSharingRouteItemsToCurrentMember = useCallback',
+      'const handleAssignSharingItem = useCallback',
+    );
+    const moveHandler = sliceBetween(
+      source,
+      'const handleMoveItem = useCallback',
+      'const handleMoveItemVerticalInternal = useCallback',
+    );
+    const bulkMoveHandler = sliceBetween(
+      source,
+      'const handleMoveToExecuteColumn = useCallback',
+      'const handleRemoveFromExecuteColumn = useCallback',
+    );
+    const mapAddHelper = sliceBetween(
+      source,
+      'const saveSharingMapRouteAddMutation = useCallback',
+      'const handleAddToExecuteListFromMap = useCallback',
+    );
+    const mapRouteHandlers = sliceBetween(
+      source,
+      'const handleAddToExecuteListFromMap = useCallback',
+      'const handleAddNewItemFromMap = useCallback',
+    );
+
+    expect(assignmentHelper).toContain('assignedToMemberId: session.roomMemberId');
+    expect(assignmentHelper).toContain('updateRoomItemAssignmentWithMemberRoutes({');
+    expect(assignmentHelper).toContain('buildSharingMemberRouteUpdatesForAssignment(');
+    expect(moveHandler).toContain('assignSharingRouteItemsToCurrentMember(');
+    expect(bulkMoveHandler).toContain('assignSharingRouteItemsToCurrentMember(');
+    expect(bulkMoveHandler).toContain('共有アイテムを巡回順に追加し、担当者を更新しました。');
+    expect(mapAddHelper).toContain('saveSharingRouteOrderMutation(');
+    expect(mapAddHelper).toContain('assignSharingRouteItemsToCurrentMember(');
+    expect(mapRouteHandlers).toContain('saveSharingMapRouteAddMutation(');
+    expect(mapRouteHandlers).toContain('result.insertedItemIds');
+    expect(mapRouteHandlers).toContain('insertedItemIds');
+  });
+
+  it('renders all-member map routes from execute order with member-colored number markers', () => {
+    const mapView = mapViewSource();
+    const mapCanvas = mapCanvasSource();
+    const overlayBuilder = sliceBetween(
+      mapView,
+      'const memberRouteOverlays = useMemo<MemberRouteOverlay[]>(() => {',
+      'const mapInsertRouteSegments = useMemo',
+    );
+    const overlayDrawing = sliceBetween(
+      mapCanvas,
+      'if (!isRotationInteracting && effectiveRouteVisible && memberRouteOverlays.length > 0) {',
+      'if (!isRotationInteracting && effectiveRouteVisible && routeSegments.length > 0 && routeCrossingData) {',
+    );
+
+    expect(overlayBuilder).toContain('executeModeItemIds.filter');
+    expect(overlayBuilder).toContain('item?.assignedTo === member.roomMemberId');
+    expect(overlayBuilder).toContain("color: member.color || '#2563EB'");
+    expect(overlayBuilder).not.toContain('memberRouteItemsForDate[member.roomMemberId]');
+    expect(overlayDrawing).toContain('filterFirstRouteMarkers(overlay.routePoints)');
+    expect(overlayDrawing).toContain('ctx.fillStyle = overlay.color');
+    expect(overlayDrawing).toContain('drawUprightText(String(point.order + 1), px, py)');
+  });
+
   it('saves shared map route operations through route order RPC', () => {
     const source = appSource();
+    const mapAddHelper = sliceBetween(
+      source,
+      'const saveSharingMapRouteAddMutation = useCallback',
+      'const handleAddToExecuteListFromMap = useCallback',
+    );
     const mapRouteHandlers = sliceBetween(
       source,
       'const handleAddToExecuteListFromMap = useCallback',
@@ -376,8 +449,9 @@ describe('App MVP-2c sharing integration', () => {
     );
 
     expect(mapRouteHandlers).toContain('activeSharingSession?.eventName === activeEventName');
-    expect(mapRouteHandlers).toContain('saveSharingRouteOrderMutation(');
-    expect(mapRouteHandlers).toContain('共有アイテムを巡回順に追加しました。');
+    expect(mapAddHelper).toContain('saveSharingRouteOrderMutation(');
+    expect(mapAddHelper).toContain('共有アイテムを巡回順に追加しました。');
+    expect(mapRouteHandlers).toContain('saveSharingMapRouteAddMutation(');
     expect(mapRouteHandlers).toContain('共有アイテムを候補へ移動しました。');
     expect(mapEndpointHandlers).toContain('saveSharingRouteOrderMutation(');
     expect(mapEndpointHandlers).toContain('共有アイテムの巡回順を更新しました。');

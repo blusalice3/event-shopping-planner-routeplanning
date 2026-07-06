@@ -1540,6 +1540,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const lineWidth = Math.max(2.5, cellSize * 0.075);
       const outlineWidth = lineWidth + Math.max(3, cellSize * 0.08);
       const parallelOffset = Math.max(4, cellSize * 0.14);
+      const markerOffset = Math.max(5, cellSize * 0.16);
 
       const getOffsetPoints = (
         px1: number,
@@ -1611,6 +1612,36 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         if (overlay.routeSegments.length === 0) return;
         drawOverlayStroke(overlay, overlayIndex, overlay.color, lineWidth);
       });
+
+      if (isDetailedView) {
+        memberRouteOverlays.forEach((overlay, overlayIndex) => {
+          const markers = filterFirstRouteMarkers(overlay.routePoints);
+          if (markers.length === 0) return;
+
+          const offset = (overlayIndex - (overlayCount - 1) / 2) * markerOffset;
+          markers.forEach((point) => {
+            const px = (point.col - 0.5) * cellSize + offset;
+            const py = (point.row - 0.5) * cellSize - offset;
+
+            if (px < visMinX || px > visMaxX || py < visMinY || py > visMaxY) return;
+
+            const circleSize = Math.max(12, cellSize * 0.5);
+            ctx.beginPath();
+            ctx.fillStyle = overlay.color;
+            ctx.arc(px, py, circleSize / 2, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.lineWidth = Math.max(1.5, cellSize * 0.045);
+            ctx.strokeStyle = isDarkMode ? 'rgba(15, 23, 42, 0.92)' : '#FFFFFF';
+            ctx.stroke();
+
+            ctx.font = `bold ${Math.max(8, circleSize * 0.6)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillStyle = '#FFFFFF';
+            drawUprightText(String(point.order + 1), px, py);
+          });
+        });
+      }
     }
 
     if (!isRotationInteracting && effectiveRouteVisible && routeSegments.length > 0 && routeCrossingData) {

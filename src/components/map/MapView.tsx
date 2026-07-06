@@ -709,18 +709,23 @@ const MapView: React.FC<MapViewProps> = ({
     if (routeDisplayMode !== 'allMembers') return [];
 
     const dayName = mapDayName || normalizeDisplayText(mapName);
+    const itemsById = new Map(items.map((item) => [item.id, item]));
     return assignmentMembers
       .map((member) => {
-        const routeItemIds = memberRouteItemsForDate[member.roomMemberId] ?? [];
-        if (routeItemIds.length < 2) return null;
+        const routeItemIds = executeModeItemIds.filter((itemId) => {
+          const item = itemsById.get(itemId);
+          return item?.assignedTo === member.roomMemberId;
+        });
+        if (routeItemIds.length === 0) return null;
 
         const hallFilteredItemIds =
           selectedHallId === 'all' || halls.length === 0
             ? routeItemIds
             : routeItemIds.filter((itemId) => {
-                const item = items.find((candidate) => candidate.id === itemId);
+                const item = itemsById.get(itemId);
                 return item ? isItemInHall(item, selectedHallId) : false;
               });
+        if (hallFilteredItemIds.length === 0) return null;
 
         const orderedItemIds = buildMapRouteExecuteItemIds({
           executeModeItemIds: hallFilteredItemIds,
@@ -743,16 +748,17 @@ const MapView: React.FC<MapViewProps> = ({
           respectManualHallMismatch: false,
         }).routePoints;
 
-        if (routePoints.length < 2) return null;
+        if (routePoints.length === 0) return null;
 
-        const routeSegments = generateRouteSegments(displayRoutePathfindingMapData, routePoints).map(
-          (segment) => ({
-            ...segment,
-            path: simplifyPath(segment.path),
-          }),
-        );
-
-        if (routeSegments.length === 0) return null;
+        const routeSegments =
+          routePoints.length < 2
+            ? []
+            : generateRouteSegments(displayRoutePathfindingMapData, routePoints).map(
+                (segment) => ({
+                  ...segment,
+                  path: simplifyPath(segment.path),
+                }),
+              );
 
         return {
           memberId: member.roomMemberId,
@@ -767,6 +773,7 @@ const MapView: React.FC<MapViewProps> = ({
     assignmentMembers,
     displayRoutePathfindingMapData,
     effectiveRouteHallOrder,
+    executeModeItemIds,
     filteredItems,
     filteredMapData,
     halls,
