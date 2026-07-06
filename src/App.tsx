@@ -132,6 +132,7 @@ import {
   markPendingItemSyncAckAttempt,
   markPendingRouteOrderAckAttempt,
   mergePendingRouteOrderAcks,
+  repairDuplicateSharingItemIdsForEvent,
   type SharingAppState,
 } from './features/sharing/appIntegration';
 import {
@@ -1262,11 +1263,41 @@ const App: React.FC = () => {
 
   const saveSharingSessionState = useCallback(async (session: SharingSessionMetadata) => {
     await db.saveSharingSession(session);
-    setSharingSessions((prev) => ({
-      ...prev,
-      [session.sessionId]: session,
-    }));
+    setSharingSessions((prev) => {
+      const next = {
+        ...prev,
+        [session.sessionId]: session,
+      };
+      sharingSessionsRef.current = next;
+      return next;
+    });
   }, []);
+
+  const deleteSharingSessionsForEvent = useCallback(
+    async (eventName: string) => {
+      const sessionsToDelete = Object.values(sharingSessionsRef.current).filter(
+        (session) => session.eventName === eventName,
+      );
+      if (sessionsToDelete.length === 0) return;
+
+      await Promise.all(
+        sessionsToDelete.map(async (session) => {
+          await db.deleteSharingSession(session.sessionId);
+          forgetMemberKey(session.roomId);
+        }),
+      );
+
+      setSharingSessions((prev) => {
+        const next = { ...prev };
+        sessionsToDelete.forEach((session) => {
+          delete next[session.sessionId];
+        });
+        sharingSessionsRef.current = next;
+        return next;
+      });
+    },
+    [],
+  );
 
   const localizeSharingSessionForSyncUpgrade = useCallback(
     async (session: SharingSessionMetadata) => {
@@ -1727,21 +1758,43 @@ const App: React.FC = () => {
   const handleCreateSharingRoom = useCallback(
     async (eventName: string, displayName: string) => {
       if (!eventName) return;
-      if (isEventSharingLocked(eventName)) {
-        alert('このイベントは既に共有中です。');
-        return;
+      const existingSharingSession = findActiveSharingSessionForEvent(sharingSessions, eventName);
+      if (existingSharingSession) {
+        const shouldLocalize = window.confirm(
+          `「${eventName}」には以前の共有セッションが残っています。` +
+            'その共有同期を停止してローカルデータとして保持し、新しい共有ルームを作成しますか？',
+        );
+        if (!shouldLocalize) return;
       }
 
       setSharingBusy(true);
       setSharingStatusMessage('共有ルームを作成しています。');
       setSharingErrorMessage(null);
       try {
-        const roomId = createClientRoomId();
-        const memberKey = generateMemberKey();
-        const payload = buildRoomEventPayloadForEvent({
-          ...buildSharingAppState(),
+        if (existingSharingSession) {
+          const localizedSession = buildLocalizedSharingSessionForSyncUpgrade(existingSharingSession);
+          await saveSharingSessionState(localizedSession);
+          forgetMemberKey(existingSharingSession.roomId);
+          setSharingAssignedOnly(false);
+        }
+
+        const sharingState = buildSharingAppState();
+        const repairResult = repairDuplicateSharingItemIdsForEvent({
+          ...sharingState,
           eventName,
         });
+        if (repairResult.repaired) {
+          setEventLists(repairResult.state.eventLists);
+          eventListsRef.current = repairResult.state.eventLists;
+          updateExecuteModeItems(() => repairResult.state.executeModeItems);
+          setMemberRouteItems(repairResult.state.memberRouteItems);
+          memberRouteItemsRef.current = repairResult.state.memberRouteItems;
+          setSharingStatusMessage('重複IDを修復しました。共有ルームを作成しています。');
+        }
+
+        const roomId = createClientRoomId();
+        const memberKey = generateMemberKey();
+        const payload = buildRoomEventPayloadForEvent(repairResult.state);
         const created = await createSharingRoom({
           roomId,
           displayName: displayName.trim() || '主催',
@@ -1757,7 +1810,11 @@ const App: React.FC = () => {
         await applySnapshotAndAck(created.data.roomId, created.data.roomCode);
         setSharingPanelEventName(eventName);
         setSharingPanelMode('invite');
-        setSharingStatusMessage('共有ルームを作成しました。参加URLとQRコードを表示しています。');
+        setSharingStatusMessage(
+          repairResult.repaired
+            ? '重複IDを修復しました。共有ルームを作成しました。参加URLとQRコードを表示しています。'
+            : '共有ルームを作成しました。参加URLとQRコードを表示しています。',
+        );
       } catch (error) {
         console.error('Sharing create error:', error);
         setSharingErrorMessage('共有ルームの作成に失敗しました。設定または通信状態を確認してください。');
@@ -1765,7 +1822,13 @@ const App: React.FC = () => {
         setSharingBusy(false);
       }
     },
-    [applySnapshotAndAck, buildSharingAppState, isEventSharingLocked],
+    [
+      applySnapshotAndAck,
+      buildSharingAppState,
+      saveSharingSessionState,
+      sharingSessions,
+      updateExecuteModeItems,
+    ],
   );
 
   const handleJoinSharingRoom = useCallback(
@@ -4644,8 +4707,15 @@ const App: React.FC = () => {
   );
 
   const handleDeleteEvent = useCallback(
-    (eventName: string) => {
+    async (eventName: string) => {
       if (guardSharingStructureMutation(eventName)) return;
+      try {
+        await deleteSharingSessionsForEvent(eventName);
+      } catch (error) {
+        console.error('Sharing session delete error:', error);
+        alert('共有セッション情報の削除に失敗しました。もう一度お試しください。');
+        return;
+      }
       setEventLists((prev) => removeRecordKey(prev, eventName));
       setEventMetadata((prev) => removeRecordKey(prev, eventName));
       updateExecuteModeItems((prev) => removeRecordKey(prev, eventName));
@@ -4662,7 +4732,7 @@ const App: React.FC = () => {
         setActiveTab('eventList');
       }
     },
-    [activeEventName, guardSharingStructureMutation],
+    [activeEventName, deleteSharingSessionsForEvent, guardSharingStructureMutation],
   );
 
   const handleRenameEvent = useCallback((oldName: string) => {

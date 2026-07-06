@@ -71,6 +71,12 @@ export type SharingRoomEventPayloadResult = {
   itemCount: number;
 };
 
+export type SharingDuplicateItemIdRepairResult = {
+  state: SharingRoomEventPayloadInput;
+  repaired: boolean;
+  repairedItemCount: number;
+};
+
 const jsonClone = (value: unknown): RoomEventJson => {
   if (value === undefined) return null;
   return JSON.parse(JSON.stringify(value)) as RoomEventJson;
@@ -89,6 +95,101 @@ const stringArrayRecord = (value: ExecuteModeItems | undefined): Record<string, 
     result[key] = Array.isArray(ids) ? ids.filter((id): id is string => typeof id === 'string') : [];
   });
   return result;
+};
+
+const replaceRouteItemIds = (
+  routeItems: Record<string, string[]>,
+  idRemapByOccurrence: Map<string, string[]>,
+): Record<string, string[]> =>
+  Object.fromEntries(
+    Object.entries(routeItems).map(([routeKey, itemIds]) => {
+      const nextIndexes = new Map<string, number>();
+      return [
+        routeKey,
+        itemIds.map((itemId) => {
+          const replacements = idRemapByOccurrence.get(itemId);
+          if (!replacements) return itemId;
+          const currentIndex = nextIndexes.get(itemId) ?? 0;
+          nextIndexes.set(itemId, currentIndex + 1);
+          return replacements[Math.min(currentIndex, replacements.length - 1)] ?? itemId;
+        }),
+      ];
+    }),
+  );
+
+const replaceMemberRouteItemIds = (
+  memberRouteItems: MemberRouteItems,
+  idRemapByOccurrence: Map<string, string[]>,
+): MemberRouteItems =>
+  Object.fromEntries(
+    Object.entries(memberRouteItems).map(([eventDate, byMember]) => [
+      eventDate,
+      replaceRouteItemIds(byMember, idRemapByOccurrence),
+    ]),
+  );
+
+export const repairDuplicateSharingItemIdsForEvent = (
+  input: SharingRoomEventPayloadInput,
+  createItemId: () => string = () => crypto.randomUUID(),
+): SharingDuplicateItemIdRepairResult => {
+  const eventItems = input.eventLists[input.eventName] ?? [];
+  const seenIds = new Set<string>();
+  const idRemapByOccurrence = new Map<string, string[]>();
+  let repairedItemCount = 0;
+
+  const repairedItems = eventItems.map((item) => {
+    if (!seenIds.has(item.id)) {
+      seenIds.add(item.id);
+      idRemapByOccurrence.set(item.id, [item.id]);
+      return item;
+    }
+
+    let nextId = createItemId();
+    while (seenIds.has(nextId)) {
+      nextId = createItemId();
+    }
+    seenIds.add(nextId);
+    repairedItemCount++;
+    idRemapByOccurrence.get(item.id)?.push(nextId);
+    return { ...item, id: nextId };
+  });
+
+  if (repairedItemCount === 0) {
+    return {
+      state: input,
+      repaired: false,
+      repairedItemCount: 0,
+    };
+  }
+
+  const nextExecuteModeItems = {
+    ...input.executeModeItems,
+    [input.eventName]: replaceRouteItemIds(
+      input.executeModeItems[input.eventName] ?? {},
+      idRemapByOccurrence,
+    ),
+  };
+  const nextMemberRouteItems = {
+    ...input.memberRouteItems,
+    [input.eventName]: replaceMemberRouteItemIds(
+      input.memberRouteItems[input.eventName] ?? {},
+      idRemapByOccurrence,
+    ),
+  };
+
+  return {
+    state: {
+      ...input,
+      eventLists: {
+        ...input.eventLists,
+        [input.eventName]: repairedItems,
+      },
+      executeModeItems: nextExecuteModeItems,
+      memberRouteItems: nextMemberRouteItems,
+    },
+    repaired: true,
+    repairedItemCount,
+  };
 };
 
 export const buildCurrentSharingAppData = (state: SharingAppState): AppData => ({
