@@ -421,8 +421,9 @@ describe('App MVP-2c sharing integration', () => {
     expect(overlayBuilder).toContain("color: member.color || '#2563EB'");
     expect(overlayBuilder).not.toContain('memberRouteItemsForDate[member.roomMemberId]');
     expect(overlayDrawing).toContain('filterFirstRouteMarkers(overlay.routePoints)');
-    expect(overlayDrawing).toContain('ctx.fillStyle = overlay.color');
-    expect(overlayDrawing).toContain('drawUprightText(String(point.order + 1), px, py)');
+    expect(overlayDrawing).toContain('drawRouteLayer({');
+    expect(overlayDrawing).toContain('resolveSegmentColor: () => overlay.color');
+    expect(overlayDrawing).toContain('resolveMarkerColor: () => overlay.color');
   });
 
   it('saves shared map route operations through route order RPC', () => {

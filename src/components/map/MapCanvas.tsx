@@ -77,6 +77,110 @@ interface MapCanvasProps {
 const BASE_CELL_SIZE = 28; // Base cell size.
 const SCROLL_MARGIN = 5; // Blank-cell scroll margin.
 const FILLED_SCROLL_MARGIN = 25; // Extra margin around filled cells.
+
+type RoutePriorityLevel = 'none' | 'priority' | 'highest';
+
+type RouteLayerCrossingData = {
+  crossingLookup: ReturnType<typeof buildCrossingLookup>;
+  bridgeParams: ReturnType<typeof getBridgeParams>;
+  edgeUsage: Map<string, Set<RoutePriorityLevel>>;
+};
+
+const getRoutePriorityColor = (priority: RoutePriorityLevel | undefined): string => {
+  switch (priority) {
+    case 'highest':
+      return '#EF4444';
+    case 'priority':
+      return '#F97316';
+    default:
+      return '#1976D2';
+  }
+};
+
+const isRouteGroupTransition = (
+  fromPriority: string | undefined,
+  toPriority: string | undefined,
+): boolean => {
+  const from = fromPriority || 'none';
+  const to = toPriority || 'none';
+  return from !== to;
+};
+
+const getRouteEdgeKey = (r1: number, c1: number, r2: number, c2: number): string => {
+  const rr1 = Math.round(r1);
+  const rc1 = Math.round(c1);
+  const rr2 = Math.round(r2);
+  const rc2 = Math.round(c2);
+  if (rr1 < rr2 || (rr1 === rr2 && rc1 < rc2)) {
+    return `${rr1},${rc1}-${rr2},${rc2}`;
+  }
+  return `${rr2},${rc2}-${rr1},${rc1}`;
+};
+
+const getRouteOffsetPoints = (
+  px1: number,
+  py1: number,
+  px2: number,
+  py2: number,
+  offset: number,
+): { x1: number; y1: number; x2: number; y2: number } => {
+  const dx = px2 - px1;
+  const dy = py2 - py1;
+  const len = Math.sqrt(dx * dx + dy * dy);
+  if (len === 0) return { x1: px1, y1: py1, x2: px2, y2: py2 };
+
+  const nx = -dy / len;
+  const ny = dx / len;
+
+  return {
+    x1: px1 + nx * offset,
+    y1: py1 + ny * offset,
+    x2: px2 + nx * offset,
+    y2: py2 + ny * offset,
+  };
+};
+
+const buildRouteLayerCrossingData = (
+  routeSegments: RouteSegment[],
+  cellSize: number,
+): RouteLayerCrossingData => {
+  const allPixelEdges: PixelEdge[][] = routeSegments.map((segment) => {
+    if (segment.path.length < 2) return [];
+    const edges: PixelEdge[] = [];
+    for (let i = 0; i < segment.path.length - 1; i++) {
+      const p1 = segment.path[i];
+      const p2 = segment.path[i + 1];
+      edges.push({
+        x1: (p1.col - 0.5) * cellSize,
+        y1: (p1.row - 0.5) * cellSize,
+        x2: (p2.col - 0.5) * cellSize,
+        y2: (p2.row - 0.5) * cellSize,
+      });
+    }
+    return edges;
+  });
+
+  const crossings = findAllCrossingsIndexed(allPixelEdges, cellSize);
+  const crossingLookup = buildCrossingLookup(crossings);
+  const bridgeParams = getBridgeParams(cellSize);
+  const edgeUsage = new Map<string, Set<RoutePriorityLevel>>();
+
+  routeSegments.forEach((segment) => {
+    if (segment.path.length < 2) return;
+    if (isRouteGroupTransition(segment.fromPriority, segment.toPriority)) return;
+    const priority = (segment.fromPriority || 'none') as RoutePriorityLevel;
+    for (let i = 0; i < segment.path.length - 1; i++) {
+      const p1 = segment.path[i];
+      const p2 = segment.path[i + 1];
+      const key = getRouteEdgeKey(p1.row, p1.col, p2.row, p2.col);
+      if (!edgeUsage.has(key)) edgeUsage.set(key, new Set());
+      edgeUsage.get(key)!.add(priority);
+    }
+  });
+
+  return { crossingLookup, bridgeParams, edgeUsage };
+};
+
 const getDragPanMultiplier = (zoom: number): number => {
   if (zoom < 70) return 2.0;
   if (zoom < 120) return 1.6;
@@ -597,55 +701,21 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const routeCrossingData = useMemo(() => {
     if (!effectiveRouteVisible || routeSegments.length === 0) return null;
 
-    const allPixelEdges: PixelEdge[][] = routeSegments.map((segment) => {
-      if (segment.path.length < 2) return [];
-      const edges: PixelEdge[] = [];
-      for (let i = 0; i < segment.path.length - 1; i++) {
-        const p1 = segment.path[i];
-        const p2 = segment.path[i + 1];
-        edges.push({
-          x1: (p1.col - 0.5) * cellSize,
-          y1: (p1.row - 0.5) * cellSize,
-          x2: (p2.col - 0.5) * cellSize,
-          y2: (p2.row - 0.5) * cellSize,
-        });
-      }
-      return edges;
-    });
-
-    const crossings = findAllCrossingsIndexed(allPixelEdges, cellSize);
-    const crossingLookup = buildCrossingLookup(crossings);
-    const bridgeParams = getBridgeParams(cellSize);
-
-    // Use cell-rounded edge keys for parallel route rendering.
-    const roundToCell = (v: number): number => Math.round(v);
-    const getEdgeKeyLocal = (r1: number, c1: number, r2: number, c2: number): string => {
-      const rr1 = roundToCell(r1); const rc1 = roundToCell(c1);
-      const rr2 = roundToCell(r2); const rc2 = roundToCell(c2);
-      if (rr1 < rr2 || (rr1 === rr2 && rc1 < rc2)) return `${rr1},${rc1}-${rr2},${rc2}`;
-      return `${rr2},${rc2}-${rr1},${rc1}`;
-    };
-
-    const isGroupTransition = (fromPriority: string | undefined, toPriority: string | undefined): boolean => {
-      return (fromPriority || 'none') !== (toPriority || 'none');
-    };
-
-    const edgeUsage = new Map<string, Set<'none' | 'priority' | 'highest'>>();
-    routeSegments.forEach((segment) => {
-      if (segment.path.length < 2) return;
-      if (isGroupTransition(segment.fromPriority, segment.toPriority)) return;
-      const priority = (segment.fromPriority || 'none') as 'none' | 'priority' | 'highest';
-      for (let i = 0; i < segment.path.length - 1; i++) {
-        const p1 = segment.path[i];
-        const p2 = segment.path[i + 1];
-        const key = getEdgeKeyLocal(p1.row, p1.col, p2.row, p2.col);
-        if (!edgeUsage.has(key)) edgeUsage.set(key, new Set());
-        edgeUsage.get(key)!.add(priority);
-      }
-    });
-
-    return { crossingLookup, bridgeParams, edgeUsage };
+    return buildRouteLayerCrossingData(routeSegments, cellSize);
   }, [effectiveRouteVisible, routeSegments, cellSize]);
+
+  const memberRouteCrossingData = useMemo(() => {
+    if (!effectiveRouteVisible || memberRouteOverlays.length === 0) {
+      return new Map<string, RouteLayerCrossingData>();
+    }
+
+    return new Map(
+      memberRouteOverlays.map((overlay) => [
+        overlay.memberId,
+        buildRouteLayerCrossingData(overlay.routeSegments, cellSize),
+      ]),
+    );
+  }, [effectiveRouteVisible, memberRouteOverlays, cellSize]);
 
   const drawCanvas = useCallback(() => {
     const canvas = canvasRef.current;
@@ -727,6 +797,132 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.rotate(-rotationRadians);
       ctx.fillText(text, 0, 0);
       ctx.restore();
+    };
+
+    const drawRouteLayer = (params: {
+      layerRouteSegments: RouteSegment[];
+      crossingData: RouteLayerCrossingData | null | undefined;
+      routeMarkers: Array<{
+        row: number;
+        col: number;
+        order: number;
+        priorityLevel?: RoutePriorityLevel;
+      }>;
+      resolveSegmentColor: (segment: RouteSegment) => string;
+      resolveMarkerColor: (point: { priorityLevel?: RoutePriorityLevel }) => string;
+    }) => {
+      const { layerRouteSegments, crossingData, routeMarkers, resolveSegmentColor, resolveMarkerColor } = params;
+      if (layerRouteSegments.length === 0 || !crossingData) return;
+
+      const { crossingLookup, bridgeParams, edgeUsage } = crossingData;
+      const lineWidth = Math.max(2, cellSize * 0.08);
+      const parallelOffset = Math.max(3, cellSize * 0.12);
+      const routeMargin = cellSize * 2;
+      const visMinX = visibleMinX - routeMargin;
+      const visMaxX = visibleMaxX + routeMargin;
+      const visMinY = visibleMinY - routeMargin;
+      const visMaxY = visibleMaxY + routeMargin;
+      const batcher = new BatchedPathRenderer();
+
+      layerRouteSegments.forEach((segment, segIdx) => {
+        if (segment.path.length < 2) return;
+
+        const isTransition = isRouteGroupTransition(segment.fromPriority, segment.toPriority);
+        const segmentPriority = (segment.fromPriority || 'none') as RoutePriorityLevel;
+        const baseColor = isTransition ? '#9CA3AF' : resolveSegmentColor(segment);
+        const collector = batcher.beginGroup(baseColor, lineWidth);
+
+        for (let i = 0; i < segment.path.length - 1; i++) {
+          const p1 = segment.path[i];
+          const p2 = segment.path[i + 1];
+          const edgeKey = getRouteEdgeKey(p1.row, p1.col, p2.row, p2.col);
+
+          let px1 = (p1.col - 0.5) * cellSize;
+          let py1 = (p1.row - 0.5) * cellSize;
+          let px2 = (p2.col - 0.5) * cellSize;
+          let py2 = (p2.row - 0.5) * cellSize;
+
+          if (!isTransition) {
+            const usedPriorities = edgeUsage.get(edgeKey);
+            const isOverlapping = usedPriorities && usedPriorities.size > 1;
+
+            if (isOverlapping) {
+              const priorities = Array.from(usedPriorities!).sort((a, b) => {
+                const order = { highest: 0, priority: 1, none: 2 };
+                return order[a] - order[b];
+              });
+
+              const priorityIndex = priorities.indexOf(segmentPriority);
+              if (priorityIndex === -1) continue;
+
+              const totalLines = priorities.length;
+              const offsetIndex = priorityIndex - (totalLines - 1) / 2;
+              const offset = offsetIndex * parallelOffset;
+              const offsetted = getRouteOffsetPoints(px1, py1, px2, py2, offset);
+              px1 = offsetted.x1;
+              py1 = offsetted.y1;
+              px2 = offsetted.x2;
+              py2 = offsetted.y2;
+            }
+          }
+
+          if (px1 < visMinX && px2 < visMinX) continue;
+          if (px1 > visMaxX && px2 > visMaxX) continue;
+          if (py1 < visMinY && py2 < visMinY) continue;
+          if (py1 > visMaxY && py2 > visMaxY) continue;
+
+          collectEdgeWithBridges(
+            collector, px1, py1, px2, py2,
+            segIdx, i,
+            crossingLookup, bridgeParams,
+          );
+        }
+
+        const last = segment.path[segment.path.length - 1];
+        const prev = segment.path[segment.path.length - 2];
+        const endX = (last.col - 0.5) * cellSize;
+        const endY = (last.row - 0.5) * cellSize;
+
+        if (endX >= visMinX && endX <= visMaxX && endY >= visMinY && endY <= visMaxY) {
+          const angle = Math.atan2(
+            (last.row - prev.row) * cellSize,
+            (last.col - prev.col) * cellSize,
+          );
+          const arrowSize = Math.max(6, cellSize * 0.25);
+          batcher.addTriangle(
+            baseColor,
+            endX, endY,
+            endX - arrowSize * Math.cos(angle - Math.PI / 6),
+            endY - arrowSize * Math.sin(angle - Math.PI / 6),
+            endX - arrowSize * Math.cos(angle + Math.PI / 6),
+            endY - arrowSize * Math.sin(angle + Math.PI / 6),
+          );
+        }
+      });
+
+      batcher.flush(ctx);
+      ctx.setLineDash([]);
+
+      if (isDetailedView) {
+        routeMarkers.forEach((point) => {
+          const px = (point.col - 0.5) * cellSize;
+          const py = (point.row - 0.5) * cellSize;
+
+          if (px < visMinX || px > visMaxX || py < visMinY || py > visMaxY) return;
+
+          const circleSize = Math.max(12, cellSize * 0.5);
+          ctx.beginPath();
+          ctx.fillStyle = resolveMarkerColor(point);
+          ctx.arc(px, py, circleSize / 2, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.font = `bold ${Math.max(8, circleSize * 0.6)}px sans-serif`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillStyle = '#FFFFFF';
+          drawUprightText(String(point.order + 1), px, py);
+        });
+      }
     };
 
     const splitTokenByWidth = (token: string, maxLineWidth: number): string[] => {
@@ -1531,301 +1727,26 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     });
 
     if (!isRotationInteracting && effectiveRouteVisible && memberRouteOverlays.length > 0) {
-      const overlayCount = memberRouteOverlays.length;
-      const routeMargin = cellSize * 2;
-      const visMinX = visibleMinX - routeMargin;
-      const visMaxX = visibleMaxX + routeMargin;
-      const visMinY = visibleMinY - routeMargin;
-      const visMaxY = visibleMaxY + routeMargin;
-      const lineWidth = Math.max(2.5, cellSize * 0.075);
-      const outlineWidth = lineWidth + Math.max(3, cellSize * 0.08);
-      const parallelOffset = Math.max(4, cellSize * 0.14);
-      const markerOffset = Math.max(5, cellSize * 0.16);
-
-      const getOffsetPoints = (
-        px1: number,
-        py1: number,
-        px2: number,
-        py2: number,
-        offset: number,
-      ): { x1: number; y1: number; x2: number; y2: number } => {
-        const dx = px2 - px1;
-        const dy = py2 - py1;
-        const len = Math.sqrt(dx * dx + dy * dy);
-        if (len === 0) return { x1: px1, y1: py1, x2: px2, y2: py2 };
-
-        const nx = -dy / len;
-        const ny = dx / len;
-
-        return {
-          x1: px1 + nx * offset,
-          y1: py1 + ny * offset,
-          x2: px2 + nx * offset,
-          y2: py2 + ny * offset,
-        };
-      };
-
-      const drawOverlayStroke = (
-        overlay: MemberRouteOverlay,
-        overlayIndex: number,
-        strokeStyle: string,
-        width: number,
-      ) => {
-        const offset = (overlayIndex - (overlayCount - 1) / 2) * parallelOffset;
-        ctx.beginPath();
-        ctx.strokeStyle = strokeStyle;
-        ctx.lineWidth = width;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        overlay.routeSegments.forEach((segment) => {
-          if (segment.path.length < 2) return;
-          for (let i = 0; i < segment.path.length - 1; i++) {
-            const p1 = segment.path[i];
-            const p2 = segment.path[i + 1];
-            const offsetted = getOffsetPoints(
-              (p1.col - 0.5) * cellSize,
-              (p1.row - 0.5) * cellSize,
-              (p2.col - 0.5) * cellSize,
-              (p2.row - 0.5) * cellSize,
-              offset,
-            );
-
-            if (offsetted.x1 < visMinX && offsetted.x2 < visMinX) continue;
-            if (offsetted.x1 > visMaxX && offsetted.x2 > visMaxX) continue;
-            if (offsetted.y1 < visMinY && offsetted.y2 < visMinY) continue;
-            if (offsetted.y1 > visMaxY && offsetted.y2 > visMaxY) continue;
-
-            ctx.moveTo(offsetted.x1, offsetted.y1);
-            ctx.lineTo(offsetted.x2, offsetted.y2);
-          }
+      memberRouteOverlays.forEach((overlay) => {
+        drawRouteLayer({
+          layerRouteSegments: overlay.routeSegments,
+          crossingData: memberRouteCrossingData.get(overlay.memberId),
+          routeMarkers: filterFirstRouteMarkers(overlay.routePoints),
+          resolveSegmentColor: () => overlay.color,
+          resolveMarkerColor: () => overlay.color,
         });
-        ctx.stroke();
-      };
-
-      const outlineColor = isDarkMode ? 'rgba(15, 23, 42, 0.72)' : 'rgba(255, 255, 255, 0.82)';
-      memberRouteOverlays.forEach((overlay, overlayIndex) => {
-        if (overlay.routeSegments.length === 0) return;
-        drawOverlayStroke(overlay, overlayIndex, outlineColor, outlineWidth);
       });
-      memberRouteOverlays.forEach((overlay, overlayIndex) => {
-        if (overlay.routeSegments.length === 0) return;
-        drawOverlayStroke(overlay, overlayIndex, overlay.color, lineWidth);
-      });
-
-      if (isDetailedView) {
-        memberRouteOverlays.forEach((overlay, overlayIndex) => {
-          const markers = filterFirstRouteMarkers(overlay.routePoints);
-          if (markers.length === 0) return;
-
-          const offset = (overlayIndex - (overlayCount - 1) / 2) * markerOffset;
-          markers.forEach((point) => {
-            const px = (point.col - 0.5) * cellSize + offset;
-            const py = (point.row - 0.5) * cellSize - offset;
-
-            if (px < visMinX || px > visMaxX || py < visMinY || py > visMaxY) return;
-
-            const circleSize = Math.max(12, cellSize * 0.5);
-            ctx.beginPath();
-            ctx.fillStyle = overlay.color;
-            ctx.arc(px, py, circleSize / 2, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.lineWidth = Math.max(1.5, cellSize * 0.045);
-            ctx.strokeStyle = isDarkMode ? 'rgba(15, 23, 42, 0.92)' : '#FFFFFF';
-            ctx.stroke();
-
-            ctx.font = `bold ${Math.max(8, circleSize * 0.6)}px sans-serif`;
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillStyle = '#FFFFFF';
-            drawUprightText(String(point.order + 1), px, py);
-          });
-        });
-      }
     }
 
     if (!isRotationInteracting && effectiveRouteVisible && routeSegments.length > 0 && routeCrossingData) {
-      const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
-        switch (priority) {
-          case 'highest':
-            return '#EF4444';
-          case 'priority':
-            return '#F97316';
-          default:
-            return '#1976D2';
-        }
-      };
-
-      const isGroupTransition = (
-        fromPriority: string | undefined,
-        toPriority: string | undefined,
-      ): boolean => {
-        const from = fromPriority || 'none';
-        const to = toPriority || 'none';
-        return from !== to;
-      };
-
-      const { crossingLookup, bridgeParams, edgeUsage } = routeCrossingData;
-
-      const lineWidth = Math.max(2, cellSize * 0.08);
-      const parallelOffset = Math.max(3, cellSize * 0.12);
-
-      // Viewport-culling margin.
-      const routeMargin = cellSize * 2;
-      const visMinX = visibleMinX - routeMargin;
-      const visMaxX = visibleMaxX + routeMargin;
-      const visMinY = visibleMinY - routeMargin;
-      const visMaxY = visibleMaxY + routeMargin;
-
-      // Use cell-rounded edge keys for parallel route rendering.
-      const roundToCell = (v: number): number => Math.round(v);
-      const getEdgeKey = (r1: number, c1: number, r2: number, c2: number): string => {
-        const rr1 = roundToCell(r1);
-        const rc1 = roundToCell(c1);
-        const rr2 = roundToCell(r2);
-        const rc2 = roundToCell(c2);
-        if (rr1 < rr2 || (rr1 === rr2 && rc1 < rc2)) {
-          return `${rr1},${rc1}-${rr2},${rc2}`;
-        }
-        return `${rr2},${rc2}-${rr1},${rc1}`;
-      };
-
-      const getOffsetPoints = (
-        px1: number,
-        py1: number,
-        px2: number,
-        py2: number,
-        offset: number,
-      ): { x1: number; y1: number; x2: number; y2: number } => {
-        const dx = px2 - px1;
-        const dy = py2 - py1;
-        const len = Math.sqrt(dx * dx + dy * dy);
-        if (len === 0) return { x1: px1, y1: py1, x2: px2, y2: py2 };
-
-        const nx = -dy / len;
-        const ny = dx / len;
-
-        return {
-          x1: px1 + nx * offset,
-          y1: py1 + ny * offset,
-          x2: px2 + nx * offset,
-          y2: py2 + ny * offset,
-        };
-      };
-
-      const batcher = new BatchedPathRenderer();
-
-      routeSegments.forEach((segment, segIdx) => {
-        if (segment.path.length < 2) return;
-
-        const isTransition = isGroupTransition(segment.fromPriority, segment.toPriority);
-        const segmentPriority = segment.fromPriority || 'none';
-        const baseColor = isTransition ? '#9CA3AF' : getPriorityColor(segment.fromPriority);
-        const collector = batcher.beginGroup(baseColor, lineWidth);
-
-        for (let i = 0; i < segment.path.length - 1; i++) {
-          const p1 = segment.path[i];
-          const p2 = segment.path[i + 1];
-          const edgeKey = getEdgeKey(p1.row, p1.col, p2.row, p2.col);
-
-          let px1 = (p1.col - 0.5) * cellSize;
-          let py1 = (p1.row - 0.5) * cellSize;
-          let px2 = (p2.col - 0.5) * cellSize;
-          let py2 = (p2.row - 0.5) * cellSize;
-
-          if (!isTransition) {
-            const usedPriorities = edgeUsage.get(edgeKey);
-            const isOverlapping = usedPriorities && usedPriorities.size > 1;
-
-            if (isOverlapping) {
-              const priorities = Array.from(usedPriorities!).sort((a, b) => {
-                const order = { highest: 0, priority: 1, none: 2 };
-                return order[a] - order[b];
-              });
-
-              const priorityIndex = priorities.indexOf(segmentPriority);
-              if (priorityIndex === -1) continue;
-
-              const totalLines = priorities.length;
-              const offsetIndex = priorityIndex - (totalLines - 1) / 2;
-              const offset = offsetIndex * parallelOffset;
-
-              const offsetted = getOffsetPoints(px1, py1, px2, py2, offset);
-              px1 = offsetted.x1;
-              py1 = offsetted.y1;
-              px2 = offsetted.x2;
-              py2 = offsetted.y2;
-            }
-          }
-
-          // Viewport culling: skip segments fully outside the view.
-          if (px1 < visMinX && px2 < visMinX) continue;
-          if (px1 > visMaxX && px2 > visMaxX) continue;
-          if (py1 < visMinY && py2 < visMinY) continue;
-          if (py1 > visMaxY && py2 > visMaxY) continue;
-
-          // Draw with bridge gaps where route lines cross.
-          collectEdgeWithBridges(
-            collector, px1, py1, px2, py2,
-            segIdx, i,
-            crossingLookup, bridgeParams,
-          );
-        }
-
-        // Draw arrowheads.
-        if (segment.path.length >= 2) {
-          const last = segment.path[segment.path.length - 1];
-          const prev = segment.path[segment.path.length - 2];
-
-          const endX = (last.col - 0.5) * cellSize;
-          const endY = (last.row - 0.5) * cellSize;
-
-          // Cull arrowheads outside the viewport.
-          if (endX >= visMinX && endX <= visMaxX && endY >= visMinY && endY <= visMaxY) {
-            const angle = Math.atan2(
-              (last.row - prev.row) * cellSize,
-              (last.col - prev.col) * cellSize,
-            );
-
-            const arrowSize = Math.max(6, cellSize * 0.25);
-            batcher.addTriangle(
-              baseColor,
-              endX, endY,
-              endX - arrowSize * Math.cos(angle - Math.PI / 6),
-              endY - arrowSize * Math.sin(angle - Math.PI / 6),
-              endX - arrowSize * Math.cos(angle + Math.PI / 6),
-              endY - arrowSize * Math.sin(angle + Math.PI / 6),
-            );
-          }
-        }
+      drawRouteLayer({
+        layerRouteSegments: routeSegments,
+        crossingData: routeCrossingData,
+        routeMarkers: visibleRouteMarkers,
+        resolveSegmentColor: (segment) =>
+          getRoutePriorityColor(segment.fromPriority as RoutePriorityLevel | undefined),
+        resolveMarkerColor: (point) => getRoutePriorityColor(point.priorityLevel),
       });
-
-      batcher.flush(ctx);
-      ctx.setLineDash([]);
-
-      if (isDetailedView) {
-        visibleRouteMarkers.forEach((point) => {
-          const px = (point.col - 0.5) * cellSize;
-          const py = (point.row - 0.5) * cellSize;
-
-          // Viewport culling.
-          if (px < visMinX || px > visMaxX || py < visMinY || py > visMaxY) return;
-
-          const circleSize = Math.max(12, cellSize * 0.5);
-          const pointColor = getPriorityColor(point.priorityLevel);
-
-          ctx.beginPath();
-          ctx.fillStyle = pointColor;
-          ctx.arc(px, py, circleSize / 2, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.font = `bold ${Math.max(8, circleSize * 0.6)}px sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillStyle = '#FFFFFF';
-          drawUprightText(String(point.order + 1), px, py);
-        });
-      }
     }
 
     if (!isRotationInteracting && highlightedCell) {
@@ -2171,6 +2092,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     mapCenterY,
     numberCellOutlineStyle,
     routeCrossingData,
+    memberRouteCrossingData,
     memberRouteOverlays,
   ]);
 
