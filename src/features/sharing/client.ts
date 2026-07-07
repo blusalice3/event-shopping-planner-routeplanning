@@ -19,6 +19,7 @@ import {
   type SharingSuccessEnvelope,
 } from './contracts';
 import {
+  CanonicalPayloadError,
   canonicalCreateRoomPayload,
   type CanonicalCreateRoomPayload,
 } from './canonicalCreateRoomPayload';
@@ -53,6 +54,18 @@ const publicGuardUnavailableEnvelope = <T>(): SharingEnvelope<T> => ({
     contract_version: SHARING_CONTRACT_VERSION,
   },
 });
+
+const canonicalPayloadErrorEnvelope = <T>(error: unknown): SharingEnvelope<T> | null => {
+  if (!(error instanceof CanonicalPayloadError)) return null;
+
+  return {
+    ok: false,
+    error: {
+      code: error.reason === 'PAYLOAD_TOO_LARGE' ? 'CREATE_PAYLOAD_TOO_LARGE' : 'INVALID_REQUEST',
+      contract_version: SHARING_CONTRACT_VERSION,
+    },
+  };
+};
 
 const isPublicGuardRequiredButUnavailable = (
   availability: SharingAvailability,
@@ -2113,7 +2126,14 @@ export const createSharingRoom = async (
   }
 
   const client = requireSupabase();
-  const canonical = await canonicalizeRoomEventDataForCreate(input.rawRoomEventDataJson);
+  let canonical: CanonicalCreateRoomPayload;
+  try {
+    canonical = await canonicalizeRoomEventDataForCreate(input.rawRoomEventDataJson);
+  } catch (error) {
+    const envelope = canonicalPayloadErrorEnvelope<CreateSharingRoomResult>(error);
+    if (envelope) return envelope;
+    throw error;
+  }
   const prepared =
     availability.enabled && availability.mode === 'public_guard'
       ? validateCreateRoomChallengeEnvelope(

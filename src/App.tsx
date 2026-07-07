@@ -186,6 +186,10 @@ import {
   forgetMemberKey,
 } from './features/sharing/client';
 import { isRouteAffectingItemPlacementChange } from './features/sharing/routeAffecting';
+import {
+  MAX_CANONICAL_CREATE_PAYLOAD_BYTES,
+  MAX_ROOM_ITEMS,
+} from './features/sharing/contracts';
 import { getSharingAvailability } from './lib/supabase';
 import type { SmartInsertMode, SortState } from './features/app-shell/types';
 import { normalizeSmartInsertMode } from './utils/smartInsertMode';
@@ -877,6 +881,13 @@ const resolveDayMapRotationState = (
   };
 };
 
+const formatUnexpectedSharingError = (error: unknown): string => {
+  if (error instanceof Error) {
+    return `${error.name || 'Error'}${error.message ? `: ${error.message}` : ''}`;
+  }
+  return typeof error === 'string' ? error : 'UNKNOWN_ERROR';
+};
+
 const App: React.FC = () => {
   const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>({});
   const [eventMetadata, setEventMetadata] = useState<Record<string, EventMetadata>>({});
@@ -1260,10 +1271,10 @@ const App: React.FC = () => {
             `${sessionToStop.eventName} の共有同期を停止し、ローカルデータとして保持しました。`,
           );
           setSharingErrorMessage(SHARING_SYNC_UNUSABLE_MESSAGE);
-          return;
+          return false;
         }
         setSharingErrorMessage(`snapshotの取得に失敗しました: ${snapshotEnvelope.error.code}`);
-        return;
+        return false;
       }
 
       const currentAppData = buildCurrentSharingAppData(buildSharingAppState());
@@ -1299,9 +1310,10 @@ const App: React.FC = () => {
 
       if (!ack.ok) {
         setSharingErrorMessage(`snapshotの保存後ackに失敗しました: ${ack.error.code}`);
-        return;
+        return false;
       }
       setSharingErrorMessage(null);
+      return true;
     },
     [
       applySharingAppData,
@@ -1821,6 +1833,7 @@ const App: React.FC = () => {
       setSharingBusy(true);
       setSharingStatusMessage('共有ルームを作成しています。');
       setSharingErrorMessage(null);
+      let createdRoomCode: string | null = null;
       try {
         if (existingSharingSession) {
           const localizedSession = buildLocalizedSharingSessionForSyncUpgrade(existingSharingSession);
@@ -1846,6 +1859,21 @@ const App: React.FC = () => {
         const roomId = createClientRoomId();
         const memberKey = generateMemberKey();
         const payload = buildRoomEventPayloadForEvent(repairResult.state);
+        if (payload.itemCount > MAX_ROOM_ITEMS) {
+          setSharingErrorMessage(
+            `共有ルームの作成に失敗しました: INVALID_REQUEST（アイテム数が上限${MAX_ROOM_ITEMS}件を超えています）`,
+          );
+          return;
+        }
+
+        const payloadSizeBytes = new TextEncoder().encode(payload.rawJson).byteLength;
+        if (payloadSizeBytes > MAX_CANONICAL_CREATE_PAYLOAD_BYTES) {
+          setSharingErrorMessage(
+            `共有ルームの作成に失敗しました: CREATE_PAYLOAD_TOO_LARGE（送信データが上限${MAX_CANONICAL_CREATE_PAYLOAD_BYTES} bytesを超えています）`,
+          );
+          return;
+        }
+
         const created = await createSharingRoom({
           roomId,
           displayName: displayName.trim() || '主催',
@@ -1857,8 +1885,17 @@ const App: React.FC = () => {
           setSharingErrorMessage(`共有ルームの作成に失敗しました: ${created.error.code}`);
           return;
         }
+        createdRoomCode = created.data.roomCode;
 
-        await applySnapshotAndAck(created.data.roomId, created.data.roomCode);
+        const snapshotApplied = await applySnapshotAndAck(created.data.roomId, created.data.roomCode);
+        if (!snapshotApplied) {
+          setSharingPanelEventName(eventName);
+          setSharingPanelMode('status');
+          setSharingStatusMessage(
+            `共有ルームは作成されましたが、初回同期に失敗しました。ルームコード: ${created.data.roomCode}`,
+          );
+          return;
+        }
         setSharingPanelEventName(eventName);
         setSharingPanelMode('invite');
         setSharingStatusMessage(
@@ -1868,7 +1905,15 @@ const App: React.FC = () => {
         );
       } catch (error) {
         console.error('Sharing create error:', error);
-        setSharingErrorMessage('共有ルームの作成に失敗しました。設定または通信状態を確認してください。');
+        if (createdRoomCode) {
+          setSharingErrorMessage(
+            `共有ルームは作成されましたが、初回同期または端末保存に失敗しました: ${formatUnexpectedSharingError(error)}。ルームコード: ${createdRoomCode}`,
+          );
+        } else {
+          setSharingErrorMessage(
+            `共有ルームの作成に失敗しました: ${formatUnexpectedSharingError(error)}`,
+          );
+        }
       } finally {
         setSharingBusy(false);
       }
