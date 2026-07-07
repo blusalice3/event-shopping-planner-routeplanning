@@ -72,6 +72,7 @@ describe('buildRoomEventPayloadForEvent', () => {
       circle: 'サークルA',
       title: '新刊',
     });
+    expect(result.payload.itemSnapshots['item-1']).not.toHaveProperty('assignedTo');
     expect(JSON.parse(result.rawJson)).toEqual(result.payload);
   });
 });
