@@ -189,7 +189,10 @@ type AppMainContentProps = {
   visitListPanelOpen: boolean;
   zoomLevel: number;
   assignmentMembers?: AssignmentMemberProfile[];
+  routeAssignmentMembers?: AssignmentMemberProfile[];
+  canShowAllMemberRoutes?: boolean;
   canAssignItem?: (item: ShoppingItem) => boolean;
+  canUpdatePurchaseFields?: (item: ShoppingItem) => boolean;
   onAssignItem?: (itemId: string, assignedToMemberId: string | null) => void;
   sharingAssignmentRouteGroups?: AssignmentRouteGroup[];
   onApplySharingAssignmentRouteOrder?: (groupOrder: string[]) => void;
@@ -338,7 +341,10 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     visitListPanelOpen,
     zoomLevel,
     assignmentMembers = [],
+    routeAssignmentMembers,
+    canShowAllMemberRoutes = false,
     canAssignItem,
+    canUpdatePurchaseFields,
     onAssignItem,
     sharingAssignmentRouteGroups = [],
     onApplySharingAssignmentRouteOrder,
@@ -416,7 +422,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                 >
                   <option value="global">地図: 全体</option>
                   <option value="member">地図: 個人</option>
-                  <option value="allMembers">地図: 全員</option>
+                  {canShowAllMemberRoutes && <option value="allMembers">地図: 全員</option>}
                 </select>
               </div>
             )}
@@ -552,7 +558,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                               onChange={(event) => onRouteMemberChange?.(event.target.value)}
                               className="rounded-md border border-blue-300 bg-white px-2 py-1 text-xs text-slate-800 dark:border-blue-700 dark:bg-slate-800 dark:text-slate-100"
                             >
-                              {assignmentMembers.map((member) => (
+                              {(routeAssignmentMembers ?? assignmentMembers).map((member) => (
                                 <option key={member.roomMemberId} value={member.roomMemberId}>
                                   {member.displayName}
                                 </option>
@@ -585,7 +591,9 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                           >
                             <option value="global">地図: 全体</option>
                             <option value="member">地図: 個人</option>
-                            <option value="allMembers">地図: 全員</option>
+                            {canShowAllMemberRoutes && (
+                              <option value="allMembers">地図: 全員</option>
+                            )}
                           </select>
                         )}
                       </div>
@@ -635,6 +643,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                     skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                     assignmentMembers={assignmentMembers}
                     canAssignItem={canAssignItem}
+                    canUpdatePurchaseFields={canUpdatePurchaseFields}
                     onAssignItem={onAssignItem}
                   />
                 </div>
@@ -744,6 +753,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                     skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                     assignmentMembers={assignmentMembers}
                     canAssignItem={canAssignItem}
+                    canUpdatePurchaseFields={canUpdatePurchaseFields}
                     onAssignItem={onAssignItem}
                     inoperableItemIds={candidateInoperableItemIds}
                   />
@@ -836,6 +846,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                 purchaseStatusControlMode={purchaseStatusControlMode}
                 assignmentMembers={assignmentMembers}
                 canAssignItem={canAssignItem}
+                canUpdatePurchaseFields={canUpdatePurchaseFields}
                 onAssignItem={onAssignItem}
               />
             )}
