@@ -285,6 +285,12 @@ type SharingMemberRouteUpdate = {
   expectedVersion: number;
 };
 
+type MemberRouteInsertion = {
+  eventDate: string;
+  referenceItemId: string;
+  position: 'before' | 'after';
+};
+
 const applyCanonicalRouteOrderToItems = (
   items: ShoppingItem[],
   routeOrder: CanonicalRouteOrder,
@@ -335,6 +341,51 @@ const routeOrdersReferenceMissingItems = (
 
 const areRouteItemIdsEqual = (a: string[], b: string[]): boolean =>
   a.length === b.length && a.every((itemId, index) => itemId === b[index]);
+
+const uniqueItemIds = (itemIds: string[]): string[] => Array.from(new Set(itemIds));
+
+const buildGlobalRouteItemIdsFromMemberRoutes = ({
+  memberRoutesForDate,
+  previousRouteItemIds,
+  eventItems,
+}: {
+  memberRoutesForDate: Record<string, string[]>;
+  previousRouteItemIds: string[];
+  eventItems: ShoppingItem[];
+}): string[] => {
+  const validItemIds = new Set(eventItems.map((item) => item.id));
+  const routeOwnerByItemId = new Map<string, string>();
+
+  Object.entries(memberRoutesForDate).forEach(([memberId, routeItemIds]) => {
+    routeItemIds.forEach((itemId) => {
+      if (!routeOwnerByItemId.has(itemId)) {
+        routeOwnerByItemId.set(itemId, memberId);
+      }
+    });
+  });
+
+  const memberOrder: string[] = [];
+  const addMemberOrder = (memberId: string | undefined) => {
+    if (!memberId || memberOrder.includes(memberId)) return;
+    if ((memberRoutesForDate[memberId] ?? []).length === 0) return;
+    memberOrder.push(memberId);
+  };
+
+  previousRouteItemIds.forEach((itemId) => addMemberOrder(routeOwnerByItemId.get(itemId)));
+  Object.keys(memberRoutesForDate).forEach(addMemberOrder);
+
+  const nextRouteItemIds: string[] = [];
+  const addedItemIds = new Set<string>();
+  memberOrder.forEach((memberId) => {
+    (memberRoutesForDate[memberId] ?? []).forEach((itemId) => {
+      if (!validItemIds.has(itemId) || addedItemIds.has(itemId)) return;
+      nextRouteItemIds.push(itemId);
+      addedItemIds.add(itemId);
+    });
+  });
+
+  return nextRouteItemIds;
+};
 
 const getChangedMemberRouteVersionKeys = (
   serverVersions: Record<string, Record<string, number>>,
@@ -2025,12 +2076,14 @@ const App: React.FC = () => {
       eventName: string,
       itemIds: string[],
       assignedToMemberId: string | null,
+      insertion?: MemberRouteInsertion,
     ): SharingMemberRouteUpdate[] => {
       const eventItems = eventListsRef.current[eventName] ?? [];
       const itemsById = new Map(eventItems.map((item) => [item.id, item]));
       const currentMemberRoutes = memberRouteItemsRef.current[eventName] ?? {};
       const nextRoutesByDate = new Map<string, Map<string, string[]>>();
       const changedKeys = new Set<string>();
+      const pendingAddsByDate = new Map<string, string[]>();
 
       const ensureRoute = (eventDate: string, roomMemberId: string): string[] => {
         let routesByMember = nextRoutesByDate.get(eventDate);
@@ -2053,8 +2106,7 @@ const App: React.FC = () => {
         changedKeys.add(`${eventDate}::${roomMemberId}`);
       };
 
-      const uniqueItemIds = Array.from(new Set(itemIds));
-      for (const itemId of uniqueItemIds) {
+      for (const itemId of uniqueItemIds(itemIds)) {
         const item = itemsById.get(itemId);
         if (!item?.eventDate) continue;
 
@@ -2068,12 +2120,38 @@ const App: React.FC = () => {
         });
 
         if (assignedToMemberId) {
-          const route = ensureRoute(item.eventDate, assignedToMemberId);
-          if (!route.includes(itemId)) {
-            nextRoutesByDate.get(item.eventDate)?.set(assignedToMemberId, [...route, itemId]);
-            markChanged(item.eventDate, assignedToMemberId);
-          }
+          pendingAddsByDate.set(item.eventDate, [
+            ...(pendingAddsByDate.get(item.eventDate) ?? []),
+            itemId,
+          ]);
         }
+      }
+
+      if (assignedToMemberId) {
+        pendingAddsByDate.forEach((addItemIds, eventDate) => {
+          const route = ensureRoute(eventDate, assignedToMemberId);
+          const addIds = uniqueItemIds(addItemIds).filter((itemId) => !route.includes(itemId));
+          if (addIds.length === 0) return;
+
+          const nextRoute = [...route];
+          const insertionForDate = insertion?.eventDate === eventDate ? insertion : undefined;
+          const insertionIndex =
+            insertionForDate
+              ? nextRoute.indexOf(insertionForDate.referenceItemId)
+              : -1;
+          if (insertionIndex >= 0) {
+            nextRoute.splice(
+              insertionForDate?.position === 'before' ? insertionIndex : insertionIndex + 1,
+              0,
+              ...addIds,
+            );
+          } else {
+            nextRoute.push(...addIds);
+          }
+
+          nextRoutesByDate.get(eventDate)?.set(assignedToMemberId, nextRoute);
+          markChanged(eventDate, assignedToMemberId);
+        });
       }
 
       return Array.from(changedKeys).map((key) => {
@@ -2095,23 +2173,30 @@ const App: React.FC = () => {
       eventName: string,
       result: AssignmentWithMemberRoutesResult,
       statusMessage: string,
-    ) => {
+    ): Promise<MemberRouteItems> => {
       const mutationItems = result.changedItems.map((change) => change.item);
       if (mutationItems.length > 0) {
         applySharingMutationItems(eventName, mutationItems);
       }
 
-      setMemberRouteItems((prev) => ({
-        ...prev,
-        [eventName]: applyCanonicalMemberRouteOrders(
-          prev[eventName] ?? {},
-          result.changedMemberRouteOrders.map((routeOrder) => ({
-            eventDate: routeOrder.eventDate,
-            roomMemberId: routeOrder.routeMemberId,
-            itemIds: routeOrder.itemIds,
-          })),
-        ),
+      const canonicalMemberRouteOrders = result.changedMemberRouteOrders.map((routeOrder) => ({
+        eventDate: routeOrder.eventDate,
+        roomMemberId: routeOrder.routeMemberId,
+        itemIds: routeOrder.itemIds,
       }));
+      const nextEventMemberRoutes = applyCanonicalMemberRouteOrders(
+        memberRouteItemsRef.current[eventName] ?? {},
+        canonicalMemberRouteOrders,
+      );
+
+      setMemberRouteItems((prev) => {
+        const next = {
+          ...prev,
+          [eventName]: nextEventMemberRoutes,
+        };
+        memberRouteItemsRef.current = next;
+        return next;
+      });
 
       if (mutationItems.length > 0) {
         await saveSharingMutationVersion(session, result.itemsVersion, mutationItems, {
@@ -2142,6 +2227,7 @@ const App: React.FC = () => {
       }
 
       setSharingStatusMessage(statusMessage);
+      return nextEventMemberRoutes;
     },
     [
       applySharingMutationItems,
@@ -4024,6 +4110,122 @@ const App: React.FC = () => {
     ],
   );
 
+  const saveSharingGlobalRouteFromMemberRoutes = useCallback(
+    async (
+      session: SharingSessionMetadata,
+      eventName: string,
+      eventDate: string,
+      memberRoutesForDate: Record<string, string[]>,
+      successMessage: string,
+    ): Promise<boolean> => {
+      const previousRouteItemIds =
+        executeModeItemsRef.current[eventName]?.[eventDate] ?? [];
+      const eventItems = (eventListsRef.current[eventName] ?? []).filter(
+        (item) => item.eventDate === eventDate,
+      );
+      const nextRouteItemIds = buildGlobalRouteItemIdsFromMemberRoutes({
+        memberRoutesForDate,
+        previousRouteItemIds,
+        eventItems,
+      });
+
+      if (areRouteItemIdsEqual(previousRouteItemIds, nextRouteItemIds)) {
+        return true;
+      }
+
+      const latestSession = sharingSessionsRef.current[session.sessionId] ?? session;
+      return saveSharingRouteOrderMutation(
+        latestSession,
+        eventName,
+        eventDate,
+        nextRouteItemIds,
+        successMessage,
+        'allow',
+      );
+    },
+    [saveSharingRouteOrderMutation],
+  );
+
+  const persistSharingMemberRouteMapMutation = useCallback(
+    async (
+      session: SharingSessionMetadata,
+      eventName: string,
+      eventDate: string,
+      itemIds: string[],
+      assignedToMemberId: string | null,
+      memberRouteUpdates: SharingMemberRouteUpdate[],
+      statusMessage: string,
+    ) => {
+      const eventItems = eventListsRef.current[eventName] ?? [];
+      const targetIds = new Set(itemIds);
+      const assignments = [];
+
+      if (assignedToMemberId) {
+        for (const item of eventItems.filter((candidate) => targetIds.has(candidate.id))) {
+          if (item.assignedTo === assignedToMemberId) continue;
+          const expectedFieldClocks = pickExpectedFieldClocks(session, item.id, ['assignedTo']);
+          if (!expectedFieldClocks) {
+            setSharingErrorMessage('共有アイテムの同期基準が不足しています。最新状態を取得します。');
+            await applySnapshotAndAck(session.roomId);
+            return;
+          }
+          assignments.push({
+            localItemId: item.id,
+            assignedToMemberId,
+            expectedFieldClocks,
+          });
+        }
+      }
+
+      try {
+        const result = await updateRoomItemAssignmentWithMemberRoutes({
+          roomId: session.roomId,
+          assignments,
+          memberRouteUpdates,
+        });
+        if (!result.ok) {
+          if (isFullItemRefreshRequired(result.error.code)) {
+            setSharingErrorMessage('共有アイテムの最新状態を全体再取得しています。');
+            await applySnapshotAndAck(session.roomId);
+            return;
+          }
+          if (
+            result.error.code === 'FIELD_CLOCK_CONFLICT' ||
+            result.error.code === 'ROUTE_ORDER_CONFLICT'
+          ) {
+            setSharingErrorMessage('他の参加者が先に更新しました。最新状態を取得しました。');
+            await applySnapshotAndAck(session.roomId);
+            return;
+          }
+          setSharingErrorMessage(`個人ルートの更新に失敗しました: ${result.error.code}`);
+          return;
+        }
+
+        const nextEventMemberRoutes = await applySharingAssignmentWithMemberRoutesResult(
+          session,
+          eventName,
+          result.data,
+          statusMessage,
+        );
+        await saveSharingGlobalRouteFromMemberRoutes(
+          session,
+          eventName,
+          eventDate,
+          nextEventMemberRoutes[eventDate] ?? {},
+          '個人ルートの変更を全体ルートへ反映しました。',
+        );
+      } catch (error) {
+        console.error('Sharing member route map mutation error:', error);
+        setSharingErrorMessage('個人ルートの更新に失敗しました。通信状態を確認してください。');
+      }
+    },
+    [
+      applySharingAssignmentWithMemberRoutesResult,
+      applySnapshotAndAck,
+      saveSharingGlobalRouteFromMemberRoutes,
+    ],
+  );
+
   const handleMoveItem = useCallback(
     async (
       dragId: string,
@@ -4336,14 +4538,6 @@ const App: React.FC = () => {
         const eventItems = eventListsRef.current[activeEventName] ?? [];
         const targetIds = new Set(expandedIds);
         const targetItems = eventItems.filter((item) => targetIds.has(item.id));
-        const assignedToOtherMember = targetItems.find(
-          (item) => item.assignedTo && item.assignedTo !== activeRouteMemberId,
-        );
-        if (assignedToOtherMember && sharingSession.role !== 'host') {
-          setSharingErrorMessage('他の参加者の担当アイテムは個人ルートへ追加できません。');
-          return;
-        }
-
         const assignmentTargets = targetItems.filter(
           (item) => item.assignedTo !== activeRouteMemberId,
         );
@@ -4396,11 +4590,18 @@ const App: React.FC = () => {
             return;
           }
 
-          await applySharingAssignmentWithMemberRoutesResult(
+          const nextEventMemberRoutes = await applySharingAssignmentWithMemberRoutesResult(
             sharingSession,
             activeEventName,
             result.data,
             '個人ルートへ追加しました。',
+          );
+          await saveSharingGlobalRouteFromMemberRoutes(
+            sharingSession,
+            activeEventName,
+            currentEventDate,
+            nextEventMemberRoutes[currentEventDate] ?? {},
+            '個人ルートを全体ルートへ反映しました。',
           );
         } catch (error) {
           console.error('Sharing member route add error:', error);
@@ -4477,6 +4678,7 @@ const App: React.FC = () => {
       assignSharingRouteItemsToCurrentMember,
       buildSharingMemberRouteUpdatesForAssignment,
       guardSharingStructureMutation,
+      saveSharingGlobalRouteFromMemberRoutes,
       saveSharingRouteOrderMutation,
     ],
   );
@@ -4507,26 +4709,6 @@ const App: React.FC = () => {
       }
 
       if (sharingSession && activeRouteScope === 'member' && activeRouteMemberId) {
-        const assignments = [];
-        const eventItems = eventListsRef.current[activeEventName] ?? [];
-        const targetIds = new Set(expandedIds);
-        for (const item of eventItems.filter((candidate) => targetIds.has(candidate.id))) {
-          if (!item.assignedTo) continue;
-          const expectedFieldClocks = pickExpectedFieldClocks(sharingSession, item.id, [
-            'assignedTo',
-          ]);
-          if (!expectedFieldClocks) {
-            setSharingErrorMessage('共有アイテムの同期基準が不足しています。最新状態を取得します。');
-            await applySnapshotAndAck(sharingSession.roomId);
-            return;
-          }
-          assignments.push({
-            localItemId: item.id,
-            assignedToMemberId: null,
-            expectedFieldClocks,
-          });
-        }
-
         const memberRouteUpdates = buildSharingMemberRouteUpdatesForAssignment(
           sharingSession,
           activeEventName,
@@ -4538,7 +4720,7 @@ const App: React.FC = () => {
         try {
           const result = await updateRoomItemAssignmentWithMemberRoutes({
             roomId: sharingSession.roomId,
-            assignments,
+            assignments: [],
             memberRouteUpdates,
           });
           if (!result.ok) {
@@ -4559,11 +4741,18 @@ const App: React.FC = () => {
             return;
           }
 
-          await applySharingAssignmentWithMemberRoutesResult(
+          const nextEventMemberRoutes = await applySharingAssignmentWithMemberRoutesResult(
             sharingSession,
             activeEventName,
             result.data,
             '個人ルートから候補へ移動しました。',
+          );
+          await saveSharingGlobalRouteFromMemberRoutes(
+            sharingSession,
+            activeEventName,
+            currentEventDate,
+            nextEventMemberRoutes[currentEventDate] ?? {},
+            '個人ルートの変更を全体ルートへ反映しました。',
           );
         } catch (error) {
           console.error('Sharing member route remove error:', error);
@@ -4620,6 +4809,7 @@ const App: React.FC = () => {
       applySnapshotAndAck,
       buildSharingMemberRouteUpdatesForAssignment,
       guardSharingStructureMutation,
+      saveSharingGlobalRouteFromMemberRoutes,
       saveSharingRouteOrderMutation,
     ],
   );
@@ -6527,6 +6717,71 @@ const App: React.FC = () => {
       };
       const currentMapData = mapData[activeEventName]?.[currentMapTabName];
 
+      if (sharingSession && activeMapRouteDisplayMode === 'member' && activeRouteMemberId) {
+        const currentMemberRoute =
+          memberRouteItemsRef.current[activeEventName]?.[dayName]?.[activeRouteMemberId] ?? [];
+        const result = computeAddToExecuteListFromMapWithResult(
+          itemId,
+          dayName,
+          items,
+          { [dayName]: currentMemberRoute },
+          halls,
+          hallRouteSettingsForMap,
+          currentMapData,
+        );
+        if (!result.accepted) return [];
+
+        const memberRouteUpdates = buildSharingMemberRouteUpdatesForAssignment(
+          sharingSession,
+          activeEventName,
+          result.insertedItemIds,
+          activeRouteMemberId,
+        );
+        const nextEventMemberRoutes = applyCanonicalMemberRouteOrders(
+          memberRouteItemsRef.current[activeEventName] ?? {},
+          memberRouteUpdates.map((routeOrder) => ({
+            eventDate: routeOrder.eventDate,
+            roomMemberId: routeOrder.routeMemberId,
+            itemIds: routeOrder.itemIds,
+          })),
+        );
+        setMemberRouteItems((prev) => {
+          const next = {
+            ...prev,
+            [activeEventName]: nextEventMemberRoutes,
+          };
+          memberRouteItemsRef.current = next;
+          return next;
+        });
+        setEventLists((prev) => ({
+          ...prev,
+          [activeEventName]: (prev[activeEventName] ?? []).map((item) =>
+            result.insertedItemIds.includes(item.id)
+              ? { ...item, assignedTo: activeRouteMemberId }
+              : item,
+          ),
+        }));
+        const nextGlobalRouteItemIds = buildGlobalRouteItemIdsFromMemberRoutes({
+          memberRoutesForDate: nextEventMemberRoutes[dayName] ?? {},
+          previousRouteItemIds: executeModeItemsRef.current[activeEventName]?.[dayName] ?? [],
+          eventItems: items.filter((item) => item.eventDate === dayName),
+        });
+        commitExecuteModeItemsForEvent(activeEventName, {
+          ...(executeModeItemsRef.current[activeEventName] ?? {}),
+          [dayName]: nextGlobalRouteItemIds,
+        });
+        void persistSharingMemberRouteMapMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          result.insertedItemIds,
+          activeRouteMemberId,
+          memberRouteUpdates,
+          '個人ルートへ追加しました。',
+        );
+        return result.insertedItemIds;
+      }
+
       const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
       const result = computeAddToExecuteListFromMapWithResult(
         itemId,
@@ -6555,13 +6810,17 @@ const App: React.FC = () => {
       activeEventName,
       activeEventDate,
       activeSharingSession,
+      activeMapRouteDisplayMode,
+      activeRouteMemberId,
       currentMapTabName,
       isMapTab,
       items,
       hallDefinitions,
       hallRouteSettings,
       mapData,
+      buildSharingMemberRouteUpdatesForAssignment,
       commitExecuteModeItemsForEvent,
+      persistSharingMemberRouteMapMutation,
       saveSharingMapRouteAddMutation,
     ],
   );
@@ -6575,6 +6834,76 @@ const App: React.FC = () => {
 
       const dayName = activeEventDate;
       const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
+
+      if (sharingSession && activeMapRouteDisplayMode === 'member' && activeRouteMemberId) {
+        const currentMemberRoute =
+          memberRouteItemsRef.current[activeEventName]?.[dayName]?.[activeRouteMemberId] ?? [];
+        const result = computeInsertIntoExecuteAtPosition(
+          [itemId],
+          referenceItemId,
+          position,
+          { [dayName]: currentMemberRoute },
+          dayName,
+          items,
+          {
+            canInsertWithReference: (insertedItemId, refId) =>
+              areItemsInSameHallGroup(insertedItemId, refId, dayName),
+          },
+        );
+        if (!result.accepted) return [];
+
+        const memberRouteUpdates = buildSharingMemberRouteUpdatesForAssignment(
+          sharingSession,
+          activeEventName,
+          result.insertedItemIds,
+          activeRouteMemberId,
+          { eventDate: dayName, referenceItemId, position },
+        );
+        const nextEventMemberRoutes = applyCanonicalMemberRouteOrders(
+          memberRouteItemsRef.current[activeEventName] ?? {},
+          memberRouteUpdates.map((routeOrder) => ({
+            eventDate: routeOrder.eventDate,
+            roomMemberId: routeOrder.routeMemberId,
+            itemIds: routeOrder.itemIds,
+          })),
+        );
+        setMemberRouteItems((prev) => {
+          const next = {
+            ...prev,
+            [activeEventName]: nextEventMemberRoutes,
+          };
+          memberRouteItemsRef.current = next;
+          return next;
+        });
+        setEventLists((prev) => ({
+          ...prev,
+          [activeEventName]: (prev[activeEventName] ?? []).map((item) =>
+            result.insertedItemIds.includes(item.id)
+              ? { ...item, assignedTo: activeRouteMemberId }
+              : item,
+          ),
+        }));
+        const nextGlobalRouteItemIds = buildGlobalRouteItemIdsFromMemberRoutes({
+          memberRoutesForDate: nextEventMemberRoutes[dayName] ?? {},
+          previousRouteItemIds: currentForEvent[dayName] ?? [],
+          eventItems: items.filter((item) => item.eventDate === dayName),
+        });
+        commitExecuteModeItemsForEvent(activeEventName, {
+          ...currentForEvent,
+          [dayName]: nextGlobalRouteItemIds,
+        });
+        void persistSharingMemberRouteMapMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          result.insertedItemIds,
+          activeRouteMemberId,
+          memberRouteUpdates,
+          '個人ルートへ追加しました。',
+        );
+        return result.insertedItemIds;
+      }
+
       const result = computeInsertIntoExecuteAtPosition(
         [itemId],
         referenceItemId,
@@ -6605,10 +6934,14 @@ const App: React.FC = () => {
       activeEventName,
       activeEventDate,
       activeSharingSession,
+      activeMapRouteDisplayMode,
+      activeRouteMemberId,
       isMapTab,
       items,
       areItemsInSameHallGroup,
+      buildSharingMemberRouteUpdatesForAssignment,
       commitExecuteModeItemsForEvent,
+      persistSharingMemberRouteMapMutation,
       saveSharingMapRouteAddMutation,
     ],
   );
@@ -6622,6 +6955,60 @@ const App: React.FC = () => {
 
       const dayName = activeEventDate;
       const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
+
+      if (sharingSession && activeMapRouteDisplayMode === 'member' && activeRouteMemberId) {
+        const currentMemberRoute =
+          memberRouteItemsRef.current[activeEventName]?.[dayName]?.[activeRouteMemberId] ?? [];
+        const removeIds = expandExecuteRemovalItemIds(
+          [itemId],
+          dayName,
+          items,
+          { [dayName]: currentMemberRoute },
+        );
+        if (removeIds.length === 0) return [];
+        const memberRouteUpdates = buildSharingMemberRouteUpdatesForAssignment(
+          sharingSession,
+          activeEventName,
+          removeIds,
+          null,
+        );
+        const nextEventMemberRoutes = applyCanonicalMemberRouteOrders(
+          memberRouteItemsRef.current[activeEventName] ?? {},
+          memberRouteUpdates.map((routeOrder) => ({
+            eventDate: routeOrder.eventDate,
+            roomMemberId: routeOrder.routeMemberId,
+            itemIds: routeOrder.itemIds,
+          })),
+        );
+        setMemberRouteItems((prev) => {
+          const next = {
+            ...prev,
+            [activeEventName]: nextEventMemberRoutes,
+          };
+          memberRouteItemsRef.current = next;
+          return next;
+        });
+        const nextGlobalRouteItemIds = buildGlobalRouteItemIdsFromMemberRoutes({
+          memberRoutesForDate: nextEventMemberRoutes[dayName] ?? {},
+          previousRouteItemIds: currentForEvent[dayName] ?? [],
+          eventItems: items.filter((item) => item.eventDate === dayName),
+        });
+        commitExecuteModeItemsForEvent(activeEventName, {
+          ...currentForEvent,
+          [dayName]: nextGlobalRouteItemIds,
+        });
+        void persistSharingMemberRouteMapMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          removeIds,
+          null,
+          memberRouteUpdates,
+          '個人ルートから候補へ移動しました。',
+        );
+        return removeIds;
+      }
+
       const removeIds = expandExecuteRemovalItemIds([itemId], dayName, items, currentForEvent);
       const newExecuteItems = computeRemoveFromExecuteListFromMap(
         itemId,
@@ -6647,9 +7034,13 @@ const App: React.FC = () => {
       activeEventName,
       activeEventDate,
       activeSharingSession,
+      activeMapRouteDisplayMode,
+      activeRouteMemberId,
       isMapTab,
       items,
+      buildSharingMemberRouteUpdatesForAssignment,
       commitExecuteModeItemsForEvent,
+      persistSharingMemberRouteMapMutation,
       saveSharingRouteOrderMutation,
     ],
   );
@@ -6667,6 +7058,79 @@ const App: React.FC = () => {
         hallVisitLists: [],
       };
       const currentMap = mapData[activeEventName]?.[currentMapTabName];
+
+      if (sharingSession && activeMapRouteDisplayMode === 'member' && activeRouteMemberId) {
+        let currentMemberExecuteItems: ExecuteModeItems = {
+          [dayName]:
+            memberRouteItemsRef.current[activeEventName]?.[dayName]?.[activeRouteMemberId] ?? [],
+        };
+        const insertedItemIds: string[] = [];
+        for (const id of itemIds) {
+          const result = computeAddToExecuteListFromMapWithResult(
+            id,
+            dayName,
+            items,
+            currentMemberExecuteItems,
+            halls,
+            hallRouteSettingsForMap,
+            currentMap,
+          );
+          if (result.accepted) {
+            currentMemberExecuteItems = result.executeModeItems;
+            insertedItemIds.push(...result.insertedItemIds);
+          }
+        }
+        if (insertedItemIds.length === 0) return [];
+
+        const memberRouteUpdates = buildSharingMemberRouteUpdatesForAssignment(
+          sharingSession,
+          activeEventName,
+          insertedItemIds,
+          activeRouteMemberId,
+        );
+        const nextEventMemberRoutes = applyCanonicalMemberRouteOrders(
+          memberRouteItemsRef.current[activeEventName] ?? {},
+          memberRouteUpdates.map((routeOrder) => ({
+            eventDate: routeOrder.eventDate,
+            roomMemberId: routeOrder.routeMemberId,
+            itemIds: routeOrder.itemIds,
+          })),
+        );
+        setMemberRouteItems((prev) => {
+          const next = {
+            ...prev,
+            [activeEventName]: nextEventMemberRoutes,
+          };
+          memberRouteItemsRef.current = next;
+          return next;
+        });
+        setEventLists((prev) => ({
+          ...prev,
+          [activeEventName]: (prev[activeEventName] ?? []).map((item) =>
+            insertedItemIds.includes(item.id) ? { ...item, assignedTo: activeRouteMemberId } : item,
+          ),
+        }));
+        const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
+        const nextGlobalRouteItemIds = buildGlobalRouteItemIdsFromMemberRoutes({
+          memberRoutesForDate: nextEventMemberRoutes[dayName] ?? {},
+          previousRouteItemIds: currentForEvent[dayName] ?? [],
+          eventItems: items.filter((item) => item.eventDate === dayName),
+        });
+        commitExecuteModeItemsForEvent(activeEventName, {
+          ...currentForEvent,
+          [dayName]: nextGlobalRouteItemIds,
+        });
+        void persistSharingMemberRouteMapMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          insertedItemIds,
+          activeRouteMemberId,
+          memberRouteUpdates,
+          '個人ルートへ追加しました。',
+        );
+        return insertedItemIds;
+      }
 
       {
         let current = executeModeItemsRef.current[activeEventName] || {};
@@ -6695,13 +7159,17 @@ const App: React.FC = () => {
       activeEventName,
       activeEventDate,
       activeSharingSession,
+      activeMapRouteDisplayMode,
+      activeRouteMemberId,
       currentMapTabName,
       isMapTab,
       items,
       hallDefinitions,
       hallRouteSettings,
       mapData,
+      buildSharingMemberRouteUpdatesForAssignment,
       commitExecuteModeItemsForEvent,
+      persistSharingMemberRouteMapMutation,
       saveSharingMapRouteAddMutation,
     ],
   );
@@ -6715,6 +7183,76 @@ const App: React.FC = () => {
       const dayName = activeEventDate;
 
       const current = executeModeItemsRef.current[activeEventName] || {};
+
+      if (sharingSession && activeMapRouteDisplayMode === 'member' && activeRouteMemberId) {
+        const currentMemberRoute =
+          memberRouteItemsRef.current[activeEventName]?.[dayName]?.[activeRouteMemberId] ?? [];
+        const result = computeInsertIntoExecuteAtPosition(
+          itemIds,
+          referenceItemId,
+          position,
+          { [dayName]: currentMemberRoute },
+          dayName,
+          items,
+          {
+            canInsertWithReference: (insertedItemId, refId) =>
+              areItemsInSameHallGroup(insertedItemId, refId, dayName),
+          },
+        );
+        if (!result.accepted) return [];
+
+        const memberRouteUpdates = buildSharingMemberRouteUpdatesForAssignment(
+          sharingSession,
+          activeEventName,
+          result.insertedItemIds,
+          activeRouteMemberId,
+          { eventDate: dayName, referenceItemId, position },
+        );
+        const nextEventMemberRoutes = applyCanonicalMemberRouteOrders(
+          memberRouteItemsRef.current[activeEventName] ?? {},
+          memberRouteUpdates.map((routeOrder) => ({
+            eventDate: routeOrder.eventDate,
+            roomMemberId: routeOrder.routeMemberId,
+            itemIds: routeOrder.itemIds,
+          })),
+        );
+        setMemberRouteItems((prev) => {
+          const next = {
+            ...prev,
+            [activeEventName]: nextEventMemberRoutes,
+          };
+          memberRouteItemsRef.current = next;
+          return next;
+        });
+        setEventLists((prev) => ({
+          ...prev,
+          [activeEventName]: (prev[activeEventName] ?? []).map((item) =>
+            result.insertedItemIds.includes(item.id)
+              ? { ...item, assignedTo: activeRouteMemberId }
+              : item,
+          ),
+        }));
+        const nextGlobalRouteItemIds = buildGlobalRouteItemIdsFromMemberRoutes({
+          memberRoutesForDate: nextEventMemberRoutes[dayName] ?? {},
+          previousRouteItemIds: current[dayName] ?? [],
+          eventItems: items.filter((item) => item.eventDate === dayName),
+        });
+        commitExecuteModeItemsForEvent(activeEventName, {
+          ...current,
+          [dayName]: nextGlobalRouteItemIds,
+        });
+        void persistSharingMemberRouteMapMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          result.insertedItemIds,
+          activeRouteMemberId,
+          memberRouteUpdates,
+          '個人ルートへ追加しました。',
+        );
+        return result.insertedItemIds;
+      }
+
       const result = computeInsertIntoExecuteAtPosition(
         itemIds,
         referenceItemId,
@@ -6744,10 +7282,14 @@ const App: React.FC = () => {
       activeEventName,
       activeEventDate,
       activeSharingSession,
+      activeMapRouteDisplayMode,
+      activeRouteMemberId,
       isMapTab,
       items,
       areItemsInSameHallGroup,
+      buildSharingMemberRouteUpdatesForAssignment,
       commitExecuteModeItemsForEvent,
+      persistSharingMemberRouteMapMutation,
       saveSharingMapRouteAddMutation,
     ],
   );
@@ -6759,6 +7301,67 @@ const App: React.FC = () => {
       const sharingSession =
         activeSharingSession?.eventName === activeEventName ? activeSharingSession : null;
       const dayName = activeEventDate;
+
+      if (sharingSession && activeMapRouteDisplayMode === 'member' && activeRouteMemberId) {
+        let currentMemberExecuteItems: ExecuteModeItems = {
+          [dayName]:
+            memberRouteItemsRef.current[activeEventName]?.[dayName]?.[activeRouteMemberId] ?? [],
+        };
+        const removedItemIds: string[] = [];
+        for (const id of itemIds) {
+          const removeIds = expandExecuteRemovalItemIds([id], dayName, items, currentMemberExecuteItems);
+          currentMemberExecuteItems = {
+            [dayName]: (currentMemberExecuteItems[dayName] ?? []).filter(
+              (routeItemId) => !removeIds.includes(routeItemId),
+            ),
+          };
+          removedItemIds.push(...removeIds.filter((removeId) => !removedItemIds.includes(removeId)));
+        }
+        if (removedItemIds.length === 0) return [];
+
+        const memberRouteUpdates = buildSharingMemberRouteUpdatesForAssignment(
+          sharingSession,
+          activeEventName,
+          removedItemIds,
+          null,
+        );
+        const nextEventMemberRoutes = applyCanonicalMemberRouteOrders(
+          memberRouteItemsRef.current[activeEventName] ?? {},
+          memberRouteUpdates.map((routeOrder) => ({
+            eventDate: routeOrder.eventDate,
+            roomMemberId: routeOrder.routeMemberId,
+            itemIds: routeOrder.itemIds,
+          })),
+        );
+        setMemberRouteItems((prev) => {
+          const next = {
+            ...prev,
+            [activeEventName]: nextEventMemberRoutes,
+          };
+          memberRouteItemsRef.current = next;
+          return next;
+        });
+        const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
+        const nextGlobalRouteItemIds = buildGlobalRouteItemIdsFromMemberRoutes({
+          memberRoutesForDate: nextEventMemberRoutes[dayName] ?? {},
+          previousRouteItemIds: currentForEvent[dayName] ?? [],
+          eventItems: items.filter((item) => item.eventDate === dayName),
+        });
+        commitExecuteModeItemsForEvent(activeEventName, {
+          ...currentForEvent,
+          [dayName]: nextGlobalRouteItemIds,
+        });
+        void persistSharingMemberRouteMapMutation(
+          sharingSession,
+          activeEventName,
+          dayName,
+          removedItemIds,
+          null,
+          memberRouteUpdates,
+          '個人ルートから候補へ移動しました。',
+        );
+        return removedItemIds;
+      }
 
       let current = executeModeItemsRef.current[activeEventName] || {};
       const removedItemIds: string[] = [];
@@ -6784,9 +7387,13 @@ const App: React.FC = () => {
       activeEventName,
       activeEventDate,
       activeSharingSession,
+      activeMapRouteDisplayMode,
+      activeRouteMemberId,
       isMapTab,
       items,
+      buildSharingMemberRouteUpdatesForAssignment,
       commitExecuteModeItemsForEvent,
+      persistSharingMemberRouteMapMutation,
       saveSharingRouteOrderMutation,
     ],
   );
@@ -7100,11 +7707,17 @@ const App: React.FC = () => {
       const currentRouteItemIds =
         executeModeItemsRef.current[activeEventName]?.[activeEventDate] || [];
       const eventItems = eventListsRef.current[activeEventName] || items;
-      const nextRouteItemIds = reorderExecuteIdsByAssignmentRouteOrder(
+      const reorderedRouteItemIds = reorderExecuteIdsByAssignmentRouteOrder(
         currentRouteItemIds,
         eventItems,
         groupOrder,
       );
+      const nextRouteItemIds = buildGlobalRouteItemIdsFromMemberRoutes({
+        memberRoutesForDate:
+          memberRouteItemsRef.current[activeEventName]?.[activeEventDate] ?? {},
+        previousRouteItemIds: reorderedRouteItemIds,
+        eventItems: eventItems.filter((item) => item.eventDate === activeEventDate),
+      });
       if (areStringArraysEqual(currentRouteItemIds, nextRouteItemIds)) return;
 
       const saved = await saveSharingRouteOrderMutation(

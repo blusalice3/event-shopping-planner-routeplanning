@@ -1,4 +1,4 @@
-﻿import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+﻿﻿import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import {
   DayMapData,
   ZoomLevel,
@@ -52,6 +52,36 @@ type RouteInsertAnchorCandidate = {
   itemId: string;
   order: number;
   label: string;
+};
+
+const MEMBER_ROUTE_FALLBACK_COLORS = [
+  '#2563EB',
+  '#16A34A',
+  '#F97316',
+  '#7C3AED',
+  '#DC2626',
+  '#0891B2',
+] as const;
+
+const hashString = (value: string): number => {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) >>> 0;
+  }
+  return hash;
+};
+
+const resolveMemberRouteColor = (
+  member: AssignmentMemberProfile,
+  index: number,
+): string => {
+  const color = member.color?.trim();
+  if (color) return color;
+  const paletteIndex =
+    member.roomMemberId
+      ? hashString(member.roomMemberId) % MEMBER_ROUTE_FALLBACK_COLORS.length
+      : index % MEMBER_ROUTE_FALLBACK_COLORS.length;
+  return MEMBER_ROUTE_FALLBACK_COLORS[paletteIndex];
 };
 
 type PendingHallVisitEntry = {
@@ -574,8 +604,12 @@ const MapView: React.FC<MapViewProps> = ({
   const routeResolutionMapData =
     selectedHallId === 'all' || halls.length === 0 ? mapData : strictFilteredMapData;
 
+  const usesMemberRouteOverlays =
+    routeDisplayMode === 'allMembers' ||
+    (routeDisplayMode === 'global' && assignmentMembers.length > 0);
+
   const displayRouteExecuteModeItemIds = useMemo(() => {
-    if (routeDisplayMode === 'allMembers') return [];
+    if (usesMemberRouteOverlays) return [];
 
     return buildMapRouteExecuteItemIds({
       executeModeItemIds: filteredExecuteModeItemIds,
@@ -593,7 +627,7 @@ const MapView: React.FC<MapViewProps> = ({
     effectiveRouteHallOrder,
     mapDayName,
     mapName,
-    routeDisplayMode,
+    usesMemberRouteOverlays,
   ]);
 
   const mapRouteResolutionItems = useMemo(() => {
@@ -706,16 +740,13 @@ const MapView: React.FC<MapViewProps> = ({
   }, [displayRoutePoints, displayRoutePathfindingMapData]);
 
   const memberRouteOverlays = useMemo<MemberRouteOverlay[]>(() => {
-    if (routeDisplayMode !== 'allMembers') return [];
+    if (!usesMemberRouteOverlays) return [];
 
     const dayName = mapDayName || normalizeDisplayText(mapName);
     const itemsById = new Map(items.map((item) => [item.id, item]));
     return assignmentMembers
-      .map((member) => {
-        const routeItemIds = executeModeItemIds.filter((itemId) => {
-          const item = itemsById.get(itemId);
-          return item?.assignedTo === member.roomMemberId;
-        });
+      .map((member, memberIndex) => {
+        const routeItemIds = memberRouteItemsForDate[member.roomMemberId] ?? [];
         if (routeItemIds.length === 0) return null;
 
         const hallFilteredItemIds =
@@ -763,7 +794,7 @@ const MapView: React.FC<MapViewProps> = ({
         return {
           memberId: member.roomMemberId,
           label: member.displayName,
-          color: member.color || '#2563EB',
+          color: resolveMemberRouteColor(member, memberIndex),
           routePoints,
           routeSegments,
         };
@@ -782,8 +813,8 @@ const MapView: React.FC<MapViewProps> = ({
     mapDayName,
     mapName,
     memberRouteItemsForDate,
-    routeDisplayMode,
     selectedHallId,
+    usesMemberRouteOverlays,
   ]);
 
   const mapInsertRouteSegments = useMemo(() => {
@@ -1830,7 +1861,7 @@ const MapView: React.FC<MapViewProps> = ({
         zoomLevel={zoomLevel}
         isRouteVisible={
           isRouteVisible &&
-          (routeDisplayMode === 'allMembers' || halls.length === 0 || selectedHallId !== 'all')
+          (usesMemberRouteOverlays || halls.length === 0 || selectedHallId !== 'all')
         }
         routePointsOverride={routePointsForCanvas}
         routeSegmentsOverride={routeSegmentsForCanvas}
