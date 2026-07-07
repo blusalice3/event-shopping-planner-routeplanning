@@ -122,6 +122,7 @@ interface ShoppingListProps {
   skipLimitedPurchaseForSingleQuantity: boolean;
   assignmentMembers?: AssignmentMemberProfile[];
   canAssignItem?: (item: ShoppingItem) => boolean;
+  canUpdatePurchaseFields?: (item: ShoppingItem) => boolean;
   onAssignItem?: (itemId: string, assignedToMemberId: string | null) => void;
   inoperableItemIds?: Set<string>;
 }
@@ -308,6 +309,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   purchaseStatusControlMode = 'cycle',
   assignmentMembers,
   canAssignItem,
+  canUpdatePurchaseFields,
   onAssignItem,
   inoperableItemIds,
 }) => {
@@ -2256,6 +2258,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                           assignmentMembers={assignmentMembers}
                           canAssignItem={canAssignItem}
+                          canUpdatePurchaseFields={canUpdatePurchaseFields}
                           onAssignItem={onAssignItem}
                         />
 
@@ -2785,6 +2788,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                         assignmentMembers={assignmentMembers}
                         canAssignItem={canAssignItem}
+                        canUpdatePurchaseFields={canUpdatePurchaseFields}
                         onAssignItem={onAssignItem}
                       />
 
@@ -3012,6 +3016,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
               assignmentMembers={assignmentMembers}
               canAssignItem={canAssignItem}
+              canUpdatePurchaseFields={canUpdatePurchaseFields}
               onAssignItem={onAssignItem}
             />
 

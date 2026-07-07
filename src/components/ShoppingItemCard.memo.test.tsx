@@ -66,6 +66,7 @@ const representativeShoppingItemCardProps = {
   skipLimitedPurchaseForSingleQuantity: true,
   assignmentMembers: [],
   canAssignItem: vi.fn(),
+  canUpdatePurchaseFields: vi.fn(),
   onAssignItem: vi.fn(),
 } satisfies Required<ShoppingItemCardProps>;
 

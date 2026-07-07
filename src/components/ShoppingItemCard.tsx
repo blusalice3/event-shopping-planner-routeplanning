@@ -82,6 +82,7 @@ export interface ShoppingItemCardProps {
   skipLimitedPurchaseForSingleQuantity: boolean;
   assignmentMembers?: AssignmentMemberProfile[];
   canAssignItem?: (item: ShoppingItem) => boolean;
+  canUpdatePurchaseFields?: (item: ShoppingItem) => boolean;
   onAssignItem?: (itemId: string, assignedToMemberId: string | null) => void;
 }
 
@@ -381,6 +382,7 @@ export const SHOPPING_ITEM_CARD_COMPARISON_KEYS = [
   'skipLimitedPurchaseForSingleQuantity',
   'assignmentMembers',
   'canAssignItem',
+  'canUpdatePurchaseFields',
   'onAssignItem',
 ] as const satisfies readonly (keyof ShoppingItemCardProps)[];
 
@@ -416,6 +418,7 @@ export const areSameShoppingItemCardProps = (
   prev.skipLimitedPurchaseForSingleQuantity === next.skipLimitedPurchaseForSingleQuantity &&
   prev.assignmentMembers === next.assignmentMembers &&
   prev.canAssignItem === next.canAssignItem &&
+  prev.canUpdatePurchaseFields === next.canUpdatePurchaseFields &&
   prev.onAssignItem === next.onAssignItem;
 
 const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
@@ -447,6 +450,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   skipLimitedPurchaseForSingleQuantity,
   assignmentMembers = [],
   canAssignItem,
+  canUpdatePurchaseFields,
   onAssignItem,
 }) => {
   const [menuVisible, setMenuVisible] = useState(false);
@@ -461,6 +465,9 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
     useState<LimitedDialogSource>('current');
   const [singleQuantityChoiceOpen, setSingleQuantityChoiceOpen] = useState(false);
   const item = optimisticItem;
+  const purchaseFieldUpdateEnabled = canUpdatePurchaseFields
+    ? canUpdatePurchaseFields(item)
+    : true;
 
   useEffect(() => {
     setOptimisticItem((prev) => (areSameItemSnapshot(prev, sourceItem) ? prev : sourceItem));
@@ -596,6 +603,10 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
   const handleLimitedDialogSubmit = useCallback(
     (result: LimitedPurchaseDialogResult) => {
+      if (!purchaseFieldUpdateEnabled) {
+        closeLimitedDialog();
+        return;
+      }
       const latestItem = resolveLatestDialogItem();
       if (latestItem === undefined) {
         if (limitedDialogSource === 'singleQuantityChoice') {
@@ -637,12 +648,14 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       commitLimitedDialogResult,
       limitedDialogSource,
       onNotify,
+      purchaseFieldUpdateEnabled,
       resolveLatestDialogItem,
     ],
   );
 
   const commitPurchaseStatusChange = useCallback(
     (nextStatus: PurchaseStatus) => {
+      if (!purchaseFieldUpdateEnabled) return;
       if (nextStatus === 'LimitedPurchase') {
         setLimitedDialogItem(null);
         setLimitedDialogSource('current');
@@ -657,7 +670,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
       commitItemUpdate(nextItem);
     },
-    [item, commitItemUpdate],
+    [item, commitItemUpdate, purchaseFieldUpdateEnabled],
   );
 
   const togglePurchaseStatus = useCallback(() => {
@@ -723,6 +736,10 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   }, [restorePurchaseStatusButtonFocus]);
 
   const handleSingleQuantityChoicePurchased = useCallback(() => {
+    if (!purchaseFieldUpdateEnabled) {
+      closeSingleQuantityChoice();
+      return;
+    }
     const latestItem = resolveLatestDialogItem();
     if (latestItem === undefined) {
       onNotify?.(ITEM_NOT_FOUND_MESSAGE);
@@ -756,9 +773,19 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         return;
       }
     }
-  }, [closeSingleQuantityChoice, commitItemUpdate, onNotify, resolveLatestDialogItem]);
+  }, [
+    closeSingleQuantityChoice,
+    commitItemUpdate,
+    onNotify,
+    purchaseFieldUpdateEnabled,
+    resolveLatestDialogItem,
+  ]);
 
   const handleSingleQuantityChoiceLimited = useCallback(() => {
+    if (!purchaseFieldUpdateEnabled) {
+      closeSingleQuantityChoice();
+      return;
+    }
     const latestItem = resolveLatestDialogItem();
     if (latestItem === undefined) {
       onNotify?.(ITEM_NOT_FOUND_MESSAGE);
@@ -791,11 +818,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         return;
       }
     }
-  }, [closeSingleQuantityChoice, onNotify, resolveLatestDialogItem]);
+  }, [closeSingleQuantityChoice, onNotify, purchaseFieldUpdateEnabled, resolveLatestDialogItem]);
 
   const handlePurchaseStatusButtonClick = useCallback(
     (event: React.MouseEvent<HTMLButtonElement>) => {
       event.stopPropagation();
+      if (!purchaseFieldUpdateEnabled) return;
 
       if (purchaseStatusControlMode === 'radial') {
         setMenuVisible(false);
@@ -805,7 +833,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
       togglePurchaseStatus();
     },
-    [purchaseStatusControlMode, togglePurchaseStatus],
+    [purchaseFieldUpdateEnabled, purchaseStatusControlMode, togglePurchaseStatus],
   );
 
   const getEffectiveProtectionLevel = useCallback((): ProtectionLevel => {
@@ -1113,12 +1141,13 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       item.purchaseStatus === 'LimitedPurchase' ? (
         <button
           type="button"
+          disabled={!purchaseFieldUpdateEnabled}
           onClick={() => {
             setLimitedDialogItem(null);
             setLimitedDialogSource('current');
             setLimitedDialogOpen(true);
           }}
-          className={`text-xs font-semibold rounded py-0.5 px-1.5 text-center bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-200 ${
+          className={`text-xs font-semibold rounded py-0.5 px-1.5 text-center bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-200 disabled:cursor-not-allowed disabled:opacity-50 ${
             highlightLimitedMissing ? 'ring-2 ring-orange-500 animate-pulse' : ''
           }`}
         >
@@ -1128,7 +1157,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         <select
           value={item.quantity}
           onChange={handleQuantityChange}
-          className="text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-10"
+          disabled={!purchaseFieldUpdateEnabled}
+          className="text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-10 disabled:cursor-not-allowed disabled:opacity-50"
         >
           {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
             <option key={num} value={num}>
@@ -1146,7 +1176,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         <select
           value={item.price === null ? '' : item.price}
           onChange={handlePriceChange}
-          className={`text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-16 ${
+          disabled={!purchaseFieldUpdateEnabled}
+          className={`text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-16 disabled:cursor-not-allowed disabled:opacity-50 ${
             item.price === null ? 'text-red-600 dark:text-red-400' : ''
           } ${highlightPrice && item.price === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
         >
@@ -1163,10 +1194,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       <button
         ref={purchaseStatusButtonRef}
         onClick={handlePurchaseStatusButtonClick}
+        disabled={!purchaseFieldUpdateEnabled}
         data-no-long-press
         aria-haspopup={purchaseStatusControlMode === 'radial' ? 'dialog' : undefined}
         aria-expanded={purchaseStatusControlMode === 'radial' ? purchaseStatusMenuOpen : undefined}
-        className="p-1 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+        className="p-1 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         title={currentStatus.label}
       >
@@ -1280,10 +1312,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                     <button
                       ref={purchaseStatusButtonRef}
                       onClick={handlePurchaseStatusButtonClick}
+                      disabled={!purchaseFieldUpdateEnabled}
                       data-no-long-press
                       aria-haspopup={purchaseStatusControlMode === 'radial' ? 'dialog' : undefined}
                       aria-expanded={purchaseStatusControlMode === 'radial' ? purchaseStatusMenuOpen : undefined}
-                      className="flex items-center space-x-1 p-1.5 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+                      className="flex items-center space-x-1 p-1.5 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                       aria-label={`Current status: ${currentStatus.label}. Click to change.`}
                     >
                       <IconComponent className={`w-5 h-5 ${currentStatus.color}`} />
@@ -1689,10 +1722,11 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         <button
           ref={purchaseStatusButtonRef}
           onClick={handlePurchaseStatusButtonClick}
+          disabled={!purchaseFieldUpdateEnabled}
           data-no-long-press
           aria-haspopup={purchaseStatusControlMode === 'radial' ? 'dialog' : undefined}
           aria-expanded={purchaseStatusControlMode === 'radial' ? purchaseStatusMenuOpen : undefined}
-          className="flex items-center space-x-2 p-2 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors relative z-10 justify-start"
+          className="flex items-center space-x-2 p-2 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors relative z-10 justify-start disabled:cursor-not-allowed disabled:opacity-50"
           aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         >
           <IconComponent className={`w-7 h-7 flex-shrink-0 ${currentStatus.color}`} />
@@ -1707,12 +1741,13 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           {item.purchaseStatus === 'LimitedPurchase' ? (
             <button
               type="button"
+              disabled={!purchaseFieldUpdateEnabled}
               onClick={() => {
                 setLimitedDialogItem(null);
                 setLimitedDialogSource('current');
                 setLimitedDialogOpen(true);
               }}
-              className={`flex-1 text-base font-semibold rounded-md py-1 px-2 text-center bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-200 tabular-nums ${
+              className={`flex-1 text-base font-semibold rounded-md py-1 px-2 text-center bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-200 tabular-nums disabled:cursor-not-allowed disabled:opacity-50 ${
                 highlightLimitedMissing ? 'ring-2 ring-orange-500 animate-pulse' : ''
               }`}
             >
@@ -1722,7 +1757,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             <select
               value={item.quantity}
               onChange={handleQuantityChange}
-              className="flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums"
+              disabled={!purchaseFieldUpdateEnabled}
+              className="flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums disabled:cursor-not-allowed disabled:opacity-50"
             >
               {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
                 <option key={num} value={num}>
@@ -1742,7 +1778,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           <select
             value={item.price === null ? '' : item.price}
             onChange={handlePriceChange}
-            className={`flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums ${
+            disabled={!purchaseFieldUpdateEnabled}
+            className={`flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums disabled:cursor-not-allowed disabled:opacity-50 ${
               item.price === null ? 'text-red-600 dark:text-red-400' : ''
             } ${highlightPrice && item.price === null ? 'ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse' : ''}`}
           >
