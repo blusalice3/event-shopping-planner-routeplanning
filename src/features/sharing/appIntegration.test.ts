@@ -158,6 +158,125 @@ describe('repairDuplicateSharingItemIdsForEvent', () => {
     ]);
   });
 
+  it('assigns new ids to blank ids and keeps route references canonical', () => {
+    const input = {
+      eventName: 'テスト即売会',
+      eventLists: {
+        テスト即売会: [
+          {
+            id: '',
+            circle: 'サークルA',
+            eventDate: '1日目',
+            block: 'A',
+            number: '01',
+            title: '既刊',
+            price: null,
+            purchaseStatus: 'None' as const,
+            quantity: 1,
+            remarks: '',
+            postponed: false,
+          },
+          {
+            id: '   ',
+            circle: 'サークルB',
+            eventDate: '1日目',
+            block: 'B',
+            number: '02',
+            title: '新刊',
+            price: null,
+            purchaseStatus: 'None' as const,
+            quantity: 1,
+            remarks: '',
+            postponed: false,
+          },
+          {
+            id: 'item-1',
+            circle: 'サークルC',
+            eventDate: '1日目',
+            block: 'C',
+            number: '03',
+            title: '委託',
+            price: null,
+            purchaseStatus: 'None' as const,
+            quantity: 1,
+            remarks: '',
+            postponed: false,
+          },
+          {
+            id: 'item-1',
+            circle: 'サークルD',
+            eventDate: '1日目',
+            block: 'D',
+            number: '04',
+            title: 'グッズ',
+            price: null,
+            purchaseStatus: 'None' as const,
+            quantity: 1,
+            remarks: '',
+            postponed: false,
+          },
+        ],
+      },
+      eventMetadata: {},
+      executeModeItems: {
+        テスト即売会: {
+          '1日目': ['', '   ', 'item-1', 'item-1'],
+        },
+      },
+      memberRouteItems: {
+        テスト即売会: {
+          '1日目': {
+            'member-1': ['', '   ', 'item-1', 'item-1'],
+          },
+        },
+      },
+      dayModes: {},
+      mapData: {},
+      mapRotationSettings: {},
+      routeSettings: {},
+      hallDefinitions: {},
+      hallRouteSettings: {},
+      mapViewportSettings: {},
+    };
+    const generatedIds = [
+      'item-repaired-blank',
+      'item-repaired-space',
+      'item-repaired-duplicate',
+    ];
+
+    const result = repairDuplicateSharingItemIdsForEvent(input, () => generatedIds.shift() ?? 'unused');
+
+    expect(result.repaired).toBe(true);
+    expect(result.repairedItemCount).toBe(3);
+    expect(result.state.eventLists.テスト即売会.map((item) => item.id)).toEqual([
+      'item-repaired-blank',
+      'item-repaired-space',
+      'item-1',
+      'item-repaired-duplicate',
+    ]);
+    expect(result.state.executeModeItems.テスト即売会['1日目']).toEqual([
+      'item-repaired-blank',
+      'item-repaired-space',
+      'item-1',
+      'item-repaired-duplicate',
+    ]);
+    expect(result.state.memberRouteItems.テスト即売会['1日目']['member-1']).toEqual([
+      'item-repaired-blank',
+      'item-repaired-space',
+      'item-1',
+      'item-repaired-duplicate',
+    ]);
+
+    const payload = buildRoomEventPayloadForEvent(result.state);
+    expect(payload.itemCount).toBe(4);
+    expect(Object.keys(payload.payload.itemSnapshots).sort()).toEqual([
+      'item-1',
+      'item-repaired-blank',
+      'item-repaired-duplicate',
+      'item-repaired-space',
+    ]);
+  });
+
   it('returns the original state when ids are already unique', () => {
     const input = {
       eventName: 'テスト即売会',

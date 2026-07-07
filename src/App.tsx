@@ -1853,12 +1853,20 @@ const App: React.FC = () => {
           updateExecuteModeItems(() => repairResult.state.executeModeItems);
           setMemberRouteItems(repairResult.state.memberRouteItems);
           memberRouteItemsRef.current = repairResult.state.memberRouteItems;
-          setSharingStatusMessage('重複IDを修復しました。共有ルームを作成しています。');
+          setSharingStatusMessage('アイテムIDを修復しました。共有ルームを作成しています。');
         }
 
         const roomId = createClientRoomId();
         const memberKey = generateMemberKey();
         const payload = buildRoomEventPayloadForEvent(repairResult.state);
+        const payloadSnapshotCount = Object.keys(payload.payload.itemSnapshots).length;
+        if (payloadSnapshotCount !== payload.itemCount) {
+          setSharingErrorMessage(
+            '共有ルームの作成に失敗しました: INVALID_REQUEST（アイテムIDの重複または空IDを修復できませんでした）',
+          );
+          return;
+        }
+
         if (payload.itemCount > MAX_ROOM_ITEMS) {
           setSharingErrorMessage(
             `共有ルームの作成に失敗しました: INVALID_REQUEST（アイテム数が上限${MAX_ROOM_ITEMS}件を超えています）`,
@@ -1900,7 +1908,7 @@ const App: React.FC = () => {
         setSharingPanelMode('invite');
         setSharingStatusMessage(
           repairResult.repaired
-            ? '重複IDを修復しました。共有ルームを作成しました。参加URLとQRコードを表示しています。'
+            ? 'アイテムIDを修復しました。共有ルームを作成しました。参加URLとQRコードを表示しています。'
             : '共有ルームを作成しました。参加URLとQRコードを表示しています。',
         );
       } catch (error) {

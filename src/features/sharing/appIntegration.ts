@@ -137,20 +137,36 @@ export const repairDuplicateSharingItemIdsForEvent = (
   const idRemapByOccurrence = new Map<string, string[]>();
   let repairedItemCount = 0;
 
+  const isValidItemId = (value: unknown): value is string =>
+    typeof value === 'string' && value.trim().length > 0;
+
+  const createUnusedItemId = () => {
+    let nextId = createItemId();
+    while (!isValidItemId(nextId) || seenIds.has(nextId)) {
+      nextId = createItemId();
+    }
+    return nextId;
+  };
+
   const repairedItems = eventItems.map((item) => {
-    if (!seenIds.has(item.id)) {
-      seenIds.add(item.id);
-      idRemapByOccurrence.set(item.id, [item.id]);
+    const rawId = (item as { id?: unknown }).id;
+    const originalId = typeof rawId === 'string' ? rawId : '';
+
+    if (isValidItemId(rawId) && !seenIds.has(rawId)) {
+      seenIds.add(rawId);
+      idRemapByOccurrence.set(rawId, [rawId]);
       return item;
     }
 
-    let nextId = createItemId();
-    while (seenIds.has(nextId)) {
-      nextId = createItemId();
-    }
+    const nextId = createUnusedItemId();
     seenIds.add(nextId);
     repairedItemCount++;
-    idRemapByOccurrence.get(item.id)?.push(nextId);
+    const replacements = idRemapByOccurrence.get(originalId);
+    if (replacements) {
+      replacements.push(nextId);
+    } else {
+      idRemapByOccurrence.set(originalId, [nextId]);
+    }
     return { ...item, id: nextId };
   });
 
