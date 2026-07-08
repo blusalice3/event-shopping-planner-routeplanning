@@ -32,27 +32,60 @@ export type LoadResult<T> = {
 };
 
 let dbInstance: IDBDatabase | null = null;
+let dbOpenPromise: Promise<IDBDatabase> | null = null;
+
+function resetDbInstance() {
+  dbOpenPromise = null;
+  if (!dbInstance) return;
+  try {
+    dbInstance.close();
+  } catch {
+    // Ignore close failures; the next operation will open a fresh connection.
+  }
+  dbInstance = null;
+}
+
+function ensureStoreExists(db: IDBDatabase, storeName: StoreName) {
+  if (!db.objectStoreNames.contains(storeName)) {
+    throw new Error(`IndexedDB object store is missing: ${storeName}`);
+  }
+}
 
 /**
  * データベースを開く
  */
 function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (dbInstance) {
-      resolve(dbInstance);
-      return;
-    }
+  if (dbInstance) {
+    return Promise.resolve(dbInstance);
+  }
 
+  if (dbOpenPromise) {
+    return dbOpenPromise;
+  }
+
+  dbOpenPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onerror = () => {
       console.error('IndexedDB open error:', request.error);
+      resetDbInstance();
       reject(request.error);
     };
 
     request.onsuccess = () => {
       dbInstance = request.result;
+      dbInstance.onversionchange = () => {
+        resetDbInstance();
+      };
+      dbInstance.onclose = () => {
+        dbInstance = null;
+      };
       resolve(dbInstance);
+    };
+
+    request.onblocked = () => {
+      resetDbInstance();
+      reject(new Error('IndexedDB open request was blocked by another tab.'));
     };
 
     request.onupgradeneeded = (event) => {
@@ -66,36 +99,62 @@ function openDB(): Promise<IDBDatabase> {
       });
     };
   });
+
+  dbOpenPromise.then(
+    () => {
+      dbOpenPromise = null;
+    },
+    () => {
+      dbOpenPromise = null;
+    },
+  );
+
+  return dbOpenPromise;
 }
 
 /**
  * データを保存
  */
 async function saveData<T>(storeName: StoreName, key: string, data: T): Promise<void> {
-  const db = await openDB();
+  const saveOnce = async (): Promise<void> => {
+    const db = await openDB();
+    ensureStoreExists(db, storeName);
 
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(storeName, 'readwrite');
-    const store = transaction.objectStore(storeName);
-    const request = store.put(data, key);
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, 'readwrite');
+      const store = transaction.objectStore(storeName);
+      const request = store.put(data, key);
 
-    request.onerror = () => {
-      console.error(`Failed to save to ${storeName}:`, request.error);
-      reject(request.error);
-    };
+      request.onerror = () => {
+        console.error(`Failed to save to ${storeName}:`, request.error);
+        reject(request.error);
+      };
 
-    request.onsuccess = () => {
-      resolve();
-    };
-  });
+      transaction.oncomplete = () => {
+        resolve();
+      };
+
+      transaction.onabort = () => {
+        reject(transaction.error || request.error);
+      };
+    });
+  };
+
+  try {
+    await saveOnce();
+  } catch {
+    resetDbInstance();
+    await saveOnce();
+  }
 }
 
 /**
  * データを読み込み
  */
 async function loadData<T>(storeName: StoreName, key: string): Promise<LoadResult<T>> {
-  try {
+  const loadOnce = async (): Promise<LoadResult<T>> => {
     const db = await openDB();
+    ensureStoreExists(db, storeName);
 
     return await new Promise((resolve) => {
       const transaction = db.transaction(storeName, 'readonly');
@@ -125,14 +184,34 @@ async function loadData<T>(storeName: StoreName, key: string): Promise<LoadResul
           data: request.result as T,
         });
       };
+
+      transaction.onabort = () => {
+        resolve({
+          status: 'error',
+          data: null,
+          error: transaction.error || request.error,
+        });
+      };
     });
+  };
+
+  try {
+    const firstResult = await loadOnce();
+    if (firstResult.status !== 'error') return firstResult;
+    resetDbInstance();
+    return await loadOnce();
   } catch (error) {
-    console.error(`Failed to load from ${storeName}:`, error);
-    return {
-      status: 'error',
-      data: null,
-      error,
-    };
+    resetDbInstance();
+    try {
+      return await loadOnce();
+    } catch (retryError) {
+      console.error(`Failed to load from ${storeName}:`, retryError);
+      return {
+        status: 'error',
+        data: null,
+        error: retryError,
+      };
+    }
   }
 }
 
