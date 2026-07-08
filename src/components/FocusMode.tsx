@@ -53,6 +53,13 @@ import {
   computeLimitedBulkCancelDecision,
   computeLimitedBulkSubmitDecision,
 } from '../utils/limitedBulkFlow';
+import PostEventDistributionCheckDialog, {
+  type PostEventDistributionCheckMode,
+} from './PostEventDistributionCheckDialog';
+import {
+  type PostEventDistributionAnswer,
+  upsertPostEventDistributionRemark,
+} from '../utils/postEventDistributionCheck';
 // フェーズの定義
 interface FocusModeProps {
   items: ShoppingItem[];
@@ -83,7 +90,12 @@ interface FocusModeProps {
   disableLimitedPurchaseQuantityCheck?: boolean;
   skipLimitedPurchaseForSingleQuantity: boolean;
   purchaseStatusControlMode?: PurchaseStatusControlMode;
+  postEventDistributionCheckEnabled?: boolean;
 }
+type PostEventDistributionCheckContext = {
+  mode: PostEventDistributionCheckMode;
+  targets: ShoppingItem[];
+};
 // スワイプ判定の閾値
 const SWIPE_THRESHOLD = 50;
 const FOOTER_HEIGHT_SP = 56;
@@ -125,6 +137,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
   disableLimitedPurchaseQuantityCheck = false,
   skipLimitedPurchaseForSingleQuantity,
   purchaseStatusControlMode = 'cycle',
+  postEventDistributionCheckEnabled = true,
 }) => {
   const noopRotationHandler = useCallback(() => {}, []);
   const stableMapRotationHandler = onMapRotationAngleChange || noopRotationHandler;
@@ -162,6 +175,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const [limitedBulkDialogContext, setLimitedBulkDialogContext] =
     useState<LimitedBulkDialogContext | null>(null);
   const [bulkLimitedMessage, setBulkLimitedMessage] = useState<BulkLimitedMessageState | null>(null);
+  const [postEventDistributionCheckContext, setPostEventDistributionCheckContext] =
+    useState<PostEventDistributionCheckContext | null>(null);
   const activeLimitedBulkFlowTokenRef = useRef<symbol | null>(null);
   const limitedBulkNotificationOwnerRef = useRef<LimitedBulkNotificationOwner | null>(null);
   const [completionSubView, setCompletionSubView] =
@@ -618,6 +633,31 @@ const FocusMode: React.FC<FocusModeProps> = ({
     },
     [clearLimitedPurchaseQuantityDeferredForItem, onUpdateItem],
   );
+  const openPostEventDistributionCheck = useCallback(
+    (mode: PostEventDistributionCheckMode, targets: ShoppingItem[]) => {
+      if (!postEventDistributionCheckEnabled || targets.length === 0) return;
+      clearAutoAdvanceTimer();
+      setPostEventDistributionCheckContext({ mode, targets });
+    },
+    [clearAutoAdvanceTimer, postEventDistributionCheckEnabled],
+  );
+  const handlePostEventDistributionCheckApply = useCallback(
+    (itemIds: string[], answer: PostEventDistributionAnswer) => {
+      itemIds.forEach((itemId) => {
+        const latestItem = items.find((item) => item.id === itemId);
+        if (!latestItem) return;
+        updateItemWithDeferredCleanup({
+          ...latestItem,
+          remarks: upsertPostEventDistributionRemark(latestItem.remarks, answer),
+        });
+      });
+      setPostEventDistributionCheckContext(null);
+    },
+    [items, updateItemWithDeferredCleanup],
+  );
+  const handlePostEventDistributionCheckCancel = useCallback(() => {
+    setPostEventDistributionCheckContext(null);
+  }, []);
   useEffect(() => {
     setDeferredLimitedItemIdsByVisitKey((previous) => {
       if (previous.size === 0) return previous;
@@ -1627,6 +1667,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
         updateItemWithDeferredCleanup(clearLimitedPurchase({ ...item, purchaseStatus: newStatus }));
       });
 
+      if (targetStatus === 'SoldOut' && newStatus === 'SoldOut') {
+        openPostEventDistributionCheck('bulk', targets);
+      }
+
       clearAutoAdvanceTimer();
     },
     [
@@ -1638,6 +1682,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       setNotification,
       startLimitedBulkFlow,
       updateItemWithDeferredCleanup,
+      openPostEventDistributionCheck,
     ],
   );
   const handleTouchStart = useCallback(
@@ -1900,6 +1945,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
       onCancel={handleLimitedBulkCancel}
     />
   );
+  const postEventDistributionCheckDialogJSX = (
+    <PostEventDistributionCheckDialog
+      open={postEventDistributionCheckContext !== null}
+      mode={postEventDistributionCheckContext?.mode ?? 'single'}
+      targets={postEventDistributionCheckContext?.targets ?? []}
+      onCancel={handlePostEventDistributionCheckCancel}
+      onApply={handlePostEventDistributionCheckApply}
+    />
+  );
   if (allVisits.length === 0) {
     return (
       <>
@@ -1995,7 +2049,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return (
       <div className="relative flex flex-col" style={{ height: availableHeight }}>
         {visibleNotification && (
-          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
+          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
             {visibleNotification}
           </div>
         )}
@@ -2086,6 +2140,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
             purchaseStatusControlMode={purchaseStatusControlMode}
             skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
             onLimitedPurchaseDefer={handleLimitedPurchaseDefer}
+            onPostEventDistributionCheckRequest={(soldOutItem) =>
+              openPostEventDistributionCheck('single', [soldOutItem])
+            }
           />
         </div>
         <FocusModeFooterPortal
@@ -2108,6 +2165,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         {cellItemPopupJSX}
         {addItemDialogJSX}
         {limitedPurchaseDialogJSX}
+        {postEventDistributionCheckDialogJSX}
         {resumeChoiceDialogJSX}
       </div>
     );
@@ -2117,7 +2175,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return (
       <div className="relative flex" style={{ height: availableHeight }}>
         {visibleNotification && (
-          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
+          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
             {visibleNotification}
           </div>
         )}
@@ -2190,6 +2248,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
             purchaseStatusControlMode={purchaseStatusControlMode}
             skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
             onLimitedPurchaseDefer={handleLimitedPurchaseDefer}
+            onPostEventDistributionCheckRequest={(soldOutItem) =>
+              openPostEventDistributionCheck('single', [soldOutItem])
+            }
           />
         </div>
         <button
@@ -2233,6 +2294,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
         {cellItemPopupJSX}
         {addItemDialogJSX}
         {limitedPurchaseDialogJSX}
+        {postEventDistributionCheckDialogJSX}
       </div>
     );
   }
@@ -2245,7 +2307,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       onTouchEnd={handleTouchEnd}
     >
       {visibleNotification && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
+        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
           {visibleNotification}
         </div>
       )}
@@ -2282,6 +2344,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
         purchaseStatusControlMode={purchaseStatusControlMode}
         skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
         onLimitedPurchaseDefer={handleLimitedPurchaseDefer}
+        onPostEventDistributionCheckRequest={(soldOutItem) =>
+          openPostEventDistributionCheck('single', [soldOutItem])
+        }
       />
       {layoutMode === 'pc' && (
         <>
@@ -2330,6 +2395,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       {cellItemPopupJSX}
       {addItemDialogJSX}
       {limitedPurchaseDialogJSX}
+      {postEventDistributionCheckDialogJSX}
       {resumeChoiceDialogJSX}
     </div>
   );
