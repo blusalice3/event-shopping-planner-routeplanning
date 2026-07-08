@@ -2049,7 +2049,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return (
       <div className="relative flex flex-col" style={{ height: availableHeight }}>
         {visibleNotification && (
-          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
+          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
             {visibleNotification}
           </div>
         )}
@@ -2175,7 +2175,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return (
       <div className="relative flex" style={{ height: availableHeight }}>
         {visibleNotification && (
-          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
+          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
             {visibleNotification}
           </div>
         )}
@@ -2307,7 +2307,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       onTouchEnd={handleTouchEnd}
     >
       {visibleNotification && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
+        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
           {visibleNotification}
         </div>
       )}
