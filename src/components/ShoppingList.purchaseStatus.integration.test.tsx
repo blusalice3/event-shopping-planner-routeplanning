@@ -39,6 +39,7 @@ const StateFulShoppingListHarness = ({
   showLateFilterButton,
   onActivateLateFilter,
   disablePriceUndefinedCheck,
+  postEventDistributionCheckEnabled,
 }: {
   initialItems: ShoppingItem[];
   onCollapseAndOpenNext?: (groupKey: string) => void;
@@ -49,6 +50,7 @@ const StateFulShoppingListHarness = ({
   showLateFilterButton?: boolean;
   onActivateLateFilter?: () => void;
   disablePriceUndefinedCheck?: boolean;
+  postEventDistributionCheckEnabled?: boolean;
 }) => {
   const [items, setItems] = useState(initialItems);
 
@@ -77,6 +79,49 @@ const StateFulShoppingListHarness = ({
       showLateFilterButton={showLateFilterButton}
       onActivateLateFilter={onActivateLateFilter}
       disablePriceUndefinedCheck={disablePriceUndefinedCheck}
+      postEventDistributionCheckEnabled={postEventDistributionCheckEnabled}
+    />
+  );
+};
+
+const StatefulBulkShoppingListHarness = ({
+  initialItems,
+  postEventDistributionCheckEnabled,
+}: {
+  initialItems: ShoppingItem[];
+  postEventDistributionCheckEnabled?: boolean;
+}) => {
+  const [items, setItems] = useState(initialItems);
+
+  return (
+    <ShoppingList
+      items={items}
+      onUpdateItem={(updatedItem) =>
+        setItems((current) =>
+          current.map((item) => (item.id === updatedItem.id ? updatedItem : item)),
+        )
+      }
+      onMoveItem={vi.fn()}
+      onEditRequest={vi.fn()}
+      onDeleteRequest={vi.fn()}
+      selectedItemIds={new Set()}
+      onSelectItem={vi.fn()}
+      layoutMode="pc"
+      viewMode="execute"
+      columnType="execute"
+      skipLimitedPurchaseForSingleQuantity
+      showSpaceGroups
+      onBulkStatusChange={(_groupKey, targetStatus, groupItems) => {
+        setItems((current) => {
+          const groupItemIds = new Set(groupItems.map((item) => item.id));
+          const allAlready = groupItems.every((item) => item.purchaseStatus === targetStatus);
+          const newStatus = allAlready ? 'None' : targetStatus;
+          return current.map((item) =>
+            groupItemIds.has(item.id) ? { ...item, purchaseStatus: newStatus } : item,
+          );
+        });
+      }}
+      postEventDistributionCheckEnabled={postEventDistributionCheckEnabled}
     />
   );
 };
@@ -88,7 +133,126 @@ const clickLimitedDeferForTitle = (title: string) => {
   fireEvent.click(screen.getByRole('button', { name: 'この商品を後で入力' }));
 };
 
+const clickStatusButtonForTitle = (title: string) => {
+  const card = screen.getByText(title).closest('[data-item-id]');
+  if (!card) throw new Error(`card not found: ${title}`);
+  fireEvent.click(
+    within(card as HTMLElement).getByRole('button', { name: /Current status/i }),
+  );
+};
+
+const getRemarksInputForTitle = (title: string): HTMLInputElement => {
+  const card = screen.getByText(title).closest('[data-item-id]');
+  if (!card) throw new Error(`card not found: ${title}`);
+  return within(card as HTMLElement).getByPlaceholderText('備考') as HTMLInputElement;
+};
+
 describe('ShoppingList purchase status control mode', () => {
+  it('opens post-event distribution check dialog when an execute item becomes sold out', async () => {
+    render(<StateFulShoppingListHarness initialItems={[baseItem]} />);
+
+    clickStatusButtonForTitle('Title');
+    clickStatusButtonForTitle('Title');
+
+    expect(
+      await screen.findByRole('dialog', { name: '事後通販･頒布可否確認' }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox', { name: '回答内容' }), {
+      target: { value: 'BOOTH有' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '記録' }));
+
+    expect(getRemarksInputForTitle('Title')).toHaveValue('通販･頒布確認: BOOTH有');
+  });
+
+  it('does not open post-event distribution check dialog when the setting is off', () => {
+    render(
+      <StateFulShoppingListHarness
+        initialItems={[baseItem]}
+        postEventDistributionCheckEnabled={false}
+      />,
+    );
+
+    clickStatusButtonForTitle('Title');
+    clickStatusButtonForTitle('Title');
+
+    expect(
+      screen.queryByRole('dialog', { name: '事後通販･頒布可否確認' }),
+    ).not.toBeInTheDocument();
+  });
+
+  it('records bulk sold-out check answers for the selected display group items', async () => {
+    render(
+      <StatefulBulkShoppingListHarness
+        initialItems={[
+          { ...baseItem, id: 'new-book', title: '新刊', purchaseStatus: 'None' },
+          {
+            ...baseItem,
+            id: 'existing-book',
+            title: '既刊',
+            purchaseStatus: 'SoldOut',
+            remarks: '既存 通販･頒布確認: BOOTH有',
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '全売切' }));
+
+    const dialog = await screen.findByRole('dialog', { name: '事後通販･頒布可否確認' });
+    expect(dialog).toBeInTheDocument();
+    expect(screen.getByLabelText('スペース内全アイテムに適用')).toBeChecked();
+    expect(within(dialog).getByText('既刊')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox', { name: '一括回答' }), {
+      target: { value: '通販有(メロン等)' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '記録' }));
+
+    expect(getRemarksInputForTitle('新刊')).toHaveValue(
+      '通販･頒布確認: 通販有(メロン等)',
+    );
+    expect(getRemarksInputForTitle('既刊')).toHaveValue(
+      '既存 通販･頒布確認: 通販有(メロン等)',
+    );
+    expect(getRemarksInputForTitle('既刊').value.match(/通販･頒布確認:/g)).toHaveLength(1);
+  });
+
+  it('records different post-event distribution answers for each bulk sold-out item', async () => {
+    render(
+      <StatefulBulkShoppingListHarness
+        initialItems={[
+          { ...baseItem, id: 'booth-book', title: 'BOOTH本', purchaseStatus: 'None' },
+          { ...baseItem, id: 'melon-book', title: 'メロン本', purchaseStatus: 'None' },
+          { ...baseItem, id: 'event-book', title: '別イベ本', purchaseStatus: 'None' },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '全売切' }));
+
+    await screen.findByRole('dialog', { name: '事後通販･頒布可否確認' });
+    fireEvent.change(screen.getByRole('combobox', { name: 'BOOTH本の回答内容' }), {
+      target: { value: 'BOOTH有' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'メロン本の回答内容' }), {
+      target: { value: '通販有(メロン等)' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: '別イベ本の回答内容' }), {
+      target: { value: '別イベント頒布有' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '記録' }));
+
+    expect(getRemarksInputForTitle('BOOTH本')).toHaveValue('通販･頒布確認: BOOTH有');
+    expect(getRemarksInputForTitle('メロン本')).toHaveValue(
+      '通販･頒布確認: 通販有(メロン等)',
+    );
+    expect(getRemarksInputForTitle('別イベ本')).toHaveValue(
+      '通販･頒布確認: 別イベント頒布有',
+    );
+  });
+
   it('passes radial purchase status control mode to item cards', () => {
     render(
       <ShoppingList

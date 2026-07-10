@@ -91,6 +91,7 @@ export const minimalProps = (
     disableLimitedPurchaseQuantityCheck?: boolean;
     skipLimitedPurchaseForSingleQuantity?: boolean;
     purchaseStatusControlMode?: PurchaseStatusControlMode;
+    postEventDistributionCheckEnabled?: boolean;
   } = {},
 ) => ({
   items: overrides.items ?? [],
@@ -109,6 +110,7 @@ export const minimalProps = (
   skipLimitedPurchaseForSingleQuantity:
     overrides.skipLimitedPurchaseForSingleQuantity ?? true,
   purchaseStatusControlMode: overrides.purchaseStatusControlMode ?? 'cycle',
+  postEventDistributionCheckEnabled: overrides.postEventDistributionCheckEnabled ?? true,
 });
 
 /**
@@ -128,12 +130,14 @@ export const StatefulFocusModeHarness: React.FC<{
   resumeState: FocusModeSessionState | null;
   onSessionStateChange?: (state: FocusModeSessionState) => void;
   disableLimitedPurchaseQuantityCheck?: boolean;
+  postEventDistributionCheckEnabled?: boolean;
 }> = ({
   initialItems,
   executeModeItemIds,
   resumeState,
   onSessionStateChange,
   disableLimitedPurchaseQuantityCheck,
+  postEventDistributionCheckEnabled,
 }) => {
   const [items, setItems] = React.useState(initialItems);
   // 後続 initialItems 変更は取り込まない。リセットしたければ key でリマウント
@@ -149,6 +153,7 @@ export const StatefulFocusModeHarness: React.FC<{
         resumeState,
         onSessionStateChange,
         disableLimitedPurchaseQuantityCheck,
+        postEventDistributionCheckEnabled,
       })}
     />
   );

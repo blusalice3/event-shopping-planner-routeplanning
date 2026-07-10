@@ -14,7 +14,7 @@ type PostEventDistributionCheckDialogProps = {
   mode: PostEventDistributionCheckMode;
   targets: ShoppingItem[];
   onCancel: () => void;
-  onApply: (itemIds: string[], answer: PostEventDistributionAnswer) => void;
+  onApply: (answers: { itemId: string; answer: PostEventDistributionAnswer }[]) => void;
 };
 
 const getItemLabel = (item: ShoppingItem): string => {
@@ -35,11 +35,13 @@ const PostEventDistributionCheckDialog: React.FC<PostEventDistributionCheckDialo
   const targetIds = useMemo(() => targets.map((item) => item.id), [targets]);
   const [selectedAnswer, setSelectedAnswer] = useState('');
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(() => new Set(targetIds));
+  const [itemAnswers, setItemAnswers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!open) return;
     setSelectedAnswer('');
     setSelectedItemIds(new Set(targetIds));
+    setItemAnswers({});
   }, [open, targetIds]);
 
   if (!open || targets.length === 0) return null;
@@ -65,9 +67,31 @@ const PostEventDistributionCheckDialog: React.FC<PostEventDistributionCheckDialo
     });
   };
 
+  const applyBulkAnswerToSelectedItems = () => {
+    setItemAnswers((current) => {
+      const next = { ...current };
+      applyTargetIds.forEach((itemId) => {
+        next[itemId] = selectedAnswer;
+      });
+      return next;
+    });
+  };
+
+  const setItemAnswer = (itemId: string, answer: string) => {
+    setItemAnswers((current) => ({
+      ...current,
+      [itemId]: answer,
+    }));
+  };
+
   const handleApply = () => {
     if (!canApply) return;
-    onApply(applyTargetIds, normalizePostEventDistributionAnswer(selectedAnswer));
+    onApply(
+      applyTargetIds.map((itemId) => ({
+        itemId,
+        answer: normalizePostEventDistributionAnswer(itemAnswers[itemId] ?? selectedAnswer),
+      })),
+    );
   };
 
   const dialog = (
@@ -86,22 +110,34 @@ const PostEventDistributionCheckDialog: React.FC<PostEventDistributionCheckDialo
         </h2>
 
         <div className="mt-4 space-y-4">
-          <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-            回答内容
-            <select
-              aria-label="回答内容"
-              value={selectedAnswer}
-              onChange={(event) => setSelectedAnswer(event.target.value)}
-              className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
-            >
-              <option value="">未確認</option>
-              {POST_EVENT_DISTRIBUTION_OPTIONS.map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
+          <div className="space-y-2">
+            <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+              {isBulk ? '一括回答' : '回答内容'}
+              <select
+                aria-label={isBulk ? '一括回答' : '回答内容'}
+                value={selectedAnswer}
+                onChange={(event) => setSelectedAnswer(event.target.value)}
+                className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
+              >
+                <option value="">未確認</option>
+                {POST_EVENT_DISTRIBUTION_OPTIONS.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
+            </label>
+            {isBulk && (
+              <button
+                type="button"
+                onClick={applyBulkAnswerToSelectedItems}
+                disabled={!canApply}
+                className="rounded-md border border-blue-300 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:border-slate-300 disabled:text-slate-400 dark:border-blue-700 dark:text-blue-300 dark:hover:bg-blue-950/30 dark:disabled:border-slate-600 dark:disabled:text-slate-500"
+              >
+                選択中に一括適用
+              </button>
+            )}
+          </div>
 
           {isBulk ? (
             <div>
@@ -114,11 +150,11 @@ const PostEventDistributionCheckDialog: React.FC<PostEventDistributionCheckDialo
                 />
                 <span>スペース内全アイテムに適用</span>
               </label>
-              <div className="mt-2 max-h-56 space-y-2 overflow-y-auto rounded-md border border-slate-200 p-2 dark:border-slate-700">
+              <div className="mt-2 max-h-72 space-y-2 overflow-y-auto rounded-md border border-slate-200 p-2 dark:border-slate-700">
                 {targets.map((item) => (
-                  <label
+                  <div
                     key={item.id}
-                    className="flex items-start gap-2 text-sm text-slate-700 dark:text-slate-300"
+                    className="grid grid-cols-[auto_minmax(0,1fr)] gap-2 rounded-md px-1 py-1 text-sm text-slate-700 dark:text-slate-300 sm:grid-cols-[auto_minmax(0,1fr)_minmax(9rem,12rem)]"
                   >
                     <input
                       type="checkbox"
@@ -127,7 +163,21 @@ const PostEventDistributionCheckDialog: React.FC<PostEventDistributionCheckDialo
                       className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600"
                     />
                     <span className="min-w-0 flex-1 break-words">{getItemLabel(item)}</span>
-                  </label>
+                    <select
+                      aria-label={`${getItemLabel(item)}の回答内容`}
+                      value={itemAnswers[item.id] ?? selectedAnswer}
+                      onChange={(event) => setItemAnswer(item.id, event.target.value)}
+                      disabled={!selectedItemIds.has(item.id)}
+                      className="col-span-2 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-100 disabled:text-slate-400 dark:border-slate-600 dark:bg-slate-700 dark:text-white dark:disabled:bg-slate-800 sm:col-span-1"
+                    >
+                      <option value="">未確認</option>
+                      {POST_EVENT_DISTRIBUTION_OPTIONS.map((option) => (
+                        <option key={option} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 ))}
               </div>
             </div>

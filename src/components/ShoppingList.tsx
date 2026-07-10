@@ -37,6 +37,13 @@ import {
   computeLimitedBulkCancelDecision,
   computeLimitedBulkSubmitDecision,
 } from '../utils/limitedBulkFlow';
+import PostEventDistributionCheckDialog, {
+  type PostEventDistributionCheckMode,
+} from './PostEventDistributionCheckDialog';
+import {
+  type PostEventDistributionAnswer,
+  upsertPostEventDistributionRemark,
+} from '../utils/postEventDistributionCheck';
 
 type PriorityLevel = 'none' | 'priority' | 'highest';
 
@@ -114,8 +121,14 @@ interface ShoppingListProps {
   // 実行モード用: 価格未定チェック無効化設定（true のとき、購入済・価格未定でも次のスペースへ進める）
   disablePriceUndefinedCheck?: boolean;
   disableLimitedPurchaseQuantityCheck?: boolean;
+  postEventDistributionCheckEnabled?: boolean;
   skipLimitedPurchaseForSingleQuantity: boolean;
 }
+
+type PostEventDistributionCheckContext = {
+  mode: PostEventDistributionCheckMode;
+  targets: ShoppingItem[];
+};
 
 const getGroupDisplayName = (groupId: string | null, hallDefinitions: HallDefinition[]): string => {
   if (groupId === null) return 'ホール未定義';
@@ -295,6 +308,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onActivateLateFilter,
   disablePriceUndefinedCheck = false,
   disableLimitedPurchaseQuantityCheck: _disableLimitedPurchaseQuantityCheck = false,
+  postEventDistributionCheckEnabled = true,
   skipLimitedPurchaseForSingleQuantity,
   purchaseStatusControlMode = 'cycle',
 }) => {
@@ -309,6 +323,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     useState<LimitedBulkDialogContext | null>(null);
   const [limitedMessage, setLimitedMessage] = useState<string | null>(null);
   const [bulkLimitedMessage, setBulkLimitedMessage] = useState<BulkLimitedMessageState | null>(null);
+  const [postEventDistributionCheckContext, setPostEventDistributionCheckContext] =
+    useState<PostEventDistributionCheckContext | null>(null);
   const activeLimitedBulkFlowTokenRef = useRef<symbol | null>(null);
   const limitedBulkNotificationOwnerRef = useRef<LimitedBulkNotificationOwner | null>(null);
 
@@ -564,6 +580,33 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     [clearLimitedPurchaseQuantityDeferredForItem, onUpdateItem],
   );
 
+  const openPostEventDistributionCheck = useCallback(
+    (mode: PostEventDistributionCheckMode, targets: ShoppingItem[]) => {
+      if (!postEventDistributionCheckEnabled || targets.length === 0) return;
+      setPostEventDistributionCheckContext({ mode, targets });
+    },
+    [postEventDistributionCheckEnabled],
+  );
+
+  const handlePostEventDistributionCheckApply = useCallback(
+    (answers: { itemId: string; answer: PostEventDistributionAnswer }[]) => {
+      answers.forEach(({ itemId, answer }) => {
+        const latestItem = getLatestItemById(itemId);
+        if (!latestItem) return;
+        updateItemWithDeferredCleanup({
+          ...latestItem,
+          remarks: upsertPostEventDistributionRemark(latestItem.remarks, answer),
+        });
+      });
+      setPostEventDistributionCheckContext(null);
+    },
+    [getLatestItemById, updateItemWithDeferredCleanup],
+  );
+
+  const handlePostEventDistributionCheckCancel = useCallback(() => {
+    setPostEventDistributionCheckContext(null);
+  }, []);
+
   const commitLimitedDialogResult = useCallback(
     (baseItem: ShoppingItem, result: LimitedPurchaseDialogResult) => {
       if (result.kind === 'limited') {
@@ -752,6 +795,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         return;
       }
 
+      const allAlready = groupItems.every((item) => item.purchaseStatus === targetStatus);
       const hasLimitedPurchase = groupItems.some((item) => item.purchaseStatus === 'LimitedPurchase');
       const targets = groupItems.filter((item) => item.purchaseStatus !== 'LimitedPurchase');
       const changedItems = hasLimitedPurchase
@@ -763,8 +807,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         return;
       }
       onBulkStatusChange?.(groupKey, targetStatus, changedItems);
+      if (targetStatus === 'SoldOut' && !allAlready) {
+        openPostEventDistributionCheck('bulk', targets);
+      }
     },
-    [onBulkStatusChange, startLimitedBulkFlow],
+    [onBulkStatusChange, openPostEventDistributionCheck, startLimitedBulkFlow],
   );
 
   const blockPriceOrLimitedMissingIfNeeded = useCallback(
@@ -1520,6 +1567,13 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         onSubmit={handleLimitedBulkSubmit}
         onCancel={handleLimitedBulkCancel}
       />
+      <PostEventDistributionCheckDialog
+        open={postEventDistributionCheckContext !== null}
+        mode={postEventDistributionCheckContext?.mode ?? 'single'}
+        targets={postEventDistributionCheckContext?.targets ?? []}
+        onCancel={handlePostEventDistributionCheckCancel}
+        onApply={handlePostEventDistributionCheckApply}
+      />
     </>
   );
 
@@ -2238,6 +2292,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                               ? markLimitedPurchaseQuantityDeferred
                               : undefined
                           }
+                          onPostEventDistributionCheckRequest={
+                            viewMode === 'execute' && columnType === 'execute'
+                              ? (soldOutItem) =>
+                                  openPostEventDistributionCheck('single', [soldOutItem])
+                              : undefined
+                          }
                           purchaseStatusControlMode={purchaseStatusControlMode}
                           skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                         />
@@ -2763,6 +2823,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         highlightLimitedMissing={limitedMissingHighlightItemIds.has(item.id)}
                         getLatestItemById={getLatestItemById}
                         onNotify={setLimitedMessage}
+                        onPostEventDistributionCheckRequest={
+                          viewMode === 'execute' && columnType === 'execute'
+                            ? (soldOutItem) =>
+                                openPostEventDistributionCheck('single', [soldOutItem])
+                            : undefined
+                        }
                         purchaseStatusControlMode={purchaseStatusControlMode}
                         skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
                       />
@@ -2986,6 +3052,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               highlightLimitedMissing={limitedMissingHighlightItemIds.has(item.id)}
               getLatestItemById={getLatestItemById}
               onNotify={setLimitedMessage}
+              onPostEventDistributionCheckRequest={
+                viewMode === 'execute' && columnType === 'execute'
+                  ? (soldOutItem) => openPostEventDistributionCheck('single', [soldOutItem])
+                  : undefined
+              }
               purchaseStatusControlMode={purchaseStatusControlMode}
               skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
             />

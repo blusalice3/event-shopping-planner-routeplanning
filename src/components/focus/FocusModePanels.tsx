@@ -23,6 +23,7 @@ interface FocusModeItemListProps {
   purchaseStatusControlMode?: PurchaseStatusControlMode;
   skipLimitedPurchaseForSingleQuantity: boolean;
   onLimitedPurchaseDefer?: (item: ShoppingItem) => void;
+  onPostEventDistributionCheckRequest?: (item: ShoppingItem) => void;
 }
 
 interface FocusModeHeaderProps {
@@ -92,6 +93,7 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
   purchaseStatusControlMode = 'cycle',
   skipLimitedPurchaseForSingleQuantity,
   onLimitedPurchaseDefer,
+  onPostEventDistributionCheckRequest,
 }) => (
   <div
     ref={itemListRef}
@@ -134,6 +136,7 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(({
           getLatestItemById={getLatestItemById}
           onNotify={onNotify}
           onLimitedPurchaseDefer={onLimitedPurchaseDefer}
+          onPostEventDistributionCheckRequest={onPostEventDistributionCheckRequest}
         />
       </div>
     ))}
