@@ -56,7 +56,6 @@ export function useIndexedDbPersistence({
   const [isInitialized, setIsInitialized] = useState(false);
   const isSavingRef = useRef(false);
   const hasShownLoadErrorRef = useRef(false);
-  const hasShownSaveErrorRef = useRef(false);
   const {
     eventLists,
     eventMetadata,
@@ -203,82 +202,21 @@ export function useIndexedDbPersistence({
     const saveData = async () => {
       isSavingRef.current = true;
       try {
-        const toIndexedDbSafeData = <T,>(data: T): T => JSON.parse(JSON.stringify(data)) as T;
-        const saveTasks = [
-          {
-            label: 'eventLists',
-            save: () => db.saveEventLists(toIndexedDbSafeData(eventLists)),
-          },
-          {
-            label: 'eventMetadata',
-            save: () => db.saveEventMetadata(toIndexedDbSafeData(eventMetadata)),
-          },
-          {
-            label: 'executeModeItems',
-            save: () => db.saveExecuteModeItems(toIndexedDbSafeData(executeModeItems)),
-          },
-          {
-            label: 'dayModes',
-            save: () => db.saveDayModes(toIndexedDbSafeData(dayModes)),
-          },
-          {
-            label: 'mapData',
-            save: () => db.saveMapData(toIndexedDbSafeData(mapData)),
-          },
-          {
-            label: 'mapRotationSettings',
-            save: () => db.saveMapRotationSettings(toIndexedDbSafeData(mapRotationSettings)),
-          },
-          {
-            label: 'routeSettings',
-            save: () => db.saveRouteSettings(toIndexedDbSafeData(routeSettings)),
-          },
-          {
-            label: 'hallDefinitions',
-            save: () => db.saveHallDefinitions(toIndexedDbSafeData(hallDefinitions)),
-          },
-          {
-            label: 'hallRouteSettings',
-            save: () => db.saveHallRouteSettings(toIndexedDbSafeData(hallRouteSettings)),
-          },
-          {
-            label: 'mapViewportSettings',
-            save: () => db.saveMapViewportSettings(toIndexedDbSafeData(mapViewportSettings)),
-          },
-        ];
-
-        const results = await Promise.allSettled(
-          saveTasks.map(async ({ label, save }) => {
-            try {
-              await save();
-            } catch (error) {
-              throw { label, error };
-            }
-          }),
-        );
-        const failed = results
-          .filter((result): result is PromiseRejectedResult => result.status === 'rejected')
-          .map((result) => result.reason);
-
-        if (failed.length > 0) {
-          console.error('Failed to save data to IndexedDB:', failed);
-          if (!hasShownSaveErrorRef.current) {
-            hasShownSaveErrorRef.current = true;
-            alert(
-              `保存に失敗しました。ページを再読み込みしてください。\n${failed
-                .map((failure) => failure.label || 'unknown')
-                .join('\n')}`,
-            );
-          }
-          return;
-        }
-        hasShownSaveErrorRef.current = false;
+        await Promise.all([
+          db.saveEventLists(eventLists),
+          db.saveEventMetadata(eventMetadata),
+          db.saveExecuteModeItems(executeModeItems),
+          db.saveDayModes(dayModes),
+          db.saveMapData(mapData),
+          db.saveMapRotationSettings(mapRotationSettings),
+          db.saveRouteSettings(routeSettings),
+          db.saveHallDefinitions(hallDefinitions),
+          db.saveHallRouteSettings(hallRouteSettings),
+          db.saveMapViewportSettings(mapViewportSettings),
+        ]);
       } catch (error) {
         console.error('Failed to save data to IndexedDB:', error);
-        if (!hasShownSaveErrorRef.current) {
-          hasShownSaveErrorRef.current = true;
-          alert('保存に失敗しました。ページを再読み込みしてください。');
-        }
+        alert('Failed to save data. Please reload the page.');
       } finally {
         isSavingRef.current = false;
       }

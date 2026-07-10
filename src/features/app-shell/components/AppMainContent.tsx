@@ -65,7 +65,6 @@ type AppMainContentProps = {
   disablePriceUndefinedCheck: boolean;
   disableLimitedPurchaseQuantityCheck: boolean;
   skipLimitedPurchaseForSingleQuantity: boolean;
-  postEventDistributionCheckEnabled: boolean;
   duplicateCircleItemIds: Set<string>;
   eventDates: string[];
   eventLists: Record<string, ShoppingItem[]>;
@@ -195,11 +194,10 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     currentMapTabRotationState,
     currentMapTabViewport,
     currentMode,
-  disablePriceUndefinedCheck,
-  disableLimitedPurchaseQuantityCheck,
-  skipLimitedPurchaseForSingleQuantity,
-  postEventDistributionCheckEnabled,
-  duplicateCircleItemIds,
+    disablePriceUndefinedCheck,
+    disableLimitedPurchaseQuantityCheck,
+    skipLimitedPurchaseForSingleQuantity,
+    duplicateCircleItemIds,
     eventDates,
     eventLists,
     executeCollapsedSpaces,
@@ -619,7 +617,6 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                   disablePriceUndefinedCheck={disablePriceUndefinedCheck}
                   disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
                   skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
-                  postEventDistributionCheckEnabled={postEventDistributionCheckEnabled}
                   purchaseStatusControlMode={purchaseStatusControlMode}
                 />
               </Suspense>
@@ -655,7 +652,6 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                 disablePriceUndefinedCheck={disablePriceUndefinedCheck}
                 disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
                 skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
-                postEventDistributionCheckEnabled={postEventDistributionCheckEnabled}
                 showPostponeFilterButton={showPostponeFilterButton}
                 onActivatePostponeFilter={handleActivatePostponeFilter}
                 showLateFilterButton={showLateFilterButton}

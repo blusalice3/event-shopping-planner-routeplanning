@@ -54,7 +54,6 @@ type FocusModeContainerProps = {
   disableLimitedPurchaseQuantityCheck?: boolean;
   skipLimitedPurchaseForSingleQuantity: boolean;
   purchaseStatusControlMode?: PurchaseStatusControlMode;
-  postEventDistributionCheckEnabled?: boolean;
 };
 
 const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
@@ -85,7 +84,6 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   disableLimitedPurchaseQuantityCheck,
   skipLimitedPurchaseForSingleQuantity,
   purchaseStatusControlMode = 'cycle',
-  postEventDistributionCheckEnabled = true,
 }) => {
   // 現在表示中の日付（タブ名が日付と一致すればそれ、そうでなければ先頭日）
   const currentDay = useMemo(
@@ -363,7 +361,6 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
       skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
       purchaseStatusControlMode={purchaseStatusControlMode}
-      postEventDistributionCheckEnabled={postEventDistributionCheckEnabled}
     />
   );
 };

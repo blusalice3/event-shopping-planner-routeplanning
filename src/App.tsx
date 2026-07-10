@@ -106,7 +106,6 @@ import {
   useSkipLimitedPurchaseForSingleQuantity,
 } from './hooks/useSkipLimitedPurchaseForSingleQuantity';
 import { usePurchaseStatusControlMode } from './hooks/usePurchaseStatusControlMode';
-import { usePostEventDistributionCheck } from './hooks/usePostEventDistributionCheck';
 import { useIndexedDbPersistence } from './hooks/useIndexedDbPersistence';
 import type { SmartInsertMode, SortState } from './features/app-shell/types';
 import { normalizeSmartInsertMode } from './utils/smartInsertMode';
@@ -378,10 +377,6 @@ const App: React.FC = () => {
     skipLimitedPurchaseForSingleQuantity,
     setSkipLimitedPurchaseForSingleQuantity,
   } = useSkipLimitedPurchaseForSingleQuantity();
-  const {
-    postEventDistributionCheckEnabled,
-    setPostEventDistributionCheckEnabled,
-  } = usePostEventDistributionCheck();
   const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
   const [uiSettingsPanelOpen, setUiSettingsPanelOpen] = useState(false);
   const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
@@ -4277,7 +4272,6 @@ const App: React.FC = () => {
         disablePriceUndefinedCheck={disablePriceUndefinedCheck}
         disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
         skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
-        postEventDistributionCheckEnabled={postEventDistributionCheckEnabled}
         eventDates={eventDates}
         executeSpaceGroupingEnabled={executeSpaceGroupingEnabled}
         getHallExecuteCount={getHallExecuteCount}
@@ -4341,7 +4335,6 @@ const App: React.FC = () => {
         setDisablePriceUndefinedCheck={setDisablePriceUndefinedCheck}
         setDisableLimitedPurchaseQuantityCheck={setDisableLimitedPurchaseQuantityCheck}
         setSkipLimitedPurchaseForSingleQuantity={setSkipLimitedPurchaseForSingleQuantity}
-        setPostEventDistributionCheckEnabled={setPostEventDistributionCheckEnabled}
         setNumberCellOutlineStyle={setNumberCellOutlineStyle}
         setPurchaseStatusControlMode={setPurchaseStatusControlMode}
         setSearchKeyword={setSearchKeyword}
@@ -4449,7 +4442,6 @@ const App: React.FC = () => {
         disablePriceUndefinedCheck={disablePriceUndefinedCheck}
         disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
         skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
-        postEventDistributionCheckEnabled={postEventDistributionCheckEnabled}
         duplicateCircleItemIds={duplicateCircleItemIds}
         eventDates={eventDates}
         eventLists={eventLists}

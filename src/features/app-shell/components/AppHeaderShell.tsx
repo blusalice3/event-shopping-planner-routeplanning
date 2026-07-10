@@ -138,7 +138,6 @@ type AppHeaderShellProps = {
   disablePriceUndefinedCheck: boolean;
   disableLimitedPurchaseQuantityCheck: boolean;
   skipLimitedPurchaseForSingleQuantity: boolean;
-  postEventDistributionCheckEnabled: boolean;
   eventDates: string[];
   getHallExecuteCount: (hallId: string) => number;
   getHallTotalItemCount: (hallId: string) => number;
@@ -202,7 +201,6 @@ type AppHeaderShellProps = {
   setDisablePriceUndefinedCheck: React.Dispatch<React.SetStateAction<boolean>>;
   setDisableLimitedPurchaseQuantityCheck: React.Dispatch<React.SetStateAction<boolean>>;
   setSkipLimitedPurchaseForSingleQuantity: React.Dispatch<React.SetStateAction<boolean>>;
-  setPostEventDistributionCheckEnabled: React.Dispatch<React.SetStateAction<boolean>>;
   setNumberCellOutlineStyle: React.Dispatch<React.SetStateAction<NumberCellOutlineStyle>>;
   setPurchaseStatusControlMode: React.Dispatch<React.SetStateAction<PurchaseStatusControlMode>>;
   setSearchKeyword: React.Dispatch<React.SetStateAction<string>>;
@@ -253,7 +251,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     disablePriceUndefinedCheck,
     disableLimitedPurchaseQuantityCheck,
     skipLimitedPurchaseForSingleQuantity,
-    postEventDistributionCheckEnabled,
     eventDates,
     getHallExecuteCount,
     getHallTotalItemCount,
@@ -317,7 +314,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     setDisablePriceUndefinedCheck,
     setDisableLimitedPurchaseQuantityCheck,
     setSkipLimitedPurchaseForSingleQuantity,
-    setPostEventDistributionCheckEnabled,
     setNumberCellOutlineStyle,
     setPurchaseStatusControlMode,
     setSearchKeyword,
@@ -891,24 +887,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                 </span>
                                 <span className="block text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
                                   ON にすると、数量1の新規限数入力を購入済み扱いの導線に寄せます
-                                </span>
-                              </span>
-                            </label>
-                            <label className="mt-2 flex items-start gap-2 cursor-pointer text-xs">
-                              <input
-                                type="checkbox"
-                                checked={postEventDistributionCheckEnabled}
-                                onChange={(e) =>
-                                  setPostEventDistributionCheckEnabled(e.target.checked)
-                                }
-                                className="mt-0.5 rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500 w-3.5 h-3.5"
-                              />
-                              <span className="flex-1">
-                                <span className="block text-slate-700 dark:text-slate-300">
-                                  事後通販･頒布可否確認を有効化
-                                </span>
-                                <span className="block text-[10px] text-slate-500 dark:text-slate-400 mt-0.5">
-                                  ON にすると、売切へ変更した時に確認結果を備考へ記録できます
                                 </span>
                               </span>
                             </label>
