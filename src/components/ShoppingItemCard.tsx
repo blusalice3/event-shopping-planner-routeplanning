@@ -74,7 +74,6 @@ export interface ShoppingItemCardProps {
   getLatestItemById?: (itemId: string) => ShoppingItem | undefined;
   onNotify?: (message: string) => void;
   onLimitedPurchaseDefer?: (item: ShoppingItem) => void;
-  onPostEventDistributionCheckRequest?: (item: ShoppingItem) => void;
   purchaseStatusControlMode?: PurchaseStatusControlMode;
   skipLimitedPurchaseForSingleQuantity: boolean;
 }
@@ -370,7 +369,6 @@ export const SHOPPING_ITEM_CARD_COMPARISON_KEYS = [
   'getLatestItemById',
   'onNotify',
   'onLimitedPurchaseDefer',
-  'onPostEventDistributionCheckRequest',
   'purchaseStatusControlMode',
   'skipLimitedPurchaseForSingleQuantity',
 ] as const satisfies readonly (keyof ShoppingItemCardProps)[];
@@ -402,7 +400,6 @@ export const areSameShoppingItemCardProps = (
   prev.getLatestItemById === next.getLatestItemById &&
   prev.onNotify === next.onNotify &&
   prev.onLimitedPurchaseDefer === next.onLimitedPurchaseDefer &&
-  prev.onPostEventDistributionCheckRequest === next.onPostEventDistributionCheckRequest &&
   prev.purchaseStatusControlMode === next.purchaseStatusControlMode &&
   prev.skipLimitedPurchaseForSingleQuantity === next.skipLimitedPurchaseForSingleQuantity;
 
@@ -430,7 +427,6 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
   getLatestItemById,
   onNotify,
   onLimitedPurchaseDefer,
-  onPostEventDistributionCheckRequest,
   purchaseStatusControlMode = 'cycle',
   skipLimitedPurchaseForSingleQuantity,
 }) => {
@@ -641,11 +637,8 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           : { ...item, purchaseStatus: nextStatus };
 
       commitItemUpdate(nextItem);
-      if (nextStatus === 'SoldOut' && item.purchaseStatus !== 'SoldOut') {
-        onPostEventDistributionCheckRequest?.(nextItem);
-      }
     },
-    [item, commitItemUpdate, onPostEventDistributionCheckRequest],
+    [item, commitItemUpdate],
   );
 
   const togglePurchaseStatus = useCallback(() => {
