@@ -3,8 +3,18 @@
  * localStorageの代わりに大容量データを保存するためのラッパー
  */
 
+import type { MapDataStore } from '../types/map';
+import {
+  compactDayMapForStorage,
+  compactMapDataForStorage,
+  expandDayMapFromStorage,
+  expandMapDataFromStorage,
+} from './mapDataPersistence';
+
 const DB_NAME = 'EventShoppingPlannerDB';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
+const MAP_DATA_LEGACY_KEY = 'data';
+const MAP_DATA_KEY_PREFIX = 'mapData:';
 
 // ストア名
 const STORES = {
@@ -23,6 +33,22 @@ const STORES = {
 
 type StoreName = (typeof STORES)[keyof typeof STORES];
 
+const LOCAL_STORAGE_FALLBACK_DISABLED_STORES = new Set<StoreName>([STORES.MAP_DATA]);
+
+const LOCAL_STORAGE_KEYS: Record<StoreName, string> = {
+  [STORES.EVENT_LISTS]: 'eventShoppingLists',
+  [STORES.EVENT_METADATA]: 'eventMetadata',
+  [STORES.EXECUTE_MODE_ITEMS]: 'executeModeItems',
+  [STORES.DAY_MODES]: 'dayModes',
+  [STORES.MAP_DATA]: 'mapData',
+  [STORES.MAP_ROTATION_SETTINGS]: 'mapRotationSettings',
+  [STORES.ROUTE_SETTINGS]: 'routeSettings',
+  [STORES.HALL_DEFINITIONS]: 'hallDefinitions',
+  [STORES.HALL_ROUTE_SETTINGS]: 'hallRouteSettings',
+  [STORES.MAP_VIEWPORT_SETTINGS]: 'mapViewportSettings',
+  [STORES.SYNC_QUEUE]: 'syncQueue',
+};
+
 export type LoadStatus = 'ok' | 'missing' | 'error';
 
 export type LoadResult<T> = {
@@ -32,27 +58,168 @@ export type LoadResult<T> = {
 };
 
 let dbInstance: IDBDatabase | null = null;
+let dbOpenPromise: Promise<IDBDatabase> | null = null;
+
+function resetDbInstance() {
+  dbOpenPromise = null;
+  if (!dbInstance) return;
+  try {
+    dbInstance.close();
+  } catch {
+    // Ignore close failures; the next operation will open a fresh connection.
+  }
+  dbInstance = null;
+}
+
+function ensureStoreExists(db: IDBDatabase, storeName: StoreName) {
+  if (!db.objectStoreNames.contains(storeName)) {
+    throw new Error(`IndexedDB object store is missing: ${storeName}`);
+  }
+}
+
+function getLocalStorageKey(storeName: StoreName, key: string) {
+  const baseKey = LOCAL_STORAGE_KEYS[storeName];
+  return key === 'data' ? baseKey : `${baseKey}:${key}`;
+}
+
+function saveDataToLocalStorage<T>(storeName: StoreName, key: string, data: T): void {
+  localStorage.setItem(getLocalStorageKey(storeName, key), JSON.stringify(data));
+}
+
+function clearLocalStorageFallbackData(storeName: StoreName, key: string): void {
+  localStorage.removeItem(getLocalStorageKey(storeName, key));
+}
+
+function canUseLocalStorageFallback(storeName: StoreName): boolean {
+  return !LOCAL_STORAGE_FALLBACK_DISABLED_STORES.has(storeName);
+}
+
+function getMapDataEntryKey(eventName: string, dayMapName: string): string {
+  return `${MAP_DATA_KEY_PREFIX}${JSON.stringify([eventName, dayMapName])}`;
+}
+
+function parseMapDataEntryKey(key: string): [string, string] | null {
+  if (!key.startsWith(MAP_DATA_KEY_PREFIX)) return null;
+
+  try {
+    const parsed = JSON.parse(key.slice(MAP_DATA_KEY_PREFIX.length));
+    if (
+      Array.isArray(parsed) &&
+      parsed.length === 2 &&
+      typeof parsed[0] === 'string' &&
+      typeof parsed[1] === 'string'
+    ) {
+      return [parsed[0], parsed[1]];
+    }
+  } catch {
+    // Ignore invalid split-map keys; legacy data is handled separately.
+  }
+
+  return null;
+}
+
+function collectMapDataEntryKeys(data: MapDataStore): Set<string> {
+  const keys = new Set<string>();
+
+  Object.entries(data).forEach(([eventName, eventMapData]) => {
+    Object.keys(eventMapData).forEach((dayMapName) => {
+      keys.add(getMapDataEntryKey(eventName, dayMapName));
+    });
+  });
+
+  return keys;
+}
+
+function getDayMapDataByStorageKey(data: MapDataStore, key: string) {
+  const parsedKey = parseMapDataEntryKey(key);
+  if (!parsedKey) return undefined;
+
+  const [eventName, dayMapName] = parsedKey;
+  return data[eventName]?.[dayMapName];
+}
+
+async function deleteDataFromIndexedDb(storeName: StoreName, key: string): Promise<void> {
+  const db = await openDB();
+  ensureStoreExists(db, storeName);
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(storeName, 'readwrite');
+    const store = transaction.objectStore(storeName);
+    const request = store.delete(key);
+
+    request.onerror = () => {
+      console.error(`Failed to delete from ${storeName}:`, request.error);
+      reject(request.error);
+    };
+
+    transaction.oncomplete = () => {
+      resolve();
+    };
+
+    transaction.onabort = () => {
+      reject(transaction.error || request.error);
+    };
+  });
+}
+
+function loadDataFromLocalStorage<T>(storeName: StoreName, key: string): LoadResult<T> {
+  const stored = localStorage.getItem(getLocalStorageKey(storeName, key));
+  if (stored === null) {
+    return {
+      status: 'missing',
+      data: null,
+    };
+  }
+
+  try {
+    return {
+      status: 'ok',
+      data: JSON.parse(stored) as T,
+    };
+  } catch (error) {
+    console.error(`Failed to load fallback localStorage data for ${storeName}:`, error);
+    return {
+      status: 'error',
+      data: null,
+      error,
+    };
+  }
+}
 
 /**
  * データベースを開く
  */
 function openDB(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    if (dbInstance) {
-      resolve(dbInstance);
-      return;
-    }
+  if (dbInstance) {
+    return Promise.resolve(dbInstance);
+  }
 
+  if (dbOpenPromise) {
+    return dbOpenPromise;
+  }
+
+  dbOpenPromise = new Promise((resolve, reject) => {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onerror = () => {
       console.error('IndexedDB open error:', request.error);
+      resetDbInstance();
       reject(request.error);
     };
 
     request.onsuccess = () => {
       dbInstance = request.result;
+      dbInstance.onversionchange = () => {
+        resetDbInstance();
+      };
+      dbInstance.onclose = () => {
+        dbInstance = null;
+      };
       resolve(dbInstance);
+    };
+
+    request.onblocked = () => {
+      console.warn('IndexedDB open request is blocked by another tab.');
     };
 
     request.onupgradeneeded = (event) => {
@@ -66,36 +233,124 @@ function openDB(): Promise<IDBDatabase> {
       });
     };
   });
+
+  dbOpenPromise.then(
+    () => {
+      dbOpenPromise = null;
+    },
+    () => {
+      dbOpenPromise = null;
+    },
+  );
+
+  return dbOpenPromise;
+}
+
+/**
+ * mapDataストアへの複数キーの削除+書き込みを単一トランザクションで実行
+ * (キーごとにトランザクションを分けると、書き込み回数と一時的なディスク使用量が
+ *  増えて大容量データで失敗しやすくなるため)
+ */
+async function writeMapDataEntriesOnce(
+  deletes: string[],
+  puts: { key: string; value: unknown }[],
+): Promise<void> {
+  const db = await openDB();
+  ensureStoreExists(db, STORES.MAP_DATA);
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORES.MAP_DATA, 'readwrite');
+    const store = transaction.objectStore(STORES.MAP_DATA);
+    let requestError: unknown = null;
+
+    const trackRequestError = (request: IDBRequest) => {
+      request.onerror = () => {
+        requestError = request.error;
+      };
+    };
+
+    deletes.forEach((key) => trackRequestError(store.delete(key)));
+    puts.forEach(({ key, value }) => trackRequestError(store.put(value, key)));
+
+    transaction.oncomplete = () => {
+      resolve();
+    };
+
+    transaction.onabort = () => {
+      console.error(`Failed to write to ${STORES.MAP_DATA}:`, transaction.error || requestError);
+      reject(transaction.error || requestError);
+    };
+  });
+}
+
+async function writeMapDataEntries(
+  deletes: string[],
+  puts: { key: string; value: unknown }[],
+): Promise<void> {
+  if (deletes.length === 0 && puts.length === 0) return;
+
+  try {
+    await writeMapDataEntriesOnce(deletes, puts);
+  } catch (firstError) {
+    console.warn(`Retrying ${STORES.MAP_DATA} write after failure:`, firstError);
+    resetDbInstance();
+    await writeMapDataEntriesOnce(deletes, puts);
+  }
 }
 
 /**
  * データを保存
  */
 async function saveData<T>(storeName: StoreName, key: string, data: T): Promise<void> {
-  const db = await openDB();
+  const saveOnce = async (): Promise<void> => {
+    const db = await openDB();
+    ensureStoreExists(db, storeName);
 
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(storeName, 'readwrite');
-    const store = transaction.objectStore(storeName);
-    const request = store.put(data, key);
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, 'readwrite');
+      const store = transaction.objectStore(storeName);
+      const request = store.put(data, key);
 
-    request.onerror = () => {
-      console.error(`Failed to save to ${storeName}:`, request.error);
-      reject(request.error);
-    };
+      request.onerror = () => {
+        console.error(`Failed to save to ${storeName}:`, request.error);
+        reject(request.error);
+      };
 
-    request.onsuccess = () => {
-      resolve();
-    };
-  });
+      transaction.oncomplete = () => {
+        resolve();
+      };
+
+      transaction.onabort = () => {
+        reject(transaction.error || request.error);
+      };
+    });
+  };
+
+  try {
+    await saveOnce();
+    clearLocalStorageFallbackData(storeName, key);
+  } catch (firstError) {
+    resetDbInstance();
+    try {
+      await saveOnce();
+      clearLocalStorageFallbackData(storeName, key);
+    } catch (retryError) {
+      if (!canUseLocalStorageFallback(storeName)) {
+        throw retryError || firstError;
+      }
+      console.warn(`Falling back to localStorage for ${storeName}:`, retryError || firstError);
+      saveDataToLocalStorage(storeName, key, data);
+    }
+  }
 }
 
 /**
  * データを読み込み
  */
 async function loadData<T>(storeName: StoreName, key: string): Promise<LoadResult<T>> {
-  try {
+  const loadOnce = async (): Promise<LoadResult<T>> => {
     const db = await openDB();
+    ensureStoreExists(db, storeName);
 
     return await new Promise((resolve) => {
       const transaction = db.transaction(storeName, 'readonly');
@@ -125,14 +380,33 @@ async function loadData<T>(storeName: StoreName, key: string): Promise<LoadResul
           data: request.result as T,
         });
       };
+
+      transaction.onabort = () => {
+        resolve({
+          status: 'error',
+          data: null,
+          error: transaction.error || request.error,
+        });
+      };
     });
+  };
+
+  try {
+    const firstResult = await loadOnce();
+    if (firstResult.status !== 'error') return firstResult;
+    resetDbInstance();
+    const retryResult = await loadOnce();
+    if (retryResult.status !== 'error') return retryResult;
+    console.warn(`Falling back to localStorage for ${storeName}:`, retryResult.error);
+    return loadDataFromLocalStorage(storeName, key);
   } catch (error) {
-    console.error(`Failed to load from ${storeName}:`, error);
-    return {
-      status: 'error',
-      data: null,
-      error,
-    };
+    resetDbInstance();
+    try {
+      return await loadOnce();
+    } catch (retryError) {
+      console.warn(`Falling back to localStorage for ${storeName}:`, retryError || error);
+      return loadDataFromLocalStorage(storeName, key);
+    }
   }
 }
 
@@ -140,22 +414,12 @@ async function loadData<T>(storeName: StoreName, key: string): Promise<LoadResul
  * データを削除
  */
 async function deleteData(storeName: StoreName, key: string): Promise<void> {
-  const db = await openDB();
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(storeName, 'readwrite');
-    const store = transaction.objectStore(storeName);
-    const request = store.delete(key);
-
-    request.onerror = () => {
-      console.error(`Failed to delete from ${storeName}:`, request.error);
-      reject(request.error);
-    };
-
-    request.onsuccess = () => {
-      resolve();
-    };
-  });
+  try {
+    await deleteDataFromIndexedDb(storeName, key);
+  } catch {
+    resetDbInstance();
+    localStorage.removeItem(getLocalStorageKey(storeName, key));
+  }
 }
 
 // deleteDataは将来使用する可能性があるため維持
@@ -165,52 +429,65 @@ void deleteData;
  * ストア内の全キーを取得
  */
 async function getAllKeys(storeName: StoreName): Promise<string[]> {
-  const db = await openDB();
+  try {
+    const db = await openDB();
+    ensureStoreExists(db, storeName);
 
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(storeName, 'readonly');
-    const store = transaction.objectStore(storeName);
-    const request = store.getAllKeys();
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, 'readonly');
+      const store = transaction.objectStore(storeName);
+      const request = store.getAllKeys();
 
-    request.onerror = () => {
-      console.error(`Failed to get keys from ${storeName}:`, request.error);
-      reject(request.error);
-    };
+      request.onerror = () => {
+        console.error(`Failed to get keys from ${storeName}:`, request.error);
+        reject(request.error);
+      };
 
-    request.onsuccess = () => {
-      resolve(request.result as string[]);
-    };
-  });
+      request.onsuccess = () => {
+        resolve(request.result as string[]);
+      };
+    });
+  } catch {
+    resetDbInstance();
+    return localStorage.getItem(LOCAL_STORAGE_KEYS[storeName]) === null ? [] : ['data'];
+  }
 }
 
 /**
  * ストア内の全データを取得
  */
 async function getAllData<T>(storeName: StoreName): Promise<Record<string, T>> {
-  const db = await openDB();
+  try {
+    const db = await openDB();
+    ensureStoreExists(db, storeName);
 
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction(storeName, 'readonly');
-    const store = transaction.objectStore(storeName);
-    const result: Record<string, T> = {};
+    return await new Promise((resolve, reject) => {
+      const transaction = db.transaction(storeName, 'readonly');
+      const store = transaction.objectStore(storeName);
+      const result: Record<string, T> = {};
 
-    const cursorRequest = store.openCursor();
+      const cursorRequest = store.openCursor();
 
-    cursorRequest.onerror = () => {
-      console.error(`Failed to get all data from ${storeName}:`, cursorRequest.error);
-      reject(cursorRequest.error);
-    };
+      cursorRequest.onerror = () => {
+        console.error(`Failed to get all data from ${storeName}:`, cursorRequest.error);
+        reject(cursorRequest.error);
+      };
 
-    cursorRequest.onsuccess = (event) => {
-      const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
-      if (cursor) {
-        result[cursor.key as string] = cursor.value;
-        cursor.continue();
-      } else {
-        resolve(result);
-      }
-    };
-  });
+      cursorRequest.onsuccess = (event) => {
+        const cursor = (event.target as IDBRequest<IDBCursorWithValue>).result;
+        if (cursor) {
+          result[cursor.key as string] = cursor.value;
+          cursor.continue();
+        } else {
+          resolve(result);
+        }
+      };
+    });
+  } catch {
+    resetDbInstance();
+    const fallback = loadDataFromLocalStorage<T>(storeName, 'data');
+    return fallback.status === 'ok' && fallback.data !== null ? { data: fallback.data } : {};
+  }
 }
 
 /**
@@ -244,7 +521,18 @@ async function migrateFromLocalStorage(): Promise<boolean> {
       if (data) {
         try {
           const parsed = JSON.parse(data);
-          await saveData(store, 'data', parsed);
+          if (store === STORES.MAP_DATA) {
+            const compactedMapData = compactMapDataForStorage(parsed as MapDataStore);
+            const puts: { key: string; value: unknown }[] = [];
+            for (const [eventName, eventMapData] of Object.entries(compactedMapData)) {
+              for (const [dayMapName, dayMapData] of Object.entries(eventMapData)) {
+                puts.push({ key: getMapDataEntryKey(eventName, dayMapName), value: dayMapData });
+              }
+            }
+            await writeMapDataEntries([], puts);
+          } else {
+            await saveData(store, 'data', parsed);
+          }
           console.log(`Migrated ${key} to IndexedDB`);
         } catch (e) {
           console.error(`Failed to migrate ${key}:`, e);
@@ -355,11 +643,95 @@ export const db = {
   },
 
   // マップデータ
-  async saveMapData(data: Record<string, Record<string, unknown>>): Promise<void> {
-    await saveData(STORES.MAP_DATA, 'data', data);
+  async saveMapData(data: MapDataStore): Promise<void> {
+    const puts: { key: string; value: unknown }[] = [];
+    const nextKeys = new Set<string>();
+
+    Object.entries(data).forEach(([eventName, eventMapData]) => {
+      Object.entries(eventMapData).forEach(([dayMapName, dayMapData]) => {
+        const key = getMapDataEntryKey(eventName, dayMapName);
+        nextKeys.add(key);
+        puts.push({ key, value: compactDayMapForStorage(dayMapData) });
+      });
+    });
+
+    const existingKeys = await getAllKeys(STORES.MAP_DATA);
+    const deletes = existingKeys
+      .map((key) => String(key))
+      .filter(
+        (keyString) =>
+          keyString === MAP_DATA_LEGACY_KEY ||
+          (keyString.startsWith(MAP_DATA_KEY_PREFIX) && !nextKeys.has(keyString)),
+      );
+
+    await writeMapDataEntries(deletes, puts);
+
+    clearLocalStorageFallbackData(STORES.MAP_DATA, MAP_DATA_LEGACY_KEY);
   },
-  async loadMapData(): Promise<LoadResult<Record<string, Record<string, unknown>>>> {
-    return loadData(STORES.MAP_DATA, 'data');
+  async saveMapDataChanges(previousData: MapDataStore, nextData: MapDataStore): Promise<void> {
+    const previousKeys = collectMapDataEntryKeys(previousData);
+    const nextKeys = collectMapDataEntryKeys(nextData);
+
+    const deletes: string[] = [MAP_DATA_LEGACY_KEY];
+    for (const key of previousKeys) {
+      if (!nextKeys.has(key)) {
+        deletes.push(key);
+      }
+    }
+
+    const puts: { key: string; value: unknown }[] = [];
+    for (const key of nextKeys) {
+      const previousDayMapData = getDayMapDataByStorageKey(previousData, key);
+      const nextDayMapData = getDayMapDataByStorageKey(nextData, key);
+      if (!nextDayMapData || previousDayMapData === nextDayMapData) continue;
+
+      puts.push({ key, value: compactDayMapForStorage(nextDayMapData) });
+    }
+
+    await writeMapDataEntries(deletes, puts);
+
+    clearLocalStorageFallbackData(STORES.MAP_DATA, MAP_DATA_LEGACY_KEY);
+  },
+  async loadMapData(): Promise<LoadResult<MapDataStore>> {
+    try {
+      const entries = await getAllData<unknown>(STORES.MAP_DATA);
+      const loaded: MapDataStore = {};
+
+      Object.entries(entries).forEach(([key, value]) => {
+        if (key === MAP_DATA_LEGACY_KEY) {
+          const legacyMapData = expandMapDataFromStorage(
+            value as Record<string, Record<string, unknown>>,
+          );
+          Object.entries(legacyMapData).forEach(([eventName, eventMapData]) => {
+            loaded[eventName] = {
+              ...(loaded[eventName] ?? {}),
+              ...eventMapData,
+            };
+          });
+          return;
+        }
+
+        const parsedKey = parseMapDataEntryKey(key);
+        if (!parsedKey) return;
+
+        const [eventName, dayMapName] = parsedKey;
+        loaded[eventName] = {
+          ...(loaded[eventName] ?? {}),
+          [dayMapName]: expandDayMapFromStorage(value as Parameters<typeof expandDayMapFromStorage>[0]),
+        };
+      });
+
+      return {
+        status: Object.keys(loaded).length > 0 ? 'ok' : 'missing',
+        data: Object.keys(loaded).length > 0 ? loaded : null,
+      };
+    } catch (error) {
+      return {
+        status: 'error',
+        data: null,
+        error,
+      };
+    }
   },
 
   // マップ回転設定

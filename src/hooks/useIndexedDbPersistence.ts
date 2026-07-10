@@ -56,6 +56,8 @@ export function useIndexedDbPersistence({
   const [isInitialized, setIsInitialized] = useState(false);
   const isSavingRef = useRef(false);
   const hasShownLoadErrorRef = useRef(false);
+  const hasShownSaveErrorRef = useRef(false);
+  const previousSavedValuesRef = useRef<PersistedStateValues | null>(null);
   const {
     eventLists,
     eventMetadata,
@@ -202,21 +204,118 @@ export function useIndexedDbPersistence({
     const saveData = async () => {
       isSavingRef.current = true;
       try {
-        await Promise.all([
-          db.saveEventLists(eventLists),
-          db.saveEventMetadata(eventMetadata),
-          db.saveExecuteModeItems(executeModeItems),
-          db.saveDayModes(dayModes),
-          db.saveMapData(mapData),
-          db.saveMapRotationSettings(mapRotationSettings),
-          db.saveRouteSettings(routeSettings),
-          db.saveHallDefinitions(hallDefinitions),
-          db.saveHallRouteSettings(hallRouteSettings),
-          db.saveMapViewportSettings(mapViewportSettings),
-        ]);
+        const currentValues: PersistedStateValues = {
+          eventLists,
+          eventMetadata,
+          executeModeItems,
+          dayModes,
+          mapData,
+          mapRotationSettings,
+          routeSettings,
+          hallDefinitions,
+          hallRouteSettings,
+          mapViewportSettings,
+        };
+        const previousValues = previousSavedValuesRef.current;
+
+        if (!previousValues) {
+          previousSavedValuesRef.current = currentValues;
+          return;
+        }
+
+        const saveTasks: { label: string; save: () => Promise<void> }[] = [];
+        if (previousValues.eventLists !== eventLists) {
+          saveTasks.push({ label: 'eventLists', save: () => db.saveEventLists(eventLists) });
+        }
+        if (previousValues.eventMetadata !== eventMetadata) {
+          saveTasks.push({ label: 'eventMetadata', save: () => db.saveEventMetadata(eventMetadata) });
+        }
+        if (previousValues.executeModeItems !== executeModeItems) {
+          saveTasks.push({
+            label: 'executeModeItems',
+            save: () => db.saveExecuteModeItems(executeModeItems),
+          });
+        }
+        if (previousValues.dayModes !== dayModes) {
+          saveTasks.push({ label: 'dayModes', save: () => db.saveDayModes(dayModes) });
+        }
+        if (previousValues.mapData !== mapData) {
+          saveTasks.push({
+            label: 'mapData',
+            save: () => db.saveMapDataChanges(previousValues.mapData, mapData),
+          });
+        }
+        if (previousValues.mapRotationSettings !== mapRotationSettings) {
+          saveTasks.push({
+            label: 'mapRotationSettings',
+            save: () => db.saveMapRotationSettings(mapRotationSettings),
+          });
+        }
+        if (previousValues.routeSettings !== routeSettings) {
+          saveTasks.push({ label: 'routeSettings', save: () => db.saveRouteSettings(routeSettings) });
+        }
+        if (previousValues.hallDefinitions !== hallDefinitions) {
+          saveTasks.push({
+            label: 'hallDefinitions',
+            save: () => db.saveHallDefinitions(hallDefinitions),
+          });
+        }
+        if (previousValues.hallRouteSettings !== hallRouteSettings) {
+          saveTasks.push({
+            label: 'hallRouteSettings',
+            save: () => db.saveHallRouteSettings(hallRouteSettings),
+          });
+        }
+        if (previousValues.mapViewportSettings !== mapViewportSettings) {
+          saveTasks.push({
+            label: 'mapViewportSettings',
+            save: () => db.saveMapViewportSettings(mapViewportSettings),
+          });
+        }
+
+        if (saveTasks.length === 0) return;
+
+        // ストアを1つずつ順番に保存する。並列実行すると、あるストアの保存失敗時の
+        // DB接続リセットが実行中の他ストアのトランザクションを巻き添えでabortさせ、
+        // 実際には保存できるデータでも失敗扱いになってしまうため。
+        const failed: { label: string; error: unknown }[] = [];
+        for (const { label, save } of saveTasks) {
+          try {
+            await save();
+          } catch (error) {
+            failed.push({ label, error });
+          }
+        }
+
+        // 成功したストアは保存済みとして記録し、失敗したストアだけ次回の保存で再試行する
+        const nextSavedValues: PersistedStateValues = { ...currentValues };
+        for (const failure of failed) {
+          const label = failure.label as keyof PersistedStateValues;
+          if (label in previousValues) {
+            (nextSavedValues as Record<string, unknown>)[label] = previousValues[label];
+          }
+        }
+        previousSavedValuesRef.current = nextSavedValues;
+
+        if (failed.length > 0) {
+          console.error('Failed to save data to IndexedDB:', failed);
+          if (!hasShownSaveErrorRef.current) {
+            hasShownSaveErrorRef.current = true;
+            alert(
+              `保存に失敗しました。ページを再読み込みしてください。\n${failed
+                .map((failure) => failure.label || 'unknown')
+                .join('\n')}`,
+            );
+          }
+          return;
+        }
+        hasShownSaveErrorRef.current = false;
       } catch (error) {
         console.error('Failed to save data to IndexedDB:', error);
-        alert('Failed to save data. Please reload the page.');
+        if (!hasShownSaveErrorRef.current) {
+          hasShownSaveErrorRef.current = true;
+          alert('保存に失敗しました。ページを再読み込みしてください。');
+        }
       } finally {
         isSavingRef.current = false;
       }
