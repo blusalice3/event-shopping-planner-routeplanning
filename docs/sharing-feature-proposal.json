@@ -1,0 +1,216 @@
+{
+  "title": "Sakuri共有機能の考察 & 強化共有機能の提案",
+  "version": "1.0",
+  "date": "2026-03-29",
+  "target_app": "Event Shopping Planner v1.9.0",
+  "reference_app": "Sakuri (https://doujin-help.com/sakuri/)",
+  "reference_article": "akurusan - Notion+コミケ実戦レポート (C104-C106)",
+  "sections": [
+    {
+      "level": 3,
+      "parent_h2": "Context",
+      "title": "動画から確認したSakuriの実際の使用フロー",
+      "content": "# Sakuri共有機能の考察 & 強化共有機能の提案\n\n\n現在のEvent Shopping Planner（巡回表）v1.9.0は、同人誌即売会の買い物リストをオフラインで管理するPWAだが、**共有機能が一切ない**。参照アプリ「Sakuri」(https://doujin-help.com/sakuri/) のリアルタイム共有機能を分析し、それを強化した共有機能を本アプリに追加する計画。最終的にはコード実装を視野に入れるが、まずは考察と提案を行う。\n\n- **動画1（ホスト側）**: ルーム「ホスト/ゲスト」二択 → ホスト選択 → ユーザーネーム設定 → 合言葉（5桁コード）自動生成・表示\n- **動画2（ホスト画面でのリアルタイム反映）**: ゲストユーザーが特定スペースに「訪問中」となっている状態表示 + ゲストが購入ステータスを変更した際のリアルタイム同期反映"
+    },
+    {
+      "level": 4,
+      "parent_h2": "Context",
+      "parent_h3": "note記事「【C104】宝の地図を捨て、Notionを使ってコミケに参戦した話。」からの知見",
+      "title": "記事で紹介されたNotionデータベース構成",
+      "content": "akurusanによるNotionチーム買い物管理の実戦レポート（C104〜C106、4人チーム、200サークル規模）。\n\n- **カラム**: サークル名、棟別（東123/東456/東7/西12）、場所（01a等）、状態（未選択/購入前/購入完了/etc）、担当者、担当者メモ、頒布タイトル、頒布金額、希望数、希望メモ、画像、順番\n- **ビュー**: 個人タブ（担当者フィルター+順番昇順）、未完了タブ（グループ化+未完了フィルター）、絆リスト（更新時間順ソート）\n- **Slack連携**: Notionオートメーションで状態変更時にSlack通知（「購入完了(通知)」「限数購入(通知)」等）"
+    },
+    {
+      "level": 4,
+      "parent_h2": "Context",
+      "parent_h3": "note記事「【C104】宝の地図を捨て、Notionを使ってコミケに参戦した話。」からの知見",
+      "title": "記事から抽出した現場での臨機応変な再振り分けシナリオ（最重要）",
+      "content": "1. **「先に来たから買っちゃうよ！」**: 西担当の人がまだ西で買い物中 → 自分が先に東7に到着 → Slackで連絡 → **担当者と順番をその場で書き換え投げつけ** → リアルタイムで相手のリストから消え、自分のリストに追加\n2. **「このサークル、後回しにしよう」**: 混雑で並べない → **順番を後ろに変更** → リスト上で自動的に後方に移動 → 後から戻ってきた時にリマインダー的に再表示\n3. **「限数がかかっていて買えない！」**: 限数購入制限 → **Slack通知（限数購入(通知)）** → 他メンバーが自分の購入として追加分を購入\n4. **「これ買ってきて！」**: 限数列で30分拘束中 → 他メンバーの**未完了タブで空き状況を確認** → 「ヘルプいる？」→ **代理購入を依頼・担当者変更** → 約20分で完了（電話なら説明に時間がかかる）\n5. **二重購入防止**: 担当変更がリアルタイムで反映 → 元の担当者のリストから即座に消える\n6. **金額変更の即時通知**: 事前情報なしのサークルで購入 → 購入完了と同時に頒布金額を入力 → Slackで金額変更も通知"
+    },
+    {
+      "level": 4,
+      "parent_h2": "Context",
+      "parent_h3": "note記事「【C104】宝の地図を捨て、Notionを使ってコミケに参戦した話。」からの知見",
+      "title": "記事で指摘された紙リスト（宝の地図）の問題点",
+      "content": "- 打合せで漏れて買い忘れる\n- 打合せで数を間違える、合計で購入または少なく購入する\n- 並べる時間があることを選んでいるのにメモにより別の種類を選ぶ\n- 購入時のチェックミスで二重に買う、または買い忘れる\n- 机左右のabを間違える\n- WEBカタログのリストが同じ棟で複数ページになり最終ページのサークル全て買い忘れる"
+    },
+    {
+      "level": 4,
+      "parent_h2": "Context",
+      "parent_h3": "note記事「【C104】宝の地図を捨て、Notionを使ってコミケに参戦した話。」からの知見",
+      "title": "記事で指摘されたNotion運用の課題点（C105以降で改善中）",
+      "content": "- **予算管理**: 「いくらお金を持っていけばいいか分かる親切な機能：予算」追加（C105）\n- **タイムスタンプ**: いつ・何分列に並んで買ったか記録できる機能追加（C106）\n- **イマココ機能**: どこで何分サークル列に並んでいるか分かる機能追加（C106）\n- **MS Listsも検討**: モバイルアプリのレイアウト問題、リアルタイム表示でない点で却下→Notion継続\n\n---"
+    },
+    {
+      "level": 3,
+      "parent_h2": "1. Sakuriの技術分析",
+      "title": "使用技術",
+      "content": "| 要素 | 技術 |\n|------|------|\n| リアルタイム同期 | **Firebase Realtime Database** (`ref().on('value')`) |\n| ローカル保存 | IndexedDB v3 + localStorage フォールバック |\n| 認証 | Firebase Anonymous Auth（デバイス単位のUID） |\n| 二重確保防止 | `ref().transaction()` によるアトミック操作 |\n| UI | フレームワークレス（素のDOM操作） |\n| 画像処理 | Canvas API で800x800px/JPEG 0.75に圧縮 |"
+    },
+    {
+      "level": 3,
+      "parent_h2": "1. Sakuriの技術分析",
+      "title": "Sakuriの共有フロー",
+      "content": "1. **ルーム作成**: 5桁の合言葉コード自動生成\n2. **参加**: テンキーUIでコード入力 → Firebaseの`rooms/{roomId}/members`に登録\n3. **リアルタイム同期**: アイテムの確保状態(`gotBy`)、完売状態(`status='sold'`)をFirebaseリスナーで即時反映\n4. **二重確保防止**: `transaction()`で「既に他メンバーが確保済み」の場合はロールバック+通知\n5. **プレゼンス**: `onDisconnect()`でオンライン/オフライン状態を自動管理\n6. **「向かっている」通知**: ブースへの移動意思をリアルタイムでブロードキャスト"
+    },
+    {
+      "level": 3,
+      "parent_h2": "1. Sakuriの技術分析",
+      "title": "Firebase データ構造（Sakuri）",
+      "content": "```\nrooms/{roomId}/\n  members/{memberId}/ → 名前、色、位置情報、オンライン状態\n  spaces/{itemId}/\n    subItems/{subId}/ → 確保状態、完売状態、gotBy\n  batting/ → 「向かっている」リアルタイム通知\n```\n\n---"
+    },
+    {
+      "level": 2,
+      "title": "2. 本アプリとSakuriの比較",
+      "content": "| 機能 | 本アプリ（巡回表） | Sakuri |\n|------|-------------------|--------|\n| ルート計画・A*経路探索 | あり | なし |\n| ホール別マップ表示 | あり | なし |\n| フォーカスモード（順番案内） | あり | なし |\n| ブロック定義・巡回順 | あり | なし |\n| XLSX入出力 | あり | なし（JSONのみ） |\n| Google Sheets連携 | あり | なし |\n| リアルタイム共有 | なし | あり |\n| 合言葉参加 | なし | あり |\n| 二重確保防止 | なし | あり |\n| メンバープレゼンス | なし | あり |\n| チャット | なし | なし |\n\n**本アプリの最大の強み**: ルート計画・マップ・経路探索。これを活かした共有機能が差別化ポイント。\n\n---"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[高優先度] 基盤機能（Sakuri同等 + 強化）",
+      "title": "3.1 リアルタイムルーム共有",
+      "content": "- Firebase Realtime Database + Anonymous Authで実装\n- 5文字英数字のルームコード（36^5 = 6000万通り）\n- 最大5名参加、ルーム有効期限付き（イベント日+24h）\n- **強化点**: Sakuriと同等の基本共有"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[高優先度] 基盤機能（Sakuri同等 + 強化）",
+      "title": "3.2 QRコード共有",
+      "content": "- ルームコードをQRコード化し、画面に大きく表示\n- 会場で隣の友人にカメラで読み取ってもらうだけで参加可能\n- URLスキーム: `https://{domain}/join/{roomCode}`\n- **強化点**: Sakuriにはない。会場の混雑時にコード手入力は困難"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[高優先度] 基盤機能（Sakuri同等 + 強化）",
+      "title": "3.3 URLディープリンク + Web Share API",
+      "content": "- `https://{domain}/join/{roomCode}` でブラウザから直接参加\n- Web Share APIでLINE/Twitter/Discordへのネイティブ共有\n- コピーボタン+トースト通知のフォールバック\n- **強化点**: Sakuriは合言葉のみ。URLならメッセージアプリから1タップで参加"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[高優先度] 基盤機能（Sakuri同等 + 強化）",
+      "title": "3.4 二重購入防止（トランザクション）",
+      "content": "- Firebase `runTransaction()` で同一アイテムの重複確保を防止\n- 楽観的UI更新 → トランザクション失敗時にロールバック+通知\n- 「○○さんが既に確保しました」トースト表示\n- **強化点**: Sakuriと同等（必須機能）\n\n---"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[高優先度] 現場での臨機応変な再振り分け機能群（note記事の実戦知見に基づく最重要差別化）",
+      "title": "3.5 リアルタイム担当者変更（ドラッグ&タップ再割り当て） --- 最重要",
+      "content": "> 以下は記事で実際に発生した6つのシナリオを**アプリ内で完結**させるための機能群。\n> Sakuriにもない、Notionでは「Slack+手動操作」で対応していた部分を**ワンタップUI**で実現する。\n\n**対応シナリオ**: 「先に来たから買っちゃうよ！」「これ買ってきて！」\n\n- アイテムカード上のメンバーアバターをタップ → 担当者変更メニュー表示 → 1タップで再割り当て\n- 変更即座にFirebase同期 → 元の担当者のリストからリアルタイムで消え、新担当者のリストに追加\n- **「投げつけ」ボタン**: 自分の未購入アイテムを一括で特定メンバーに渡すワンタップ操作\n- **「ヘルプ要請」ボタン**: 列に並んで拘束中の時、空いているメンバーに通知を飛ばす\n  - 受け取り側には「○○さんがヘルプを求めています（残り3件）」と表示\n  - 承諾すると自動で担当者が切り替わる\n- **Notion記事での課題**: 担当者変更はできるが、Slackで連絡→Notionを開いて手動変更→相手も確認、と3ステップ必要だった。本アプリでは1タップで完結"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[高優先度] 現場での臨機応変な再振り分け機能群（note記事の実戦知見に基づく最重要差別化）",
+      "title": "3.6 購入順序のリアルタイム変更（後回し・前倒し）",
+      "content": "**対応シナリオ**: 「このサークル、後回しにしよう」\n\n- アイテムカードをスワイプまたは長押し → 「後回し」ボタン → 巡回順の末尾に移動\n- 「前倒し」ボタン → 現在位置の次に挿入（急いで買いたい場合）\n- 順番変更は即座にFirebase同期 → フォーカスモードの案内順にも反映\n- **後回しアイテムのリマインダー**: 一通り回った後、後回しにしたサークルが自動的にリストの先頭に再浮上\n- 既存の`executeModeItems`（巡回順）のリアルタイム同期で実現\n- **Notion記事での運用**: 順番フィールドを書き換えてリスト上の位置を変更していた。本アプリではスワイプ1つで完結し、ルート再計算も自動"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[高優先度] 現場での臨機応変な再振り分け機能群（note記事の実戦知見に基づく最重要差別化）",
+      "title": "3.7 限数購入・特殊状態の通知と連携",
+      "content": "**対応シナリオ**: 「限数がかかっていて買えない！」「金額変更の即時通知」\n\n- 新しい購入ステータス追加: `LimitedPurchase`（限数購入）\n- 限数購入時の自動通知: 「○○さんが[サークル名]を限数購入しました（1部のみ）。追加購入が必要です」\n- 他メンバーが「追加購入を引き受ける」ボタンをタップ → 自動で同一サークルのアイテムが自分のリストに追加\n- **価格未定→購入時入力→即時通知**: 事前に価格不明だったアイテムの金額を購入時に入力 → 全メンバーに金額通知\n- **Notion記事での課題**: Notionオートメーション+Slackで「限数購入(通知)」を実装。本アプリではアプリ内通知+ワンタップ対応で完結"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[高優先度] 現場での臨機応変な再振り分け機能群（note記事の実戦知見に基づく最重要差別化）",
+      "title": "3.8 メンバー空き状況の可視化と自動ヘルプマッチング",
+      "content": "**対応シナリオ**: 「これ買ってきて！」（他メンバーの空き確認）\n\n- **メンバーステータスバー**: 各メンバーの現在の状態をヘッダーに常時表示\n  - 「巡回中（残り12件）」「列に並び中（○○サークル/約15分）」「完了」「休憩中」\n- **未完了タブのチーム版**: Notionの未完了タブに相当。メンバー別の残タスク数と進捗率をリアルタイム表示\n- **自動ヘルプ提案**: あるメンバーが「列に並び中」で長時間拘束 + 別のメンバーが「残り2件」で余裕あり → 自動で「○○さんの代わりに買えるアイテムがあります」と提案\n- **Notion記事での運用**: 未完了タブで手動確認 → Slackで「ヘルプいる？」と連絡。本アプリでは空き状況が常時可視化され、自動マッチング提案まで行う"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[高優先度] 現場での臨機応変な再振り分け機能群（note記事の実戦知見に基づく最重要差別化）",
+      "title": "3.9 タスク初期割り振り（事前準備フェーズ）",
+      "content": "**対応シナリオ**: 記事の「2日前の打合せ」フェーズ\n\n- **手動割り当て**: アイテムごとにメンバーアバターをタップして担当者指定\n- **自動割り振り**: 既存のA*経路探索(`src/utils/pathfinding.ts`)を活用し、各メンバーの総移動距離を最小化するように自動分配\n- **ホール別一括割り当て**: 「東123は○○担当、東456は△△担当」のようなエリア単位での一括割り当て（記事の「西12担当のメンバーと東456担当」に対応）\n- 優先度(`highest`)のアイテムは最も近い/速いメンバーに優先割り当て\n- **「自分のアイテム」フィルター**: SummaryBarにトグル追加（Notionの「個人タブ」に相当）\n- **強化点**: Sakuriにはタスク分担機能自体がない。Notionでは手動でカラムを埋める作業が必要だったが、本アプリでは経路最適化ベースの自動割り振りが可能\n\n---"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[中優先度] 状況把握・コミュニケーション機能",
+      "title": "3.10 共有マップ上のメンバー表示",
+      "content": "- マップ上に各メンバーの現在位置（チェックインしたブース）をアバターで表示\n- 各メンバーのルートを色分けでオーバーレイ\n- 「向かっている」ブースに脈動するマーカー表示\n- タスク分担時は自分のルートをハイライト、他メンバーは薄く表示\n- **強化点**: Sakuriにはマップ機能自体がない。記事のC106「イマココ機能」に相当するが、マップ上に可視化される点で遥かに直感的"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[中優先度] 状況把握・コミュニケーション機能",
+      "title": "3.11 チーム予算管理",
+      "content": "**対応シナリオ**: 記事の「金額を忘れるな」「予算機能追加（C105）」\n\n- メンバーごとの支出合計（`price * quantity`で確保済みアイテム集計）\n- **購入時の金額入力**: 事前に価格不明だったアイテムの金額をその場で入力 → 即時通知+予算に反映\n- チーム全体の予算上限設定 → 80%/100%でアラート\n- **持参金額の管理**: 各メンバーが持っている現金残高を入力 → 残りの購入可能金額をリアルタイム表示\n- イベント後の精算計算（立て替え分の差額計算：「○○が△△の分を3,000円立て替え」→精算リスト自動生成）\n- **Notion記事での課題**: 「頒布金額」カラムに手入力。事前情報がないと空欄で、後から金額変更をSlack通知。本アプリでは予算ダッシュボードとして統合"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[中優先度] 状況把握・コミュニケーション機能",
+      "title": "3.12 アプリ内通知・クイックアクション（Slack代替）",
+      "content": "**対応シナリオ**: 記事のSlack連携全般\n\n- **自動ステータス通知**: 購入完了/限数購入/完売/担当者変更時にアプリ内トースト+通知パネル\n- **クイックスタンプ**: 「了解！」「完売でした」「長蛇の列」「合流しよう」「ヘルプいる？」「お疲れ！」\n- **ワンタップアクション付き通知**: 通知に「引き受ける」「後で」等のアクションボタンを付与\n  - 例: 「○○さんが限数購入しました」→「追加分を引き受ける」ボタン\n  - 例: 「○○さんがヘルプを求めています」→「対応する」ボタン\n- Firebase `rooms/{code}/notifications/` に保存、折りたたみパネルで表示\n- **Notion+Slackとの差**: 2つのアプリを行き来する必要がなく、通知から直接アクション実行可能"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[中優先度] 状況把握・コミュニケーション機能",
+      "title": "3.13 購入タイムスタンプ・絆リスト（行動ログ）",
+      "content": "**対応シナリオ**: 記事のC106「タイムスタンプ機能追加」「絆リスト」\n\n- 購入完了時に自動でタイムスタンプ記録\n- **絆リスト**: 更新時間順でソートしたリスト → チーム全体の購入フローを時系列で把握\n  - 「11:05 ○○が[サークルA]を購入」「11:08 △△が[サークルB]を完売報告」...\n- **移動時間分析**: サークル間の移動にかかった時間を自動計算 → 次回イベントの計画改善に活用\n- **滞在時間記録**: 列に並んだ開始〜終了時間 → 「このサークルは平均20分待ち」のデータ蓄積\n\n---"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[低優先度] 将来的な拡張",
+      "title": "3.14 SNS共有（読み取り専用リスト公開）",
+      "content": "- 買い物リストを読み取り専用WebページとしてURL生成\n- Canvas→PNG画像エクスポートでTwitter/X投稿用\n- 「○○のコミケ戦利品」的な共有"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[低優先度] 将来的な拡張",
+      "title": "3.15 ロールベース権限",
+      "content": "- オーナー（全権限）/ エディター（ステータス変更可）/ ビューアー（閲覧のみ）\n- 進捗を見守りたいだけの友人にビューアーロールを付与"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[低優先度] 将来的な拡張",
+      "title": "3.16 オフライン同期強化",
+      "content": "- Firebase RTDBの`enablePersistence()`でオフライン書き込みキュー\n- 同期ステータスインジケーター（緑=同期済 / 黄=同期中 / 赤=オフライン）\n- 再接続時の自動リプレイとトランザクションによる競合解決"
+    },
+    {
+      "level": 4,
+      "parent_h2": "3. 強化共有機能の提案",
+      "parent_h3": "[低優先度] 将来的な拡張",
+      "title": "3.17 イベント振り返りレポート",
+      "content": "- イベント終了後に自動生成: 総購入数、総支出、メンバー別実績、完売率、移動効率\n- 「次回改善ポイント」の自動提案（例: 「○○ホールの到着が遅く完売3件」→「次回は○○を優先ルートに」）\n\n---"
+    },
+    {
+      "level": 3,
+      "parent_h2": "4. 推奨技術スタック",
+      "title": "コスト見積もり",
+      "content": "| 要素 | 選定 | 理由 |\n|------|------|------|\n| リアルタイムDB | Firebase Realtime Database | Sakuriで実績あり、オフライン永続化内蔵、無料枠十分 |\n| 認証 | Firebase Anonymous Auth | ログイン不要でデバイス単位のUID発行 |\n| QRコード | `qrcode` npm パッケージ | 軽量（~30KB）、Canvas/SVG出力対応 |\n| ディープリンク | Vercel rewrites + URLパース | 既存のVercelデプロイに追加ルール |\n| プッシュ通知 | Firebase Cloud Messaging（将来） | サービスワーカー既存、VAPID key追加のみ |\n\n- Firebase Spark（無料）: 同時100接続、1GBストレージ、10GB/月ダウンロード\n- 1ルーム = 5接続 x ~40KBデータ → 同時20ルーム（100人）まで無料\n- それ以上はBlaze従量課金: イベント1日あたり約$5-10\n\n---"
+    },
+    {
+      "level": 3,
+      "parent_h2": "5. 実装アーキテクチャ",
+      "title": "新規ファイル構成",
+      "content": "```\nsrc/features/sharing/\n  config/firebase.ts              # Firebase初期化（環境変数）\n  types/room.ts                   # Room, Member, SyncedItem, Notification 型定義\n  hooks/\n    useFirebaseAuth.ts            # Anonymous Auth\n    useRoom.ts                    # ルーム作成/参加/退出\n    useRoomSync.ts                # アイテムステータスリアルタイム同期\n    usePresence.ts                # オンライン/オフライン管理\n    useAssignment.ts              # 担当者割り当て・再振り分け\n    useNotifications.ts           # アプリ内通知購読+アクション処理\n    useMemberStatus.ts            # メンバー状態（巡回中/列並び中/完了等）\n    useTeamBudget.ts              # チーム予算管理\n    useActivityLog.ts             # 購入タイムスタンプ・絆リスト\n  services/\n    roomService.ts                # Firebase CRUD\n    syncService.ts                # トランザクション付き同期\n    assignmentService.ts          # タスク割り振り+再振り分けロジック\n    notificationService.ts        # 通知生成+ワンタップアクション処理\n    helpMatchingService.ts        # 自動ヘルプマッチングロジック\n  components/\n    SharingProvider.tsx           # React Context（共有状態管理）\n    RoomPanel.tsx                 # メイン共有UI（スライドパネル）\n    CreateRoomDialog.tsx          # ルーム作成ダイアログ\n    JoinRoomDialog.tsx            # 参加ダイアログ（コード入力/QR）\n    MemberListPanel.tsx           # メンバー一覧（プレゼンス+ステータス表示）\n    MemberStatusBar.tsx           # ヘッダー常時表示のメンバー状態バー\n    QRCodeDisplay.tsx             # QRコード全画面表示\n    TaskAssignmentPanel.tsx       # タスク初期割り振りUI\n    ReassignDialog.tsx            # 現場での再振り分けダイアログ\n    HelpRequestPanel.tsx          # ヘルプ要請/受諾UI\n    NotificationPanel.tsx         # アプリ内通知パネル（アクションボタン付き）\n    TeamBudgetPanel.tsx           # 予算管理ダッシュボード\n    ActivityLogPanel.tsx          # 絆リスト（時系列行動ログ）\n    SyncStatusIndicator.tsx       # ヘッダー同期状態バッジ\n    SharedMapOverlay.tsx          # マップ上のメンバー位置/ルートオーバーレイ\n  utils/\n    roomCodeGenerator.ts          # コード生成/検証\n    conflictResolution.ts         # オフライン競合解決\n    routeDivision.ts              # 経路探索ベースの自動分担\n    helpMatching.ts               # メンバー空き状況判定+マッチングアルゴリズム\n```"
+    },
+    {
+      "level": 3,
+      "parent_h2": "5. 実装アーキテクチャ",
+      "title": "Firebase データ構造（拡張版）",
+      "content": "```\nrooms/{roomCode}/\n  meta/\n    eventName, createdAt, expiresAt, maxMembers\n  members/{uid}/\n    displayName, color, joinedAt, isOnline, lastSeen\n    status: 'roaming' | 'inQueue' | 'done' | 'resting'  # メンバー状態\n    queueInfo/                          # 列並び中の詳細\n      circleId, circleName, startedAt, estimatedMinutes\n    currentLocation/                    # ブースベース位置\n      hallId, blockName, number, updatedAt\n    remainingItems: number              # 残タスク数\n  items/{itemId}/\n    purchaseStatus, assignedTo, updatedBy, updatedAt\n    quantity, price                     # 購入時に金額更新可能\n    orderIndex: number                  # 巡回順序（リアルタイム変更可能）\n    postponed: boolean                  # 後回しフラグ\n  notifications/{notifId}/\n    type: 'purchased' | 'soldOut' | 'limitedPurchase' | 'reassigned'\n          | 'helpRequest' | 'helpAccepted' | 'priceUpdate'\n    fromUid, toUid, itemId, message, timestamp\n    actionRequired: boolean             # ワンタップアクションが必要か\n    actionTaken: boolean                # アクション済みか\n  activityLog/{logId}/\n    type, uid, itemId, timestamp, details\n  budget/\n    totalBudget: number\n    memberBudgets/{uid}/\n      carried: number                   # 持参金額\n      spent: number                     # 支出合計\n```"
+    },
+    {
+      "level": 3,
+      "parent_h2": "5. 実装アーキテクチャ",
+      "title": "既存コードとの統合ポイント",
+      "content": "| ファイル | 変更内容 |\n|----------|----------|\n| `src/App.tsx` | `<SharingProvider>`でラップ、共有UIエントリーポイント追加 |\n| `src/types.ts` | `ShoppingItem`に`assignedTo?`, `lastSyncedAt?`, `orderIndex?`, `postponed?`追加。`PurchaseStatus`に`LimitedPurchase`追加 |\n| `src/components/ShoppingItemCard.tsx` | メンバー色ボーダー、「○○が確保」バッジ、再割り当てボタン、後回しスワイプ |\n| `src/components/SummaryBar.tsx` | 「自分のアイテム」トグル、メンバー別進捗・支出、メンバーステータスバー |\n| `src/components/map/MapCanvasPresentation.tsx` | メンバー位置マーカー、複数ルートオーバーレイ |\n| `src/components/FocusMode.tsx` | 割り当て済みアイテムのみ表示フィルター、後回しアイテム再浮上 |\n| `src/components/EventListScreen.tsx` | ルーム作成/参加ボタン追加 |\n| `vercel.json` | `/join/[code]` リライトルール追加 |\n| `package.json` | `firebase`, `qrcode` 依存追加 |"
+    },
+    {
+      "level": 3,
+      "parent_h2": "5. 実装アーキテクチャ",
+      "title": "データフロー",
+      "content": "**購入ステータス変更:**\n```\nユーザーが「確保」をタップ\n  → (1) ローカルReact state即時更新（楽観的UI）\n  → (2) IndexedDB保存（500msデバウンス、既存フロー）\n  → (3) Firebase runTransaction()\n      成功 → 完了 + activityLog追記 + 通知生成\n      失敗（他メンバー確保済み） → ローカルstateロールバック+トースト通知\n  → (4) Firebase → 他メンバーのリスナー → 他メンバーのstate更新 → UI反映\n```\n\n**現場での再振り分け:**\n```\nメンバーAが「ヘルプ要請」をタップ\n  → (1) Firebase notifications/ に helpRequest 書き込み\n  → (2) helpMatchingService が空きメンバーを判定\n      → 残タスク少 + status='roaming' のメンバーBに通知\n  → (3) メンバーBに「○○さんがヘルプを求めています」通知表示\n      → 「対応する」ボタンをタップ\n  → (4) Firebase items/{itemId}/assignedTo を A→B に変更\n      → メンバーAのリストから消え、メンバーBのリストに追加\n      → activityLog + 通知生成\n```\n\n**後回し操作:**\n```\nユーザーがアイテムを「後回し」\n  → (1) items/{itemId}/postponed = true, orderIndex = 9999\n  → (2) フォーカスモードのリストから一旦消える\n  → (3) 他の全アイテム完了後、後回しアイテムがリスト先頭に再浮上\n  → (4) 「後回しにしたアイテムがあります」リマインダー通知\n```\n\n---"
+    }
+  ]
+}
