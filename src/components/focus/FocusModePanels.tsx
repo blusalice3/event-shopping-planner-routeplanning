@@ -4,11 +4,11 @@ import {
   PurchaseStatusControlMode,
   ShoppingItem,
 } from "../../types/item";
-import { FocusMapCenteringMode } from "../../types/focus";
+import type { FocusMapCenteringMode, FocusPhase } from "../../types/focus";
+import { buildStatusSegments } from "../../features/space-navigation/domain/statusSegments";
+import { NAVIGATOR_STATUS_COLORS } from "../../features/space-navigation/components/SpaceNavigatorLegend";
 import ShoppingItemCard from "../ShoppingItemCard";
 import MapRotationControls from "../map/MapRotationControls";
-
-type FocusPhase = "normal" | "postponed" | "late";
 
 interface FocusModeItemListProps {
   itemListRef: React.RefObject<HTMLDivElement>;
@@ -50,6 +50,8 @@ interface FocusModeHeaderProps {
   currentVisitItems: ShoppingItem[];
   onBulkStatusChange: (targetStatus: PurchaseStatus) => void;
   readOnly?: boolean;
+  isSpaceAggregate?: boolean;
+  movementBasisPhase?: FocusPhase | null;
   nextVisitInfo: {
     spaceInfo: string;
     circleName: string;
@@ -67,6 +69,33 @@ interface FocusModeMapControlsProps {
 
 const noopShoppingItemHandler = (_item: ShoppingItem) => {};
 const noopSelectItem = (_itemId: string) => {};
+
+const phaseDisplayNames: Record<FocusPhase, string> = {
+  normal: "通常",
+  postponed: "後回し",
+  late: "遅参",
+};
+
+const headerDarkOverlay =
+  "linear-gradient(rgba(15, 23, 42, 0.28), rgba(15, 23, 42, 0.28))";
+const fallbackHeaderGradient =
+  "linear-gradient(to right, #6366f1 0%, #6366f1 50%, #9333ea 50%, #9333ea 100%)";
+
+const buildHeaderBackgroundImage = (items: readonly ShoppingItem[]): string => {
+  const segments = buildStatusSegments(items);
+  if (segments.length === 0) {
+    return `${headerDarkOverlay}, ${fallbackHeaderGradient}`;
+  }
+
+  const stops = segments.flatMap((segment) => {
+    const color = NAVIGATOR_STATUS_COLORS[segment.kind];
+    return [
+      `${color} ${segment.startRatio * 100}%`,
+      `${color} ${segment.endRatio * 100}%`,
+    ];
+  });
+  return `${headerDarkOverlay}, linear-gradient(to right, ${stops.join(", ")})`;
+};
 
 const bulkStatusOptions: {
   status: PurchaseStatus;
@@ -214,13 +243,16 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
     currentVisitItems,
     onBulkStatusChange,
     readOnly = false,
+    isSpaceAggregate = false,
+    movementBasisPhase = null,
     nextVisitInfo,
   }) => {
     const rootClassName = containerClassName
-      ? `bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-lg shadow-lg ${containerClassName}`
-      : `bg-gradient-to-r from-indigo-500 to-purple-600 text-white p-3 rounded-lg shadow-lg ${
+      ? `text-white rounded-lg shadow-lg ${containerClassName}`
+      : `text-white p-3 rounded-lg shadow-lg ${
           layoutMode === "smartphone" && isMapVisible ? "mx-2" : ""
         }`;
+    const headerBackgroundImage = buildHeaderBackgroundImage(currentVisitItems);
     const labelClassName =
       size === "expanded" ? "text-sm opacity-80" : "text-xs opacity-80";
     const titleClassName =
@@ -280,6 +312,27 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
       </select>
     );
 
+    const renderPhaseControl = (selectClass: string) => {
+      if (!isSpaceAggregate) return renderPhaseSelect(selectClass);
+
+      return (
+        <div
+          className="rounded-md bg-black/10 px-2 py-1 text-right"
+          data-testid="focus-header-aggregate-phase"
+        >
+          <div className="whitespace-nowrap text-sm font-bold leading-tight">
+            一時表示・全フェーズ
+          </div>
+          <div className="mt-1 whitespace-nowrap text-xs opacity-85">
+            移動基準：
+            {movementBasisPhase
+              ? phaseDisplayNames[movementBasisPhase]
+              : "未選択"}
+          </div>
+        </div>
+      );
+    };
+
     const renderBulkStatusButtons = (buttonClassName: string) =>
       bulkStatusOptions.map(({ status, label, activeColor, hoverColor }) => {
         const allMatch = currentVisitItems.every(
@@ -305,27 +358,31 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
         );
       });
 
-    if (isSmartphone) {
-      return (
-        <div className={rootClassName}>
-          <div
-            className="grid grid-cols-[minmax(0,1fr)_auto] gap-3"
-            data-testid="focus-header-smartphone-main"
-          >
-            <div className="min-w-0">
-              <div className="text-xl font-bold leading-tight break-words">
-                {spaceInfo}
-              </div>
-              <div className="mt-1 text-sm leading-snug break-words">
-                {circleName}
-              </div>
-              <span className="mt-1 inline-block rounded bg-white/20 px-2 py-0.5 text-xs font-semibold">
-                {currentVisitCheckedCount}/{currentVisitTotalCount}
-              </span>
+    const headerContent = isSmartphone ? (
+      <>
+        <div
+          className="grid grid-cols-[minmax(0,1fr)_auto] gap-3"
+          data-testid="focus-header-smartphone-main"
+        >
+          <div className="min-w-0">
+            <div className="text-xl font-bold leading-tight break-words">
+              {spaceInfo}
             </div>
+            <div className="mt-1 text-sm leading-snug break-words">
+              {circleName}
+            </div>
+            <span className="mt-1 inline-block rounded bg-white/20 px-2 py-0.5 text-xs font-semibold">
+              {currentVisitCheckedCount}/{currentVisitTotalCount}
+            </span>
+          </div>
 
-            <div className="min-w-[7.5rem] text-right">
-              {renderPhaseSelect(smartphoneSelectClassName)}
+          <div
+            className={`text-right ${
+              isSpaceAggregate ? "min-w-[9.25rem]" : "min-w-[7.5rem]"
+            }`}
+          >
+            {renderPhaseControl(smartphoneSelectClassName)}
+            {!isSpaceAggregate && (
               <div
                 className="mt-1 max-w-[8.5rem] truncate text-xs opacity-80"
                 title={nextVisitDisplayText}
@@ -333,48 +390,46 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
               >
                 次: {nextVisitDisplayText}
               </div>
-            </div>
+            )}
           </div>
+        </div>
 
-          <div
-            className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-white/20 pt-2"
-            data-testid="focus-header-smartphone-payment"
-          >
-            <span className="text-xs opacity-80">支払額</span>
-            <span className="text-xl font-bold">
-              ¥{currentVisitPriceInfo.chargeableTotal.toLocaleString()}
+        <div
+          className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-white/20 pt-2"
+          data-testid="focus-header-smartphone-payment"
+        >
+          <span className="text-xs opacity-80">支払額</span>
+          <span className="text-xl font-bold">
+            ¥{currentVisitPriceInfo.chargeableTotal.toLocaleString()}
+          </span>
+          {hasPlannedDiff && (
+            <span className="text-xs font-semibold opacity-85">
+              予定額 ¥{currentVisitPriceInfo.plannedTotal.toLocaleString()}
             </span>
-            {hasPlannedDiff && (
-              <span className="text-xs font-semibold opacity-85">
-                予定額 ¥{currentVisitPriceInfo.plannedTotal.toLocaleString()}
-              </span>
-            )}
-            {currentVisitPriceInfo.priceMissingItemCount > 0 && (
-              <span className="text-xs font-semibold text-red-300">
-                価格未定 {currentVisitPriceInfo.priceMissingItemCount}件
-              </span>
-            )}
-          </div>
-
-          {currentVisitItems.length > 0 && (
-            <div
-              className="-mx-1 mt-3 overflow-x-auto overflow-y-hidden px-1 pb-1"
-              data-testid="focus-header-bulk-scroll"
-            >
-              <div
-                className="ml-auto flex w-max max-w-none flex-nowrap justify-end gap-1.5"
-                data-testid="focus-header-bulk-row"
-              >
-                {renderBulkStatusButtons(smartphoneBulkStatusButtonClassName)}
-              </div>
-            </div>
+          )}
+          {currentVisitPriceInfo.priceMissingItemCount > 0 && (
+            <span className="text-xs font-semibold text-red-300">
+              価格未定 {currentVisitPriceInfo.priceMissingItemCount}件
+            </span>
           )}
         </div>
-      );
-    }
 
-    return (
-      <div className={rootClassName}>
+        {currentVisitItems.length > 0 && (
+          <div
+            className="-mx-1 mt-3 overflow-x-auto overflow-y-hidden px-1 pb-1"
+            data-testid="focus-header-bulk-scroll"
+          >
+            <div
+              className="ml-auto flex w-max max-w-none flex-nowrap justify-end gap-1.5"
+              data-testid="focus-header-bulk-row"
+            >
+              {renderBulkStatusButtons(smartphoneBulkStatusButtonClassName)}
+            </div>
+          </div>
+        )}
+      </>
+    ) : (
+      <>
         <div className="flex justify-between items-start">
           <div>
             <div className={labelClassName}>訪問先</div>
@@ -409,11 +464,15 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
             </div>
           </div>
           <div className="text-right">
-            <div className={labelClassName}>フェーズ</div>
-            {renderPhaseSelect(selectClassName)}
-            <div className={nextClassName}>
-              次: {nextVisitInfo.spaceInfo} {nextVisitInfo.circleName}
-            </div>
+            {!isSpaceAggregate && (
+              <div className={labelClassName}>フェーズ</div>
+            )}
+            {renderPhaseControl(selectClassName)}
+            {!isSpaceAggregate && (
+              <div className={nextClassName}>
+                次: {nextVisitInfo.spaceInfo} {nextVisitInfo.circleName}
+              </div>
+            )}
           </div>
         </div>
         {currentVisitItems.length > 0 && (
@@ -421,6 +480,16 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
             {renderBulkStatusButtons(bulkStatusButtonClassName)}
           </div>
         )}
+      </>
+    );
+
+    return (
+      <div
+        className={rootClassName}
+        style={{ backgroundImage: headerBackgroundImage }}
+        data-testid="focus-mode-header"
+      >
+        {headerContent}
       </div>
     );
   },

@@ -1,7 +1,9 @@
 import type React from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FocusPhase } from "../../types/focus";
 import type { ShoppingItem } from "../../types/item";
+import { acquireBodyScrollLock } from "../../utils/bodyScrollLock";
 import type { PhaseChangeDialogState } from "./hooks/useFocusSessionState";
 
 type VisitGroup = {
@@ -14,6 +16,37 @@ type CellPopupState = {
   blockName: string;
   number: number;
   items: ShoppingItem[];
+};
+
+export type CellTemporaryTarget = {
+  visitId: string;
+  spaceKey: string;
+  displayLabel: string;
+  itemIds: string[];
+  itemCount: number;
+  disabled?: boolean;
+};
+
+export type TemporaryPhaseChoice = {
+  phase: FocusPhase;
+  label: string;
+  detail: string;
+  disabled?: boolean;
+};
+
+export type TemporaryRemainingSpace = {
+  visitId: string;
+  spaceKey: string;
+  label: string;
+  circles: string[];
+  itemCount: number;
+  disabled?: boolean;
+};
+
+export type TemporaryRemainingSection = {
+  phase: FocusPhase;
+  label: string;
+  entries: TemporaryRemainingSpace[];
 };
 
 type AddItemDialogState = {
@@ -37,6 +70,13 @@ const formInputClass =
   "w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white";
 const labelClass =
   "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
+
+const useModalInteractionLock = (isOpen: boolean) => {
+  useEffect(() => {
+    if (!isOpen) return;
+    return acquireBodyScrollLock({ lockOverscroll: true });
+  }, [isOpen]);
+};
 
 export function PhaseChangeDialogView({
   dialog,
@@ -127,27 +167,78 @@ export function PhaseChangeDialogView({
 export function CellItemPopup({
   state,
   canAddItem,
+  temporaryTargets = [],
   onAddItem,
+  onTemporaryMove,
   onClose,
 }: {
   state: CellPopupState;
   canAddItem: boolean;
+  temporaryTargets?: CellTemporaryTarget[];
   onAddItem: () => void;
+  onTemporaryMove?: (
+    target: CellTemporaryTarget,
+  ) => void | boolean | Promise<void | boolean>;
   onClose: () => void;
 }) {
+  useModalInteractionLock(state.isOpen);
+  const operationLockRef = useRef(false);
+  const [busyVisitId, setBusyVisitId] = useState<string | null>(null);
   if (!state.isOpen) return null;
 
+  const handleTemporaryMove = async (target: CellTemporaryTarget) => {
+    if (target.disabled || operationLockRef.current || !onTemporaryMove) return;
+    operationLockRef.current = true;
+    setBusyVisitId(target.visitId);
+    try {
+      const shouldClose = await onTemporaryMove(target);
+      if (shouldClose !== false) onClose();
+    } finally {
+      operationLockRef.current = false;
+      setBusyVisitId(null);
+    }
+  };
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${state.blockName}-${state.number}のアイテム`}
+      onPointerDown={(event) => event.stopPropagation()}
+      onTouchStart={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
+    >
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-sm w-full mx-4 overflow-hidden">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3 border-b border-slate-200 dark:border-slate-700">
           <h3 className="font-semibold text-slate-900 dark:text-white">
             {state.blockName}-{state.number}{" "}
             {state.items.length > 0 ? `（${state.items.length}件）` : ""}
           </h3>
+          <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+            {temporaryTargets.map((target) => (
+              <button
+                key={target.visitId}
+                type="button"
+                disabled={
+                  target.disabled || busyVisitId !== null || !onTemporaryMove
+                }
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void handleTemporaryMove(target);
+                }}
+                className="w-auto whitespace-nowrap rounded-lg bg-blue-600 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-400 disabled:opacity-70"
+              >
+                {busyVisitId === target.visitId
+                  ? "移動中…"
+                  : `${target.displayLabel}に一時移動`}
+              </button>
+            ))}
+          </div>
           <button
             onClick={onClose}
-            className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            className="ml-auto text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
+            aria-label="閉じる"
           >
             <svg
               className="w-5 h-5"
@@ -190,7 +281,7 @@ export function CellItemPopup({
         <div className="max-h-60 overflow-y-auto">
           {state.items.length === 0 ? (
             <div className="px-4 py-6 text-center text-slate-500 dark:text-slate-400">
-              このセルにはアイテムがありません
+              このセルには今回の巡回対象アイテムがありません
             </div>
           ) : (
             state.items.map((item) => (
@@ -223,6 +314,167 @@ export function CellItemPopup({
         </div>
       </div>
     </div>
+  );
+}
+
+export function TemporaryPhaseChoiceDialog({
+  isOpen,
+  title,
+  description,
+  choices,
+  onSelect,
+  onCancel,
+}: {
+  isOpen: boolean;
+  title: string;
+  description?: string;
+  choices: TemporaryPhaseChoice[];
+  onSelect: (phase: FocusPhase) => void;
+  onCancel: () => void;
+}) {
+  useModalInteractionLock(isOpen);
+  if (!isOpen) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label={title}
+      onPointerDown={(event) => event.stopPropagation()}
+      onTouchStart={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
+    >
+      <div className="w-full max-w-lg overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-800">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 text-white">
+          <h2 className="text-lg font-bold">{title}</h2>
+          {description && (
+            <p className="mt-1 text-sm opacity-85">{description}</p>
+          )}
+        </div>
+        <div className="space-y-2 p-4">
+          {choices.map((choice) => (
+            <button
+              key={choice.phase}
+              type="button"
+              disabled={choice.disabled}
+              onClick={() => onSelect(choice.phase)}
+              className="w-full rounded-lg border border-slate-200 px-4 py-3 text-left transition-colors hover:border-blue-400 hover:bg-blue-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-55 dark:border-slate-600 dark:hover:border-blue-500 dark:hover:bg-slate-700 dark:disabled:bg-slate-900"
+            >
+              <span className="block font-semibold text-slate-900 dark:text-white">
+                {choice.label}
+              </span>
+              <span className="mt-0.5 block text-sm text-slate-600 dark:text-slate-300">
+                {choice.detail}
+              </span>
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={onCancel}
+            className="mt-2 w-full rounded-lg bg-slate-200 px-4 py-2 font-medium text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+          >
+            キャンセル
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  );
+}
+
+export function TemporaryRemainingSpacesDialog({
+  isOpen,
+  sections,
+  onSelect,
+  onEnd,
+  onCancel,
+}: {
+  isOpen: boolean;
+  sections: TemporaryRemainingSection[];
+  onSelect: (phase: FocusPhase, visitId: string) => void;
+  onEnd: () => void;
+  onCancel: () => void;
+}) {
+  useModalInteractionLock(isOpen);
+  if (!isOpen) return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label="一時巡回の残りスペース"
+      onPointerDown={(event) => event.stopPropagation()}
+      onTouchStart={(event) => event.stopPropagation()}
+      onWheel={(event) => event.stopPropagation()}
+    >
+      <div className="flex max-h-[85dvh] w-full max-w-2xl flex-col overflow-hidden rounded-xl bg-white shadow-2xl dark:bg-slate-800">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 text-white">
+          <h2 className="text-lg font-bold">残りスペース</h2>
+          <p className="mt-1 text-sm opacity-85">
+            購入状態を再集計した最新の候補です
+          </p>
+        </div>
+        <div className="flex-1 space-y-4 overflow-y-auto p-4">
+          <button
+            type="button"
+            onClick={onEnd}
+            className="w-full rounded-lg bg-slate-800 px-4 py-3 font-semibold text-white hover:bg-slate-900 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+          >
+            ここで一時巡回を終了
+          </button>
+          {sections.map((section) => (
+            <section key={section.phase} aria-label={section.label}>
+              <h3 className="mb-2 text-sm font-bold text-slate-700 dark:text-slate-200">
+                {section.label}
+              </h3>
+              {section.entries.length === 0 ? (
+                <p className="rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-400">
+                  該当するスペースはありません
+                </p>
+              ) : (
+                <div className="space-y-2">
+                  {section.entries.map((entry) => {
+                    const circleText =
+                      entry.circles.length > 2
+                        ? `${entry.circles.slice(0, 2).join("・")} ほか${entry.circles.length - 2}件`
+                        : entry.circles.join("・");
+                    return (
+                      <button
+                        key={`${section.phase}:${entry.spaceKey}`}
+                        type="button"
+                        disabled={entry.disabled}
+                        onClick={() => onSelect(section.phase, entry.visitId)}
+                        className="w-full rounded-lg border border-slate-200 px-3 py-2 text-left hover:border-blue-400 hover:bg-blue-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:opacity-60 dark:border-slate-600 dark:hover:border-blue-500 dark:hover:bg-slate-700 dark:disabled:bg-slate-900"
+                      >
+                        <span className="font-semibold text-slate-900 dark:text-white">
+                          {entry.label}（{entry.itemCount}件）
+                          {entry.disabled ? "・表示中" : ""}
+                        </span>
+                        {circleText && (
+                          <span className="mt-0.5 block text-xs text-slate-600 dark:text-slate-300">
+                            {circleText}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </section>
+          ))}
+          <button
+            type="button"
+            onClick={onCancel}
+            className="w-full rounded-lg bg-slate-200 px-4 py-2 font-medium text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+          >
+            表示中のスペースへ戻る
+          </button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }
 

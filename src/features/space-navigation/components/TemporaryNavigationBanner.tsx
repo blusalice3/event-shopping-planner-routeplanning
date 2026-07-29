@@ -32,8 +32,9 @@ export function TemporaryNavigationBanner() {
         <div className="flex w-full max-w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
           <button
             type="button"
+            disabled={navigator.actionBusy}
             onClick={() => void navigator.returnToPrevious()}
-            className="min-h-10 max-w-[55vw] truncate rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+            className="min-h-10 max-w-[55vw] truncate rounded-lg bg-slate-100 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-200 disabled:cursor-wait disabled:opacity-60 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
             title={`${previousLabel}へ戻る`}
           >
             ← {previousLabel}
@@ -41,16 +42,18 @@ export function TemporaryNavigationBanner() {
           {navigator.isInspecting && (
             <button
               type="button"
+              disabled={navigator.actionBusy}
               onClick={navigator.switchInspectToTemporary}
-              className="min-h-10 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-200 dark:hover:bg-indigo-900/70"
+              className="min-h-10 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 disabled:cursor-wait disabled:opacity-60 dark:border-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-200 dark:hover:bg-indigo-900/70"
             >
               一時移動する
             </button>
           )}
           <button
             type="button"
+            disabled={navigator.actionBusy}
             onClick={() => void navigator.promoteTemporary()}
-            className="min-h-10 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700"
+            className="min-h-10 rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white hover:bg-indigo-700 disabled:cursor-wait disabled:opacity-60"
           >
             現在地にする
           </button>

@@ -284,7 +284,31 @@ const getLatestMapProps = () =>
     | {
         currentPhase?: string;
         currentVisitKey?: string | null;
+        formalCurrentVisitKey?: string | null;
+        temporaryVisitKey?: string | null;
+        formalCurrentPhase?: string;
+        formalCurrentRouteIndex?: number;
         recenterRevision?: number;
+        onViewportSnapshotChange?: (snapshot: {
+          offsetX: number;
+          offsetY: number;
+          zoomLevel: number;
+          rotationAngle: number;
+        }) => void;
+        viewportRestoreRequest?: {
+          snapshot: {
+            offsetX: number;
+            offsetY: number;
+            zoomLevel: number;
+            rotationAngle: number;
+          };
+          revision: number;
+        } | null;
+        onCellClick?: (
+          blockName: string,
+          number: number,
+          matchingItems: ShoppingItem[],
+        ) => void;
         precomputedVisitKeyCellMap?: Map<
           string,
           { row: number; col: number; key: string }
@@ -1000,5 +1024,490 @@ describe("FocusMode Space Navigator integration", () => {
         mapProps?.precomputedVisitKeyCellMap?.get("2026-01-01-A-01a-none"),
       ).toEqual({ row: 1, col: 1, key: "1-1" });
     });
+  });
+
+  it("opens a clicked map cell as one all-phase space without changing the formal route", async () => {
+    const formalItem = {
+      ...makeItem("formal", "01a"),
+      price: null,
+      circle: "正式サークル",
+      priorityLevel: "highest" as const,
+    };
+    const normalHighest = {
+      ...makeItem("normal-highest", "02a"),
+      priorityLevel: "highest" as const,
+      circle: "Alpha",
+    };
+    const normal = {
+      ...makeItem("normal", "02a", "LimitedPurchase"),
+      circle: "Beta",
+    };
+    const postponed = {
+      ...makeItem("postponed", "02a", "Postpone"),
+      circle: "Gamma",
+    };
+    const late = {
+      ...makeItem("late", "02a", "Late"),
+      circle: "Delta",
+    };
+    const adjacentSuffix = {
+      ...makeItem("suffix-b", "02b"),
+      circle: "Suffix B",
+    };
+    const outsideScope = {
+      ...makeItem("outside-scope", "02c"),
+      circle: "対象外",
+    };
+    const { container, onItemUpdate, onSessionStateChange } =
+      renderFocusNavigator({
+        items: [
+          formalItem,
+          normalHighest,
+          normal,
+          postponed,
+          late,
+          adjacentSuffix,
+        ],
+        mapData: { "2026-01-01マップ": focusMap },
+      });
+
+    await expectNavigatorPosition({
+      current: 0,
+      formal: 0,
+      mode: "none",
+      history: 0,
+    });
+    fireEvent.click(screen.getByTitle("マップを表示"));
+    await waitFor(() =>
+      expect(screen.getByTestId("focus-map-canvas-mock")).toBeInTheDocument(),
+    );
+    expect(getLatestMapProps()).toMatchObject({
+      currentVisitKey: "2026-01-01-A-01a",
+      formalCurrentVisitKey: "2026-01-01-A-01a",
+      temporaryVisitKey: null,
+      formalCurrentPhase: "normal",
+      formalCurrentRouteIndex: 0,
+    });
+    const originalViewport = {
+      offsetX: -123,
+      offsetY: 47,
+      zoomLevel: 135,
+      rotationAngle: 15,
+    };
+    act(() => {
+      getLatestMapProps()?.onViewportSnapshotChange?.(originalViewport);
+    });
+    const formalFooterProgress = screen.getByText(/^通常:/).textContent;
+
+    act(() => {
+      getLatestMapProps()?.onCellClick?.("A", 2, [
+        normalHighest,
+        normal,
+        postponed,
+        late,
+        adjacentSuffix,
+        outsideScope,
+      ]);
+    });
+
+    const popup = screen.getByRole("dialog", { name: "A-2のアイテム" });
+    expect(within(popup).getByText("A-2 （5件）")).toBeInTheDocument();
+    expect(
+      within(popup).getByRole("button", { name: "A-02aに一時移動" }),
+    ).toBeInTheDocument();
+    expect(
+      within(popup).getByRole("button", { name: "A-02bに一時移動" }),
+    ).toBeInTheDocument();
+    expect(within(popup).queryByText("対象外")).not.toBeInTheDocument();
+
+    await act(async () =>
+      fireEvent.click(
+        within(popup).getByRole("button", {
+          name: "A-02aに一時移動",
+        }),
+      ),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("navigator-current-id")).toHaveTextContent(
+        "space-aggregate:A-02a",
+      ),
+    );
+    expect(screen.getByTestId("navigator-formal-id")).toHaveTextContent(
+      "normal:A-01a:highest",
+    );
+    expect(screen.getByTestId("navigator-temporary-mode")).toHaveTextContent(
+      "temporary",
+    );
+    expect(screen.getByTestId("navigator-history-length")).toHaveTextContent(
+      "1",
+    );
+    expect(screen.getByText("一時表示・全フェーズ")).toBeInTheDocument();
+    expect(screen.getByText("移動基準：未選択")).toBeInTheDocument();
+    expect(screen.queryByText(/^次:/)).not.toBeInTheDocument();
+    expect(screen.getByText(/^通常:/)).toHaveTextContent(
+      formalFooterProgress ?? "",
+    );
+
+    for (const itemId of ["normal-highest", "normal", "postponed", "late"]) {
+      expect(
+        container.querySelector(`[data-item-id="${itemId}"]`),
+      ).toBeInTheDocument();
+    }
+    expect(
+      container.querySelector('[data-item-id="suffix-b"]'),
+    ).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(getLatestMapProps()).toMatchObject({
+        currentVisitKey: "2026-01-01-A-02a",
+        formalCurrentVisitKey: "2026-01-01-A-01a",
+        temporaryVisitKey: "2026-01-01-A-02a",
+        formalCurrentPhase: "normal",
+        formalCurrentRouteIndex: 0,
+      });
+    });
+    await expectLatestSession(onSessionStateChange, {
+      phase: "normal",
+      phaseIndex: 0,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "全購入" }));
+    await waitFor(() => {
+      for (const itemId of ["normal-highest", "normal", "postponed", "late"]) {
+        expect(onItemUpdate).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: itemId,
+            purchaseStatus: "Purchased",
+          }),
+        );
+      }
+    });
+    expect(screen.getByTestId("navigator-temporary-mode")).toHaveTextContent(
+      "temporary",
+    );
+    expect(screen.getByTestId("navigator-formal-id")).toHaveTextContent(
+      "normal:A-01a:highest",
+    );
+    expect(
+      onSessionStateChange.mock.calls.every(
+        ([state]) => state.phase === "normal" && state.phaseIndex === 0,
+      ),
+    ).toBe(true);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "return-temporary-navigation" }),
+    );
+    await expectNavigatorPosition({
+      current: 0,
+      formal: 0,
+      mode: "none",
+      history: 0,
+    });
+    await waitFor(() =>
+      expect(getLatestMapProps()?.viewportRestoreRequest).toMatchObject({
+        snapshot: originalViewport,
+      }),
+    );
+  });
+
+  it("selects a movement phase once, opens the temporary end flow, and promotes the chosen phase", async () => {
+    const formalItem = {
+      ...makeItem("formal", "01a"),
+      priorityLevel: "highest" as const,
+    };
+    const postponedBefore = {
+      ...makeItem("postponed-before", "04a", "Postpone"),
+      block: "P",
+      priorityLevel: "highest" as const,
+    };
+    const lateBefore = {
+      ...makeItem("late-before", "05a", "Late"),
+      block: "L",
+      priorityLevel: "highest" as const,
+    };
+    const currentHighest = {
+      ...makeItem("current-highest", "02a"),
+      priorityLevel: "highest" as const,
+    };
+    const currentNormal = makeItem("current-normal", "02a");
+    const currentPostponed = {
+      ...makeItem("current-postponed", "02a", "Postpone"),
+      priorityLevel: "highest" as const,
+    };
+    const currentLate = {
+      ...makeItem("current-late", "02a", "Late"),
+      priorityLevel: "highest" as const,
+    };
+    const lastNormal = {
+      ...makeItem("last-normal", "99a"),
+      block: "Z",
+      priorityLevel: "highest" as const,
+    };
+    const { onSessionStateChange } = renderFocusNavigator({
+      items: [
+        formalItem,
+        postponedBefore,
+        lateBefore,
+        currentHighest,
+        currentNormal,
+        currentPostponed,
+        currentLate,
+        lastNormal,
+      ],
+      mapData: { "2026-01-01マップ": focusMap },
+    });
+
+    await expectNavigatorPosition({
+      current: 0,
+      formal: 0,
+      mode: "none",
+      history: 0,
+    });
+    fireEvent.click(screen.getByTitle("マップを表示"));
+    await waitFor(() =>
+      expect(screen.getByTestId("focus-map-canvas-mock")).toBeInTheDocument(),
+    );
+    act(() => {
+      getLatestMapProps()?.onCellClick?.("A", 2, [
+        currentHighest,
+        currentNormal,
+        currentPostponed,
+        currentLate,
+      ]);
+    });
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "A-02aに一時移動" })),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("navigator-current-id")).toHaveTextContent(
+        "space-aggregate:A-02a",
+      ),
+    );
+
+    fireEvent.click(screen.getByTitle("次の訪問先"));
+    const movementDialog = await screen.findByRole("dialog", {
+      name: "次へ進む基準フェーズを選択",
+    });
+    expect(document.body.style.overflow).toBe("hidden");
+    expect(
+      within(movementDialog).getByRole("button", { name: /^通常/ }),
+    ).toHaveTextContent("Z-99a");
+    fireEvent.click(
+      within(movementDialog).getByRole("button", { name: /^通常/ }),
+    );
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", {
+          name: "次へ進む基準フェーズを選択",
+        }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByTestId("navigator-current-id")).toHaveTextContent(
+        "space-aggregate:Z-99a",
+      );
+    });
+    expect(document.body.style.overflow).not.toBe("hidden");
+    expect(screen.getByText("移動基準：通常")).toBeInTheDocument();
+    expect(screen.getByTestId("navigator-history-length")).toHaveTextContent(
+      "1",
+    );
+
+    fireEvent.click(screen.getByTitle("次の訪問先"));
+    const remainingDialog = await screen.findByRole("dialog", {
+      name: "一時巡回の残りスペース",
+    });
+    expect(
+      within(remainingDialog).getByRole("button", {
+        name: "ここで一時巡回を終了",
+      }),
+    ).toBeInTheDocument();
+    fireEvent.click(
+      within(remainingDialog).getByRole("button", {
+        name: "ここで一時巡回を終了",
+      }),
+    );
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "一時巡回を終了しました",
+      }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("すべて完了")).not.toBeInTheDocument();
+    await expectLatestSession(onSessionStateChange, {
+      phase: "normal",
+      phaseIndex: 0,
+      isCompleted: false,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "現在地にする" }));
+    const promotionDialog = await screen.findByRole("dialog", {
+      name: "現在地にするフェーズを選択",
+    });
+    fireEvent.click(
+      within(promotionDialog).getByRole("button", { name: /^通常/ }),
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("navigator-temporary-mode")).toHaveTextContent(
+        "none",
+      );
+      expect(screen.getByTestId("navigator-history-length")).toHaveTextContent(
+        "0",
+      );
+      expect(screen.getByTestId("navigator-formal-id")).toHaveTextContent(
+        "normal:Z-99a:highest",
+      );
+    });
+    await expectLatestSession(onSessionStateChange, {
+      phase: "normal",
+      isCompleted: false,
+    });
+    await waitFor(() =>
+      expect(getLatestMapProps()).toMatchObject({
+        currentVisitKey: "2026-01-01-Z-99a",
+        formalCurrentVisitKey: "2026-01-01-Z-99a",
+        temporaryVisitKey: null,
+      }),
+    );
+  });
+
+  it("retains the selected movement phase when the forward input guard blocks navigation", async () => {
+    const formalItem = {
+      ...makeItem("formal", "01a"),
+      priorityLevel: "highest" as const,
+    };
+    const guardedCurrent = {
+      ...makeItem("guarded-current", "02a", "Purchased"),
+      price: null,
+      priorityLevel: "highest" as const,
+    };
+    const nextItem = {
+      ...makeItem("next", "03a"),
+      priorityLevel: "highest" as const,
+    };
+    renderFocusNavigator({
+      items: [formalItem, guardedCurrent, nextItem],
+      mapData: { "2026-01-01マップ": focusMap },
+    });
+
+    fireEvent.click(screen.getByTitle("マップを表示"));
+    await waitFor(() =>
+      expect(screen.getByTestId("focus-map-canvas-mock")).toBeInTheDocument(),
+    );
+    act(() => {
+      getLatestMapProps()?.onCellClick?.("A", 2, [guardedCurrent]);
+    });
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "A-02aに一時移動" })),
+    );
+
+    fireEvent.click(screen.getByTitle("次の訪問先"));
+    const dialog = await screen.findByRole("dialog", {
+      name: "次へ進む基準フェーズを選択",
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: /^通常/ }));
+
+    await waitFor(() => {
+      expect(
+        screen.queryByRole("dialog", {
+          name: "次へ進む基準フェーズを選択",
+        }),
+      ).not.toBeInTheDocument();
+      expect(screen.getByText("移動基準：通常")).toBeInTheDocument();
+      expect(screen.getByTestId("navigator-current-id")).toHaveTextContent(
+        "space-aggregate:A-02a",
+      );
+    });
+
+    fireEvent.click(screen.getByTitle("次の訪問先"));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(
+      screen.queryByRole("dialog", {
+        name: "次へ進む基準フェーズを選択",
+      }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("移動基準：通常")).toBeInTheDocument();
+    expect(screen.getByTestId("navigator-current-id")).toHaveTextContent(
+      "space-aggregate:A-02a",
+    );
+  });
+
+  it("returns safely when the displayed aggregate leaves the execution scope", async () => {
+    const formalItem = {
+      ...makeItem("formal", "01a"),
+      priorityLevel: "highest" as const,
+    };
+    const temporaryItem = {
+      ...makeItem("temporary", "02a"),
+      priorityLevel: "highest" as const,
+    };
+
+    function ScopeHarness() {
+      const [executeIds, setExecuteIds] = React.useState([
+        formalItem.id,
+        temporaryItem.id,
+      ]);
+      return (
+        <>
+          <FocusMode
+            {...minimalProps({
+              items: [formalItem, temporaryItem],
+              executeModeItemIds: executeIds,
+              onUpdateItem: vi.fn(),
+              onSessionStateChange: vi.fn(),
+            })}
+            layoutMode="pc"
+            mapData={{ "2026-01-01マップ": focusMap }}
+          />
+          <button type="button" onClick={() => setExecuteIds([formalItem.id])}>
+            一時対象を実行列から外す
+          </button>
+        </>
+      );
+    }
+
+    const { container } = render(
+      <SpaceNavigatorProvider>
+        <ScopeHarness />
+        <SpaceNavigatorProbe />
+      </SpaceNavigatorProvider>,
+    );
+
+    fireEvent.click(screen.getByTitle("マップを表示"));
+    await waitFor(() =>
+      expect(screen.getByTestId("focus-map-canvas-mock")).toBeInTheDocument(),
+    );
+    act(() => {
+      getLatestMapProps()?.onCellClick?.("A", 2, [temporaryItem]);
+    });
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "A-02aに一時移動" })),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("navigator-current-id")).toHaveTextContent(
+        "space-aggregate:A-02a",
+      ),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "一時対象を実行列から外す",
+      }),
+    );
+
+    await expectNavigatorPosition({
+      current: 0,
+      formal: 0,
+      mode: "none",
+      history: 0,
+    });
+    expect(
+      container.querySelector('[data-item-id="formal"]'),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-item-id="temporary"]'),
+    ).not.toBeInTheDocument();
   });
 });

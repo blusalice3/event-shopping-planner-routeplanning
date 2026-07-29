@@ -19,12 +19,19 @@ import {
   FocusModeSessionState,
   FocusPhase,
   FocusMapCenteringMode,
+  FocusMapViewportRestoreRequest,
+  FocusMapViewportSnapshot,
 } from "../types/focus";
 import FocusModeMapCanvas from "./FocusModeMapCanvas";
 import {
   AddItemDialogView,
   CellItemPopup,
   PhaseChangeDialogView,
+  TemporaryPhaseChoiceDialog,
+  TemporaryRemainingSpacesDialog,
+  type CellTemporaryTarget,
+  type TemporaryPhaseChoice,
+  type TemporaryRemainingSection,
 } from "./focus/FocusModeDialogs";
 import {
   FocusModeHeader,
@@ -45,6 +52,7 @@ import {
   CompletionStateView,
   EmptyVisitStateView,
   ResumeChoiceDialogView,
+  TemporaryTourEndStateView,
 } from "./focus/FocusModeStateViews";
 import { resolveResumeChoice } from "./focus/resumeChoice";
 import { useAutoSkipEmptyVisit } from "./focus/hooks/useAutoSkipEmptyVisit";
@@ -89,7 +97,10 @@ import {
   type PostEventDistributionAnswer,
   upsertPostEventDistributionRemark,
 } from "../utils/postEventDistributionCheck";
-import { useFocusSpaceNavigator } from "../features/space-navigation/hooks/useFocusSpaceNavigator";
+import {
+  useFocusSpaceNavigator,
+  type FocusSpaceAggregateNavigationPayload,
+} from "../features/space-navigation/hooks/useFocusSpaceNavigator";
 import type {
   NavigationGuardResult,
   NavigatorEntry,
@@ -100,6 +111,10 @@ import {
   normalizeBaseSpaceNumber,
   normalizeSpaceBlock,
 } from "../features/space-navigation/domain/visitIdentity";
+import {
+  aggregateNavigatorSpace,
+  groupCellItemsBySpace,
+} from "../features/space-navigation/domain/opportunisticNavigation";
 import { useOptionalSpaceNavigator } from "../features/space-navigation/SpaceNavigatorContext";
 import { SPACE_NAVIGATOR_RAIL_WIDTH_PX } from "../features/space-navigation/components/SpaceNavigatorRail";
 // フェーズの定義
@@ -246,6 +261,37 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const swipeContainerRef = useRef<HTMLDivElement>(null);
   const [isMapVisible, setIsMapVisible] = useState(false);
   const [mapZoomLevel, setMapZoomLevel] = useState<number>(100);
+  const mapViewportSnapshotRef = useRef<FocusMapViewportSnapshot | null>(null);
+  const mapViewportRestoreRevisionRef = useRef(0);
+  const [mapViewportRestoreRequest, setMapViewportRestoreRequest] =
+    useState<FocusMapViewportRestoreRequest | null>(null);
+  const handleMapViewportSnapshotChange = useCallback(
+    (snapshot: FocusMapViewportSnapshot) => {
+      mapViewportSnapshotRef.current = snapshot;
+    },
+    [],
+  );
+  const getMapViewportSnapshot = useCallback(
+    () => mapViewportSnapshotRef.current ?? undefined,
+    [],
+  );
+  const restoreMapViewportSnapshot = useCallback(
+    (snapshot: FocusMapViewportSnapshot) => {
+      setMapZoomLevel(snapshot.zoomLevel);
+      stableMapRotationHandler(snapshot.rotationAngle);
+      mapViewportRestoreRevisionRef.current += 1;
+      setMapViewportRestoreRequest({
+        snapshot,
+        revision: mapViewportRestoreRevisionRef.current,
+      });
+    },
+    [stableMapRotationHandler],
+  );
+  const handleMapViewportRestoreApplied = useCallback((revision: number) => {
+    setMapViewportRestoreRequest((current) =>
+      current?.revision === revision ? null : current,
+    );
+  }, []);
   const selectedHallId: string | "follow" = "follow";
   const [mapCenteringMode, setMapCenteringMode] =
     useState<FocusMapCenteringMode>("prevToCurrent");
@@ -636,11 +682,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
   );
   const getNavigatorDeferredLimitedItemIds = useCallback(
     (entry: NavigatorEntry) => {
-      const firstItem = entry.items[0];
-      if (!firstItem) return undefined;
-      return deferredLimitedItemIdsByVisitKey.get(
-        getVisitKey(firstItem as ShoppingItem),
-      );
+      const deferredIds = new Set<string>();
+      entry.items.forEach((item) => {
+        const itemDeferredIds = deferredLimitedItemIdsByVisitKey.get(
+          getVisitKey(item as ShoppingItem),
+        );
+        itemDeferredIds?.forEach((itemId) => deferredIds.add(itemId));
+      });
+      return deferredIds.size > 0 ? deferredIds : undefined;
     },
     [deferredLimitedItemIdsByVisitKey],
   );
@@ -650,7 +699,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
   );
   const {
     entries: navigatorEntries,
+    baseEntries: baseNavigatorEntries,
     currentIndex: displayNavigatorIndex,
+    formalRouteIndex,
     displayEntry,
     displayPhase,
     displayPhaseIndex,
@@ -661,6 +712,25 @@ const FocusMode: React.FC<FocusModeProps> = ({
     pickerOpen: isNavigatorPickerOpen,
     recenterRevision,
     moveTemporaryBy,
+    isSpaceAggregate,
+    aggregateSpaceKey,
+    movementBasisPhase,
+    temporarySubview,
+    movementPhaseSelectionOpen,
+    movementDirection,
+    initialPhaseCandidates,
+    aggregatePhasePresence,
+    selectMovementPhase,
+    cancelMovementPhaseSelection,
+    remainingSpaceLists,
+    selectRemainingSpace,
+    showTemporaryEnd,
+    showRemainingSpaces,
+    closeRemainingSpaces,
+    promotionPhaseChoiceOpen,
+    promotionPhasePresence,
+    cancelPromotionPhaseSelection,
+    confirmPromotionPhase,
   } = useFocusSpaceNavigator({
     registrationId: focusNavigatorRegistrationId,
     enabled:
@@ -672,13 +742,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
     sourcesByPhase: navigatorSourcesByPhase,
     officialPhase: currentPhase,
     officialPhaseIndex: currentPhaseIndex,
-    latestItemsById: itemsById,
+    latestItemsById: executeItemsById,
     disablePriceUndefinedCheck,
     disableLimitedPurchaseQuantityCheck,
     getDeferredLimitedItemIds: getNavigatorDeferredLimitedItemIds,
     onCommitOfficial: commitNavigatorOfficialPosition,
     onGuardResult: handleNavigatorGuardResult,
     onInteractionStart: closeNavigatorEditableSurfaces,
+    getMapViewportSnapshot,
+    restoreMapViewportSnapshot,
   });
   const activeNavigatorRailSide =
     spaceNavigator?.settings.railVisible &&
@@ -732,6 +804,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
         .find((item): item is ShoppingItem => item !== undefined);
       if (!firstItem) return null;
       const visitKey = getVisitKey(firstItem);
+      if (entry.id.startsWith("space-aggregate:")) {
+        return {
+          key: visitKey,
+          items: entry.itemIds
+            .map((itemId) => itemsById.get(itemId))
+            .filter((item): item is ShoppingItem => item !== undefined),
+        };
+      }
       return (
         allVisits.find((visit) => visit.key === visitKey) ?? {
           key: visitKey,
@@ -764,14 +844,15 @@ const FocusMode: React.FC<FocusModeProps> = ({
         .filter((item): item is ShoppingItem => item !== undefined),
     [displayItemIds, itemsById],
   );
-  const displayPhaseVisitsLength = useMemo(
+  const formalPhaseEntriesLength = useMemo(
     () =>
-      navigatorEntries.filter((entry) => entry.phase === displayPhase).length,
-    [displayPhase, navigatorEntries],
+      baseNavigatorEntries.filter((entry) => entry.phase === currentPhase)
+        .length,
+    [baseNavigatorEntries, currentPhase],
   );
   const nextAllVisitKeys = useMemo(
     () =>
-      navigatorEntries
+      baseNavigatorEntries
         .map((entry) => {
           const firstItem = entry.itemIds
             .map((itemId) => itemsById.get(itemId))
@@ -779,7 +860,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
           return firstItem ? getVisitKey(firstItem) : null;
         })
         .filter((visitKey): visitKey is string => visitKey !== null),
-    [itemsById, navigatorEntries],
+    [baseNavigatorEntries, itemsById],
   );
   const allVisitKeysSignature = useMemo(
     () => JSON.stringify(nextAllVisitKeys),
@@ -819,20 +900,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
     [currentVisitDisplayItems],
   );
   const isCurrentVisitLimitedCheckDeferred = useMemo(() => {
-    if (!currentVisit || currentVisitLimitedMissingItems.length === 0)
-      return false;
-    const deferredItemIds = deferredLimitedItemIdsByVisitKey.get(
-      currentVisit.key,
-    );
-    if (!deferredItemIds) return false;
+    if (currentVisitLimitedMissingItems.length === 0) return false;
     return currentVisitLimitedMissingItems.every((item) =>
-      deferredItemIds.has(item.id),
+      deferredLimitedItemIdsByVisitKey.get(getVisitKey(item))?.has(item.id),
     );
-  }, [
-    currentVisit,
-    currentVisitLimitedMissingItems,
-    deferredLimitedItemIdsByVisitKey,
-  ]);
+  }, [currentVisitLimitedMissingItems, deferredLimitedItemIdsByVisitKey]);
   const isLimitedPurchaseQuantityCheckDisabledForCurrentVisit =
     disableLimitedPurchaseQuantityCheck || isCurrentVisitLimitedCheckDeferred;
   const blockedByLimited = useMemo(
@@ -854,7 +926,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
           : "none";
   // フェーズ名の日本語表示
   const phaseDisplayName = useMemo(() => {
-    switch (displayPhase) {
+    switch (currentPhase) {
       case "normal":
         return "通常";
       case "postponed":
@@ -862,9 +934,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
       case "late":
         return "遅参";
     }
-  }, [displayPhase]);
-  const totalVisits = navigatorEntries.length;
-  const currentVisitNumber = displayNavigatorIndex + 1;
+  }, [currentPhase]);
+  const totalVisits = baseNavigatorEntries.length;
+  const currentVisitNumber = formalRouteIndex + 1;
   const remainingCost = useMemo(() => {
     return executeItems.reduce((sum, item) => {
       const isPurchasable =
@@ -2243,9 +2315,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
         (item) => item.purchaseStatus === targetStatus,
       );
       const newStatus: PurchaseStatus = allAlready ? "None" : targetStatus;
-      const targets = currentVisitDisplayItems.filter(
-        (item) => item.purchaseStatus !== "LimitedPurchase",
-      );
+      const targets = isSpaceAggregate
+        ? currentVisitDisplayItems
+        : currentVisitDisplayItems.filter(
+            (item) => item.purchaseStatus !== "LimitedPurchase",
+          );
       const changedItems = targets.filter(
         (item) => item.purchaseStatus !== newStatus,
       );
@@ -2283,6 +2357,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       currentPhase,
       currentPhaseIndex,
       clearAutoAdvanceTimer,
+      isSpaceAggregate,
       isTemporaryActive,
       isInspecting,
       setNotification,
@@ -2428,14 +2503,87 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const handleMapCellClick = useCallback(
     (blockName: string, number: number, matchingItems: ShoppingItem[]) => {
       if (isInspecting) return;
+      const seenItemIds = new Set<string>();
+      const scopedItems = matchingItems.filter((item) => {
+        if (
+          !executeModeItemIdSet.has(item.id) ||
+          item.eventDate.trim() !== mapDayName ||
+          seenItemIds.has(item.id)
+        ) {
+          return false;
+        }
+        seenItemIds.add(item.id);
+        return true;
+      });
       setCellPopupState({
         isOpen: true,
         blockName,
         number,
-        items: matchingItems,
+        items: scopedItems,
       });
     },
-    [isInspecting],
+    [executeModeItemIdSet, isInspecting, mapDayName],
+  );
+  const cellTemporaryTargets = useMemo<CellTemporaryTarget[]>(() => {
+    return groupCellItemsBySpace(cellPopupState.items).flatMap((group) => {
+      const aggregate = aggregateNavigatorSpace(
+        baseNavigatorEntries,
+        group.spaceKey,
+        { latestItemsById: itemsById },
+      );
+      if (!aggregate) return [];
+      const target: CellTemporaryTarget = {
+        visitId: aggregate.representativeVisitId,
+        spaceKey: group.spaceKey,
+        displayLabel: group.displayLabel,
+        itemIds: [...aggregate.itemIds],
+        itemCount: aggregate.itemIds.length,
+        disabled: displayEntry?.spaceKey === group.spaceKey,
+      };
+      return [target];
+    });
+  }, [
+    baseNavigatorEntries,
+    cellPopupState.items,
+    displayEntry?.spaceKey,
+    itemsById,
+  ]);
+  const handleCellTemporaryMove = useCallback(
+    async (target: CellTemporaryTarget): Promise<boolean> => {
+      if (
+        isInspecting ||
+        !spaceNavigator ||
+        spaceNavigator.registration?.id !== focusNavigatorRegistrationId
+      ) {
+        setNotification("一時移動を開始できませんでした");
+        return false;
+      }
+      clearAutoAdvanceTimer();
+      const payload: FocusSpaceAggregateNavigationPayload = {
+        kind: "space-aggregate",
+        spaceKey: target.spaceKey,
+        representativeVisitId: target.visitId,
+        displayLabel: target.displayLabel,
+      };
+      const result = await spaceNavigator.navigateByVisitId(
+        target.visitId,
+        "temporary",
+        {
+          confirmed: true,
+          source: "map-cell",
+          payload,
+          expectedRegistrationId: focusNavigatorRegistrationId,
+        },
+      );
+      if (!result.ok && result.message) setNotification(result.message);
+      return result.ok;
+    },
+    [
+      clearAutoAdvanceTimer,
+      focusNavigatorRegistrationId,
+      isInspecting,
+      spaceNavigator,
+    ],
   );
   // セルポップアップを閉じる
   const closeCellPopup = useCallback(() => {
@@ -2577,6 +2725,118 @@ const FocusMode: React.FC<FocusModeProps> = ({
       clearAutoAdvanceTimer,
     ],
   );
+  const temporaryMovementPhaseChoices = useMemo<TemporaryPhaseChoice[]>(() => {
+    const phaseLabels: Record<FocusPhase, string> = {
+      normal: "通常",
+      postponed: "後回し",
+      late: "遅参",
+    };
+    return (["normal", "postponed", "late"] as const).map((phase) => {
+      const candidate = initialPhaseCandidates[phase];
+      const aggregate = candidate
+        ? aggregateNavigatorSpace(baseNavigatorEntries, candidate.spaceKey, {
+            latestItemsById: itemsById,
+          })
+        : null;
+      const circleText = aggregate?.circles.slice(0, 2).join("・") || "";
+      const extraCircleCount = Math.max(
+        0,
+        (aggregate?.circles.length ?? 0) - 2,
+      );
+      const targetText = aggregate
+        ? `${aggregate.label}${circleText ? ` ${circleText}` : ""}${
+            extraCircleCount > 0 ? ` ほか${extraCircleCount}件` : ""
+          }（${aggregate.itemIds.length}件）`
+        : aggregatePhasePresence[phase] && movementDirection === "next"
+          ? "次のスペースはありません（残り一覧へ）"
+          : "移動先なし";
+      return {
+        phase,
+        label: phaseLabels[phase],
+        detail: targetText,
+        disabled:
+          !aggregatePhasePresence[phase] ||
+          (movementDirection === "previous" && !candidate),
+      };
+    });
+  }, [
+    aggregatePhasePresence,
+    baseNavigatorEntries,
+    initialPhaseCandidates,
+    itemsById,
+    movementDirection,
+  ]);
+  const temporaryPromotionPhaseChoices = useMemo<TemporaryPhaseChoice[]>(() => {
+    const phaseLabels: Record<FocusPhase, string> = {
+      normal: "通常",
+      postponed: "後回し",
+      late: "遅参",
+    };
+    const currentLabel =
+      currentVisitDisplayItems[0] !== undefined
+        ? getSpaceDisplayLabel(currentVisitDisplayItems[0])
+        : "表示中のスペース";
+    return (["normal", "postponed", "late"] as const).map((phase) => ({
+      phase,
+      label: phaseLabels[phase],
+      detail: promotionPhasePresence[phase]
+        ? `${currentLabel}を現在地にする`
+        : "対象なし",
+      disabled: !promotionPhasePresence[phase],
+    }));
+  }, [currentVisitDisplayItems, promotionPhasePresence]);
+  const temporaryRemainingSections = useMemo<
+    TemporaryRemainingSection[]
+  >(() => {
+    const configs: {
+      phase: FocusPhase;
+      label: string;
+    }[] = [
+      { phase: "normal", label: "通常の未購入" },
+      { phase: "postponed", label: "後回し" },
+      { phase: "late", label: "遅参" },
+    ];
+    return configs.map(({ phase, label }) => ({
+      phase,
+      label,
+      entries: remainingSpaceLists[phase].map((entry) => ({
+        visitId: entry.representativeVisitId,
+        spaceKey: entry.spaceKey,
+        label: entry.label,
+        circles: [...entry.circles],
+        itemCount: entry.itemIds.length,
+        disabled: entry.isCurrent,
+      })),
+    }));
+  }, [remainingSpaceLists]);
+  const handleTemporaryMovementPhaseSelect = useCallback(
+    (phase: FocusPhase) => {
+      const result = selectMovementPhase(phase);
+      if (!result.ok && result.message) setNotification(result.message);
+    },
+    [selectMovementPhase],
+  );
+  const handleTemporaryRemainingSelect = useCallback(
+    (phase: FocusPhase, visitId: string) => {
+      const result = selectRemainingSpace(phase, visitId);
+      if (!result.ok && result.message) setNotification(result.message);
+    },
+    [selectRemainingSpace],
+  );
+  const handleTemporaryPromotionPhaseSelect = useCallback(
+    (phase: FocusPhase) => {
+      void confirmPromotionPhase(phase).then((result) => {
+        if (!result.ok && result.message) setNotification(result.message);
+      });
+    },
+    [confirmPromotionPhase],
+  );
+  const handleTemporaryReturn = useCallback(() => {
+    void spaceNavigator?.returnToPrevious();
+  }, [spaceNavigator]);
+  const handleTemporaryPromoteRequest = useCallback(() => {
+    void spaceNavigator?.promoteTemporary();
+  }, [spaceNavigator]);
   const resumeChoiceDialogJSX = resumeChoiceDialog?.isOpen ? (
     <ResumeChoiceDialogView
       dialog={resumeChoiceDialog}
@@ -2623,6 +2883,27 @@ const FocusMode: React.FC<FocusModeProps> = ({
       </>
     );
   }
+  if (isSpaceAggregate && temporarySubview === "ended") {
+    return (
+      <>
+        <TemporaryTourEndStateView
+          executeItems={executeItems}
+          onReturn={handleTemporaryReturn}
+          onPromote={handleTemporaryPromoteRequest}
+          onBackToRemaining={showRemainingSpaces}
+        />
+        <TemporaryPhaseChoiceDialog
+          isOpen={promotionPhaseChoiceOpen}
+          title="現在地にするフェーズを選択"
+          description="全フェーズまとめ表示には単独のフェーズがないため、正式な巡回位置を選んでください。"
+          choices={temporaryPromotionPhaseChoices}
+          onSelect={handleTemporaryPromotionPhaseSelect}
+          onCancel={cancelPromotionPhaseSelection}
+        />
+        {resumeChoiceDialogJSX}
+      </>
+    );
+  }
   if (isCompleted) {
     return (
       <>
@@ -2659,18 +2940,43 @@ const FocusMode: React.FC<FocusModeProps> = ({
       </>
     );
   }
-  const circleName = currentVisit?.items[0]?.circle || "";
-  const spaceInfo = currentVisit?.items[0]
-    ? getSpaceDisplayLabel(currentVisit.items[0])
+  const currentCircleNames = Array.from(
+    new Set(
+      currentVisitDisplayItems
+        .map((item) => item.circle.trim())
+        .filter((circle) => circle.length > 0),
+    ),
+  );
+  const circleName =
+    currentCircleNames.length > 2
+      ? `${currentCircleNames.slice(0, 2).join("・")} ほか${currentCircleNames.length - 2}件`
+      : currentCircleNames.join("・");
+  const spaceInfo = currentVisitDisplayItems[0]
+    ? getSpaceDisplayLabel(currentVisitDisplayItems[0])
     : "";
-  const currentVisitKey = currentVisit?.items[0]
-    ? getMapVisitKey(currentVisit.items[0])
+  const currentVisitKey = currentVisitDisplayItems[0]
+    ? getMapVisitKey(currentVisitDisplayItems[0])
     : null;
-  const nextVisitKey = nextVisit?.items[0]
-    ? getMapVisitKey(nextVisit.items[0])
+  const formalMapEntry = baseNavigatorEntries[formalRouteIndex];
+  const formalMapItem = formalMapEntry?.itemIds
+    .map((itemId) => itemsById.get(itemId))
+    .find((item): item is ShoppingItem => item !== undefined);
+  const formalCurrentVisitKey = formalMapItem
+    ? getMapVisitKey(formalMapItem)
     : null;
-  const prevVisitKey = prevVisit?.items[0]
-    ? getMapVisitKey(prevVisit.items[0])
+  const formalNextMapEntry = baseNavigatorEntries[formalRouteIndex + 1];
+  const formalNextMapItem = formalNextMapEntry?.itemIds
+    .map((itemId) => itemsById.get(itemId))
+    .find((item): item is ShoppingItem => item !== undefined);
+  const nextVisitKey = formalNextMapItem
+    ? getMapVisitKey(formalNextMapItem)
+    : null;
+  const formalPrevMapEntry = baseNavigatorEntries[formalRouteIndex - 1];
+  const formalPrevMapItem = formalPrevMapEntry?.itemIds
+    .map((itemId) => itemsById.get(itemId))
+    .find((item): item is ShoppingItem => item !== undefined);
+  const prevVisitKey = formalPrevMapItem
+    ? getMapVisitKey(formalPrevMapItem)
     : null;
   // App.tsx側で scale されるため、高さは逆補正して実表示高さを安定させる
   const footerOverlapGuardPx = 1;
@@ -2685,11 +2991,42 @@ const FocusMode: React.FC<FocusModeProps> = ({
       onCancel={cancelPhaseChange}
     />
   );
+  const temporaryMovementPhaseDialogJSX = (
+    <TemporaryPhaseChoiceDialog
+      isOpen={movementPhaseSelectionOpen}
+      title={`${movementDirection === "previous" ? "前" : "次"}へ進む基準フェーズを選択`}
+      description="選択後は、そのフェーズを基準に前後移動します。表示する商品は引き続き全フェーズ分です。"
+      choices={temporaryMovementPhaseChoices}
+      onSelect={handleTemporaryMovementPhaseSelect}
+      onCancel={cancelMovementPhaseSelection}
+    />
+  );
+  const temporaryRemainingSpacesDialogJSX = (
+    <TemporaryRemainingSpacesDialog
+      isOpen={isSpaceAggregate && temporarySubview === "remaining"}
+      sections={temporaryRemainingSections}
+      onSelect={handleTemporaryRemainingSelect}
+      onEnd={showTemporaryEnd}
+      onCancel={closeRemainingSpaces}
+    />
+  );
+  const temporaryPromotionPhaseDialogJSX = (
+    <TemporaryPhaseChoiceDialog
+      isOpen={promotionPhaseChoiceOpen}
+      title="現在地にするフェーズを選択"
+      description="選択したフェーズ内で、このスペースの最も早い訪問候補を正式な現在地にします。"
+      choices={temporaryPromotionPhaseChoices}
+      onSelect={handleTemporaryPromotionPhaseSelect}
+      onCancel={cancelPromotionPhaseSelection}
+    />
+  );
   const cellItemPopupJSX = (
     <CellItemPopup
       state={cellPopupState}
       canAddItem={Boolean(onAddItem) && !isInspecting}
+      temporaryTargets={cellTemporaryTargets}
       onAddItem={openAddItemDialog}
+      onTemporaryMove={handleCellTemporaryMove}
       onClose={closeCellPopup}
     />
   );
@@ -2746,9 +3083,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
               zoomLevel={mapZoomLevel}
               selectedHall={selectedHall}
               currentVisitKey={currentVisitKey}
+              formalCurrentVisitKey={formalCurrentVisitKey}
+              temporaryVisitKey={isTemporaryActive ? currentVisitKey : null}
               nextVisitKey={nextVisitKey}
               prevVisitKey={prevVisitKey}
               currentPhase={displayPhase}
+              formalCurrentPhase={currentPhase}
               selectedHallMode={selectedHallId}
               onZoomChange={handleMapZoomChange}
               onCellClick={handleMapCellClick}
@@ -2758,8 +3098,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
               onRotationAngleChange={onMapRotationAngleChange}
               allVisitKeys={allVisitKeys}
               currentPhaseIndex={displayPhaseIndex}
+              formalCurrentPhaseIndex={currentPhaseIndex}
               currentRouteIndex={displayNavigatorIndex}
+              formalCurrentRouteIndex={formalRouteIndex}
               recenterRevision={recenterRevision}
+              onViewportSnapshotChange={handleMapViewportSnapshotChange}
+              viewportRestoreRequest={mapViewportRestoreRequest}
+              onViewportRestoreApplied={handleMapViewportRestoreApplied}
               numberCellOutlineStyle={numberCellOutlineStyle}
               mapCenteringMode={mapCenteringMode}
               precomputedVisitKeyCellMap={visitKeyCellMap}
@@ -2796,6 +3141,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
             currentVisitTotalCount={currentVisitTotalCount}
             currentVisitPriceInfo={currentVisitPriceInfo}
             currentPhase={displayPhase}
+            isSpaceAggregate={isSpaceAggregate}
+            movementBasisPhase={movementBasisPhase}
             onPhaseChangeRequest={handlePhaseChangeRequest}
             currentVisitItems={currentVisitDisplayItems}
             onBulkStatusChange={handleBulkStatusChange}
@@ -2832,8 +3179,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
           compact
           layoutMode={layoutMode}
           phaseDisplayName={phaseDisplayName}
-          currentPhaseIndex={displayPhaseIndex}
-          currentPhaseVisitsLength={displayPhaseVisitsLength}
+          currentPhaseIndex={currentPhaseIndex}
+          currentPhaseVisitsLength={formalPhaseEntriesLength}
           currentVisitNumber={currentVisitNumber}
           totalVisits={totalVisits}
           purchasedCount={purchasedCount}
@@ -2845,6 +3192,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
           onLayoutModeChange={onLayoutModeChange}
         />
         {phaseChangeDialogJSX}
+        {temporaryMovementPhaseDialogJSX}
+        {temporaryRemainingSpacesDialogJSX}
+        {temporaryPromotionPhaseDialogJSX}
         {cellItemPopupJSX}
         {addItemDialogJSX}
         {limitedPurchaseDialogJSX}
@@ -2884,9 +3234,12 @@ const FocusMode: React.FC<FocusModeProps> = ({
               zoomLevel={mapZoomLevel}
               selectedHall={selectedHall}
               currentVisitKey={currentVisitKey}
+              formalCurrentVisitKey={formalCurrentVisitKey}
+              temporaryVisitKey={isTemporaryActive ? currentVisitKey : null}
               nextVisitKey={nextVisitKey}
               prevVisitKey={prevVisitKey}
               currentPhase={displayPhase}
+              formalCurrentPhase={currentPhase}
               selectedHallMode={selectedHallId}
               onZoomChange={handleMapZoomChange}
               onCellClick={handleMapCellClick}
@@ -2896,8 +3249,13 @@ const FocusMode: React.FC<FocusModeProps> = ({
               onRotationAngleChange={onMapRotationAngleChange}
               allVisitKeys={allVisitKeys}
               currentPhaseIndex={displayPhaseIndex}
+              formalCurrentPhaseIndex={currentPhaseIndex}
               currentRouteIndex={displayNavigatorIndex}
+              formalCurrentRouteIndex={formalRouteIndex}
               recenterRevision={recenterRevision}
+              onViewportSnapshotChange={handleMapViewportSnapshotChange}
+              viewportRestoreRequest={mapViewportRestoreRequest}
+              onViewportRestoreApplied={handleMapViewportRestoreApplied}
               numberCellOutlineStyle={numberCellOutlineStyle}
               mapCenteringMode={mapCenteringMode}
               precomputedVisitKeyCellMap={visitKeyCellMap}
@@ -2916,6 +3274,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
             currentVisitTotalCount={currentVisitTotalCount}
             currentVisitPriceInfo={currentVisitPriceInfo}
             currentPhase={displayPhase}
+            isSpaceAggregate={isSpaceAggregate}
+            movementBasisPhase={movementBasisPhase}
             onPhaseChangeRequest={handlePhaseChangeRequest}
             currentVisitItems={currentVisitDisplayItems}
             onBulkStatusChange={handleBulkStatusChange}
@@ -2974,8 +3334,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
         <FocusModeFooterPortal
           layoutMode={layoutMode}
           phaseDisplayName={phaseDisplayName}
-          currentPhaseIndex={displayPhaseIndex}
-          currentPhaseVisitsLength={displayPhaseVisitsLength}
+          currentPhaseIndex={currentPhaseIndex}
+          currentPhaseVisitsLength={formalPhaseEntriesLength}
           currentVisitNumber={currentVisitNumber}
           totalVisits={totalVisits}
           purchasedCount={purchasedCount}
@@ -2987,6 +3347,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
           onLayoutModeChange={onLayoutModeChange}
         />
         {phaseChangeDialogJSX}
+        {temporaryMovementPhaseDialogJSX}
+        {temporaryRemainingSpacesDialogJSX}
+        {temporaryPromotionPhaseDialogJSX}
         {cellItemPopupJSX}
         {addItemDialogJSX}
         {limitedPurchaseDialogJSX}
@@ -3019,6 +3382,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
         currentVisitTotalCount={currentVisitTotalCount}
         currentVisitPriceInfo={currentVisitPriceInfo}
         currentPhase={displayPhase}
+        isSpaceAggregate={isSpaceAggregate}
+        movementBasisPhase={movementBasisPhase}
         onPhaseChangeRequest={handlePhaseChangeRequest}
         currentVisitItems={currentVisitDisplayItems}
         onBulkStatusChange={handleBulkStatusChange}
@@ -3082,8 +3447,8 @@ const FocusMode: React.FC<FocusModeProps> = ({
       <FocusModeFooterPortal
         layoutMode={layoutMode}
         phaseDisplayName={phaseDisplayName}
-        currentPhaseIndex={displayPhaseIndex}
-        currentPhaseVisitsLength={displayPhaseVisitsLength}
+        currentPhaseIndex={currentPhaseIndex}
+        currentPhaseVisitsLength={formalPhaseEntriesLength}
         currentVisitNumber={currentVisitNumber}
         totalVisits={totalVisits}
         purchasedCount={purchasedCount}
@@ -3095,6 +3460,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
         onLayoutModeChange={onLayoutModeChange}
       />
       {phaseChangeDialogJSX}
+      {temporaryMovementPhaseDialogJSX}
+      {temporaryRemainingSpacesDialogJSX}
+      {temporaryPromotionPhaseDialogJSX}
       {cellItemPopupJSX}
       {addItemDialogJSX}
       {limitedPurchaseDialogJSX}

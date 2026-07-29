@@ -15,6 +15,7 @@ import {
   type SpaceNavigatorRegistration,
 } from "./SpaceNavigatorContext";
 import { SpaceNavigatorFooterButton } from "./components/SpaceNavigatorFooterButton";
+import { SpaceNavigatorHost } from "./components/SpaceNavigatorHost";
 import { TemporaryNavigationBanner } from "./components/TemporaryNavigationBanner";
 import { useSpaceNavigatorSettings } from "./hooks/useSpaceNavigatorSettings";
 import type { NavigatorItem } from "./types";
@@ -101,6 +102,10 @@ function ContextProbe() {
         {navigator.temporaryMode ?? "none"}
       </output>
       <output data-testid="history-depth">{navigator.history.length}</output>
+      <output data-testid="navigator-settings">
+        {String(navigator.settings.railVisible)}:
+        {String(navigator.settings.footerButtonVisible)}
+      </output>
       <button
         type="button"
         onClick={() => void navigator.navigate(1, "temporary")}
@@ -124,6 +129,17 @@ function ContextProbe() {
       </button>
       <button type="button" onClick={() => void navigator.promoteTemporary()}>
         現在地
+      </button>
+      <button
+        type="button"
+        onClick={() =>
+          navigator.updateSettings({
+            railVisible: false,
+            footerButtonVisible: false,
+          })
+        }
+      >
+        ナビを両方OFF
       </button>
       <SpaceNavigatorFooterButton />
     </div>
@@ -180,6 +196,36 @@ describe("SpaceNavigatorContext", () => {
     );
     expect(screen.getByTestId("history-depth")).toHaveTextContent("0");
     expect(screen.getByTestId("temporary-mode")).toHaveTextContent("none");
+  });
+
+  it("accepts only one navigation action during a rapid double tap", async () => {
+    let releaseAction: (() => void) | undefined;
+    const action = vi.fn(async () => {
+      await new Promise<void>((resolve) => {
+        releaseAction = resolve;
+      });
+      return { ok: true };
+    });
+
+    render(
+      <SpaceNavigatorProvider>
+        <RegistrationHarness action={action} />
+        <ContextProbe />
+      </SpaceNavigatorProvider>,
+    );
+
+    const button = screen.getByRole("button", { name: "一時B" });
+    fireEvent.click(button);
+    fireEvent.click(button);
+    expect(action).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      releaseAction?.();
+    });
+    await waitFor(() =>
+      expect(screen.getByTestId("history-depth")).toHaveTextContent("1"),
+    );
+    expect(screen.getByTestId("current-index")).toHaveTextContent("1");
   });
 
   it("promotes an inspect target and clears the return history", async () => {
@@ -246,6 +292,54 @@ describe("SpaceNavigatorContext", () => {
     expect(action).toHaveBeenCalledWith(
       expect.objectContaining({ index: 2, intent: "inspect" }),
     );
+  });
+
+  it("keeps temporary history and recovery actions when both navigator entry points are disabled", async () => {
+    render(
+      <SpaceNavigatorProvider>
+        <RegistrationHarness />
+        <ContextProbe />
+        <SpaceNavigatorHost />
+      </SpaceNavigatorProvider>,
+    );
+
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "一時B" })),
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("temporary-mode")).toHaveTextContent(
+        "temporary",
+      ),
+    );
+    expect(screen.getByText("一時移動中")).toBeInTheDocument();
+    expect(screen.getByTestId("history-depth")).toHaveTextContent("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "ナビを両方OFF" }));
+    await waitFor(() =>
+      expect(screen.getByTestId("navigator-settings")).toHaveTextContent(
+        "false:false",
+      ),
+    );
+
+    expect(
+      screen.queryByRole("slider", { name: "スペースナビ" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "スペース一覧を開く" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByText("一時移動中")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "現在地にする" }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId("history-depth")).toHaveTextContent("1");
+
+    fireEvent.click(screen.getByTitle(/へ戻る$/));
+    await waitFor(() =>
+      expect(screen.getByTestId("temporary-mode")).toHaveTextContent("none"),
+    );
+    expect(screen.getByTestId("current-index")).toHaveTextContent("0");
+    expect(screen.getByTestId("history-depth")).toHaveTextContent("0");
+    expect(screen.queryByText("一時移動中")).not.toBeInTheDocument();
   });
 
   it("does not create history until a warning has been confirmed", async () => {

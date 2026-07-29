@@ -7,6 +7,7 @@ import {
   getPlannedBudgetQuantity,
   getSafePriceForCalculation,
   isCountedAsPurchased,
+  isUndefinedPrice,
 } from "../../utils/purchaseQuantity";
 
 const resumePhaseNameMap = {
@@ -110,6 +111,132 @@ export function AutoAdvancingStateView() {
       <p className="text-slate-500 dark:text-slate-400">
         次の訪問先を探しています...
       </p>
+    </div>
+  );
+}
+
+export function TemporaryTourEndStateView({
+  executeItems,
+  onReturn,
+  onPromote,
+  onBackToRemaining,
+}: {
+  executeItems: ShoppingItem[];
+  onReturn: () => void;
+  onPromote: () => void;
+  onBackToRemaining: () => void;
+}) {
+  const purchasedCount = executeItems.filter(isCountedAsPurchased).length;
+  const unprocessedCount = executeItems.filter(
+    (item) => item.purchaseStatus === "None",
+  ).length;
+  const postponedCount = executeItems.filter(
+    (item) => item.purchaseStatus === "Postpone",
+  ).length;
+  const lateCount = executeItems.filter(
+    (item) => item.purchaseStatus === "Late",
+  ).length;
+  const unavailableCount = executeItems.filter(
+    (item) =>
+      item.purchaseStatus === "SoldOut" || item.purchaseStatus === "Absent",
+  ).length;
+  const limitedMissingCount = getLimitedPurchaseCounts(executeItems).missing;
+  const undefinedPriceCount = executeItems.filter((item) =>
+    isUndefinedPrice(item.price),
+  ).length;
+  const purchasedAmount = executeItems.reduce(
+    (sum, item) =>
+      sum +
+      getSafePriceForCalculation(item.price) * getChargeableQuantity(item),
+    0,
+  );
+  const plannedAmount = executeItems.reduce(
+    (sum, item) =>
+      sum +
+      getSafePriceForCalculation(item.price) * getPlannedBudgetQuantity(item),
+    0,
+  );
+
+  return (
+    <div className="flex min-h-[50vh] flex-col items-center justify-center p-6">
+      <div className="mb-3 text-5xl">🏁</div>
+      <h2 className="text-xl font-bold text-slate-800 dark:text-slate-100">
+        一時巡回を終了しました
+      </h2>
+      <p className="mt-2 max-w-lg text-center text-sm text-slate-500 dark:text-slate-400">
+        正式な現在地と巡回の進み具合は変更していません。
+      </p>
+
+      <div className="my-6 w-full max-w-md rounded-xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-800/80">
+        <h3 className="mb-3 text-center text-sm font-semibold text-slate-600 dark:text-slate-300">
+          今回の集中モード対象
+        </h3>
+        <div className="space-y-1.5 text-sm">
+          <SummaryRow
+            label="購入済み"
+            value={purchasedCount}
+            className="text-green-600 dark:text-green-400"
+          />
+          <SummaryRow
+            label="未購入"
+            value={unprocessedCount}
+            className="text-slate-600 dark:text-slate-300"
+          />
+          <SummaryRow
+            label="後回し"
+            value={postponedCount}
+            className="text-purple-600 dark:text-purple-400"
+          />
+          <SummaryRow
+            label="遅参"
+            value={lateCount}
+            className="text-blue-600 dark:text-blue-400"
+          />
+          <SummaryRow
+            label="売切・欠席"
+            value={unavailableCount}
+            className="text-rose-600 dark:text-rose-400"
+          />
+          <SummaryRow
+            label="限数未入力"
+            value={limitedMissingCount}
+            className="text-orange-600 dark:text-orange-400"
+          />
+          <SummaryRow
+            label="価格未定"
+            value={undefinedPriceCount}
+            className="text-red-600 dark:text-red-400"
+          />
+        </div>
+        <div className="mt-3 space-y-1.5 border-t border-slate-200 pt-3 text-sm dark:border-slate-600">
+          <AmountRow label="購入合計" amount={purchasedAmount} strong />
+          <AmountRow label="予定合計" amount={plannedAmount} />
+        </div>
+      </div>
+
+      <div className="flex w-full max-w-md flex-col gap-2 sm:flex-row sm:flex-wrap">
+        <button
+          type="button"
+          onClick={onReturn}
+          className="flex-1 rounded-lg bg-slate-600 px-4 py-3 font-semibold text-white hover:bg-slate-700"
+        >
+          元のスペースへ戻る
+        </button>
+        <button
+          type="button"
+          onClick={onPromote}
+          className="flex-1 rounded-lg bg-blue-600 px-4 py-3 font-semibold text-white hover:bg-blue-700"
+        >
+          現在地にする
+        </button>
+        <button
+          type="button"
+          onClick={onBackToRemaining}
+          className="w-full rounded-lg bg-slate-200 px-4 py-3 font-semibold text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600"
+        >
+          残りスペース一覧へ戻る
+        </button>
+      </div>
     </div>
   );
 }

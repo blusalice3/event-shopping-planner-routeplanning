@@ -107,10 +107,16 @@ export function SpaceNavigatorHost() {
     return acquireBodyScrollLock({ lockOverscroll: true });
   }, [navigationOverlayOpen]);
 
+  useEffect(() => {
+    if (settingsEnabled) return;
+    setActionTargetVisitId(null);
+    setActionResult(null);
+    setPendingIntent(null);
+    setBusy(false);
+  }, [settingsEnabled]);
+
   if (!navigator || !registration || registration.entries.length === 0)
     return null;
-
-  if (!settingsEnabled) return null;
 
   const handleChoose = async (intent: SelectableIntent, confirmed = false) => {
     if (actionTargetIndex < 0 || busy) return;
@@ -133,7 +139,7 @@ export function SpaceNavigatorHost() {
 
   return ReactDOM.createPortal(
     <>
-      {navigator.settings.railVisible && (
+      {settingsEnabled && navigator.settings.railVisible && (
         <SpaceNavigatorRail
           entries={registration.entries}
           currentIndex={registration.currentIndex}
@@ -151,7 +157,7 @@ export function SpaceNavigatorHost() {
         />
       )}
 
-      {navigator.pickerOpen && (
+      {settingsEnabled && navigator.pickerOpen && (
         <SpaceNavigatorPicker
           entries={registration.entries}
           candidateIndex={candidateIndex}
@@ -167,7 +173,7 @@ export function SpaceNavigatorHost() {
         />
       )}
 
-      {actionTarget && (
+      {settingsEnabled && actionTarget && (
         <SpaceNavigatorActionDialog
           entry={actionTarget}
           result={actionResult}

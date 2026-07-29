@@ -10,7 +10,11 @@ import {
   MAX_ZOOM,
 } from "../types/map";
 import { ShoppingItem } from "../types/item";
-import { FocusMapCenteringMode } from "../types/focus";
+import {
+  FocusMapCenteringMode,
+  FocusMapViewportRestoreRequest,
+  FocusMapViewportSnapshot,
+} from "../types/focus";
 import {
   rotatePointAroundCenter,
   useCanvasViewport,
@@ -40,9 +44,18 @@ interface FocusModeMapCanvasProps {
   zoomLevel: number;
   selectedHall: HallDefinition | null;
   currentVisitKey: string | null;
+  /**
+   * When supplied, `currentVisitKey` remains the legacy/display pointer while
+   * this key is the official route position. Omitting it preserves the
+   * historical single-position behaviour.
+   */
+  formalCurrentVisitKey?: string | null;
+  /** A temporary display target drawn separately from the official position. */
+  temporaryVisitKey?: string | null;
   nextVisitKey: string | null;
   prevVisitKey: string | null;
   currentPhase: "normal" | "postponed" | "late";
+  formalCurrentPhase?: "normal" | "postponed" | "late";
   selectedHallMode?: string | "follow";
   onZoomChange?: (newZoom: number) => void;
   onCellClick?: (
@@ -56,8 +69,13 @@ interface FocusModeMapCanvasProps {
   onRotationAngleChange?: (angle: number) => void;
   allVisitKeys?: string[];
   currentPhaseIndex?: number;
+  formalCurrentPhaseIndex?: number;
   currentRouteIndex?: number;
+  formalCurrentRouteIndex?: number;
   recenterRevision?: number;
+  onViewportSnapshotChange?: (snapshot: FocusMapViewportSnapshot) => void;
+  viewportRestoreRequest?: FocusMapViewportRestoreRequest | null;
+  onViewportRestoreApplied?: (revision: number) => void;
   numberCellOutlineStyle?: NumberCellOutlineStyle;
   mapCenteringMode?: FocusMapCenteringMode;
   // ルート再計算を避けるため、FocusMode 側で事前計算したデータを受け取る。
@@ -75,6 +93,80 @@ interface FocusModeMapCanvasProps {
 const BASE_CELL_SIZE = 28;
 const SCROLL_MARGIN = 5;
 const FILLED_SCROLL_MARGIN = 25;
+
+export interface FocusMapPositionKeys {
+  officialVisitKey: string | null;
+  temporaryVisitKey: string | null;
+  centerVisitKey: string | null;
+}
+
+export interface FocusMapCellPositionFlags {
+  isOfficialPosition: boolean;
+  isTemporaryPosition: boolean;
+}
+
+export const FOCUS_MAP_OFFICIAL_MARKER_STYLE = {
+  color: "rgba(255, 109, 0, 0.8)",
+  lineStyle: "solid",
+  pin: "\u{1F4CD}",
+} as const;
+
+export const FOCUS_MAP_TEMPORARY_MARKER_STYLE = {
+  outerColor: "rgba(29, 78, 216, 0.95)",
+  innerColor: "rgba(96, 165, 250, 0.95)",
+  lineStyle: "dashed",
+  frameCount: 2,
+  label: "一時",
+} as const;
+
+export type FocusMapRouteProgressState = "visited" | "current" | "upcoming";
+
+export const resolveFocusMapPositionKeys = ({
+  currentVisitKey,
+  formalCurrentVisitKey,
+  temporaryVisitKey,
+}: {
+  currentVisitKey: string | null;
+  formalCurrentVisitKey?: string | null;
+  temporaryVisitKey?: string | null;
+}): FocusMapPositionKeys => {
+  const officialVisitKey =
+    formalCurrentVisitKey === undefined
+      ? currentVisitKey
+      : formalCurrentVisitKey;
+  const resolvedTemporaryVisitKey = temporaryVisitKey ?? null;
+  return {
+    officialVisitKey,
+    temporaryVisitKey: resolvedTemporaryVisitKey,
+    centerVisitKey: resolvedTemporaryVisitKey ?? officialVisitKey,
+  };
+};
+
+export const resolveFocusMapCellPositionFlags = (
+  visitKeys: ReadonlySet<string>,
+  positionKeys: Pick<
+    FocusMapPositionKeys,
+    "officialVisitKey" | "temporaryVisitKey"
+  >,
+): FocusMapCellPositionFlags => ({
+  isOfficialPosition: Boolean(
+    positionKeys.officialVisitKey &&
+    visitKeys.has(positionKeys.officialVisitKey),
+  ),
+  isTemporaryPosition: Boolean(
+    positionKeys.temporaryVisitKey &&
+    visitKeys.has(positionKeys.temporaryVisitKey),
+  ),
+});
+
+export const resolveFocusMapRouteProgressState = (
+  segmentIndex: number,
+  formalRouteIndex: number,
+): FocusMapRouteProgressState => {
+  if (segmentIndex < formalRouteIndex - 1) return "visited";
+  if (segmentIndex === formalRouteIndex - 1) return "current";
+  return "upcoming";
+};
 
 const hasCellInputValue = (value: string | number | null): boolean => {
   if (value === null || value === undefined) return false;
@@ -155,9 +247,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   zoomLevel,
   selectedHall,
   currentVisitKey,
+  formalCurrentVisitKey,
+  temporaryVisitKey,
   nextVisitKey,
   prevVisitKey,
   currentPhase,
+  formalCurrentPhase,
   selectedHallMode = "follow",
   onZoomChange,
   onCellClick,
@@ -167,14 +262,31 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   onRotationAngleChange,
   allVisitKeys = [],
   currentPhaseIndex = 0,
+  formalCurrentPhaseIndex,
   currentRouteIndex = currentPhaseIndex,
+  formalCurrentRouteIndex,
   recenterRevision = 0,
+  onViewportSnapshotChange,
+  viewportRestoreRequest,
+  onViewportRestoreApplied,
   numberCellOutlineStyle = "rounded",
   mapCenteringMode = "prevToCurrent",
   precomputedVisitKeyCellMap,
   precomputedAllVisitCellCoords,
   precomputedRouteSegments,
 }) => {
+  const positionKeys = useMemo(
+    () =>
+      resolveFocusMapPositionKeys({
+        currentVisitKey,
+        formalCurrentVisitKey,
+        temporaryVisitKey,
+      }),
+    [currentVisitKey, formalCurrentVisitKey, temporaryVisitKey],
+  );
+  const resolvedFormalPhase = formalCurrentPhase ?? currentPhase;
+  const resolvedFormalPhaseIndex = formalCurrentPhaseIndex ?? currentPhaseIndex;
+  const resolvedFormalRouteIndex = formalCurrentRouteIndex ?? currentRouteIndex;
   const {
     activeTouchesRef,
     canvasRef,
@@ -190,6 +302,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     isRotationInteracting,
     mapCenterX,
     mapCenterY,
+    offset,
     offsetRef,
     rafPendingRef,
     rotationRadians,
@@ -210,6 +323,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     onZoomChange,
     onRotationAngleChange,
   });
+  useEffect(() => {
+    onViewportSnapshotChange?.({
+      offsetX: offset.x,
+      offsetY: offset.y,
+      zoomLevel,
+      rotationAngle,
+    });
+  }, [offset.x, offset.y, onViewportSnapshotChange, rotationAngle, zoomLevel]);
   const appScale = Math.max(0.01, appZoomLevel / 100);
   const isDarkMode =
     typeof document !== "undefined" &&
@@ -249,6 +370,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         items: ShoppingItem[];
         visitKeys: Set<string>;
         isCurrentPosition: boolean;
+        isTemporaryPosition: boolean;
         isNextDestination: boolean;
         isPreviousPosition: boolean;
         allNone: boolean;
@@ -299,6 +421,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         items: [],
         visitKeys: new Set<string>(),
         isCurrentPosition: false,
+        isTemporaryPosition: false,
         isNextDestination: false,
         isPreviousPosition: false,
         allNone: true,
@@ -348,9 +471,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         !state.allNone &&
         (hasFinalStatus || (!state.allNone && !onlyPostponedOrLate));
 
-      if (currentVisitKey && state.visitKeys.has(currentVisitKey)) {
-        state.isCurrentPosition = true;
-      }
+      const positionFlags = resolveFocusMapCellPositionFlags(
+        state.visitKeys,
+        positionKeys,
+      );
+      state.isCurrentPosition = positionFlags.isOfficialPosition;
+      state.isTemporaryPosition = positionFlags.isTemporaryPosition;
       if (nextVisitKey && state.visitKeys.has(nextVisitKey)) {
         state.isNextDestination = true;
       }
@@ -364,12 +490,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     mapData.blocks,
     items,
     dayName,
-    currentVisitKey,
+    positionKeys,
     nextVisitKey,
     prevVisitKey,
   ]);
 
-  const currentCellCoords = useMemo(() => {
+  const officialCellCoords = useMemo(() => {
     for (const [key, state] of cellStates.entries()) {
       if (state.isCurrentPosition) {
         const [row, col] = key.split("-").map(Number);
@@ -378,6 +504,20 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     }
     return null;
   }, [cellStates]);
+
+  const temporaryCellCoords = useMemo(() => {
+    for (const [key, state] of cellStates.entries()) {
+      if (state.isTemporaryPosition) {
+        const [row, col] = key.split("-").map(Number);
+        return { row, col };
+      }
+    }
+    return null;
+  }, [cellStates]);
+
+  // All viewport calculations follow the temporary target while marker and
+  // route-progress rendering continue to use the official position.
+  const currentCellCoords = temporaryCellCoords ?? officialCellCoords;
 
   const nextCellCoords = useMemo(() => {
     for (const [key, state] of cellStates.entries()) {
@@ -414,15 +554,15 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       if (!state.hasItems) return;
 
       if (state.isCurrentPosition) {
-        if (currentPhaseIndex === 0) {
+        if (resolvedFormalPhaseIndex === 0) {
           // 各フェーズの最初の訪問セルにはフェーズ別ラベルを表示する。
-          if (currentPhase === "normal") {
+          if (resolvedFormalPhase === "normal") {
             labels.set(key, {
               text: "始",
               bgColor: "rgba(255,109,0,0.5)",
               textColor: "#FFFFFF",
             });
-          } else if (currentPhase === "postponed") {
+          } else if (resolvedFormalPhase === "postponed") {
             labels.set(key, {
               text: "後始",
               bgColor: "rgba(156,39,176,0.5)",
@@ -470,7 +610,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     });
 
     return labels;
-  }, [cellStates, currentPhaseIndex, currentPhase]);
+  }, [cellStates, resolvedFormalPhaseIndex, resolvedFormalPhase]);
 
   // 番号セルを高速に判定できるようキャッシュする。
   const numberCellSet = useMemo(() => {
@@ -649,8 +789,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
   const effectiveShowPrevRef = useRef<boolean>(true);
 
-  const routeBounds =
-    mapCenteringMode === "currentOnly"
+  const routeBounds = temporaryCellCoords
+    ? routeBoundsCurrentOnly
+    : mapCenteringMode === "currentOnly"
       ? routeBoundsCurrentOnly
       : routeBoundsPrevCurrent;
 
@@ -786,7 +927,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   ]);
 
   useEffect(() => {
-    const centerRequestKey = `${currentVisitKey ?? ""}:${recenterRevision}`;
+    const centerRequestKey = `${positionKeys.centerVisitKey ?? ""}:${recenterRevision}`;
     if (prevCenterRequestRef.current === centerRequestKey) {
       return;
     }
@@ -834,7 +975,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
-    currentVisitKey,
+    positionKeys.centerVisitKey,
     recenterRevision,
     routeBounds,
     currentCellCoords,
@@ -900,6 +1041,35 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     showPrevRoute,
     calcOptimalZoom,
     calculateCenteredOffset,
+  ]);
+
+  const restoredViewportRevisionRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (
+      !viewportRestoreRequest ||
+      restoredViewportRevisionRef.current === viewportRestoreRequest.revision
+    ) {
+      return;
+    }
+    restoredViewportRevisionRef.current = viewportRestoreRequest.revision;
+    const snapshot = viewportRestoreRequest.snapshot;
+    if (onZoomChange && snapshot.zoomLevel !== zoomLevelRef.current) {
+      zoomLevelRef.current = snapshot.zoomLevel;
+      onZoomChange(snapshot.zoomLevel);
+    }
+    if (onRotationAngleChange && snapshot.rotationAngle !== rotationAngle) {
+      onRotationAngleChange(snapshot.rotationAngle);
+    }
+    setOffset({ x: snapshot.offsetX, y: snapshot.offsetY });
+    onViewportRestoreApplied?.(viewportRestoreRequest.revision);
+  }, [
+    onRotationAngleChange,
+    onZoomChange,
+    onViewportRestoreApplied,
+    rotationAngle,
+    setOffset,
+    viewportRestoreRequest,
+    zoomLevelRef,
   ]);
 
   // ドラッグ中の再描画で再計算しないよう、ルート交差データをキャッシュする。
@@ -1387,7 +1557,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
             ctx.fillStyle = "rgba(158, 158, 158, 0.5)";
             ctx.fillRect(x, y, width, height);
           }
-        } else if (state.hasPostponed && currentPhase !== "postponed") {
+        } else if (state.hasPostponed && resolvedFormalPhase !== "postponed") {
           if (isNumberCell) {
             const color = "rgba(156, 39, 176, 0.4)";
             if (!overlayGroups.has(color)) overlayGroups.set(color, []);
@@ -1396,7 +1566,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
             ctx.fillStyle = "rgba(156, 39, 176, 0.4)";
             ctx.fillRect(x, y, width, height);
           }
-        } else if (state.hasLate && currentPhase !== "late") {
+        } else if (state.hasLate && resolvedFormalPhase !== "late") {
           if (isNumberCell) {
             const color = "rgba(33, 150, 243, 0.4)";
             if (!overlayGroups.has(color)) overlayGroups.set(color, []);
@@ -1691,10 +1861,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         let currentLineWidth = lineWidth;
         let strokeStyle: string;
 
-        // 現在フェーズ位置に応じてルート線の見た目を切り替える。
-        if (segment.segmentIndex < currentRouteIndex - 1) {
+        // 正式位置だけを基準にルート線の見た目を切り替える。
+        const progressState = resolveFocusMapRouteProgressState(
+          segment.segmentIndex,
+          resolvedFormalRouteIndex,
+        );
+        if (progressState === "visited") {
           strokeStyle = "rgba(156, 163, 175, 0.4)";
-        } else if (segment.segmentIndex === currentRouteIndex - 1) {
+        } else if (progressState === "current") {
           strokeStyle = "rgba(255, 109, 0, 0.6)";
           currentLineWidth = Math.max(3, cellSize * 0.1);
         } else {
@@ -1756,7 +1930,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         // 現在対象セルを枠線で強調する。
         const state = cellStates.get(key);
         if (state?.isCurrentPosition) {
-          ctx.strokeStyle = "rgba(255, 109, 0, 0.8)";
+          ctx.strokeStyle = FOCUS_MAP_OFFICIAL_MARKER_STYLE.color;
           ctx.lineWidth = Math.max(3, cellSize * 0.12);
           ctx.strokeRect(x - 1, y - 1, width + 2, height + 2);
         }
@@ -1769,7 +1943,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           ctx.textAlign = "center";
           ctx.textBaseline = "bottom";
           const pinY = y; // ピンの描画位置。
-          drawUprightText("\u{1F4CD}", x + width / 2, pinY);
+          drawUprightText(
+            FOCUS_MAP_OFFICIAL_MARKER_STYLE.pin,
+            x + width / 2,
+            pinY,
+          );
 
           // ラベルはピンの上に配置する。
           const labelFontSize = Math.max(10, cellSize * 0.35);
@@ -1787,6 +1965,79 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           drawUprightText(label.text, x + width / 2, y + height / 2);
         }
       });
+
+      // 一時表示先は正式位置とは独立した青い破線二重枠で描く。
+      // 同じセルに正式位置もある場合は、破線の隙間からオレンジ枠を
+      // 見せつつ、外側・内側の両方へ青枠を重ねる。
+      cellStates.forEach((state, key) => {
+        if (!state.isTemporaryPosition) return;
+        const [row, col] = key.split("-").map(Number);
+        if (!isCellVisible(row, col, 1, 1)) return;
+
+        const x = (col - 1) * cellSize;
+        const y = (row - 1) * cellSize;
+        const merge = mergedCellsMap.get(key);
+        const width = merge
+          ? (merge.endCol - merge.startCol + 1) * cellSize
+          : cellSize;
+        const height = merge
+          ? (merge.endRow - merge.startRow + 1) * cellSize
+          : cellSize;
+        const outerInset = Math.max(2, cellSize * 0.08);
+        const innerInset = Math.max(3, cellSize * 0.14);
+        const dashLength = Math.max(5, cellSize * 0.24);
+        const dashGap = Math.max(3, cellSize * 0.12);
+
+        ctx.save();
+        ctx.setLineDash([dashLength, dashGap]);
+        ctx.lineCap = "butt";
+        ctx.strokeStyle = FOCUS_MAP_TEMPORARY_MARKER_STYLE.outerColor;
+        ctx.lineWidth = Math.max(3, cellSize * 0.13);
+        ctx.strokeRect(
+          x - outerInset,
+          y - outerInset,
+          width + outerInset * 2,
+          height + outerInset * 2,
+        );
+
+        ctx.setLineDash([dashLength * 0.75, dashGap * 0.75]);
+        ctx.strokeStyle = FOCUS_MAP_TEMPORARY_MARKER_STYLE.innerColor;
+        ctx.lineWidth = Math.max(2, cellSize * 0.08);
+        ctx.strokeRect(
+          x + innerInset,
+          y + innerInset,
+          Math.max(1, width - innerInset * 2),
+          Math.max(1, height - innerInset * 2),
+        );
+        ctx.setLineDash([]);
+
+        const labelFontSize = Math.max(10, cellSize * 0.32);
+        const labelPaddingX = Math.max(3, cellSize * 0.1);
+        const labelPaddingY = Math.max(2, cellSize * 0.06);
+        ctx.font = `bold ${labelFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
+        const labelWidth =
+          ctx.measureText(FOCUS_MAP_TEMPORARY_MARKER_STYLE.label).width +
+          labelPaddingX * 2;
+        const labelHeight = labelFontSize + labelPaddingY * 2;
+        const labelCenterX = x + width / 2;
+        const labelCenterY = y + height - labelHeight / 2 - innerInset;
+        ctx.fillStyle = "rgba(29, 78, 216, 0.92)";
+        ctx.fillRect(
+          labelCenterX - labelWidth / 2,
+          labelCenterY - labelHeight / 2,
+          labelWidth,
+          labelHeight,
+        );
+        ctx.fillStyle = "#FFFFFF";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        drawUprightText(
+          FOCUS_MAP_TEMPORARY_MARKER_STYLE.label,
+          labelCenterX,
+          labelCenterY,
+        );
+        ctx.restore();
+      });
     }
 
     ctx.restore();
@@ -1798,14 +2049,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     numberCellSet,
     mergedCellsMap,
     routeSegments,
-    currentPhaseIndex,
-    currentRouteIndex,
+    resolvedFormalPhaseIndex,
+    resolvedFormalRouteIndex,
     dpr,
     isDetailedView,
     showNumbers,
     showBorders,
     currentCellCoords,
-    currentPhase,
+    resolvedFormalPhase,
     isDarkMode,
     isRotationInteracting,
     rotationRadians,

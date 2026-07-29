@@ -2,6 +2,18 @@ export type FocusPhase = "normal" | "postponed" | "late";
 
 export type FocusMapCenteringMode = "prevToCurrent" | "currentOnly";
 
+export interface FocusMapViewportSnapshot {
+  offsetX: number;
+  offsetY: number;
+  zoomLevel: number;
+  rotationAngle: number;
+}
+
+export interface FocusMapViewportRestoreRequest {
+  snapshot: FocusMapViewportSnapshot;
+  revision: number;
+}
+
 export interface FocusModeSessionState {
   phase: FocusPhase;
   phaseIndex: number;

@@ -3,6 +3,7 @@ import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { FocusModeHeader, FocusModeItemList } from "./FocusModePanels";
 import type { ShoppingItem } from "../../types/item";
+import type { FocusPhase } from "../../types/focus";
 
 const baseItem: ShoppingItem = {
   id: "item-1",
@@ -17,33 +18,46 @@ const baseItem: ShoppingItem = {
   remarks: "",
 };
 
+const makeItem = (
+  id: string,
+  purchaseStatus: ShoppingItem["purchaseStatus"],
+  overrides: Partial<ShoppingItem> = {},
+): ShoppingItem => ({
+  ...baseItem,
+  id,
+  purchaseStatus,
+  ...overrides,
+});
+
+const makeHeaderProps = (
+  overrides: Partial<ComponentProps<typeof FocusModeHeader>> = {},
+): ComponentProps<typeof FocusModeHeader> => ({
+  layoutMode: "pc",
+  isMapVisible: false,
+  spaceInfo: "A-01a",
+  circleName: "Circle",
+  currentVisitCheckedCount: 1,
+  currentVisitTotalCount: 2,
+  currentVisitPriceInfo: {
+    chargeableTotal: 1000,
+    plannedTotal: 1500,
+    priceMissingItemCount: 1,
+  },
+  currentPhase: "normal",
+  onPhaseChangeRequest: vi.fn(),
+  currentVisitItems: [baseItem],
+  onBulkStatusChange: vi.fn(),
+  nextVisitInfo: {
+    spaceInfo: "A-02a",
+    circleName: "Next Circle",
+  },
+  ...overrides,
+});
+
 const renderHeader = (
   overrides: Partial<ComponentProps<typeof FocusModeHeader>> = {},
 ) => {
-  const props: ComponentProps<typeof FocusModeHeader> = {
-    layoutMode: "pc",
-    isMapVisible: false,
-    spaceInfo: "A-01a",
-    circleName: "Circle",
-    currentVisitCheckedCount: 1,
-    currentVisitTotalCount: 2,
-    currentVisitPriceInfo: {
-      chargeableTotal: 1000,
-      plannedTotal: 1500,
-      priceMissingItemCount: 1,
-    },
-    currentPhase: "normal",
-    onPhaseChangeRequest: vi.fn(),
-    currentVisitItems: [baseItem],
-    onBulkStatusChange: vi.fn(),
-    nextVisitInfo: {
-      spaceInfo: "A-02a",
-      circleName: "Next Circle",
-    },
-    ...overrides,
-  };
-
-  return render(<FocusModeHeader {...props} />);
+  return render(<FocusModeHeader {...makeHeaderProps(overrides)} />);
 };
 
 describe("FocusModeItemList purchase status control mode", () => {
@@ -187,4 +201,159 @@ describe("FocusModeHeader responsive layout", () => {
 
     expect(onPhaseChangeRequest).toHaveBeenCalledWith("late");
   });
+});
+
+describe("FocusModeHeader purchase-aware background", () => {
+  const getBackgroundImage = () =>
+    screen.getByTestId("focus-mode-header").style.backgroundImage;
+
+  it("uses equal-width segments even when item counts are nine to one", () => {
+    const items = [
+      ...Array.from({ length: 9 }, (_, index) =>
+        makeItem(`none-${index}`, "None"),
+      ),
+      makeItem("completed", "Purchased"),
+    ];
+
+    renderHeader({ currentVisitItems: items });
+
+    const backgroundImage = getBackgroundImage();
+    expect(backgroundImage).toContain("#94a3b8 0%");
+    expect(backgroundImage).toContain("#94a3b8 50%");
+    expect(backgroundImage).toContain("#22c55e 50%");
+    expect(backgroundImage).toContain("#22c55e 100%");
+    expect(backgroundImage).toContain("rgba(15, 23, 42, 0.28)");
+  });
+
+  it("keeps the fixed unvisited, postponed, late, limited, completed order", () => {
+    renderHeader({
+      currentVisitItems: [
+        makeItem("completed", "Purchased"),
+        makeItem("late", "Late"),
+        makeItem("limited", "LimitedPurchase", { quantity: 3 }),
+        makeItem("unvisited", "None"),
+        makeItem("postponed", "Postpone"),
+      ],
+    });
+
+    const backgroundImage = getBackgroundImage();
+    const colorPositions = [
+      "#94a3b8",
+      "#8b5cf6",
+      "#3b82f6",
+      "#f97316",
+      "#22c55e",
+    ].map((color) => backgroundImage.indexOf(color));
+
+    expect(colorPositions.every((position) => position >= 0)).toBe(true);
+    expect(colorPositions).toEqual([...colorPositions].sort((a, b) => a - b));
+  });
+
+  it("uses a full green background when every item is complete", () => {
+    renderHeader({
+      currentVisitItems: [
+        makeItem("purchased", "Purchased"),
+        makeItem("sold-out", "SoldOut"),
+        makeItem("absent", "Absent"),
+        makeItem("limited-complete", "LimitedPurchase", {
+          quantity: 3,
+          limitedPurchasedQuantity: 2,
+        }),
+      ],
+    });
+
+    const backgroundImage = getBackgroundImage();
+    expect(backgroundImage).toContain("#22c55e 0%");
+    expect(backgroundImage).toContain("#22c55e 100%");
+    expect(backgroundImage).not.toContain("#94a3b8");
+    expect(backgroundImage).not.toContain("#f97316");
+  });
+
+  it("separates missing and entered limited quantities into orange and green", () => {
+    renderHeader({
+      currentVisitItems: [
+        makeItem("limited-missing", "LimitedPurchase", { quantity: 3 }),
+        makeItem("limited-complete", "LimitedPurchase", {
+          quantity: 3,
+          limitedPurchasedQuantity: 1,
+        }),
+      ],
+    });
+
+    const backgroundImage = getBackgroundImage();
+    expect(backgroundImage).toContain("#f97316 0%");
+    expect(backgroundImage).toContain("#f97316 50%");
+    expect(backgroundImage).toContain("#22c55e 50%");
+    expect(backgroundImage).toContain("#22c55e 100%");
+  });
+
+  it("does not let an undefined price change the status classification", () => {
+    const pricedItems = [
+      makeItem("unvisited", "None", { price: 100 }),
+      makeItem("completed", "Purchased", { price: 100 }),
+    ];
+    const undefinedPriceItems = pricedItems.map((item) => ({
+      ...item,
+      price: null,
+    }));
+    const view = renderHeader({ currentVisitItems: pricedItems });
+    const pricedBackground = getBackgroundImage();
+
+    view.rerender(
+      <FocusModeHeader
+        {...makeHeaderProps({ currentVisitItems: undefinedPriceItems })}
+      />,
+    );
+
+    expect(getBackgroundImage()).toBe(pricedBackground);
+  });
+
+  it("applies the same status background to smartphone and desktop roots", () => {
+    const items = [
+      makeItem("unvisited", "None"),
+      makeItem("completed", "Purchased"),
+    ];
+    const view = renderHeader({
+      layoutMode: "pc",
+      currentVisitItems: items,
+    });
+    const desktopBackground = getBackgroundImage();
+
+    view.rerender(
+      <FocusModeHeader
+        {...makeHeaderProps({
+          layoutMode: "smartphone",
+          currentVisitItems: items,
+        })}
+      />,
+    );
+
+    expect(getBackgroundImage()).toBe(desktopBackground);
+  });
+});
+
+describe("FocusModeHeader aggregate phase label", () => {
+  it.each<{
+    movementBasisPhase: FocusPhase | null | undefined;
+    expected: string;
+  }>([
+    { movementBasisPhase: undefined, expected: "未選択" },
+    { movementBasisPhase: null, expected: "未選択" },
+    { movementBasisPhase: "normal", expected: "通常" },
+    { movementBasisPhase: "postponed", expected: "後回し" },
+    { movementBasisPhase: "late", expected: "遅参" },
+  ])(
+    "shows a static all-phase label for movement basis $expected",
+    ({ movementBasisPhase, expected }) => {
+      renderHeader({
+        isSpaceAggregate: true,
+        movementBasisPhase,
+      });
+
+      expect(screen.queryByRole("combobox", { name: "phase" })).toBeNull();
+      const phaseLabel = screen.getByTestId("focus-header-aggregate-phase");
+      expect(phaseLabel).toHaveTextContent("一時表示・全フェーズ");
+      expect(phaseLabel).toHaveTextContent(`移動基準：${expected}`);
+    },
+  );
 });
