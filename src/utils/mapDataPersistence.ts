@@ -1,9 +1,14 @@
-import type { CellBorders, CellData, DayMapData, MapDataStore } from '../types/map';
+import type {
+  CellBorders,
+  CellData,
+  DayMapData,
+  MapDataStore,
+} from "../types/map";
 
-type PersistedCellData = Pick<CellData, 'row' | 'col'> &
-  Partial<Omit<CellData, 'row' | 'col'>>;
+type PersistedCellData = Pick<CellData, "row" | "col"> &
+  Partial<Omit<CellData, "row" | "col">>;
 
-type PersistedDayMapData = Omit<DayMapData, 'cells'> & {
+type PersistedDayMapData = Omit<DayMapData, "cells"> & {
   cells: PersistedCellData[];
 };
 
@@ -15,10 +20,15 @@ const EMPTY_BORDERS: CellBorders = {
 };
 
 function isEmptyBorders(borders: CellBorders | null | undefined): boolean {
-  return !borders || (!borders.top && !borders.right && !borders.bottom && !borders.left);
+  return (
+    !borders ||
+    (!borders.top && !borders.right && !borders.bottom && !borders.left)
+  );
 }
 
-function normalizeBorders(borders: Partial<CellBorders> | null | undefined): CellBorders {
+function normalizeBorders(
+  borders: Partial<CellBorders> | null | undefined,
+): CellBorders {
   return {
     top: borders?.top ?? null,
     right: borders?.right ?? null,
@@ -28,7 +38,7 @@ function normalizeBorders(borders: Partial<CellBorders> | null | undefined): Cel
 }
 
 function isDefaultWhiteColor(color: string | null | undefined): boolean {
-  return color?.trim().toUpperCase() === '#FFFFFF';
+  return color?.trim().toUpperCase() === "#FFFFFF";
 }
 
 function getImportantCellKeys(dayMapData: DayMapData): Set<string> {
@@ -50,10 +60,14 @@ function getImportantCellKeys(dayMapData: DayMapData): Set<string> {
   return keys;
 }
 
-function hasPersistableCellContent(cell: CellData, importantCellKeys: Set<string>): boolean {
+function hasPersistableCellContent(
+  cell: CellData,
+  importantCellKeys: Set<string>,
+): boolean {
   if (importantCellKeys.has(`${cell.row}-${cell.col}`)) return true;
   if (cell.value !== null && cell.value !== undefined) return true;
-  if (cell.backgroundColor && !isDefaultWhiteColor(cell.backgroundColor)) return true;
+  if (cell.backgroundColor && !isDefaultWhiteColor(cell.backgroundColor))
+    return true;
   if (cell.fontColor) return true;
   if (!isEmptyBorders(cell.borders)) return true;
   if (cell.isVerticalText) return true;
@@ -105,29 +119,70 @@ function expandCellFromStorage(cell: PersistedCellData): CellData {
   };
 }
 
-export function compactDayMapForStorage(dayMapData: DayMapData): PersistedDayMapData {
-  const importantCellKeys = getImportantCellKeys(dayMapData);
+export function compactDayMapForStorage(
+  dayMapData: DayMapData,
+): PersistedDayMapData {
+  const normalizedDayMapData = expandDayMapFromStorage(dayMapData);
+  const importantCellKeys = getImportantCellKeys(normalizedDayMapData);
 
   return {
-    ...dayMapData,
-    cells: dayMapData.cells
+    ...normalizedDayMapData,
+    cells: normalizedDayMapData.cells
       .filter((cell) => hasPersistableCellContent(cell, importantCellKeys))
       .map(compactCellForStorage),
   };
 }
 
-export function expandDayMapFromStorage(dayMapData: Partial<PersistedDayMapData>): DayMapData {
+export function expandDayMapFromStorage(
+  dayMapData: Partial<PersistedDayMapData>,
+): DayMapData {
+  const blocks = Array.isArray(dayMapData.blocks)
+    ? dayMapData.blocks.map((block) => ({
+        ...block,
+        numberCells: Array.isArray(block.numberCells) ? block.numberCells : [],
+        ...(block.nameCells !== undefined
+          ? { nameCells: Array.isArray(block.nameCells) ? block.nameCells : [] }
+          : {}),
+      }))
+    : [];
+
   return {
     ...dayMapData,
-    maxRow: dayMapData.maxRow ?? 0,
-    maxCol: dayMapData.maxCol ?? 0,
-    cells: (dayMapData.cells ?? []).map(expandCellFromStorage),
-    mergedCells: dayMapData.mergedCells ?? [],
-    blocks: dayMapData.blocks ?? [],
+    maxRow: dayMapData.maxRow ?? dayMapData.rows ?? 0,
+    maxCol: dayMapData.maxCol ?? dayMapData.cols ?? 0,
+    cells: (Array.isArray(dayMapData.cells) ? dayMapData.cells : []).map(
+      expandCellFromStorage,
+    ),
+    mergedCells: Array.isArray(dayMapData.mergedCells)
+      ? dayMapData.mergedCells
+      : [],
+    blocks,
   };
 }
 
-export function compactMapDataForStorage(data: MapDataStore): Record<string, Record<string, unknown>> {
+export function expandEventMapDataFromStorage(
+  data: Record<string, unknown>,
+): MapDataStore[string] {
+  const expanded: MapDataStore[string] = {};
+
+  Object.entries(data).forEach(([dayMapName, dayMapData]) => {
+    if (
+      !dayMapData ||
+      typeof dayMapData !== "object" ||
+      Array.isArray(dayMapData)
+    )
+      return;
+    expanded[dayMapName] = expandDayMapFromStorage(
+      dayMapData as Partial<PersistedDayMapData>,
+    );
+  });
+
+  return expanded;
+}
+
+export function compactMapDataForStorage(
+  data: MapDataStore,
+): Record<string, Record<string, unknown>> {
   const compacted: Record<string, Record<string, unknown>> = {};
 
   Object.entries(data).forEach(([eventName, eventMapData]) => {
@@ -140,16 +195,13 @@ export function compactMapDataForStorage(data: MapDataStore): Record<string, Rec
   return compacted;
 }
 
-export function expandMapDataFromStorage(data: Record<string, Record<string, unknown>>): MapDataStore {
+export function expandMapDataFromStorage(
+  data: Record<string, Record<string, unknown>>,
+): MapDataStore {
   const expanded: MapDataStore = {};
 
   Object.entries(data).forEach(([eventName, eventMapData]) => {
-    expanded[eventName] = {};
-    Object.entries(eventMapData).forEach(([dayMapName, dayMapData]) => {
-      expanded[eventName][dayMapName] = expandDayMapFromStorage(
-        dayMapData as Partial<PersistedDayMapData>,
-      );
-    });
+    expanded[eventName] = expandEventMapDataFromStorage(eventMapData);
   });
 
   return expanded;

@@ -101,6 +101,7 @@ import {
   normalizeSpaceBlock,
 } from "../features/space-navigation/domain/visitIdentity";
 import { useOptionalSpaceNavigator } from "../features/space-navigation/SpaceNavigatorContext";
+import { SPACE_NAVIGATOR_RAIL_WIDTH_PX } from "../features/space-navigation/components/SpaceNavigatorRail";
 // フェーズの定義
 interface FocusModeProps {
   items: ShoppingItem[];
@@ -685,9 +686,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
       ? spaceNavigator.settings.side
       : null;
   const safeAppScale = Math.max(0.01, appZoomLevel / 100);
-  const railClearance = activeNavigatorRailSide ? 44 / safeAppScale : 0;
+  const railClearance = activeNavigatorRailSide
+    ? SPACE_NAVIGATOR_RAIL_WIDTH_PX / safeAppScale
+    : 0;
   // FocusMode lives inside the app-level scale transform, while the rail is a
-  // body portal. Convert its physical 44px hit width back to FocusMode units.
+  // body portal. Convert its physical hit width back to FocusMode units.
   const navPrevStyle = useMemo(
     () => ({
       left: `${16 + navButtonOffset.left + (activeNavigatorRailSide === "left" ? railClearance : 0)}px`,

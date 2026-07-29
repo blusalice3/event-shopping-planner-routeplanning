@@ -169,4 +169,16 @@ describe('App executeModeItems commit integration', () => {
     expect(batchHandler).toMatch(/itemIds,\s*referenceItemId,\s*position/);
     expect(batchHandler).not.toContain('reverse()');
   });
+
+  it('keeps the visibility override button above the settings header and navigator layers', () => {
+    const source = appSource();
+    const overrideButton = sliceBetween(
+      source,
+      '{rawHideSomething &&',
+      '<AppMainContent',
+    );
+
+    expect(overrideButton).toContain('z-[110]');
+    expect(overrideButton).not.toContain('z-20');
+  });
 });

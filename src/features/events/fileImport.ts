@@ -3,14 +3,15 @@ import type {
   EventMetadata,
   ExecuteModeItems,
   ShoppingItem,
-} from '../../types/item';
+} from "../../types/item";
 import type {
   HallDefinitionsStore,
   HallRouteSettingsStore,
   MapDataStore,
   RouteSettingsStore,
-} from '../../types/map';
-import type { ImportResult } from '../../utils/exportImport';
+} from "../../types/map";
+import type { ImportResult } from "../../utils/exportImport";
+import { expandEventMapDataFromStorage } from "../../utils/mapDataPersistence";
 
 export type ImportedEventData = {
   eventName: string;
@@ -25,7 +26,9 @@ export type ImportedEventData = {
   errors: string[];
 };
 
-function hasEntries(record?: Record<string, unknown>): boolean {
+function hasEntries(
+  record?: Record<string, unknown>,
+): record is Record<string, unknown> {
   return !!record && Object.keys(record).length > 0;
 }
 
@@ -40,7 +43,9 @@ export function toImportedEventData(result: ImportResult): ImportedEventData {
     dayModes: hasEntries(result.layoutInfo?.dayModes)
       ? (result.layoutInfo!.dayModes as unknown as DayModeState)
       : null,
-    mapData: hasEntries(result.mapData) ? (result.mapData as MapDataStore[string]) : null,
+    mapData: hasEntries(result.mapData)
+      ? expandEventMapDataFromStorage(result.mapData)
+      : null,
     routeSettings: hasEntries(result.routeSettings)
       ? (result.routeSettings as RouteSettingsStore[string])
       : null,

@@ -4378,7 +4378,7 @@ const App: React.FC = () => {
               setUiVisibilityOverride((prev) => !prev);
               setUiSettingsPanelOpen(false);
             }}
-            className={`fixed left-3 top-3 z-20 w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all touch-manipulation select-none ${
+            className={`fixed left-3 top-3 z-[110] w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all touch-manipulation select-none ${
               uiVisibilityOverride
                 ? 'bg-blue-600 text-white hover:bg-blue-700'
                 : 'bg-white/80 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-600 backdrop-blur-sm border border-slate-200 dark:border-slate-600'

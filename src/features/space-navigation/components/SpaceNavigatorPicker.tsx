@@ -10,9 +10,10 @@ import {
 interface SpaceNavigatorPickerProps {
   entries: readonly NavigatorEntry[];
   candidateIndex: number;
+  layoutMode: "pc" | "smartphone";
   side: SpaceNavigatorSide;
   onCandidateChange: (index: number) => void;
-  onSelect: () => void;
+  onSelect: (index: number) => void;
   onClose: () => void;
 }
 
@@ -20,11 +21,19 @@ const ROW_HEIGHT = 68;
 const FULL_WINDOW_RADIUS = 3;
 const COMPACT_WINDOW_RADIUS = 2;
 const COMPACT_SHEET_HEIGHT = 660;
+const WHEEL_LINE_HEIGHT = 16;
+const WHEEL_STEP_THRESHOLD = ROW_HEIGHT / 2;
 
 const getInitialWindowRadius = () =>
   typeof window !== "undefined" && window.innerHeight < COMPACT_SHEET_HEIGHT
     ? COMPACT_WINDOW_RADIUS
     : FULL_WINDOW_RADIUS;
+
+const windowRadiusFromHeight = (height: number) => {
+  const rowCount = Math.max(5, Math.floor(height / ROW_HEIGHT));
+  const oddRowCount = rowCount % 2 === 0 ? rowCount - 1 : rowCount;
+  return (oddRowCount - 1) / 2;
+};
 
 const phaseLabels = {
   normal: "通常",
@@ -43,30 +52,34 @@ const statusAbbreviations: Record<NavigatorStatusKind, string> = {
 export function SpaceNavigatorPicker({
   entries,
   candidateIndex,
+  layoutMode,
   side,
   onCandidateChange,
   onSelect,
   onClose,
 }: SpaceNavigatorPickerProps) {
   const sheetRef = useRef<HTMLElement>(null);
+  const listRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{
     pointerId: number;
     startY: number;
     startIndex: number;
+    hasPointerCapture: boolean;
   } | null>(null);
   const didDragRef = useRef(false);
+  const wheelDeltaRef = useRef(0);
+  const candidateIndexRef = useRef(candidateIndex);
   const [windowRadius, setWindowRadius] = useState(getInitialWindowRadius);
+  candidateIndexRef.current = candidateIndex;
 
   useEffect(() => {
     const updateWindowRadius = () => {
       const measuredHeight =
-        sheetRef.current?.getBoundingClientRect().height ?? 0;
-      const availableHeight =
-        measuredHeight > 0 ? measuredHeight : window.innerHeight;
+        listRef.current?.getBoundingClientRect().height ?? 0;
       const nextRadius =
-        availableHeight < COMPACT_SHEET_HEIGHT
-          ? COMPACT_WINDOW_RADIUS
-          : FULL_WINDOW_RADIUS;
+        measuredHeight > 0
+          ? windowRadiusFromHeight(measuredHeight)
+          : getInitialWindowRadius();
       setWindowRadius((currentRadius) =>
         currentRadius === nextRadius ? currentRadius : nextRadius,
       );
@@ -78,7 +91,7 @@ export function SpaceNavigatorPicker({
       typeof ResizeObserver === "undefined"
         ? null
         : new ResizeObserver(updateWindowRadius);
-    if (sheetRef.current) observer?.observe(sheetRef.current);
+    if (listRef.current) observer?.observe(listRef.current);
 
     return () => {
       window.removeEventListener("resize", updateWindowRadius);
@@ -86,13 +99,22 @@ export function SpaceNavigatorPicker({
     };
   }, []);
 
-  const rows = useMemo(
-    () =>
-      Array.from({ length: windowRadius * 2 + 1 }, (_, offset) => {
-        const index = candidateIndex + offset - windowRadius;
-        return { index, entry: entries[index] };
-      }),
-    [candidateIndex, entries, windowRadius],
+  const rows = useMemo(() => {
+    const visibleRowCount = Math.min(entries.length, windowRadius * 2 + 1);
+    const maxWindowStart = Math.max(0, entries.length - visibleRowCount);
+    const windowStart = Math.min(
+      Math.max(candidateIndex - windowRadius, 0),
+      maxWindowStart,
+    );
+
+    return Array.from({ length: visibleRowCount }, (_, offset) => {
+      const index = windowStart + offset;
+      return { index, entry: entries[index] };
+    });
+  }, [candidateIndex, entries, windowRadius]);
+  const selectedRowIndex = Math.max(
+    0,
+    rows.findIndex(({ index }) => index === candidateIndex),
   );
 
   return (
@@ -138,28 +160,72 @@ export function SpaceNavigatorPicker({
         </div>
 
         <div
+          ref={listRef}
           className="relative mx-3 my-3 grid min-h-0 flex-1 select-none overflow-hidden rounded-xl border border-slate-200 bg-slate-100/70 dark:border-slate-700 dark:bg-slate-950/50"
           style={{
-            maxHeight: ROW_HEIGHT * rows.length,
             gridTemplateRows: `repeat(${rows.length}, minmax(0, 1fr))`,
             touchAction: "none",
           }}
           data-testid="space-navigator-window"
           data-visible-row-count={rows.length}
+          onClick={(event) => {
+            if (event.target === event.currentTarget && didDragRef.current) {
+              didDragRef.current = false;
+            }
+          }}
+          onWheel={(event) => {
+            if (layoutMode !== "pc" || event.deltaY === 0) return;
+            event.stopPropagation();
+            const deltaScale =
+              event.deltaMode === 1
+                ? WHEEL_LINE_HEIGHT
+                : event.deltaMode === 2
+                  ? event.currentTarget.getBoundingClientRect().height ||
+                    window.innerHeight
+                  : 1;
+            const normalizedDelta = event.deltaY * deltaScale;
+            if (
+              wheelDeltaRef.current !== 0 &&
+              Math.sign(wheelDeltaRef.current) !== Math.sign(normalizedDelta)
+            ) {
+              wheelDeltaRef.current = 0;
+            }
+            wheelDeltaRef.current += normalizedDelta;
+            if (Math.abs(wheelDeltaRef.current) < WHEEL_STEP_THRESHOLD) return;
+            const direction = Math.sign(wheelDeltaRef.current);
+            wheelDeltaRef.current = 0;
+            const nextIndex = clampCandidateIndex(
+              candidateIndexRef.current + direction,
+              entries.length,
+            );
+            candidateIndexRef.current = nextIndex;
+            onCandidateChange(nextIndex);
+          }}
           onPointerDown={(event) => {
-            event.currentTarget.setPointerCapture(event.pointerId);
             dragRef.current = {
               pointerId: event.pointerId,
               startY: event.clientY,
               startIndex: candidateIndex,
+              hasPointerCapture: false,
             };
             didDragRef.current = false;
           }}
           onPointerMove={(event) => {
             const drag = dragRef.current;
             if (!drag || drag.pointerId !== event.pointerId) return;
+            if (event.pointerType === "mouse" && event.buttons === 0) {
+              dragRef.current = null;
+              didDragRef.current = false;
+              return;
+            }
             const delta = drag.startY - event.clientY;
-            if (Math.abs(delta) > 5) didDragRef.current = true;
+            if (Math.abs(delta) > 5) {
+              didDragRef.current = true;
+              if (!drag.hasPointerCapture) {
+                event.currentTarget.setPointerCapture(event.pointerId);
+                drag.hasPointerCapture = true;
+              }
+            }
             const measuredRowHeight =
               event.currentTarget.getBoundingClientRect().height / rows.length;
             onCandidateChange(
@@ -179,17 +245,40 @@ export function SpaceNavigatorPicker({
             }
             dragRef.current = null;
           }}
+          onPointerLeave={(event) => {
+            const drag = dragRef.current;
+            if (
+              drag &&
+              drag.pointerId === event.pointerId &&
+              !drag.hasPointerCapture
+            ) {
+              dragRef.current = null;
+              didDragRef.current = false;
+            }
+          }}
           onPointerCancel={(event) => {
             if (event.currentTarget.hasPointerCapture(event.pointerId)) {
               event.currentTarget.releasePointerCapture(event.pointerId);
             }
             dragRef.current = null;
+            didDragRef.current = false;
+          }}
+          onLostPointerCapture={(event) => {
+            if (dragRef.current?.pointerId === event.pointerId) {
+              dragRef.current = null;
+            }
           }}
         >
-          <div
-            className="pointer-events-none absolute left-0 right-0 top-1/2 z-10 -translate-y-1/2 border-y-2 border-indigo-500 bg-indigo-100/20 dark:bg-indigo-400/10"
-            style={{ height: `${100 / rows.length}%` }}
-          />
+          {rows.length > 0 && (
+            <div
+              className="pointer-events-none absolute left-0 right-0 z-10 -translate-y-1/2 border-y-2 border-indigo-500 bg-indigo-100/20 dark:bg-indigo-400/10"
+              style={{
+                height: `${100 / rows.length}%`,
+                top: `${((selectedRowIndex + 0.5) / rows.length) * 100}%`,
+              }}
+              data-testid="space-navigator-selection"
+            />
+          )}
           {rows.map(({ index, entry }, rowIndex) => {
             const isSelected = index === candidateIndex;
             if (!entry) {
@@ -214,14 +303,9 @@ export function SpaceNavigatorPicker({
                     didDragRef.current = false;
                     return;
                   }
-                  if (isSelected) onSelect();
-                  else
-                    onCandidateChange(
-                      clampCandidateIndex(
-                        candidateIndex + Math.sign(index - candidateIndex),
-                        entries.length,
-                      ),
-                    );
+                  candidateIndexRef.current = index;
+                  onCandidateChange(index);
+                  onSelect(index);
                 }}
                 aria-current={isSelected ? "true" : undefined}
               >
@@ -276,7 +360,9 @@ export function SpaceNavigatorPicker({
         </div>
 
         <p className="shrink-0 px-4 pb-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
-          一覧を上下にドラッグし、中央の行をタップしてください。指を離しただけでは移動しません。
+          {layoutMode === "pc"
+            ? "ホイールまたは上下ドラッグで候補を移動し、スペースをクリックしてください。"
+            : "一覧を上下にドラッグするか、スペースをタップしてください。ドラッグ終了だけでは移動しません。"}
         </p>
       </section>
     </div>

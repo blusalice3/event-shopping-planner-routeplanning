@@ -311,7 +311,7 @@ describe("FocusMode Space Navigator integration", () => {
       history: 0,
     });
     await waitFor(() => {
-      expect(screen.getByTitle("前の訪問先")).toHaveStyle({ left: "60px" });
+      expect(screen.getByTitle("前の訪問先")).toHaveStyle({ left: "32px" });
       expect(screen.getByTitle("次の訪問先")).toHaveStyle({ right: "16px" });
     });
 
@@ -320,14 +320,14 @@ describe("FocusMode Space Navigator integration", () => {
     );
     await waitFor(() => {
       expect(screen.getByTitle("前の訪問先")).toHaveStyle({ left: "16px" });
-      expect(screen.getByTitle("次の訪問先")).toHaveStyle({ right: "60px" });
+      expect(screen.getByTitle("次の訪問先")).toHaveStyle({ right: "32px" });
     });
 
     fireEvent.click(screen.getByTitle("マップを表示"));
     await waitFor(() =>
       expect(screen.getByTestId("focus-map-canvas-mock")).toBeInTheDocument(),
     );
-    expect(screen.getByTitle("次の訪問先")).toHaveStyle({ right: "60px" });
+    expect(screen.getByTitle("次の訪問先")).toHaveStyle({ right: "32px" });
   });
 
   it("applies the rail-aware offset to the completion view previous button", () => {
@@ -340,11 +340,11 @@ describe("FocusMode Space Navigator integration", () => {
         onTouchStart={vi.fn()}
         onTouchMove={vi.fn()}
         onTouchEnd={vi.fn()}
-        prevButtonStyle={{ left: "60px" }}
+        prevButtonStyle={{ left: "32px" }}
       />,
     );
 
-    expect(screen.getByTitle("前の訪問先")).toHaveStyle({ left: "60px" });
+    expect(screen.getByTitle("前の訪問先")).toHaveStyle({ left: "32px" });
   });
 
   it("keeps the formal session pointer unchanged while a temporary visit is displayed", async () => {

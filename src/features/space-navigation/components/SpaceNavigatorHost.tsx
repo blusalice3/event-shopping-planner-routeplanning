@@ -156,11 +156,12 @@ export function SpaceNavigatorHost() {
         <SpaceNavigatorPicker
           entries={registration.entries}
           candidateIndex={candidateIndex}
+          layoutMode={registration.layoutMode}
           side={navigator.settings.side}
           onCandidateChange={setCandidateIndex}
-          onSelect={() => {
+          onSelect={(index) => {
             setActionTargetVisitId(
-              registration.entries[candidateIndex]?.id ?? null,
+              registration.entries[index]?.id ?? null,
             );
             setActionResult(null);
             setPendingIntent(null);

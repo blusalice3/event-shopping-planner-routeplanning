@@ -7,6 +7,8 @@ import {
 } from "../domain/candidateIndex";
 import { NAVIGATOR_STATUS_COLORS } from "./SpaceNavigatorLegend";
 
+export const SPACE_NAVIGATOR_RAIL_WIDTH_PX = 16;
+
 interface SpaceNavigatorRailProps {
   entries: readonly NavigatorEntry[];
   currentIndex: number;
@@ -59,16 +61,22 @@ export function SpaceNavigatorRail({
 
   return (
     <div
-      className={`fixed top-[env(safe-area-inset-top)] z-[45] flex w-11 items-stretch ${
+      className={`fixed top-[env(safe-area-inset-top)] z-[45] flex items-stretch ${
         side === "left" ? "left-0 justify-start" : "right-0 justify-end"
       }`}
-      style={{ bottom: "var(--footer-height, 0px)" }}
+      style={{
+        bottom: "var(--footer-height, 0px)",
+        width: `${SPACE_NAVIGATOR_RAIL_WIDTH_PX}px`,
+      }}
       aria-label="スペースナビ"
     >
       <div
         ref={railRef}
-        className="relative h-full w-11 bg-transparent"
-        style={{ touchAction: "none" }}
+        className="relative h-full bg-transparent"
+        style={{
+          touchAction: "none",
+          width: `${SPACE_NAVIGATOR_RAIL_WIDTH_PX}px`,
+        }}
         role="slider"
         tabIndex={0}
         aria-label="スペースナビ"
@@ -141,9 +149,10 @@ export function SpaceNavigatorRail({
         }}
       >
         <div
-          className={`pointer-events-none absolute top-0 flex h-full w-4 flex-col overflow-hidden border-x border-white/60 bg-slate-200 shadow-md dark:border-slate-700/70 dark:bg-slate-700 ${
+          className={`pointer-events-none absolute top-0 flex h-full flex-col overflow-hidden border-x border-white/60 bg-slate-200 shadow-md dark:border-slate-700/70 dark:bg-slate-700 ${
             side === "left" ? "left-0" : "right-0"
           }`}
+          style={{ width: `${SPACE_NAVIGATOR_RAIL_WIDTH_PX}px` }}
         >
           {entries.map((entry, index) => {
             const phaseBoundary =
