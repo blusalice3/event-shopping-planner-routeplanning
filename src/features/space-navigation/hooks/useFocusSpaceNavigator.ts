@@ -484,6 +484,7 @@ export function useFocusSpaceNavigator({
         return {
           ok: false,
           message: getBlockingMessage(guard),
+          tone: "warning",
         };
       }
       if (
@@ -496,6 +497,7 @@ export function useFocusSpaceNavigator({
           requiresConfirmation: true,
           message:
             "現在のスペースに未購入のアイテムがあります。確認して移動してください。",
+          tone: "warning",
         };
       }
 
@@ -520,6 +522,10 @@ export function useFocusSpaceNavigator({
         message:
           guard.checked && guard.advisoryReasons.includes("unvisited")
             ? "前のスペースに未購入のアイテムがあります"
+            : undefined,
+        tone:
+          guard.checked && guard.advisoryReasons.includes("unvisited")
+            ? "warning"
             : undefined,
       };
     },
@@ -748,11 +754,14 @@ export function useFocusSpaceNavigator({
         const guard = runAggregateForwardGuard(activeSnapshot.entry);
         if (!guard.allowed) {
           const message = getBlockingMessage(guard);
-          navigator?.notify(message);
-          return { ok: false, message };
+          navigator?.notify(message, "warning");
+          return { ok: false, message, tone: "warning" };
         }
         if (guard.advisoryReasons.includes("unvisited")) {
-          navigator?.notify("前のスペースに未購入のアイテムがあります");
+          navigator?.notify(
+            "前のスペースに未購入のアイテムがあります",
+            "warning",
+          );
         }
       }
 
@@ -856,8 +865,8 @@ export function useFocusSpaceNavigator({
           const guard = runAggregateForwardGuard(activeSnapshot.entry);
           if (!guard.allowed) {
             const message = getBlockingMessage(guard);
-            navigator?.notify(message);
-            return { ok: false, message };
+            navigator?.notify(message, "warning");
+            return { ok: false, message, tone: "warning" };
           }
           setDisplaySnapshot({
             ...activeSnapshot,
@@ -884,11 +893,14 @@ export function useFocusSpaceNavigator({
         const guard = runGuard(targetIndex, "temporary");
         if (!guard.allowed) {
           const message = getBlockingMessage(guard);
-          navigator?.notify(message);
-          return { ok: false, message };
+          navigator?.notify(message, "warning");
+          return { ok: false, message, tone: "warning" };
         }
         if (guard.advisoryReasons.includes("unvisited")) {
-          navigator?.notify("前のスペースに未購入のアイテムがあります");
+          navigator?.notify(
+            "前のスペースに未購入のアイテムがあります",
+            "warning",
+          );
         }
       }
       setDisplaySnapshot(makeDisplaySnapshot(targetEntry));
@@ -942,8 +954,8 @@ export function useFocusSpaceNavigator({
         const guard = runAggregateForwardGuard(activeSnapshot.entry);
         if (!guard.allowed) {
           const message = getBlockingMessage(guard);
-          navigator?.notify(message);
-          return { ok: false, message };
+          navigator?.notify(message, "warning");
+          return { ok: false, message, tone: "warning" };
         }
         setDisplaySnapshot({ ...selectedSnapshot, subview: "remaining" });
         return { ok: true };

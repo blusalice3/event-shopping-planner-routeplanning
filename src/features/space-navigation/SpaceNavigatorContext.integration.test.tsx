@@ -404,6 +404,32 @@ describe("SpaceNavigatorContext", () => {
     );
   });
 
+  it("propagates a warning action result to the host notification tone", async () => {
+    const action = vi.fn(async () => ({
+      ok: false,
+      message: "価格を入力してください",
+      tone: "warning" as const,
+    }));
+
+    render(
+      <SpaceNavigatorProvider>
+        <RegistrationHarness action={action} />
+        <ContextProbe />
+        <SpaceNavigatorHost />
+      </SpaceNavigatorProvider>,
+    );
+
+    await act(async () =>
+      fireEvent.click(screen.getByRole("button", { name: "一時B" })),
+    );
+
+    const warningNotification = (
+      await screen.findByText("価格を入力してください")
+    ).closest('[role="status"]');
+    expect(warningNotification).not.toBeNull();
+    expect(warningNotification).toHaveClass("bg-red-600", "dark:bg-red-700");
+  });
+
   it("uses the compact smartphone footer label", () => {
     render(
       <SpaceNavigatorProvider>

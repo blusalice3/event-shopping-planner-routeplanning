@@ -48,6 +48,7 @@ export function SpaceNavigatorActionDialog({
   const needsConfirmation = Boolean(
     result?.requiresConfirmation && pendingIntent,
   );
+  const showsWarning = Boolean(result?.tone === "warning" || needsConfirmation);
 
   return (
     <div
@@ -83,8 +84,8 @@ export function SpaceNavigatorActionDialog({
         {result?.message && (
           <div
             className={`mt-4 rounded-lg border px-3 py-2 text-sm ${
-              needsConfirmation
-                ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-100"
+              showsWarning
+                ? "border-red-300 bg-red-50 text-red-900 dark:border-red-700 dark:bg-red-950/60 dark:text-red-100"
                 : "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-700 dark:bg-rose-950/60 dark:text-rose-100"
             }`}
             role="alert"
@@ -99,7 +100,7 @@ export function SpaceNavigatorActionDialog({
               type="button"
               disabled={busy}
               onClick={() => onChoose(pendingIntent!, true)}
-              className="min-h-12 w-full rounded-lg bg-amber-600 px-4 py-3 text-left font-bold text-white hover:bg-amber-700 disabled:opacity-50"
+              className="min-h-12 w-full rounded-lg bg-red-600 px-4 py-3 text-left font-bold text-white hover:bg-red-700 disabled:opacity-50"
             >
               警告を確認して移動
             </button>

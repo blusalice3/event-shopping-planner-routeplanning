@@ -410,7 +410,7 @@ describe("ShoppingList purchase status control mode", () => {
       await screen.findByText(
         "限数未入力があります。実購入数を入力してください",
       ),
-    ).toBeInTheDocument();
+    ).toHaveClass("bg-red-600");
   });
 
   it("allows moving to the next space when all missing limited quantities in the group are deferred from item cards", async () => {

@@ -30,6 +30,8 @@ import type {
   SortState,
 } from "../types";
 
+const APP_ZOOM_OPTIONS = [15, 30, 50, 75, 100, 125, 150] as const;
+
 type TabButtonProps = {
   tab: ActiveTab;
   label: string;
@@ -106,10 +108,10 @@ export type DisplaySettingsResetButtonProps = {
   setPurchaseStatusControlMode: React.Dispatch<
     React.SetStateAction<PurchaseStatusControlMode>
   >;
-  setUiVisibilityOverride: React.Dispatch<React.SetStateAction<boolean>>;
   setUiVisibilitySettings: React.Dispatch<
     React.SetStateAction<UIVisibilitySettings>
   >;
+  setZoomLevel: (zoomLevel: number) => void;
 };
 
 export const DisplaySettingsResetButton: React.FC<
@@ -124,15 +126,15 @@ export const DisplaySettingsResetButton: React.FC<
   setSkipLimitedPurchaseForSingleQuantity,
   setNumberCellOutlineStyle,
   setPurchaseStatusControlMode,
-  setUiVisibilityOverride,
   setUiVisibilitySettings,
+  setZoomLevel,
 }) => {
   const spaceNavigator = useOptionalSpaceNavigator();
   return (
     <button
       onClick={() => {
         setUiVisibilitySettings(DEFAULT_UI_VISIBILITY);
-        setUiVisibilityOverride(false);
+        setZoomLevel(100);
         setNumberCellOutlineStyle(DEFAULT_OUTLINE_STYLE);
         setDisablePriceUndefinedCheck(false);
         setDisableLimitedPurchaseQuantityCheck(false);
@@ -184,6 +186,7 @@ type AppHeaderShellProps = {
   handleSearchNext: () => void;
   handleSetViewMode: (mode: ViewMode, scrollToItemId?: string) => void;
   handleSortToggle: () => void;
+  handleZoomChange: (newZoom: number) => void;
   hasCandidateSelection: boolean;
   hasExecuteSelection: boolean;
   hasUndefinedPriorityItems: boolean;
@@ -206,6 +209,8 @@ type AppHeaderShellProps = {
   mapViewActive: boolean;
   numberCellOutlineStyle: NumberCellOutlineStyle;
   openVisitListPanel: (mapTab: string) => void;
+  onCloseUiSettingsPanel: () => void;
+  onToggleUiSettingsPanel: () => void;
   purchaseStatusControlMode: PurchaseStatusControlMode;
   searchKeyword: string;
   selectedItemIds: Set<string>;
@@ -251,8 +256,6 @@ type AppHeaderShellProps = {
   setSelectedItemIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   setSimpleHallDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
   setThemeMode: React.Dispatch<React.SetStateAction<ThemeMode>>;
-  setUiSettingsPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  setUiVisibilityOverride: React.Dispatch<React.SetStateAction<boolean>>;
   setUiVisibilitySettings: React.Dispatch<
     React.SetStateAction<UIVisibilitySettings>
   >;
@@ -277,6 +280,7 @@ type AppHeaderShellProps = {
     value: boolean,
   ) => void;
   visibleSearchMatches: string[];
+  zoomLevel: number;
 };
 
 const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
@@ -315,6 +319,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     handleSearchNext,
     handleSetViewMode,
     handleSortToggle,
+    handleZoomChange,
     hasCandidateSelection,
     hasExecuteSelection,
     hasUndefinedPriorityItems,
@@ -337,6 +342,8 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     mapViewActive,
     numberCellOutlineStyle,
     openVisitListPanel,
+    onCloseUiSettingsPanel,
+    onToggleUiSettingsPanel,
     purchaseStatusControlMode,
     searchKeyword,
     selectedItemIds,
@@ -370,8 +377,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     setSelectedItemIds,
     setSimpleHallDefinitionMode,
     setThemeMode,
-    setUiSettingsPanelOpen,
-    setUiVisibilityOverride,
     setUiVisibilitySettings,
     showHeaderBar,
     showMoveButtons,
@@ -388,6 +393,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     uiVisibilitySettings,
     updateUIVisibilityConfig,
     visibleSearchMatches,
+    zoomLevel,
   } = props;
 
   React.useEffect(() => {
@@ -645,7 +651,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       onClick={(e) => {
                         e.preventDefault();
                         e.stopPropagation();
-                        setUiSettingsPanelOpen(!uiSettingsPanelOpen);
+                        onToggleUiSettingsPanel();
                       }}
                       className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
                         uiSettingsPanelOpen
@@ -686,7 +692,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       <>
                         <div
                           className="fixed inset-0 z-40"
-                          onClick={() => setUiSettingsPanelOpen(false)}
+                          onClick={onCloseUiSettingsPanel}
                           onTouchMove={stopUiSettingsBackgroundScroll}
                           onWheel={stopUiSettingsBackgroundScroll}
                         />
@@ -826,6 +832,29 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                 </svg>
                               )}
                             </button>
+                          </div>
+
+                          <div className="mb-3 flex items-center justify-between border-b border-slate-200 pb-3 dark:border-slate-700">
+                            <label
+                              htmlFor="app-display-zoom"
+                              className="text-xs font-semibold text-slate-700 dark:text-slate-300"
+                            >
+                              画面の表示倍率
+                            </label>
+                            <select
+                              id="app-display-zoom"
+                              value={zoomLevel}
+                              onChange={(event) =>
+                                handleZoomChange(Number(event.target.value))
+                              }
+                              className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200"
+                            >
+                              {APP_ZOOM_OPTIONS.map((zoom) => (
+                                <option key={zoom} value={zoom}>
+                                  {zoom}%
+                                </option>
+                              ))}
+                            </select>
                           </div>
 
                           <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3">
@@ -1130,8 +1159,8 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                             setPurchaseStatusControlMode={
                               setPurchaseStatusControlMode
                             }
-                            setUiVisibilityOverride={setUiVisibilityOverride}
                             setUiVisibilitySettings={setUiVisibilitySettings}
+                            setZoomLevel={handleZoomChange}
                           />
                         </div>
                       </>

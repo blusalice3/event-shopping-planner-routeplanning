@@ -20,6 +20,7 @@ import {
 export type SpaceNavigatorMode = "execute" | "focus";
 export type TemporaryNavigationMode = "temporary" | "inspect";
 export type SpaceNavigatorActionSource = "navigator" | "map-cell";
+export type SpaceNavigatorNotificationTone = "info" | "warning";
 
 export interface SpaceNavigatorLocationSnapshot {
   scrollTop?: number;
@@ -39,6 +40,7 @@ export interface SpaceNavigatorActionRequest {
 export interface SpaceNavigatorActionResult {
   ok: boolean;
   message?: string;
+  tone?: SpaceNavigatorNotificationTone;
   requiresConfirmation?: boolean;
   requiresPhaseSelection?: boolean;
 }
@@ -112,7 +114,8 @@ interface SpaceNavigatorContextValue {
   promoteTemporary: (payload?: unknown) => Promise<SpaceNavigatorActionResult>;
   actionBusy: boolean;
   notification: string | null;
-  notify: (message: string) => void;
+  notificationTone: SpaceNavigatorNotificationTone;
+  notify: (message: string, tone?: SpaceNavigatorNotificationTone) => void;
   clearNotification: () => void;
   interactionActive: boolean;
 }
@@ -136,6 +139,8 @@ export function SpaceNavigatorProvider({
     useState<TemporaryNavigationMode | null>(null);
   const [history, setHistory] = useState<InternalReturnPoint[]>([]);
   const [notification, setNotification] = useState<string | null>(null);
+  const [notificationTone, setNotificationTone] =
+    useState<SpaceNavigatorNotificationTone>("info");
   const [actionBusy, setActionBusy] = useState(false);
   const notificationTimerRef = useRef<number | null>(null);
   const temporaryModeRef = useRef<TemporaryNavigationMode | null>(null);
@@ -161,19 +166,25 @@ export function SpaceNavigatorProvider({
     setPickerOpen(false);
   }, [pickerOpen, settings.footerButtonVisible, settings.railVisible]);
 
-  const notify = useCallback((message: string) => {
-    setNotification(message);
-    if (notificationTimerRef.current !== null) {
-      window.clearTimeout(notificationTimerRef.current);
-    }
-    notificationTimerRef.current = window.setTimeout(() => {
-      setNotification(null);
-      notificationTimerRef.current = null;
-    }, 4000);
-  }, []);
+  const notify = useCallback(
+    (message: string, tone: SpaceNavigatorNotificationTone = "info") => {
+      setNotificationTone(tone);
+      setNotification(message);
+      if (notificationTimerRef.current !== null) {
+        window.clearTimeout(notificationTimerRef.current);
+      }
+      notificationTimerRef.current = window.setTimeout(() => {
+        setNotification(null);
+        setNotificationTone("info");
+        notificationTimerRef.current = null;
+      }, 4000);
+    },
+    [],
+  );
 
   const clearNotification = useCallback(() => {
     setNotification(null);
+    setNotificationTone("info");
     if (notificationTimerRef.current !== null) {
       window.clearTimeout(notificationTimerRef.current);
       notificationTimerRef.current = null;
@@ -323,7 +334,7 @@ export function SpaceNavigatorProvider({
           temporaryModeRef.current = priorMode;
           setTemporaryMode(priorMode);
           if (result.message && !result.requiresConfirmation) {
-            notify(result.message);
+            notify(result.message, result.tone);
           }
           return result;
         }
@@ -337,7 +348,7 @@ export function SpaceNavigatorProvider({
           setHistory([]);
         }
 
-        if (result.message) notify(result.message);
+        if (result.message) notify(result.message, result.tone);
         setPickerOpen(false);
         active.onInteractionEnd?.();
         return result;
@@ -394,7 +405,7 @@ export function SpaceNavigatorProvider({
           return;
         }
         if (result && !result.ok) {
-          if (result.message) notify(result.message);
+          if (result.message) notify(result.message, result.tone);
           remainingHistory = remainingHistory.slice(0, -1);
           continue;
         }
@@ -405,7 +416,7 @@ export function SpaceNavigatorProvider({
         temporaryModeRef.current = nextMode;
         setHistory(nextHistory);
         setTemporaryMode(nextMode);
-        if (result?.message) notify(result.message);
+        if (result?.message) notify(result.message, result.tone);
         return;
       }
 
@@ -471,13 +482,13 @@ export function SpaceNavigatorProvider({
         if (!result.ok) {
           temporaryModeRef.current = priorMode;
           setTemporaryMode(priorMode);
-          if (result.message) notify(result.message);
+          if (result.message) notify(result.message, result.tone);
           return result;
         }
 
         historyRef.current = [];
         setHistory([]);
-        if (result.message) notify(result.message);
+        if (result.message) notify(result.message, result.tone);
         return result;
       } finally {
         if (generation === registrationGenerationRef.current) {
@@ -510,6 +521,7 @@ export function SpaceNavigatorProvider({
       promoteTemporary,
       actionBusy,
       notification,
+      notificationTone,
       notify,
       clearNotification,
       interactionActive: pickerOpen || temporaryMode !== null,
@@ -533,6 +545,7 @@ export function SpaceNavigatorProvider({
       promoteTemporary,
       actionBusy,
       notification,
+      notificationTone,
       notify,
       clearNotification,
     ],

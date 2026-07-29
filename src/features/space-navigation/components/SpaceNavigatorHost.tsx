@@ -194,7 +194,11 @@ export function SpaceNavigatorHost() {
         <button
           type="button"
           onClick={navigator.clearNotification}
-          className="fixed left-1/2 z-[95] max-w-[calc(100%-1rem)] -translate-x-1/2 rounded-lg bg-slate-950 px-4 py-2 text-sm font-medium text-white shadow-xl dark:bg-slate-100 dark:text-slate-950"
+          className={`fixed left-1/2 z-[95] max-w-[calc(100%-1rem)] -translate-x-1/2 rounded-lg px-4 py-2 text-sm font-medium shadow-xl ${
+            navigator.notificationTone === "warning"
+              ? "bg-red-600 text-white dark:bg-red-700 dark:text-white"
+              : "bg-slate-950 text-white dark:bg-slate-100 dark:text-slate-950"
+          }`}
           style={{ bottom: "calc(var(--footer-height, 0px) + .75rem)" }}
           role="status"
         >

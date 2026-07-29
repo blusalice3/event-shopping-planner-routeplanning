@@ -18,6 +18,7 @@ import {
 } from "../SpaceNavigatorContext";
 import { buildExecutionNavigatorEntries } from "../domain/buildNavigatorEntries";
 import type { NavigatorItem } from "../types";
+import { SpaceNavigatorActionDialog } from "./SpaceNavigatorActionDialog";
 import { SpaceNavigatorFooterButton } from "./SpaceNavigatorFooterButton";
 import { SpaceNavigatorHost } from "./SpaceNavigatorHost";
 import { SpaceNavigatorPicker } from "./SpaceNavigatorPicker";
@@ -90,9 +91,14 @@ function MutableRegistration() {
 function NotificationTrigger() {
   const { notify } = useSpaceNavigator();
   return (
-    <button type="button" onClick={() => notify("お知らせ")}>
-      通知
-    </button>
+    <>
+      <button type="button" onClick={() => notify("お知らせ")}>
+        通知
+      </button>
+      <button type="button" onClick={() => notify("警告のお知らせ", "warning")}>
+        警告通知
+      </button>
+    </>
   );
 }
 
@@ -592,6 +598,57 @@ describe("SpaceNavigatorRail", () => {
   });
 });
 
+describe("SpaceNavigatorActionDialog", () => {
+  it("renders a blocking warning with the red warning palette", () => {
+    render(
+      <SpaceNavigatorActionDialog
+        entry={entries[1]}
+        result={{
+          ok: false,
+          message: "価格を入力してください",
+          tone: "warning",
+        }}
+        pendingIntent="set-current"
+        busy={false}
+        onChoose={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveClass(
+      "border-red-300",
+      "bg-red-50",
+      "text-red-900",
+    );
+  });
+
+  it("renders an unvisited advisory and its confirmation action in red", () => {
+    render(
+      <SpaceNavigatorActionDialog
+        entry={entries[1]}
+        result={{
+          ok: false,
+          message: "未購入のアイテムがあります",
+          requiresConfirmation: true,
+        }}
+        pendingIntent="temporary"
+        busy={false}
+        onChoose={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole("alert")).toHaveClass(
+      "border-red-300",
+      "bg-red-50",
+      "text-red-900",
+    );
+    expect(
+      screen.getByRole("button", { name: "警告を確認して移動" }),
+    ).toHaveClass("bg-red-600", "hover:bg-red-700");
+  });
+});
+
 describe("SpaceNavigatorHost and footer visibility", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -731,6 +788,30 @@ describe("SpaceNavigatorHost and footer visibility", () => {
     expect(screen.getByRole("status")).toHaveStyle({
       bottom: "calc(var(--footer-height, 0px) + .75rem)",
     });
+  });
+
+  it("keeps information notifications slate and renders warnings in red", () => {
+    render(
+      <SpaceNavigatorProvider>
+        <StaticRegistration />
+        <NotificationTrigger />
+        <SpaceNavigatorHost />
+      </SpaceNavigatorProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "通知" }));
+    expect(screen.getByRole("status")).toHaveClass(
+      "bg-slate-950",
+      "dark:bg-slate-100",
+    );
+    expect(screen.getByRole("status")).not.toHaveClass("bg-red-600");
+
+    fireEvent.click(screen.getByRole("button", { name: "警告通知" }));
+    expect(screen.getByRole("status")).toHaveClass(
+      "bg-red-600",
+      "dark:bg-red-700",
+    );
+    expect(screen.getByRole("status")).not.toHaveClass("bg-slate-950");
   });
 
   it.each([

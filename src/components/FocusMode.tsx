@@ -1808,7 +1808,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
     if (isTemporaryActive) {
       const result = moveTemporaryBy(1);
-      if (!result.ok && result.message) setNotification(result.message);
+      if (!result.ok && result.message) {
+        setNotification(result.message, result.tone);
+      }
       return;
     }
     setBlinkingPriceItemIds(
@@ -1821,15 +1823,21 @@ const FocusMode: React.FC<FocusModeProps> = ({
     );
 
     if (blockedByPrice && blockedByLimited) {
-      setNotification("価格と限数の実購入数を入力してください");
+      setNotification("価格と限数の実購入数を入力してください", "warning");
       return;
     }
     if (blockedByPrice) {
-      setNotification("価格未定のアイテムがあります。価格を入力してください。");
+      setNotification(
+        "価格未定のアイテムがあります。価格を入力してください。",
+        "warning",
+      );
       return;
     }
     if (blockedByLimited) {
-      setNotification("限数未入力があります。実購入数を入力してください");
+      setNotification(
+        "限数未入力があります。実購入数を入力してください",
+        "warning",
+      );
       return;
     }
     const hasUncheckedItems = currentVisitDisplayItems.some(
@@ -1840,7 +1848,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     // チェック漏れがある場合は通知を表示
     if (hasUncheckedItems) {
       setTimeout(() => {
-        setNotification("前のサークルでチェック漏れがあります");
+        setNotification("前のサークルでチェック漏れがあります", "warning");
       }, 100);
     }
   }, [
@@ -1864,7 +1872,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
     }
     if (isTemporaryActive) {
       const result = moveTemporaryBy(-1);
-      if (!result.ok && result.message) setNotification(result.message);
+      if (!result.ok && result.message) {
+        setNotification(result.message, result.tone);
+      }
       return;
     }
     if (isCompleted) {
@@ -2575,7 +2585,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
           expectedRegistrationId: focusNavigatorRegistrationId,
         },
       );
-      if (!result.ok && result.message) setNotification(result.message);
+      if (!result.ok && result.message) {
+        setNotification(result.message, result.tone);
+      }
       return result.ok;
     },
     [
@@ -2812,21 +2824,27 @@ const FocusMode: React.FC<FocusModeProps> = ({
   const handleTemporaryMovementPhaseSelect = useCallback(
     (phase: FocusPhase) => {
       const result = selectMovementPhase(phase);
-      if (!result.ok && result.message) setNotification(result.message);
+      if (!result.ok && result.message) {
+        setNotification(result.message, result.tone);
+      }
     },
     [selectMovementPhase],
   );
   const handleTemporaryRemainingSelect = useCallback(
     (phase: FocusPhase, visitId: string) => {
       const result = selectRemainingSpace(phase, visitId);
-      if (!result.ok && result.message) setNotification(result.message);
+      if (!result.ok && result.message) {
+        setNotification(result.message, result.tone);
+      }
     },
     [selectRemainingSpace],
   );
   const handleTemporaryPromotionPhaseSelect = useCallback(
     (phase: FocusPhase) => {
       void confirmPromotionPhase(phase).then((result) => {
-        if (!result.ok && result.message) setNotification(result.message);
+        if (!result.ok && result.message) {
+          setNotification(result.message, result.tone);
+        }
       });
     },
     [confirmPromotionPhase],
@@ -2980,7 +2998,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
     : null;
   // App.tsx側で scale されるため、高さは逆補正して実表示高さを安定させる
   const footerOverlapGuardPx = 1;
-  const visibleNotification = bulkLimitedMessage?.message ?? notification;
+  const visibleNotification = bulkLimitedMessage
+    ? { message: bulkLimitedMessage.message, tone: "info" as const }
+    : notification;
+  const visibleNotificationColorClass =
+    visibleNotification?.tone === "warning" ? "bg-red-600" : "bg-blue-600";
   // フェーズ切り替え確認ダイアログ
   const phaseChangeDialogJSX = (
     <PhaseChangeDialogView
@@ -3058,8 +3080,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
         data-focus-inspecting={isInspecting || undefined}
       >
         {visibleNotification && (
-          <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
-            {visibleNotification}
+          <div
+            className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse ${visibleNotificationColorClass}`}
+          >
+            {visibleNotification.message}
           </div>
         )}
         <div
@@ -3212,8 +3236,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
         data-focus-inspecting={isInspecting || undefined}
       >
         {visibleNotification && (
-          <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
-            {visibleNotification}
+          <div
+            className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse ${visibleNotificationColorClass}`}
+          >
+            {visibleNotification.message}
           </div>
         )}
         <div className="w-1/2 flex flex-col border-r border-slate-200 dark:border-slate-700">
@@ -3367,8 +3393,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
       onTouchEnd={handleTouchEnd}
     >
       {visibleNotification && (
-        <div className="fixed top-20 left-1/2 transform -translate-x-1/2 z-50 bg-blue-600 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse">
-          {visibleNotification}
+        <div
+          className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse ${visibleNotificationColorClass}`}
+        >
+          {visibleNotification.message}
         </div>
       )}
       <FocusModeHeader

@@ -66,6 +66,7 @@ const minimalAppHeaderShellProps = (): ComponentProps<
   handleSearchNext: vi.fn(),
   handleSetViewMode: vi.fn(),
   handleSortToggle: vi.fn(),
+  handleZoomChange: vi.fn(),
   hasCandidateSelection: false,
   hasExecuteSelection: false,
   hasUndefinedPriorityItems: false,
@@ -88,6 +89,8 @@ const minimalAppHeaderShellProps = (): ComponentProps<
   mapViewActive: false,
   numberCellOutlineStyle: "rounded",
   openVisitListPanel: vi.fn(),
+  onCloseUiSettingsPanel: vi.fn(),
+  onToggleUiSettingsPanel: vi.fn(),
   purchaseStatusControlMode: "cycle",
   searchKeyword: "",
   selectedItemIds: new Set(),
@@ -120,8 +123,6 @@ const minimalAppHeaderShellProps = (): ComponentProps<
   setSelectedItemIds: vi.fn(),
   setSimpleHallDefinitionMode: vi.fn(),
   setThemeMode: vi.fn(),
-  setUiSettingsPanelOpen: vi.fn(),
-  setUiVisibilityOverride: vi.fn(),
   setUiVisibilitySettings: vi.fn(),
   showHeaderBar: true,
   showMoveButtons: false,
@@ -147,6 +148,7 @@ const minimalAppHeaderShellProps = (): ComponentProps<
   uiVisibilitySettings: DEFAULT_UI_VISIBILITY,
   updateUIVisibilityConfig: vi.fn(),
   visibleSearchMatches: [],
+  zoomLevel: 100,
 });
 
 describe("PurchaseStatusControlModeSettings", () => {
@@ -178,8 +180,8 @@ describe("PurchaseStatusControlModeSettings", () => {
       setSkipLimitedPurchaseForSingleQuantity: vi.fn(),
       setNumberCellOutlineStyle: vi.fn(),
       setPurchaseStatusControlMode: vi.fn(),
-      setUiVisibilityOverride: vi.fn(),
       setUiVisibilitySettings: vi.fn(),
+      setZoomLevel: vi.fn(),
     };
 
     render(<DisplaySettingsResetButton {...props} />);
@@ -190,7 +192,7 @@ describe("PurchaseStatusControlModeSettings", () => {
     expect(props.setDisableLimitedPurchaseQuantityCheck).toHaveBeenCalledWith(
       false,
     );
-    expect(props.setUiVisibilityOverride).toHaveBeenCalledWith(false);
+    expect(props.setZoomLevel).toHaveBeenCalledWith(100);
   });
 });
 
@@ -202,5 +204,40 @@ describe("AppHeaderShell purchase status settings integration", () => {
     expect(
       screen.getByRole("radio", { name: /放射状メニュー/ }),
     ).toBeInTheDocument();
+  });
+
+  it("changes the app zoom from the real settings panel", () => {
+    const props = minimalAppHeaderShellProps();
+    render(<AppHeaderShell {...props} />);
+
+    const zoomSelect = screen.getByRole("combobox", {
+      name: "画面の表示倍率",
+    });
+    expect(zoomSelect).toHaveValue("100");
+
+    fireEvent.change(zoomSelect, { target: { value: "125" } });
+
+    expect(props.handleZoomChange).toHaveBeenCalledWith(125);
+  });
+
+  it("keeps visibility edits in the draft until the panel close callback", () => {
+    const props = minimalAppHeaderShellProps();
+    render(<AppHeaderShell {...props} />);
+
+    fireEvent.click(
+      screen.getAllByRole("checkbox", {
+        name: "ヘッダー",
+      })[0],
+    );
+
+    expect(props.updateUIVisibilityConfig).toHaveBeenCalledWith(
+      "focus_sp_mapOn",
+      "header",
+      true,
+    );
+    expect(props.setUiVisibilitySettings).not.toHaveBeenCalled();
+
+    fireEvent.click(document.querySelector(".fixed.inset-0.z-40")!);
+    expect(props.onCloseUiSettingsPanel).toHaveBeenCalledOnce();
   });
 });

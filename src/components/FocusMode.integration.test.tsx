@@ -369,7 +369,7 @@ describe("FocusMode limited purchase defer - integration", () => {
       await screen.findByText(
         "限数未入力があります。実購入数を入力してください",
       ),
-    ).toBeInTheDocument();
+    ).toHaveClass("bg-red-600");
     expect(screen.getByText("A-01A")).toBeInTheDocument();
   });
 
@@ -469,8 +469,34 @@ describe("FocusMode limited purchase defer - integration", () => {
       await screen.findByText(
         "価格未定のアイテムがあります。価格を入力してください。",
       ),
-    ).toBeInTheDocument();
+    ).toHaveClass("bg-red-600");
     expect(screen.getByText("A-01A")).toBeInTheDocument();
+  });
+
+  it("shows the non-blocking unchecked-item caution in red", async () => {
+    const currentItem = {
+      ...limitedItemsFixture.items[0],
+      id: "unchecked-current",
+      purchaseStatus: "None" as const,
+    };
+    const nextItem = {
+      ...limitedItemsFixture.items[2],
+      purchaseStatus: "Purchased" as const,
+    };
+
+    render(
+      <StatefulFocusModeHarness
+        initialItems={[currentItem, nextItem]}
+        executeModeItemIds={[currentItem.id, nextItem.id]}
+        resumeState={incompleteSessionFixture}
+      />,
+    );
+
+    clickNextVisitButton();
+
+    expect(
+      await screen.findByText("前のサークルでチェック漏れがあります"),
+    ).toHaveClass("bg-red-600");
   });
 
   it("preserves the existing global limited purchase check disable behavior", async () => {

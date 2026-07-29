@@ -1,4 +1,11 @@
-import { useEffect, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
 
 export type UIVisibilityConfig = {
   header: boolean;
@@ -23,6 +30,16 @@ export const DEFAULT_UI_VISIBILITY: UIVisibilitySettings = {
   execute_pc: { header: true, tabBar: true },
 };
 
+type CloseUIVisibilityPanelOptions = {
+  resetVisibilityOverride?: boolean;
+};
+
+type DeferredUIVisibilitySettingsParams = {
+  appliedSettings: UIVisibilitySettings;
+  setAppliedSettings: Dispatch<SetStateAction<UIVisibilitySettings>>;
+  setVisibilityOverride: Dispatch<SetStateAction<boolean>>;
+};
+
 export function useUIVisibilitySettings() {
   const [uiVisibilitySettings, setUiVisibilitySettings] =
     useState<UIVisibilitySettings>(() => {
@@ -45,4 +62,87 @@ export function useUIVisibilitySettings() {
   }, [uiVisibilitySettings]);
 
   return { uiVisibilitySettings, setUiVisibilitySettings } as const;
+}
+
+export function useDeferredUIVisibilitySettings({
+  appliedSettings,
+  setAppliedSettings,
+  setVisibilityOverride,
+}: DeferredUIVisibilitySettingsParams) {
+  const [draftSettings, setDraftSettingsState] = useState(appliedSettings);
+  const [isPanelOpen, setIsPanelOpenState] = useState(false);
+  const appliedSettingsRef = useRef(appliedSettings);
+  const draftSettingsRef = useRef(draftSettings);
+  const isPanelOpenRef = useRef(isPanelOpen);
+
+  useEffect(() => {
+    appliedSettingsRef.current = appliedSettings;
+  }, [appliedSettings]);
+
+  const setDraftSettings = useCallback<
+    Dispatch<SetStateAction<UIVisibilitySettings>>
+  >((action) => {
+    const nextSettings =
+      typeof action === "function" ? action(draftSettingsRef.current) : action;
+    draftSettingsRef.current = nextSettings;
+    setDraftSettingsState(nextSettings);
+  }, []);
+
+  const openPanel = useCallback(() => {
+    const nextDraft = appliedSettingsRef.current;
+    draftSettingsRef.current = nextDraft;
+    setDraftSettingsState(nextDraft);
+    isPanelOpenRef.current = true;
+    setIsPanelOpenState(true);
+  }, []);
+
+  const closePanel = useCallback(
+    (options: CloseUIVisibilityPanelOptions = {}) => {
+      if (isPanelOpenRef.current) {
+        setAppliedSettings(draftSettingsRef.current);
+      }
+      isPanelOpenRef.current = false;
+      setIsPanelOpenState(false);
+      if (options.resetVisibilityOverride !== false) {
+        setVisibilityOverride(false);
+      }
+    },
+    [setAppliedSettings, setVisibilityOverride],
+  );
+
+  const togglePanel = useCallback(() => {
+    if (isPanelOpenRef.current) {
+      closePanel();
+      return;
+    }
+    openPanel();
+  }, [closePanel, openPanel]);
+
+  const updateDraftConfig = useCallback(
+    (
+      key: keyof UIVisibilitySettings,
+      field: keyof UIVisibilityConfig,
+      value: boolean,
+    ) => {
+      setDraftSettings((previous) => ({
+        ...previous,
+        [key]: {
+          ...DEFAULT_UI_VISIBILITY[key],
+          ...previous[key],
+          [field]: value,
+        },
+      }));
+    },
+    [setDraftSettings],
+  );
+
+  return {
+    draftSettings,
+    isPanelOpen,
+    setDraftSettings,
+    openPanel,
+    closePanel,
+    togglePanel,
+    updateDraftConfig,
+  } as const;
 }

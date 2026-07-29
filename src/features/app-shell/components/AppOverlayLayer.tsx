@@ -7,7 +7,6 @@ import EventRenameDialog from "../../../components/EventRenameDialog";
 import ExportOptionsDialog from "../../../components/ExportOptionsDialog";
 import BulkActionControls from "../../../components/BulkActionControls";
 import SummaryBar from "../../../components/SummaryBar";
-import ZoomControl from "../../../components/ZoomControl";
 import VisitListPanel from "../../../components/VisitListPanel";
 import {
   BlockDefinitionPanel,
@@ -196,8 +195,6 @@ type AppOverlayLayerProps = {
   sortDisplayLabel: string;
   sortState: SortState;
   handleSortToggle: () => void;
-  zoomLevel: number;
-  handleZoomChange: (newZoom: number) => void;
   selectedItemIds: Set<string>;
   handleBulkSort: (direction: BulkSortDirection) => void;
   handleClearSelection: () => void;
@@ -317,8 +314,6 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
   sortDisplayLabel,
   sortState,
   handleSortToggle,
-  zoomLevel,
-  handleZoomChange,
   selectedItemIds,
   handleBulkSort,
   handleClearSelection,
@@ -727,10 +722,6 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
             />
           )}
         </>
-      )}
-
-      {activeEventName && items.length > 0 && mainContentVisible && (
-        <ZoomControl zoomLevel={zoomLevel} onZoomChange={handleZoomChange} />
       )}
 
       {layoutMode === "smartphone" &&

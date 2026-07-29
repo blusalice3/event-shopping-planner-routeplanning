@@ -1,5 +1,12 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type { FocusModeSessionState, FocusPhase } from "../../../types/focus";
+
+export type FocusNotificationTone = "info" | "warning";
+
+export type FocusNotification = {
+  message: string;
+  tone: FocusNotificationTone;
+};
 
 export type PhaseChangeDialogState = {
   isOpen: boolean;
@@ -24,7 +31,14 @@ export function useFocusSessionState(
   const [blinkingPriceItemIds, setBlinkingPriceItemIds] = useState<Set<string>>(
     new Set(),
   );
-  const [notification, setNotification] = useState<string | null>(null);
+  const [notification, setNotificationState] =
+    useState<FocusNotification | null>(null);
+  const setNotification = useCallback(
+    (message: string | null, tone: FocusNotificationTone = "info") => {
+      setNotificationState(message === null ? null : { message, tone });
+    },
+    [],
+  );
   const [isCompleted, setIsCompleted] = useState(false);
   const [postponedPhaseItemIds, setPostponedPhaseItemIds] = useState<
     Set<string>

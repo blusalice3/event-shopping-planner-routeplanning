@@ -10,7 +10,9 @@ import {
 import type { ShoppingItem } from "../../../types/item";
 import {
   useOptionalSpaceNavigator,
+  type SpaceNavigatorActionResult,
   type SpaceNavigatorLocationSnapshot,
+  type SpaceNavigatorNotificationTone,
   type SpaceNavigatorRegistration,
   type TemporaryNavigationMode,
 } from "../SpaceNavigatorContext";
@@ -42,6 +44,7 @@ export interface ExecutionNavigationGuardFeedback {
   priceItemIds: readonly string[];
   limitedItemIds: readonly string[];
   message: string | null;
+  tone: SpaceNavigatorNotificationTone;
 }
 
 export interface UseExecutionSpaceNavigatorOptions {
@@ -405,7 +408,7 @@ export function useExecutionSpaceNavigator(
   const onNavigate = useCallback(
     async (
       request: Parameters<SpaceNavigatorRegistration["onNavigate"]>[0],
-    ) => {
+    ): Promise<SpaceNavigatorActionResult> => {
       const latestEntries = entriesRef.current;
       const targetIndex = latestEntries.findIndex(
         (entry) => entry.id === request.entry.id,
@@ -462,16 +465,22 @@ export function useExecutionSpaceNavigator(
           ? guard.limitedWarningItemIds.filter((id) => !deferredIds?.has(id))
           : [],
         message: guardMessage,
+        tone: guardMessage ? "warning" : "info",
       });
 
       if (!guard.allowed) {
-        return { ok: false, message: guardMessage ?? undefined };
+        return {
+          ok: false,
+          message: guardMessage ?? undefined,
+          tone: "warning",
+        };
       }
       if (guard.advisoryReasons.includes("unvisited") && !request.confirmed) {
         return {
           ok: false,
           requiresConfirmation: true,
           message: "現在のスペースに未購入のアイテムがあります。移動しますか？",
+          tone: "warning",
         };
       }
 

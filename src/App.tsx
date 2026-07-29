@@ -116,6 +116,7 @@ import AppOverlayLayer from "./features/app-shell/components/AppOverlayLayer";
 import { useThemeMode } from "./hooks/useThemeMode";
 import {
   DEFAULT_UI_VISIBILITY,
+  useDeferredUIVisibilitySettings,
   useUIVisibilitySettings,
   type UIVisibilitySettings,
 } from "./hooks/useUIVisibilitySettings";
@@ -416,6 +417,19 @@ const App: React.FC = () => {
   );
   const { uiVisibilitySettings, setUiVisibilitySettings } =
     useUIVisibilitySettings();
+  const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
+  const {
+    draftSettings: draftUIVisibilitySettings,
+    isPanelOpen: uiSettingsPanelOpen,
+    setDraftSettings: setDraftUIVisibilitySettings,
+    closePanel: closeUiSettingsPanel,
+    togglePanel: toggleUiSettingsPanel,
+    updateDraftConfig: updateUIVisibilityConfig,
+  } = useDeferredUIVisibilitySettings({
+    appliedSettings: uiVisibilitySettings,
+    setAppliedSettings: setUiVisibilitySettings,
+    setVisibilityOverride: setUiVisibilityOverride,
+  });
   const {
     numberCellOutlineStyle,
     setNumberCellOutlineStyle,
@@ -440,8 +454,6 @@ const App: React.FC = () => {
     postEventDistributionCheckEnabled,
     setPostEventDistributionCheckEnabled,
   } = usePostEventDistributionCheck();
-  const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
-  const [uiSettingsPanelOpen, setUiSettingsPanelOpen] = useState(false);
   const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
   const [focusModeSessions, setFocusModeSessions] = useState<
     Record<string, FocusModeSessionState>
@@ -986,7 +998,9 @@ const App: React.FC = () => {
     }
 
     const hideSomething = !rawHeader || !rawTabBar;
-    if (uiVisibilityOverride) {
+    // Keep the settings panel reachable while layout changes alter the
+    // currently-applied visibility profile. The draft is committed on close.
+    if (uiVisibilityOverride || uiSettingsPanelOpen) {
       return {
         showHeaderBar: true,
         showTabBar: true,
@@ -1000,31 +1014,13 @@ const App: React.FC = () => {
     };
   }, [
     uiVisibilityOverride,
+    uiSettingsPanelOpen,
     activeEventName,
     currentMode,
     layoutMode,
     focusModeMapVisible,
     uiVisibilitySettings,
   ]);
-
-  const updateUIVisibilityConfig = useCallback(
-    (
-      key: keyof UIVisibilitySettings,
-      field: "header" | "tabBar",
-      value: boolean,
-    ) => {
-      setUiVisibilitySettings((prev) => ({
-        ...prev,
-        [key]: {
-          ...DEFAULT_UI_VISIBILITY[key],
-          ...prev[key],
-          [field]: value,
-        },
-      }));
-      setUiVisibilityOverride(false);
-    },
-    [setUiVisibilitySettings],
-  );
 
   const handleBulkAdd = useCallback(
     (
@@ -1552,8 +1548,7 @@ const App: React.FC = () => {
       if (mode !== "focus") {
         setFocusModeMapVisible(false);
       }
-      setUiVisibilityOverride(false);
-      setUiSettingsPanelOpen(false);
+      closeUiSettingsPanel();
 
       if (scrollToItemId) {
         setTimeout(() => {
@@ -1566,7 +1561,13 @@ const App: React.FC = () => {
         }, 100);
       }
     },
-    [activeEventName, activeEventDate, activeTab, eventDates],
+    [
+      activeEventName,
+      activeEventDate,
+      activeTab,
+      closeUiSettingsPanel,
+      eventDates,
+    ],
   );
 
   const handleSelectEvent = useCallback(
@@ -4913,6 +4914,7 @@ const App: React.FC = () => {
         handleSearchNext={handleSearchNext}
         handleSetViewMode={handleSetViewMode}
         handleSortToggle={handleSortToggle}
+        handleZoomChange={handleZoomChange}
         hasCandidateSelection={hasCandidateSelection}
         hasExecuteSelection={hasExecuteSelection}
         hasUndefinedPriorityItems={hasUndefinedPriorityItems}
@@ -4973,9 +4975,9 @@ const App: React.FC = () => {
         setSelectedItemIds={setSelectedItemIds}
         setSimpleHallDefinitionMode={setSimpleHallDefinitionMode}
         setThemeMode={setThemeMode}
-        setUiSettingsPanelOpen={setUiSettingsPanelOpen}
-        setUiVisibilityOverride={setUiVisibilityOverride}
-        setUiVisibilitySettings={setUiVisibilitySettings}
+        onCloseUiSettingsPanel={closeUiSettingsPanel}
+        onToggleUiSettingsPanel={toggleUiSettingsPanel}
+        setUiVisibilitySettings={setDraftUIVisibilitySettings}
         showHeaderBar={showHeaderBar}
         showMoveButtons={showMoveButtons}
         showSmartInsertToast={showSmartInsertToast}
@@ -4988,9 +4990,10 @@ const App: React.FC = () => {
         TabButton={TabButton}
         themeMode={themeMode}
         uiSettingsPanelOpen={uiSettingsPanelOpen}
-        uiVisibilitySettings={uiVisibilitySettings}
+        uiVisibilitySettings={draftUIVisibilitySettings}
         updateUIVisibilityConfig={updateUIVisibilityConfig}
         visibleSearchMatches={visibleSearchMatches}
+        zoomLevel={zoomLevel}
       />
 
       {rawHideSomething &&
@@ -4998,8 +5001,8 @@ const App: React.FC = () => {
         (currentMode === "focus" || currentMode === "execute") && (
           <button
             onClick={() => {
+              closeUiSettingsPanel({ resetVisibilityOverride: false });
               setUiVisibilityOverride((prev) => !prev);
-              setUiSettingsPanelOpen(false);
             }}
             className={`fixed left-3 top-3 z-[110] w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all touch-manipulation select-none ${
               uiVisibilityOverride
@@ -5305,8 +5308,6 @@ const App: React.FC = () => {
         sortDisplayLabel={sortDisplayLabel}
         sortState={sortState}
         handleSortToggle={handleSortToggle}
-        zoomLevel={zoomLevel}
-        handleZoomChange={handleZoomChange}
         selectedItemIds={selectedItemIds}
         handleBulkSort={handleBulkSort}
         handleClearSelection={handleClearSelection}

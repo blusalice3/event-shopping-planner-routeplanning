@@ -67,6 +67,11 @@ import { acquireBodyScrollLock } from "../utils/bodyScrollLock";
 
 type PriorityLevel = "none" | "priority" | "highest";
 
+type LimitedMessageState = {
+  message: string;
+  tone: "info" | "warning";
+};
+
 interface HallGroup {
   groupId: string | null;
   hallId: string | null;
@@ -473,7 +478,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   );
   const [limitedBulkDialogContext, setLimitedBulkDialogContext] =
     useState<LimitedBulkDialogContext | null>(null);
-  const [limitedMessage, setLimitedMessage] = useState<string | null>(null);
+  const [limitedMessage, setLimitedMessage] =
+    useState<LimitedMessageState | null>(null);
   const [bulkLimitedMessage, setBulkLimitedMessage] =
     useState<BulkLimitedMessageState | null>(null);
   const [
@@ -517,6 +523,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     deferredLimitedItemIdsByGroupKey,
     setDeferredLimitedItemIdsByGroupKey,
   ] = useState<Map<string, Set<string>>>(() => new Map());
+  const showLimitedMessage = useCallback(
+    (message: string | null, tone: LimitedMessageState["tone"] = "info") => {
+      setLimitedMessage(message === null ? null : { message, tone });
+    },
+    [],
+  );
   const displayOrderedItems = useMemo(() => {
     if (!showSpaceGroups && !showHallGroups) return items;
     if (showSpaceGroups && columnType === "candidate") {
@@ -536,9 +548,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     (feedback: ExecutionNavigationGuardFeedback) => {
       setPriceHighlightItemIds(new Set(feedback.priceItemIds));
       setLimitedMissingHighlightItemIds(new Set(feedback.limitedItemIds));
-      setLimitedMessage(feedback.message);
+      showLimitedMessage(feedback.message, "warning");
     },
-    [],
+    [showLimitedMessage],
   );
   const { isInspecting } = useExecutionSpaceNavigator({
     enabled: viewMode === "execute" && columnType === "execute",
@@ -663,9 +675,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   useEffect(() => {
     if (!limitedMessage) return;
-    const timer = window.setTimeout(() => setLimitedMessage(null), 2500);
+    const timer = window.setTimeout(() => showLimitedMessage(null), 2500);
     return () => window.clearTimeout(timer);
-  }, [limitedMessage]);
+  }, [limitedMessage, showLimitedMessage]);
 
   useEffect(() => {
     if (!bulkLimitedMessage) return;
@@ -1061,7 +1073,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         : targets;
 
       if (changedItems.length === 0) {
-        setLimitedMessage("変更対象のアイテムはありません");
+        showLimitedMessage("変更対象のアイテムはありません");
         return;
       }
       onBulkStatusChange?.(groupKey, targetStatus, changedItems);
@@ -1107,15 +1119,19 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       );
 
       if (blockedByPrice && blockedByLimited) {
-        setLimitedMessage("価格と限数の実購入数を入力してください");
+        showLimitedMessage("価格と限数の実購入数を入力してください", "warning");
       } else if (blockedByPrice) {
-        setLimitedMessage(
+        showLimitedMessage(
           "価格未定のアイテムがあります。価格を入力してください。",
+          "warning",
         );
       } else if (blockedByLimited) {
-        setLimitedMessage("限数未入力があります。実購入数を入力してください");
+        showLimitedMessage(
+          "限数未入力があります。実購入数を入力してください",
+          "warning",
+        );
       } else {
-        setLimitedMessage(null);
+        showLimitedMessage(null);
       }
 
       return blockedByPrice || blockedByLimited;
@@ -1124,6 +1140,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       _disableLimitedPurchaseQuantityCheck,
       deferredLimitedItemIdsByGroupKey,
       disablePriceUndefinedCheck,
+      showLimitedMessage,
     ],
   );
 
@@ -1964,12 +1981,20 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     };
   }, [touchCleanUp]);
 
-  const limitedToastMessage = bulkLimitedMessage?.message ?? limitedMessage;
+  const limitedToastMessage = bulkLimitedMessage
+    ? { message: bulkLimitedMessage.message, tone: "info" as const }
+    : limitedMessage;
   const limitedPurchaseOverlays = (
     <>
       {limitedToastMessage && (
-        <div className="fixed left-1/2 top-20 z-[95] -translate-x-1/2 rounded bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-lg dark:bg-slate-100 dark:text-slate-900">
-          {limitedToastMessage}
+        <div
+          className={`fixed left-1/2 top-20 z-[95] -translate-x-1/2 rounded px-4 py-2 text-sm font-medium shadow-lg ${
+            limitedToastMessage.tone === "warning"
+              ? "bg-red-600 text-white dark:bg-red-700 dark:text-white"
+              : "bg-slate-900 text-white dark:bg-slate-100 dark:text-slate-900"
+          }`}
+        >
+          {limitedToastMessage.message}
         </div>
       )}
       <LimitedPurchaseDialog
@@ -3082,7 +3107,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                 item.id,
                               )}
                               getLatestItemById={getLatestItemById}
-                              onNotify={setLimitedMessage}
+                              onNotify={showLimitedMessage}
                               onLimitedPurchaseDefer={
                                 viewMode === "execute" &&
                                 columnType === "execute"
@@ -3758,7 +3783,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           item.id,
                         )}
                         getLatestItemById={getLatestItemById}
-                        onNotify={setLimitedMessage}
+                        onNotify={showLimitedMessage}
                         onPostEventDistributionCheckRequest={
                           viewMode === "execute" && columnType === "execute"
                             ? (soldOutItem) =>
@@ -4018,7 +4043,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 item.id,
               )}
               getLatestItemById={getLatestItemById}
-              onNotify={setLimitedMessage}
+              onNotify={showLimitedMessage}
               onPostEventDistributionCheckRequest={
                 viewMode === "execute" && columnType === "execute"
                   ? (soldOutItem) =>
