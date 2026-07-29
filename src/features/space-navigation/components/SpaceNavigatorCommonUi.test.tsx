@@ -164,6 +164,11 @@ describe("SpaceNavigatorPicker", () => {
     expect(screen.getByRole("dialog", { name: "スペース一覧" })).toHaveStyle({
       bottom: "var(--footer-height, 0px)",
     });
+    expect(
+      screen.getByText(
+        "ホイールまたは上下ドラッグで候補を移動し、スペースをタップしてください。ドラッグ終了だけでは移動しません。",
+      ),
+    ).toBeInTheDocument();
   });
 
   it("uses the measured list height to show more rows while keeping the candidate centered", () => {
@@ -311,104 +316,95 @@ describe("SpaceNavigatorPicker", () => {
     expect(onSelect).toHaveBeenCalledWith(2);
   });
 
-  it("moves the PC candidate from the latest wheel position and clamps at the boundary", () => {
-    const onCandidateChange = vi.fn();
-    const onSelect = vi.fn();
-    const view = render(
-      <SpaceNavigatorPicker
-        entries={entries}
-        candidateIndex={4}
-        layoutMode="pc"
-        side="left"
-        onCandidateChange={onCandidateChange}
-        onSelect={onSelect}
-        onClose={vi.fn()}
-      />,
-    );
+  it.each(["pc", "smartphone"] as const)(
+    "moves the %s candidate from the latest wheel position and clamps at the boundary",
+    (layoutMode) => {
+      const onCandidateChange = vi.fn();
+      const onSelect = vi.fn();
+      const view = render(
+        <SpaceNavigatorPicker
+          entries={entries}
+          candidateIndex={4}
+          layoutMode={layoutMode}
+          side="left"
+          onCandidateChange={onCandidateChange}
+          onSelect={onSelect}
+          onClose={vi.fn()}
+        />,
+      );
 
-    const windowElement = screen.getByTestId("space-navigator-window");
-    const wheelDown = new WheelEvent("wheel", {
-      bubbles: true,
-      cancelable: true,
-      deltaY: 100,
-    });
-    fireEvent(windowElement, wheelDown);
-    expect(onCandidateChange).toHaveBeenLastCalledWith(5);
+      const windowElement = screen.getByTestId("space-navigator-window");
+      const wheelDown = new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 100,
+      });
+      fireEvent(windowElement, wheelDown);
+      expect(onCandidateChange).toHaveBeenLastCalledWith(5);
 
-    const secondWheelDown = new WheelEvent("wheel", {
-      bubbles: true,
-      cancelable: true,
-      deltaY: 100,
-    });
-    fireEvent(windowElement, secondWheelDown);
-    expect(onCandidateChange).toHaveBeenLastCalledWith(6);
+      const secondWheelDown = new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: 100,
+      });
+      fireEvent(windowElement, secondWheelDown);
+      expect(onCandidateChange).toHaveBeenLastCalledWith(6);
 
-    const wheelUp = new WheelEvent("wheel", {
-      bubbles: true,
-      cancelable: true,
-      deltaY: -100,
-    });
-    fireEvent(windowElement, wheelUp);
-    expect(onCandidateChange).toHaveBeenLastCalledWith(5);
-    expect(onSelect).not.toHaveBeenCalled();
+      const wheelUp = new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: -100,
+      });
+      fireEvent(windowElement, wheelUp);
+      expect(onCandidateChange).toHaveBeenLastCalledWith(5);
+      expect(onSelect).not.toHaveBeenCalled();
 
-    fireEvent.wheel(windowElement, { deltaX: 100, deltaY: 0 });
-    expect(onCandidateChange).toHaveBeenCalledTimes(3);
+      fireEvent.wheel(windowElement, { deltaX: 100, deltaY: 0 });
+      expect(onCandidateChange).toHaveBeenCalledTimes(3);
 
-    view.rerender(
-      <SpaceNavigatorPicker
-        entries={entries}
-        candidateIndex={entries.length - 1}
-        layoutMode="pc"
-        side="left"
-        onCandidateChange={onCandidateChange}
-        onSelect={onSelect}
-        onClose={vi.fn()}
-      />,
-    );
-    fireEvent.wheel(windowElement, { deltaY: 100 });
-    expect(onCandidateChange).toHaveBeenLastCalledWith(entries.length - 1);
+      view.rerender(
+        <SpaceNavigatorPicker
+          entries={entries}
+          candidateIndex={entries.length - 1}
+          layoutMode={layoutMode}
+          side="left"
+          onCandidateChange={onCandidateChange}
+          onSelect={onSelect}
+          onClose={vi.fn()}
+        />,
+      );
+      fireEvent.wheel(windowElement, { deltaY: 100 });
+      expect(onCandidateChange).toHaveBeenLastCalledWith(entries.length - 1);
+    },
+  );
 
-    const callCountAtBoundary = onCandidateChange.mock.calls.length;
-    view.rerender(
-      <SpaceNavigatorPicker
-        entries={entries}
-        candidateIndex={4}
-        layoutMode="smartphone"
-        side="left"
-        onCandidateChange={onCandidateChange}
-        onSelect={onSelect}
-        onClose={vi.fn()}
-      />,
-    );
-    fireEvent.wheel(windowElement, { deltaY: 100 });
-    expect(onCandidateChange).toHaveBeenCalledTimes(callCountAtBoundary);
-  });
+  it.each(["pc", "smartphone"] as const)(
+    "accumulates small %s trackpad deltas before advancing one space",
+    (layoutMode) => {
+      const onCandidateChange = vi.fn();
+      render(
+        <SpaceNavigatorPicker
+          entries={entries}
+          candidateIndex={4}
+          layoutMode={layoutMode}
+          side="left"
+          onCandidateChange={onCandidateChange}
+          onSelect={vi.fn()}
+          onClose={vi.fn()}
+        />,
+      );
 
-  it("accumulates small PC trackpad deltas before advancing one space", () => {
-    const onCandidateChange = vi.fn();
-    render(
-      <SpaceNavigatorPicker
-        entries={entries}
-        candidateIndex={4}
-        layoutMode="pc"
-        side="left"
-        onCandidateChange={onCandidateChange}
-        onSelect={vi.fn()}
-        onClose={vi.fn()}
-      />,
-    );
+      const windowElement = screen.getByTestId("space-navigator-window");
+      fireEvent.wheel(windowElement, { deltaY: 10 });
+      fireEvent.wheel(windowElement, { deltaY: 10 });
+      fireEvent.wheel(windowElement, { deltaY: 10 });
+      expect(onCandidateChange).not.toHaveBeenCalled();
 
-    const windowElement = screen.getByTestId("space-navigator-window");
-    fireEvent.wheel(windowElement, { deltaY: 10 });
-    fireEvent.wheel(windowElement, { deltaY: 10 });
-    fireEvent.wheel(windowElement, { deltaY: 10 });
-    expect(onCandidateChange).not.toHaveBeenCalled();
-
-    fireEvent.wheel(windowElement, { deltaY: 10 });
-    expect(onCandidateChange).toHaveBeenCalledOnce();
-    expect(onCandidateChange).toHaveBeenCalledWith(5);
-  });
+      fireEvent.wheel(windowElement, { deltaY: 10 });
+      expect(onCandidateChange).toHaveBeenCalledOnce();
+      expect(onCandidateChange).toHaveBeenCalledWith(5);
+    },
+  );
 
   it("updates only the candidate during a drag and does not select on pointer release", () => {
     const onCandidateChange = vi.fn();

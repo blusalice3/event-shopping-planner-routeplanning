@@ -9,6 +9,7 @@ import {
   type SpaceNavigatorRegistration,
 } from './SpaceNavigatorContext';
 import { SpaceNavigatorFooterButton } from './components/SpaceNavigatorFooterButton';
+import { TemporaryNavigationBanner } from './components/TemporaryNavigationBanner';
 import { useSpaceNavigatorSettings } from './hooks/useSpaceNavigatorSettings';
 import type { NavigatorItem } from './types';
 
@@ -76,6 +77,7 @@ function ContextProbe() {
   return (
     <div>
       <output data-testid="current-index">{navigator.registration?.currentIndex ?? -1}</output>
+      <output data-testid="formal-index">{navigator.registration?.formalIndex ?? -1}</output>
       <output data-testid="temporary-mode">{navigator.temporaryMode ?? 'none'}</output>
       <output data-testid="history-depth">{navigator.history.length}</output>
       <button type="button" onClick={() => void navigator.navigate(1, 'temporary')}>
@@ -150,6 +152,32 @@ describe('SpaceNavigatorContext', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: '現在地' })));
     await waitFor(() => expect(screen.getByTestId('temporary-mode')).toHaveTextContent('none'));
     expect(screen.getByTestId('history-depth')).toHaveTextContent('0');
+  });
+
+  it('switches an inspect target to temporary mode without navigating again or changing position', async () => {
+    const action = vi.fn(async () => ({ ok: true }));
+
+    render(
+      <SpaceNavigatorProvider>
+        <RegistrationHarness action={action} />
+        <ContextProbe />
+        <TemporaryNavigationBanner />
+      </SpaceNavigatorProvider>,
+    );
+
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: '確認C' })));
+    await waitFor(() => expect(screen.getByTestId('temporary-mode')).toHaveTextContent('inspect'));
+    expect(screen.getByRole('button', { name: '一時移動する' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '一時移動する' }));
+
+    await waitFor(() => expect(screen.getByTestId('temporary-mode')).toHaveTextContent('temporary'));
+    expect(screen.getByTestId('current-index')).toHaveTextContent('2');
+    expect(screen.getByTestId('formal-index')).toHaveTextContent('0');
+    expect(screen.getByTestId('history-depth')).toHaveTextContent('1');
+    expect(screen.queryByRole('button', { name: '一時移動する' })).not.toBeInTheDocument();
+    expect(action).toHaveBeenCalledTimes(1);
+    expect(action).toHaveBeenCalledWith(expect.objectContaining({ index: 2, intent: 'inspect' }));
   });
 
   it('does not create history until a warning has been confirmed', async () => {

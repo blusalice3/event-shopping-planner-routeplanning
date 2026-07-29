@@ -88,6 +88,7 @@ interface SpaceNavigatorContextValue {
     confirmed?: boolean,
   ) => Promise<SpaceNavigatorActionResult>;
   returnToPrevious: () => Promise<void>;
+  switchInspectToTemporary: () => void;
   promoteTemporary: () => Promise<SpaceNavigatorActionResult>;
   notification: string | null;
   notify: (message: string) => void;
@@ -257,6 +258,10 @@ export function SpaceNavigatorProvider({ children }: { children: React.ReactNode
     active.onInteractionEnd?.();
   }, [history]);
 
+  const switchInspectToTemporary = useCallback(() => {
+    setTemporaryMode((current) => (current === 'inspect' ? 'temporary' : current));
+  }, []);
+
   const promoteTemporary = useCallback(async (): Promise<SpaceNavigatorActionResult> => {
     const active = registrationRef.current;
     const entry = active?.entries[active.currentIndex];
@@ -302,6 +307,7 @@ export function SpaceNavigatorProvider({ children }: { children: React.ReactNode
       history,
       navigate,
       returnToPrevious,
+      switchInspectToTemporary,
       promoteTemporary,
       notification,
       notify,
@@ -322,6 +328,7 @@ export function SpaceNavigatorProvider({ children }: { children: React.ReactNode
       history,
       navigate,
       returnToPrevious,
+      switchInspectToTemporary,
       promoteTemporary,
       notification,
       notify,

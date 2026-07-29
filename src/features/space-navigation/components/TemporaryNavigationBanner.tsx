@@ -22,7 +22,7 @@ export function TemporaryNavigationBanner() {
             {current?.label ?? '選択したスペース'}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex w-full max-w-full flex-wrap items-center justify-end gap-2 sm:w-auto">
           <button
             type="button"
             onClick={() => void navigator.returnToPrevious()}
@@ -31,6 +31,15 @@ export function TemporaryNavigationBanner() {
           >
             ← {previousLabel}
           </button>
+          {navigator.isInspecting && (
+            <button
+              type="button"
+              onClick={navigator.switchInspectToTemporary}
+              className="min-h-10 rounded-lg border border-indigo-300 bg-indigo-50 px-3 py-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-100 dark:border-indigo-600 dark:bg-indigo-950/50 dark:text-indigo-200 dark:hover:bg-indigo-900/70"
+            >
+              一時移動する
+            </button>
+          )}
           <button
             type="button"
             onClick={() => void navigator.promoteTemporary()}

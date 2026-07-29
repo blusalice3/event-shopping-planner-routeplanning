@@ -56,7 +56,6 @@ export function useIndexedDbPersistence({
   const [isInitialized, setIsInitialized] = useState(false);
   const isSavingRef = useRef(false);
   const hasShownLoadErrorRef = useRef(false);
-  const hasShownSaveErrorRef = useRef(false);
   const previousSavedValuesRef = useRef<PersistedStateValues | null>(null);
   const {
     eventLists,
@@ -299,23 +298,10 @@ export function useIndexedDbPersistence({
 
         if (failed.length > 0) {
           console.error('Failed to save data to IndexedDB:', failed);
-          if (!hasShownSaveErrorRef.current) {
-            hasShownSaveErrorRef.current = true;
-            alert(
-              `保存に失敗しました。ページを再読み込みしてください。\n${failed
-                .map((failure) => failure.label || 'unknown')
-                .join('\n')}`,
-            );
-          }
           return;
         }
-        hasShownSaveErrorRef.current = false;
       } catch (error) {
         console.error('Failed to save data to IndexedDB:', error);
-        if (!hasShownSaveErrorRef.current) {
-          hasShownSaveErrorRef.current = true;
-          alert('保存に失敗しました。ページを再読み込みしてください。');
-        }
       } finally {
         isSavingRef.current = false;
       }

@@ -174,7 +174,7 @@ export function SpaceNavigatorPicker({
             }
           }}
           onWheel={(event) => {
-            if (layoutMode !== "pc" || event.deltaY === 0) return;
+            if (event.deltaY === 0) return;
             event.stopPropagation();
             const deltaScale =
               event.deltaMode === 1
@@ -362,7 +362,7 @@ export function SpaceNavigatorPicker({
         <p className="shrink-0 px-4 pb-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
           {layoutMode === "pc"
             ? "ホイールまたは上下ドラッグで候補を移動し、スペースをクリックしてください。"
-            : "一覧を上下にドラッグするか、スペースをタップしてください。ドラッグ終了だけでは移動しません。"}
+            : "ホイールまたは上下ドラッグで候補を移動し、スペースをタップしてください。ドラッグ終了だけでは移動しません。"}
         </p>
       </section>
     </div>
