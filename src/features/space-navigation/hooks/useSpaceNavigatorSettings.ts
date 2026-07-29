@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from "react";
 
-export type SpaceNavigatorSide = 'left' | 'right';
+export type SpaceNavigatorSide = "left" | "right";
 
 export interface SpaceNavigatorSettings {
   railVisible: boolean;
@@ -11,16 +11,16 @@ export interface SpaceNavigatorSettings {
 export const DEFAULT_SPACE_NAVIGATOR_SETTINGS: SpaceNavigatorSettings = {
   railVisible: true,
   footerButtonVisible: true,
-  side: 'left',
+  side: "left",
 };
 
-const STORAGE_KEY = 'spaceNavigatorSettings';
+const STORAGE_KEY = "spaceNavigatorSettings";
 
 const isSide = (value: unknown): value is SpaceNavigatorSide =>
-  value === 'left' || value === 'right';
+  value === "left" || value === "right";
 
 const readSettings = (): SpaceNavigatorSettings => {
-  if (typeof window === 'undefined') return DEFAULT_SPACE_NAVIGATOR_SETTINGS;
+  if (typeof window === "undefined") return DEFAULT_SPACE_NAVIGATOR_SETTINGS;
 
   try {
     const saved = window.localStorage.getItem(STORAGE_KEY);
@@ -29,14 +29,16 @@ const readSettings = (): SpaceNavigatorSettings => {
     const parsed = JSON.parse(saved) as Partial<SpaceNavigatorSettings>;
     return {
       railVisible:
-        typeof parsed.railVisible === 'boolean'
+        typeof parsed.railVisible === "boolean"
           ? parsed.railVisible
           : DEFAULT_SPACE_NAVIGATOR_SETTINGS.railVisible,
       footerButtonVisible:
-        typeof parsed.footerButtonVisible === 'boolean'
+        typeof parsed.footerButtonVisible === "boolean"
           ? parsed.footerButtonVisible
           : DEFAULT_SPACE_NAVIGATOR_SETTINGS.footerButtonVisible,
-      side: isSide(parsed.side) ? parsed.side : DEFAULT_SPACE_NAVIGATOR_SETTINGS.side,
+      side: isSide(parsed.side)
+        ? parsed.side
+        : DEFAULT_SPACE_NAVIGATOR_SETTINGS.side,
     };
   } catch {
     return DEFAULT_SPACE_NAVIGATOR_SETTINGS;
@@ -44,7 +46,8 @@ const readSettings = (): SpaceNavigatorSettings => {
 };
 
 export function useSpaceNavigatorSettings() {
-  const [settings, setSettings] = useState<SpaceNavigatorSettings>(readSettings);
+  const [settings, setSettings] =
+    useState<SpaceNavigatorSettings>(readSettings);
 
   useEffect(() => {
     try {
@@ -54,9 +57,12 @@ export function useSpaceNavigatorSettings() {
     }
   }, [settings]);
 
-  const updateSettings = useCallback((patch: Partial<SpaceNavigatorSettings>) => {
-    setSettings((current) => ({ ...current, ...patch }));
-  }, []);
+  const updateSettings = useCallback(
+    (patch: Partial<SpaceNavigatorSettings>) => {
+      setSettings((current) => ({ ...current, ...patch }));
+    },
+    [],
+  );
 
   const resetSettings = useCallback(() => {
     setSettings(DEFAULT_SPACE_NAVIGATOR_SETTINGS);

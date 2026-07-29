@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { BlockDefinition, DayMapData, HallDefinition } from '../../types/map';
-import { isPointInPolygonInclusive } from '../../utils/mapRoutePolygon';
-import { validateHallPolygon } from '../../utils/polygonValidation';
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { BlockDefinition, DayMapData, HallDefinition } from "../../types/map";
+import { isPointInPolygonInclusive } from "../../utils/mapRoutePolygon";
+import { validateHallPolygon } from "../../utils/polygonValidation";
 
 interface HallDefinitionPanelProps {
   isOpen: boolean;
@@ -22,18 +22,18 @@ interface HallDefinitionPanelProps {
 }
 
 const HALL_COLORS = [
-  '#FFE0B2',
-  '#FFCCBC',
-  '#D7CCC8',
-  '#CFD8DC',
-  '#B2DFDB',
-  '#C8E6C9',
-  '#DCEDC8',
-  '#F0F4C3',
-  '#FFF9C4',
-  '#FFECB3',
-  '#E1BEE7',
-  '#D1C4E9',
+  "#FFE0B2",
+  "#FFCCBC",
+  "#D7CCC8",
+  "#CFD8DC",
+  "#B2DFDB",
+  "#C8E6C9",
+  "#DCEDC8",
+  "#F0F4C3",
+  "#FFF9C4",
+  "#FFECB3",
+  "#E1BEE7",
+  "#D1C4E9",
 ];
 
 interface EditingHallData {
@@ -53,17 +53,22 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
   pendingVertexSelection,
   onClearPendingVertexSelection,
   eventDates = [],
-  activeEventDate = '',
+  activeEventDate = "",
   mapTabDates = [],
   onSyncToOtherDates,
 }) => {
   const [localHalls, setLocalHalls] = useState<HallDefinition[]>(halls);
-  const [selectedHallIndex, setSelectedHallIndex] = useState<number | null>(null);
-  const [editingHall, setEditingHall] = useState<Partial<HallDefinition> | null>(null);
+  const [selectedHallIndex, setSelectedHallIndex] = useState<number | null>(
+    null,
+  );
+  const [editingHall, setEditingHall] =
+    useState<Partial<HallDefinition> | null>(null);
   const [isAddingNew, setIsAddingNew] = useState(false);
-  const [activeTab, setActiveTab] = useState<'list' | 'edit'>('list');
+  const [activeTab, setActiveTab] = useState<"list" | "edit">("list");
   const [showSyncUI, setShowSyncUI] = useState(false);
-  const [syncTargetDates, setSyncTargetDates] = useState<Set<string>>(new Set());
+  const [syncTargetDates, setSyncTargetDates] = useState<Set<string>>(
+    new Set(),
+  );
 
   const otherMapDates = useMemo(
     () => mapTabDates.filter((d) => d !== activeEventDate),
@@ -98,7 +103,13 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
         maxCol: mapData.maxCol,
       },
     });
-  }, [editingHall?.vertices, editingHall?.id, localHalls, mapData.maxRow, mapData.maxCol]);
+  }, [
+    editingHall?.vertices,
+    editingHall?.id,
+    localHalls,
+    mapData.maxRow,
+    mapData.maxCol,
+  ]);
 
   useEffect(() => {
     if (!pendingVertexSelection || !isOpen) return;
@@ -111,12 +122,12 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
       setEditingHall(data.hall);
       setIsAddingNew(data.isAddingNew);
       setSelectedHallIndex(data.selectedIndex);
-      setActiveTab('edit');
+      setActiveTab("edit");
     }
 
     if (vertices && vertices.length >= 4) {
       setEditingHall((prev) => ({ ...(prev || {}), vertices: [...vertices] }));
-      setActiveTab('edit');
+      setActiveTab("edit");
     }
 
     onClearPendingVertexSelection?.();
@@ -126,11 +137,11 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
     setIsAddingNew(true);
     setSelectedHallIndex(null);
     setEditingHall({
-      name: '',
+      name: "",
       vertices: [],
       color: HALL_COLORS[localHalls.length % HALL_COLORS.length],
     });
-    setActiveTab('edit');
+    setActiveTab("edit");
   }, [localHalls.length]);
 
   const handleSelectHall = useCallback(
@@ -138,7 +149,7 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
       setSelectedHallIndex(index);
       setEditingHall({ ...localHalls[index] });
       setIsAddingNew(false);
-      setActiveTab('edit');
+      setActiveTab("edit");
     },
     [localHalls],
   );
@@ -151,22 +162,31 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
       currentHalls: localHalls,
     };
     onStartVertexSelection(editingData);
-  }, [editingHall, isAddingNew, selectedHallIndex, localHalls, onStartVertexSelection]);
+  }, [
+    editingHall,
+    isAddingNew,
+    selectedHallIndex,
+    localHalls,
+    onStartVertexSelection,
+  ]);
 
   const handleSaveHall = useCallback(() => {
     if (!editingHall?.name?.trim()) {
-      alert('ホール名を入力してください。');
+      alert("ホール名を入力してください。");
       return;
     }
 
     // no-map 由来ホール: 頂点が未設定で blockNames を持つ場合は
     // ポリゴン検証をスキップして名称/色の変更のみ許容する
-    const hasPolygon = !!editingHall.vertices && editingHall.vertices.length >= 4;
+    const hasPolygon =
+      !!editingHall.vertices && editingHall.vertices.length >= 4;
     const isMaplessEdit =
-      !hasPolygon && !!editingHall.blockNames && editingHall.blockNames.length > 0;
+      !hasPolygon &&
+      !!editingHall.blockNames &&
+      editingHall.blockNames.length > 0;
 
     if (!hasPolygon && !isMaplessEdit) {
-      alert('4〜6個の頂点を選択してください。');
+      alert("4〜6個の頂点を選択してください。");
       return;
     }
 
@@ -180,15 +200,21 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
           maxCol: mapData.maxCol,
         },
       });
-      const errors = validation.issues.filter((issue) => issue.level === 'error');
+      const errors = validation.issues.filter(
+        (issue) => issue.level === "error",
+      );
       if (errors.length > 0) {
-        alert(`保存できません:\n${errors.map((issue) => `・${issue.message}`).join('\n')}`);
+        alert(
+          `保存できません:\n${errors.map((issue) => `・${issue.message}`).join("\n")}`,
+        );
         return;
       }
-      const warnings = validation.issues.filter((issue) => issue.level === 'warning');
+      const warnings = validation.issues.filter(
+        (issue) => issue.level === "warning",
+      );
       if (warnings.length > 0) {
         const confirmed = confirm(
-          `以下の警告があります:\n${warnings.map((issue) => `・${issue.message}`).join('\n')}\n\nこのまま保存しますか？`,
+          `以下の警告があります:\n${warnings.map((issue) => `・${issue.message}`).join("\n")}\n\nこのまま保存しますか？`,
         );
         if (!confirmed) return;
       }
@@ -196,7 +222,9 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
 
     const name = editingHall.name.trim();
     if (isAddingNew && localHalls.find((hall) => hall.name === name)) {
-      const shouldReplace = confirm(`「${name}」は既に存在します。置き換えますか？`);
+      const shouldReplace = confirm(
+        `「${name}」は既に存在します。置き換えますか？`,
+      );
       if (!shouldReplace) return;
       setLocalHalls((prev) => prev.filter((hall) => hall.name !== name));
     }
@@ -205,7 +233,9 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
       id: editingHall.id || `hall-${Date.now()}`,
       name,
       vertices: hasPolygon ? editingHall.vertices! : [],
-      color: editingHall.color || HALL_COLORS[localHalls.length % HALL_COLORS.length],
+      color:
+        editingHall.color ||
+        HALL_COLORS[localHalls.length % HALL_COLORS.length],
       // ポリゴンを設定した場合は blockNames を破棄してマップ側ホールへ移行
       ...(isMaplessEdit ? { blockNames: editingHall.blockNames } : {}),
     };
@@ -213,20 +243,29 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
     if (isAddingNew) {
       setLocalHalls((prev) => [...prev, saved]);
     } else if (selectedHallIndex !== null) {
-      setLocalHalls((prev) => prev.map((hall, i) => (i === selectedHallIndex ? saved : hall)));
+      setLocalHalls((prev) =>
+        prev.map((hall, i) => (i === selectedHallIndex ? saved : hall)),
+      );
     }
 
     setEditingHall(null);
     setSelectedHallIndex(null);
     setIsAddingNew(false);
-    setActiveTab('list');
-  }, [editingHall, isAddingNew, localHalls, mapData.maxRow, mapData.maxCol, selectedHallIndex]);
+    setActiveTab("list");
+  }, [
+    editingHall,
+    isAddingNew,
+    localHalls,
+    mapData.maxRow,
+    mapData.maxCol,
+    selectedHallIndex,
+  ]);
 
   const handleCancelEdit = useCallback(() => {
     setEditingHall(null);
     setSelectedHallIndex(null);
     setIsAddingNew(false);
-    setActiveTab('list');
+    setActiveTab("list");
   }, []);
 
   const handleDeleteHall = useCallback(
@@ -238,7 +277,7 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
         setSelectedHallIndex(null);
         setEditingHall(null);
         setIsAddingNew(false);
-        setActiveTab('list');
+        setActiveTab("list");
       }
     },
     [localHalls, selectedHallIndex],
@@ -255,7 +294,12 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
 
   const handleSyncExecute = useCallback(() => {
     if (syncTargetDates.size === 0 || !onSyncToOtherDates) return;
-    if (!confirm(`選択した${syncTargetDates.size}日分のホール定義を上書きします。よろしいですか？`)) return;
+    if (
+      !confirm(
+        `選択した${syncTargetDates.size}日分のホール定義を上書きします。よろしいですか？`,
+      )
+    )
+      return;
     onSyncToOtherDates(Array.from(syncTargetDates));
     setShowSyncUI(false);
     setSyncTargetDates(new Set());
@@ -263,7 +307,12 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
 
   const handleSyncAll = useCallback(() => {
     if (!onSyncToOtherDates || otherMapDates.length === 0) return;
-    if (!confirm(`全ての他の日付（${otherMapDates.length}日分）のホール定義を上書きします。よろしいですか？`)) return;
+    if (
+      !confirm(
+        `全ての他の日付（${otherMapDates.length}日分）のホール定義を上書きします。よろしいですか？`,
+      )
+    )
+      return;
     onSyncToOtherDates(otherMapDates);
     setShowSyncUI(false);
     setSyncTargetDates(new Set());
@@ -275,7 +324,9 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
       <div className="flex w-full max-w-4xl max-h-[90vh] flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-slate-800">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-700">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">ホール定義エリア設定</h2>
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+            ホール定義エリア設定
+          </h2>
           <button
             onClick={() => {
               setLocalHalls(halls);
@@ -290,28 +341,28 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
         <div className="flex-1 overflow-auto p-6">
           <div className="mb-4 flex gap-2">
             <button
-              onClick={() => setActiveTab('list')}
+              onClick={() => setActiveTab("list")}
               className={`px-3 py-1.5 text-sm rounded ${
-                activeTab === 'list'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+                activeTab === "list"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
               }`}
             >
               一覧
             </button>
             <button
-              onClick={() => setActiveTab('edit')}
+              onClick={() => setActiveTab("edit")}
               className={`px-3 py-1.5 text-sm rounded ${
-                activeTab === 'edit'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+                activeTab === "edit"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
               }`}
             >
               編集
             </button>
           </div>
 
-          {activeTab === 'list' && (
+          {activeTab === "list" && (
             <div>
               <div className="mb-4 flex items-center justify-between">
                 <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
@@ -325,7 +376,10 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                     + 新規
                   </button>
                   <button
-                    onClick={() => confirm('すべてのホール定義を削除しますか？') && setLocalHalls([])}
+                    onClick={() =>
+                      confirm("すべてのホール定義を削除しますか？") &&
+                      setLocalHalls([])
+                    }
                     className="rounded bg-red-100 px-3 py-1.5 text-xs text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400"
                   >
                     全削除
@@ -346,8 +400,8 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                         key={hall.id}
                         className={`rounded-lg border p-3 transition-colors ${
                           selectedHallIndex === i
-                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                            : 'border-slate-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700/50'
+                            ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                            : "border-slate-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700/50"
                         }`}
                       >
                         <div className="flex items-center justify-between">
@@ -357,11 +411,13 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                           >
                             <div
                               className="flex h-8 w-8 items-center justify-center rounded text-xs font-bold"
-                              style={{ backgroundColor: hall.color || '#FFE0B2' }}
+                              style={{
+                                backgroundColor: hall.color || "#FFE0B2",
+                              }}
                             >
                               {hall.vertices && hall.vertices.length >= 4
                                 ? `${hall.vertices.length}角`
-                                : 'ブロック'}
+                                : "ブロック"}
                             </div>
                             <div>
                               <div className="text-sm font-medium text-slate-900 dark:text-white">
@@ -387,19 +443,21 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
             </div>
           )}
 
-          {activeTab === 'edit' && (
+          {activeTab === "edit" && (
             <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-900">
               {editingHall ? (
                 <div className="space-y-4">
                   <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                    {isAddingNew ? '新規ホール追加' : 'ホール編集'}
+                    {isAddingNew ? "新規ホール追加" : "ホール編集"}
                   </h3>
 
                   {!isAddingNew &&
-                    (!editingHall.vertices || editingHall.vertices.length < 4) &&
+                    (!editingHall.vertices ||
+                      editingHall.vertices.length < 4) &&
                     !!editingHall.blockNames?.length && (
                       <div className="rounded border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-                        このホールは現在ブロック指定のみで定義されています（{editingHall.blockNames.length}ブロック）。
+                        このホールは現在ブロック指定のみで定義されています（
+                        {editingHall.blockNames.length}ブロック）。
                         ポリゴンを設定するとマップ側ホールへ移行します（ブロック指定は破棄されます）。
                         名称・色のみの変更であればそのまま保存できます。
                       </div>
@@ -411,8 +469,13 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                     </label>
                     <input
                       type="text"
-                      value={editingHall.name || ''}
-                      onChange={(e) => setEditingHall((prev) => ({ ...prev, name: e.target.value }))}
+                      value={editingHall.name || ""}
+                      onChange={(e) =>
+                        setEditingHall((prev) => ({
+                          ...prev,
+                          name: e.target.value,
+                        }))
+                      }
                       placeholder="例: 東1ホール"
                       className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
                     />
@@ -428,28 +491,32 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                     >
                       マップ上で頂点を選択
                     </button>
-                    {editingHall.vertices && editingHall.vertices.length > 0 && (
-                      <div className="mt-2 rounded bg-green-50 p-2 dark:bg-green-900/20">
-                        <div className="text-xs text-green-700 dark:text-green-400">
-                          選択済み: {editingHall.vertices.length}頂点
+                    {editingHall.vertices &&
+                      editingHall.vertices.length > 0 && (
+                        <div className="mt-2 rounded bg-green-50 p-2 dark:bg-green-900/20">
+                          <div className="text-xs text-green-700 dark:text-green-400">
+                            選択済み: {editingHall.vertices.length}頂点
+                          </div>
+                          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            {editingHall.vertices
+                              .map((v) => `(${v.row},${v.col})`)
+                              .join(" → ")}
+                          </div>
                         </div>
-                        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-                          {editingHall.vertices.map((v) => `(${v.row},${v.col})`).join(' → ')}
-                        </div>
-                      </div>
-                    )}
+                      )}
                     {liveValidation && liveValidation.issues.length > 0 && (
                       <div className="mt-2 rounded border border-amber-300 bg-amber-50 p-2 dark:border-amber-700 dark:bg-amber-900/20">
                         {liveValidation.issues.map((issue) => (
                           <div
                             key={issue.code}
                             className={`text-xs ${
-                              issue.level === 'error'
-                                ? 'text-red-700 dark:text-red-400'
-                                : 'text-amber-700 dark:text-amber-400'
+                              issue.level === "error"
+                                ? "text-red-700 dark:text-red-400"
+                                : "text-amber-700 dark:text-amber-400"
                             }`}
                           >
-                            {issue.level === 'error' ? 'エラー' : '警告'}: {issue.message}
+                            {issue.level === "error" ? "エラー" : "警告"}:{" "}
+                            {issue.message}
                           </div>
                         ))}
                       </div>
@@ -464,9 +531,13 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                       {HALL_COLORS.map((color) => (
                         <button
                           key={color}
-                          onClick={() => setEditingHall((prev) => ({ ...prev, color }))}
+                          onClick={() =>
+                            setEditingHall((prev) => ({ ...prev, color }))
+                          }
                           className={`h-8 w-8 rounded border-2 ${
-                            editingHall.color === color ? 'border-blue-500' : 'border-transparent'
+                            editingHall.color === color
+                              ? "border-blue-500"
+                              : "border-transparent"
                           }`}
                           style={{ backgroundColor: color }}
                         />
@@ -497,7 +568,7 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                       onClick={handleSaveHall}
                       className="flex-1 rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
                     >
-                      {isAddingNew ? '追加' : '保存'}
+                      {isAddingNew ? "追加" : "保存"}
                     </button>
                     <button
                       onClick={handleCancelEdit}
@@ -509,9 +580,11 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                 </div>
               ) : (
                 <div className="py-10 text-center text-slate-500 dark:text-slate-400">
-                  <p className="mb-2">編集するホールを一覧から選択してください。</p>
+                  <p className="mb-2">
+                    編集するホールを一覧から選択してください。
+                  </p>
                   <button
-                    onClick={() => setActiveTab('list')}
+                    onClick={() => setActiveTab("list")}
                     className="rounded bg-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
                   >
                     一覧へ戻る
@@ -546,7 +619,9 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                         onChange={() => handleToggleSyncDate(date)}
                         className="w-4 h-4 text-indigo-600 rounded"
                       />
-                      <span className="text-sm text-slate-700 dark:text-slate-200">{date}</span>
+                      <span className="text-sm text-slate-700 dark:text-slate-200">
+                        {date}
+                      </span>
                     </label>
                   ))}
                 </div>
@@ -570,7 +645,10 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                   </>
                 )}
                 <button
-                  onClick={() => { setShowSyncUI(false); setSyncTargetDates(new Set()); }}
+                  onClick={() => {
+                    setShowSyncUI(false);
+                    setSyncTargetDates(new Set());
+                  }}
                   className="px-3 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                 >
                   閉じる
@@ -588,18 +666,20 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
             >
               キャンセル
             </button>
-            {onSyncToOtherDates && otherMapDates.length > 0 && localHalls.length > 0 && (
-              <button
-                onClick={() => setShowSyncUI((v) => !v)}
-                className={`rounded px-4 py-2 text-sm transition-colors ${
-                  showSyncUI
-                    ? 'text-indigo-700 bg-indigo-100 dark:text-indigo-300 dark:bg-indigo-800/40'
-                    : 'text-indigo-600 bg-indigo-50 dark:text-indigo-400 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-800/40'
-                }`}
-              >
-                他の日に同期
-              </button>
-            )}
+            {onSyncToOtherDates &&
+              otherMapDates.length > 0 &&
+              localHalls.length > 0 && (
+                <button
+                  onClick={() => setShowSyncUI((v) => !v)}
+                  className={`rounded px-4 py-2 text-sm transition-colors ${
+                    showSyncUI
+                      ? "text-indigo-700 bg-indigo-100 dark:text-indigo-300 dark:bg-indigo-800/40"
+                      : "text-indigo-600 bg-indigo-50 dark:text-indigo-400 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-800/40"
+                  }`}
+                >
+                  他の日に同期
+                </button>
+              )}
             <button
               onClick={() => {
                 onUpdateHalls(localHalls);
@@ -624,7 +704,8 @@ function isPointOnSegment(
   a: { row: number; col: number },
   b: { row: number; col: number },
 ): boolean {
-  const cross = (b.col - a.col) * (row - a.row) - (b.row - a.row) * (col - a.col);
+  const cross =
+    (b.col - a.col) * (row - a.row) - (b.row - a.row) * (col - a.col);
   if (Math.abs(cross) > POLYGON_EPSILON) return false;
 
   const minCol = Math.min(a.col, b.col) - POLYGON_EPSILON;

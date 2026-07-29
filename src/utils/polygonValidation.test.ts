@@ -1,15 +1,19 @@
-import { describe, expect, it } from 'vitest';
-import { HallDefinition } from '../types/map';
-import { calculatePolygonArea, validateHallPolygon } from './polygonValidation';
+import { describe, expect, it } from "vitest";
+import { HallDefinition } from "../types/map";
+import { calculatePolygonArea, validateHallPolygon } from "./polygonValidation";
 
-const createHall = (id: string, name: string, vertices: { row: number; col: number }[]): HallDefinition => ({
+const createHall = (
+  id: string,
+  name: string,
+  vertices: { row: number; col: number }[],
+): HallDefinition => ({
   id,
   name,
   vertices,
 });
 
-describe('polygonValidation', () => {
-  it('calculates polygon area', () => {
+describe("polygonValidation", () => {
+  it("calculates polygon area", () => {
     const area = calculatePolygonArea([
       { row: 1, col: 1 },
       { row: 1, col: 5 },
@@ -19,7 +23,7 @@ describe('polygonValidation', () => {
     expect(area).toBe(12);
   });
 
-  it('detects self intersection as an error', () => {
+  it("detects self intersection as an error", () => {
     const result = validateHallPolygon({
       vertices: [
         { row: 1, col: 1 },
@@ -31,11 +35,13 @@ describe('polygonValidation', () => {
       mapBounds: { maxRow: 10, maxCol: 10 },
     });
 
-    expect(result.issues.some((issue) => issue.code === 'self_intersection')).toBe(true);
-    expect(result.issues.some((issue) => issue.level === 'error')).toBe(true);
+    expect(
+      result.issues.some((issue) => issue.code === "self_intersection"),
+    ).toBe(true);
+    expect(result.issues.some((issue) => issue.level === "error")).toBe(true);
   });
 
-  it('detects too-small polygons as errors', () => {
+  it("detects too-small polygons as errors", () => {
     const result = validateHallPolygon({
       vertices: [
         { row: 1, col: 1 },
@@ -48,13 +54,15 @@ describe('polygonValidation', () => {
       minArea: 4,
     });
 
-    expect(result.issues.some((issue) => issue.code === 'too_small' && issue.level === 'error')).toBe(
-      true,
-    );
+    expect(
+      result.issues.some(
+        (issue) => issue.code === "too_small" && issue.level === "error",
+      ),
+    ).toBe(true);
   });
 
-  it('warns when overlap with existing hall is high', () => {
-    const existingHall = createHall('h1', '既存ホール', [
+  it("warns when overlap with existing hall is high", () => {
+    const existingHall = createHall("h1", "既存ホール", [
       { row: 2, col: 2 },
       { row: 2, col: 8 },
       { row: 8, col: 8 },
@@ -74,11 +82,14 @@ describe('polygonValidation', () => {
     });
 
     expect(
-      result.issues.some((issue) => issue.code === 'overlap_with_existing' && issue.level === 'warning'),
+      result.issues.some(
+        (issue) =>
+          issue.code === "overlap_with_existing" && issue.level === "warning",
+      ),
     ).toBe(true);
   });
 
-  it('returns no issues for a valid polygon', () => {
+  it("returns no issues for a valid polygon", () => {
     const result = validateHallPolygon({
       vertices: [
         { row: 1, col: 1 },

@@ -1,10 +1,15 @@
-import type { ExecuteModeItems, ShoppingItem } from '../../types/item';
-import { insertItemSorted } from '../../utils/itemComparison';
-import type { EventUpdateDiff } from './updateDiff';
+import type { ExecuteModeItems, ShoppingItem } from "../../types/item";
+import { insertItemSorted } from "../../utils/itemComparison";
+import type { EventUpdateDiff } from "./updateDiff";
 
-type EventUpdatePayload = Pick<EventUpdateDiff, 'itemsToDelete' | 'itemsToUpdate' | 'itemsToAdd'>;
+type EventUpdatePayload = Pick<
+  EventUpdateDiff,
+  "itemsToDelete" | "itemsToUpdate" | "itemsToAdd"
+>;
 
-function createSpreadsheetItem(itemData: EventUpdatePayload['itemsToAdd'][number]): ShoppingItem {
+function createSpreadsheetItem(
+  itemData: EventUpdatePayload["itemsToAdd"][number],
+): ShoppingItem {
   return {
     id: crypto.randomUUID(),
     circle: itemData.circle,
@@ -15,9 +20,9 @@ function createSpreadsheetItem(itemData: EventUpdatePayload['itemsToAdd'][number
     price: itemData.price,
     quantity: itemData.quantity ?? 1,
     remarks: itemData.remarks,
-    purchaseStatus: 'None',
-    source: 'spreadsheet',
-    protectionLevel: 'none',
+    purchaseStatus: "None",
+    source: "spreadsheet",
+    protectionLevel: "none",
     ...(itemData.url ? { url: itemData.url } : {}),
   };
 }
@@ -27,7 +32,9 @@ export function applyEventUpdateToItems(
   updateData: EventUpdatePayload,
 ): ShoppingItem[] {
   const deleteIds = new Set(updateData.itemsToDelete.map((item) => item.id));
-  const updateMap = new Map(updateData.itemsToUpdate.map((item) => [item.id, item]));
+  const updateMap = new Map(
+    updateData.itemsToUpdate.map((item) => [item.id, item]),
+  );
 
   let updatedItems = currentItems.filter((item) => !deleteIds.has(item.id));
   updatedItems = updatedItems.map((item) => updateMap.get(item.id) || item);
@@ -47,7 +54,9 @@ export function removeDeletedIdsFromExecuteModeItems(
   const updatedEventItems: ExecuteModeItems = {};
 
   Object.keys(executeModeItems).forEach((eventDate) => {
-    updatedEventItems[eventDate] = executeModeItems[eventDate].filter((id) => !deleteIds.has(id));
+    updatedEventItems[eventDate] = executeModeItems[eventDate].filter(
+      (id) => !deleteIds.has(id),
+    );
   });
 
   return updatedEventItems;

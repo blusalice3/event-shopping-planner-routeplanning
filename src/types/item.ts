@@ -1,22 +1,23 @@
 export const PurchaseStatuses = [
-  'None',
-  'Purchased',
-  'SoldOut',
-  'Absent',
-  'Postpone',
-  'Late',
-  'LimitedPurchase',
+  "None",
+  "Purchased",
+  "SoldOut",
+  "Absent",
+  "Postpone",
+  "Late",
+  "LimitedPurchase",
 ] as const;
 
 export type PurchaseStatus = (typeof PurchaseStatuses)[number];
 
-export const PurchaseStatusControlModes = ['cycle', 'radial'] as const;
-export type PurchaseStatusControlMode = (typeof PurchaseStatusControlModes)[number];
+export const PurchaseStatusControlModes = ["cycle", "radial"] as const;
+export type PurchaseStatusControlMode =
+  (typeof PurchaseStatusControlModes)[number];
 
-export const ProtectionLevels = ['full', 'deletable', 'none'] as const;
+export const ProtectionLevels = ["full", "deletable", "none"] as const;
 export type ProtectionLevel = (typeof ProtectionLevels)[number];
 
-export const ItemSources = ['spreadsheet', 'app'] as const;
+export const ItemSources = ["spreadsheet", "app"] as const;
 export type ItemSource = (typeof ItemSources)[number];
 
 export interface ShoppingItem {
@@ -32,7 +33,7 @@ export interface ShoppingItem {
   limitedPurchasedQuantity?: number;
   remarks: string;
   url?: string;
-  priorityLevel?: 'none' | 'priority' | 'highest';
+  priorityLevel?: "none" | "priority" | "highest";
   protectionLevel?: ProtectionLevel;
   source?: ItemSource;
   assignedTo?: string;
@@ -42,7 +43,7 @@ export interface ShoppingItem {
   manualHallId?: string;
 }
 
-export type ViewMode = 'edit' | 'execute' | 'focus';
+export type ViewMode = "edit" | "execute" | "focus";
 
 export interface EventMetadata {
   spreadsheetUrl: string;

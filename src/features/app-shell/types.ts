@@ -1,23 +1,27 @@
-import type { ViewMode } from '../../types/item';
+import type { ViewMode } from "../../types/item";
 
-export type ActiveTab = 'eventList' | 'import' | string;
+export type ActiveTab = "eventList" | "import" | string;
 export type SortState =
-  | 'Manual'
-  | 'Postpone'
-  | 'Late'
-  | 'Absent'
-  | 'SoldOut'
-  | 'None'
-  | 'Purchased'
-  | 'LimitedPurchase';
-export type BulkSortDirection = 'asc' | 'desc';
-export type BlockSortDirection = 'asc' | 'desc';
-export type LayoutMode = 'pc' | 'smartphone';
-export type SmartInsertMode = 'map' | 'preview';
-export type ColumnType = 'execute' | 'candidate';
+  | "Manual"
+  | "Postpone"
+  | "Late"
+  | "Absent"
+  | "SoldOut"
+  | "None"
+  | "Purchased"
+  | "LimitedPurchase";
+export type BulkSortDirection = "asc" | "desc";
+export type BlockSortDirection = "asc" | "desc";
+export type LayoutMode = "pc" | "smartphone";
+export type SmartInsertMode = "map" | "preview";
+export type ColumnType = "execute" | "candidate";
 
 export type CellPosition = { row: number; col: number };
-export type CellSelectionType = 'corner' | 'multiCorner' | 'rangeStart' | 'individual';
+export type CellSelectionType =
+  | "corner"
+  | "multiCorner"
+  | "rangeStart"
+  | "individual";
 
 export type CellSelectionMode = {
   type: CellSelectionType;
@@ -54,7 +58,7 @@ export type MapTabMenuPosition = {
 export type RangeSelectionState = {
   itemId: string;
   columnType: ColumnType;
-  sourceType?: 'item' | 'spaceHeader';
+  sourceType?: "item" | "spaceHeader";
 } | null;
 
 export type AppViewMode = ViewMode;

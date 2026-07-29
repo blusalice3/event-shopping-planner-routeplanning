@@ -1,15 +1,15 @@
-import type { RouteSegment } from '../types/map';
-import type { MapRoutePoint } from './mapRoutePoints';
+import type { RouteSegment } from "../types/map";
+import type { MapRoutePoint } from "./mapRoutePoints";
 
 export type MapRouteHitResult =
   | {
-      type: 'marker';
+      type: "marker";
       itemId: string;
       order: number;
       duplicateCandidates: Array<{ itemId: string; order: number }>;
     }
   | {
-      type: 'line';
+      type: "line";
       fromItemId: string;
       fromOrder?: number;
       segment: RouteSegment;
@@ -36,13 +36,20 @@ const distanceToSegment = (
   const dx = x2 - x1;
   const dy = y2 - y1;
   if (dx === 0 && dy === 0) return Math.hypot(px - x1, py - y1);
-  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
+  const t = Math.max(
+    0,
+    Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)),
+  );
   return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 };
 
-export function hitTestMapRoute(params: HitTestMapRouteParams): MapRouteHitResult | null {
-  const markerRadiusPx = params.markerRadiusPx ?? Math.max(12, params.cellSize * 0.35);
-  const lineThresholdPx = params.lineThresholdPx ?? Math.max(8, params.cellSize * 0.25);
+export function hitTestMapRoute(
+  params: HitTestMapRouteParams,
+): MapRouteHitResult | null {
+  const markerRadiusPx =
+    params.markerRadiusPx ?? Math.max(12, params.cellSize * 0.35);
+  const lineThresholdPx =
+    params.lineThresholdPx ?? Math.max(8, params.cellSize * 0.25);
 
   const pointsByCell = new Map<string, MapRoutePoint[]>();
   params.routePoints.forEach((point) => {
@@ -57,9 +64,11 @@ export function hitTestMapRoute(params: HitTestMapRouteParams): MapRouteHitResul
     const cx = (point.col - 0.5) * params.cellSize;
     const cy = (point.row - 0.5) * params.cellSize;
     if (Math.hypot(params.mapX - cx, params.mapY - cy) <= markerRadiusPx) {
-      const sortedCandidates = [...candidates].sort((a, b) => a.order - b.order);
+      const sortedCandidates = [...candidates].sort(
+        (a, b) => a.order - b.order,
+      );
       return {
-        type: 'marker',
+        type: "marker",
         itemId: sortedCandidates[0].itemId,
         order: sortedCandidates[0].order,
         duplicateCandidates: sortedCandidates.map((candidate) => ({
@@ -70,15 +79,17 @@ export function hitTestMapRoute(params: HitTestMapRouteParams): MapRouteHitResul
     }
   }
 
-  let best:
-    | {
-        distance: number;
-        segmentIndex: number;
-        segment: RouteSegment;
-      }
-    | null = null;
+  let best: {
+    distance: number;
+    segmentIndex: number;
+    segment: RouteSegment;
+  } | null = null;
 
-  for (let segmentIndex = 0; segmentIndex < params.routeSegments.length; segmentIndex += 1) {
+  for (
+    let segmentIndex = 0;
+    segmentIndex < params.routeSegments.length;
+    segmentIndex += 1
+  ) {
     const segment = params.routeSegments[segmentIndex];
     if (!segment.fromItemId || segment.path.length < 2) continue;
     for (let i = 0; i < segment.path.length - 1; i += 1) {
@@ -112,7 +123,7 @@ export function hitTestMapRoute(params: HitTestMapRouteParams): MapRouteHitResul
 
   if (!best || !best.segment.fromItemId) return null;
   return {
-    type: 'line',
+    type: "line",
     fromItemId: best.segment.fromItemId,
     fromOrder: best.segment.fromOrder,
     segment: best.segment,

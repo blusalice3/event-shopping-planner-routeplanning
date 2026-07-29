@@ -1,4 +1,4 @@
-import React, { useRef } from 'react';
+import React, { useRef } from "react";
 
 interface SearchBarProps {
   searchKeyword: string;
@@ -18,7 +18,7 @@ const SearchBar: React.FC<SearchBarProps> = ({
   const inputRef = useRef<HTMLInputElement>(null);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter') {
+    if (e.key === "Enter") {
       e.preventDefault();
       onSearchNext();
     }
@@ -53,7 +53,9 @@ const SearchBar: React.FC<SearchBarProps> = ({
         </span>
       )}
       {searchKeyword.trim() && matchCount === 0 && (
-        <span className="text-xs text-red-600 dark:text-red-400 whitespace-nowrap">該当なし</span>
+        <span className="text-xs text-red-600 dark:text-red-400 whitespace-nowrap">
+          該当なし
+        </span>
       )}
     </div>
   );

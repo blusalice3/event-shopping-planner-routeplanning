@@ -1,8 +1,8 @@
-import React from 'react';
-import { ShoppingItem } from '../../types/item';
-import { BlockDefinition } from '../../types/map';
-import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
-import { findRouteLookupNumberCell } from '../../utils/mapRoutingSignature';
+import React from "react";
+import { ShoppingItem } from "../../types/item";
+import { BlockDefinition } from "../../types/map";
+import { extractNumberFromItemNumber } from "../../utils/xlsxMapParser";
+import { findRouteLookupNumberCell } from "../../utils/mapRoutingSignature";
 
 interface MapVisitListPanelProps {
   isOpen: boolean;
@@ -86,12 +86,19 @@ const MapVisitListPanel: React.FC<MapVisitListPanelProps> = ({
     <div className="fixed right-0 top-0 h-full w-80 bg-white dark:bg-slate-800 shadow-xl z-40 flex flex-col">
       {/* ヘッダー */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-        <h3 className="font-semibold text-slate-900 dark:text-white">訪問先リスト</h3>
+        <h3 className="font-semibold text-slate-900 dark:text-white">
+          訪問先リスト
+        </h3>
         <button
           onClick={onClose}
           className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
         >
-          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg
+            className="w-5 h-5"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
             <path
               strokeLinecap="round"
               strokeLinejoin="round"
@@ -125,7 +132,7 @@ const MapVisitListPanel: React.FC<MapVisitListPanelProps> = ({
                       {cell.blockName}-{cell.number}
                     </div>
                     <div className="text-sm text-slate-500 dark:text-slate-400 truncate">
-                      {cell.circles.join(', ')}
+                      {cell.circles.join(", ")}
                     </div>
                   </div>
                   <svg
@@ -150,7 +157,9 @@ const MapVisitListPanel: React.FC<MapVisitListPanelProps> = ({
 
       {/* フッター */}
       <div className="px-4 py-3 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50">
-        <p className="text-sm text-slate-500 dark:text-slate-400">合計 {visitCells.length} 箇所</p>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          合計 {visitCells.length} 箇所
+        </p>
       </div>
     </div>
   );

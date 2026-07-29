@@ -1,14 +1,14 @@
-import React from 'react';
-import DeleteConfirmationModal from '../../../components/DeleteConfirmationModal';
-import { ItemEditDialog } from '../../../components/ItemEditDialog';
-import UpdateConfirmationModal from '../../../components/UpdateConfirmationModal';
-import UrlUpdateDialog from '../../../components/UrlUpdateDialog';
-import EventRenameDialog from '../../../components/EventRenameDialog';
-import ExportOptionsDialog from '../../../components/ExportOptionsDialog';
-import BulkActionControls from '../../../components/BulkActionControls';
-import SummaryBar from '../../../components/SummaryBar';
-import ZoomControl from '../../../components/ZoomControl';
-import VisitListPanel from '../../../components/VisitListPanel';
+import React from "react";
+import DeleteConfirmationModal from "../../../components/DeleteConfirmationModal";
+import { ItemEditDialog } from "../../../components/ItemEditDialog";
+import UpdateConfirmationModal from "../../../components/UpdateConfirmationModal";
+import UrlUpdateDialog from "../../../components/UrlUpdateDialog";
+import EventRenameDialog from "../../../components/EventRenameDialog";
+import ExportOptionsDialog from "../../../components/ExportOptionsDialog";
+import BulkActionControls from "../../../components/BulkActionControls";
+import SummaryBar from "../../../components/SummaryBar";
+import ZoomControl from "../../../components/ZoomControl";
+import VisitListPanel from "../../../components/VisitListPanel";
 import {
   BlockDefinitionPanel,
   HallDefinitionPanel,
@@ -16,8 +16,8 @@ import {
   SimpleHallDefinitionPanel,
   MapImportDialog,
   loadBlockDetectionSettings,
-} from '../../../components/map';
-import type { EventUpdateDiff } from '../../../features/events/updateDiff';
+} from "../../../components/map";
+import type { EventUpdateDiff } from "../../../features/events/updateDiff";
 import type {
   ActiveTab,
   BulkSortDirection,
@@ -28,19 +28,39 @@ import type {
   SortState,
   VertexGuideOptions,
   VertexSelectionMode,
-} from '../types';
-import type { EventMetadata, ShoppingItem, ViewMode } from '../../../types/item';
-import type { HallDefinition, HallRouteSettings, MapDataStore } from '../../../types/map';
+} from "../types";
+import type {
+  EventMetadata,
+  ShoppingItem,
+  ViewMode,
+} from "../../../types/item";
+import type {
+  HallDefinition,
+  HallRouteSettings,
+  MapDataStore,
+} from "../../../types/map";
 
-type PriorityLevel = 'none' | 'priority' | 'highest';
-type DeleteConfirmationModalProps = React.ComponentProps<typeof DeleteConfirmationModal>;
-type UpdateConfirmationModalProps = React.ComponentProps<typeof UpdateConfirmationModal>;
+type PriorityLevel = "none" | "priority" | "highest";
+type DeleteConfirmationModalProps = React.ComponentProps<
+  typeof DeleteConfirmationModal
+>;
+type UpdateConfirmationModalProps = React.ComponentProps<
+  typeof UpdateConfirmationModal
+>;
 type UrlUpdateDialogProps = React.ComponentProps<typeof UrlUpdateDialog>;
 type EventRenameDialogProps = React.ComponentProps<typeof EventRenameDialog>;
-type ExportOptionsDialogProps = React.ComponentProps<typeof ExportOptionsDialog>;
-type BlockDefinitionPanelProps = React.ComponentProps<typeof BlockDefinitionPanel>;
-type HallDefinitionPanelProps = React.ComponentProps<typeof HallDefinitionPanel>;
-type SimpleHallDefinitionPanelProps = React.ComponentProps<typeof SimpleHallDefinitionPanel>;
+type ExportOptionsDialogProps = React.ComponentProps<
+  typeof ExportOptionsDialog
+>;
+type BlockDefinitionPanelProps = React.ComponentProps<
+  typeof BlockDefinitionPanel
+>;
+type HallDefinitionPanelProps = React.ComponentProps<
+  typeof HallDefinitionPanel
+>;
+type SimpleHallDefinitionPanelProps = React.ComponentProps<
+  typeof SimpleHallDefinitionPanel
+>;
 type HallOrderPanelProps = React.ComponentProps<typeof HallOrderPanel>;
 type VisitListPanelProps = React.ComponentProps<typeof VisitListPanel>;
 type MapImportDialogProps = React.ComponentProps<typeof MapImportDialog>;
@@ -57,39 +77,43 @@ type AppOverlayLayerProps = {
   ) => void;
   setEditDialogItem: React.Dispatch<React.SetStateAction<ShoppingItem | null>>;
   itemToDelete: ShoppingItem | null;
-  handleConfirmDelete: DeleteConfirmationModalProps['onConfirm'];
+  handleConfirmDelete: DeleteConfirmationModalProps["onConfirm"];
   setItemToDelete: React.Dispatch<React.SetStateAction<ShoppingItem | null>>;
   showUpdateConfirmation: boolean;
   updateData: EventUpdateDiff | null;
-  handleConfirmUpdate: UpdateConfirmationModalProps['onConfirm'];
+  handleConfirmUpdate: UpdateConfirmationModalProps["onConfirm"];
   setShowUpdateConfirmation: React.Dispatch<React.SetStateAction<boolean>>;
   setUpdateData: React.Dispatch<React.SetStateAction<EventUpdateDiff | null>>;
   setUpdateEventName: React.Dispatch<React.SetStateAction<string | null>>;
   showUrlUpdateDialog: boolean;
   pendingUpdateEventName: string | null;
   eventMetadata: Record<string, EventMetadata>;
-  handleUrlUpdate: UrlUpdateDialogProps['onConfirm'];
+  handleUrlUpdate: UrlUpdateDialogProps["onConfirm"];
   setShowUrlUpdateDialog: React.Dispatch<React.SetStateAction<boolean>>;
-  setPendingUpdateEventName: React.Dispatch<React.SetStateAction<string | null>>;
+  setPendingUpdateEventName: React.Dispatch<
+    React.SetStateAction<string | null>
+  >;
   setActiveEventName: React.Dispatch<React.SetStateAction<string | null>>;
   setActiveTab: React.Dispatch<React.SetStateAction<ActiveTab>>;
   showRenameDialog: boolean;
   eventToRename: string | null;
-  handleConfirmRename: EventRenameDialogProps['onConfirm'];
+  handleConfirmRename: EventRenameDialogProps["onConfirm"];
   setShowRenameDialog: React.Dispatch<React.SetStateAction<boolean>>;
   setEventToRename: React.Dispatch<React.SetStateAction<string | null>>;
   showExportOptions: boolean;
   exportEventName: string | null;
   setShowExportOptions: React.Dispatch<React.SetStateAction<boolean>>;
   setExportEventName: React.Dispatch<React.SetStateAction<string | null>>;
-  handleConfirmExport: ExportOptionsDialogProps['onExport'];
+  handleConfirmExport: ExportOptionsDialogProps["onExport"];
   mapData: MapDataStore;
   blockDefinitionMode: boolean;
-  currentMapData: BlockDefinitionPanelProps['mapData'] | null;
+  currentMapData: BlockDefinitionPanelProps["mapData"] | null;
   setBlockDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
-  setPendingCellSelection: React.Dispatch<React.SetStateAction<PendingCellSelection>>;
-  handleUpdateBlocks: BlockDefinitionPanelProps['onUpdateBlocks'];
-  handleStartCellSelection: BlockDefinitionPanelProps['onStartCellSelection'];
+  setPendingCellSelection: React.Dispatch<
+    React.SetStateAction<PendingCellSelection>
+  >;
+  handleUpdateBlocks: BlockDefinitionPanelProps["onUpdateBlocks"];
+  handleStartCellSelection: BlockDefinitionPanelProps["onStartCellSelection"];
   pendingCellSelection: PendingCellSelection;
   cellSelectionMode: CellSelectionMode;
   handleConfirmCellSelection: () => void;
@@ -97,56 +121,72 @@ type AppOverlayLayerProps = {
   simpleHallDefinitionMode: boolean;
   setSimpleHallDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
   currentMaplessHalls: HallDefinition[];
-  handleUpdateMaplessHalls: SimpleHallDefinitionPanelProps['onUpdateHalls'];
+  handleUpdateMaplessHalls: SimpleHallDefinitionPanelProps["onUpdateHalls"];
   allBlocksForHallDefinition: string[];
   eventDates: string[];
   activeEventDate: string;
-  handleSyncMaplessHallsToOtherDates: NonNullable<SimpleHallDefinitionPanelProps['onSyncToOtherDates']>;
+  handleSyncMaplessHallsToOtherDates: NonNullable<
+    SimpleHallDefinitionPanelProps["onSyncToOtherDates"]
+  >;
   globalHallOrderPanelOpen: boolean;
   setGlobalHallOrderPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
   globalHallOrderHalls: HallDefinition[];
   globalHallOrderRouteSettings: HallRouteSettings;
-  handleUpdateGlobalHallRouteSettings: HallOrderPanelProps['onUpdateHallRouteSettings'];
-  getGlobalHallItemCount: HallOrderPanelProps['getItemCountInHall'];
-  handleReorderExecuteListByHallOrder: NonNullable<HallOrderPanelProps['onReorderExecuteList']>;
+  handleUpdateGlobalHallRouteSettings: HallOrderPanelProps["onUpdateHallRouteSettings"];
+  getGlobalHallItemCount: HallOrderPanelProps["getItemCountInHall"];
+  handleReorderExecuteListByHallOrder: NonNullable<
+    HallOrderPanelProps["onReorderExecuteList"]
+  >;
   hallDefinitionMode: boolean;
   setHallDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
-  setPendingVertexSelection: React.Dispatch<React.SetStateAction<PendingVertexSelection>>;
+  setPendingVertexSelection: React.Dispatch<
+    React.SetStateAction<PendingVertexSelection>
+  >;
   currentHalls: HallDefinition[];
-  handleUpdateHalls: HallDefinitionPanelProps['onUpdateHalls'];
-  handleStartVertexSelection: HallDefinitionPanelProps['onStartVertexSelection'];
+  handleUpdateHalls: HallDefinitionPanelProps["onUpdateHalls"];
+  handleStartVertexSelection: HallDefinitionPanelProps["onStartVertexSelection"];
   pendingVertexSelection: PendingVertexSelection;
   mapTabDates: string[];
-  handleSyncPolygonHallsToOtherDates: NonNullable<HallDefinitionPanelProps['onSyncToOtherDates']>;
+  handleSyncPolygonHallsToOtherDates: NonNullable<
+    HallDefinitionPanelProps["onSyncToOtherDates"]
+  >;
   visitListPanelOpen: boolean;
-  handleVisitListClose: VisitListPanelProps['onClose'];
+  handleVisitListClose: VisitListPanelProps["onClose"];
   visitListItems: ShoppingItem[];
-  handleVisitListOrderUpdate: VisitListPanelProps['onUpdateOrder'];
+  handleVisitListOrderUpdate: VisitListPanelProps["onUpdateOrder"];
   visitListHallOrder: string[];
   layoutMode: LayoutMode;
-  handleHighlightMapCell: VisitListPanelProps['onHighlightCell'];
-  handleClearMapCellHighlight: VisitListPanelProps['onClearHighlight'];
+  handleHighlightMapCell: VisitListPanelProps["onHighlightCell"];
+  handleClearMapCellHighlight: VisitListPanelProps["onClearHighlight"];
   visitListHasUnsavedChanges: boolean;
-  handleVisitListConfirm: VisitListPanelProps['onConfirm'];
-  handleVisitListCancel: VisitListPanelProps['onCancel'];
-  handleUpdateItemPriority: NonNullable<VisitListPanelProps['onUpdateItemPriority']>;
+  handleVisitListConfirm: VisitListPanelProps["onConfirm"];
+  handleVisitListCancel: VisitListPanelProps["onCancel"];
+  handleUpdateItemPriority: NonNullable<
+    VisitListPanelProps["onUpdateItemPriority"]
+  >;
   showVisitListConfirmDialog: boolean;
   handleVisitListDialogCancel: () => void;
   handleVisitListDialogConfirm: () => void;
   vertexSelectionMode: VertexSelectionMode;
   vertexGuideOptions: VertexGuideOptions;
-  setVertexGuideOptions: React.Dispatch<React.SetStateAction<VertexGuideOptions>>;
+  setVertexGuideOptions: React.Dispatch<
+    React.SetStateAction<VertexGuideOptions>
+  >;
   handleConfirmVertexSelection: () => void;
   handleCancelVertexSelection: () => void;
   mapFileInputRef: React.RefObject<HTMLInputElement>;
-  handleMapFileChange: (e: React.ChangeEvent<HTMLInputElement>) => void | Promise<void>;
+  handleMapFileChange: (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => void | Promise<void>;
   mapImportDialogOpen: boolean;
   mapImportPendingFile: File | null;
   mapImportPendingEventName: string;
-  handleMapImportConfirm: MapImportDialogProps['onImport'];
-  handleMapImportClose: MapImportDialogProps['onClose'];
+  handleMapImportConfirm: MapImportDialogProps["onImport"];
+  handleMapImportClose: MapImportDialogProps["onClose"];
   exportFileInputRef: React.RefObject<HTMLInputElement>;
-  handleExportFileImport: (e: React.ChangeEvent<HTMLInputElement>) => void | Promise<void>;
+  handleExportFileImport: (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => void | Promise<void>;
   activeEventName: string | null;
   mainContentVisible: boolean;
   currentMode: ViewMode;
@@ -167,7 +207,7 @@ type AppOverlayLayerProps = {
   hasExecuteSelection: boolean;
   handleRemoveFromExecuteColumn: (itemIds: string[]) => void;
   smartInsertToast: string | null;
-  smartInsertToastType: 'success' | 'error';
+  smartInsertToastType: "success" | "error";
 };
 
 const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
@@ -298,14 +338,14 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
           allItems={items}
           halls={getHallsForDate(editDialogItem.eventDate)}
           onSave={(updatedItem) => {
-            const prevPriority = (editDialogItem.priorityLevel || 'none') as
-              | 'none'
-              | 'priority'
-              | 'highest';
-            const nextPriority = (updatedItem.priorityLevel || 'none') as
-              | 'none'
-              | 'priority'
-              | 'highest';
+            const prevPriority = (editDialogItem.priorityLevel || "none") as
+              | "none"
+              | "priority"
+              | "highest";
+            const nextPriority = (updatedItem.priorityLevel || "none") as
+              | "none"
+              | "priority"
+              | "highest";
             handleUpdateItem(updatedItem);
             if (prevPriority !== nextPriority) {
               handleUpdateHallOrderForPriorityChangeFromEdit(
@@ -316,9 +356,11 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
             }
             setEditDialogItem(null);
             setTimeout(() => {
-              const element = document.querySelector(`[data-item-id="${updatedItem.id}"]`);
+              const element = document.querySelector(
+                `[data-item-id="${updatedItem.id}"]`,
+              );
               if (element) {
-                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                element.scrollIntoView({ behavior: "smooth", block: "center" });
               }
             }, 100);
           }}
@@ -357,15 +399,15 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         <UrlUpdateDialog
           currentUrl={
             pendingUpdateEventName
-              ? eventMetadata[pendingUpdateEventName]?.spreadsheetUrl || ''
-              : ''
+              ? eventMetadata[pendingUpdateEventName]?.spreadsheetUrl || ""
+              : ""
           }
           onConfirm={handleUrlUpdate}
           onCancel={() => {
             setShowUrlUpdateDialog(false);
             setPendingUpdateEventName(null);
             setActiveEventName(null);
-            setActiveTab('eventList');
+            setActiveTab("eventList");
           }}
         />
       )}
@@ -423,22 +465,27 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
                   | { block?: { name?: string } }
                   | undefined;
                 const name = data?.block?.name?.trim();
-                return name ? `「${name}」設定中` : '「名称不明ブロック」設定中';
+                return name
+                  ? `「${name}」設定中`
+                  : "「名称不明ブロック」設定中";
               })()}
             </div>
             <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
-              {cellSelectionMode.type === 'corner' &&
+              {cellSelectionMode.type === "corner" &&
                 `セルをクリックして角を選択 (${cellSelectionMode.clickedCells.length}/4)`}
-              {cellSelectionMode.type === 'multiCorner' &&
+              {cellSelectionMode.type === "multiCorner" &&
                 `セルをクリックして角を選択 (${cellSelectionMode.clickedCells.length}/4)`}
-              {cellSelectionMode.type === 'rangeStart' &&
+              {cellSelectionMode.type === "rangeStart" &&
                 `対角の2セルをクリック (${cellSelectionMode.clickedCells.length}/2)`}
-              {cellSelectionMode.type === 'individual' &&
+              {cellSelectionMode.type === "individual" &&
                 `対象セルをクリック (${cellSelectionMode.clickedCells.length}セル選択中)`}
             </div>
             {cellSelectionMode.clickedCells.length > 0 && (
               <div className="text-xs text-slate-500 dark:text-slate-400">
-                選択: {cellSelectionMode.clickedCells.map((c) => `(${c.row},${c.col})`).join(', ')}
+                選択:{" "}
+                {cellSelectionMode.clickedCells
+                  .map((c) => `(${c.row},${c.col})`)
+                  .join(", ")}
               </div>
             )}
             <div className="text-xs text-blue-500 dark:text-blue-400 mt-1">
@@ -449,11 +496,12 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
             <button
               onClick={handleConfirmCellSelection}
               disabled={
-                ((cellSelectionMode.type === 'corner' || cellSelectionMode.type === 'multiCorner') &&
+                ((cellSelectionMode.type === "corner" ||
+                  cellSelectionMode.type === "multiCorner") &&
                   cellSelectionMode.clickedCells.length < 4) ||
-                (cellSelectionMode.type === 'rangeStart' &&
+                (cellSelectionMode.type === "rangeStart" &&
                   cellSelectionMode.clickedCells.length < 2) ||
-                (cellSelectionMode.type === 'individual' &&
+                (cellSelectionMode.type === "individual" &&
                   cellSelectionMode.clickedCells.length === 0)
               }
               className="px-4 py-2 text-sm font-medium rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -566,13 +614,16 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
           <div className="text-center mb-3">
             <div className="text-xs font-medium text-blue-600 dark:text-blue-400 mb-1">
               {(() => {
-                const data = vertexSelectionMode.editingData as { hall?: { name?: string } } | undefined;
+                const data = vertexSelectionMode.editingData as
+                  | { hall?: { name?: string } }
+                  | undefined;
                 const name = data?.hall?.name?.trim();
-                return name ? `「${name}」設定中` : '「名称不明ホール」設定中';
+                return name ? `「${name}」設定中` : "「名称不明ホール」設定中";
               })()}
             </div>
             <div className="text-sm font-semibold text-slate-800 dark:text-white mb-1">
-              ホールの頂点をクリック ({vertexSelectionMode.clickedVertices.length}
+              ホールの頂点をクリック (
+              {vertexSelectionMode.clickedVertices.length}
               /6)
             </div>
             <div className="text-xs text-slate-500 dark:text-slate-400 mb-1">
@@ -580,35 +631,43 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
             </div>
             {vertexSelectionMode.clickedVertices.length > 0 && (
               <div className="text-xs text-slate-500 dark:text-slate-400">
-                選択:{' '}
+                選択:{" "}
                 {vertexSelectionMode.clickedVertices
                   .map((v) => `(${v.row},${v.col})`)
-                  .join(' → ')}
+                  .join(" → ")}
               </div>
             )}
           </div>
           <div className="flex gap-2 justify-center mb-3">
             <button
-              onClick={() => setVertexGuideOptions((prev) => ({ ...prev, showGrid: !prev.showGrid }))}
+              onClick={() =>
+                setVertexGuideOptions((prev) => ({
+                  ...prev,
+                  showGrid: !prev.showGrid,
+                }))
+              }
               className={`px-3 py-1.5 text-xs rounded transition-colors ${
                 vertexGuideOptions.showGrid
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"
               }`}
             >
-              補助グリッド {vertexGuideOptions.showGrid ? 'ON' : 'OFF'}
+              補助グリッド {vertexGuideOptions.showGrid ? "ON" : "OFF"}
             </button>
             <button
               onClick={() =>
-                setVertexGuideOptions((prev) => ({ ...prev, showRuler: !prev.showRuler }))
+                setVertexGuideOptions((prev) => ({
+                  ...prev,
+                  showRuler: !prev.showRuler,
+                }))
               }
               className={`px-3 py-1.5 text-xs rounded transition-colors ${
                 vertexGuideOptions.showRuler
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"
               }`}
             >
-              座標尺 {vertexGuideOptions.showRuler ? 'ON' : 'OFF'}
+              座標尺 {vertexGuideOptions.showRuler ? "ON" : "OFF"}
             </button>
           </div>
           <div className="flex gap-2 justify-center">
@@ -634,7 +693,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         ref={mapFileInputRef}
         accept=".xlsx"
         onChange={handleMapFileChange}
-        style={{ display: 'none' }}
+        style={{ display: "none" }}
       />
 
       <MapImportDialog
@@ -642,7 +701,9 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         file={mapImportPendingFile}
         eventName={mapImportPendingEventName}
         savedSettings={
-          mapImportPendingEventName ? loadBlockDetectionSettings(mapImportPendingEventName) : null
+          mapImportPendingEventName
+            ? loadBlockDetectionSettings(mapImportPendingEventName)
+            : null
         }
         onImport={handleMapImportConfirm}
         onClose={handleMapImportClose}
@@ -653,12 +714,12 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         ref={exportFileInputRef}
         accept=".xlsx"
         onChange={handleExportFileImport}
-        style={{ display: 'none' }}
+        style={{ display: "none" }}
       />
 
       {activeEventName && items.length > 0 && mainContentVisible && (
         <>
-          {currentMode === 'execute' && (
+          {currentMode === "execute" && (
             <SummaryBar
               items={visibleItems}
               filterLabel={!showHeaderBar ? sortDisplayLabel : undefined}
@@ -672,18 +733,23 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         <ZoomControl zoomLevel={zoomLevel} onZoomChange={handleZoomChange} />
       )}
 
-      {layoutMode === 'smartphone' &&
+      {layoutMode === "smartphone" &&
         activeEventName &&
         mainContentVisible &&
         items.length > 0 &&
         selectedItemIds.size > 0 && (
           <div className="fixed bottom-0 left-0 right-0 z-30 bg-white/95 dark:bg-slate-800/95 backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-lg px-3 py-2">
             <div className="flex items-center justify-between gap-2">
-              <BulkActionControls onSort={handleBulkSort} onClear={handleClearSelection} />
+              <BulkActionControls
+                onSort={handleBulkSort}
+                onClear={handleClearSelection}
+              />
               <div className="flex items-center gap-2">
                 {showMoveButtons && hasCandidateSelection && (
                   <button
-                    onClick={() => handleMoveToExecuteColumn(Array.from(selectedItemIds))}
+                    onClick={() =>
+                      handleMoveToExecuteColumn(Array.from(selectedItemIds))
+                    }
                     className="px-3 py-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors"
                   >
                     ⇦実行列へ ({selectedItemIds.size})
@@ -691,7 +757,9 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
                 )}
                 {showMoveButtons && hasExecuteSelection && (
                   <button
-                    onClick={() => handleRemoveFromExecuteColumn(Array.from(selectedItemIds))}
+                    onClick={() =>
+                      handleRemoveFromExecuteColumn(Array.from(selectedItemIds))
+                    }
                     className="px-3 py-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors"
                   >
                     ⇨候補へ ({selectedItemIds.size})
@@ -705,7 +773,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
       {smartInsertToast && (
         <div
           className={`fixed top-16 left-1/2 transform -translate-x-1/2 z-[10000] text-white px-5 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-pulse ${
-            smartInsertToastType === 'error' ? 'bg-red-600' : 'bg-green-600'
+            smartInsertToastType === "error" ? "bg-red-600" : "bg-green-600"
           }`}
         >
           {smartInsertToast}

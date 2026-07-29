@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 
 const CircleIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <svg
@@ -9,7 +9,14 @@ const CircleIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
     stroke="currentColor"
     {...props}
   >
-    <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5" fill="none" />
+    <circle
+      cx="12"
+      cy="12"
+      r="10"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      fill="none"
+    />
   </svg>
 );
 

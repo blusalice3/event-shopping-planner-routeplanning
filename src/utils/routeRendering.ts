@@ -4,16 +4,26 @@
 
 export interface PathCollector {
   addLine(x1: number, y1: number, x2: number, y2: number): void;
-  addQuadratic(sx: number, sy: number, cpx: number, cpy: number, ex: number, ey: number): void;
+  addQuadratic(
+    sx: number,
+    sy: number,
+    cpx: number,
+    cpy: number,
+    ex: number,
+    ey: number,
+  ): void;
 }
 
 interface StyleGroup {
-  lines: number[];   // [x1,y1,x2,y2, ...]
-  quads: number[];    // [sx,sy,cpx,cpy,ex,ey, ...]
+  lines: number[]; // [x1,y1,x2,y2, ...]
+  quads: number[]; // [sx,sy,cpx,cpy,ex,ey, ...]
 }
 
 export class BatchedPathRenderer {
-  private groups = new Map<string, StyleGroup & { strokeStyle: string; lineWidth: number }>();
+  private groups = new Map<
+    string,
+    StyleGroup & { strokeStyle: string; lineWidth: number }
+  >();
 
   beginGroup(strokeStyle: string, lineWidth: number): PathCollector {
     const key = `${strokeStyle}|${lineWidth}`;
@@ -25,7 +35,14 @@ export class BatchedPathRenderer {
       addLine(x1: number, y1: number, x2: number, y2: number) {
         group.lines.push(x1, y1, x2, y2);
       },
-      addQuadratic(sx: number, sy: number, cpx: number, cpy: number, ex: number, ey: number) {
+      addQuadratic(
+        sx: number,
+        sy: number,
+        cpx: number,
+        cpy: number,
+        ex: number,
+        ey: number,
+      ) {
         group.quads.push(sx, sy, cpx, cpy, ex, ey);
       },
     };
@@ -34,13 +51,21 @@ export class BatchedPathRenderer {
   // 矢印（三角形fill）用の蓄積
   private triangles = new Map<string, number[]>(); // fillStyle -> [x1,y1,x2,y2,x3,y3, ...]
 
-  addTriangle(fillStyle: string, x1: number, y1: number, x2: number, y2: number, x3: number, y3: number): void {
+  addTriangle(
+    fillStyle: string,
+    x1: number,
+    y1: number,
+    x2: number,
+    y2: number,
+    x3: number,
+    y3: number,
+  ): void {
     if (!this.triangles.has(fillStyle)) this.triangles.set(fillStyle, []);
     this.triangles.get(fillStyle)!.push(x1, y1, x2, y2, x3, y3);
   }
 
   flush(ctx: CanvasRenderingContext2D): void {
-    ctx.lineCap = 'round';
+    ctx.lineCap = "round";
     ctx.setLineDash([]);
 
     for (const group of this.groups.values()) {
@@ -64,7 +89,12 @@ export class BatchedPathRenderer {
         const quads = group.quads;
         for (let i = 0; i < quads.length; i += 6) {
           ctx.moveTo(quads[i], quads[i + 1]);
-          ctx.quadraticCurveTo(quads[i + 2], quads[i + 3], quads[i + 4], quads[i + 5]);
+          ctx.quadraticCurveTo(
+            quads[i + 2],
+            quads[i + 3],
+            quads[i + 4],
+            quads[i + 5],
+          );
         }
         ctx.stroke();
       }
@@ -88,7 +118,10 @@ export class BatchedPathRenderer {
 // collectEdgeWithBridges: drawEdgeWithBridgesと同一ロジックだがPathCollectorに蓄積
 export function collectEdgeWithBridges(
   collector: PathCollector,
-  x1: number, y1: number, x2: number, y2: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
   segIdx: number,
   edgeIdx: number,
   crossingLookup: Map<string, CrossingInfo[]>,
@@ -110,14 +143,20 @@ export function collectEdgeWithBridges(
   );
 
   if (asEarlier.length > 0 && asLater.length === 0) {
-    const gaps = asEarlier.map((c) => ({ t: c.tA, gapRadius: bridgeParams.gapRadius }));
+    const gaps = asEarlier.map((c) => ({
+      t: c.tA,
+      gapRadius: bridgeParams.gapRadius,
+    }));
     const subSegs = splitEdgeWithGaps(x1, y1, x2, y2, gaps);
     for (const sub of subSegs) {
       collector.addLine(sub.x1, sub.y1, sub.x2, sub.y2);
     }
   } else if (asLater.length > 0) {
     const sortedCrossings = [...asLater].sort((a, b) => a.tB - b.tB);
-    const allGaps = asEarlier.map((c) => ({ t: c.tA, gapRadius: bridgeParams.gapRadius }));
+    const allGaps = asEarlier.map((c) => ({
+      t: c.tA,
+      gapRadius: bridgeParams.gapRadius,
+    }));
 
     const dx = x2 - x1;
     const dy = y2 - y1;
@@ -136,13 +175,21 @@ export function collectEdgeWithBridges(
         const lineX2 = x1 + dx * archStartT;
         const lineY2 = y1 + dy * archStartT;
 
-        const relevantGaps = allGaps.filter((g) => g.t > currentT && g.t < archStartT);
+        const relevantGaps = allGaps.filter(
+          (g) => g.t > currentT && g.t < archStartT,
+        );
 
         if (relevantGaps.length > 0) {
-          const subSegs = splitEdgeWithGaps(lineX1, lineY1, lineX2, lineY2, relevantGaps.map((g) => ({
-            t: (g.t - currentT) / (archStartT - currentT),
-            gapRadius: g.gapRadius,
-          })));
+          const subSegs = splitEdgeWithGaps(
+            lineX1,
+            lineY1,
+            lineX2,
+            lineY2,
+            relevantGaps.map((g) => ({
+              t: (g.t - currentT) / (archStartT - currentT),
+              gapRadius: g.gapRadius,
+            })),
+          );
           for (const sub of subSegs) {
             collector.addLine(sub.x1, sub.y1, sub.x2, sub.y2);
           }
@@ -151,8 +198,23 @@ export function collectEdgeWithBridges(
         }
       }
 
-      const archParams = computeArchParams(x1, y1, x2, y2, crossing.tB, bridgeParams.gapRadius, bridgeParams.archHeight);
-      collector.addQuadratic(archParams.archStartX, archParams.archStartY, archParams.cpX, archParams.cpY, archParams.archEndX, archParams.archEndY);
+      const archParams = computeArchParams(
+        x1,
+        y1,
+        x2,
+        y2,
+        crossing.tB,
+        bridgeParams.gapRadius,
+        bridgeParams.archHeight,
+      );
+      collector.addQuadratic(
+        archParams.archStartX,
+        archParams.archStartY,
+        archParams.cpX,
+        archParams.cpY,
+        archParams.archEndX,
+        archParams.archEndY,
+      );
 
       currentT = archEndT;
     }
@@ -164,10 +226,16 @@ export function collectEdgeWithBridges(
       const relevantGaps = allGaps.filter((g) => g.t > currentT && g.t < 1);
 
       if (relevantGaps.length > 0) {
-        const subSegs = splitEdgeWithGaps(lineX1, lineY1, x2, y2, relevantGaps.map((g) => ({
-          t: (g.t - currentT) / (1 - currentT),
-          gapRadius: g.gapRadius,
-        })));
+        const subSegs = splitEdgeWithGaps(
+          lineX1,
+          lineY1,
+          x2,
+          y2,
+          relevantGaps.map((g) => ({
+            t: (g.t - currentT) / (1 - currentT),
+            gapRadius: g.gapRadius,
+          })),
+        );
         for (const sub of subSegs) {
           collector.addLine(sub.x1, sub.y1, sub.x2, sub.y2);
         }
@@ -178,7 +246,10 @@ export function collectEdgeWithBridges(
   } else {
     // 両方の役割がある場合（先行かつ後行）- 後行のアーチ処理を優先
     const sortedLater = [...asLater].sort((a, b) => a.tB - b.tB);
-    const earlierGaps = asEarlier.map((c) => ({ t: c.tA, gapRadius: bridgeParams.gapRadius }));
+    const earlierGaps = asEarlier.map((c) => ({
+      t: c.tA,
+      gapRadius: bridgeParams.gapRadius,
+    }));
 
     const dx = x2 - x1;
     const dy = y2 - y1;
@@ -193,8 +264,10 @@ export function collectEdgeWithBridges(
 
       if (currentT < archStartT) {
         const subSegs = splitEdgeWithGaps(
-          x1 + dx * currentT, y1 + dy * currentT,
-          x1 + dx * archStartT, y1 + dy * archStartT,
+          x1 + dx * currentT,
+          y1 + dy * currentT,
+          x1 + dx * archStartT,
+          y1 + dy * archStartT,
           earlierGaps
             .filter((g) => g.t > currentT && g.t < archStartT)
             .map((g) => ({
@@ -207,16 +280,33 @@ export function collectEdgeWithBridges(
         }
       }
 
-      const archParams = computeArchParams(x1, y1, x2, y2, crossing.tB, bridgeParams.gapRadius, bridgeParams.archHeight);
-      collector.addQuadratic(archParams.archStartX, archParams.archStartY, archParams.cpX, archParams.cpY, archParams.archEndX, archParams.archEndY);
+      const archParams = computeArchParams(
+        x1,
+        y1,
+        x2,
+        y2,
+        crossing.tB,
+        bridgeParams.gapRadius,
+        bridgeParams.archHeight,
+      );
+      collector.addQuadratic(
+        archParams.archStartX,
+        archParams.archStartY,
+        archParams.cpX,
+        archParams.cpY,
+        archParams.archEndX,
+        archParams.archEndY,
+      );
 
       currentT = archEndT;
     }
 
     if (currentT < 1) {
       const subSegs = splitEdgeWithGaps(
-        x1 + dx * currentT, y1 + dy * currentT,
-        x2, y2,
+        x1 + dx * currentT,
+        y1 + dy * currentT,
+        x2,
+        y2,
         earlierGaps
           .filter((g) => g.t > currentT && g.t < 1)
           .map((g) => ({
@@ -250,7 +340,12 @@ export interface PixelEdge {
 }
 
 // 正規化されたエッジキー生成
-export function getEdgeKey(r1: number, c1: number, r2: number, c2: number): string {
+export function getEdgeKey(
+  r1: number,
+  c1: number,
+  r2: number,
+  c2: number,
+): string {
   if (r1 < r2 || (r1 === r2 && c1 < c2)) {
     return `${r1},${c1}-${r2},${c2}`;
   }
@@ -285,8 +380,14 @@ export function getOffsetPoints(
 // 返り値: { x, y, tA, tB } または null（交差しない場合）
 // tA: セグメントA上の交差位置 (0-1), tB: セグメントB上の交差位置 (0-1)
 export function segmentIntersectionPoint(
-  ax1: number, ay1: number, ax2: number, ay2: number,
-  bx1: number, by1: number, bx2: number, by2: number,
+  ax1: number,
+  ay1: number,
+  ax2: number,
+  ay2: number,
+  bx1: number,
+  by1: number,
+  bx2: number,
+  by2: number,
 ): { x: number; y: number; tA: number; tB: number } | null {
   const dax = ax2 - ax1;
   const day = ay2 - ay1;
@@ -315,9 +416,7 @@ export function segmentIntersectionPoint(
 
 // 全セグメント間の交差点を検出
 // segments: セグメントごとのピクセル座標エッジ配列
-export function findAllCrossings(
-  segments: PixelEdge[][],
-): CrossingInfo[] {
+export function findAllCrossings(segments: PixelEdge[][]): CrossingInfo[] {
   const crossings: CrossingInfo[] = [];
 
   for (let i = 0; i < segments.length; i++) {
@@ -331,8 +430,14 @@ export function findAllCrossings(
           const eB = edgesB[ej];
 
           const result = segmentIntersectionPoint(
-            eA.x1, eA.y1, eA.x2, eA.y2,
-            eB.x1, eB.y1, eB.x2, eB.y2,
+            eA.x1,
+            eA.y1,
+            eA.x2,
+            eA.y2,
+            eB.x1,
+            eB.y1,
+            eB.x2,
+            eB.y2,
           );
 
           if (result) {
@@ -377,7 +482,10 @@ export function buildCrossingLookup(
 }
 
 // 飛び越し線のギャップ半径とアーチ高さを計算
-export function getBridgeParams(cellSize: number): { gapRadius: number; archHeight: number } {
+export function getBridgeParams(cellSize: number): {
+  gapRadius: number;
+  archHeight: number;
+} {
   return {
     gapRadius: Math.max(4, cellSize * 0.15),
     archHeight: Math.max(5, cellSize * 0.2),
@@ -386,7 +494,10 @@ export function getBridgeParams(cellSize: number): { gapRadius: number; archHeig
 
 // エッジを交差点でサブセグメントに分割（先行セグメント用：ギャップを空ける）
 export function splitEdgeWithGaps(
-  x1: number, y1: number, x2: number, y2: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
   crossingsOnEdge: { t: number; gapRadius: number }[],
 ): { x1: number; y1: number; x2: number; y2: number }[] {
   const dx = x2 - x1;
@@ -431,19 +542,27 @@ export function splitEdgeWithGaps(
 // 飛び越しアーチの描画パラメータを計算（後行セグメント用）
 export interface ArchDrawParams {
   // アーチ前の直線部分
-  preX: number; preY: number;
+  preX: number;
+  preY: number;
   // アーチ開始点
-  archStartX: number; archStartY: number;
+  archStartX: number;
+  archStartY: number;
   // 制御点（quadraticCurveTo用）
-  cpX: number; cpY: number;
+  cpX: number;
+  cpY: number;
   // アーチ終了点
-  archEndX: number; archEndY: number;
+  archEndX: number;
+  archEndY: number;
   // アーチ後の直線部分
-  postX: number; postY: number;
+  postX: number;
+  postY: number;
 }
 
 export function computeArchParams(
-  x1: number, y1: number, x2: number, y2: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
   crossingT: number,
   gapRadius: number,
   archHeight: number,
@@ -465,21 +584,26 @@ export function computeArchParams(
   const ny = len > 0 ? dx / len : 0;
 
   return {
-    preX: x1, preY: y1,
+    preX: x1,
+    preY: y1,
     archStartX: x1 + dx * archStartT,
     archStartY: y1 + dy * archStartT,
     cpX: cx + nx * archHeight,
     cpY: cy + ny * archHeight,
     archEndX: x1 + dx * archEndT,
     archEndY: y1 + dy * archEndT,
-    postX: x2, postY: y2,
+    postX: x2,
+    postY: y2,
   };
 }
 
 // Canvas上でエッジを飛び越し線付きで描画する共通関数
 export function drawEdgeWithBridges(
   ctx: CanvasRenderingContext2D,
-  x1: number, y1: number, x2: number, y2: number,
+  x1: number,
+  y1: number,
+  x2: number,
+  y2: number,
   segIdx: number,
   edgeIdx: number,
   crossingLookup: Map<string, CrossingInfo[]>,
@@ -495,7 +619,7 @@ export function drawEdgeWithBridges(
     ctx.beginPath();
     ctx.strokeStyle = strokeStyle;
     ctx.lineWidth = lineWidth;
-    ctx.lineCap = 'round';
+    ctx.lineCap = "round";
     ctx.setLineDash([]);
     ctx.moveTo(x1, y1);
     ctx.lineTo(x2, y2);
@@ -523,7 +647,7 @@ export function drawEdgeWithBridges(
       ctx.beginPath();
       ctx.strokeStyle = strokeStyle;
       ctx.lineWidth = lineWidth;
-      ctx.lineCap = 'round';
+      ctx.lineCap = "round";
       ctx.setLineDash([]);
       ctx.moveTo(sub.x1, sub.y1);
       ctx.lineTo(sub.x2, sub.y2);
@@ -542,7 +666,7 @@ export function drawEdgeWithBridges(
 
     ctx.strokeStyle = strokeStyle;
     ctx.lineWidth = lineWidth;
-    ctx.lineCap = 'round';
+    ctx.lineCap = "round";
     ctx.setLineDash([]);
 
     const dx = x2 - x1;
@@ -570,10 +694,16 @@ export function drawEdgeWithBridges(
           .map((g) => ({ ...g }));
 
         if (relevantGaps.length > 0) {
-          const subSegs = splitEdgeWithGaps(lineX1, lineY1, lineX2, lineY2, relevantGaps.map((g) => ({
-            t: (g.t - currentT) / (archStartT - currentT),
-            gapRadius: g.gapRadius,
-          })));
+          const subSegs = splitEdgeWithGaps(
+            lineX1,
+            lineY1,
+            lineX2,
+            lineY2,
+            relevantGaps.map((g) => ({
+              t: (g.t - currentT) / (archStartT - currentT),
+              gapRadius: g.gapRadius,
+            })),
+          );
           for (const sub of subSegs) {
             ctx.beginPath();
             ctx.moveTo(sub.x1, sub.y1);
@@ -590,7 +720,10 @@ export function drawEdgeWithBridges(
 
       // アーチ描画
       const archParams = computeArchParams(
-        x1, y1, x2, y2,
+        x1,
+        y1,
+        x2,
+        y2,
         crossing.tB,
         bridgeParams.gapRadius,
         bridgeParams.archHeight,
@@ -598,7 +731,12 @@ export function drawEdgeWithBridges(
 
       ctx.beginPath();
       ctx.moveTo(archParams.archStartX, archParams.archStartY);
-      ctx.quadraticCurveTo(archParams.cpX, archParams.cpY, archParams.archEndX, archParams.archEndY);
+      ctx.quadraticCurveTo(
+        archParams.cpX,
+        archParams.cpY,
+        archParams.archEndX,
+        archParams.archEndY,
+      );
       ctx.stroke();
 
       currentT = archEndT;
@@ -614,10 +752,16 @@ export function drawEdgeWithBridges(
         .map((g) => ({ ...g }));
 
       if (relevantGaps.length > 0) {
-        const subSegs = splitEdgeWithGaps(lineX1, lineY1, x2, y2, relevantGaps.map((g) => ({
-          t: (g.t - currentT) / (1 - currentT),
-          gapRadius: g.gapRadius,
-        })));
+        const subSegs = splitEdgeWithGaps(
+          lineX1,
+          lineY1,
+          x2,
+          y2,
+          relevantGaps.map((g) => ({
+            t: (g.t - currentT) / (1 - currentT),
+            gapRadius: g.gapRadius,
+          })),
+        );
         for (const sub of subSegs) {
           ctx.beginPath();
           ctx.moveTo(sub.x1, sub.y1);
@@ -642,7 +786,7 @@ export function drawEdgeWithBridges(
 
     ctx.strokeStyle = strokeStyle;
     ctx.lineWidth = lineWidth;
-    ctx.lineCap = 'round';
+    ctx.lineCap = "round";
     ctx.setLineDash([]);
 
     const dx = x2 - x1;
@@ -658,8 +802,10 @@ export function drawEdgeWithBridges(
 
       if (currentT < archStartT) {
         const subSegs = splitEdgeWithGaps(
-          x1 + dx * currentT, y1 + dy * currentT,
-          x1 + dx * archStartT, y1 + dy * archStartT,
+          x1 + dx * currentT,
+          y1 + dy * currentT,
+          x1 + dx * archStartT,
+          y1 + dy * archStartT,
           earlierGaps
             .filter((g) => g.t > currentT && g.t < archStartT)
             .map((g) => ({
@@ -675,10 +821,23 @@ export function drawEdgeWithBridges(
         }
       }
 
-      const archParams = computeArchParams(x1, y1, x2, y2, crossing.tB, bridgeParams.gapRadius, bridgeParams.archHeight);
+      const archParams = computeArchParams(
+        x1,
+        y1,
+        x2,
+        y2,
+        crossing.tB,
+        bridgeParams.gapRadius,
+        bridgeParams.archHeight,
+      );
       ctx.beginPath();
       ctx.moveTo(archParams.archStartX, archParams.archStartY);
-      ctx.quadraticCurveTo(archParams.cpX, archParams.cpY, archParams.archEndX, archParams.archEndY);
+      ctx.quadraticCurveTo(
+        archParams.cpX,
+        archParams.cpY,
+        archParams.archEndX,
+        archParams.archEndY,
+      );
       ctx.stroke();
 
       currentT = archEndT;
@@ -686,8 +845,10 @@ export function drawEdgeWithBridges(
 
     if (currentT < 1) {
       const subSegs = splitEdgeWithGaps(
-        x1 + dx * currentT, y1 + dy * currentT,
-        x2, y2,
+        x1 + dx * currentT,
+        y1 + dy * currentT,
+        x2,
+        y2,
         earlierGaps
           .filter((g) => g.t > currentT && g.t < 1)
           .map((g) => ({
@@ -712,7 +873,10 @@ export function findAllCrossingsIndexed(
   cellSize: number,
 ): CrossingInfo[] {
   const gridSize = Math.max(cellSize * 4, 50);
-  const grid = new Map<string, { segIdx: number; edgeIdx: number; edge: PixelEdge }[]>();
+  const grid = new Map<
+    string,
+    { segIdx: number; edgeIdx: number; edge: PixelEdge }[]
+  >();
 
   // 各エッジをグリッドセルに登録
   for (let si = 0; si < segments.length; si++) {
@@ -759,8 +923,14 @@ export function findAllCrossingsIndexed(
         seen.add(pairKey);
 
         const result = segmentIntersectionPoint(
-          earlier.edge.x1, earlier.edge.y1, earlier.edge.x2, earlier.edge.y2,
-          later.edge.x1, later.edge.y1, later.edge.x2, later.edge.y2,
+          earlier.edge.x1,
+          earlier.edge.y1,
+          earlier.edge.x2,
+          earlier.edge.y2,
+          later.edge.x1,
+          later.edge.y1,
+          later.edge.x2,
+          later.edge.y2,
         );
 
         if (result) {

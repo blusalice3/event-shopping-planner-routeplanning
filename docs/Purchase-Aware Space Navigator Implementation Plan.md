@@ -18,14 +18,14 @@
 
 ### 状態色
 
-| 分類 | 対象 |
-|---|---|
-| グレー | 未購入 |
-| 紫 | 後回し |
-| 青 | 遅参 |
-| オレンジ | 限数・実購入数未入力 |
-| 緑 | 購入済、売切、欠席、実購入数入力済みの限数 |
-| 警告線 | 価格未定などの入力警告 |
+| 分類     | 対象                                       |
+| -------- | ------------------------------------------ |
+| グレー   | 未購入                                     |
+| 紫       | 後回し                                     |
+| 青       | 遅参                                       |
+| オレンジ | 限数・実購入数未入力                       |
+| 緑       | 購入済、売切、欠席、実購入数入力済みの限数 |
+| 警告線   | 価格未定などの入力警告                     |
 
 混在時は、存在する分類を同じ幅で分割します。順序は「未購入→後回し→遅参→限数→完了」で固定します。
 
@@ -63,13 +63,13 @@
 
 ## 3. 移動方法ごとの動作
 
-| 操作 | 入力チェック | 正式位置 | 編集 | 戻り履歴 |
-|---|---|---|---|---|
-| 現在地として移動 | 前方移動時に実施 | 更新 | 可 | 全消去 |
-| 一時移動して操作 | 前方移動時に実施 | 変更しない | 可 | 1件追加 |
-| 内容だけ確認 | 実施しない | 変更しない | 不可 | 1件追加 |
-| 元のスペースへ戻る | 実施しない | 変更しない | 元の状態へ復帰 | 1件削除 |
-| 一時移動先を現在地にする | 原則再チェック不要 | 表示位置で更新 | 可 | 全消去 |
+| 操作                     | 入力チェック       | 正式位置       | 編集           | 戻り履歴 |
+| ------------------------ | ------------------ | -------------- | -------------- | -------- |
+| 現在地として移動         | 前方移動時に実施   | 更新           | 可             | 全消去   |
+| 一時移動して操作         | 前方移動時に実施   | 変更しない     | 可             | 1件追加  |
+| 内容だけ確認             | 実施しない         | 変更しない     | 不可           | 1件追加  |
+| 元のスペースへ戻る       | 実施しない         | 変更しない     | 元の状態へ復帰 | 1件削除  |
+| 一時移動先を現在地にする | 原則再チェック不要 | 表示位置で更新 | 可             | 全消去   |
 
 入力チェックは移動元の現在スペースだけを対象とし、飛ばす途中のスペースはブロックしません。
 
@@ -150,8 +150,8 @@ Pointer Eventsでスマートフォン、タブレット、マウスを共通処
 
 実行モードと集中モード双方の既存フッターへ追加します。
 
-- 実行モード：[SummaryBar.tsx](<D:/event-shopping-planner-routeplanning-1.9.6.6/src/components/SummaryBar.tsx>)
-- 集中モード：[FocusModeFooterPortal.tsx](<D:/event-shopping-planner-routeplanning-1.9.6.6/src/components/focus/FocusModeFooterPortal.tsx>)
+- 実行モード：[SummaryBar.tsx](D:/event-shopping-planner-routeplanning-1.9.6.6/src/components/SummaryBar.tsx)
+- 集中モード：[FocusModeFooterPortal.tsx](D:/event-shopping-planner-routeplanning-1.9.6.6/src/components/focus/FocusModeFooterPortal.tsx)
 
 動作：
 
@@ -180,7 +180,7 @@ Pointer Eventsでスマートフォン、タブレット、マウスを共通処
 - 左側／右側
 - 表示見本
 
-設定UIの組み込み先は [AppHeaderShell.tsx](<D:/event-shopping-planner-routeplanning-1.9.6.6/src/features/app-shell/components/AppHeaderShell.tsx>) です。
+設定UIの組み込み先は [AppHeaderShell.tsx](D:/event-shopping-planner-routeplanning-1.9.6.6/src/features/app-shell/components/AppHeaderShell.tsx) です。
 
 両方OFFの場合は、ナビ関連の表示・タップ領域・余白をすべて除去し、従来画面と同じ状態にします。
 
@@ -188,10 +188,10 @@ Pointer Eventsでスマートフォン、タブレット、マウスを共通処
 
 主な変更先：
 
-- [ShoppingList.tsx](<D:/event-shopping-planner-routeplanning-1.9.6.6/src/components/ShoppingList.tsx>)
-- [ShoppingItemCard.tsx](<D:/event-shopping-planner-routeplanning-1.9.6.6/src/components/ShoppingItemCard.tsx>)
-- [AppMainContent.tsx](<D:/event-shopping-planner-routeplanning-1.9.6.6/src/features/app-shell/components/AppMainContent.tsx>)
-- [AppOverlayLayer.tsx](<D:/event-shopping-planner-routeplanning-1.9.6.6/src/features/app-shell/components/AppOverlayLayer.tsx>)
+- [ShoppingList.tsx](D:/event-shopping-planner-routeplanning-1.9.6.6/src/components/ShoppingList.tsx)
+- [ShoppingItemCard.tsx](D:/event-shopping-planner-routeplanning-1.9.6.6/src/components/ShoppingItemCard.tsx)
+- [AppMainContent.tsx](D:/event-shopping-planner-routeplanning-1.9.6.6/src/features/app-shell/components/AppMainContent.tsx)
+- [AppOverlayLayer.tsx](D:/event-shopping-planner-routeplanning-1.9.6.6/src/features/app-shell/components/AppOverlayLayer.tsx)
 
 実装内容：
 
@@ -218,9 +218,9 @@ Pointer Eventsでスマートフォン、タブレット、マウスを共通処
 
 主な変更先：
 
-- [FocusMode.tsx](<D:/event-shopping-planner-routeplanning-1.9.6.6/src/components/FocusMode.tsx>)
-- [FocusModeMapCanvas.tsx](<D:/event-shopping-planner-routeplanning-1.9.6.6/src/components/FocusModeMapCanvas.tsx>)
-- [FocusModeContainer.tsx](<D:/event-shopping-planner-routeplanning-1.9.6.6/src/features/map/components/FocusModeContainer.tsx>)
+- [FocusMode.tsx](D:/event-shopping-planner-routeplanning-1.9.6.6/src/components/FocusMode.tsx)
+- [FocusModeMapCanvas.tsx](D:/event-shopping-planner-routeplanning-1.9.6.6/src/components/FocusModeMapCanvas.tsx)
+- [FocusModeContainer.tsx](D:/event-shopping-planner-routeplanning-1.9.6.6/src/features/map/components/FocusModeContainer.tsx)
 
 実装内容：
 

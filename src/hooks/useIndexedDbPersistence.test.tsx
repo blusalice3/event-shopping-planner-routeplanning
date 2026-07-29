@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { act, renderHook } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { useIndexedDbPersistence } from './useIndexedDbPersistence';
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { useIndexedDbPersistence } from "./useIndexedDbPersistence";
 
 const dbMock = vi.hoisted(() => ({
   migrateFromLocalStorage: vi.fn(),
@@ -28,13 +28,13 @@ const dbMock = vi.hoisted(() => ({
   saveMapViewportSettings: vi.fn(),
 }));
 
-vi.mock('../utils/indexedDB', () => ({
+vi.mock("../utils/indexedDB", () => ({
   db: dbMock,
 }));
 
 type HookParams = Parameters<typeof useIndexedDbPersistence>[0];
-type PersistedValues = HookParams['values'];
-type PersistedSetters = HookParams['setters'];
+type PersistedValues = HookParams["values"];
+type PersistedSetters = HookParams["setters"];
 
 const createValues = (): PersistedValues => ({
   eventLists: {},
@@ -68,12 +68,12 @@ const flushMicrotasks = async () => {
   }
 };
 
-describe('useIndexedDbPersistence', () => {
+describe("useIndexedDbPersistence", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
 
-    const missing = { status: 'missing' as const, data: null };
+    const missing = { status: "missing" as const, data: null };
     dbMock.migrateFromLocalStorage.mockResolvedValue(false);
     dbMock.loadEventLists.mockResolvedValue(missing);
     dbMock.loadEventMetadata.mockResolvedValue(missing);
@@ -103,12 +103,16 @@ describe('useIndexedDbPersistence', () => {
     vi.restoreAllMocks();
   });
 
-  it('logs a mapData save failure without alerting and retries that store on the next save', async () => {
-    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
-    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  it("logs a mapData save failure without alerting and retries that store on the next save", async () => {
+    const alertSpy = vi
+      .spyOn(window, "alert")
+      .mockImplementation(() => undefined);
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     const setters = createSetters();
     const initialValues = createValues();
-    const saveError = new Error('mapData write failed');
+    const saveError = new Error("mapData write failed");
 
     dbMock.saveMapDataChanges
       .mockRejectedValueOnce(saveError)
@@ -127,7 +131,7 @@ describe('useIndexedDbPersistence', () => {
       await vi.runOnlyPendingTimersAsync();
     });
 
-    const changedMapData: PersistedValues['mapData'] = { importedEvent: {} };
+    const changedMapData: PersistedValues["mapData"] = { importedEvent: {} };
     const valuesAfterImport: PersistedValues = {
       ...initialValues,
       mapData: changedMapData,
@@ -139,10 +143,14 @@ describe('useIndexedDbPersistence', () => {
     });
 
     expect(dbMock.saveMapDataChanges).toHaveBeenCalledTimes(1);
-    expect(dbMock.saveMapDataChanges).toHaveBeenLastCalledWith({}, changedMapData);
-    expect(consoleErrorSpy).toHaveBeenCalledWith('Failed to save data to IndexedDB:', [
-      { label: 'mapData', error: saveError },
-    ]);
+    expect(dbMock.saveMapDataChanges).toHaveBeenLastCalledWith(
+      {},
+      changedMapData,
+    );
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Failed to save data to IndexedDB:",
+      [{ label: "mapData", error: saveError }],
+    );
     expect(alertSpy).not.toHaveBeenCalled();
 
     const valuesAtNextSave: PersistedValues = {
@@ -156,8 +164,13 @@ describe('useIndexedDbPersistence', () => {
     });
 
     expect(dbMock.saveMapDataChanges).toHaveBeenCalledTimes(2);
-    expect(dbMock.saveMapDataChanges).toHaveBeenLastCalledWith({}, changedMapData);
-    expect(dbMock.saveEventLists).toHaveBeenCalledWith(valuesAtNextSave.eventLists);
+    expect(dbMock.saveMapDataChanges).toHaveBeenLastCalledWith(
+      {},
+      changedMapData,
+    );
+    expect(dbMock.saveEventLists).toHaveBeenCalledWith(
+      valuesAtNextSave.eventLists,
+    );
     expect(alertSpy).not.toHaveBeenCalled();
   });
 });

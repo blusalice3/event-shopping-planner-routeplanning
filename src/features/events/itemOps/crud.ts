@@ -5,8 +5,8 @@ import type {
   PurchaseStatus,
   ShoppingItem,
   ViewMode,
-} from '../../../types/item';
-import { normalizeLimitedPurchaseFields } from '../../../utils/purchaseQuantity';
+} from "../../../types/item";
+import { normalizeLimitedPurchaseFields } from "../../../utils/purchaseQuantity";
 
 export interface UpdateItemResult {
   items: ShoppingItem[];
@@ -29,29 +29,43 @@ export function computeUpdateItem(
   itemSource: ItemSource | undefined,
 ): UpdateItemResult {
   const normalizedUpdatedItem = normalizeLimitedPurchaseFields(updatedItem);
-  const currentItem = items.find((item) => item.id === normalizedUpdatedItem.id);
+  const currentItem = items.find(
+    (item) => item.id === normalizedUpdatedItem.id,
+  );
   const purchaseStatusChanged =
-    currentItem != null && currentItem.purchaseStatus !== normalizedUpdatedItem.purchaseStatus;
-  const priceChanged = currentItem != null && currentItem.price !== normalizedUpdatedItem.price;
+    currentItem != null &&
+    currentItem.purchaseStatus !== normalizedUpdatedItem.purchaseStatus;
+  const priceChanged =
+    currentItem != null && currentItem.price !== normalizedUpdatedItem.price;
   const quantityChanged =
-    currentItem != null && currentItem.quantity !== normalizedUpdatedItem.quantity;
+    currentItem != null &&
+    currentItem.quantity !== normalizedUpdatedItem.quantity;
   const limitedPurchasedQuantityChanged =
     currentItem != null &&
-    currentItem.limitedPurchasedQuantity !== normalizedUpdatedItem.limitedPurchasedQuantity;
-  const purchaseQuantityChanged = quantityChanged || limitedPurchasedQuantityChanged;
-  const importantItemChanged = purchaseStatusChanged || priceChanged || purchaseQuantityChanged;
+    currentItem.limitedPurchasedQuantity !==
+      normalizedUpdatedItem.limitedPurchasedQuantity;
+  const purchaseQuantityChanged =
+    quantityChanged || limitedPurchasedQuantityChanged;
+  const importantItemChanged =
+    purchaseStatusChanged || priceChanged || purchaseQuantityChanged;
 
   let finalItem = normalizedUpdatedItem;
 
-  if ((mode === 'execute' || mode === 'focus') && importantItemChanged) {
-    const effectiveProtection = currentProtection ?? (itemSource === 'app' ? 'full' : 'none');
-    if (effectiveProtection === 'none') {
-      finalItem = { ...normalizedUpdatedItem, protectionLevel: 'deletable' as const };
+  if ((mode === "execute" || mode === "focus") && importantItemChanged) {
+    const effectiveProtection =
+      currentProtection ?? (itemSource === "app" ? "full" : "none");
+    if (effectiveProtection === "none") {
+      finalItem = {
+        ...normalizedUpdatedItem,
+        protectionLevel: "deletable" as const,
+      };
     }
   }
 
   return {
-    items: items.map((item) => (item.id === normalizedUpdatedItem.id ? finalItem : item)),
+    items: items.map((item) =>
+      item.id === normalizedUpdatedItem.id ? finalItem : item,
+    ),
     purchaseStatusChanged,
     priceChanged,
     quantityChanged,
@@ -82,7 +96,9 @@ export function computeDeleteItem(
 
   const newExecuteItems: ExecuteModeItems = {};
   Object.keys(executeModeItems).forEach((eventDate) => {
-    newExecuteItems[eventDate] = executeModeItems[eventDate].filter((id) => id !== deletedId);
+    newExecuteItems[eventDate] = executeModeItems[eventDate].filter(
+      (id) => id !== deletedId,
+    );
   });
 
   return { items: newItems, executeModeItems: newExecuteItems };
@@ -103,23 +119,23 @@ export interface AddItemFromFocusModeResult {
  */
 export function computeAddItemFromFocusMode(
   items: ShoppingItem[],
-  newItem: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus },
+  newItem: Omit<ShoppingItem, "id"> & { purchaseStatus?: PurchaseStatus },
   executeModeItems: ExecuteModeItems,
 ): AddItemFromFocusModeResult {
-  const purchaseStatus = newItem.purchaseStatus || 'None';
+  const purchaseStatus = newItem.purchaseStatus || "None";
 
   const item: ShoppingItem = {
     ...newItem,
     id: `item-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
     purchaseStatus,
-    source: 'app' as const,
-    protectionLevel: 'full' as const,
+    source: "app" as const,
+    protectionLevel: "full" as const,
   };
 
   const newItems = [...items, item];
   let newExecuteItems = executeModeItems;
 
-  if (purchaseStatus === 'Postpone' || purchaseStatus === 'Late') {
+  if (purchaseStatus === "Postpone" || purchaseStatus === "Late") {
     const dayName = newItem.eventDate;
     if (dayName) {
       const dayItems = executeModeItems[dayName] || [];
@@ -130,7 +146,11 @@ export function computeAddItemFromFocusMode(
     }
   }
 
-  return { items: newItems, executeModeItems: newExecuteItems, newItemId: item.id };
+  return {
+    items: newItems,
+    executeModeItems: newExecuteItems,
+    newItemId: item.id,
+  };
 }
 
 // ────────────────────────────────────────────────

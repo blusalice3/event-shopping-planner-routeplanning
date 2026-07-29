@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState } from "react";
 
 interface UrlUpdateDialogProps {
   currentUrl: string;
@@ -6,9 +6,13 @@ interface UrlUpdateDialogProps {
   onCancel: () => void;
 }
 
-const UrlUpdateDialog: React.FC<UrlUpdateDialogProps> = ({ currentUrl, onConfirm, onCancel }) => {
+const UrlUpdateDialog: React.FC<UrlUpdateDialogProps> = ({
+  currentUrl,
+  onConfirm,
+  onCancel,
+}) => {
   const [url, setUrl] = useState(currentUrl);
-  const [sheetName, setSheetName] = useState('');
+  const [sheetName, setSheetName] = useState("");
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();

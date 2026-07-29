@@ -3,7 +3,7 @@ import type {
   HallDefinitionsStore,
   HallRouteSettings,
   HallRouteSettingsStore,
-} from '../types/map';
+} from "../types/map";
 
 export function buildHallDefinitionsRoutingSignature(
   hallDefinitions: HallDefinition[] | null | undefined,
@@ -47,9 +47,9 @@ export function buildHallDefinitionsStoreRoutingSignature(params: {
   } = params;
 
   return JSON.stringify([
-    activeEventName || '',
-    activeMapTabName || '',
-    maplessKey || '',
+    activeEventName || "",
+    activeMapTabName || "",
+    maplessKey || "",
     buildHallDefinitionsRoutingSignature(activeMapHalls),
     buildHallDefinitionsRoutingSignature(activeMaplessHalls),
   ]);
@@ -71,9 +71,9 @@ export function buildHallRouteSettingsStoreRoutingSignature(params: {
   } = params;
 
   return JSON.stringify([
-    activeEventName || '',
-    activeMapTabName || '',
-    maplessKey || '',
+    activeEventName || "",
+    activeMapTabName || "",
+    maplessKey || "",
     buildHallRouteSettingsRoutingSignature(activeMapSettings),
     buildHallRouteSettingsRoutingSignature(activeMaplessSettings),
   ]);

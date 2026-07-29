@@ -6,19 +6,19 @@ import React, {
   useMemo,
   useRef,
   useState,
-} from 'react';
+} from "react";
 import type {
   NavigationIntent,
   NavigatorEntry,
   NavigatorReturnPoint,
-} from './types';
+} from "./types";
 import {
   useSpaceNavigatorSettings,
   type SpaceNavigatorSettings,
-} from './hooks/useSpaceNavigatorSettings';
+} from "./hooks/useSpaceNavigatorSettings";
 
-export type SpaceNavigatorMode = 'execute' | 'focus';
-export type TemporaryNavigationMode = 'temporary' | 'inspect';
+export type SpaceNavigatorMode = "execute" | "focus";
+export type TemporaryNavigationMode = "temporary" | "inspect";
 
 export interface SpaceNavigatorLocationSnapshot {
   scrollTop?: number;
@@ -29,7 +29,7 @@ export interface SpaceNavigatorLocationSnapshot {
 export interface SpaceNavigatorActionRequest {
   entry: NavigatorEntry;
   index: number;
-  intent: Extract<NavigationIntent, 'set-current' | 'temporary' | 'inspect'>;
+  intent: Extract<NavigationIntent, "set-current" | "temporary" | "inspect">;
   confirmed: boolean;
 }
 
@@ -45,7 +45,7 @@ export interface SpaceNavigatorRegistration {
   entries: readonly NavigatorEntry[];
   currentIndex: number;
   formalIndex: number;
-  layoutMode: 'pc' | 'smartphone';
+  layoutMode: "pc" | "smartphone";
   getSnapshot?: () => SpaceNavigatorLocationSnapshot;
   onNavigate: (
     request: SpaceNavigatorActionRequest,
@@ -84,7 +84,7 @@ interface SpaceNavigatorContextValue {
   history: readonly InternalReturnPoint[];
   navigate: (
     targetIndex: number,
-    intent: Extract<NavigationIntent, 'set-current' | 'temporary' | 'inspect'>,
+    intent: Extract<NavigationIntent, "set-current" | "temporary" | "inspect">,
     confirmed?: boolean,
   ) => Promise<SpaceNavigatorActionResult>;
   returnToPrevious: () => Promise<void>;
@@ -96,14 +96,23 @@ interface SpaceNavigatorContextValue {
   interactionActive: boolean;
 }
 
-const SpaceNavigatorContext = createContext<SpaceNavigatorContextValue | null>(null);
+const SpaceNavigatorContext = createContext<SpaceNavigatorContextValue | null>(
+  null,
+);
 
-export function SpaceNavigatorProvider({ children }: { children: React.ReactNode }) {
-  const { settings, updateSettings, resetSettings } = useSpaceNavigatorSettings();
-  const [registration, setRegistration] = useState<SpaceNavigatorRegistration | null>(null);
+export function SpaceNavigatorProvider({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const { settings, updateSettings, resetSettings } =
+    useSpaceNavigatorSettings();
+  const [registration, setRegistration] =
+    useState<SpaceNavigatorRegistration | null>(null);
   const registrationRef = useRef<SpaceNavigatorRegistration | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
-  const [temporaryMode, setTemporaryMode] = useState<TemporaryNavigationMode | null>(null);
+  const [temporaryMode, setTemporaryMode] =
+    useState<TemporaryNavigationMode | null>(null);
   const [history, setHistory] = useState<InternalReturnPoint[]>([]);
   const [notification, setNotification] = useState<string | null>(null);
   const notificationTimerRef = useRef<number | null>(null);
@@ -156,25 +165,31 @@ export function SpaceNavigatorProvider({ children }: { children: React.ReactNode
     }
   }, []);
 
-  const register = useCallback((nextRegistration: SpaceNavigatorRegistration) => {
-    registrationRef.current = nextRegistration;
-    setRegistration(nextRegistration);
+  const register = useCallback(
+    (nextRegistration: SpaceNavigatorRegistration) => {
+      registrationRef.current = nextRegistration;
+      setRegistration(nextRegistration);
 
-    return () => {
+      return () => {
+        if (registrationRef.current?.id !== nextRegistration.id) return;
+        registrationRef.current = null;
+        setRegistration(null);
+        setPickerOpen(false);
+        setTemporaryMode(null);
+        setHistory([]);
+      };
+    },
+    [],
+  );
+
+  const updateRegistration = useCallback(
+    (nextRegistration: SpaceNavigatorRegistration) => {
       if (registrationRef.current?.id !== nextRegistration.id) return;
-      registrationRef.current = null;
-      setRegistration(null);
-      setPickerOpen(false);
-      setTemporaryMode(null);
-      setHistory([]);
-    };
-  }, []);
-
-  const updateRegistration = useCallback((nextRegistration: SpaceNavigatorRegistration) => {
-    if (registrationRef.current?.id !== nextRegistration.id) return;
-    registrationRef.current = nextRegistration;
-    setRegistration(nextRegistration);
-  }, []);
+      registrationRef.current = nextRegistration;
+      setRegistration(nextRegistration);
+    },
+    [],
+  );
 
   const openPicker = useCallback(() => {
     const active = registrationRef.current;
@@ -191,24 +206,27 @@ export function SpaceNavigatorProvider({ children }: { children: React.ReactNode
   const navigate = useCallback(
     async (
       targetIndex: number,
-      intent: Extract<NavigationIntent, 'set-current' | 'temporary' | 'inspect'>,
+      intent: Extract<
+        NavigationIntent,
+        "set-current" | "temporary" | "inspect"
+      >,
       confirmed = false,
     ): Promise<SpaceNavigatorActionResult> => {
       const active = registrationRef.current;
       const entry = active?.entries[targetIndex];
       if (!active || !entry) {
-        return { ok: false, message: '選択した訪問先は現在の一覧にありません' };
+        return { ok: false, message: "選択した訪問先は現在の一覧にありません" };
       }
 
       const priorMode = temporaryMode;
       const sourceEntry = active.entries[active.currentIndex];
       const sourceLabel = sourceEntry
-        ? `${sourceEntry.label}${sourceEntry.circles[0] ? `・${sourceEntry.circles[0]}` : ''}`
-        : '元のスペース';
+        ? `${sourceEntry.label}${sourceEntry.circles[0] ? `・${sourceEntry.circles[0]}` : ""}`
+        : "元のスペース";
       const returnPoint: InternalReturnPoint = {
         visitId: sourceEntry?.id ?? entry.id,
         navigatorIndex: active.currentIndex,
-        mode: intent === 'inspect' ? 'inspect' : 'temporary',
+        mode: intent === "inspect" ? "inspect" : "temporary",
         phase: active.entries[active.currentIndex]?.phase,
         phaseIndex: active.entries[active.currentIndex]?.phaseIndex,
         scrollTop: window.scrollY,
@@ -219,20 +237,26 @@ export function SpaceNavigatorProvider({ children }: { children: React.ReactNode
         },
       };
 
-      if (intent === 'temporary' || intent === 'inspect') {
+      if (intent === "temporary" || intent === "inspect") {
         setTemporaryMode(intent);
       } else {
         setTemporaryMode(null);
       }
 
-      const result = await active.onNavigate({ entry, index: targetIndex, intent, confirmed });
+      const result = await active.onNavigate({
+        entry,
+        index: targetIndex,
+        intent,
+        confirmed,
+      });
       if (!result.ok) {
         setTemporaryMode(priorMode);
-        if (result.message && !result.requiresConfirmation) notify(result.message);
+        if (result.message && !result.requiresConfirmation)
+          notify(result.message);
         return result;
       }
 
-      if (intent === 'temporary' || intent === 'inspect') {
+      if (intent === "temporary" || intent === "inspect") {
         setHistory((current) => [...current, returnPoint]);
       } else {
         setHistory([]);
@@ -259,37 +283,40 @@ export function SpaceNavigatorProvider({ children }: { children: React.ReactNode
   }, [history]);
 
   const switchInspectToTemporary = useCallback(() => {
-    setTemporaryMode((current) => (current === 'inspect' ? 'temporary' : current));
+    setTemporaryMode((current) =>
+      current === "inspect" ? "temporary" : current,
+    );
   }, []);
 
-  const promoteTemporary = useCallback(async (): Promise<SpaceNavigatorActionResult> => {
-    const active = registrationRef.current;
-    const entry = active?.entries[active.currentIndex];
-    if (!active || !entry) {
-      return { ok: false, message: '現在の訪問先を確定できませんでした' };
-    }
+  const promoteTemporary =
+    useCallback(async (): Promise<SpaceNavigatorActionResult> => {
+      const active = registrationRef.current;
+      const entry = active?.entries[active.currentIndex];
+      if (!active || !entry) {
+        return { ok: false, message: "現在の訪問先を確定できませんでした" };
+      }
 
-    const priorMode = temporaryMode;
-    setTemporaryMode(null);
-    const result = active.onPromote
-      ? await active.onPromote(entry, active.currentIndex)
-      : await active.onNavigate({
-          entry,
-          index: active.currentIndex,
-          intent: 'set-current',
-          confirmed: true,
-        });
+      const priorMode = temporaryMode;
+      setTemporaryMode(null);
+      const result = active.onPromote
+        ? await active.onPromote(entry, active.currentIndex)
+        : await active.onNavigate({
+            entry,
+            index: active.currentIndex,
+            intent: "set-current",
+            confirmed: true,
+          });
 
-    if (!result.ok) {
-      setTemporaryMode(priorMode);
+      if (!result.ok) {
+        setTemporaryMode(priorMode);
+        if (result.message) notify(result.message);
+        return result;
+      }
+
+      setHistory([]);
       if (result.message) notify(result.message);
       return result;
-    }
-
-    setHistory([]);
-    if (result.message) notify(result.message);
-    return result;
-  }, [notify, temporaryMode]);
+    }, [notify, temporaryMode]);
 
   const value = useMemo<SpaceNavigatorContextValue>(
     () => ({
@@ -303,7 +330,7 @@ export function SpaceNavigatorProvider({ children }: { children: React.ReactNode
       openPicker,
       closePicker,
       temporaryMode,
-      isInspecting: temporaryMode === 'inspect',
+      isInspecting: temporaryMode === "inspect",
       history,
       navigate,
       returnToPrevious,
@@ -336,13 +363,19 @@ export function SpaceNavigatorProvider({ children }: { children: React.ReactNode
     ],
   );
 
-  return <SpaceNavigatorContext.Provider value={value}>{children}</SpaceNavigatorContext.Provider>;
+  return (
+    <SpaceNavigatorContext.Provider value={value}>
+      {children}
+    </SpaceNavigatorContext.Provider>
+  );
 }
 
 export function useSpaceNavigator() {
   const context = useContext(SpaceNavigatorContext);
   if (!context) {
-    throw new Error('useSpaceNavigator must be used within SpaceNavigatorProvider');
+    throw new Error(
+      "useSpaceNavigator must be used within SpaceNavigatorProvider",
+    );
   }
   return context;
 }

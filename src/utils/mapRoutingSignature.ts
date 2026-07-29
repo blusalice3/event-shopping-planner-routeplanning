@@ -1,4 +1,4 @@
-import type { BlockDefinition, DayMapData, NumberCellInfo } from '../types/map';
+import type { BlockDefinition, DayMapData, NumberCellInfo } from "../types/map";
 
 const compareStringStable = (a: string, b: string): number => {
   if (a < b) return -1;
@@ -9,8 +9,8 @@ const compareStringStable = (a: string, b: string): number => {
 const encodeCellValueForRouteSignature = (
   value: string | number | null | undefined,
 ): [string, string | number | null] => {
-  if (value === undefined) return ['undefined', null];
-  if (value === null) return ['null', null];
+  if (value === undefined) return ["undefined", null];
+  if (value === null) return ["null", null];
   return [typeof value, value];
 };
 
@@ -54,7 +54,9 @@ function selectRouteLookupNumberCellsByValue(
 export function getRouteLookupNumberCellEntries(
   block: BlockDefinition,
 ): [number, NumberCellInfo][] {
-  return [...selectRouteLookupNumberCellsByValue(block).entries()].sort(compareNumberCellEntry);
+  return [...selectRouteLookupNumberCellsByValue(block).entries()].sort(
+    compareNumberCellEntry,
+  );
 }
 
 export function findRouteLookupNumberCell(
@@ -80,7 +82,9 @@ export function buildDayMapVisitLookupSignature(
 
   const blocks = hasDuplicateBlockNames(dayMapData.blocks)
     ? dayMapData.blocks
-    : [...dayMapData.blocks].sort((a, b) => compareStringStable(a.name, b.name));
+    : [...dayMapData.blocks].sort((a, b) =>
+        compareStringStable(a.name, b.name),
+      );
 
   return JSON.stringify(
     blocks.map((block) => [

@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo } from "react";
 import type {
   DayMapData,
   HallDefinition,
@@ -6,8 +6,8 @@ import type {
   HallRouteSettings,
   HallRouteSettingsStore,
   MapDataStore,
-} from '../../../types/map';
-import { getMaplessKey } from '../../../types/map';
+} from "../../../types/map";
+import { getMaplessKey } from "../../../types/map";
 
 type UseMapSelectorsParams = {
   activeEventName: string | null;
@@ -20,12 +20,14 @@ type UseMapSelectorsParams = {
 };
 
 const toHalfWidthDigits = (value: string): string =>
-  value.replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0));
+  value.replace(/[０-９]/g, (char) =>
+    String.fromCharCode(char.charCodeAt(0) - 0xfee0),
+  );
 
 const normalizeMapDayToken = (value: string): string =>
   toHalfWidthDigits(value)
-    .replace(/[ \u3000]/g, '')
-    .replace(/マップ$/, '');
+    .replace(/[ \u3000]/g, "")
+    .replace(/マップ$/, "");
 
 type UseMapSelectorsResult = {
   mapTabs: string[];
@@ -52,8 +54,8 @@ export function useMapSelectors({
   const mapTabs = useMemo(() => {
     if (!activeEventName || !mapData[activeEventName]) return [];
     return Object.keys(mapData[activeEventName]).sort((a, b) => {
-      const numA = parseInt(toHalfWidthDigits(a).match(/\d+/)?.[0] || '0', 10);
-      const numB = parseInt(toHalfWidthDigits(b).match(/\d+/)?.[0] || '0', 10);
+      const numA = parseInt(toHalfWidthDigits(a).match(/\d+/)?.[0] || "0", 10);
+      const numB = parseInt(toHalfWidthDigits(b).match(/\d+/)?.[0] || "0", 10);
       return numA - numB;
     });
   }, [activeEventName, mapData]);
@@ -87,7 +89,8 @@ export function useMapSelectors({
     const mapHalls = currentMapTabName
       ? hallDefinitions[activeEventName]?.[currentMapTabName] || []
       : [];
-    const maplessHalls = hallDefinitions[activeEventName]?.[getMaplessKey(activeEventDate)] || [];
+    const maplessHalls =
+      hallDefinitions[activeEventName]?.[getMaplessKey(activeEventDate)] || [];
     return [...mapHalls, ...maplessHalls];
   }, [activeEventName, activeEventDate, currentMapTabName, hallDefinitions]);
 
@@ -107,8 +110,11 @@ export function useMapSelectors({
     (eventDate: string): HallDefinition[] => {
       if (!activeEventName) return [];
       const mapTab = getMapTabForDate(eventDate);
-      const mapHalls = mapTab ? hallDefinitions[activeEventName]?.[mapTab] || [] : [];
-      const maplessHalls = hallDefinitions[activeEventName]?.[getMaplessKey(eventDate)] || [];
+      const mapHalls = mapTab
+        ? hallDefinitions[activeEventName]?.[mapTab] || []
+        : [];
+      const maplessHalls =
+        hallDefinitions[activeEventName]?.[getMaplessKey(eventDate)] || [];
       return [...mapHalls, ...maplessHalls];
     },
     [activeEventName, hallDefinitions, getMapTabForDate],
@@ -128,17 +134,24 @@ export function useMapSelectors({
     (eventDate: string): string[] => {
       if (!activeEventName) return [];
       const mapTab = getMapTabForDate(eventDate);
-      const mapHalls = mapTab ? hallDefinitions[activeEventName]?.[mapTab] || [] : [];
-      const maplessHalls = hallDefinitions[activeEventName]?.[getMaplessKey(eventDate)] || [];
-      const mapRouteSettings = mapTab ? hallRouteSettings[activeEventName]?.[mapTab] : undefined;
-      const maplessRouteSettings = hallRouteSettings[activeEventName]?.[getMaplessKey(eventDate)];
+      const mapHalls = mapTab
+        ? hallDefinitions[activeEventName]?.[mapTab] || []
+        : [];
+      const maplessHalls =
+        hallDefinitions[activeEventName]?.[getMaplessKey(eventDate)] || [];
+      const mapRouteSettings = mapTab
+        ? hallRouteSettings[activeEventName]?.[mapTab]
+        : undefined;
+      const maplessRouteSettings =
+        hallRouteSettings[activeEventName]?.[getMaplessKey(eventDate)];
 
       const mapOrder =
         mapRouteSettings?.hallOrder && mapRouteSettings.hallOrder.length > 0
           ? mapRouteSettings.hallOrder
           : mapHalls.map((h) => h.id);
       const maplessOrder =
-        maplessRouteSettings?.hallOrder && maplessRouteSettings.hallOrder.length > 0
+        maplessRouteSettings?.hallOrder &&
+        maplessRouteSettings.hallOrder.length > 0
           ? maplessRouteSettings.hallOrder
           : maplessHalls.map((h) => h.id);
 

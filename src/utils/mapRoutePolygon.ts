@@ -8,7 +8,8 @@ export function isPointOnSegment(
   a: MapRoutePolygonPoint,
   b: MapRoutePolygonPoint,
 ): boolean {
-  const cross = (col - a.col) * (b.row - a.row) - (row - a.row) * (b.col - a.col);
+  const cross =
+    (col - a.col) * (b.row - a.row) - (row - a.row) * (b.col - a.col);
   if (Math.abs(cross) > EPSILON) return false;
 
   return (
@@ -27,7 +28,14 @@ export function isPointInPolygonInclusive(
   if (vertices.length < 3) return false;
 
   for (let i = 0; i < vertices.length; i += 1) {
-    if (isPointOnSegment(row, col, vertices[i], vertices[(i + 1) % vertices.length])) {
+    if (
+      isPointOnSegment(
+        row,
+        col,
+        vertices[i],
+        vertices[(i + 1) % vertices.length],
+      )
+    ) {
       return true;
     }
   }
@@ -46,7 +54,11 @@ export function isPointInPolygonInclusive(
   return inside;
 }
 
-function orientation(a: MapRoutePolygonPoint, b: MapRoutePolygonPoint, c: MapRoutePolygonPoint) {
+function orientation(
+  a: MapRoutePolygonPoint,
+  b: MapRoutePolygonPoint,
+  c: MapRoutePolygonPoint,
+) {
   return (b.col - a.col) * (c.row - a.row) - (b.row - a.row) * (c.col - a.col);
 }
 
@@ -66,7 +78,10 @@ function collectSegmentIntersectionParams(
   edgeEnd: MapRoutePolygonPoint,
 ): void {
   const r = { row: end.row - start.row, col: end.col - start.col };
-  const s = { row: edgeEnd.row - edgeStart.row, col: edgeEnd.col - edgeStart.col };
+  const s = {
+    row: edgeEnd.row - edgeStart.row,
+    col: edgeEnd.col - edgeStart.col,
+  };
   const denominator = r.col * s.row - r.row * s.col;
   const qp = { row: edgeStart.row - start.row, col: edgeStart.col - start.col };
 
@@ -77,8 +92,14 @@ function collectSegmentIntersectionParams(
     const axisEnd = useCol ? end.col : end.row;
     const axisDelta = axisEnd - axisStart;
     if (Math.abs(axisDelta) < EPSILON) return;
-    addUniqueParam(params, ((useCol ? edgeStart.col : edgeStart.row) - axisStart) / axisDelta);
-    addUniqueParam(params, ((useCol ? edgeEnd.col : edgeEnd.row) - axisStart) / axisDelta);
+    addUniqueParam(
+      params,
+      ((useCol ? edgeStart.col : edgeStart.row) - axisStart) / axisDelta,
+    );
+    addUniqueParam(
+      params,
+      ((useCol ? edgeEnd.col : edgeEnd.row) - axisStart) / axisDelta,
+    );
     return;
   }
 
@@ -99,7 +120,13 @@ export function isSegmentInPolygonInclusive(
 
   const params = [0, 1];
   for (let i = 0; i < vertices.length; i += 1) {
-    collectSegmentIntersectionParams(params, start, end, vertices[i], vertices[(i + 1) % vertices.length]);
+    collectSegmentIntersectionParams(
+      params,
+      start,
+      end,
+      vertices[i],
+      vertices[(i + 1) % vertices.length],
+    );
   }
   params.sort((a, b) => a - b);
 
@@ -122,10 +149,12 @@ export function isRoutePathInsideHallPolygon(
 ): boolean {
   if (vertices.length < 3 || path.length === 0) return false;
   for (const point of path) {
-    if (!isPointInPolygonInclusive(point.row, point.col, vertices)) return false;
+    if (!isPointInPolygonInclusive(point.row, point.col, vertices))
+      return false;
   }
   for (let i = 0; i < path.length - 1; i += 1) {
-    if (!isSegmentInPolygonInclusive(path[i], path[i + 1], vertices)) return false;
+    if (!isSegmentInPolygonInclusive(path[i], path[i + 1], vertices))
+      return false;
   }
   return true;
 }

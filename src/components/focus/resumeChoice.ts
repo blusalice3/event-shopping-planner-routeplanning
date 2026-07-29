@@ -1,11 +1,11 @@
-import type { FocusModeSessionState, FocusPhase } from '../../types/focus';
-import type { ShoppingItem } from '../../types/item';
+import type { FocusModeSessionState, FocusPhase } from "../../types/focus";
+import type { ShoppingItem } from "../../types/item";
 
 // VisitGroup をそのまま import できないため、必要最小限のフィールドだけを型定義する。
 // 実際の FocusMode 側の VisitGroup (items: ShoppingItem[]) は structural 互換で受け渡し可能。
 export type ResumeVisitGroup = {
   key: string;
-  items: Array<Pick<ShoppingItem, 'block' | 'number' | 'circle'>>;
+  items: Array<Pick<ShoppingItem, "block" | "number" | "circle">>;
 };
 
 export interface ResumeChoiceDialogState {
@@ -55,12 +55,13 @@ export function buildResumeChoiceDialogState(args: {
 
   const lastChangeEnabled = exactLastChangeIndex !== null;
 
-  let lastSpaceLabel = '対象スペースが現在の並びに見つかりません';
+  let lastSpaceLabel = "対象スペースが現在の並びに見つかりません";
   if (lastChangeEnabled && lpc) {
     const visits = args.visitsByPhase[lpc.phase];
     const firstItem = visits[exactLastChangeIndex as number]?.items?.[0];
     if (firstItem) {
-      lastSpaceLabel = `${firstItem.block}-${firstItem.number} ${firstItem.circle ?? ''}`.trim();
+      lastSpaceLabel =
+        `${firstItem.block}-${firstItem.number} ${firstItem.circle ?? ""}`.trim();
     }
   }
 
@@ -89,13 +90,13 @@ export interface ResumeChoiceResult {
  * 再開ダイアログの選択から、適用すべき state の差分を算出する純粋関数。
  */
 export function resolveResumeChoice(
-  choice: 'lastChange' | 'pointer' | 'phaseStart' | 'normalStart',
+  choice: "lastChange" | "pointer" | "phaseStart" | "normalStart",
   dialog: ResumeChoiceDialogState,
 ): ResumeChoiceResult {
-  if (choice === 'lastChange' && dialog.lastChangeEnabled) {
+  if (choice === "lastChange" && dialog.lastChangeEnabled) {
     return { phase: dialog.lastPhase, phaseIndex: dialog.lastIndex };
   }
-  if (choice === 'pointer') {
+  if (choice === "pointer") {
     const result: ResumeChoiceResult = {
       phase: dialog.pointerPhase,
       phaseIndex: dialog.pointerIndex,
@@ -103,11 +104,11 @@ export function resolveResumeChoice(
     if (dialog.wasCompleted) result.isCompleted = true;
     return result;
   }
-  if (choice === 'phaseStart' && dialog.phaseStartEnabled) {
+  if (choice === "phaseStart" && dialog.phaseStartEnabled) {
     return { phase: dialog.phaseStartPhase, phaseIndex: 0 };
   }
-  if (choice === 'normalStart' && dialog.normalStartEnabled) {
-    return { phase: 'normal', phaseIndex: 0 };
+  if (choice === "normalStart" && dialog.normalStartEnabled) {
+    return { phase: "normal", phaseIndex: 0 };
   }
   return {};
 }

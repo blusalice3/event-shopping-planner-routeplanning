@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import type { ComponentProps } from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import LimitedPurchaseConfirmDialog from './LimitedPurchaseConfirmDialog';
+import type { ComponentProps } from "react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import LimitedPurchaseConfirmDialog from "./LimitedPurchaseConfirmDialog";
 
 const renderDialog = (
   overrides: Partial<ComponentProps<typeof LimitedPurchaseConfirmDialog>> = {},
@@ -21,11 +21,11 @@ const renderDialog = (
     />,
   );
 
-describe('LimitedPurchaseConfirmDialog', () => {
-  it('places initial focus on the requested button', () => {
-    const { rerender } = renderDialog({ initialFocus: 'cancel' });
+describe("LimitedPurchaseConfirmDialog", () => {
+  it("places initial focus on the requested button", () => {
+    const { rerender } = renderDialog({ initialFocus: "cancel" });
 
-    expect(screen.getByRole('button', { name: '戻る' })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "戻る" })).toHaveFocus();
 
     rerender(
       <LimitedPurchaseConfirmDialog
@@ -40,25 +40,25 @@ describe('LimitedPurchaseConfirmDialog', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: '進む' })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "進む" })).toHaveFocus();
   });
 
-  it('traps Tab between cancel and confirm buttons', () => {
-    renderDialog({ initialFocus: 'confirm' });
+  it("traps Tab between cancel and confirm buttons", () => {
+    renderDialog({ initialFocus: "confirm" });
 
-    const dialog = screen.getByRole('dialog', { name: '確認' });
-    const cancelButton = screen.getByRole('button', { name: '戻る' });
-    const confirmButton = screen.getByRole('button', { name: '進む' });
+    const dialog = screen.getByRole("dialog", { name: "確認" });
+    const cancelButton = screen.getByRole("button", { name: "戻る" });
+    const confirmButton = screen.getByRole("button", { name: "進む" });
 
     expect(confirmButton).toHaveFocus();
-    fireEvent.keyDown(dialog, { key: 'Tab' });
+    fireEvent.keyDown(dialog, { key: "Tab" });
     expect(cancelButton).toHaveFocus();
 
-    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
     expect(confirmButton).toHaveFocus();
   });
 
-  it('stops dialog mouse events from React parents and document bubble listeners', () => {
+  it("stops dialog mouse events from React parents and document bubble listeners", () => {
     const parentClick = vi.fn();
     const documentMouseDown = vi.fn();
     const documentMouseUp = vi.fn();
@@ -79,11 +79,11 @@ describe('LimitedPurchaseConfirmDialog', () => {
       </div>,
     );
 
-    document.addEventListener('mousedown', documentMouseDown);
-    document.addEventListener('mouseup', documentMouseUp);
-    document.addEventListener('click', documentClick);
+    document.addEventListener("mousedown", documentMouseDown);
+    document.addEventListener("mouseup", documentMouseUp);
+    document.addEventListener("click", documentClick);
 
-    const dialog = screen.getByRole('dialog', { name: '確認' });
+    const dialog = screen.getByRole("dialog", { name: "確認" });
     fireEvent.mouseDown(dialog);
     fireEvent.mouseUp(dialog);
     fireEvent.click(dialog);
@@ -93,8 +93,8 @@ describe('LimitedPurchaseConfirmDialog', () => {
     expect(documentMouseUp).not.toHaveBeenCalled();
     expect(documentClick).not.toHaveBeenCalled();
 
-    document.removeEventListener('mousedown', documentMouseDown);
-    document.removeEventListener('mouseup', documentMouseUp);
-    document.removeEventListener('click', documentClick);
+    document.removeEventListener("mousedown", documentMouseDown);
+    document.removeEventListener("mouseup", documentMouseUp);
+    document.removeEventListener("click", documentClick);
   });
 });

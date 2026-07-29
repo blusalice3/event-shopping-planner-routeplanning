@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef } from 'react';
-import type { FocusPhase } from '../../../types/focus';
-import type { ShoppingItem } from '../../../types/item';
+import { useEffect, useMemo, useRef } from "react";
+import type { FocusPhase } from "../../../types/focus";
+import type { ShoppingItem } from "../../../types/item";
 
 type VisitGroup = {
   key: string;
@@ -83,10 +83,12 @@ export function useAutoSkipEmptyVisit({
     for (let i = currentPhaseIndex + 1; i < currentPhaseVisits.length; i++) {
       const visit = currentPhaseVisits[i];
       let hasItems = false;
-      if (currentPhase === 'normal') {
+      if (currentPhase === "normal") {
         hasItems = visit.items.length > 0;
-      } else if (currentPhase === 'postponed') {
-        hasItems = visit.items.some((item) => postponedPhaseItemIds.has(item.id));
+      } else if (currentPhase === "postponed") {
+        hasItems = visit.items.some((item) =>
+          postponedPhaseItemIds.has(item.id),
+        );
       } else {
         hasItems = visit.items.some((item) => latePhaseItemIds.has(item.id));
       }
@@ -98,41 +100,45 @@ export function useAutoSkipEmptyVisit({
 
     clearAutoAdvanceTimer();
 
-    if (currentPhase === 'normal') {
+    if (currentPhase === "normal") {
       const postponedIds = new Set(
-        executeItems.filter((item) => item.purchaseStatus === 'Postpone').map((item) => item.id),
+        executeItems
+          .filter((item) => item.purchaseStatus === "Postpone")
+          .map((item) => item.id),
       );
       const lateIds = new Set(
-        executeItems.filter((item) => item.purchaseStatus === 'Late').map((item) => item.id),
+        executeItems
+          .filter((item) => item.purchaseStatus === "Late")
+          .map((item) => item.id),
       );
 
       if (postponedIds.size > 0) {
         setPostponedPhaseItemIds(postponedIds);
         setLatePhaseItemIds(lateIds);
-        setNotification('後回しアイテムの巡回を開始します');
-        setCurrentPhase('postponed');
+        setNotification("後回しアイテムの巡回を開始します");
+        setCurrentPhase("postponed");
         setCurrentPhaseIndex(0);
       } else if (lateIds.size > 0) {
         setPostponedPhaseItemIds(postponedIds);
         setLatePhaseItemIds(lateIds);
-        setNotification('遅参アイテムの巡回を開始します');
-        setCurrentPhase('late');
+        setNotification("遅参アイテムの巡回を開始します");
+        setCurrentPhase("late");
         setCurrentPhaseIndex(0);
       } else {
         setIsCompleted(true);
       }
-    } else if (currentPhase === 'postponed') {
+    } else if (currentPhase === "postponed") {
       const currentLateIds = new Set(latePhaseItemIds);
       executeItems.forEach((item) => {
-        if (item.purchaseStatus === 'Late') {
+        if (item.purchaseStatus === "Late") {
           currentLateIds.add(item.id);
         }
       });
 
       if (currentLateIds.size > 0) {
         setLatePhaseItemIds(currentLateIds);
-        setNotification('遅参アイテムの巡回を開始します');
-        setCurrentPhase('late');
+        setNotification("遅参アイテムの巡回を開始します");
+        setCurrentPhase("late");
         setCurrentPhaseIndex(0);
       } else {
         setIsCompleted(true);

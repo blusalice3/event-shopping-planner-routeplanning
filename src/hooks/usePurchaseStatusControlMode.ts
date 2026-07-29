@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 import {
   PurchaseStatusControlModes,
   type PurchaseStatusControlMode,
-} from '../types/item';
+} from "../types/item";
 
-const STORAGE_KEY = 'purchaseStatusControlMode';
-export const DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode = 'cycle';
+const STORAGE_KEY = "purchaseStatusControlMode";
+export const DEFAULT_PURCHASE_STATUS_CONTROL_MODE: PurchaseStatusControlMode =
+  "cycle";
 const VALID_MODES = new Set<string>(PurchaseStatusControlModes);
 
 export function usePurchaseStatusControlMode() {

@@ -1,13 +1,13 @@
-export const POST_EVENT_DISTRIBUTION_REMARK_LABEL = '通販･頒布確認:';
+export const POST_EVENT_DISTRIBUTION_REMARK_LABEL = "通販･頒布確認:";
 
 export const POST_EVENT_DISTRIBUTION_OPTIONS = [
-  '通販有(メロン等)',
-  'BOOTH有',
-  '別イベント頒布有',
-  '通販･別イベ頒布無',
+  "通販有(メロン等)",
+  "BOOTH有",
+  "別イベント頒布有",
+  "通販･別イベ頒布無",
 ] as const;
 
-export const POST_EVENT_DISTRIBUTION_UNCONFIRMED = '未確認';
+export const POST_EVENT_DISTRIBUTION_UNCONFIRMED = "未確認";
 
 export type PostEventDistributionAnswer =
   | (typeof POST_EVENT_DISTRIBUTION_OPTIONS)[number]
@@ -28,7 +28,7 @@ export const upsertPostEventDistributionRemark = (
 ): string => {
   const nextRemark = `${POST_EVENT_DISTRIBUTION_REMARK_LABEL} ${value}`;
   const existingPattern = new RegExp(
-    `${POST_EVENT_DISTRIBUTION_REMARK_LABEL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s*\\S*`,
+    `${POST_EVENT_DISTRIBUTION_REMARK_LABEL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\S*`,
   );
 
   if (existingPattern.test(remarks)) {

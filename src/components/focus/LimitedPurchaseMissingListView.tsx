@@ -1,6 +1,6 @@
-import React, { useMemo, useState } from 'react';
-import type { ShoppingItem } from '../../types/item';
-import LimitedPurchaseExcessConfirmDialog from '../LimitedPurchaseExcessConfirmDialog';
+import React, { useMemo, useState } from "react";
+import type { ShoppingItem } from "../../types/item";
+import LimitedPurchaseExcessConfirmDialog from "../LimitedPurchaseExcessConfirmDialog";
 import {
   applyLimitedPurchase,
   applyPurchasedFromLimitedInput,
@@ -10,7 +10,7 @@ import {
   validateLimitedPurchasePlannedQuantity,
   validateLimitedPurchaseQuantities,
   type LimitedPurchaseValidationError,
-} from '../../utils/purchaseQuantity';
+} from "../../utils/purchaseQuantity";
 
 type LimitedPurchaseMissingListViewProps = {
   items: ShoppingItem[];
@@ -30,28 +30,31 @@ type PriceInputParseResult =
   | { ok: false; message: string };
 
 const toMessage = (error: LimitedPurchaseValidationError): string => {
-  if (error === 'planned_required') return '購入予定量を入力してください';
-  if (error === 'actual_required') return '実購入数を入力してください';
-  if (error === 'planned_not_integer') return '購入予定量は整数で入力してください';
-  if (error === 'actual_not_integer') return '実購入数は整数で入力してください';
-  if (error === 'planned_not_positive') return '購入予定量は1以上で入力してください';
-  if (error === 'actual_not_positive') return '実購入数は1以上で入力してください';
-  return '限数購入では実購入数を購入予定量より少なくしてください';
+  if (error === "planned_required") return "購入予定量を入力してください";
+  if (error === "actual_required") return "実購入数を入力してください";
+  if (error === "planned_not_integer")
+    return "購入予定量は整数で入力してください";
+  if (error === "actual_not_integer") return "実購入数は整数で入力してください";
+  if (error === "planned_not_positive")
+    return "購入予定量は1以上で入力してください";
+  if (error === "actual_not_positive")
+    return "実購入数は1以上で入力してください";
+  return "限数購入では実購入数を購入予定量より少なくしてください";
 };
 
 const parsePriceInput = (value: string): PriceInputParseResult => {
   const trimmed = value.trim();
-  if (trimmed === '') return { ok: true, price: null };
+  if (trimmed === "") return { ok: true, price: null };
   if (!/^\d+$/.test(trimmed)) {
-    return { ok: false, message: '価格は半角数字で入力してください' };
+    return { ok: false, message: "価格は半角数字で入力してください" };
   }
   return { ok: true, price: Number(trimmed) };
 };
 
 const createRowState = (item: ShoppingItem): RowState => ({
-  actualText: '',
+  actualText: "",
   plannedText: String(getPlannedQuantity(item)),
-  priceText: item.price === null ? '' : String(item.price),
+  priceText: item.price === null ? "" : String(item.price),
   error: null,
 });
 
@@ -60,9 +63,14 @@ export function LimitedPurchaseMissingListView({
   onUpdateItem,
   onBack,
 }: LimitedPurchaseMissingListViewProps) {
-  const missingItems = useMemo(() => items.filter(hasMissingLimitedPurchaseQuantity), [items]);
+  const missingItems = useMemo(
+    () => items.filter(hasMissingLimitedPurchaseQuantity),
+    [items],
+  );
   const [rows, setRows] = useState<Record<string, RowState>>(() =>
-    Object.fromEntries(missingItems.map((item) => [item.id, createRowState(item)])),
+    Object.fromEntries(
+      missingItems.map((item) => [item.id, createRowState(item)]),
+    ),
   );
   const [excessConfirm, setExcessConfirm] = useState<{
     item: ShoppingItem;
@@ -70,13 +78,15 @@ export function LimitedPurchaseMissingListView({
     price: number | null;
   } | null>(null);
 
-  const getRow = (item: ShoppingItem): RowState => rows[item.id] ?? createRowState(item);
+  const getRow = (item: ShoppingItem): RowState =>
+    rows[item.id] ?? createRowState(item);
 
   const updateRow = (itemId: string, patch: Partial<RowState>) => {
     setRows((prev) => ({
       ...prev,
       [itemId]: {
-        ...(prev[itemId] ?? createRowState(items.find((item) => item.id === itemId)!)),
+        ...(prev[itemId] ??
+          createRowState(items.find((item) => item.id === itemId)!)),
         ...patch,
       },
     }));
@@ -92,13 +102,18 @@ export function LimitedPurchaseMissingListView({
 
     const planned = parseDecimalIntegerInput(row.plannedText);
 
-    if (row.actualText.trim() === '') {
+    if (row.actualText.trim() === "") {
       const plannedValidation = validateLimitedPurchasePlannedQuantity(planned);
       if (!plannedValidation.ok) {
         updateRow(item.id, { error: toMessage(plannedValidation.error) });
         return;
       }
-      onUpdateItem(applyLimitedPurchase({ ...item, price: parsedPrice.price }, { planned: planned! }));
+      onUpdateItem(
+        applyLimitedPurchase(
+          { ...item, price: parsedPrice.price },
+          { planned: planned! },
+        ),
+      );
       updateRow(item.id, { error: null });
       return;
     }
@@ -117,13 +132,22 @@ export function LimitedPurchaseMissingListView({
     }
 
     if (
-      validation.error === 'actual_not_less_than_planned' &&
+      validation.error === "actual_not_less_than_planned" &&
       actual !== undefined &&
       planned !== undefined
     ) {
       if (actual === planned) {
-        if (window.confirm('全て購入できているので「購入済」にします。よろしいですか？')) {
-          onUpdateItem(applyPurchasedFromLimitedInput({ ...item, price: parsedPrice.price }, planned));
+        if (
+          window.confirm(
+            "全て購入できているので「購入済」にします。よろしいですか？",
+          )
+        ) {
+          onUpdateItem(
+            applyPurchasedFromLimitedInput(
+              { ...item, price: parsedPrice.price },
+              planned,
+            ),
+          );
           updateRow(item.id, { error: null });
         }
         return;
@@ -171,7 +195,9 @@ export function LimitedPurchaseMissingListView({
                     {item.circle}
                   </div>
                   {item.title && (
-                    <div className="text-sm text-slate-500 dark:text-slate-400">{item.title}</div>
+                    <div className="text-sm text-slate-500 dark:text-slate-400">
+                      {item.title}
+                    </div>
                   )}
                   <div className="text-xs text-slate-400">
                     {item.eventDate} {item.block}-{item.number}
@@ -182,7 +208,12 @@ export function LimitedPurchaseMissingListView({
                     実購入数
                     <input
                       value={row.actualText}
-                      onChange={(e) => updateRow(item.id, { actualText: e.target.value, error: null })}
+                      onChange={(e) =>
+                        updateRow(item.id, {
+                          actualText: e.target.value,
+                          error: null,
+                        })
+                      }
                       className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                       inputMode="numeric"
                     />
@@ -191,7 +222,12 @@ export function LimitedPurchaseMissingListView({
                     購入予定量
                     <input
                       value={row.plannedText}
-                      onChange={(e) => updateRow(item.id, { plannedText: e.target.value, error: null })}
+                      onChange={(e) =>
+                        updateRow(item.id, {
+                          plannedText: e.target.value,
+                          error: null,
+                        })
+                      }
                       className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                       inputMode="numeric"
                     />
@@ -200,13 +236,20 @@ export function LimitedPurchaseMissingListView({
                     価格
                     <input
                       value={row.priceText}
-                      onChange={(e) => updateRow(item.id, { priceText: e.target.value, error: null })}
+                      onChange={(e) =>
+                        updateRow(item.id, {
+                          priceText: e.target.value,
+                          error: null,
+                        })
+                      }
                       className="mt-1 w-full rounded border border-slate-300 px-3 py-2 text-sm dark:border-slate-600 dark:bg-slate-900 dark:text-slate-100"
                       inputMode="numeric"
                     />
                   </label>
                 </div>
-                {row.error && <p className="mt-2 text-sm text-red-600">{row.error}</p>}
+                {row.error && (
+                  <p className="mt-2 text-sm text-red-600">{row.error}</p>
+                )}
                 <div className="mt-3 flex justify-end">
                   <button
                     type="button"

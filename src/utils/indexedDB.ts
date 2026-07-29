@@ -3,53 +3,55 @@
  * localStorageの代わりに大容量データを保存するためのラッパー
  */
 
-import type { MapDataStore } from '../types/map';
+import type { MapDataStore } from "../types/map";
 import {
   compactDayMapForStorage,
   compactMapDataForStorage,
   expandDayMapFromStorage,
   expandMapDataFromStorage,
-} from './mapDataPersistence';
+} from "./mapDataPersistence";
 
-const DB_NAME = 'EventShoppingPlannerDB';
+const DB_NAME = "EventShoppingPlannerDB";
 const DB_VERSION = 5;
-const MAP_DATA_LEGACY_KEY = 'data';
-const MAP_DATA_KEY_PREFIX = 'mapData:';
+const MAP_DATA_LEGACY_KEY = "data";
+const MAP_DATA_KEY_PREFIX = "mapData:";
 
 // ストア名
 const STORES = {
-  EVENT_LISTS: 'eventLists',
-  EVENT_METADATA: 'eventMetadata',
-  EXECUTE_MODE_ITEMS: 'executeModeItems',
-  DAY_MODES: 'dayModes',
-  MAP_DATA: 'mapData',
-  MAP_ROTATION_SETTINGS: 'mapRotationSettings',
-  ROUTE_SETTINGS: 'routeSettings',
-  HALL_DEFINITIONS: 'hallDefinitions',
-  HALL_ROUTE_SETTINGS: 'hallRouteSettings',
-  MAP_VIEWPORT_SETTINGS: 'mapViewportSettings',
-  SYNC_QUEUE: 'syncQueue',
+  EVENT_LISTS: "eventLists",
+  EVENT_METADATA: "eventMetadata",
+  EXECUTE_MODE_ITEMS: "executeModeItems",
+  DAY_MODES: "dayModes",
+  MAP_DATA: "mapData",
+  MAP_ROTATION_SETTINGS: "mapRotationSettings",
+  ROUTE_SETTINGS: "routeSettings",
+  HALL_DEFINITIONS: "hallDefinitions",
+  HALL_ROUTE_SETTINGS: "hallRouteSettings",
+  MAP_VIEWPORT_SETTINGS: "mapViewportSettings",
+  SYNC_QUEUE: "syncQueue",
 } as const;
 
 type StoreName = (typeof STORES)[keyof typeof STORES];
 
-const LOCAL_STORAGE_FALLBACK_DISABLED_STORES = new Set<StoreName>([STORES.MAP_DATA]);
+const LOCAL_STORAGE_FALLBACK_DISABLED_STORES = new Set<StoreName>([
+  STORES.MAP_DATA,
+]);
 
 const LOCAL_STORAGE_KEYS: Record<StoreName, string> = {
-  [STORES.EVENT_LISTS]: 'eventShoppingLists',
-  [STORES.EVENT_METADATA]: 'eventMetadata',
-  [STORES.EXECUTE_MODE_ITEMS]: 'executeModeItems',
-  [STORES.DAY_MODES]: 'dayModes',
-  [STORES.MAP_DATA]: 'mapData',
-  [STORES.MAP_ROTATION_SETTINGS]: 'mapRotationSettings',
-  [STORES.ROUTE_SETTINGS]: 'routeSettings',
-  [STORES.HALL_DEFINITIONS]: 'hallDefinitions',
-  [STORES.HALL_ROUTE_SETTINGS]: 'hallRouteSettings',
-  [STORES.MAP_VIEWPORT_SETTINGS]: 'mapViewportSettings',
-  [STORES.SYNC_QUEUE]: 'syncQueue',
+  [STORES.EVENT_LISTS]: "eventShoppingLists",
+  [STORES.EVENT_METADATA]: "eventMetadata",
+  [STORES.EXECUTE_MODE_ITEMS]: "executeModeItems",
+  [STORES.DAY_MODES]: "dayModes",
+  [STORES.MAP_DATA]: "mapData",
+  [STORES.MAP_ROTATION_SETTINGS]: "mapRotationSettings",
+  [STORES.ROUTE_SETTINGS]: "routeSettings",
+  [STORES.HALL_DEFINITIONS]: "hallDefinitions",
+  [STORES.HALL_ROUTE_SETTINGS]: "hallRouteSettings",
+  [STORES.MAP_VIEWPORT_SETTINGS]: "mapViewportSettings",
+  [STORES.SYNC_QUEUE]: "syncQueue",
 };
 
-export type LoadStatus = 'ok' | 'missing' | 'error';
+export type LoadStatus = "ok" | "missing" | "error";
 
 export type LoadResult<T> = {
   status: LoadStatus;
@@ -79,14 +81,24 @@ function ensureStoreExists(db: IDBDatabase, storeName: StoreName) {
 
 function getLocalStorageKey(storeName: StoreName, key: string) {
   const baseKey = LOCAL_STORAGE_KEYS[storeName];
-  return key === 'data' ? baseKey : `${baseKey}:${key}`;
+  return key === "data" ? baseKey : `${baseKey}:${key}`;
 }
 
-function saveDataToLocalStorage<T>(storeName: StoreName, key: string, data: T): void {
-  localStorage.setItem(getLocalStorageKey(storeName, key), JSON.stringify(data));
+function saveDataToLocalStorage<T>(
+  storeName: StoreName,
+  key: string,
+  data: T,
+): void {
+  localStorage.setItem(
+    getLocalStorageKey(storeName, key),
+    JSON.stringify(data),
+  );
 }
 
-function clearLocalStorageFallbackData(storeName: StoreName, key: string): void {
+function clearLocalStorageFallbackData(
+  storeName: StoreName,
+  key: string,
+): void {
   localStorage.removeItem(getLocalStorageKey(storeName, key));
 }
 
@@ -106,8 +118,8 @@ function parseMapDataEntryKey(key: string): [string, string] | null {
     if (
       Array.isArray(parsed) &&
       parsed.length === 2 &&
-      typeof parsed[0] === 'string' &&
-      typeof parsed[1] === 'string'
+      typeof parsed[0] === "string" &&
+      typeof parsed[1] === "string"
     ) {
       return [parsed[0], parsed[1]];
     }
@@ -138,12 +150,15 @@ function getDayMapDataByStorageKey(data: MapDataStore, key: string) {
   return data[eventName]?.[dayMapName];
 }
 
-async function deleteDataFromIndexedDb(storeName: StoreName, key: string): Promise<void> {
+async function deleteDataFromIndexedDb(
+  storeName: StoreName,
+  key: string,
+): Promise<void> {
   const db = await openDB();
   ensureStoreExists(db, storeName);
 
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(storeName, 'readwrite');
+    const transaction = db.transaction(storeName, "readwrite");
     const store = transaction.objectStore(storeName);
     const request = store.delete(key);
 
@@ -162,24 +177,30 @@ async function deleteDataFromIndexedDb(storeName: StoreName, key: string): Promi
   });
 }
 
-function loadDataFromLocalStorage<T>(storeName: StoreName, key: string): LoadResult<T> {
+function loadDataFromLocalStorage<T>(
+  storeName: StoreName,
+  key: string,
+): LoadResult<T> {
   const stored = localStorage.getItem(getLocalStorageKey(storeName, key));
   if (stored === null) {
     return {
-      status: 'missing',
+      status: "missing",
       data: null,
     };
   }
 
   try {
     return {
-      status: 'ok',
+      status: "ok",
       data: JSON.parse(stored) as T,
     };
   } catch (error) {
-    console.error(`Failed to load fallback localStorage data for ${storeName}:`, error);
+    console.error(
+      `Failed to load fallback localStorage data for ${storeName}:`,
+      error,
+    );
     return {
-      status: 'error',
+      status: "error",
       data: null,
       error,
     };
@@ -202,7 +223,7 @@ function openDB(): Promise<IDBDatabase> {
     const request = indexedDB.open(DB_NAME, DB_VERSION);
 
     request.onerror = () => {
-      console.error('IndexedDB open error:', request.error);
+      console.error("IndexedDB open error:", request.error);
       resetDbInstance();
       reject(request.error);
     };
@@ -219,7 +240,7 @@ function openDB(): Promise<IDBDatabase> {
     };
 
     request.onblocked = () => {
-      console.warn('IndexedDB open request is blocked by another tab.');
+      console.warn("IndexedDB open request is blocked by another tab.");
     };
 
     request.onupgradeneeded = (event) => {
@@ -259,7 +280,7 @@ async function writeMapDataEntriesOnce(
   ensureStoreExists(db, STORES.MAP_DATA);
 
   return new Promise((resolve, reject) => {
-    const transaction = db.transaction(STORES.MAP_DATA, 'readwrite');
+    const transaction = db.transaction(STORES.MAP_DATA, "readwrite");
     const store = transaction.objectStore(STORES.MAP_DATA);
     let requestError: unknown = null;
 
@@ -277,7 +298,10 @@ async function writeMapDataEntriesOnce(
     };
 
     transaction.onabort = () => {
-      console.error(`Failed to write to ${STORES.MAP_DATA}:`, transaction.error || requestError);
+      console.error(
+        `Failed to write to ${STORES.MAP_DATA}:`,
+        transaction.error || requestError,
+      );
       reject(transaction.error || requestError);
     };
   });
@@ -292,7 +316,10 @@ async function writeMapDataEntries(
   try {
     await writeMapDataEntriesOnce(deletes, puts);
   } catch (firstError) {
-    console.warn(`Retrying ${STORES.MAP_DATA} write after failure:`, firstError);
+    console.warn(
+      `Retrying ${STORES.MAP_DATA} write after failure:`,
+      firstError,
+    );
     resetDbInstance();
     await writeMapDataEntriesOnce(deletes, puts);
   }
@@ -301,13 +328,17 @@ async function writeMapDataEntries(
 /**
  * データを保存
  */
-async function saveData<T>(storeName: StoreName, key: string, data: T): Promise<void> {
+async function saveData<T>(
+  storeName: StoreName,
+  key: string,
+  data: T,
+): Promise<void> {
   const saveOnce = async (): Promise<void> => {
     const db = await openDB();
     ensureStoreExists(db, storeName);
 
     return new Promise((resolve, reject) => {
-      const transaction = db.transaction(storeName, 'readwrite');
+      const transaction = db.transaction(storeName, "readwrite");
       const store = transaction.objectStore(storeName);
       const request = store.put(data, key);
 
@@ -338,7 +369,10 @@ async function saveData<T>(storeName: StoreName, key: string, data: T): Promise<
       if (!canUseLocalStorageFallback(storeName)) {
         throw retryError || firstError;
       }
-      console.warn(`Falling back to localStorage for ${storeName}:`, retryError || firstError);
+      console.warn(
+        `Falling back to localStorage for ${storeName}:`,
+        retryError || firstError,
+      );
       saveDataToLocalStorage(storeName, key, data);
     }
   }
@@ -347,20 +381,23 @@ async function saveData<T>(storeName: StoreName, key: string, data: T): Promise<
 /**
  * データを読み込み
  */
-async function loadData<T>(storeName: StoreName, key: string): Promise<LoadResult<T>> {
+async function loadData<T>(
+  storeName: StoreName,
+  key: string,
+): Promise<LoadResult<T>> {
   const loadOnce = async (): Promise<LoadResult<T>> => {
     const db = await openDB();
     ensureStoreExists(db, storeName);
 
     return await new Promise((resolve) => {
-      const transaction = db.transaction(storeName, 'readonly');
+      const transaction = db.transaction(storeName, "readonly");
       const store = transaction.objectStore(storeName);
       const request = store.get(key);
 
       request.onerror = () => {
         console.error(`Failed to load from ${storeName}:`, request.error);
         resolve({
-          status: 'error',
+          status: "error",
           data: null,
           error: request.error,
         });
@@ -369,21 +406,21 @@ async function loadData<T>(storeName: StoreName, key: string): Promise<LoadResul
       request.onsuccess = () => {
         if (request.result === undefined || request.result === null) {
           resolve({
-            status: 'missing',
+            status: "missing",
             data: null,
           });
           return;
         }
 
         resolve({
-          status: 'ok',
+          status: "ok",
           data: request.result as T,
         });
       };
 
       transaction.onabort = () => {
         resolve({
-          status: 'error',
+          status: "error",
           data: null,
           error: transaction.error || request.error,
         });
@@ -393,18 +430,24 @@ async function loadData<T>(storeName: StoreName, key: string): Promise<LoadResul
 
   try {
     const firstResult = await loadOnce();
-    if (firstResult.status !== 'error') return firstResult;
+    if (firstResult.status !== "error") return firstResult;
     resetDbInstance();
     const retryResult = await loadOnce();
-    if (retryResult.status !== 'error') return retryResult;
-    console.warn(`Falling back to localStorage for ${storeName}:`, retryResult.error);
+    if (retryResult.status !== "error") return retryResult;
+    console.warn(
+      `Falling back to localStorage for ${storeName}:`,
+      retryResult.error,
+    );
     return loadDataFromLocalStorage(storeName, key);
   } catch (error) {
     resetDbInstance();
     try {
       return await loadOnce();
     } catch (retryError) {
-      console.warn(`Falling back to localStorage for ${storeName}:`, retryError || error);
+      console.warn(
+        `Falling back to localStorage for ${storeName}:`,
+        retryError || error,
+      );
       return loadDataFromLocalStorage(storeName, key);
     }
   }
@@ -434,7 +477,7 @@ async function getAllKeys(storeName: StoreName): Promise<string[]> {
     ensureStoreExists(db, storeName);
 
     return await new Promise((resolve, reject) => {
-      const transaction = db.transaction(storeName, 'readonly');
+      const transaction = db.transaction(storeName, "readonly");
       const store = transaction.objectStore(storeName);
       const request = store.getAllKeys();
 
@@ -449,7 +492,9 @@ async function getAllKeys(storeName: StoreName): Promise<string[]> {
     });
   } catch {
     resetDbInstance();
-    return localStorage.getItem(LOCAL_STORAGE_KEYS[storeName]) === null ? [] : ['data'];
+    return localStorage.getItem(LOCAL_STORAGE_KEYS[storeName]) === null
+      ? []
+      : ["data"];
   }
 }
 
@@ -462,14 +507,17 @@ async function getAllData<T>(storeName: StoreName): Promise<Record<string, T>> {
     ensureStoreExists(db, storeName);
 
     return await new Promise((resolve, reject) => {
-      const transaction = db.transaction(storeName, 'readonly');
+      const transaction = db.transaction(storeName, "readonly");
       const store = transaction.objectStore(storeName);
       const result: Record<string, T> = {};
 
       const cursorRequest = store.openCursor();
 
       cursorRequest.onerror = () => {
-        console.error(`Failed to get all data from ${storeName}:`, cursorRequest.error);
+        console.error(
+          `Failed to get all data from ${storeName}:`,
+          cursorRequest.error,
+        );
         reject(cursorRequest.error);
       };
 
@@ -485,8 +533,10 @@ async function getAllData<T>(storeName: StoreName): Promise<Record<string, T>> {
     });
   } catch {
     resetDbInstance();
-    const fallback = loadDataFromLocalStorage<T>(storeName, 'data');
-    return fallback.status === 'ok' && fallback.data !== null ? { data: fallback.data } : {};
+    const fallback = loadDataFromLocalStorage<T>(storeName, "data");
+    return fallback.status === "ok" && fallback.data !== null
+      ? { data: fallback.data }
+      : {};
   }
 }
 
@@ -496,24 +546,24 @@ async function getAllData<T>(storeName: StoreName): Promise<Record<string, T>> {
 async function migrateFromLocalStorage(): Promise<boolean> {
   try {
     // localStorageにデータがあるか確認
-    const storedLists = localStorage.getItem('eventShoppingLists');
+    const storedLists = localStorage.getItem("eventShoppingLists");
     if (!storedLists) {
       return false; // 移行するデータがない
     }
 
-    console.log('Migrating data from localStorage to IndexedDB...');
+    console.log("Migrating data from localStorage to IndexedDB...");
 
     // 各データを移行
     const migrations = [
-      { key: 'eventShoppingLists', store: STORES.EVENT_LISTS },
-      { key: 'eventMetadata', store: STORES.EVENT_METADATA },
-      { key: 'executeModeItems', store: STORES.EXECUTE_MODE_ITEMS },
-      { key: 'dayModes', store: STORES.DAY_MODES },
-      { key: 'mapData', store: STORES.MAP_DATA },
-      { key: 'mapRotationSettings', store: STORES.MAP_ROTATION_SETTINGS },
-      { key: 'routeSettings', store: STORES.ROUTE_SETTINGS },
-      { key: 'hallDefinitions', store: STORES.HALL_DEFINITIONS },
-      { key: 'hallRouteSettings', store: STORES.HALL_ROUTE_SETTINGS },
+      { key: "eventShoppingLists", store: STORES.EVENT_LISTS },
+      { key: "eventMetadata", store: STORES.EVENT_METADATA },
+      { key: "executeModeItems", store: STORES.EXECUTE_MODE_ITEMS },
+      { key: "dayModes", store: STORES.DAY_MODES },
+      { key: "mapData", store: STORES.MAP_DATA },
+      { key: "mapRotationSettings", store: STORES.MAP_ROTATION_SETTINGS },
+      { key: "routeSettings", store: STORES.ROUTE_SETTINGS },
+      { key: "hallDefinitions", store: STORES.HALL_DEFINITIONS },
+      { key: "hallRouteSettings", store: STORES.HALL_ROUTE_SETTINGS },
     ];
 
     for (const { key, store } of migrations) {
@@ -522,16 +572,25 @@ async function migrateFromLocalStorage(): Promise<boolean> {
         try {
           const parsed = JSON.parse(data);
           if (store === STORES.MAP_DATA) {
-            const compactedMapData = compactMapDataForStorage(parsed as MapDataStore);
+            const compactedMapData = compactMapDataForStorage(
+              parsed as MapDataStore,
+            );
             const puts: { key: string; value: unknown }[] = [];
-            for (const [eventName, eventMapData] of Object.entries(compactedMapData)) {
-              for (const [dayMapName, dayMapData] of Object.entries(eventMapData)) {
-                puts.push({ key: getMapDataEntryKey(eventName, dayMapName), value: dayMapData });
+            for (const [eventName, eventMapData] of Object.entries(
+              compactedMapData,
+            )) {
+              for (const [dayMapName, dayMapData] of Object.entries(
+                eventMapData,
+              )) {
+                puts.push({
+                  key: getMapDataEntryKey(eventName, dayMapName),
+                  value: dayMapData,
+                });
               }
             }
             await writeMapDataEntries([], puts);
           } else {
-            await saveData(store, 'data', parsed);
+            await saveData(store, "data", parsed);
           }
           console.log(`Migrated ${key} to IndexedDB`);
         } catch (e) {
@@ -545,10 +604,10 @@ async function migrateFromLocalStorage(): Promise<boolean> {
       localStorage.removeItem(key);
     });
 
-    console.log('Migration complete');
+    console.log("Migration complete");
     return true;
   } catch (error) {
-    console.error('Migration failed:', error);
+    console.error("Migration failed:", error);
     return false;
   }
 }
@@ -571,11 +630,11 @@ const resolveLoadResultData = <T extends Record<string, unknown>>(
   storeName: StoreName,
   result: LoadResult<T>,
 ): T => {
-  if (result.status === 'ok' && result.data) {
+  if (result.status === "ok" && result.data) {
     return result.data;
   }
 
-  if (result.status === 'error') {
+  if (result.status === "error") {
     console.error(`Failed to load ${storeName}:`, result.error);
   }
 
@@ -589,11 +648,14 @@ const removeEventFromStore = async <T extends Record<string, unknown>>(
   saver: (data: T) => Promise<void>,
 ): Promise<void> => {
   const loadResult = await loader();
-  if (loadResult.status === 'error') {
-    console.error(`Failed to load ${storeName} during event deletion:`, loadResult.error);
+  if (loadResult.status === "error") {
+    console.error(
+      `Failed to load ${storeName} during event deletion:`,
+      loadResult.error,
+    );
     return;
   }
-  if (loadResult.status !== 'ok' || !loadResult.data) {
+  if (loadResult.status !== "ok" || !loadResult.data) {
     return;
   }
 
@@ -612,34 +674,42 @@ export const db = {
 
   // イベントリスト
   async saveEventLists(data: Record<string, unknown[]>): Promise<void> {
-    await saveData(STORES.EVENT_LISTS, 'data', data);
+    await saveData(STORES.EVENT_LISTS, "data", data);
   },
   async loadEventLists(): Promise<LoadResult<Record<string, unknown[]>>> {
-    return loadData(STORES.EVENT_LISTS, 'data');
+    return loadData(STORES.EVENT_LISTS, "data");
   },
 
   // イベントメタデータ
   async saveEventMetadata(data: Record<string, unknown>): Promise<void> {
-    await saveData(STORES.EVENT_METADATA, 'data', data);
+    await saveData(STORES.EVENT_METADATA, "data", data);
   },
   async loadEventMetadata(): Promise<LoadResult<Record<string, unknown>>> {
-    return loadData(STORES.EVENT_METADATA, 'data');
+    return loadData(STORES.EVENT_METADATA, "data");
   },
 
   // 実行モードアイテム
-  async saveExecuteModeItems(data: Record<string, Record<string, string[]>>): Promise<void> {
-    await saveData(STORES.EXECUTE_MODE_ITEMS, 'data', data);
+  async saveExecuteModeItems(
+    data: Record<string, Record<string, string[]>>,
+  ): Promise<void> {
+    await saveData(STORES.EXECUTE_MODE_ITEMS, "data", data);
   },
-  async loadExecuteModeItems(): Promise<LoadResult<Record<string, Record<string, string[]>>>> {
-    return loadData(STORES.EXECUTE_MODE_ITEMS, 'data');
+  async loadExecuteModeItems(): Promise<
+    LoadResult<Record<string, Record<string, string[]>>>
+  > {
+    return loadData(STORES.EXECUTE_MODE_ITEMS, "data");
   },
 
   // 日モード
-  async saveDayModes(data: Record<string, Record<string, string>>): Promise<void> {
-    await saveData(STORES.DAY_MODES, 'data', data);
+  async saveDayModes(
+    data: Record<string, Record<string, string>>,
+  ): Promise<void> {
+    await saveData(STORES.DAY_MODES, "data", data);
   },
-  async loadDayModes(): Promise<LoadResult<Record<string, Record<string, string>>>> {
-    return loadData(STORES.DAY_MODES, 'data');
+  async loadDayModes(): Promise<
+    LoadResult<Record<string, Record<string, string>>>
+  > {
+    return loadData(STORES.DAY_MODES, "data");
   },
 
   // マップデータ
@@ -661,14 +731,18 @@ export const db = {
       .filter(
         (keyString) =>
           keyString === MAP_DATA_LEGACY_KEY ||
-          (keyString.startsWith(MAP_DATA_KEY_PREFIX) && !nextKeys.has(keyString)),
+          (keyString.startsWith(MAP_DATA_KEY_PREFIX) &&
+            !nextKeys.has(keyString)),
       );
 
     await writeMapDataEntries(deletes, puts);
 
     clearLocalStorageFallbackData(STORES.MAP_DATA, MAP_DATA_LEGACY_KEY);
   },
-  async saveMapDataChanges(previousData: MapDataStore, nextData: MapDataStore): Promise<void> {
+  async saveMapDataChanges(
+    previousData: MapDataStore,
+    nextData: MapDataStore,
+  ): Promise<void> {
     const previousKeys = collectMapDataEntryKeys(previousData);
     const nextKeys = collectMapDataEntryKeys(nextData);
 
@@ -717,17 +791,19 @@ export const db = {
         const [eventName, dayMapName] = parsedKey;
         loaded[eventName] = {
           ...(loaded[eventName] ?? {}),
-          [dayMapName]: expandDayMapFromStorage(value as Parameters<typeof expandDayMapFromStorage>[0]),
+          [dayMapName]: expandDayMapFromStorage(
+            value as Parameters<typeof expandDayMapFromStorage>[0],
+          ),
         };
       });
 
       return {
-        status: Object.keys(loaded).length > 0 ? 'ok' : 'missing',
+        status: Object.keys(loaded).length > 0 ? "ok" : "missing",
         data: Object.keys(loaded).length > 0 ? loaded : null,
       };
     } catch (error) {
       return {
-        status: 'error',
+        status: "error",
         data: null,
         error,
       };
@@ -735,43 +811,63 @@ export const db = {
   },
 
   // マップ回転設定
-  async saveMapRotationSettings(data: Record<string, Record<string, unknown>>): Promise<void> {
-    await saveData(STORES.MAP_ROTATION_SETTINGS, 'data', data);
+  async saveMapRotationSettings(
+    data: Record<string, Record<string, unknown>>,
+  ): Promise<void> {
+    await saveData(STORES.MAP_ROTATION_SETTINGS, "data", data);
   },
-  async loadMapRotationSettings(): Promise<LoadResult<Record<string, Record<string, unknown>>>> {
-    return loadData(STORES.MAP_ROTATION_SETTINGS, 'data');
+  async loadMapRotationSettings(): Promise<
+    LoadResult<Record<string, Record<string, unknown>>>
+  > {
+    return loadData(STORES.MAP_ROTATION_SETTINGS, "data");
   },
 
   // ルート設定
-  async saveRouteSettings(data: Record<string, Record<string, unknown>>): Promise<void> {
-    await saveData(STORES.ROUTE_SETTINGS, 'data', data);
+  async saveRouteSettings(
+    data: Record<string, Record<string, unknown>>,
+  ): Promise<void> {
+    await saveData(STORES.ROUTE_SETTINGS, "data", data);
   },
-  async loadRouteSettings(): Promise<LoadResult<Record<string, Record<string, unknown>>>> {
-    return loadData(STORES.ROUTE_SETTINGS, 'data');
+  async loadRouteSettings(): Promise<
+    LoadResult<Record<string, Record<string, unknown>>>
+  > {
+    return loadData(STORES.ROUTE_SETTINGS, "data");
   },
 
   // ホール定義
-  async saveHallDefinitions(data: Record<string, Record<string, unknown[]>>): Promise<void> {
-    await saveData(STORES.HALL_DEFINITIONS, 'data', data);
+  async saveHallDefinitions(
+    data: Record<string, Record<string, unknown[]>>,
+  ): Promise<void> {
+    await saveData(STORES.HALL_DEFINITIONS, "data", data);
   },
-  async loadHallDefinitions(): Promise<LoadResult<Record<string, Record<string, unknown[]>>>> {
-    return loadData(STORES.HALL_DEFINITIONS, 'data');
+  async loadHallDefinitions(): Promise<
+    LoadResult<Record<string, Record<string, unknown[]>>>
+  > {
+    return loadData(STORES.HALL_DEFINITIONS, "data");
   },
 
   // ホールルート設定
-  async saveHallRouteSettings(data: Record<string, Record<string, unknown>>): Promise<void> {
-    await saveData(STORES.HALL_ROUTE_SETTINGS, 'data', data);
+  async saveHallRouteSettings(
+    data: Record<string, Record<string, unknown>>,
+  ): Promise<void> {
+    await saveData(STORES.HALL_ROUTE_SETTINGS, "data", data);
   },
-  async loadHallRouteSettings(): Promise<LoadResult<Record<string, Record<string, unknown>>>> {
-    return loadData(STORES.HALL_ROUTE_SETTINGS, 'data');
+  async loadHallRouteSettings(): Promise<
+    LoadResult<Record<string, Record<string, unknown>>>
+  > {
+    return loadData(STORES.HALL_ROUTE_SETTINGS, "data");
   },
 
   // マップビューポート設定
-  async saveMapViewportSettings(data: Record<string, Record<string, unknown>>): Promise<void> {
-    await saveData(STORES.MAP_VIEWPORT_SETTINGS, 'data', data);
+  async saveMapViewportSettings(
+    data: Record<string, Record<string, unknown>>,
+  ): Promise<void> {
+    await saveData(STORES.MAP_VIEWPORT_SETTINGS, "data", data);
   },
-  async loadMapViewportSettings(): Promise<LoadResult<Record<string, Record<string, unknown>>>> {
-    return loadData(STORES.MAP_VIEWPORT_SETTINGS, 'data');
+  async loadMapViewportSettings(): Promise<
+    LoadResult<Record<string, Record<string, unknown>>>
+  > {
+    return loadData(STORES.MAP_VIEWPORT_SETTINGS, "data");
   },
 
   // イベント削除時に関連データも削除
@@ -795,8 +891,18 @@ export const db = {
         db.loadExecuteModeItems,
         db.saveExecuteModeItems,
       );
-      await removeEventFromStore(eventName, STORES.DAY_MODES, db.loadDayModes, db.saveDayModes);
-      await removeEventFromStore(eventName, STORES.MAP_DATA, db.loadMapData, db.saveMapData);
+      await removeEventFromStore(
+        eventName,
+        STORES.DAY_MODES,
+        db.loadDayModes,
+        db.saveDayModes,
+      );
+      await removeEventFromStore(
+        eventName,
+        STORES.MAP_DATA,
+        db.loadMapData,
+        db.saveMapData,
+      );
       await removeEventFromStore(
         eventName,
         STORES.MAP_ROTATION_SETTINGS,
@@ -860,16 +966,28 @@ export const db = {
 
     return {
       eventLists: resolveLoadResultData(STORES.EVENT_LISTS, eventListsResult),
-      eventMetadata: resolveLoadResultData(STORES.EVENT_METADATA, eventMetadataResult),
-      executeModeItems: resolveLoadResultData(STORES.EXECUTE_MODE_ITEMS, executeModeItemsResult),
+      eventMetadata: resolveLoadResultData(
+        STORES.EVENT_METADATA,
+        eventMetadataResult,
+      ),
+      executeModeItems: resolveLoadResultData(
+        STORES.EXECUTE_MODE_ITEMS,
+        executeModeItemsResult,
+      ),
       dayModes: resolveLoadResultData(STORES.DAY_MODES, dayModesResult),
       mapData: resolveLoadResultData(STORES.MAP_DATA, mapDataResult),
       mapRotationSettings: resolveLoadResultData(
         STORES.MAP_ROTATION_SETTINGS,
         mapRotationSettingsResult,
       ),
-      routeSettings: resolveLoadResultData(STORES.ROUTE_SETTINGS, routeSettingsResult),
-      hallDefinitions: resolveLoadResultData(STORES.HALL_DEFINITIONS, hallDefinitionsResult),
+      routeSettings: resolveLoadResultData(
+        STORES.ROUTE_SETTINGS,
+        routeSettingsResult,
+      ),
+      hallDefinitions: resolveLoadResultData(
+        STORES.HALL_DEFINITIONS,
+        hallDefinitionsResult,
+      ),
       hallRouteSettings: resolveLoadResultData(
         STORES.HALL_ROUTE_SETTINGS,
         hallRouteSettingsResult,
@@ -883,10 +1001,10 @@ export const db = {
 
   // 同期キュー（共有機能用）
   async saveSyncQueue(data: unknown[]): Promise<void> {
-    await saveData(STORES.SYNC_QUEUE, 'data', data);
+    await saveData(STORES.SYNC_QUEUE, "data", data);
   },
   async loadSyncQueue(): Promise<LoadResult<unknown[]>> {
-    return loadData(STORES.SYNC_QUEUE, 'data');
+    return loadData(STORES.SYNC_QUEUE, "data");
   },
 
   // localStorageからの移行

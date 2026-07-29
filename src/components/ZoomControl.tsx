@@ -1,11 +1,14 @@
-import React from 'react';
+import React from "react";
 
 interface ZoomControlProps {
   zoomLevel: number;
   onZoomChange: (newZoom: number) => void;
 }
 
-const ZoomControl: React.FC<ZoomControlProps> = ({ zoomLevel, onZoomChange }) => {
+const ZoomControl: React.FC<ZoomControlProps> = ({
+  zoomLevel,
+  onZoomChange,
+}) => {
   const zoomOptions = [15, 30, 50, 75, 100, 125, 150];
 
   return (

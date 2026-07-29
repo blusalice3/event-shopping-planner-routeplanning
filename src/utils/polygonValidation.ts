@@ -1,13 +1,13 @@
-import { HallDefinition } from '../types/map';
+import { HallDefinition } from "../types/map";
 
 export type PolygonValidationIssueCode =
-  | 'self_intersection'
-  | 'too_small'
-  | 'overlap_with_existing';
+  | "self_intersection"
+  | "too_small"
+  | "overlap_with_existing";
 
 export interface PolygonValidationIssue {
   code: PolygonValidationIssueCode;
-  level: 'error' | 'warning';
+  level: "error" | "warning";
   message: string;
   hallId?: string;
 }
@@ -49,7 +49,9 @@ const isPointOnSegment = (
   const maxCol = Math.max(a.col, b.col) + EPSILON;
   const minRow = Math.min(a.row, b.row) - EPSILON;
   const maxRow = Math.max(a.row, b.row) + EPSILON;
-  return p.col >= minCol && p.col <= maxCol && p.row >= minRow && p.row <= maxRow;
+  return (
+    p.col >= minCol && p.col <= maxCol && p.row >= minRow && p.row <= maxRow
+  );
 };
 
 const segmentsIntersect = (
@@ -71,7 +73,9 @@ const segmentsIntersect = (
   return false;
 };
 
-const hasSelfIntersection = (vertices: { row: number; col: number }[]): boolean => {
+const hasSelfIntersection = (
+  vertices: { row: number; col: number }[],
+): boolean => {
   const n = vertices.length;
   if (n < 4) return false;
 
@@ -90,7 +94,9 @@ const hasSelfIntersection = (vertices: { row: number; col: number }[]): boolean 
   return false;
 };
 
-export const calculatePolygonArea = (vertices: { row: number; col: number }[]): number => {
+export const calculatePolygonArea = (
+  vertices: { row: number; col: number }[],
+): number => {
   if (vertices.length < 3) return 0;
   let sum = 0;
   for (let i = 0; i < vertices.length; i++) {
@@ -157,42 +163,50 @@ export const validateHallPolygon = ({
 
   if (vertices.length < 4) {
     issues.push({
-      code: 'too_small',
-      level: 'error',
-      message: '頂点は4個以上で定義してください。',
+      code: "too_small",
+      level: "error",
+      message: "頂点は4個以上で定義してください。",
     });
     return { area, issues };
   }
 
   if (hasSelfIntersection(vertices)) {
     issues.push({
-      code: 'self_intersection',
-      level: 'error',
-      message: '多角形が自己交差しています。',
+      code: "self_intersection",
+      level: "error",
+      message: "多角形が自己交差しています。",
     });
   }
 
   if (area < minArea) {
     issues.push({
-      code: 'too_small',
-      level: 'error',
+      code: "too_small",
+      level: "error",
       message: `多角形の面積が小さすぎます（面積: ${area.toFixed(2)}）。`,
     });
   }
 
-  const currentCells = getCoveredCells(vertices, mapBounds.maxRow, mapBounds.maxCol);
+  const currentCells = getCoveredCells(
+    vertices,
+    mapBounds.maxRow,
+    mapBounds.maxCol,
+  );
   if (currentCells.size === 0) {
     issues.push({
-      code: 'too_small',
-      level: 'error',
-      message: 'セルに重なる領域がありません。',
+      code: "too_small",
+      level: "error",
+      message: "セルに重なる領域がありません。",
     });
   }
 
   existingHalls
     .filter((hall) => hall.id !== currentHallId && hall.vertices.length >= 4)
     .forEach((hall) => {
-      const hallCells = getCoveredCells(hall.vertices, mapBounds.maxRow, mapBounds.maxCol);
+      const hallCells = getCoveredCells(
+        hall.vertices,
+        mapBounds.maxRow,
+        mapBounds.maxCol,
+      );
       if (hallCells.size === 0 || currentCells.size === 0) return;
 
       let intersectionCount = 0;
@@ -206,8 +220,8 @@ export const validateHallPolygon = ({
       const overlapRatio = Math.max(overlapRatioNew, overlapRatioExisting);
       if (overlapRatio >= overlapThreshold) {
         issues.push({
-          code: 'overlap_with_existing',
-          level: 'warning',
+          code: "overlap_with_existing",
+          level: "warning",
           hallId: hall.id,
           message: `既存ホール「${hall.name}」と重複率 ${(overlapRatio * 100).toFixed(1)}% です。`,
         });

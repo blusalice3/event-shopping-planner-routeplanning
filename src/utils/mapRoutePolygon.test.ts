@@ -1,5 +1,8 @@
-import { describe, expect, it } from 'vitest';
-import { isPointInPolygonInclusive, isRoutePathInsideHallPolygon } from './mapRoutePolygon';
+import { describe, expect, it } from "vitest";
+import {
+  isPointInPolygonInclusive,
+  isRoutePathInsideHallPolygon,
+} from "./mapRoutePolygon";
 
 const square = [
   { row: 1, col: 1 },
@@ -8,12 +11,12 @@ const square = [
   { row: 4, col: 1 },
 ];
 
-describe('mapRoutePolygon', () => {
-  it('treats boundary points as inside', () => {
+describe("mapRoutePolygon", () => {
+  it("treats boundary points as inside", () => {
     expect(isPointInPolygonInclusive(1, 2, square)).toBe(true);
   });
 
-  it('rejects route segments that leave the polygon', () => {
+  it("rejects route segments that leave the polygon", () => {
     expect(
       isRoutePathInsideHallPolygon(
         [

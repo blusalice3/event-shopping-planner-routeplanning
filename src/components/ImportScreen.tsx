@@ -1,12 +1,15 @@
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { ShoppingItem } from '../types/item';
-import { getItemKey } from '../utils/itemComparison';
-import type { BulkAddLayoutInfo, BulkAddMetadata } from '../features/events/bulkAdd';
+import React, { useState, useMemo, useEffect, useRef } from "react";
+import { ShoppingItem } from "../types/item";
+import { getItemKey } from "../utils/itemComparison";
+import type {
+  BulkAddLayoutInfo,
+  BulkAddMetadata,
+} from "../features/events/bulkAdd";
 
 interface ImportScreenProps {
   onBulkAdd: (
     eventName: string,
-    items: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[],
+    items: Omit<ShoppingItem, "id" | "purchaseStatus">[],
     metadata?: BulkAddMetadata,
   ) => void;
   activeEventName: string | null;
@@ -27,28 +30,28 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
   onClearNewItemDefaults,
 }) => {
   // State for bulk add (creating new list)
-  const [eventName, setEventName] = useState('');
-  const [circles, setCircles] = useState('');
-  const [eventDates, setEventDates] = useState('');
-  const [blocks, setBlocks] = useState('');
-  const [numbers, setNumbers] = useState('');
-  const [titles, setTitles] = useState('');
-  const [prices, setPrices] = useState('');
-  const [remarks, setRemarks] = useState('');
-  const [urls, setUrls] = useState('');
-  const [spreadsheetUrl, setSpreadsheetUrl] = useState('');
+  const [eventName, setEventName] = useState("");
+  const [circles, setCircles] = useState("");
+  const [eventDates, setEventDates] = useState("");
+  const [blocks, setBlocks] = useState("");
+  const [numbers, setNumbers] = useState("");
+  const [titles, setTitles] = useState("");
+  const [prices, setPrices] = useState("");
+  const [remarks, setRemarks] = useState("");
+  const [urls, setUrls] = useState("");
+  const [spreadsheetUrl, setSpreadsheetUrl] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // State for single item add/edit
-  const [singleCircle, setSingleCircle] = useState('');
-  const [singleEventDate, setSingleEventDate] = useState('1日目');
-  const [singleBlock, setSingleBlock] = useState('');
-  const [singleNumber, setSingleNumber] = useState('');
-  const [singleTitle, setSingleTitle] = useState('');
-  const [singlePrice, setSinglePrice] = useState('0');
-  const [singleQuantity, setSingleQuantity] = useState('1');
-  const [singleRemarks, setSingleRemarks] = useState('');
-  const [singleUrl, setSingleUrl] = useState('');
+  const [singleCircle, setSingleCircle] = useState("");
+  const [singleEventDate, setSingleEventDate] = useState("1日目");
+  const [singleBlock, setSingleBlock] = useState("");
+  const [singleNumber, setSingleNumber] = useState("");
+  const [singleTitle, setSingleTitle] = useState("");
+  const [singlePrice, setSinglePrice] = useState("0");
+  const [singleQuantity, setSingleQuantity] = useState("1");
+  const [singleRemarks, setSingleRemarks] = useState("");
+  const [singleUrl, setSingleUrl] = useState("");
   const [isCustomEventDate, setIsCustomEventDate] = useState(false);
 
   const isEditing = itemToEdit !== null;
@@ -61,12 +64,12 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
       setSingleBlock(itemToEdit.block);
       setSingleNumber(itemToEdit.number);
       setSingleTitle(itemToEdit.title);
-      setSinglePrice(itemToEdit.price === null ? '' : String(itemToEdit.price));
+      setSinglePrice(itemToEdit.price === null ? "" : String(itemToEdit.price));
       setSingleQuantity(String(itemToEdit.quantity ?? 1));
       setSingleRemarks(itemToEdit.remarks);
-      setSingleUrl(itemToEdit.url || '');
+      setSingleUrl(itemToEdit.url || "");
       // 編集時は、1日目～4日目に含まれない場合はカスタムモードにする
-      const defaultDates = ['1日目', '2日目', '3日目', '4日目'];
+      const defaultDates = ["1日目", "2日目", "3日目", "4日目"];
       setIsCustomEventDate(!defaultDates.includes(itemToEdit.eventDate));
     }
   }, [itemToEdit, isEditing]);
@@ -78,7 +81,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
       setSingleBlock(newItemDefaults.block);
       setSingleNumber(newItemDefaults.number);
       // 1日目～4日目に含まれない場合はカスタムモードにする
-      const defaultDates = ['1日目', '2日目', '3日目', '4日目'];
+      const defaultDates = ["1日目", "2日目", "3日目", "4日目"];
       setIsCustomEventDate(!defaultDates.includes(newItemDefaults.eventDate));
       // 初期値を消費したらクリア
       if (onClearNewItemDefaults) {
@@ -89,8 +92,8 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     e.preventDefault();
-    const pasteData = e.clipboardData.getData('text');
-    const rows = pasteData.split('\n').filter((row) => row.trim() !== '');
+    const pasteData = e.clipboardData.getData("text");
+    const rows = pasteData.split("\n").filter((row) => row.trim() !== "");
 
     const cols: { [key: string]: string[] } = {
       circles: [],
@@ -103,28 +106,28 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
     };
 
     rows.forEach((row) => {
-      const cells = row.split('\t');
-      cols.circles.push(cells[0] || '');
-      cols.eventDates.push(cells[1] || '');
-      cols.blocks.push(cells[2] || '');
-      cols.numbers.push(cells[3] || '');
-      cols.titles.push(cells[4] || '');
-      cols.prices.push(cells[5] || '');
-      cols.urls.push(cells[6] || '');
+      const cells = row.split("\t");
+      cols.circles.push(cells[0] || "");
+      cols.eventDates.push(cells[1] || "");
+      cols.blocks.push(cells[2] || "");
+      cols.numbers.push(cells[3] || "");
+      cols.titles.push(cells[4] || "");
+      cols.prices.push(cells[5] || "");
+      cols.urls.push(cells[6] || "");
     });
 
-    setCircles(cols.circles.join('\n'));
-    setEventDates(cols.eventDates.join('\n'));
-    setBlocks(cols.blocks.join('\n'));
-    setNumbers(cols.numbers.join('\n'));
-    setTitles(cols.titles.join('\n'));
-    setPrices(cols.prices.join('\n'));
-    setUrls(cols.urls.join('\n'));
+    setCircles(cols.circles.join("\n"));
+    setEventDates(cols.eventDates.join("\n"));
+    setBlocks(cols.blocks.join("\n"));
+    setNumbers(cols.numbers.join("\n"));
+    setTitles(cols.titles.join("\n"));
+    setPrices(cols.prices.join("\n"));
+    setUrls(cols.urls.join("\n"));
   };
 
   const parseCSVLine = (line: string): string[] => {
     const cells: string[] = [];
-    let currentCell = '';
+    let currentCell = "";
     let insideQuotes = false;
 
     for (let j = 0; j < line.length; j++) {
@@ -137,9 +140,9 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
         } else {
           insideQuotes = !insideQuotes;
         }
-      } else if (char === ',' && !insideQuotes) {
+      } else if (char === "," && !insideQuotes) {
         cells.push(currentCell);
-        currentCell = '';
+        currentCell = "";
       } else {
         currentCell += char;
       }
@@ -151,11 +154,11 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
   const processImportData = (
     lines: string[],
   ): {
-    items: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[];
+    items: Omit<ShoppingItem, "id" | "purchaseStatus">[];
     spreadsheetUrl?: string;
     layoutInfo?: BulkAddLayoutInfo[];
   } => {
-    const newItems: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[] = [];
+    const newItems: Omit<ShoppingItem, "id" | "purchaseStatus">[] = [];
     let spreadsheetUrl: string | undefined;
     const layoutInfo: BulkAddLayoutInfo[] = [];
 
@@ -163,15 +166,18 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
     let startIndex = 0;
 
     // 1行目がヘッダー行かチェック
-    if (lines.length > 0 && lines[0].includes('サークル名')) {
+    if (lines.length > 0 && lines[0].includes("サークル名")) {
       startIndex = 1;
     }
 
     // メタデータ行をチェック（ファイルの最後にある可能性がある）
     for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].startsWith('#METADATA')) {
+      if (lines[i].startsWith("#METADATA")) {
         const metadataCells = parseCSVLine(lines[i]);
-        if (metadataCells.length >= 3 && metadataCells[1] === 'spreadsheetUrl') {
+        if (
+          metadataCells.length >= 3 &&
+          metadataCells[1] === "spreadsheetUrl"
+        ) {
           spreadsheetUrl = metadataCells[2]?.trim();
         }
         // メタデータ行は処理対象から除外（既にstartIndex以降の行を処理するので問題ない）
@@ -184,54 +190,58 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
       if (!line.trim()) continue;
 
       // メタデータ行をスキップ
-      if (line.startsWith('#METADATA')) {
+      if (line.startsWith("#METADATA")) {
         continue;
       }
 
       // ヘッダー行をスキップ（念のため再チェック）
-      if (line.includes('サークル名') && line.includes('参加日') && line.includes('ブロック')) {
+      if (
+        line.includes("サークル名") &&
+        line.includes("参加日") &&
+        line.includes("ブロック")
+      ) {
         continue;
       }
 
       const cells = parseCSVLine(line);
 
       // エクスポートされたCSVファイル形式（A列から始まる）を優先的にチェック
-      let circle = cells[0]?.trim() || ''; // A列: サークル名
-      let eventDate = cells[1]?.trim() || ''; // B列: 参加日
-      let block = cells[2]?.trim() || ''; // C列: ブロック
-      let number = cells[3]?.trim() || ''; // D列: ナンバー
-      let title = cells[4]?.trim() || ''; // E列: タイトル
-      let priceStr = cells[5]?.trim() || ''; // F列: 頒布価格
-      let quantityStr = cells[6]?.trim() || ''; // G列: 数量
-      let remarks = cells[8]?.trim() || ''; // I列: 備考
-      let url = cells[11]?.trim() || ''; // L列: URL
-      let columnType: 'execute' | 'candidate' | null = null; // J列: 列の種類
+      let circle = cells[0]?.trim() || ""; // A列: サークル名
+      let eventDate = cells[1]?.trim() || ""; // B列: 参加日
+      let block = cells[2]?.trim() || ""; // C列: ブロック
+      let number = cells[3]?.trim() || ""; // D列: ナンバー
+      let title = cells[4]?.trim() || ""; // E列: タイトル
+      let priceStr = cells[5]?.trim() || ""; // F列: 頒布価格
+      let quantityStr = cells[6]?.trim() || ""; // G列: 数量
+      let remarks = cells[8]?.trim() || ""; // I列: 備考
+      let url = cells[11]?.trim() || ""; // L列: URL
+      let columnType: "execute" | "candidate" | null = null; // J列: 列の種類
       let order = 0; // K列: 列内順番
 
       // 配置情報がある場合（エクスポートされたCSV形式）
       if (cells.length >= 11) {
-        const columnTypeStr = cells[9]?.trim() || '';
-        if (columnTypeStr === '実行列') {
-          columnType = 'execute';
-        } else if (columnTypeStr === '候補リスト') {
-          columnType = 'candidate';
+        const columnTypeStr = cells[9]?.trim() || "";
+        if (columnTypeStr === "実行列") {
+          columnType = "execute";
+        } else if (columnTypeStr === "候補リスト") {
+          columnType = "candidate";
         }
-        order = parseInt(cells[10]?.trim() || '0', 10) || 0;
+        order = parseInt(cells[10]?.trim() || "0", 10) || 0;
       }
 
       // A列からD列が全て入力されているかチェック
       if (!circle || !eventDate || !block || !number) {
         // スプレッドシート形式（M列から始まる）を試す
-        circle = cells[12]?.trim() || ''; // M列
-        eventDate = cells[13]?.trim() || ''; // N列
-        block = cells[14]?.trim() || ''; // O列
-        number = cells[15]?.trim() || ''; // P列
-        title = cells[16]?.trim() || ''; // Q列
-        priceStr = cells[17]?.trim() || ''; // R列
-        remarks = cells[22]?.trim() || ''; // W列
-        url = cells[24]?.trim() || ''; // Y列: URL
+        circle = cells[12]?.trim() || ""; // M列
+        eventDate = cells[13]?.trim() || ""; // N列
+        block = cells[14]?.trim() || ""; // O列
+        number = cells[15]?.trim() || ""; // P列
+        title = cells[16]?.trim() || ""; // Q列
+        priceStr = cells[17]?.trim() || ""; // R列
+        remarks = cells[22]?.trim() || ""; // W列
+        url = cells[24]?.trim() || ""; // Y列: URL
         // AA列から数量を取得
-        quantityStr = cells[26]?.trim() || ''; // AA列 (0-indexed: 26)
+        quantityStr = cells[26]?.trim() || ""; // AA列 (0-indexed: 26)
 
         // それでも必須項目が揃わない場合はスキップ
         if (!circle || !eventDate || !block || !number) {
@@ -240,14 +250,23 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
       }
 
       // 空欄の場合はnull、0と入力されている場合は0を設定
-      const price = priceStr === '' ? null : parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0;
+      const price =
+        priceStr === ""
+          ? null
+          : parseInt(priceStr.replace(/[^0-9]/g, ""), 10) || 0;
       // 数量: 空欄時は1、それ以外は数値を反映（1-10の範囲に制限）
       const quantity =
-        quantityStr === ''
+        quantityStr === ""
           ? 1
-          : Math.max(1, Math.min(10, parseInt(quantityStr.replace(/[^0-9]/g, ''), 10) || 1));
+          : Math.max(
+              1,
+              Math.min(
+                10,
+                parseInt(quantityStr.replace(/[^0-9]/g, ""), 10) || 1,
+              ),
+            );
 
-      const item: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
+      const item: Omit<ShoppingItem, "id" | "purchaseStatus"> = {
         circle,
         eventDate,
         block,
@@ -274,7 +293,10 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
     }
 
     // 各参加日タブ中でサークル名が重複するアイテムのURL転記処理
-    const eventDateGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
+    const eventDateGroups = new Map<
+      string,
+      Omit<ShoppingItem, "id" | "purchaseStatus">[]
+    >();
     newItems.forEach((item) => {
       if (!eventDateGroups.has(item.eventDate)) {
         eventDateGroups.set(item.eventDate, []);
@@ -284,7 +306,10 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
 
     eventDateGroups.forEach((items) => {
       // サークル名でグループ化
-      const circleGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
+      const circleGroups = new Map<
+        string,
+        Omit<ShoppingItem, "id" | "purchaseStatus">[]
+      >();
       items.forEach((item) => {
         if (!circleGroups.has(item.circle)) {
           circleGroups.set(item.circle, []);
@@ -296,12 +321,14 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
       circleGroups.forEach((circleItems) => {
         if (circleItems.length >= 2) {
           // URLが入力されているアイテムを探す
-          const itemWithUrl = circleItems.find((item) => item.url && item.url.trim() !== '');
+          const itemWithUrl = circleItems.find(
+            (item) => item.url && item.url.trim() !== "",
+          );
 
           if (itemWithUrl && itemWithUrl.url) {
             // URLが入力されていないアイテムにURLを転記
             circleItems.forEach((item) => {
-              if (!item.url || item.url.trim() === '') {
+              if (!item.url || item.url.trim() === "") {
                 item.url = itemWithUrl.url;
               }
             });
@@ -322,7 +349,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
     if (!file) return;
 
     const text = await file.text();
-    const lines = text.split('\n').filter((line) => line.trim() !== '');
+    const lines = text.split("\n").filter((line) => line.trim() !== "");
     const importResult = processImportData(lines);
 
     if (importResult.items.length > 0) {
@@ -335,97 +362,110 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
       }
 
       onBulkAdd(
-        eventName || 'インポートリスト',
+        eventName || "インポートリスト",
         importResult.items,
         Object.keys(metadata).length > 0 ? metadata : undefined,
       );
       if (fileInputRef.current) {
-        fileInputRef.current.value = '';
+        fileInputRef.current.value = "";
       }
-      const urlMessage = importResult.spreadsheetUrl ? `スプレッドシートURLも保存されました。` : '';
+      const urlMessage = importResult.spreadsheetUrl
+        ? `スプレッドシートURLも保存されました。`
+        : "";
       const layoutMessage =
         importResult.layoutInfo && importResult.layoutInfo.length > 0
           ? `配置情報も復元されました。`
-          : '';
+          : "";
       alert(
         `${importResult.items.length}件のアイテムをインポートしました。${urlMessage}${layoutMessage}`,
       );
     } else {
       alert(
-        'インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。',
+        "インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。",
       );
     }
   };
 
   const handleUrlImport = async () => {
     if (!spreadsheetUrl.trim()) {
-      alert('スプレッドシートのURLを入力してください。');
+      alert("スプレッドシートのURLを入力してください。");
       return;
     }
 
     if (!eventName.trim()) {
-      alert('即売会名を入力してください。');
+      alert("即売会名を入力してください。");
       return;
     }
 
     try {
-      const sheetIdMatch = spreadsheetUrl.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+      const sheetIdMatch = spreadsheetUrl.match(
+        /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/,
+      );
       if (!sheetIdMatch) {
-        throw new Error('無効なURL');
+        throw new Error("無効なURL");
       }
 
-      const sheetName = '品目表';
+      const sheetName = "品目表";
       const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetIdMatch[1]}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
 
       const response = await fetch(csvUrl);
       if (!response.ok) {
-        throw new Error('スプレッドシートの読み込みに失敗しました。');
+        throw new Error("スプレッドシートの読み込みに失敗しました。");
       }
 
       const text = await response.text();
-      const lines = text.split('\n').filter((line) => line.trim() !== '');
+      const lines = text.split("\n").filter((line) => line.trim() !== "");
       const importResult = processImportData(lines);
 
       if (importResult.items.length > 0) {
-        onBulkAdd(eventName.trim(), importResult.items, { url: spreadsheetUrl, sheetName });
-        setSpreadsheetUrl('');
+        onBulkAdd(eventName.trim(), importResult.items, {
+          url: spreadsheetUrl,
+          sheetName,
+        });
+        setSpreadsheetUrl("");
         alert(`${importResult.items.length}件のアイテムをインポートしました。`);
       } else {
         alert(
-          'インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。',
+          "インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。",
         );
       }
     } catch (error) {
-      console.error('Import error:', error);
-      alert('スプレッドシートのインポートに失敗しました。URLが正しいか確認してください。');
+      console.error("Import error:", error);
+      alert(
+        "スプレッドシートのインポートに失敗しました。URLが正しいか確認してください。",
+      );
     }
   };
 
   const resetSingleForm = () => {
-    setSingleCircle('');
-    setSingleEventDate('1日目');
-    setSingleBlock('');
-    setSingleNumber('');
-    setSingleTitle('');
-    setSinglePrice('');
-    setSingleQuantity('1');
-    setSingleRemarks('');
-    setSingleUrl('');
+    setSingleCircle("");
+    setSingleEventDate("1日目");
+    setSingleBlock("");
+    setSingleNumber("");
+    setSingleTitle("");
+    setSinglePrice("");
+    setSingleQuantity("1");
+    setSingleRemarks("");
+    setSingleUrl("");
     setIsCustomEventDate(false);
   };
 
-  const handleEventDateSelectChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
+  const handleEventDateSelectChange = (
+    e: React.ChangeEvent<HTMLSelectElement>,
+  ) => {
     const value = e.target.value;
-    if (value === '__custom__') {
+    if (value === "__custom__") {
       setIsCustomEventDate(true);
-      setSingleEventDate('');
+      setSingleEventDate("");
     } else {
       setIsCustomEventDate(false);
       setSingleEventDate(value);
     }
   };
 
-  const handleEventDateInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleEventDateInputChange = (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const value = e.target.value;
     setSingleEventDate(value);
   };
@@ -433,7 +473,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
   const handleEventDateInputBlur = (e: React.FocusEvent<HTMLInputElement>) => {
     const value = e.target.value.trim();
     // 1日目～4日目のいずれかが入力されたら、セレクトボックスに戻す
-    const defaultDates = ['1日目', '2日目', '3日目', '4日目'];
+    const defaultDates = ["1日目", "2日目", "3日目", "4日目"];
     if (defaultDates.includes(value)) {
       setIsCustomEventDate(false);
       setSingleEventDate(value);
@@ -445,15 +485,18 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
 
     if (isEditing) {
       if (!singleCircle.trim() && !singleTitle.trim()) {
-        alert('サークル名かタイトルを入力してください。');
+        alert("サークル名かタイトルを入力してください。");
         return;
       }
       // 空欄の場合はnull、0と入力されている場合は0を設定
       const priceStr = String(singlePrice).trim();
-      const price = priceStr === '' ? null : parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0;
+      const price =
+        priceStr === ""
+          ? null
+          : parseInt(priceStr.replace(/[^0-9]/g, ""), 10) || 0;
       const quantity = Math.max(
         1,
-        Math.min(10, parseInt(singleQuantity.replace(/[^0-9]/g, ''), 10) || 1),
+        Math.min(10, parseInt(singleQuantity.replace(/[^0-9]/g, ""), 10) || 1),
       );
       const updatedItem: ShoppingItem = {
         ...itemToEdit,
@@ -474,18 +517,18 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
 
     if (isCreatingNew) {
       if (!eventName.trim()) {
-        alert('即売会名を入力してください。');
+        alert("即売会名を入力してください。");
         return;
       }
       const finalEventName = eventName.trim();
-      const circlesArr = circles.split('\n').map((s) => s.trim());
-      const eventDatesArr = eventDates.split('\n').map((s) => s.trim());
-      const blocksArr = blocks.split('\n').map((s) => s.trim());
-      const numbersArr = numbers.split('\n').map((s) => s.trim());
-      const titlesArr = titles.split('\n').map((s) => s.trim());
-      const pricesArr = prices.split('\n').map((s) => s.trim());
-      const remarksArr = remarks.split('\n').map((s) => s.trim());
-      const urlsArr = urls.split('\n').map((s) => s.trim());
+      const circlesArr = circles.split("\n").map((s) => s.trim());
+      const eventDatesArr = eventDates.split("\n").map((s) => s.trim());
+      const blocksArr = blocks.split("\n").map((s) => s.trim());
+      const numbersArr = numbers.split("\n").map((s) => s.trim());
+      const titlesArr = titles.split("\n").map((s) => s.trim());
+      const pricesArr = prices.split("\n").map((s) => s.trim());
+      const remarksArr = remarks.split("\n").map((s) => s.trim());
+      const urlsArr = urls.split("\n").map((s) => s.trim());
       const numItems = Math.max(
         circlesArr.length,
         eventDatesArr.length,
@@ -496,40 +539,45 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
         remarksArr.length,
         urlsArr.length,
       );
-      if (numItems === 0 || (circlesArr.length === 1 && circlesArr[0] === '')) {
-        alert('インポートするデータがありません。');
+      if (numItems === 0 || (circlesArr.length === 1 && circlesArr[0] === "")) {
+        alert("インポートするデータがありません。");
         return;
       }
-      const newItems: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[] = [];
+      const newItems: Omit<ShoppingItem, "id" | "purchaseStatus">[] = [];
       for (let i = 0; i < numItems; i++) {
-        const circle = circlesArr[i] || '';
-        const eventDate = eventDatesArr[i] || '';
-        const block = blocksArr[i] || '';
-        const number = numbersArr[i] || '';
+        const circle = circlesArr[i] || "";
+        const eventDate = eventDatesArr[i] || "";
+        const block = blocksArr[i] || "";
+        const number = numbersArr[i] || "";
         // A列からD列（サークル、参加日、ブロック、ナンバー）の値が全て入力されている行のみをインポート
         if (!circle || !eventDate || !block || !number) {
           continue;
         }
         // 空欄の場合はnull、0と入力されている場合は0を設定
-        const priceString = pricesArr[i] || '';
+        const priceString = pricesArr[i] || "";
         const price =
-          priceString === '' ? null : parseInt(priceString.replace(/[^0-9]/g, ''), 10) || 0;
-        const url = urlsArr[i] || '';
+          priceString === ""
+            ? null
+            : parseInt(priceString.replace(/[^0-9]/g, ""), 10) || 0;
+        const url = urlsArr[i] || "";
         newItems.push({
           circle,
           eventDate,
           block,
           number,
-          title: titlesArr[i] || '',
+          title: titlesArr[i] || "",
           price: price,
           quantity: 1,
-          remarks: remarksArr[i] || '',
+          remarks: remarksArr[i] || "",
           ...(url ? { url } : {}),
         });
       }
 
       // 各参加日タブ中でサークル名が重複するアイテムのURL転記処理
-      const eventDateGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
+      const eventDateGroups = new Map<
+        string,
+        Omit<ShoppingItem, "id" | "purchaseStatus">[]
+      >();
       newItems.forEach((item) => {
         if (!eventDateGroups.has(item.eventDate)) {
           eventDateGroups.set(item.eventDate, []);
@@ -539,7 +587,10 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
 
       eventDateGroups.forEach((items) => {
         // サークル名でグループ化
-        const circleGroups = new Map<string, Omit<ShoppingItem, 'id' | 'purchaseStatus'>[]>();
+        const circleGroups = new Map<
+          string,
+          Omit<ShoppingItem, "id" | "purchaseStatus">[]
+        >();
         items.forEach((item) => {
           if (!circleGroups.has(item.circle)) {
             circleGroups.set(item.circle, []);
@@ -551,12 +602,14 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
         circleGroups.forEach((circleItems) => {
           if (circleItems.length >= 2) {
             // URLが入力されているアイテムを探す
-            const itemWithUrl = circleItems.find((item) => item.url && item.url.trim() !== '');
+            const itemWithUrl = circleItems.find(
+              (item) => item.url && item.url.trim() !== "",
+            );
 
             if (itemWithUrl && itemWithUrl.url) {
               // URLが入力されていないアイテムにURLを転記
               circleItems.forEach((item) => {
-                if (!item.url || item.url.trim() === '') {
+                if (!item.url || item.url.trim() === "") {
                   item.url = itemWithUrl.url;
                 }
               });
@@ -567,34 +620,37 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
 
       if (newItems.length > 0) {
         onBulkAdd(finalEventName, newItems);
-        setEventName('');
-        setCircles('');
-        setEventDates('');
-        setBlocks('');
-        setNumbers('');
-        setTitles('');
-        setPrices('');
-        setRemarks('');
-        setUrls('');
+        setEventName("");
+        setCircles("");
+        setEventDates("");
+        setBlocks("");
+        setNumbers("");
+        setTitles("");
+        setPrices("");
+        setRemarks("");
+        setUrls("");
       } else {
         alert(
-          '有効なアイテムデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。',
+          "有効なアイテムデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。",
         );
       }
     } else {
       // Adding single item to existing list
       if (!singleCircle.trim() && !singleTitle.trim()) {
-        alert('サークル名かタイトルを入力してください。');
+        alert("サークル名かタイトルを入力してください。");
         return;
       }
       // 空欄の場合はnull、0と入力されている場合は0を設定
       const priceStr = String(singlePrice).trim();
-      const price = priceStr === '' ? null : parseInt(priceStr.replace(/[^0-9]/g, ''), 10) || 0;
+      const price =
+        priceStr === ""
+          ? null
+          : parseInt(priceStr.replace(/[^0-9]/g, ""), 10) || 0;
       const quantity = Math.max(
         1,
-        Math.min(10, parseInt(singleQuantity.replace(/[^0-9]/g, ''), 10) || 1),
+        Math.min(10, parseInt(singleQuantity.replace(/[^0-9]/g, ""), 10) || 1),
       );
-      const newItem: Omit<ShoppingItem, 'id' | 'purchaseStatus'> = {
+      const newItem: Omit<ShoppingItem, "id" | "purchaseStatus"> = {
         circle: singleCircle.trim(),
         eventDate: singleEventDate,
         block: singleBlock.trim(),
@@ -605,7 +661,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
         remarks: singleRemarks.trim(),
         url: singleUrl.trim() || undefined,
       };
-      onBulkAdd(activeEventName, [newItem], { source: 'app' });
+      onBulkAdd(activeEventName, [newItem], { source: "app" });
       resetSingleForm();
     }
   };
@@ -619,10 +675,11 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
   }, []);
 
   const formTextareaClass =
-    'w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow duration-200 h-32 resize-y font-mono text-sm';
+    "w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-shadow duration-200 h-32 resize-y font-mono text-sm";
   const formInputClass =
-    'block w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition';
-  const labelClass = 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1';
+    "block w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition";
+  const labelClass =
+    "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
 
   const handlePriceInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value;
@@ -640,17 +697,17 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
     <div className="bg-white dark:bg-slate-800 rounded-lg shadow-lg p-6 sm:p-8 animate-fade-in">
       <h2 className="text-xl sm:text-2xl font-bold mb-2 text-slate-900 dark:text-white text-center">
         {isEditing
-          ? 'アイテムを編集'
+          ? "アイテムを編集"
           : isCreatingNew
-            ? '新規リスト作成'
+            ? "新規リスト作成"
             : `「${activeEventName}」にアイテムを追加`}
       </h2>
       <p className="text-center text-slate-600 dark:text-slate-400 mb-6">
         {isCreatingNew
-          ? 'スプレッドシートのM列からR列とW列をコピーし、下の「サークル名」の欄に貼り付けてください。データが自動で振り分けられます。'
+          ? "スプレッドシートのM列からR列とW列をコピーし、下の「サークル名」の欄に貼り付けてください。データが自動で振り分けられます。"
           : isEditing
-            ? 'アイテムの情報を編集してください。'
-            : '追加するアイテムのデータを入力してください。'}
+            ? "アイテムの情報を編集してください。"
+            : "追加するアイテムのデータを入力してください。"}
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-6">
@@ -665,7 +722,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
                 id="eventName"
                 value={eventName}
                 onChange={(e) => setEventName(e.target.value)}
-                className={`mt-1 ${formInputClass.replace('p-2', 'p-2 mt-1')}`}
+                className={`mt-1 ${formInputClass.replace("p-2", "p-2 mt-1")}`}
                 placeholder="例: C105"
                 required
               />
@@ -722,13 +779,15 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
                 </p>
               </div>
 
-              <div className="text-center text-slate-500 dark:text-slate-400 my-4">または</div>
+              <div className="text-center text-slate-500 dark:text-slate-400 my-4">
+                または
+              </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
               <div className="md:col-span-1">
                 <label htmlFor="circles" className={labelClass}>
-                  サークル名{' '}
+                  サークル名{" "}
                 </label>
                 <textarea
                   id="circles"
@@ -741,7 +800,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
               </div>
               <div className="md:col-span-1">
                 <label htmlFor="event-dates" className={labelClass}>
-                  参加日{' '}
+                  参加日{" "}
                 </label>
                 <textarea
                   id="event-dates"
@@ -753,7 +812,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
               </div>
               <div className="md:col-span-1">
                 <label htmlFor="blocks" className={labelClass}>
-                  ブロック{' '}
+                  ブロック{" "}
                 </label>
                 <textarea
                   id="blocks"
@@ -765,7 +824,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
               </div>
               <div className="md:col-span-1">
                 <label htmlFor="numbers" className={labelClass}>
-                  ナンバー{' '}
+                  ナンバー{" "}
                 </label>
                 <textarea
                   id="numbers"
@@ -777,7 +836,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
               </div>
               <div className="md:col-span-1">
                 <label htmlFor="titles" className={labelClass}>
-                  タイトル{' '}
+                  タイトル{" "}
                 </label>
                 <textarea
                   id="titles"
@@ -789,7 +848,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
               </div>
               <div className="md:col-span-1">
                 <label htmlFor="prices" className={labelClass}>
-                  頒布価格{' '}
+                  頒布価格{" "}
                 </label>
                 <textarea
                   id="prices"
@@ -803,7 +862,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="remarks" className={labelClass}>
-                  備考{' '}
+                  備考{" "}
                 </label>
                 <textarea
                   id="remarks"
@@ -815,7 +874,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
               </div>
               <div>
                 <label htmlFor="urls" className={labelClass}>
-                  URL{' '}
+                  URL{" "}
                 </label>
                 <textarea
                   id="urls"
@@ -943,7 +1002,11 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
                   id="price-quick-select"
                   onChange={handlePriceSelectChange}
                   className={formInputClass}
-                  value={priceOptions.includes(Number(singlePrice)) ? singlePrice : ''}
+                  value={
+                    priceOptions.includes(Number(singlePrice))
+                      ? singlePrice
+                      : ""
+                  }
                 >
                   <option value="" disabled>
                     金額を選択...
@@ -1011,7 +1074,11 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
             type="submit"
             className="w-full sm:w-auto inline-flex items-center justify-center px-6 py-3 border border-transparent text-base font-medium rounded-md shadow-sm text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:bg-slate-400 dark:disabled:bg-slate-600 disabled:cursor-not-allowed transition-colors duration-200"
           >
-            {isEditing ? 'アイテムを更新' : isCreatingNew ? 'リストを作成' : 'リストに追加'}
+            {isEditing
+              ? "アイテムを更新"
+              : isCreatingNew
+                ? "リストを作成"
+                : "リストに追加"}
           </button>
         </div>
       </form>

@@ -1,20 +1,20 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import type { HallDefinition } from '../../types/map';
-import { normalizeBlockName } from '../../utils/hallFallback';
+import React, { useState, useMemo, useEffect, useCallback } from "react";
+import type { HallDefinition } from "../../types/map";
+import { normalizeBlockName } from "../../utils/hallFallback";
 
 const HALL_COLORS = [
-  '#FFE0B2',
-  '#FFCCBC',
-  '#D7CCC8',
-  '#CFD8DC',
-  '#B2DFDB',
-  '#C8E6C9',
-  '#DCEDC8',
-  '#F0F4C3',
-  '#FFF9C4',
-  '#FFECB3',
-  '#E1BEE7',
-  '#D1C4E9',
+  "#FFE0B2",
+  "#FFCCBC",
+  "#D7CCC8",
+  "#CFD8DC",
+  "#B2DFDB",
+  "#C8E6C9",
+  "#DCEDC8",
+  "#F0F4C3",
+  "#FFF9C4",
+  "#FFECB3",
+  "#E1BEE7",
+  "#D1C4E9",
 ];
 
 interface SimpleHallDefinitionPanelProps {
@@ -37,25 +37,29 @@ interface EditingHall {
 
 const createNewHall = (existingCount: number): EditingHall => ({
   id: `hall-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-  name: '',
+  name: "",
   color: HALL_COLORS[existingCount % HALL_COLORS.length],
   blockNames: [],
 });
 
-export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps> = ({
+export const SimpleHallDefinitionPanel: React.FC<
+  SimpleHallDefinitionPanelProps
+> = ({
   isOpen,
   onClose,
   halls,
   onUpdateHalls,
   availableBlocks,
   eventDates = [],
-  activeEventDate = '',
+  activeEventDate = "",
   onSyncToOtherDates,
 }) => {
   const [localHalls, setLocalHalls] = useState<HallDefinition[]>(halls);
   const [editing, setEditing] = useState<EditingHall | null>(null);
   const [showSyncUI, setShowSyncUI] = useState(false);
-  const [syncTargetDates, setSyncTargetDates] = useState<Set<string>>(new Set());
+  const [syncTargetDates, setSyncTargetDates] = useState<Set<string>>(
+    new Set(),
+  );
 
   const otherDates = useMemo(
     () => eventDates.filter((d) => d !== activeEventDate),
@@ -115,7 +119,7 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
   const handleSaveEditing = useCallback(() => {
     if (!editing) return;
     if (!editing.name.trim()) {
-      alert('ホール名を入力してください');
+      alert("ホール名を入力してください");
       return;
     }
     const saved: HallDefinition = {
@@ -123,7 +127,8 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
       name: editing.name.trim(),
       vertices: [],
       color: editing.color,
-      blockNames: editing.blockNames.length > 0 ? editing.blockNames : undefined,
+      blockNames:
+        editing.blockNames.length > 0 ? editing.blockNames : undefined,
     };
     setLocalHalls((prev) => {
       const idx = prev.findIndex((h) => h.id === editing.id);
@@ -164,7 +169,12 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
 
   const handleSyncExecute = useCallback(() => {
     if (syncTargetDates.size === 0 || !onSyncToOtherDates) return;
-    if (!confirm(`選択した${syncTargetDates.size}日分のホール定義を上書きします。よろしいですか？`)) return;
+    if (
+      !confirm(
+        `選択した${syncTargetDates.size}日分のホール定義を上書きします。よろしいですか？`,
+      )
+    )
+      return;
     onSyncToOtherDates(Array.from(syncTargetDates));
     setShowSyncUI(false);
     setSyncTargetDates(new Set());
@@ -172,7 +182,12 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
 
   const handleSyncAll = useCallback(() => {
     if (!onSyncToOtherDates || otherDates.length === 0) return;
-    if (!confirm(`全ての他の日付（${otherDates.length}日分）のホール定義を上書きします。よろしいですか？`)) return;
+    if (
+      !confirm(
+        `全ての他の日付（${otherDates.length}日分）のホール定義を上書きします。よろしいですか？`,
+      )
+    )
+      return;
     onSyncToOtherDates(otherDates);
     setShowSyncUI(false);
     setSyncTargetDates(new Set());
@@ -192,8 +207,12 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
         {/* Header */}
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 py-3 flex items-center justify-between">
           <div>
-            <h2 className="text-white font-bold text-base">ホール定義（ブロック割当）</h2>
-            <p className="text-blue-100 text-xs mt-0.5">ブロック名でホールを定義します</p>
+            <h2 className="text-white font-bold text-base">
+              ホール定義（ブロック割当）
+            </h2>
+            <p className="text-blue-100 text-xs mt-0.5">
+              ブロック名でホールを定義します
+            </p>
           </div>
           <button
             onClick={onClose}
@@ -216,7 +235,9 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
                 <input
                   type="text"
                   value={editing.name}
-                  onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+                  onChange={(e) =>
+                    setEditing({ ...editing, name: e.target.value })
+                  }
                   placeholder="例: 東1ホール"
                   className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded-lg text-sm bg-white dark:bg-slate-700 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none"
                 />
@@ -233,8 +254,8 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
                       onClick={() => setEditing({ ...editing, color })}
                       className={`w-8 h-8 rounded-lg transition-all ${
                         editing.color === color
-                          ? 'ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-800'
-                          : 'hover:ring-2 hover:ring-slate-300'
+                          ? "ring-2 ring-blue-500 ring-offset-2 ring-offset-white dark:ring-offset-slate-800"
+                          : "hover:ring-2 hover:ring-slate-300"
                       }`}
                       style={{ backgroundColor: color }}
                       aria-label={`色: ${color}`}
@@ -256,46 +277,46 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
                     {(() => {
                       const selectedSet = new Set(editing.blockNames);
                       return availableBlocks.map((block) => {
-                      const key = normalizeBlockName(block);
-                      const otherHalls = (blockToHallsMap.get(key) || []).filter(
-                        (h) => h.id !== editing.id,
-                      );
-                      // 厳密一致: "E" と "e" は別ブロックとして扱う
-                      const checked = selectedSet.has(block);
-                      return (
-                        <label
-                          key={block}
-                          className="flex items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => handleToggleBlock(block)}
-                            className="w-4 h-4 text-blue-600 rounded"
-                          />
-                          <span className="text-sm font-medium text-slate-800 dark:text-slate-200">
-                            {block}
-                          </span>
-                          {otherHalls.length > 0 && (
-                            <span className="inline-flex items-center gap-1 ml-auto">
-                              {otherHalls.map((h) => (
-                                <span
-                                  key={h.id}
-                                  className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400"
-                                  title={`${h.name}にも割当済み`}
-                                >
-                                  <span
-                                    className="w-2.5 h-2.5 rounded-full"
-                                    style={{ backgroundColor: h.color }}
-                                  />
-                                  {h.name}
-                                </span>
-                              ))}
+                        const key = normalizeBlockName(block);
+                        const otherHalls = (
+                          blockToHallsMap.get(key) || []
+                        ).filter((h) => h.id !== editing.id);
+                        // 厳密一致: "E" と "e" は別ブロックとして扱う
+                        const checked = selectedSet.has(block);
+                        return (
+                          <label
+                            key={block}
+                            className="flex items-center gap-3 px-3 py-2 hover:bg-slate-50 dark:hover:bg-slate-700/50 cursor-pointer"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => handleToggleBlock(block)}
+                              className="w-4 h-4 text-blue-600 rounded"
+                            />
+                            <span className="text-sm font-medium text-slate-800 dark:text-slate-200">
+                              {block}
                             </span>
-                          )}
-                        </label>
-                      );
-                    });
+                            {otherHalls.length > 0 && (
+                              <span className="inline-flex items-center gap-1 ml-auto">
+                                {otherHalls.map((h) => (
+                                  <span
+                                    key={h.id}
+                                    className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400"
+                                    title={`${h.name}にも割当済み`}
+                                  >
+                                    <span
+                                      className="w-2.5 h-2.5 rounded-full"
+                                      style={{ backgroundColor: h.color }}
+                                    />
+                                    {h.name}
+                                  </span>
+                                ))}
+                              </span>
+                            )}
+                          </label>
+                        );
+                      });
                     })()}
                   </div>
                 )}
@@ -347,7 +368,9 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
                       <div className="flex items-center gap-3">
                         <div
                           className="w-10 h-10 rounded-lg flex items-center justify-center text-xs font-bold text-slate-700 flex-shrink-0"
-                          style={{ backgroundColor: hall.color || HALL_COLORS[0] }}
+                          style={{
+                            backgroundColor: hall.color || HALL_COLORS[0],
+                          }}
                         >
                           {hall.name.slice(0, 2)}
                         </div>
@@ -357,8 +380,8 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
                           </div>
                           <div className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
                             {blockCount > 0
-                              ? `ブロック: ${hall.blockNames!.join(', ')}`
-                              : 'ブロック未割当'}
+                              ? `ブロック: ${hall.blockNames!.join(", ")}`
+                              : "ブロック未割当"}
                           </div>
                         </div>
                       </div>
@@ -399,7 +422,9 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
                         onChange={() => handleToggleSyncDate(date)}
                         className="w-4 h-4 text-indigo-600 rounded"
                       />
-                      <span className="text-sm text-slate-700 dark:text-slate-200">{date}</span>
+                      <span className="text-sm text-slate-700 dark:text-slate-200">
+                        {date}
+                      </span>
                     </label>
                   ))}
                 </div>
@@ -418,7 +443,10 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
                     選択した日に同期 ({syncTargetDates.size})
                   </button>
                   <button
-                    onClick={() => { setShowSyncUI(false); setSyncTargetDates(new Set()); }}
+                    onClick={() => {
+                      setShowSyncUI(false);
+                      setSyncTargetDates(new Set());
+                    }}
                     className="px-3 py-1.5 text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
                   >
                     閉じる
@@ -433,18 +461,20 @@ export const SimpleHallDefinitionPanel: React.FC<SimpleHallDefinitionPanelProps>
               >
                 キャンセル
               </button>
-              {onSyncToOtherDates && otherDates.length > 0 && localHalls.length > 0 && (
-                <button
-                  onClick={() => setShowSyncUI((v) => !v)}
-                  className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
-                    showSyncUI
-                      ? 'text-indigo-700 bg-indigo-100 dark:text-indigo-300 dark:bg-indigo-800/40'
-                      : 'text-indigo-600 bg-indigo-50 dark:text-indigo-400 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-800/40'
-                  }`}
-                >
-                  他の日に同期
-                </button>
-              )}
+              {onSyncToOtherDates &&
+                otherDates.length > 0 &&
+                localHalls.length > 0 && (
+                  <button
+                    onClick={() => setShowSyncUI((v) => !v)}
+                    className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+                      showSyncUI
+                        ? "text-indigo-700 bg-indigo-100 dark:text-indigo-300 dark:bg-indigo-800/40"
+                        : "text-indigo-600 bg-indigo-50 dark:text-indigo-400 dark:bg-indigo-900/30 hover:bg-indigo-100 dark:hover:bg-indigo-800/40"
+                    }`}
+                  >
+                    他の日に同期
+                  </button>
+                )}
               <button
                 onClick={handleConfirmAll}
                 className="flex-1 px-4 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700"

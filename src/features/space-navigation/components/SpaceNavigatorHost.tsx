@@ -31,14 +31,13 @@ export function SpaceNavigatorHost() {
   const [busy, setBusy] = useState(false);
   const openedFromRailRef = useRef(false);
   const settingsEnabled = Boolean(
-    navigator?.settings.railVisible ||
-      navigator?.settings.footerButtonVisible,
+    navigator?.settings.railVisible || navigator?.settings.footerButtonVisible,
   );
   const hostVisible = Boolean(
     navigator &&
-      registration &&
-      registration.entries.length > 0 &&
-      settingsEnabled,
+    registration &&
+    registration.entries.length > 0 &&
+    settingsEnabled,
   );
   const navigationOverlayOpen = Boolean(
     hostVisible && (navigator?.pickerOpen || actionTargetVisitId !== null),
@@ -51,7 +50,7 @@ export function SpaceNavigatorHost() {
         ) ?? -1);
   const actionTarget =
     actionTargetIndex >= 0
-      ? registration?.entries[actionTargetIndex] ?? null
+      ? (registration?.entries[actionTargetIndex] ?? null)
       : null;
 
   useEffect(() => {
@@ -160,9 +159,7 @@ export function SpaceNavigatorHost() {
           side={navigator.settings.side}
           onCandidateChange={setCandidateIndex}
           onSelect={(index) => {
-            setActionTargetVisitId(
-              registration.entries[index]?.id ?? null,
-            );
+            setActionTargetVisitId(registration.entries[index]?.id ?? null);
             setActionResult(null);
             setPendingIntent(null);
           }}
@@ -176,9 +173,7 @@ export function SpaceNavigatorHost() {
           result={actionResult}
           pendingIntent={pendingIntent}
           busy={busy}
-          onChoose={(intent, confirmed) =>
-            void handleChoose(intent, confirmed)
-          }
+          onChoose={(intent, confirmed) => void handleChoose(intent, confirmed)}
           onCancel={() => {
             setActionTargetVisitId(null);
             setActionResult(null);

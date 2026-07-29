@@ -4,12 +4,15 @@ import type {
   HallDefinitionsStore,
   HallRouteSettings,
   HallRouteSettingsStore,
-} from '../../../types/map';
-import type { ShoppingItem } from '../../../types/item';
-import { getMaplessKey } from '../../../types/map';
-import { resolveHallByBlockName, resolveManualHallId } from '../../../utils/hallFallback';
+} from "../../../types/map";
+import type { ShoppingItem } from "../../../types/item";
+import { getMaplessKey } from "../../../types/map";
+import {
+  resolveHallByBlockName,
+  resolveManualHallId,
+} from "../../../utils/hallFallback";
 
-type PriorityLevel = 'none' | 'priority' | 'highest';
+type PriorityLevel = "none" | "priority" | "highest";
 
 export const emptyHallRouteSettings = (): HallRouteSettings => ({
   hallOrder: [],
@@ -17,8 +20,8 @@ export const emptyHallRouteSettings = (): HallRouteSettings => ({
 });
 
 export const extractHallIdFromGroupId = (groupId: string): string => {
-  if (groupId.endsWith(':highest')) return groupId.replace(':highest', '');
-  if (groupId.endsWith(':priority')) return groupId.replace(':priority', '');
+  if (groupId.endsWith(":highest")) return groupId.replace(":highest", "");
+  if (groupId.endsWith(":priority")) return groupId.replace(":priority", "");
   return groupId;
 };
 
@@ -27,12 +30,12 @@ export const buildHallGroupId = (
   priority: PriorityLevel,
 ): string => {
   if (hallId === null) {
-    if (priority === 'highest') return 'undefined:highest';
-    if (priority === 'priority') return 'undefined:priority';
-    return 'undefined';
+    if (priority === "highest") return "undefined:highest";
+    if (priority === "priority") return "undefined:priority";
+    return "undefined";
   }
-  if (priority === 'highest') return `${hallId}:highest`;
-  if (priority === 'priority') return `${hallId}:priority`;
+  if (priority === "highest") return `${hallId}:highest`;
+  if (priority === "priority") return `${hallId}:priority`;
   return hallId;
 };
 
@@ -43,15 +46,23 @@ export const splitHallsForStorage = (
     .filter((hall) => hall.vertices && hall.vertices.length >= 4)
     .map(({ blockNames: _ignored, ...rest }) => rest as HallDefinition);
   const maplessHalls = halls.filter(
-    (hall) => (!hall.vertices || hall.vertices.length < 4) && !!hall.blockNames?.length,
+    (hall) =>
+      (!hall.vertices || hall.vertices.length < 4) && !!hall.blockNames?.length,
   );
 
   return { polygonHalls, maplessHalls };
 };
 
-export const mergeHallOrder = (existingOrder: string[], hallIds: string[]): string[] => [
-  ...existingOrder.filter((id) => hallIds.includes(extractHallIdFromGroupId(id))),
-  ...hallIds.filter((id) => !existingOrder.some((existingId) => existingId === id)),
+export const mergeHallOrder = (
+  existingOrder: string[],
+  hallIds: string[],
+): string[] => [
+  ...existingOrder.filter((id) =>
+    hallIds.includes(extractHallIdFromGroupId(id)),
+  ),
+  ...hallIds.filter(
+    (id) => !existingOrder.some((existingId) => existingId === id),
+  ),
 ];
 
 export const updateHallDefinitionsForHalls = ({
@@ -114,7 +125,8 @@ export const updateHallRouteSettingsForHalls = ({
   };
 
   if (maplessKey) {
-    const previousMapless = previousEvent[maplessKey] || emptyHallRouteSettings();
+    const previousMapless =
+      previousEvent[maplessKey] || emptyHallRouteSettings();
     updated[eventName][maplessKey] = {
       ...previousMapless,
       hallOrder: mergeHallOrder(previousMapless.hallOrder, maplessIds),
@@ -154,7 +166,8 @@ export const updateMaplessHallRouteSettings = ({
   halls: HallDefinition[];
 }): HallRouteSettingsStore => {
   const previousEvent = previous[eventName] || {};
-  const previousSettings = previousEvent[maplessKey] || emptyHallRouteSettings();
+  const previousSettings =
+    previousEvent[maplessKey] || emptyHallRouteSettings();
   const hallIds = halls.map((hall) => hall.id);
 
   return {
@@ -173,7 +186,10 @@ export const cloneHallsForDates = (
   sourceHalls: HallDefinition[],
   targetDates: string[],
 ): Map<string, { halls: HallDefinition[]; idMap: Map<string, string> }> => {
-  const clonedByDate = new Map<string, { halls: HallDefinition[]; idMap: Map<string, string> }>();
+  const clonedByDate = new Map<
+    string,
+    { halls: HallDefinition[]; idMap: Map<string, string> }
+  >();
   for (const date of targetDates) {
     const idMap = new Map<string, string>();
     const halls = sourceHalls.map((hall) => {
@@ -186,13 +202,18 @@ export const cloneHallsForDates = (
   return clonedByDate;
 };
 
-const remapHallGroupId = (groupId: string, idMap: Map<string, string>): string | null => {
+const remapHallGroupId = (
+  groupId: string,
+  idMap: Map<string, string>,
+): string | null => {
   const hallId = extractHallIdFromGroupId(groupId);
   const nextHallId = idMap.get(hallId);
   if (!nextHallId) return null;
-  if (groupId.endsWith(':highest')) return buildHallGroupId(nextHallId, 'highest');
-  if (groupId.endsWith(':priority')) return buildHallGroupId(nextHallId, 'priority');
-  return buildHallGroupId(nextHallId, 'none');
+  if (groupId.endsWith(":highest"))
+    return buildHallGroupId(nextHallId, "highest");
+  if (groupId.endsWith(":priority"))
+    return buildHallGroupId(nextHallId, "priority");
+  return buildHallGroupId(nextHallId, "none");
 };
 
 export const remapHallRouteSettings = (
@@ -208,7 +229,9 @@ export const remapHallRouteSettings = (
       const hallId = remapHallGroupId(visitList.hallId, idMap);
       return hallId ? { ...visitList, hallId } : null;
     })
-    .filter((visitList): visitList is NonNullable<typeof visitList> => !!visitList),
+    .filter(
+      (visitList): visitList is NonNullable<typeof visitList> => !!visitList,
+    ),
 });
 
 export const splitGlobalHallRouteSettings = ({
@@ -247,7 +270,10 @@ export const splitGlobalHallRouteSettings = ({
 
   return {
     mapSettings: { hallOrder: mapOrder, hallVisitLists: mapVisitLists },
-    maplessSettings: { hallOrder: maplessOrder, hallVisitLists: maplessVisitLists },
+    maplessSettings: {
+      hallOrder: maplessOrder,
+      hallVisitLists: maplessVisitLists,
+    },
   };
 };
 
@@ -266,30 +292,30 @@ export const getGlobalHallItemCount = ({
 
   let targetHallId: string | null;
   let targetPriority: PriorityLevel;
-  if (groupId === 'undefined' || groupId === 'undefined:none') {
+  if (groupId === "undefined" || groupId === "undefined:none") {
     targetHallId = null;
-    targetPriority = 'none';
-  } else if (groupId === 'undefined:highest') {
+    targetPriority = "none";
+  } else if (groupId === "undefined:highest") {
     targetHallId = null;
-    targetPriority = 'highest';
-  } else if (groupId === 'undefined:priority') {
+    targetPriority = "highest";
+  } else if (groupId === "undefined:priority") {
     targetHallId = null;
-    targetPriority = 'priority';
-  } else if (groupId.endsWith(':highest')) {
-    targetHallId = groupId.replace(':highest', '');
-    targetPriority = 'highest';
-  } else if (groupId.endsWith(':priority')) {
-    targetHallId = groupId.replace(':priority', '');
-    targetPriority = 'priority';
+    targetPriority = "priority";
+  } else if (groupId.endsWith(":highest")) {
+    targetHallId = groupId.replace(":highest", "");
+    targetPriority = "highest";
+  } else if (groupId.endsWith(":priority")) {
+    targetHallId = groupId.replace(":priority", "");
+    targetPriority = "priority";
   } else {
     targetHallId = groupId;
-    targetPriority = 'none';
+    targetPriority = "none";
   }
 
   return executeIds.filter((itemId) => {
     const item = items.find((candidate) => candidate.id === itemId);
     if (!item) return false;
-    if ((item.priorityLevel || 'none') !== targetPriority) return false;
+    if ((item.priorityLevel || "none") !== targetPriority) return false;
     return getItemHallId(item, item.eventDate) === targetHallId;
   }).length;
 };
@@ -306,7 +332,10 @@ const isPointInPolygon = (
     const yi = vertices[i].row;
     const xj = vertices[j].col;
     const yj = vertices[j].row;
-    if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
+    if (
+      yi > row !== yj > row &&
+      col < ((xj - xi) * (row - yi)) / (yj - yi) + xi
+    ) {
       inside = !inside;
     }
   }
@@ -322,15 +351,17 @@ export const resolveItemHallGroupId = ({
   halls: HallDefinition[];
   mapData: DayMapData | undefined;
 }): string => {
-  if (!item) return 'undefined';
+  if (!item) return "undefined";
 
   let hallId: string | null = null;
   const manual = resolveManualHallId(item.manualHallId, halls);
   if (manual) {
     hallId = manual;
   } else if (mapData) {
-    const blockName = item.block?.trim() || '';
-    let block = mapData.blocks.find((candidate) => candidate.name === blockName);
+    const blockName = item.block?.trim() || "";
+    let block = mapData.blocks.find(
+      (candidate) => candidate.name === blockName,
+    );
     if (!block) {
       const candidates = mapData.blocks.filter(
         (candidate) => candidate.name.toLowerCase() === blockName.toLowerCase(),
@@ -343,7 +374,10 @@ export const resolveItemHallGroupId = ({
       const centerRow = (block.startRow + block.endRow) / 2;
       const centerCol = (block.startCol + block.endCol) / 2;
       for (const hall of halls) {
-        if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
+        if (
+          hall.vertices.length >= 4 &&
+          isPointInPolygon(centerRow, centerCol, hall.vertices)
+        ) {
           hallId = hall.id;
           break;
         }
@@ -355,7 +389,10 @@ export const resolveItemHallGroupId = ({
     hallId = resolveHallByBlockName(item.block, halls);
   }
 
-  return buildHallGroupId(hallId, (item.priorityLevel || 'none') as PriorityLevel);
+  return buildHallGroupId(
+    hallId,
+    (item.priorityLevel || "none") as PriorityLevel,
+  );
 };
 
 export const reorderExecuteIdsByHallOrder = ({
@@ -435,7 +472,9 @@ export const getCombinedHallRouteSettingsForDate = ({
   hallRouteSettings: HallRouteSettingsStore;
 }): HallRouteSettings => {
   const maplessKey = getMaplessKey(dayName);
-  const mapSettings = mapTabName ? hallRouteSettings[eventName]?.[mapTabName] : undefined;
+  const mapSettings = mapTabName
+    ? hallRouteSettings[eventName]?.[mapTabName]
+    : undefined;
   const maplessSettings = hallRouteSettings[eventName]?.[maplessKey];
 
   return {

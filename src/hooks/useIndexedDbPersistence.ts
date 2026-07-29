@@ -1,11 +1,11 @@
-import { Dispatch, SetStateAction, useEffect, useRef, useState } from 'react';
+import { Dispatch, SetStateAction, useEffect, useRef, useState } from "react";
 import {
   DayModeState,
   EventMetadata,
   ExecuteModeItems,
   ShoppingItem,
-} from '../types/item';
-import { normalizeLimitedPurchaseFields } from '../utils/purchaseQuantity';
+} from "../types/item";
+import { normalizeLimitedPurchaseFields } from "../utils/purchaseQuantity";
 import {
   HallDefinitionsStore,
   HallRouteSettingsStore,
@@ -13,8 +13,8 @@ import {
   MapRotationSettingsStore,
   MapViewportSettingsStore,
   RouteSettingsStore,
-} from '../types/map';
-import { db, type LoadResult } from '../utils/indexedDB';
+} from "../types/map";
+import { db, type LoadResult } from "../utils/indexedDB";
 
 type PersistedStateValues = {
   eventLists: Record<string, ShoppingItem[]>;
@@ -32,7 +32,9 @@ type PersistedStateValues = {
 type PersistedStateSetters = {
   setEventLists: Dispatch<SetStateAction<Record<string, ShoppingItem[]>>>;
   setEventMetadata: Dispatch<SetStateAction<Record<string, EventMetadata>>>;
-  setExecuteModeItems: Dispatch<SetStateAction<Record<string, ExecuteModeItems>>>;
+  setExecuteModeItems: Dispatch<
+    SetStateAction<Record<string, ExecuteModeItems>>
+  >;
   setDayModes: Dispatch<SetStateAction<Record<string, DayModeState>>>;
   setMapData: Dispatch<SetStateAction<MapDataStore>>;
   setMapRotationSettings: Dispatch<SetStateAction<MapRotationSettingsStore>>;
@@ -116,69 +118,93 @@ export function useIndexedDbPersistence({
           storeLabel: string,
           result: LoadResult<T>,
         ): T => {
-          if (result.status === 'ok' && result.data) {
+          if (result.status === "ok" && result.data) {
             return result.data;
           }
-          if (result.status === 'error') {
-            console.error(`Failed to load ${storeLabel} from IndexedDB:`, result.error);
+          if (result.status === "error") {
+            console.error(
+              `Failed to load ${storeLabel} from IndexedDB:`,
+              result.error,
+            );
             loadErrorStores.push(storeLabel);
           }
           return {} as T;
         };
 
-        const resolvedEventLists = resolveLoadResult('eventLists', loadedEventLists);
-        const resolvedMetadata = resolveLoadResult('eventMetadata', loadedMetadata);
-        const resolvedExecuteItems = resolveLoadResult('executeModeItems', loadedExecuteItems);
-        const resolvedDayModes = resolveLoadResult('dayModes', loadedDayModes);
-        const resolvedMapData = resolveLoadResult('mapData', loadedMapData);
+        const resolvedEventLists = resolveLoadResult(
+          "eventLists",
+          loadedEventLists,
+        );
+        const resolvedMetadata = resolveLoadResult(
+          "eventMetadata",
+          loadedMetadata,
+        );
+        const resolvedExecuteItems = resolveLoadResult(
+          "executeModeItems",
+          loadedExecuteItems,
+        );
+        const resolvedDayModes = resolveLoadResult("dayModes", loadedDayModes);
+        const resolvedMapData = resolveLoadResult("mapData", loadedMapData);
         const resolvedMapRotationSettings = resolveLoadResult(
-          'mapRotationSettings',
+          "mapRotationSettings",
           loadedMapRotationSettings,
         );
-        const resolvedRouteSettings = resolveLoadResult('routeSettings', loadedRouteSettings);
+        const resolvedRouteSettings = resolveLoadResult(
+          "routeSettings",
+          loadedRouteSettings,
+        );
         const resolvedHallDefinitions = resolveLoadResult(
-          'hallDefinitions',
+          "hallDefinitions",
           loadedHallDefinitions,
         );
         const resolvedHallRouteSettings = resolveLoadResult(
-          'hallRouteSettings',
+          "hallRouteSettings",
           loadedHallRouteSettings,
         );
         const resolvedMapViewportSettings = resolveLoadResult(
-          'mapViewportSettings',
+          "mapViewportSettings",
           loadedMapViewportSettings,
         );
 
         const migratedLists: Record<string, ShoppingItem[]> = {};
         Object.keys(resolvedEventLists).forEach((eventName) => {
-          migratedLists[eventName] = (resolvedEventLists[eventName] as ShoppingItem[]).map(
-            (item: ShoppingItem) =>
-              normalizeLimitedPurchaseFields({
-                ...item,
-                quantity: item.quantity ?? 1,
-              }),
+          migratedLists[eventName] = (
+            resolvedEventLists[eventName] as ShoppingItem[]
+          ).map((item: ShoppingItem) =>
+            normalizeLimitedPurchaseFields({
+              ...item,
+              quantity: item.quantity ?? 1,
+            }),
           );
         });
 
         setEventLists(migratedLists);
         setEventMetadata(resolvedMetadata as Record<string, EventMetadata>);
-        setExecuteModeItems(resolvedExecuteItems as Record<string, ExecuteModeItems>);
+        setExecuteModeItems(
+          resolvedExecuteItems as Record<string, ExecuteModeItems>,
+        );
         setDayModes(resolvedDayModes as Record<string, DayModeState>);
         setMapData(resolvedMapData as MapDataStore);
-        setMapRotationSettings(resolvedMapRotationSettings as MapRotationSettingsStore);
+        setMapRotationSettings(
+          resolvedMapRotationSettings as MapRotationSettingsStore,
+        );
         setRouteSettings(resolvedRouteSettings as RouteSettingsStore);
         setHallDefinitions(resolvedHallDefinitions as HallDefinitionsStore);
-        setHallRouteSettings(resolvedHallRouteSettings as HallRouteSettingsStore);
-        setMapViewportSettings(resolvedMapViewportSettings as MapViewportSettingsStore);
+        setHallRouteSettings(
+          resolvedHallRouteSettings as HallRouteSettingsStore,
+        );
+        setMapViewportSettings(
+          resolvedMapViewportSettings as MapViewportSettingsStore,
+        );
 
         if (loadErrorStores.length > 0 && !hasShownLoadErrorRef.current) {
           hasShownLoadErrorRef.current = true;
           alert(
-            `一部の保存データの読み込みに失敗したため、初期値で起動しました。\n${loadErrorStores.join('\n')}`,
+            `一部の保存データの読み込みに失敗したため、初期値で起動しました。\n${loadErrorStores.join("\n")}`,
           );
         }
       } catch (error) {
-        console.error('Failed to load data from IndexedDB:', error);
+        console.error("Failed to load data from IndexedDB:", error);
       }
       setIsInitialized(true);
     };
@@ -224,50 +250,62 @@ export function useIndexedDbPersistence({
 
         const saveTasks: { label: string; save: () => Promise<void> }[] = [];
         if (previousValues.eventLists !== eventLists) {
-          saveTasks.push({ label: 'eventLists', save: () => db.saveEventLists(eventLists) });
+          saveTasks.push({
+            label: "eventLists",
+            save: () => db.saveEventLists(eventLists),
+          });
         }
         if (previousValues.eventMetadata !== eventMetadata) {
-          saveTasks.push({ label: 'eventMetadata', save: () => db.saveEventMetadata(eventMetadata) });
+          saveTasks.push({
+            label: "eventMetadata",
+            save: () => db.saveEventMetadata(eventMetadata),
+          });
         }
         if (previousValues.executeModeItems !== executeModeItems) {
           saveTasks.push({
-            label: 'executeModeItems',
+            label: "executeModeItems",
             save: () => db.saveExecuteModeItems(executeModeItems),
           });
         }
         if (previousValues.dayModes !== dayModes) {
-          saveTasks.push({ label: 'dayModes', save: () => db.saveDayModes(dayModes) });
+          saveTasks.push({
+            label: "dayModes",
+            save: () => db.saveDayModes(dayModes),
+          });
         }
         if (previousValues.mapData !== mapData) {
           saveTasks.push({
-            label: 'mapData',
+            label: "mapData",
             save: () => db.saveMapDataChanges(previousValues.mapData, mapData),
           });
         }
         if (previousValues.mapRotationSettings !== mapRotationSettings) {
           saveTasks.push({
-            label: 'mapRotationSettings',
+            label: "mapRotationSettings",
             save: () => db.saveMapRotationSettings(mapRotationSettings),
           });
         }
         if (previousValues.routeSettings !== routeSettings) {
-          saveTasks.push({ label: 'routeSettings', save: () => db.saveRouteSettings(routeSettings) });
+          saveTasks.push({
+            label: "routeSettings",
+            save: () => db.saveRouteSettings(routeSettings),
+          });
         }
         if (previousValues.hallDefinitions !== hallDefinitions) {
           saveTasks.push({
-            label: 'hallDefinitions',
+            label: "hallDefinitions",
             save: () => db.saveHallDefinitions(hallDefinitions),
           });
         }
         if (previousValues.hallRouteSettings !== hallRouteSettings) {
           saveTasks.push({
-            label: 'hallRouteSettings',
+            label: "hallRouteSettings",
             save: () => db.saveHallRouteSettings(hallRouteSettings),
           });
         }
         if (previousValues.mapViewportSettings !== mapViewportSettings) {
           saveTasks.push({
-            label: 'mapViewportSettings',
+            label: "mapViewportSettings",
             save: () => db.saveMapViewportSettings(mapViewportSettings),
           });
         }
@@ -291,17 +329,18 @@ export function useIndexedDbPersistence({
         for (const failure of failed) {
           const label = failure.label as keyof PersistedStateValues;
           if (label in previousValues) {
-            (nextSavedValues as Record<string, unknown>)[label] = previousValues[label];
+            (nextSavedValues as Record<string, unknown>)[label] =
+              previousValues[label];
           }
         }
         previousSavedValuesRef.current = nextSavedValues;
 
         if (failed.length > 0) {
-          console.error('Failed to save data to IndexedDB:', failed);
+          console.error("Failed to save data to IndexedDB:", failed);
           return;
         }
       } catch (error) {
-        console.error('Failed to save data to IndexedDB:', error);
+        console.error("Failed to save data to IndexedDB:", error);
       } finally {
         isSavingRef.current = false;
       }

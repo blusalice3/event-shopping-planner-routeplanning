@@ -1,7 +1,7 @@
-import { ShoppingItem } from '../../types/item';
-import { getItemKey, getItemKeyWithoutTitle } from '../../utils/itemComparison';
+import { ShoppingItem } from "../../types/item";
+import { getItemKey, getItemKeyWithoutTitle } from "../../utils/itemComparison";
 
-export type SheetItem = Omit<ShoppingItem, 'id' | 'purchaseStatus'>;
+export type SheetItem = Omit<ShoppingItem, "id" | "purchaseStatus">;
 
 export type EventUpdateDiff = {
   itemsToDelete: ShoppingItem[];
@@ -11,9 +11,11 @@ export type EventUpdateDiff = {
   protectedFromUpdate: number;
 };
 
-function getEffectiveProtectionLevel(item: ShoppingItem): 'full' | 'deletable' | 'none' {
+function getEffectiveProtectionLevel(
+  item: ShoppingItem,
+): "full" | "deletable" | "none" {
   if (item.protectionLevel) return item.protectionLevel;
-  return item.source === 'app' ? 'full' : 'none';
+  return item.source === "app" ? "full" : "none";
 }
 
 export function normalizeSheetItemsUrls(sheetItems: SheetItem[]): SheetItem[] {
@@ -38,11 +40,13 @@ export function normalizeSheetItemsUrls(sheetItems: SheetItem[]): SheetItem[] {
 
     circleGroups.forEach((circleItems) => {
       if (circleItems.length < 2) return;
-      const itemWithUrl = circleItems.find((item) => item.url && item.url.trim() !== '');
+      const itemWithUrl = circleItems.find(
+        (item) => item.url && item.url.trim() !== "",
+      );
       if (!itemWithUrl?.url) return;
 
       circleItems.forEach((item) => {
-        if (!item.url || item.url.trim() === '') {
+        if (!item.url || item.url.trim() === "") {
           item.url = itemWithUrl.url;
         }
       });
@@ -56,7 +60,9 @@ export function createEventUpdateDiff(
   currentItems: ShoppingItem[],
   sheetItems: SheetItem[],
 ): EventUpdateDiff {
-  const currentItemsMapWithAll = new Map(currentItems.map((item) => [getItemKey(item), item]));
+  const currentItemsMapWithAll = new Map(
+    currentItems.map((item) => [getItemKey(item), item]),
+  );
   const sheetItemsMapWithoutTitle = new Map(
     sheetItems.map((item) => [getItemKeyWithoutTitle(item), item]),
   );
@@ -74,7 +80,7 @@ export function createEventUpdateDiff(
     const keyWithoutTitle = getItemKeyWithoutTitle(item);
     if (!sheetItemsMapWithoutTitle.has(keyWithoutTitle)) {
       const protectionLevel = getEffectiveProtectionLevel(item);
-      if (protectionLevel !== 'full') {
+      if (protectionLevel !== "full") {
         itemsToDelete.push(item);
       } else {
         protectedFromDelete++;
@@ -89,7 +95,7 @@ export function createEventUpdateDiff(
     const existingWithAll = currentItemsMapWithAll.get(keyWithAll);
     if (existingWithAll) {
       const protectionLevel = getEffectiveProtectionLevel(existingWithAll);
-      if (protectionLevel === 'full' || protectionLevel === 'deletable') {
+      if (protectionLevel === "full" || protectionLevel === "deletable") {
         if (
           existingWithAll.price !== sheetItem.price ||
           existingWithAll.remarks !== sheetItem.remarks ||
@@ -115,10 +121,11 @@ export function createEventUpdateDiff(
       return;
     }
 
-    const existingWithoutTitle = currentItemsMapWithoutTitle.get(keyWithoutTitle);
+    const existingWithoutTitle =
+      currentItemsMapWithoutTitle.get(keyWithoutTitle);
     if (existingWithoutTitle) {
       const protectionLevel = getEffectiveProtectionLevel(existingWithoutTitle);
-      if (protectionLevel === 'full' || protectionLevel === 'deletable') {
+      if (protectionLevel === "full" || protectionLevel === "deletable") {
         protectedFromUpdate++;
         return;
       }

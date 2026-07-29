@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, {
+  useState,
+  useEffect,
+  useCallback,
+  useMemo,
+  useRef,
+} from "react";
 import {
   ShoppingItem,
   PurchaseStatus,
@@ -6,7 +12,7 @@ import {
   ViewMode,
   DayModeState,
   ExecuteModeItems,
-} from './types/item';
+} from "./types/item";
 import {
   MapDataStore,
   RouteSettingsStore,
@@ -20,16 +26,24 @@ import {
   MapRotationSettingsStore,
   MapViewportSettingsStore,
   MapViewportState,
-} from './types/map';
-import { ExportOptions } from './types/export';
-import { FocusModeSessionState } from './types/focus';
-import { MAPLESS_HALL_KEY, getMaplessKey } from './types/map';
-import { resolveHallByBlockName, resolveManualHallId, findHallsByBlockName } from './utils/hallFallback';
-import { buildMergedHallRouteSettings } from './utils/mergedHallRouteSettings';
-import { isPointInPolygon, saveBlockDetectionSettings } from './components/map';
-import { extractEventDates } from './utils/eventDates';
-import { getSpaceKey } from './utils/spaceGrouping';
-import { importFromXlsx, downloadBlob, type ItemFallbackWarning } from './utils/exportImport';
+} from "./types/map";
+import { ExportOptions } from "./types/export";
+import { FocusModeSessionState } from "./types/focus";
+import { MAPLESS_HALL_KEY, getMaplessKey } from "./types/map";
+import {
+  resolveHallByBlockName,
+  resolveManualHallId,
+  findHallsByBlockName,
+} from "./utils/hallFallback";
+import { buildMergedHallRouteSettings } from "./utils/mergedHallRouteSettings";
+import { isPointInPolygon, saveBlockDetectionSettings } from "./components/map";
+import { extractEventDates } from "./utils/eventDates";
+import { getSpaceKey } from "./utils/spaceGrouping";
+import {
+  importFromXlsx,
+  downloadBlob,
+  type ItemFallbackWarning,
+} from "./utils/exportImport";
 import {
   buildBulkAddUiPlan,
   buildBulkAddEventMetadata,
@@ -39,19 +53,26 @@ import {
   buildLayoutAppliedEventItems,
   hasBulkAddLayoutInfo,
   type BulkAddMetadata,
-} from './features/events/bulkAdd';
-import { type EventUpdateDiff } from './features/events/updateDiff';
+} from "./features/events/bulkAdd";
+import { type EventUpdateDiff } from "./features/events/updateDiff";
 import {
   applyEventUpdateToItems,
   removeDeletedIdsFromExecuteModeItems,
-} from './features/events/updateApply';
+} from "./features/events/updateApply";
 import {
   buildEventUpdateDiffFromSpreadsheet,
   resolveSpreadsheetSource,
-} from './features/events/updateFlow';
-import { buildEventExportFile, hasExportableItems } from './features/events/exportFlow';
-import { toImportedEventData } from './features/events/fileImport';
-import { removeRecordKey, renameRecordKey, upsertRecordKey } from './features/events/recordOps';
+} from "./features/events/updateFlow";
+import {
+  buildEventExportFile,
+  hasExportableItems,
+} from "./features/events/exportFlow";
+import { toImportedEventData } from "./features/events/fileImport";
+import {
+  removeRecordKey,
+  renameRecordKey,
+  upsertRecordKey,
+} from "./features/events/recordOps";
 import {
   computeUpdateItem,
   computeDeleteItem,
@@ -68,11 +89,11 @@ import {
   expandExecuteRemovalItemIds,
   expandSameSpacePriorityItemIds,
   reorderExecuteIdsForSpaceAdjacency,
-} from './features/events/itemOps';
+} from "./features/events/itemOps";
 import {
   buildImportCompletionMessage,
   resolveEventListTab,
-} from './features/events/uiOrchestration';
+} from "./features/events/uiOrchestration";
 import {
   cloneHallsForDates,
   emptyHallRouteSettings,
@@ -86,59 +107,59 @@ import {
   updateHallRouteSettingsForHalls,
   updateMaplessHallDefinitions,
   updateMaplessHallRouteSettings,
-} from './features/map/domain/hallOperations';
-import { useMapSelectors } from './features/map/hooks/useMapSelectors';
-import { useListInteractionState } from './features/lists/hooks/useListInteractionState';
-import AppHeaderShell from './features/app-shell/components/AppHeaderShell';
-import AppMainContent from './features/app-shell/components/AppMainContent';
-import AppOverlayLayer from './features/app-shell/components/AppOverlayLayer';
-import { useThemeMode } from './hooks/useThemeMode';
+} from "./features/map/domain/hallOperations";
+import { useMapSelectors } from "./features/map/hooks/useMapSelectors";
+import { useListInteractionState } from "./features/lists/hooks/useListInteractionState";
+import AppHeaderShell from "./features/app-shell/components/AppHeaderShell";
+import AppMainContent from "./features/app-shell/components/AppMainContent";
+import AppOverlayLayer from "./features/app-shell/components/AppOverlayLayer";
+import { useThemeMode } from "./hooks/useThemeMode";
 import {
   DEFAULT_UI_VISIBILITY,
   useUIVisibilitySettings,
   type UIVisibilitySettings,
-} from './hooks/useUIVisibilitySettings';
-import { useNumberCellOutlineStyle } from './hooks/useNumberCellOutlineStyle';
-import { useDisablePriceUndefinedCheck } from './hooks/useDisablePriceUndefinedCheck';
-import { useDisableLimitedPurchaseQuantityCheck } from './hooks/useDisableLimitedPurchaseQuantityCheck';
+} from "./hooks/useUIVisibilitySettings";
+import { useNumberCellOutlineStyle } from "./hooks/useNumberCellOutlineStyle";
+import { useDisablePriceUndefinedCheck } from "./hooks/useDisablePriceUndefinedCheck";
+import { useDisableLimitedPurchaseQuantityCheck } from "./hooks/useDisableLimitedPurchaseQuantityCheck";
 import {
   DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY,
   useSkipLimitedPurchaseForSingleQuantity,
-} from './hooks/useSkipLimitedPurchaseForSingleQuantity';
-import { usePurchaseStatusControlMode } from './hooks/usePurchaseStatusControlMode';
-import { usePostEventDistributionCheck } from './hooks/usePostEventDistributionCheck';
-import { useIndexedDbPersistence } from './hooks/useIndexedDbPersistence';
-import type { SmartInsertMode, SortState } from './features/app-shell/types';
-import { normalizeSmartInsertMode } from './utils/smartInsertMode';
+} from "./hooks/useSkipLimitedPurchaseForSingleQuantity";
+import { usePurchaseStatusControlMode } from "./hooks/usePurchaseStatusControlMode";
+import { usePostEventDistributionCheck } from "./hooks/usePostEventDistributionCheck";
+import { useIndexedDbPersistence } from "./hooks/useIndexedDbPersistence";
+import type { SmartInsertMode, SortState } from "./features/app-shell/types";
+import { normalizeSmartInsertMode } from "./utils/smartInsertMode";
 import {
   clearLimitedPurchase,
   getLimitedPurchaseCounts,
   matchesPurchaseStatusFilter,
-} from './utils/purchaseQuantity';
+} from "./utils/purchaseQuantity";
 
-type ActiveTab = 'eventList' | 'import' | string;
-export type BulkSortDirection = 'asc' | 'desc';
-type BlockSortDirection = 'asc' | 'desc';
+type ActiveTab = "eventList" | "import" | string;
+export type BulkSortDirection = "asc" | "desc";
+type BlockSortDirection = "asc" | "desc";
 
 const sortCycle: SortState[] = [
-  'Manual',
-  'Postpone',
-  'Late',
-  'Absent',
-  'SoldOut',
-  'None',
-  'Purchased',
-  'LimitedPurchase',
+  "Manual",
+  "Postpone",
+  "Late",
+  "Absent",
+  "SoldOut",
+  "None",
+  "Purchased",
+  "LimitedPurchase",
 ];
 const sortLabels: Record<SortState, string> = {
-  Manual: '巡回順',
-  Postpone: '後回し',
-  Late: '遅参',
-  Absent: '欠席',
-  SoldOut: '売切',
-  None: '未購入',
-  Purchased: '購入済',
-  LimitedPurchase: '\u9650\u6570',
+  Manual: "巡回順",
+  Postpone: "後回し",
+  Late: "遅参",
+  Absent: "欠席",
+  SoldOut: "売切",
+  None: "未購入",
+  Purchased: "購入済",
+  LimitedPurchase: "\u9650\u6570",
 };
 
 const buildFocusSessionKey = (eventName: string, eventDate: string): string =>
@@ -228,14 +249,19 @@ const normalizeRotationAngle = (angle: number): number => {
 };
 
 const toHalfWidthDigits = (value: string): string =>
-  value.replace(/[０-９]/g, (char) => String.fromCharCode(char.charCodeAt(0) - 0xfee0));
+  value.replace(/[０-９]/g, (char) =>
+    String.fromCharCode(char.charCodeAt(0) - 0xfee0),
+  );
 
 const normalizeMapDayToken = (value: string): string =>
   toHalfWidthDigits(value)
-    .replace(/[ \u3000]/g, '')
-    .replace(/マップ$/, '');
+    .replace(/[ \u3000]/g, "")
+    .replace(/マップ$/, "");
 
-const resolveImportMapTabName = (mapName: string, eventDates: string[]): string | null => {
+const resolveImportMapTabName = (
+  mapName: string,
+  eventDates: string[],
+): string | null => {
   const normalizedMapDay = normalizeMapDayToken(mapName);
   const matchedEventDate = eventDates.find(
     (eventDate) => normalizeMapDayToken(eventDate) === normalizedMapDay,
@@ -243,28 +269,41 @@ const resolveImportMapTabName = (mapName: string, eventDates: string[]): string 
   return matchedEventDate ? `${matchedEventDate}マップ` : null;
 };
 
-type RotationScreenType = 'mapTab' | 'focusMode';
+type RotationScreenType = "mapTab" | "focusMode";
 
 const resolveDayMapRotationState = (
-  state: { initialAngle?: number; mapTabAngle?: number; focusModeAngle?: number } | undefined,
+  state:
+    | { initialAngle?: number; mapTabAngle?: number; focusModeAngle?: number }
+    | undefined,
 ) => {
   const initialAngle = normalizeRotationAngle(state?.initialAngle ?? 0);
   return {
     initialAngle,
     mapTabAngle: normalizeRotationAngle(state?.mapTabAngle ?? initialAngle),
-    focusModeAngle: normalizeRotationAngle(state?.focusModeAngle ?? initialAngle),
+    focusModeAngle: normalizeRotationAngle(
+      state?.focusModeAngle ?? initialAngle,
+    ),
   };
 };
 
 const App: React.FC = () => {
-  const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>({});
-  const [eventMetadata, setEventMetadata] = useState<Record<string, EventMetadata>>({});
-  const [executeModeItems, setExecuteModeItems] = useState<Record<string, ExecuteModeItems>>({});
+  const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>(
+    {},
+  );
+  const [eventMetadata, setEventMetadata] = useState<
+    Record<string, EventMetadata>
+  >({});
+  const [executeModeItems, setExecuteModeItems] = useState<
+    Record<string, ExecuteModeItems>
+  >({});
   const executeModeItemsRef = useRef<Record<string, ExecuteModeItems>>({});
-  const commitExecuteModeItems = useCallback((nextAllEvents: Record<string, ExecuteModeItems>) => {
-    executeModeItemsRef.current = nextAllEvents;
-    setExecuteModeItems(nextAllEvents);
-  }, []);
+  const commitExecuteModeItems = useCallback(
+    (nextAllEvents: Record<string, ExecuteModeItems>) => {
+      executeModeItemsRef.current = nextAllEvents;
+      setExecuteModeItems(nextAllEvents);
+    },
+    [],
+  );
   const updateExecuteModeItems = useCallback(
     (
       updater: (
@@ -280,10 +319,12 @@ const App: React.FC = () => {
   const setExecuteModeItemsCommitted = useCallback(
     (next: React.SetStateAction<Record<string, ExecuteModeItems>>) => {
       const nextAllEvents =
-        typeof next === 'function'
-          ? (next as (current: Record<string, ExecuteModeItems>) => Record<string, ExecuteModeItems>)(
-              executeModeItemsRef.current,
-            )
+        typeof next === "function"
+          ? (
+              next as (
+                current: Record<string, ExecuteModeItems>,
+              ) => Record<string, ExecuteModeItems>
+            )(executeModeItemsRef.current)
           : next;
       commitExecuteModeItems(nextAllEvents);
     },
@@ -301,19 +342,24 @@ const App: React.FC = () => {
   const [dayModes, setDayModes] = useState<Record<string, DayModeState>>({});
 
   const [activeEventName, setActiveEventName] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<ActiveTab>('eventList');
+  const [activeTab, setActiveTab] = useState<ActiveTab>("eventList");
   const [mapViewActive, setMapViewActive] = useState(false);
   const mapToggleLongPressRef = React.useRef<number | null>(null);
   const mapToggleLongPressFiredRef = React.useRef(false);
   const mapToggleButtonRef = React.useRef<HTMLButtonElement>(null);
   const mapToggleMenuRef = React.useRef<HTMLDivElement>(null);
-  const [sortState, setSortState] = useState<SortState>('Manual');
-  const [blockSortDirection, setBlockSortDirection] = useState<BlockSortDirection | null>(null);
+  const [sortState, setSortState] = useState<SortState>("Manual");
+  const [blockSortDirection, setBlockSortDirection] =
+    useState<BlockSortDirection | null>(null);
   const [itemToEdit, setItemToEdit] = useState<ShoppingItem | null>(null);
-  const [editDialogItem, setEditDialogItem] = useState<ShoppingItem | null>(null);
+  const [editDialogItem, setEditDialogItem] = useState<ShoppingItem | null>(
+    null,
+  );
   const [itemToDelete, setItemToDelete] = useState<ShoppingItem | null>(null);
   const [zoomLevel, setZoomLevel] = useState(100);
-  const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<Set<string>>(new Set());
+  const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<
+    Set<string>
+  >(new Set());
   const {
     selectedItemIds,
     setSelectedItemIds,
@@ -351,20 +397,32 @@ const App: React.FC = () => {
   const [updateData, setUpdateData] = useState<EventUpdateDiff | null>(null);
   const [updateEventName, setUpdateEventName] = useState<string | null>(null);
   const [showUrlUpdateDialog, setShowUrlUpdateDialog] = useState(false);
-  const [pendingUpdateEventName, setPendingUpdateEventName] = useState<string | null>(null);
+  const [pendingUpdateEventName, setPendingUpdateEventName] = useState<
+    string | null
+  >(null);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [eventToRename, setEventToRename] = useState<string | null>(null);
 
-  const [searchKeyword, setSearchKeyword] = useState('');
+  const [searchKeyword, setSearchKeyword] = useState("");
   const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
-  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(null);
-
-  const [layoutMode, setLayoutMode] = useState<'pc' | 'smartphone'>(() =>
-    typeof window !== 'undefined' && window.innerWidth < 768 ? 'smartphone' : 'pc',
+  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(
+    null,
   );
-  const { uiVisibilitySettings, setUiVisibilitySettings } = useUIVisibilitySettings();
-  const { numberCellOutlineStyle, setNumberCellOutlineStyle, DEFAULT_OUTLINE_STYLE } = useNumberCellOutlineStyle();
-  const { disablePriceUndefinedCheck, setDisablePriceUndefinedCheck } = useDisablePriceUndefinedCheck();
+
+  const [layoutMode, setLayoutMode] = useState<"pc" | "smartphone">(() =>
+    typeof window !== "undefined" && window.innerWidth < 768
+      ? "smartphone"
+      : "pc",
+  );
+  const { uiVisibilitySettings, setUiVisibilitySettings } =
+    useUIVisibilitySettings();
+  const {
+    numberCellOutlineStyle,
+    setNumberCellOutlineStyle,
+    DEFAULT_OUTLINE_STYLE,
+  } = useNumberCellOutlineStyle();
+  const { disablePriceUndefinedCheck, setDisablePriceUndefinedCheck } =
+    useDisablePriceUndefinedCheck();
   const {
     disableLimitedPurchaseQuantityCheck,
     setDisableLimitedPurchaseQuantityCheck,
@@ -385,28 +443,38 @@ const App: React.FC = () => {
   const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
   const [uiSettingsPanelOpen, setUiSettingsPanelOpen] = useState(false);
   const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
-  const [focusModeSessions, setFocusModeSessions] = useState<Record<string, FocusModeSessionState>>(
-    {},
-  );
+  const [focusModeSessions, setFocusModeSessions] = useState<
+    Record<string, FocusModeSessionState>
+  >({});
 
   const { themeMode, setThemeMode } = useThemeMode();
 
   const [mapData, setMapData] = useState<MapDataStore>({});
-  const [mapRotationSettings, setMapRotationSettings] = useState<MapRotationSettingsStore>({});
-  const [mapViewportSettings, setMapViewportSettings] = useState<MapViewportSettingsStore>({});
+  const [mapRotationSettings, setMapRotationSettings] =
+    useState<MapRotationSettingsStore>({});
+  const [mapViewportSettings, setMapViewportSettings] =
+    useState<MapViewportSettingsStore>({});
   const [routeSettings, setRouteSettings] = useState<RouteSettingsStore>({});
-  const [hallDefinitions, setHallDefinitions] = useState<HallDefinitionsStore>({});
-  const [hallRouteSettings, setHallRouteSettings] = useState<HallRouteSettingsStore>({});
-  const [simpleHallDefinitionMode, setSimpleHallDefinitionMode] = useState(false);
-  const [globalHallOrderPanelOpen, setGlobalHallOrderPanelOpen] = useState(false);
+  const [hallDefinitions, setHallDefinitions] = useState<HallDefinitionsStore>(
+    {},
+  );
+  const [hallRouteSettings, setHallRouteSettings] =
+    useState<HallRouteSettingsStore>({});
+  const [simpleHallDefinitionMode, setSimpleHallDefinitionMode] =
+    useState(false);
+  const [globalHallOrderPanelOpen, setGlobalHallOrderPanelOpen] =
+    useState(false);
   const [showExportOptions, setShowExportOptions] = useState(false);
   const [exportEventName, setExportEventName] = useState<string | null>(null);
   const mapFileInputRef = useRef<HTMLInputElement>(null);
   const exportFileInputRef = useRef<HTMLInputElement>(null);
 
   const [mapImportDialogOpen, setMapImportDialogOpen] = useState(false);
-  const [mapImportPendingFile, setMapImportPendingFile] = useState<File | null>(null);
-  const [mapImportPendingEventName, setMapImportPendingEventName] = useState<string>('');
+  const [mapImportPendingFile, setMapImportPendingFile] = useState<File | null>(
+    null,
+  );
+  const [mapImportPendingEventName, setMapImportPendingEventName] =
+    useState<string>("");
   const { isInitialized } = useIndexedDbPersistence({
     values: {
       eventLists,
@@ -450,7 +518,11 @@ const App: React.FC = () => {
           maplessById.set(h.id, h);
         }
         for (const tabName of Object.keys(byTab)) {
-          if (tabName === MAPLESS_HALL_KEY || tabName.startsWith(MAPLESS_HALL_KEY + ':')) continue;
+          if (
+            tabName === MAPLESS_HALL_KEY ||
+            tabName.startsWith(MAPLESS_HALL_KEY + ":")
+          )
+            continue;
           const original = byTab[tabName] || [];
           const keep: HallDefinition[] = [];
           for (const h of original) {
@@ -528,10 +600,9 @@ const App: React.FC = () => {
     [activeEventName, eventLists],
   );
 
-
   const eventDates = useMemo(() => extractEventDates(items), [items]);
   const activeEventDate = useMemo(
-    () => (activeEventName && eventDates.includes(activeTab) ? activeTab : ''),
+    () => (activeEventName && eventDates.includes(activeTab) ? activeTab : ""),
     [activeEventName, activeTab, eventDates],
   );
 
@@ -556,7 +627,6 @@ const App: React.FC = () => {
     hallRouteSettings,
   });
 
-
   const getHallExecuteCount = useCallback(
     (hallId: string): number => {
       if (!activeEventName || !isMapTab || !currentMapData) return 0;
@@ -569,7 +639,6 @@ const App: React.FC = () => {
       return executeIds.filter((itemId) => {
         const item = items.find((i) => i.id === itemId);
         if (!item) return false;
-
 
         const block = currentMapData.blocks.find((b) => b.name === item.block);
         if (!block) return false;
@@ -587,9 +656,16 @@ const App: React.FC = () => {
         return false;
       }).length;
     },
-    [activeEventName, isMapTab, activeEventDate, currentMapData, currentHalls, items, executeModeItems],
+    [
+      activeEventName,
+      isMapTab,
+      activeEventDate,
+      currentMapData,
+      currentHalls,
+      items,
+      executeModeItems,
+    ],
   );
-
 
   const getHallTotalItemCount = useCallback(
     (hallId: string): number => {
@@ -617,9 +693,15 @@ const App: React.FC = () => {
         return false;
       }).length;
     },
-    [activeEventName, isMapTab, activeEventDate, currentMapData, currentHalls, items],
+    [
+      activeEventName,
+      isMapTab,
+      activeEventDate,
+      currentMapData,
+      currentHalls,
+      items,
+    ],
   );
-
 
   const getItemHallId = useCallback(
     (item: ShoppingItem, eventDate: string): string | null => {
@@ -636,7 +718,10 @@ const App: React.FC = () => {
           const centerRow = (block.startRow + block.endRow) / 2;
           const centerCol = (block.startCol + block.endCol) / 2;
           for (const hall of halls) {
-            if (hall.vertices.length >= 4 && isPointInPolygon(centerRow, centerCol, hall.vertices)) {
+            if (
+              hall.vertices.length >= 4 &&
+              isPointInPolygon(centerRow, centerCol, hall.vertices)
+            ) {
               return hall.id;
             }
           }
@@ -647,7 +732,6 @@ const App: React.FC = () => {
     },
     [getHallsForDate, getMapDataForDate],
   );
-
 
   const areItemsInSameHall = useCallback(
     (itemId1: string, itemId2: string, eventDate: string): boolean => {
@@ -661,8 +745,8 @@ const App: React.FC = () => {
 
       if (hallId1 === null || hallId2 === null) return true;
 
-      const priority1 = item1.priorityLevel || 'none';
-      const priority2 = item2.priorityLevel || 'none';
+      const priority1 = item1.priorityLevel || "none";
+      const priority2 = item2.priorityLevel || "none";
       if (hallId1 !== hallId2 || priority1 !== priority2) return false;
 
       const spaceKey1 = getSpaceKey(item1.block, item1.number);
@@ -684,27 +768,26 @@ const App: React.FC = () => {
 
       if (hallId1 === null || hallId2 === null) return true;
 
-      const priority1 = item1.priorityLevel || 'none';
-      const priority2 = item2.priorityLevel || 'none';
+      const priority1 = item1.priorityLevel || "none";
+      const priority2 = item2.priorityLevel || "none";
       return hallId1 === hallId2 && priority1 === priority2;
     },
     [items, getHallsForDate, getItemHallId],
   );
 
   const currentMode = useMemo(() => {
-    if (!activeEventName) return 'execute';
+    if (!activeEventName) return "execute";
     const modes = dayModes[activeEventName];
-    if (!modes) return 'edit';
+    if (!modes) return "edit";
     if (activeEventDate) {
       const mode = modes[activeEventDate];
       if (mode) {
         return mode;
       }
-      return 'edit';
+      return "edit";
     }
-    return 'edit';
+    return "edit";
   }, [activeEventName, dayModes, activeEventDate]);
-
 
   const currentFocusSessionKey = useMemo(() => {
     if (!activeEventName) return null;
@@ -758,10 +841,13 @@ const App: React.FC = () => {
     });
   }, [validFocusSessionKeys]);
 
-  const currentFocusEventDate = useMemo(() => activeEventDate, [activeEventDate]);
+  const currentFocusEventDate = useMemo(
+    () => activeEventDate,
+    [activeEventDate],
+  );
 
   const currentFocusMapName = useMemo(
-    () => (currentFocusEventDate ? `${currentFocusEventDate}マップ` : ''),
+    () => (currentFocusEventDate ? `${currentFocusEventDate}マップ` : ""),
     [currentFocusEventDate],
   );
 
@@ -772,13 +858,20 @@ const App: React.FC = () => {
   );
 
   const updateMapRotationAngle = useCallback(
-    (eventName: string, dayMapName: string, screen: RotationScreenType, angle: number) => {
+    (
+      eventName: string,
+      dayMapName: string,
+      screen: RotationScreenType,
+      angle: number,
+    ) => {
       const normalizedAngle = normalizeRotationAngle(angle);
       setMapRotationSettings((prev) => {
         const eventSettings = prev[eventName] || {};
-        const currentState = resolveDayMapRotationState(eventSettings[dayMapName]);
+        const currentState = resolveDayMapRotationState(
+          eventSettings[dayMapName],
+        );
         const nextState =
-          screen === 'mapTab'
+          screen === "mapTab"
             ? { ...currentState, mapTabAngle: normalizedAngle }
             : { ...currentState, focusModeAngle: normalizedAngle };
         if (
@@ -817,7 +910,12 @@ const App: React.FC = () => {
   const handleMapTabRotationAngleChange = useCallback(
     (angle: number) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
-      updateMapRotationAngle(activeEventName, currentMapTabName, 'mapTab', angle);
+      updateMapRotationAngle(
+        activeEventName,
+        currentMapTabName,
+        "mapTab",
+        angle,
+      );
     },
     [activeEventName, isMapTab, currentMapTabName, updateMapRotationAngle],
   );
@@ -825,7 +923,12 @@ const App: React.FC = () => {
   const handleFocusMapRotationAngleChange = useCallback(
     (angle: number) => {
       if (!activeEventName || !currentFocusMapName) return;
-      updateMapRotationAngle(activeEventName, currentFocusMapName, 'focusMode', angle);
+      updateMapRotationAngle(
+        activeEventName,
+        currentFocusMapName,
+        "focusMode",
+        angle,
+      );
     },
     [activeEventName, currentFocusMapName, updateMapRotationAngle],
   );
@@ -865,17 +968,17 @@ const App: React.FC = () => {
     if (!activeEventName) {
       return { showHeaderBar: true, showTabBar: true, rawHideSomething: false };
     }
-    const layout = layoutMode === 'smartphone' ? 'sp' : 'pc';
+    const layout = layoutMode === "smartphone" ? "sp" : "pc";
     let rawHeader = true,
       rawTabBar = true;
 
-    if (currentMode === 'focus') {
+    if (currentMode === "focus") {
       const key =
-        `focus_${layout}_${focusModeMapVisible ? 'mapOn' : 'mapOff'}` as keyof UIVisibilitySettings;
+        `focus_${layout}_${focusModeMapVisible ? "mapOn" : "mapOff"}` as keyof UIVisibilitySettings;
       const config = uiVisibilitySettings[key];
       rawHeader = config.header;
       rawTabBar = config.tabBar;
-    } else if (currentMode === 'execute') {
+    } else if (currentMode === "execute") {
       const key = `execute_${layout}` as keyof UIVisibilitySettings;
       const config = uiVisibilitySettings[key];
       rawHeader = config.header;
@@ -884,9 +987,17 @@ const App: React.FC = () => {
 
     const hideSomething = !rawHeader || !rawTabBar;
     if (uiVisibilityOverride) {
-      return { showHeaderBar: true, showTabBar: true, rawHideSomething: hideSomething };
+      return {
+        showHeaderBar: true,
+        showTabBar: true,
+        rawHideSomething: hideSomething,
+      };
     }
-    return { showHeaderBar: rawHeader, showTabBar: rawTabBar, rawHideSomething: hideSomething };
+    return {
+      showHeaderBar: rawHeader,
+      showTabBar: rawTabBar,
+      rawHideSomething: hideSomething,
+    };
   }, [
     uiVisibilityOverride,
     activeEventName,
@@ -897,7 +1008,11 @@ const App: React.FC = () => {
   ]);
 
   const updateUIVisibilityConfig = useCallback(
-    (key: keyof UIVisibilitySettings, field: 'header' | 'tabBar', value: boolean) => {
+    (
+      key: keyof UIVisibilitySettings,
+      field: "header" | "tabBar",
+      value: boolean,
+    ) => {
       setUiVisibilitySettings((prev) => ({
         ...prev,
         [key]: {
@@ -914,7 +1029,7 @@ const App: React.FC = () => {
   const handleBulkAdd = useCallback(
     (
       eventName: string,
-      newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[],
+      newItemsData: Omit<ShoppingItem, "id" | "purchaseStatus">[],
       metadata?: BulkAddMetadata,
     ) => {
       const newItems = buildBulkAddItems(newItemsData, metadata);
@@ -959,7 +1074,8 @@ const App: React.FC = () => {
         }));
 
         if (!hasBulkAddLayoutInfo(metadata)) {
-          const initialExecuteItems = buildInitialExecuteItemsForBulkAdd(newItems);
+          const initialExecuteItems =
+            buildInitialExecuteItemsForBulkAdd(newItems);
           updateExecuteModeItems((prev) => ({
             ...prev,
             [eventName]: initialExecuteItems,
@@ -994,7 +1110,9 @@ const App: React.FC = () => {
 
       setEventLists((prev) => {
         const currentItems = prev[activeEventName] || [];
-        const currentItem = currentItems.find((item) => item.id === updatedItem.id);
+        const currentItem = currentItems.find(
+          (item) => item.id === updatedItem.id,
+        );
 
         const result = computeUpdateItem(
           currentItems,
@@ -1005,7 +1123,9 @@ const App: React.FC = () => {
         );
 
         if (result.purchaseStatusChanged || result.purchaseQuantityChanged) {
-          setRecentlyChangedItemIds((prevIds) => new Set(prevIds).add(updatedItem.id));
+          setRecentlyChangedItemIds((prevIds) =>
+            new Set(prevIds).add(updatedItem.id),
+          );
         }
 
         return {
@@ -1021,11 +1141,11 @@ const App: React.FC = () => {
     (
       dragId: string,
       hoverId: string,
-      targetColumn?: 'execute' | 'candidate',
-      sourceColumn?: 'execute' | 'candidate',
+      targetColumn?: "execute" | "candidate",
+      sourceColumn?: "execute" | "candidate",
     ) => {
       if (!activeEventName) return;
-      setSortState('Manual');
+      setSortState("Manual");
       setBlockSortDirection(null);
 
       const currentEventDate = activeEventDate;
@@ -1037,11 +1157,14 @@ const App: React.FC = () => {
         : selectedItemIds;
       spaceGroupDragItemIdsRef.current = null;
 
-      const currentEventExecuteItems = executeModeItemsRef.current[activeEventName] || {};
+      const currentEventExecuteItems =
+        executeModeItemsRef.current[activeEventName] || {};
       const currentExecuteItems = currentEventExecuteItems[currentEventDate]
         ? {
             ...currentEventExecuteItems,
-            [currentEventDate]: [...(currentEventExecuteItems[currentEventDate] || [])],
+            [currentEventDate]: [
+              ...(currentEventExecuteItems[currentEventDate] || []),
+            ],
           }
         : currentEventExecuteItems;
 
@@ -1049,14 +1172,19 @@ const App: React.FC = () => {
         if (effectiveSelectedIds.size <= 1) return false;
         const spaceKeys = new Set<string>();
         effectiveSelectedIds.forEach((id) => {
-          const item = (eventLists[activeEventName] || []).find((i) => i.id === id);
+          const item = (eventLists[activeEventName] || []).find(
+            (i) => i.id === id,
+          );
           if (item) spaceKeys.add(getSpaceKey(item.block, item.number));
         });
         return spaceKeys.size > 1;
       })();
-      const hallCheck = (spaceGroupIds || selectionSpansMultipleSpaces)
-        ? (id1: string, id2: string) => areItemsInSameHallGroup(id1, id2, currentEventDate)
-        : (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate);
+      const hallCheck =
+        spaceGroupIds || selectionSpansMultipleSpaces
+          ? (id1: string, id2: string) =>
+              areItemsInSameHallGroup(id1, id2, currentEventDate)
+          : (id1: string, id2: string) =>
+              areItemsInSameHall(id1, id2, currentEventDate);
 
       const result = computeMoveItem({
         dragId,
@@ -1073,10 +1201,16 @@ const App: React.FC = () => {
       });
 
       if (result.eventListItems) {
-        setEventLists((prev) => ({ ...prev, [activeEventName]: result.eventListItems! }));
+        setEventLists((prev) => ({
+          ...prev,
+          [activeEventName]: result.eventListItems!,
+        }));
       }
       if (result.executeModeItems) {
-        updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems! }));
+        updateExecuteModeItems((prev) => ({
+          ...prev,
+          [activeEventName]: result.executeModeItems!,
+        }));
       }
     },
     [
@@ -1093,26 +1227,37 @@ const App: React.FC = () => {
     ],
   );
   const handleMoveItemVerticalInternal = useCallback(
-    (direction: 'up' | 'down', itemId: string, targetColumn?: 'execute' | 'candidate') => {
+    (
+      direction: "up" | "down",
+      itemId: string,
+      targetColumn?: "execute" | "candidate",
+    ) => {
       if (!activeEventName) return;
-      setSortState('Manual');
+      setSortState("Manual");
       setBlockSortDirection(null);
 
       const currentEventDate = activeEventDate;
       const mode = dayModes[activeEventName]?.[currentEventDate];
-      const currentEventExecuteItems = executeModeItemsRef.current[activeEventName] || {};
+      const currentEventExecuteItems =
+        executeModeItemsRef.current[activeEventName] || {};
 
       const spaceGroupIds = spaceGroupDragItemIdsRef.current;
       const isSpaceGroupMove = !!spaceGroupIds;
 
-      if (mode === 'edit' && targetColumn === 'execute') {
-        const dayItems = [...(currentEventExecuteItems[currentEventDate] || [])];
+      if (mode === "edit" && targetColumn === "execute") {
+        const dayItems = [
+          ...(currentEventExecuteItems[currentEventDate] || []),
+        ];
         const getItemSpacePriorityKey = (id: string): string => {
           const item = items.find((i) => i.id === id);
-          return item ? `${getSpaceKey(item.block, item.number)}::${item.priorityLevel || 'none'}` : '';
+          return item
+            ? `${getSpaceKey(item.block, item.number)}::${item.priorityLevel || "none"}`
+            : "";
         };
 
-        const effectiveIds = spaceGroupIds ? new Set(spaceGroupIds) : selectedItemIds;
+        const effectiveIds = spaceGroupIds
+          ? new Set(spaceGroupIds)
+          : selectedItemIds;
         const movingGroupKeys = new Set<string>();
         movingGroupKeys.add(getItemSpacePriorityKey(itemId));
         effectiveIds.forEach((id) => {
@@ -1122,14 +1267,17 @@ const App: React.FC = () => {
         });
 
         const movingIndices = dayItems
-          .map((id, idx) => movingGroupKeys.has(getItemSpacePriorityKey(id)) ? idx : -1)
+          .map((id, idx) =>
+            movingGroupKeys.has(getItemSpacePriorityKey(id)) ? idx : -1,
+          )
           .filter((idx) => idx >= 0);
 
         if (movingIndices.length > 0) {
           const movingStart = movingIndices[0];
           const movingEnd = movingIndices[movingIndices.length - 1];
 
-          const adjacentIndex = direction === 'up' ? movingStart - 1 : movingEnd + 1;
+          const adjacentIndex =
+            direction === "up" ? movingStart - 1 : movingEnd + 1;
           if (adjacentIndex >= 0 && adjacentIndex < dayItems.length) {
             const adjacentId = dayItems[adjacentIndex];
             const adjacentGroupKey = getItemSpacePriorityKey(adjacentId);
@@ -1137,22 +1285,45 @@ const App: React.FC = () => {
             if (!movingGroupKeys.has(adjacentGroupKey)) {
               let adjStart = adjacentIndex;
               let adjEnd = adjacentIndex;
-              while (adjStart > 0 && getItemSpacePriorityKey(dayItems[adjStart - 1]) === adjacentGroupKey) adjStart--;
-              while (adjEnd < dayItems.length - 1 && getItemSpacePriorityKey(dayItems[adjEnd + 1]) === adjacentGroupKey) adjEnd++;
+              while (
+                adjStart > 0 &&
+                getItemSpacePriorityKey(dayItems[adjStart - 1]) ===
+                  adjacentGroupKey
+              )
+                adjStart--;
+              while (
+                adjEnd < dayItems.length - 1 &&
+                getItemSpacePriorityKey(dayItems[adjEnd + 1]) ===
+                  adjacentGroupKey
+              )
+                adjEnd++;
 
               const movingBlock = dayItems.slice(movingStart, movingEnd + 1);
-              const remaining = [...dayItems.slice(0, movingStart), ...dayItems.slice(movingEnd + 1)];
+              const remaining = [
+                ...dayItems.slice(0, movingStart),
+                ...dayItems.slice(movingEnd + 1),
+              ];
 
               const adjItemIdx = remaining.findIndex((id) => id === adjacentId);
               if (adjItemIdx >= 0) {
                 let insertIdx: number;
-                if (direction === 'up') {
+                if (direction === "up") {
                   let targetStart = adjItemIdx;
-                  while (targetStart > 0 && getItemSpacePriorityKey(remaining[targetStart - 1]) === adjacentGroupKey) targetStart--;
+                  while (
+                    targetStart > 0 &&
+                    getItemSpacePriorityKey(remaining[targetStart - 1]) ===
+                      adjacentGroupKey
+                  )
+                    targetStart--;
                   insertIdx = targetStart;
                 } else {
                   let targetEnd = adjItemIdx;
-                  while (targetEnd < remaining.length - 1 && getItemSpacePriorityKey(remaining[targetEnd + 1]) === adjacentGroupKey) targetEnd++;
+                  while (
+                    targetEnd < remaining.length - 1 &&
+                    getItemSpacePriorityKey(remaining[targetEnd + 1]) ===
+                      adjacentGroupKey
+                  )
+                    targetEnd++;
                   insertIdx = targetEnd + 1;
                 }
 
@@ -1176,8 +1347,10 @@ const App: React.FC = () => {
         ? new Set(spaceGroupIds)
         : selectedItemIds;
       const hallCheck = spaceGroupIds
-        ? (id1: string, id2: string) => areItemsInSameHallGroup(id1, id2, currentEventDate)
-        : (id1: string, id2: string) => areItemsInSameHall(id1, id2, currentEventDate);
+        ? (id1: string, id2: string) =>
+            areItemsInSameHallGroup(id1, id2, currentEventDate)
+        : (id1: string, id2: string) =>
+            areItemsInSameHall(id1, id2, currentEventDate);
 
       const result = computeMoveItemVertical(
         direction,
@@ -1192,10 +1365,16 @@ const App: React.FC = () => {
       );
 
       if (result.eventListItems) {
-        setEventLists((prev) => ({ ...prev, [activeEventName]: result.eventListItems! }));
+        setEventLists((prev) => ({
+          ...prev,
+          [activeEventName]: result.eventListItems!,
+        }));
       }
       if (result.executeModeItems) {
-        updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems! }));
+        updateExecuteModeItems((prev) => ({
+          ...prev,
+          [activeEventName]: result.executeModeItems!,
+        }));
       }
     },
     [
@@ -1213,14 +1392,14 @@ const App: React.FC = () => {
   );
 
   const handleMoveItemUp = useCallback(
-    (itemId: string, targetColumn?: 'execute' | 'candidate') =>
-      handleMoveItemVerticalInternal('up', itemId, targetColumn),
+    (itemId: string, targetColumn?: "execute" | "candidate") =>
+      handleMoveItemVerticalInternal("up", itemId, targetColumn),
     [handleMoveItemVerticalInternal],
   );
 
   const handleMoveItemDown = useCallback(
-    (itemId: string, targetColumn?: 'execute' | 'candidate') =>
-      handleMoveItemVerticalInternal('down', itemId, targetColumn),
+    (itemId: string, targetColumn?: "execute" | "candidate") =>
+      handleMoveItemVerticalInternal("down", itemId, targetColumn),
     [handleMoveItemVerticalInternal],
   );
 
@@ -1242,14 +1421,14 @@ const App: React.FC = () => {
       if (
         rangeStart &&
         expandedIds.includes(rangeStart.itemId) &&
-        rangeStart.columnType === 'candidate'
+        rangeStart.columnType === "candidate"
       ) {
         setRangeStart(null);
         setRangeEnd(null);
       } else if (
         rangeEnd &&
         expandedIds.includes(rangeEnd.itemId) &&
-        rangeEnd.columnType === 'candidate'
+        rangeEnd.columnType === "candidate"
       ) {
         setRangeEnd(null);
       }
@@ -1290,14 +1469,14 @@ const App: React.FC = () => {
       if (
         rangeStart &&
         expandedIds.includes(rangeStart.itemId) &&
-        rangeStart.columnType === 'execute'
+        rangeStart.columnType === "execute"
       ) {
         setRangeStart(null);
         setRangeEnd(null);
       } else if (
         rangeEnd &&
         expandedIds.includes(rangeEnd.itemId) &&
-        rangeEnd.columnType === 'execute'
+        rangeEnd.columnType === "execute"
       ) {
         setRangeEnd(null);
       }
@@ -1313,7 +1492,15 @@ const App: React.FC = () => {
 
       setSelectedItemIds(new Set());
     },
-    [activeEventName, activeTab, eventDates, rangeStart, rangeEnd, executeModeItems, expandToFullSpaceGroups],
+    [
+      activeEventName,
+      activeTab,
+      eventDates,
+      rangeStart,
+      rangeEnd,
+      executeModeItems,
+      expandToFullSpaceGroups,
+    ],
   );
 
   const handleToggleMode = useCallback(() => {
@@ -1321,16 +1508,18 @@ const App: React.FC = () => {
 
     const currentEventDate = activeEventDate;
     if (!currentEventDate) {
-      alert('参加日タブが選択されていないため、表示モードを切り替えできません。');
+      alert(
+        "参加日タブが選択されていないため、表示モードを切り替えできません。",
+      );
       return;
     }
 
     const currentModeValue = dayModes[activeEventName]?.[currentEventDate];
     if (!currentModeValue) {
-      alert('表示モードが未設定のため、表示モードを切り替えできません。');
+      alert("表示モードが未設定のため、表示モードを切り替えできません。");
       return;
     }
-    const newMode: ViewMode = currentModeValue === 'edit' ? 'execute' : 'edit';
+    const newMode: ViewMode = currentModeValue === "edit" ? "execute" : "edit";
 
     setDayModes((prev) => ({
       ...prev,
@@ -1343,7 +1532,6 @@ const App: React.FC = () => {
     setSelectedItemIds(new Set());
     setCandidateNumberSortDirection(null);
   }, [activeEventName, activeTab, dayModes, eventDates]);
-
 
   const handleSetViewMode = useCallback(
     (mode: ViewMode, scrollToItemId?: string) => {
@@ -1361,19 +1549,19 @@ const App: React.FC = () => {
       setSelectedItemIds(new Set());
       setCandidateNumberSortDirection(null);
 
-
-      if (mode !== 'focus') {
+      if (mode !== "focus") {
         setFocusModeMapVisible(false);
       }
       setUiVisibilityOverride(false);
       setUiSettingsPanelOpen(false);
 
-
       if (scrollToItemId) {
         setTimeout(() => {
-          const element = document.querySelector(`[data-item-id="${scrollToItemId}"]`);
+          const element = document.querySelector(
+            `[data-item-id="${scrollToItemId}"]`,
+          );
           if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            element.scrollIntoView({ behavior: "smooth", block: "center" });
           }
         }, 100);
       }
@@ -1386,7 +1574,7 @@ const App: React.FC = () => {
       const eventItems = eventLists[eventName] || [];
       const nextTab = resolveEventListTab(eventItems);
       if (!nextTab) {
-        alert('参加日がないため処理を停止しました。');
+        alert("参加日がないため処理を停止しました。");
         return;
       }
 
@@ -1409,10 +1597,12 @@ const App: React.FC = () => {
       setRouteSettings((prev) => removeRecordKey(prev, eventName));
       setHallDefinitions((prev) => removeRecordKey(prev, eventName));
       setHallRouteSettings((prev) => removeRecordKey(prev, eventName));
-      setFocusModeSessions((prev) => removeFocusModeSessionByEvent(prev, eventName));
+      setFocusModeSessions((prev) =>
+        removeFocusModeSessionByEvent(prev, eventName),
+      );
       if (activeEventName === eventName) {
         setActiveEventName(null);
-        setActiveTab('eventList');
+        setActiveTab("eventList");
       }
     },
     [activeEventName],
@@ -1434,7 +1624,7 @@ const App: React.FC = () => {
       }
 
       if (eventLists[newName]) {
-        alert('同名のイベントが既に存在します。別の名前を指定してください。');
+        alert("同名のイベントが既に存在します。別の名前を指定してください。");
         return;
       }
 
@@ -1444,21 +1634,27 @@ const App: React.FC = () => {
 
       setDayModes((prev) => renameRecordKey(prev, eventToRename, newName));
 
-      updateExecuteModeItems((prev) => renameRecordKey(prev, eventToRename, newName));
-
+      updateExecuteModeItems((prev) =>
+        renameRecordKey(prev, eventToRename, newName),
+      );
 
       setMapData((prev) => renameRecordKey(prev, eventToRename, newName));
-      setMapRotationSettings((prev) => renameRecordKey(prev, eventToRename, newName));
-
+      setMapRotationSettings((prev) =>
+        renameRecordKey(prev, eventToRename, newName),
+      );
 
       setRouteSettings((prev) => renameRecordKey(prev, eventToRename, newName));
 
+      setHallDefinitions((prev) =>
+        renameRecordKey(prev, eventToRename, newName),
+      );
 
-      setHallDefinitions((prev) => renameRecordKey(prev, eventToRename, newName));
-
-
-      setHallRouteSettings((prev) => renameRecordKey(prev, eventToRename, newName));
-      setFocusModeSessions((prev) => renameFocusModeSessionKeys(prev, eventToRename, newName));
+      setHallRouteSettings((prev) =>
+        renameRecordKey(prev, eventToRename, newName),
+      );
+      setFocusModeSessions((prev) =>
+        renameFocusModeSessionKeys(prev, eventToRename, newName),
+      );
 
       if (activeEventName === eventToRename) {
         setActiveEventName(newName);
@@ -1482,14 +1678,16 @@ const App: React.FC = () => {
   const handleBlockSortToggle = () => {
     if (!activeEventName) return;
 
-    const nextDirection = blockSortDirection === 'asc' ? 'desc' : 'asc';
+    const nextDirection = blockSortDirection === "asc" ? "desc" : "asc";
     const currentEventDate = activeEventDate;
 
     setEventLists((prev) => {
       const allItems = [...(prev[activeEventName] || [])];
       const currentTabKey = currentEventDate;
 
-      const itemsForTab = allItems.filter((item) => item.eventDate === currentTabKey);
+      const itemsForTab = allItems.filter(
+        (item) => item.eventDate === currentTabKey,
+      );
 
       if (itemsForTab.length === 0) return prev;
 
@@ -1497,11 +1695,11 @@ const App: React.FC = () => {
         if (!a.block && !b.block) return 0;
         if (!a.block) return 1;
         if (!b.block) return -1;
-        const comparison = a.block.localeCompare(b.block, 'ja', {
+        const comparison = a.block.localeCompare(b.block, "ja", {
           numeric: true,
-          sensitivity: 'base',
+          sensitivity: "base",
         });
-        return nextDirection === 'asc' ? comparison : -comparison;
+        return nextDirection === "asc" ? comparison : -comparison;
       });
 
       let sortedIndex = 0;
@@ -1522,14 +1720,15 @@ const App: React.FC = () => {
   const handleBlockSortToggleCandidate = () => {
     if (!activeEventName) return;
 
-    const nextDirection = blockSortDirection === 'asc' ? 'desc' : 'asc';
+    const nextDirection = blockSortDirection === "asc" ? "desc" : "asc";
     const currentEventDate = activeEventDate;
 
     setEventLists((prev) => {
       const allItems = [...(prev[activeEventName] || [])];
       const currentTabKey = currentEventDate;
-      const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-
+      const executeIds = new Set(
+        executeModeItems[activeEventName]?.[currentEventDate] || [],
+      );
 
       const candidateItems = allItems.filter(
         (item) => item.eventDate === currentTabKey && !executeIds.has(item.id),
@@ -1541,18 +1740,16 @@ const App: React.FC = () => {
         if (!a.block && !b.block) return 0;
         if (!a.block) return 1;
         if (!b.block) return -1;
-        const comparison = a.block.localeCompare(b.block, 'ja', {
+        const comparison = a.block.localeCompare(b.block, "ja", {
           numeric: true,
-          sensitivity: 'base',
+          sensitivity: "base",
         });
-        return nextDirection === 'asc' ? comparison : -comparison;
+        return nextDirection === "asc" ? comparison : -comparison;
       });
-
 
       const executeItems = allItems.filter(
         (item) => item.eventDate === currentTabKey && executeIds.has(item.id),
       );
-
 
       const newItems = allItems.map((item) => {
         if (item.eventDate !== currentTabKey) {
@@ -1580,17 +1777,21 @@ const App: React.FC = () => {
     setItemToDelete(item);
   }, []);
 
-  const handleDeleteItemFromMap = useCallback((itemId: string) => {
-    const item = items.find((i) => i.id === itemId);
-    if (item) setItemToDelete(item);
-  }, [items]);
+  const handleDeleteItemFromMap = useCallback(
+    (itemId: string) => {
+      const item = items.find((i) => i.id === itemId);
+      if (item) setItemToDelete(item);
+    },
+    [items],
+  );
 
   const handleClearNewItemDefaults = useCallback(() => {
     setNewItemDefaults(null);
   }, []);
 
   const handleModeChangeFromFocus = useCallback(
-    (mode: 'edit' | 'execute', lastItemId?: string) => handleSetViewMode(mode, lastItemId),
+    (mode: "edit" | "execute", lastItemId?: string) =>
+      handleSetViewMode(mode, lastItemId),
     [handleSetViewMode],
   );
 
@@ -1604,7 +1805,10 @@ const App: React.FC = () => {
     );
 
     setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
-    updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
+    updateExecuteModeItems((prev) => ({
+      ...prev,
+      [activeEventName]: result.executeModeItems,
+    }));
     setItemToDelete(null);
   };
 
@@ -1614,27 +1818,38 @@ const App: React.FC = () => {
       setActiveTab(itemToEdit.eventDate);
     } else {
       setItemToEdit(null);
-      alert('参加日がないため処理を停止しました。');
-      setActiveTab('eventList');
+      alert("参加日がないため処理を停止しました。");
+      setActiveTab("eventList");
     }
   };
 
   const getListColumnItems = useCallback(
-    (columnType: 'execute' | 'candidate', currentEventDate: string): ShoppingItem[] => {
+    (
+      columnType: "execute" | "candidate",
+      currentEventDate: string,
+    ): ShoppingItem[] => {
       if (!activeEventName) return [];
 
-      if (columnType === 'execute') {
-        const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+      if (columnType === "execute") {
+        const executeIds =
+          executeModeItems[activeEventName]?.[currentEventDate] || [];
         const itemsMap = new Map(items.map((item) => [item.id, item]));
-        return executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+        return executeIds
+          .map((id) => itemsMap.get(id))
+          .filter(Boolean) as ShoppingItem[];
       }
 
-      const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+      const executeIds = new Set(
+        executeModeItems[activeEventName]?.[currentEventDate] || [],
+      );
       let filtered = items.filter(
-        (item) => item.eventDate === currentEventDate && !executeIds.has(item.id),
+        (item) =>
+          item.eventDate === currentEventDate && !executeIds.has(item.id),
       );
       if (selectedBlockFilters.size > 0) {
-        filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
+        filtered = filtered.filter((item) =>
+          selectedBlockFilters.has(item.block),
+        );
       }
       return filtered;
     },
@@ -1642,20 +1857,26 @@ const App: React.FC = () => {
   );
 
   const handleSelectItem = useCallback(
-    (itemId: string, columnType?: 'execute' | 'candidate') => {
-      setSortState('Manual');
+    (itemId: string, columnType?: "execute" | "candidate") => {
+      setSortState("Manual");
       setBlockSortDirection(null);
 
       const currentEventDate = activeEventDate;
       const currentColumnType =
         columnType ||
         (activeEventName
-          ? executeModeItems[activeEventName]?.[currentEventDate]?.includes(itemId)
-            ? 'execute'
-            : 'candidate'
-          : 'execute');
+          ? executeModeItems[activeEventName]?.[currentEventDate]?.includes(
+              itemId,
+            )
+            ? "execute"
+            : "candidate"
+          : "execute");
 
-      selectItemForRange(itemId, currentColumnType, getListColumnItems(currentColumnType, currentEventDate));
+      selectItemForRange(
+        itemId,
+        currentColumnType,
+        getListColumnItems(currentColumnType, currentEventDate),
+      );
     },
     [
       activeTab,
@@ -1668,8 +1889,12 @@ const App: React.FC = () => {
   );
 
   const handleSelectSpaceGroupForRange = useCallback(
-    (firstItemId: string, allItemIds: string[], columnType: 'execute' | 'candidate') => {
-      setSortState('Manual');
+    (
+      firstItemId: string,
+      allItemIds: string[],
+      columnType: "execute" | "candidate",
+    ) => {
+      setSortState("Manual");
       setBlockSortDirection(null);
 
       const currentEventDate = activeEventDate;
@@ -1685,32 +1910,33 @@ const App: React.FC = () => {
 
   const spaceGroupDragItemIdsRef = useRef<string[] | null>(null);
 
-  const [showPostponeFilterButton, setShowPostponeFilterButton] = useState(false);
+  const [showPostponeFilterButton, setShowPostponeFilterButton] =
+    useState(false);
   const [showLateFilterButton, setShowLateFilterButton] = useState(false);
   const executeSpaceGroupOrderRef = useRef<string[]>([]);
   const executeColumnItemsRef = useRef<ShoppingItem[]>([]);
   const recentlyChangedItemIdsRef = useRef<Set<string>>(new Set());
 
-  const [candidateNumberSortDirection, setCandidateNumberSortDirection] = useState<
-    'asc' | 'desc' | null
-  >(null);
+  const [candidateNumberSortDirection, setCandidateNumberSortDirection] =
+    useState<"asc" | "desc" | null>(null);
 
   const handleCandidateNumberSort = useCallback(() => {
     if (!activeEventName) return;
 
-    const nextDirection = candidateNumberSortDirection === 'asc' ? 'desc' : 'asc';
+    const nextDirection =
+      candidateNumberSortDirection === "asc" ? "desc" : "asc";
     const currentEventDate = activeEventDate;
 
     setEventLists((prev) => {
       const allItems = [...(prev[activeEventName] || [])];
       const currentTabKey = currentEventDate;
-      const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-
+      const executeIds = new Set(
+        executeModeItems[activeEventName]?.[currentEventDate] || [],
+      );
 
       const candidateItems = allItems.filter(
         (item) => item.eventDate === currentTabKey && !executeIds.has(item.id),
       );
-
 
       let filteredCandidateItems = candidateItems;
       if (selectedBlockFilters.size > 0) {
@@ -1721,20 +1947,20 @@ const App: React.FC = () => {
 
       if (filteredCandidateItems.length === 0) return prev;
 
-
       const sortedCandidateItems = [...filteredCandidateItems].sort((a, b) => {
         const comparison = a.number.localeCompare(b.number, undefined, {
           numeric: true,
-          sensitivity: 'base',
+          sensitivity: "base",
         });
-        return nextDirection === 'asc' ? comparison : -comparison;
+        return nextDirection === "asc" ? comparison : -comparison;
       });
 
-
       const sortedCandidateMap = new Map(
-        sortedCandidateItems.map((item, index) => [item.id, { item, sortIndex: index }]),
+        sortedCandidateItems.map((item, index) => [
+          item.id,
+          { item, sortIndex: index },
+        ]),
       );
-
 
       const otherItems: ShoppingItem[] = [];
       const candidateItemsToSort: {
@@ -1749,15 +1975,20 @@ const App: React.FC = () => {
         } else if (executeIds.has(item.id)) {
           otherItems.push(item);
         } else if (sortedCandidateMap.has(item.id)) {
-          const { item: sortedItem, sortIndex } = sortedCandidateMap.get(item.id)!;
-          candidateItemsToSort.push({ item: sortedItem, originalIndex: index, sortIndex });
+          const { item: sortedItem, sortIndex } = sortedCandidateMap.get(
+            item.id,
+          )!;
+          candidateItemsToSort.push({
+            item: sortedItem,
+            originalIndex: index,
+            sortIndex,
+          });
         } else {
           otherItems.push(item);
         }
       });
 
       candidateItemsToSort.sort((a, b) => a.sortIndex - b.sortIndex);
-
 
       const resultItems: ShoppingItem[] = [];
       let candidateIndex = 0;
@@ -1795,57 +2026,78 @@ const App: React.FC = () => {
   const handleToggleBlockFilter = toggleBlockFilter;
   const handleClearBlockFilters = clearBlockFilters;
 
-  const handleToggleSpaceCollapse = useCallback((spaceKey: string) => {
-    toggleCollapsedSpace(spaceKey);
-  }, [toggleCollapsedSpace]);
+  const handleToggleSpaceCollapse = useCallback(
+    (spaceKey: string) => {
+      toggleCollapsedSpace(spaceKey);
+    },
+    [toggleCollapsedSpace],
+  );
 
-  const handleToggleAllSpaceCollapse = useCallback((collapse: boolean) => {
-    if (!collapse) {
-      setCollapsedSpaces(new Set());
-    } else {
-      const allGroupKeys = new Set<string>();
-      items
-        .filter((item) => item.eventDate === activeEventDate)
-        .forEach((item) => {
+  const handleToggleAllSpaceCollapse = useCallback(
+    (collapse: boolean) => {
+      if (!collapse) {
+        setCollapsedSpaces(new Set());
+      } else {
+        const allGroupKeys = new Set<string>();
+        items
+          .filter((item) => item.eventDate === activeEventDate)
+          .forEach((item) => {
+            const spaceKey = getSpaceKey(item.block, item.number);
+            const priority = item.priorityLevel || "none";
+            const groupKey =
+              priority !== "none" ? `${spaceKey}:${priority}` : spaceKey;
+            allGroupKeys.add(groupKey);
+          });
+        setCollapsedSpaces(allGroupKeys);
+      }
+    },
+    [items, activeEventDate],
+  );
+
+  const handleExecuteToggleSpaceCollapse = useCallback(
+    (spaceKey: string) => {
+      toggleExecuteCollapsedSpace(spaceKey);
+    },
+    [toggleExecuteCollapsedSpace],
+  );
+
+  const handleExecuteToggleAllSpaceCollapse = useCallback(
+    (collapse: boolean) => {
+      if (!collapse) {
+        setExecuteCollapsedSpaces(new Set());
+      } else {
+        if (!activeEventName) return;
+        const currentEventDate = activeEventDate;
+        const executeIds =
+          executeModeItems[activeEventName]?.[currentEventDate] || [];
+        const itemsMap = new Map(items.map((item) => [item.id, item]));
+        const allGroupKeys = new Set<string>();
+        executeIds.forEach((id) => {
+          const item = itemsMap.get(id);
+          if (!item) return;
           const spaceKey = getSpaceKey(item.block, item.number);
-          const priority = item.priorityLevel || 'none';
-          const groupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
+          const priority = item.priorityLevel || "none";
+          const groupKey =
+            priority !== "none" ? `${spaceKey}:${priority}` : spaceKey;
           allGroupKeys.add(groupKey);
         });
-      setCollapsedSpaces(allGroupKeys);
-    }
-  }, [items, activeEventDate]);
-
-  const handleExecuteToggleSpaceCollapse = useCallback((spaceKey: string) => {
-    toggleExecuteCollapsedSpace(spaceKey);
-  }, [toggleExecuteCollapsedSpace]);
-
-  const handleExecuteToggleAllSpaceCollapse = useCallback((collapse: boolean) => {
-    if (!collapse) {
-      setExecuteCollapsedSpaces(new Set());
-    } else {
-      if (!activeEventName) return;
-      const currentEventDate = activeEventDate;
-      const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
-      const itemsMap = new Map(items.map((item) => [item.id, item]));
-      const allGroupKeys = new Set<string>();
-      executeIds.forEach((id) => {
-        const item = itemsMap.get(id);
-        if (!item) return;
-        const spaceKey = getSpaceKey(item.block, item.number);
-        const priority = item.priorityLevel || 'none';
-        const groupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
-        allGroupKeys.add(groupKey);
-      });
-      setExecuteCollapsedSpaces(allGroupKeys);
-    }
-  }, [activeEventName, activeEventDate, executeModeItems, items]);
+        setExecuteCollapsedSpaces(allGroupKeys);
+      }
+    },
+    [activeEventName, activeEventDate, executeModeItems, items],
+  );
 
   const handleBulkStatusChange = useCallback(
-    (groupKey: string, targetStatus: PurchaseStatus, groupItems: ShoppingItem[]) => {
+    (
+      groupKey: string,
+      targetStatus: PurchaseStatus,
+      groupItems: ShoppingItem[],
+    ) => {
       if (!activeEventName) return;
-      const allAlready = groupItems.every((item) => item.purchaseStatus === targetStatus);
-      const newStatus: PurchaseStatus = allAlready ? 'None' : targetStatus;
+      const allAlready = groupItems.every(
+        (item) => item.purchaseStatus === targetStatus,
+      );
+      const newStatus: PurchaseStatus = allAlready ? "None" : targetStatus;
       setEventLists((prev) => {
         const allItems = [...(prev[activeEventName] || [])];
         const groupItemIds = new Set(groupItems.map((item) => item.id));
@@ -1853,7 +2105,10 @@ const App: React.FC = () => {
           ...prev,
           [activeEventName]: allItems.map((item) => {
             if (!groupItemIds.has(item.id)) return item;
-            if (targetStatus === 'LimitedPurchase' || item.purchaseStatus === 'LimitedPurchase') {
+            if (
+              targetStatus === "LimitedPurchase" ||
+              item.purchaseStatus === "LimitedPurchase"
+            ) {
               return item;
             }
             return clearLimitedPurchase({ ...item, purchaseStatus: newStatus });
@@ -1867,28 +2122,36 @@ const App: React.FC = () => {
         return next;
       });
 
-      if (sortState === 'Manual' && newStatus !== 'None') {
+      if (sortState === "Manual" && newStatus !== "None") {
         const groupOrder = executeSpaceGroupOrderRef.current;
-        if (groupOrder.length > 0 && groupKey === groupOrder[groupOrder.length - 1]) {
+        if (
+          groupOrder.length > 0 &&
+          groupKey === groupOrder[groupOrder.length - 1]
+        ) {
           const currentItems = executeColumnItemsRef.current;
           const groupItemIds = new Set(groupItems.map((item) => item.id));
           const allNonNone = currentItems.every(
-            (item) => groupItemIds.has(item.id) || item.purchaseStatus !== 'None',
+            (item) =>
+              groupItemIds.has(item.id) || item.purchaseStatus !== "None",
           );
           if (allNonNone) setShowPostponeFilterButton(true);
         }
       }
 
-      if (sortState === 'Postpone' && newStatus !== 'None') {
+      if (sortState === "Postpone" && newStatus !== "None") {
         const groupOrder = executeSpaceGroupOrderRef.current;
-        if (groupOrder.length > 0 && groupKey === groupOrder[groupOrder.length - 1]) {
+        if (
+          groupOrder.length > 0 &&
+          groupKey === groupOrder[groupOrder.length - 1]
+        ) {
           const currentItems = executeColumnItemsRef.current;
           const groupItemIds = new Set(groupItems.map((item) => item.id));
           const recentIds = recentlyChangedItemIdsRef.current;
           const allVisibleNonNone = currentItems.every((item) => {
             if (groupItemIds.has(item.id)) return true;
-            if (item.purchaseStatus !== 'Postpone' && !recentIds.has(item.id)) return true;
-            return item.purchaseStatus !== 'None';
+            if (item.purchaseStatus !== "Postpone" && !recentIds.has(item.id))
+              return true;
+            return item.purchaseStatus !== "None";
           });
           if (allVisibleNonNone) setShowLateFilterButton(true);
         }
@@ -1901,47 +2164,55 @@ const App: React.FC = () => {
     (updatedItem: ShoppingItem) => {
       handleUpdateItem(updatedItem);
 
-      if (sortState !== 'Manual' && sortState !== 'Postpone') return;
-      if (updatedItem.purchaseStatus === 'None') return;
+      if (sortState !== "Manual" && sortState !== "Postpone") return;
+      if (updatedItem.purchaseStatus === "None") return;
 
       const groupOrder = executeSpaceGroupOrderRef.current;
       if (groupOrder.length === 0) return;
       const lastGroupKey = groupOrder[groupOrder.length - 1];
 
       const spaceKey = getSpaceKey(updatedItem.block, updatedItem.number);
-      const priority = updatedItem.priorityLevel || 'none';
-      const itemGroupKey = priority !== 'none' ? `${spaceKey}:${priority}` : spaceKey;
+      const priority = updatedItem.priorityLevel || "none";
+      const itemGroupKey =
+        priority !== "none" ? `${spaceKey}:${priority}` : spaceKey;
       if (itemGroupKey !== lastGroupKey) return;
 
       const currentItems = executeColumnItemsRef.current;
 
-      if (sortState === 'Manual') {
+      if (sortState === "Manual") {
         const lastGroupItems = currentItems.filter((item) => {
           const sk = getSpaceKey(item.block, item.number);
-          const p = item.priorityLevel || 'none';
-          return (p !== 'none' ? `${sk}:${p}` : sk) === lastGroupKey;
+          const p = item.priorityLevel || "none";
+          return (p !== "none" ? `${sk}:${p}` : sk) === lastGroupKey;
         });
-        if (lastGroupItems[lastGroupItems.length - 1]?.id !== updatedItem.id) return;
+        if (lastGroupItems[lastGroupItems.length - 1]?.id !== updatedItem.id)
+          return;
 
         const allNonNone = currentItems.every(
-          (item) => item.id === updatedItem.id || item.purchaseStatus !== 'None',
+          (item) =>
+            item.id === updatedItem.id || item.purchaseStatus !== "None",
         );
         if (allNonNone) setShowPostponeFilterButton(true);
       } else {
         const recentIds = recentlyChangedItemIdsRef.current;
         const visibleLastGroupItems = currentItems.filter((item) => {
           const sk = getSpaceKey(item.block, item.number);
-          const p = item.priorityLevel || 'none';
-          const gk = p !== 'none' ? `${sk}:${p}` : sk;
+          const p = item.priorityLevel || "none";
+          const gk = p !== "none" ? `${sk}:${p}` : sk;
           if (gk !== lastGroupKey) return false;
-          return item.purchaseStatus === 'Postpone' || recentIds.has(item.id);
+          return item.purchaseStatus === "Postpone" || recentIds.has(item.id);
         });
-        if (visibleLastGroupItems[visibleLastGroupItems.length - 1]?.id !== updatedItem.id) return;
+        if (
+          visibleLastGroupItems[visibleLastGroupItems.length - 1]?.id !==
+          updatedItem.id
+        )
+          return;
 
         const allVisibleNonNone = currentItems.every((item) => {
           if (item.id === updatedItem.id) return true;
-          if (item.purchaseStatus !== 'Postpone' && !recentIds.has(item.id)) return true;
-          return item.purchaseStatus !== 'None';
+          if (item.purchaseStatus !== "Postpone" && !recentIds.has(item.id))
+            return true;
+          return item.purchaseStatus !== "None";
         });
         if (allVisibleNonNone) setShowLateFilterButton(true);
       }
@@ -1951,26 +2222,30 @@ const App: React.FC = () => {
 
   const handleActivatePostponeFilter = useCallback(() => {
     setRecentlyChangedItemIds(new Set());
-    setSortState('Postpone');
+    setSortState("Postpone");
     setShowPostponeFilterButton(false);
   }, []);
 
   const handleActivateLateFilter = useCallback(() => {
     setRecentlyChangedItemIds(new Set());
-    setSortState('Late');
+    setSortState("Late");
     setShowLateFilterButton(false);
   }, []);
 
-  const handleExecuteSpaceGroupOrderChange = useCallback((orderedGroupKeys: string[]) => {
-    executeSpaceGroupOrderRef.current = orderedGroupKeys;
-  }, []);
+  const handleExecuteSpaceGroupOrderChange = useCallback(
+    (orderedGroupKeys: string[]) => {
+      executeSpaceGroupOrderRef.current = orderedGroupKeys;
+    },
+    [],
+  );
 
   const handleCollapseAndOpenNext = useCallback((currentGroupKey: string) => {
     const order = executeSpaceGroupOrderRef.current;
     const currentIndex = order.indexOf(currentGroupKey);
-    const nextKey = currentIndex >= 0 && currentIndex < order.length - 1
-      ? order[currentIndex + 1]
-      : null;
+    const nextKey =
+      currentIndex >= 0 && currentIndex < order.length - 1
+        ? order[currentIndex + 1]
+        : null;
     setExecuteCollapsedSpaces((prev) => {
       const next = new Set(prev);
       next.add(currentGroupKey);
@@ -1981,19 +2256,26 @@ const App: React.FC = () => {
     });
   }, []);
 
-  const handleSetSpaceGroupDragItemIds = useCallback((itemIds: string[] | null) => {
-    spaceGroupDragItemIdsRef.current = itemIds;
-  }, []);
+  const handleSetSpaceGroupDragItemIds = useCallback(
+    (itemIds: string[] | null) => {
+      spaceGroupDragItemIdsRef.current = itemIds;
+    },
+    [],
+  );
 
   const handleToggleRangeSelection = useCallback(
-    (columnType: 'execute' | 'candidate') => {
+    (columnType: "execute" | "candidate") => {
       if (!activeEventName) return;
 
       const currentEventDate = activeEventDate;
-      toggleCurrentRangeSelection(columnType, getListColumnItems(columnType, currentEventDate), {
-        halls: getHallsForDate(currentEventDate),
-        currentMapData: getMapDataForDate(currentEventDate),
-      });
+      toggleCurrentRangeSelection(
+        columnType,
+        getListColumnItems(columnType, currentEventDate),
+        {
+          halls: getHallsForDate(currentEventDate),
+          currentMapData: getMapDataForDate(currentEventDate),
+        },
+      );
     },
     [
       activeEventName,
@@ -2008,16 +2290,24 @@ const App: React.FC = () => {
   const handleBulkSort = useCallback(
     (direction: BulkSortDirection) => {
       if (!activeEventName || selectedItemIds.size === 0) return;
-      setSortState('Manual');
+      setSortState("Manual");
       setBlockSortDirection(null);
       const currentEventDate = activeEventDate;
       const mode = dayModes[activeEventName]?.[currentEventDate];
 
-      if (mode === 'edit') {
-        const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-        const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
-        const isInExecuteColumn = selectedItems.some((item) => executeIds.has(item.id));
-        const isInCandidateColumn = selectedItems.some((item) => !executeIds.has(item.id));
+      if (mode === "edit") {
+        const executeIds = new Set(
+          executeModeItems[activeEventName]?.[currentEventDate] || [],
+        );
+        const selectedItems = items.filter((item) =>
+          selectedItemIds.has(item.id),
+        );
+        const isInExecuteColumn = selectedItems.some((item) =>
+          executeIds.has(item.id),
+        );
+        const isInCandidateColumn = selectedItems.some(
+          (item) => !executeIds.has(item.id),
+        );
 
         if (isInExecuteColumn && !isInCandidateColumn) {
           updateExecuteModeItems((prev) => {
@@ -2030,22 +2320,33 @@ const App: React.FC = () => {
               .map((id) => itemsMap.get(id)!)
               .filter(Boolean);
 
-            const otherItems = dayItems.filter((id) => !selectedItemIds.has(id));
+            const otherItems = dayItems.filter(
+              (id) => !selectedItemIds.has(id),
+            );
             selectedItems.sort((a, b) => {
               const comparison = a.number.localeCompare(b.number, undefined, {
                 numeric: true,
-                sensitivity: 'base',
+                sensitivity: "base",
               });
-              return direction === 'asc' ? comparison : -comparison;
+              return direction === "asc" ? comparison : -comparison;
             });
 
-            const firstSelectedIndex = dayItems.findIndex((id) => selectedItemIds.has(id));
+            const firstSelectedIndex = dayItems.findIndex((id) =>
+              selectedItemIds.has(id),
+            );
             if (firstSelectedIndex === -1) return prev;
             const newDayItems = [...otherItems];
-            newDayItems.splice(firstSelectedIndex, 0, ...selectedItems.map((item) => item.id));
+            newDayItems.splice(
+              firstSelectedIndex,
+              0,
+              ...selectedItems.map((item) => item.id),
+            );
             return {
               ...prev,
-              [activeEventName]: { ...eventItems, [currentEventDate]: newDayItems },
+              [activeEventName]: {
+                ...eventItems,
+                [currentEventDate]: newDayItems,
+              },
             };
           });
         } else if (isInCandidateColumn && !isInExecuteColumn) {
@@ -2057,7 +2358,8 @@ const App: React.FC = () => {
             );
 
             const candidateItems = allItems.filter(
-              (item) => item.eventDate === currentTabKey && !executeIdsSet.has(item.id),
+              (item) =>
+                item.eventDate === currentTabKey && !executeIdsSet.has(item.id),
             );
             const selectedCandidateItems = candidateItems.filter((item) =>
               selectedItemIds.has(item.id),
@@ -2069,9 +2371,9 @@ const App: React.FC = () => {
             selectedCandidateItems.sort((a, b) => {
               const comparison = a.number.localeCompare(b.number, undefined, {
                 numeric: true,
-                sensitivity: 'base',
+                sensitivity: "base",
               });
-              return direction === 'asc' ? comparison : -comparison;
+              return direction === "asc" ? comparison : -comparison;
             });
 
             const firstSelectedIndex = candidateItems.findIndex((item) =>
@@ -2080,11 +2382,15 @@ const App: React.FC = () => {
             if (firstSelectedIndex === -1) return prev;
 
             const sortedCandidateItems = [...otherCandidateItems];
-            sortedCandidateItems.splice(firstSelectedIndex, 0, ...selectedCandidateItems);
-
+            sortedCandidateItems.splice(
+              firstSelectedIndex,
+              0,
+              ...selectedCandidateItems,
+            );
 
             const executeItems = allItems.filter(
-              (item) => item.eventDate === currentTabKey && executeIdsSet.has(item.id),
+              (item) =>
+                item.eventDate === currentTabKey && executeIdsSet.has(item.id),
             );
 
             const newItems = allItems.map((item) => {
@@ -2104,18 +2410,24 @@ const App: React.FC = () => {
       } else {
         setEventLists((prev) => {
           const currentItems = [...(prev[activeEventName] || [])];
-          const selectedItems = currentItems.filter((item) => selectedItemIds.has(item.id));
-          const otherItems = currentItems.filter((item) => !selectedItemIds.has(item.id));
+          const selectedItems = currentItems.filter((item) =>
+            selectedItemIds.has(item.id),
+          );
+          const otherItems = currentItems.filter(
+            (item) => !selectedItemIds.has(item.id),
+          );
 
           selectedItems.sort((a, b) => {
             const comparison = a.number.localeCompare(b.number, undefined, {
               numeric: true,
-              sensitivity: 'base',
+              sensitivity: "base",
             });
-            return direction === 'asc' ? comparison : -comparison;
+            return direction === "asc" ? comparison : -comparison;
           });
 
-          const firstSelectedIndex = currentItems.findIndex((item) => selectedItemIds.has(item.id));
+          const firstSelectedIndex = currentItems.findIndex((item) =>
+            selectedItemIds.has(item.id),
+          );
           if (firstSelectedIndex === -1) return prev;
 
           const newItems = [...otherItems];
@@ -2125,15 +2437,22 @@ const App: React.FC = () => {
         });
       }
     },
-    [activeEventName, selectedItemIds, items, activeTab, dayModes, executeModeItems, eventDates],
+    [
+      activeEventName,
+      selectedItemIds,
+      items,
+      activeTab,
+      dayModes,
+      executeModeItems,
+      eventDates,
+    ],
   );
-
 
   const handleExportEvent = useCallback(
     (eventName: string) => {
       const itemsToExport = eventLists[eventName];
       if (!hasExportableItems(itemsToExport)) {
-        alert('出力できるアイテムがありません。');
+        alert("出力できるアイテムがありません。");
         return;
       }
       setExportEventName(eventName);
@@ -2141,7 +2460,6 @@ const App: React.FC = () => {
     },
     [eventLists],
   );
-
 
   const handleConfirmExport = useCallback(
     async (options: ExportOptions) => {
@@ -2170,8 +2488,8 @@ const App: React.FC = () => {
 
         downloadBlob(blob, filename);
       } catch (error) {
-        console.error('Export error:', error);
-        alert('アイテムの出力に失敗しました。');
+        console.error("Export error:", error);
+        alert("アイテムの出力に失敗しました。");
       }
 
       setExportEventName(null);
@@ -2189,19 +2507,18 @@ const App: React.FC = () => {
     ],
   );
 
-
   const handleExportFileImport = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
       const file = e.target.files?.[0];
       if (!file) return;
 
-      e.target.value = '';
+      e.target.value = "";
 
       try {
         const result = await importFromXlsx(file);
 
         if (!result.success) {
-          alert(`インポートに失敗しました:\n${result.errors.join('\n')}`);
+          alert(`インポートに失敗しました:\n${result.errors.join("\n")}`);
           return;
         }
 
@@ -2209,15 +2526,20 @@ const App: React.FC = () => {
         const skippedItemIds = new Set<string>();
         const BULK_APPROVAL_THRESHOLD = 6;
 
-        const describeFallbackWarning = (warning: ItemFallbackWarning): string =>
-          `${warning.rowNumber}行目\n${warning.reasons.map((reason) => `- ${reason}`).join('\n')}`;
+        const describeFallbackWarning = (
+          warning: ItemFallbackWarning,
+        ): string =>
+          `${warning.rowNumber}行目\n${warning.reasons.map((reason) => `- ${reason}`).join("\n")}`;
 
         if (fallbackWarnings.length >= BULK_APPROVAL_THRESHOLD) {
           const previewLines = fallbackWarnings
             .slice(0, 5)
-            .map((warning) => `- ${warning.rowNumber}行目: ${warning.reasons[0] || '補完が必要です'}`);
-          const previewText = previewLines.join('\n');
-          const hasMore = fallbackWarnings.length > 5 ? '\n- ...' : '';
+            .map(
+              (warning) =>
+                `- ${warning.rowNumber}行目: ${warning.reasons[0] || "補完が必要です"}`,
+            );
+          const previewText = previewLines.join("\n");
+          const hasMore = fallbackWarnings.length > 5 ? "\n- ..." : "";
 
           const complementAll = window.confirm(
             `不正データが${fallbackWarnings.length}件見つかりました。\n${previewText}${hasMore}\n\nOK: すべて補完して取り込む\nキャンセル: すべてスキップ`,
@@ -2239,12 +2561,16 @@ const App: React.FC = () => {
           }
         }
 
-        const resolvedItems = result.items.filter((item) => !skippedItemIds.has(item.id));
+        const resolvedItems = result.items.filter(
+          (item) => !skippedItemIds.has(item.id),
+        );
         if (resolvedItems.length === 0) {
           if (result.items.length > 0 && skippedItemIds.size > 0) {
-            alert('不正データをすべてスキップしたため、取り込み対象がありませんでした。');
+            alert(
+              "不正データをすべてスキップしたため、取り込み対象がありませんでした。",
+            );
           } else {
-            alert('取り込んだファイルにアイテムが見つかりませんでした。');
+            alert("取り込んだファイルにアイテムが見つかりませんでした。");
           }
           return;
         }
@@ -2259,7 +2585,9 @@ const App: React.FC = () => {
             );
           }
           if (skippedCount > 0) {
-            fallbackResolutionMessages.push(`不正データ${skippedCount}件をスキップしました。`);
+            fallbackResolutionMessages.push(
+              `不正データ${skippedCount}件をスキップしました。`,
+            );
           }
         }
 
@@ -2270,7 +2598,7 @@ const App: React.FC = () => {
         };
 
         if (resolvedResult.items.length === 0) {
-          alert('取り込んだファイルにアイテムが見つかりませんでした。');
+          alert("取り込んだファイルにアイテムが見つかりませんでした。");
           return;
         }
 
@@ -2278,43 +2606,50 @@ const App: React.FC = () => {
         const eventName = importedData.eventName;
         const isUpdate = !!eventLists[eventName];
 
-
-        setEventLists((prev) => upsertRecordKey(prev, eventName, importedData.items));
-
+        setEventLists((prev) =>
+          upsertRecordKey(prev, eventName, importedData.items),
+        );
 
         if (importedData.metadata) {
           const metadata = importedData.metadata;
-          setEventMetadata((prev) => upsertRecordKey(prev, eventName, metadata));
+          setEventMetadata((prev) =>
+            upsertRecordKey(prev, eventName, metadata),
+          );
         }
-
 
         if (importedData.executeModeItems) {
           const executeItems = importedData.executeModeItems;
-          updateExecuteModeItems((prev) => upsertRecordKey(prev, eventName, executeItems));
+          updateExecuteModeItems((prev) =>
+            upsertRecordKey(prev, eventName, executeItems),
+          );
         }
         if (importedData.dayModes) {
           const importedDayModes = importedData.dayModes;
-          setDayModes((prev) => upsertRecordKey(prev, eventName, importedDayModes));
+          setDayModes((prev) =>
+            upsertRecordKey(prev, eventName, importedDayModes),
+          );
         }
-
 
         if (importedData.mapData) {
           const importedMapData = importedData.mapData;
-          setMapData((prev) => upsertRecordKey(prev, eventName, importedMapData));
+          setMapData((prev) =>
+            upsertRecordKey(prev, eventName, importedMapData),
+          );
         }
-
 
         if (importedData.routeSettings) {
           const importedRouteSettings = importedData.routeSettings;
-          setRouteSettings((prev) => upsertRecordKey(prev, eventName, importedRouteSettings));
+          setRouteSettings((prev) =>
+            upsertRecordKey(prev, eventName, importedRouteSettings),
+          );
         }
-
 
         if (importedData.hallDefinitions) {
           const importedHallDefinitions = importedData.hallDefinitions;
-          setHallDefinitions((prev) => upsertRecordKey(prev, eventName, importedHallDefinitions));
+          setHallDefinitions((prev) =>
+            upsertRecordKey(prev, eventName, importedHallDefinitions),
+          );
         }
-
 
         if (importedData.hallRouteSettings) {
           const importedHallRouteSettings = importedData.hallRouteSettings;
@@ -2322,7 +2657,6 @@ const App: React.FC = () => {
             upsertRecordKey(prev, eventName, importedHallRouteSettings),
           );
         }
-
 
         alert(
           buildImportCompletionMessage({
@@ -2333,25 +2667,28 @@ const App: React.FC = () => {
           }),
         );
 
-
         const nextTab = resolveEventListTab(importedData.items);
         if (!nextTab) {
-          alert('参加日がないため処理を停止しました。');
+          alert("参加日がないため処理を停止しました。");
           return;
         }
         setActiveEventName(eventName);
         setActiveTab(nextTab);
       } catch (error) {
-        console.error('Import error:', error);
-        alert('アイテムの取り込みに失敗しました。ファイル形式を確認してください。');
+        console.error("Import error:", error);
+        alert(
+          "アイテムの取り込みに失敗しました。ファイル形式を確認してください。",
+        );
       }
     },
     [eventLists],
   );
 
-
   const handleUpdateEvent = useCallback(
-    async (eventName: string, urlOverride?: { url: string; sheetName: string }) => {
+    async (
+      eventName: string,
+      urlOverride?: { url: string; sheetName: string },
+    ) => {
       const metadata = eventMetadata[eventName];
       const source = resolveSpreadsheetSource(metadata, urlOverride);
 
@@ -2363,12 +2700,15 @@ const App: React.FC = () => {
 
       try {
         const currentItems = eventLists[eventName] || [];
-        const updateDiff = await buildEventUpdateDiffFromSpreadsheet(currentItems, source);
+        const updateDiff = await buildEventUpdateDiffFromSpreadsheet(
+          currentItems,
+          source,
+        );
         setUpdateData(updateDiff);
         setUpdateEventName(eventName);
         setShowUpdateConfirmation(true);
       } catch (error) {
-        console.error('Update error:', error);
+        console.error("Update error:", error);
         setPendingUpdateEventName(eventName);
         setShowUrlUpdateDialog(true);
       }
@@ -2391,13 +2731,15 @@ const App: React.FC = () => {
       return { ...prev, [eventName]: newItems };
     });
 
-
     updateExecuteModeItems((prev) => {
       const eventItems = prev[eventName];
       if (!eventItems) return prev;
 
       const deleteIds = new Set(itemsToDelete.map((item) => item.id));
-      const updatedEventItems = removeDeletedIdsFromExecuteModeItems(eventItems, deleteIds);
+      const updatedEventItems = removeDeletedIdsFromExecuteModeItems(
+        eventItems,
+        deleteIds,
+      );
 
       return {
         ...prev,
@@ -2408,7 +2750,7 @@ const App: React.FC = () => {
     setShowUpdateConfirmation(false);
     setUpdateData(null);
     setUpdateEventName(null);
-    alert('アイテムを更新しました。');
+    alert("アイテムを更新しました。");
   };
 
   const handleUrlUpdate = useCallback(
@@ -2418,22 +2760,25 @@ const App: React.FC = () => {
 
       const eventName = pendingUpdateEventName;
       const currentMetadata = eventMetadata[eventName];
-      const normalizedSheetName = sheetName || currentMetadata?.spreadsheetSheetName || '';
+      const normalizedSheetName =
+        sheetName || currentMetadata?.spreadsheetSheetName || "";
 
       setEventMetadata((prev) =>
         upsertRecordKey(prev, eventName, {
           spreadsheetUrl: newUrl,
           spreadsheetSheetName: normalizedSheetName,
-          lastImportDate: currentMetadata?.lastImportDate || '',
+          lastImportDate: currentMetadata?.lastImportDate || "",
         }),
       );
 
       setPendingUpdateEventName(null);
-      handleUpdateEvent(eventName, { url: newUrl, sheetName: normalizedSheetName });
+      handleUpdateEvent(eventName, {
+        url: newUrl,
+        sheetName: normalizedSheetName,
+      });
     },
     [pendingUpdateEventName, eventMetadata, handleUpdateEvent],
   );
-
 
   const handleImportMapData = useCallback(async (eventName: string) => {
     if (mapFileInputRef.current) {
@@ -2442,20 +2787,21 @@ const App: React.FC = () => {
     }
   }, []);
 
-  const handleMapFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    const eventName = e.target.dataset.eventName;
+  const handleMapFileChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      const eventName = e.target.dataset.eventName;
 
-    if (!file || !eventName) return;
+      if (!file || !eventName) return;
 
+      setMapImportPendingFile(file);
+      setMapImportPendingEventName(eventName);
+      setMapImportDialogOpen(true);
 
-    setMapImportPendingFile(file);
-    setMapImportPendingEventName(eventName);
-    setMapImportDialogOpen(true);
-
-    e.target.value = '';
-  }, []);
-
+      e.target.value = "";
+    },
+    [],
+  );
 
   const handleMapImportConfirm = useCallback(
     (
@@ -2468,13 +2814,18 @@ const App: React.FC = () => {
 
       saveBlockDetectionSettings(eventName, settings);
 
-      const eventDatesForTargetEvent = extractEventDates(eventLists[eventName] || []);
+      const eventDatesForTargetEvent = extractEventDates(
+        eventLists[eventName] || [],
+      );
       const skippedDays = new Set<string>();
       const normalizedParsedData: Record<string, DayMapData> = {};
       const normalizedInitialAngles: Record<string, number> = {};
 
       Object.entries(parsedData).forEach(([mapName, dayMapData]) => {
-        const mapTabName = resolveImportMapTabName(mapName, eventDatesForTargetEvent);
+        const mapTabName = resolveImportMapTabName(
+          mapName,
+          eventDatesForTargetEvent,
+        );
         if (!mapTabName) {
           skippedDays.add(normalizeMapDayToken(mapName) || mapName);
           return;
@@ -2497,7 +2848,9 @@ const App: React.FC = () => {
         const nextEventSettings = { ...currentEventSettings };
 
         Object.keys(normalizedParsedData).forEach((dayMapName) => {
-          const importedInitialAngle = normalizeRotationAngle(normalizedInitialAngles[dayMapName] ?? 0);
+          const importedInitialAngle = normalizeRotationAngle(
+            normalizedInitialAngles[dayMapName] ?? 0,
+          );
           nextEventSettings[dayMapName] = {
             initialAngle: importedInitialAngle,
             mapTabAngle: importedInitialAngle,
@@ -2513,19 +2866,17 @@ const App: React.FC = () => {
 
       const mapCount = Object.keys(normalizedParsedData).length;
 
-
       const firstMapName = Object.keys(normalizedParsedData)[0];
       if (firstMapName) {
         setActiveTab(firstMapName);
       }
 
-
       setMapImportDialogOpen(false);
       setMapImportPendingFile(null);
-      setMapImportPendingEventName('');
+      setMapImportPendingEventName("");
 
       const skippedMessages = Array.from(skippedDays)
-        .sort((a, b) => a.localeCompare(b, 'ja'))
+        .sort((a, b) => a.localeCompare(b, "ja"))
         .map((dayName) => `${dayName}はないので取り込みしませんでした`);
 
       const messages: string[] = [];
@@ -2535,33 +2886,40 @@ const App: React.FC = () => {
       messages.push(...skippedMessages);
 
       if (messages.length > 0) {
-        alert(messages.join('\n'));
+        alert(messages.join("\n"));
       }
     },
     [eventLists, mapImportPendingEventName],
   );
 
-
   const handleMapImportClose = useCallback(() => {
     setMapImportDialogOpen(false);
     setMapImportPendingFile(null);
-    setMapImportPendingEventName('');
+    setMapImportPendingEventName("");
   }, []);
-
 
   const handleAddToExecuteListFromMap = useCallback(
     (itemId: string) => {
-      if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return [];
+      if (
+        !activeEventName ||
+        !isMapTab ||
+        !currentMapTabName ||
+        !activeEventDate
+      )
+        return [];
 
       const dayName = activeEventDate;
       const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
-      const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
+      const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[
+        currentMapTabName
+      ] || {
         hallOrder: [],
         hallVisitLists: [],
       };
       const currentMapData = mapData[activeEventName]?.[currentMapTabName];
 
-      const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
+      const currentForEvent =
+        executeModeItemsRef.current[activeEventName] || {};
       const result = computeAddToExecuteListFromMapWithResult(
         itemId,
         dayName,
@@ -2576,16 +2934,26 @@ const App: React.FC = () => {
       commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
       return result.insertedItemIds;
     },
-    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, commitExecuteModeItemsForEvent],
+    [
+      activeEventName,
+      activeEventDate,
+      currentMapTabName,
+      isMapTab,
+      items,
+      hallDefinitions,
+      hallRouteSettings,
+      mapData,
+      commitExecuteModeItemsForEvent,
+    ],
   );
 
-
   const handleAddToExecuteListFromMapAtPosition = useCallback(
-    (itemId: string, referenceItemId: string, position: 'before' | 'after') => {
+    (itemId: string, referenceItemId: string, position: "before" | "after") => {
       if (!activeEventName || !isMapTab || !activeEventDate) return [];
 
       const dayName = activeEventDate;
-      const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
+      const currentForEvent =
+        executeModeItemsRef.current[activeEventName] || {};
       const result = computeInsertIntoExecuteAtPosition(
         [itemId],
         referenceItemId,
@@ -2603,17 +2971,29 @@ const App: React.FC = () => {
       commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
       return result.insertedItemIds;
     },
-    [activeEventName, activeEventDate, isMapTab, items, areItemsInSameHallGroup, commitExecuteModeItemsForEvent],
+    [
+      activeEventName,
+      activeEventDate,
+      isMapTab,
+      items,
+      areItemsInSameHallGroup,
+      commitExecuteModeItemsForEvent,
+    ],
   );
-
 
   const handleRemoveFromExecuteListFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab || !activeEventDate) return;
 
       const dayName = activeEventDate;
-      const currentForEvent = executeModeItemsRef.current[activeEventName] || {};
-      const removeIds = expandExecuteRemovalItemIds([itemId], dayName, items, currentForEvent);
+      const currentForEvent =
+        executeModeItemsRef.current[activeEventName] || {};
+      const removeIds = expandExecuteRemovalItemIds(
+        [itemId],
+        dayName,
+        items,
+        currentForEvent,
+      );
       const newExecuteItems = computeRemoveFromExecuteListFromMap(
         itemId,
         currentForEvent,
@@ -2624,16 +3004,29 @@ const App: React.FC = () => {
       commitExecuteModeItemsForEvent(activeEventName, newExecuteItems);
       return removeIds;
     },
-    [activeEventName, activeEventDate, isMapTab, items, commitExecuteModeItemsForEvent],
+    [
+      activeEventName,
+      activeEventDate,
+      isMapTab,
+      items,
+      commitExecuteModeItemsForEvent,
+    ],
   );
-
 
   const handleBatchAddToExecuteListFromMap = useCallback(
     (itemIds: string[]) => {
-      if (!activeEventName || !isMapTab || !currentMapTabName || !activeEventDate) return [];
+      if (
+        !activeEventName ||
+        !isMapTab ||
+        !currentMapTabName ||
+        !activeEventDate
+      )
+        return [];
       const dayName = activeEventDate;
       const halls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
-      const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[currentMapTabName] || {
+      const hallRouteSettingsForMap = hallRouteSettings[activeEventName]?.[
+        currentMapTabName
+      ] || {
         hallOrder: [],
         hallVisitLists: [],
       };
@@ -2643,7 +3036,15 @@ const App: React.FC = () => {
         let current = executeModeItemsRef.current[activeEventName] || {};
         const insertedItemIds: string[] = [];
         for (const id of itemIds) {
-          const result = computeAddToExecuteListFromMapWithResult(id, dayName, items, current, halls, hallRouteSettingsForMap, currentMap);
+          const result = computeAddToExecuteListFromMapWithResult(
+            id,
+            dayName,
+            items,
+            current,
+            halls,
+            hallRouteSettingsForMap,
+            currentMap,
+          );
           if (result.accepted) {
             current = result.executeModeItems;
             insertedItemIds.push(...result.insertedItemIds);
@@ -2653,12 +3054,25 @@ const App: React.FC = () => {
         return insertedItemIds;
       }
     },
-    [activeEventName, activeEventDate, currentMapTabName, isMapTab, items, hallDefinitions, hallRouteSettings, mapData, commitExecuteModeItemsForEvent],
+    [
+      activeEventName,
+      activeEventDate,
+      currentMapTabName,
+      isMapTab,
+      items,
+      hallDefinitions,
+      hallRouteSettings,
+      mapData,
+      commitExecuteModeItemsForEvent,
+    ],
   );
 
-
   const handleBatchAddToExecuteListFromMapAtPosition = useCallback(
-    (itemIds: string[], referenceItemId: string, position: 'before' | 'after') => {
+    (
+      itemIds: string[],
+      referenceItemId: string,
+      position: "before" | "after",
+    ) => {
       if (!activeEventName || !isMapTab || !activeEventDate) return [];
       const dayName = activeEventDate;
 
@@ -2679,9 +3093,15 @@ const App: React.FC = () => {
       commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
       return result.insertedItemIds;
     },
-    [activeEventName, activeEventDate, isMapTab, items, areItemsInSameHallGroup, commitExecuteModeItemsForEvent],
+    [
+      activeEventName,
+      activeEventDate,
+      isMapTab,
+      items,
+      areItemsInSameHallGroup,
+      commitExecuteModeItemsForEvent,
+    ],
   );
-
 
   const handleBatchRemoveFromExecuteListFromMap = useCallback(
     (itemIds: string[]) => {
@@ -2691,29 +3111,47 @@ const App: React.FC = () => {
       let current = executeModeItemsRef.current[activeEventName] || {};
       const removedItemIds: string[] = [];
       for (const id of itemIds) {
-        const removeIds = expandExecuteRemovalItemIds([id], dayName, items, current);
-        current = computeRemoveFromExecuteListFromMap(id, current, dayName, items);
-        removedItemIds.push(...removeIds.filter((removeId) => !removedItemIds.includes(removeId)));
+        const removeIds = expandExecuteRemovalItemIds(
+          [id],
+          dayName,
+          items,
+          current,
+        );
+        current = computeRemoveFromExecuteListFromMap(
+          id,
+          current,
+          dayName,
+          items,
+        );
+        removedItemIds.push(
+          ...removeIds.filter((removeId) => !removedItemIds.includes(removeId)),
+        );
       }
       commitExecuteModeItemsForEvent(activeEventName, current);
       return removedItemIds;
     },
-    [activeEventName, activeEventDate, isMapTab, items, commitExecuteModeItemsForEvent],
+    [
+      activeEventName,
+      activeEventDate,
+      isMapTab,
+      items,
+      commitExecuteModeItemsForEvent,
+    ],
   );
-
 
   const handleAddNewItemFromMap = useCallback(
     (eventDate: string, block: string, number: string) => {
       setNewItemDefaults({ eventDate, block, number });
       setItemToEdit(null);
-      setActiveTab('import');
+      setActiveTab("import");
     },
     [],
   );
 
-
   const handleAddItemFromFocusMode = useCallback(
-    (newItem: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => {
+    (
+      newItem: Omit<ShoppingItem, "id"> & { purchaseStatus?: PurchaseStatus },
+    ) => {
       if (!activeEventName) return;
 
       const result = computeAddItemFromFocusMode(
@@ -2723,11 +3161,13 @@ const App: React.FC = () => {
       );
 
       setEventLists((prev) => ({ ...prev, [activeEventName]: result.items }));
-      updateExecuteModeItems((prev) => ({ ...prev, [activeEventName]: result.executeModeItems }));
+      updateExecuteModeItems((prev) => ({
+        ...prev,
+        [activeEventName]: result.executeModeItems,
+      }));
     },
     [activeEventName, eventLists, executeModeItems],
   );
-
 
   const handleMoveToFirstFromMap = useCallback(
     (itemId: string) => {
@@ -2738,7 +3178,9 @@ const App: React.FC = () => {
 
       updateExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
-        const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
+        const dayItems = (eventItems[dayName] || []).filter(
+          (id) => id !== itemId,
+        );
 
         return {
           ...prev,
@@ -2752,7 +3194,6 @@ const App: React.FC = () => {
     [activeEventName, activeEventDate, isMapTab],
   );
 
-
   const handleMoveToLastFromMap = useCallback(
     (itemId: string) => {
       if (!activeEventName || !isMapTab) return;
@@ -2762,7 +3203,9 @@ const App: React.FC = () => {
 
       updateExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
-        const dayItems = (eventItems[dayName] || []).filter((id) => id !== itemId);
+        const dayItems = (eventItems[dayName] || []).filter(
+          (id) => id !== itemId,
+        );
 
         return {
           ...prev,
@@ -2776,7 +3219,6 @@ const App: React.FC = () => {
     [activeEventName, activeEventDate, isMapTab],
   );
 
-
   const currentMapExecuteItemIds = useMemo(() => {
     if (!activeEventName || !isMapTab || !activeEventDate) return [];
 
@@ -2785,21 +3227,22 @@ const App: React.FC = () => {
     return executeModeItems[activeEventName]?.[dayName] || [];
   }, [activeEventName, activeEventDate, isMapTab, executeModeItems]);
 
-
   const currentTabItems = useMemo(() => {
     if (!activeEventName || !eventDates.includes(activeTab)) return [];
     return items.filter((item) => item.eventDate === activeTab);
   }, [items, activeTab, activeEventName, eventDates]);
 
-
   const [mapTabMenuOpen, setMapTabMenuOpen] = useState<string | null>(null);
-  const [mapTabMenuPosition, setMapTabMenuPosition] = useState<{ left: number; top: number }>({
+  const [mapTabMenuPosition, setMapTabMenuPosition] = useState<{
+    left: number;
+    top: number;
+  }>({
     left: 0,
     top: 0,
   });
 
   React.useEffect(() => {
-    if (mapTabMenuOpen !== 'mapToggle') return;
+    if (mapTabMenuOpen !== "mapToggle") return;
     const handleClickOutside = (e: MouseEvent) => {
       if (
         mapToggleMenuRef.current &&
@@ -2810,73 +3253,90 @@ const App: React.FC = () => {
         setMapTabMenuOpen(null);
       }
     };
-    document.addEventListener('mousedown', handleClickOutside);
-    return () => document.removeEventListener('mousedown', handleClickOutside);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [mapTabMenuOpen]);
 
   const [visitListPanelOpen, setVisitListPanelOpen] = useState(false);
-  const [visitListPanelMapTab, setVisitListPanelMapTab] = useState<string | null>(null);
-  const [visitListHasUnsavedChanges, setVisitListHasUnsavedChanges] = useState(false);
-  const [visitListOriginalOrder, setVisitListOriginalOrder] = useState<string[]>([]);
-  const [highlightedMapCell, setHighlightedMapCell] = useState<{ row: number; col: number } | null>(
-    null,
-  );
-  const [showVisitListConfirmDialog, setShowVisitListConfirmDialog] = useState(false);
+  const [visitListPanelMapTab, setVisitListPanelMapTab] = useState<
+    string | null
+  >(null);
+  const [visitListHasUnsavedChanges, setVisitListHasUnsavedChanges] =
+    useState(false);
+  const [visitListOriginalOrder, setVisitListOriginalOrder] = useState<
+    string[]
+  >([]);
+  const [highlightedMapCell, setHighlightedMapCell] = useState<{
+    row: number;
+    col: number;
+  } | null>(null);
+  const [showVisitListConfirmDialog, setShowVisitListConfirmDialog] =
+    useState(false);
   const [pendingTabChange, setPendingTabChange] = useState<string | null>(null);
   const [blockDefinitionMode, setBlockDefinitionMode] = useState(false);
 
-
-  const [mapSelectedHallId, setMapSelectedHallId] = useState<string>('all');
+  const [mapSelectedHallId, setMapSelectedHallId] = useState<string>("all");
   const [mapIsRouteVisible, setMapIsRouteVisible] = useState(true);
   const [mapIsHallOrderOpen, setMapIsHallOrderOpen] = useState(false);
   const [mapHallSelectorOpen, setMapHallSelectorOpen] = useState(false);
-  const [mapSmartInsertEnabled, setMapSmartInsertEnabled] = useState<boolean>(() => {
-    try {
-      const saved = localStorage.getItem('mapSmartInsertEnabled');
-      return saved !== null ? saved === 'true' : true;
-    } catch {
-      return true;
-    }
-  });
-  const [mapSmartInsertMode, setMapSmartInsertMode] = useState<SmartInsertMode>(() => {
-    try {
-      return normalizeSmartInsertMode(localStorage.getItem('mapSmartInsertMode'));
-    } catch {
-      return 'map';
-    }
-  });
+  const [mapSmartInsertEnabled, setMapSmartInsertEnabled] = useState<boolean>(
+    () => {
+      try {
+        const saved = localStorage.getItem("mapSmartInsertEnabled");
+        return saved !== null ? saved === "true" : true;
+      } catch {
+        return true;
+      }
+    },
+  );
+  const [mapSmartInsertMode, setMapSmartInsertMode] = useState<SmartInsertMode>(
+    () => {
+      try {
+        return normalizeSmartInsertMode(
+          localStorage.getItem("mapSmartInsertMode"),
+        );
+      } catch {
+        return "map";
+      }
+    },
+  );
   const [smartInsertToast, setSmartInsertToast] = useState<string | null>(null);
-  const [smartInsertToastType, setSmartInsertToastType] = useState<'success' | 'error'>('success');
-  const smartInsertLongPressRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [smartInsertToastType, setSmartInsertToastType] = useState<
+    "success" | "error"
+  >("success");
+  const smartInsertLongPressRef = React.useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
   const smartInsertLongPressTriggeredRef = React.useRef(false);
 
   const showSmartInsertToast = useCallback(
-    (message: string, type: 'success' | 'error' = 'success') => {
+    (message: string, type: "success" | "error" = "success") => {
       setSmartInsertToastType(type);
       setSmartInsertToast(message);
     },
     [],
   );
 
-
   React.useEffect(() => {
     try {
-      localStorage.setItem('mapSmartInsertEnabled', String(mapSmartInsertEnabled));
+      localStorage.setItem(
+        "mapSmartInsertEnabled",
+        String(mapSmartInsertEnabled),
+      );
     } catch (error) {
-      console.error('Failed to persist mapSmartInsertEnabled:', error);
-      showSmartInsertToast('スマート挿入設定の保存に失敗しました。', 'error');
+      console.error("Failed to persist mapSmartInsertEnabled:", error);
+      showSmartInsertToast("スマート挿入設定の保存に失敗しました。", "error");
     }
   }, [mapSmartInsertEnabled, showSmartInsertToast]);
 
   React.useEffect(() => {
     try {
-      localStorage.setItem('mapSmartInsertMode', mapSmartInsertMode);
+      localStorage.setItem("mapSmartInsertMode", mapSmartInsertMode);
     } catch (error) {
-      console.error('Failed to persist mapSmartInsertMode:', error);
-      showSmartInsertToast('スマート挿入モードの保存に失敗しました。', 'error');
+      console.error("Failed to persist mapSmartInsertMode:", error);
+      showSmartInsertToast("スマート挿入モードの保存に失敗しました。", "error");
     }
   }, [mapSmartInsertMode, showSmartInsertToast]);
-
 
   React.useEffect(() => {
     if (smartInsertToast) {
@@ -2885,13 +3345,11 @@ const App: React.FC = () => {
     }
   }, [smartInsertToast]);
 
-
   const [cellSelectionMode, setCellSelectionMode] = useState<{
-    type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual';
+    type: "corner" | "multiCorner" | "rangeStart" | "individual";
     clickedCells: { row: number; col: number }[];
     editingBlockData?: unknown;
   } | null>(null);
-
 
   const [pendingCellSelection, setPendingCellSelection] = useState<{
     type: string;
@@ -2899,19 +3357,15 @@ const App: React.FC = () => {
     editingData?: unknown;
   } | null>(null);
 
-
   const openVisitListPanel = useCallback(
     (mapTab: string) => {
       if (!activeEventName) return;
-
 
       const dayMatch = mapTab.match(/^(.+)マップ$/);
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
-
       const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
-
 
       setVisitListOriginalOrder([...executeIds]);
       setVisitListPanelMapTab(mapTab);
@@ -2921,9 +3375,14 @@ const App: React.FC = () => {
     [activeEventName, executeModeItems],
   );
 
-
   React.useEffect(() => {
-    if (!visitListPanelOpen || !isMapTab || !activeEventName || !currentMapTabName) return;
+    if (
+      !visitListPanelOpen ||
+      !isMapTab ||
+      !activeEventName ||
+      !currentMapTabName
+    )
+      return;
     if (visitListPanelMapTab !== currentMapTabName) {
       if (visitListHasUnsavedChanges) {
         setVisitListHasUnsavedChanges(false);
@@ -2945,7 +3404,6 @@ const App: React.FC = () => {
     executeModeItems,
   ]);
 
-
   const handleVisitListOrderUpdate = useCallback(
     (newOrderItems: ShoppingItem[]) => {
       if (!visitListPanelMapTab || !activeEventName) return;
@@ -2954,9 +3412,7 @@ const App: React.FC = () => {
       if (!dayMatch) return;
       const dayName = dayMatch[1];
 
-
       const newIds = newOrderItems.map((item) => item.id);
-
 
       updateExecuteModeItems((prev) => ({
         ...prev,
@@ -2970,12 +3426,10 @@ const App: React.FC = () => {
     [visitListPanelMapTab, activeEventName],
   );
 
-
   const handleVisitListConfirm = useCallback(() => {
     setVisitListHasUnsavedChanges(false);
     setVisitListOriginalOrder([]);
   }, []);
-
 
   const handleVisitListCancel = useCallback(() => {
     if (!visitListPanelMapTab || !activeEventName) return;
@@ -2983,7 +3437,6 @@ const App: React.FC = () => {
     const dayMatch = visitListPanelMapTab.match(/^(.+)マップ$/);
     if (!dayMatch) return;
     const dayName = dayMatch[1];
-
 
     if (visitListOriginalOrder.length > 0) {
       updateExecuteModeItems((prev) => ({
@@ -2998,11 +3451,9 @@ const App: React.FC = () => {
     setVisitListOriginalOrder([]);
   }, [visitListOriginalOrder, visitListPanelMapTab, activeEventName]);
 
-
   const handleVisitListClose = useCallback(() => {
     setVisitListPanelOpen(false);
   }, []);
-
 
   const handleHighlightMapCell = useCallback((row: number, col: number) => {
     setHighlightedMapCell({ row, col });
@@ -3011,7 +3462,6 @@ const App: React.FC = () => {
   const handleClearMapCellHighlight = useCallback(() => {
     setHighlightedMapCell(null);
   }, []);
-
 
   const visitListItems = useMemo(() => {
     if (!visitListPanelMapTab || !activeEventName) return [];
@@ -3023,36 +3473,42 @@ const App: React.FC = () => {
     const dayItems = items.filter((item) => item.eventDate === dayName);
     const executeIds = executeModeItems[activeEventName]?.[dayName] || [];
 
-
     return executeIds
       .filter((id: string) => dayItems.some((item) => item.id === id))
       .map((id: string) => dayItems.find((item) => item.id === id)!)
       .filter(Boolean);
   }, [visitListPanelMapTab, activeEventName, items, executeModeItems]);
 
-
   const visitListHallOrder = useMemo(() => {
     if (!visitListPanelMapTab || !activeEventName) return [];
 
-    const halls = hallDefinitions[activeEventName]?.[visitListPanelMapTab] || [];
-    const routeSettings = hallRouteSettings[activeEventName]?.[visitListPanelMapTab];
+    const halls =
+      hallDefinitions[activeEventName]?.[visitListPanelMapTab] || [];
+    const routeSettings =
+      hallRouteSettings[activeEventName]?.[visitListPanelMapTab];
 
     if (routeSettings?.hallOrder && routeSettings.hallOrder.length > 0) {
       return routeSettings.hallOrder;
     }
 
-
     return halls.map((h) => h.id);
-  }, [visitListPanelMapTab, activeEventName, hallDefinitions, hallRouteSettings]);
-
+  }, [
+    visitListPanelMapTab,
+    activeEventName,
+    hallDefinitions,
+    hallRouteSettings,
+  ]);
 
   const handleUpdateItemPriority = useCallback(
-    (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
+    (itemId: string, priorityLevel: "none" | "priority" | "highest") => {
       if (!activeEventName || !visitListPanelMapTab) return;
 
-      const halls = hallDefinitions[activeEventName]?.[visitListPanelMapTab] || [];
+      const halls =
+        hallDefinitions[activeEventName]?.[visitListPanelMapTab] || [];
       const mapDataForTab = mapData[activeEventName]?.[visitListPanelMapTab];
-      const currentSettings = hallRouteSettings[activeEventName]?.[visitListPanelMapTab] || {
+      const currentSettings = hallRouteSettings[activeEventName]?.[
+        visitListPanelMapTab
+      ] || {
         hallOrder: [],
         hallVisitLists: [],
       };
@@ -3093,11 +3549,18 @@ const App: React.FC = () => {
         });
       }
     },
-    [activeEventName, visitListPanelMapTab, items, hallDefinitions, mapData, hallRouteSettings],
+    [
+      activeEventName,
+      visitListPanelMapTab,
+      items,
+      hallDefinitions,
+      mapData,
+      hallRouteSettings,
+    ],
   );
 
   const handleUpdateItemPriorityFromEdit = useCallback(
-    (itemId: string, priorityLevel: 'none' | 'priority' | 'highest') => {
+    (itemId: string, priorityLevel: "none" | "priority" | "highest") => {
       if (!activeEventName) return;
 
       const currentItems = eventLists[activeEventName] || [];
@@ -3108,7 +3571,9 @@ const App: React.FC = () => {
       const mapTabForItem = getMapTabForDate(item.eventDate);
       const mapHallIds = new Set(
         mapTabForItem
-          ? (hallDefinitions[activeEventName]?.[mapTabForItem] || []).map((h) => h.id)
+          ? (hallDefinitions[activeEventName]?.[mapTabForItem] || []).map(
+              (h) => h.id,
+            )
           : [],
       );
       const targetKey: string =
@@ -3117,11 +3582,12 @@ const App: React.FC = () => {
           : getMaplessKey(item.eventDate);
 
       const targetHalls = hallDefinitions[activeEventName]?.[targetKey] || [];
-      const targetMapData =
-        targetKey.startsWith(MAPLESS_HALL_KEY)
-          ? undefined
-          : mapData[activeEventName]?.[targetKey];
-      const targetSettings = hallRouteSettings[activeEventName]?.[targetKey] || {
+      const targetMapData = targetKey.startsWith(MAPLESS_HALL_KEY)
+        ? undefined
+        : mapData[activeEventName]?.[targetKey];
+      const targetSettings = hallRouteSettings[activeEventName]?.[
+        targetKey
+      ] || {
         hallOrder: [],
         hallVisitLists: [],
       };
@@ -3173,8 +3639,8 @@ const App: React.FC = () => {
   const handleUpdateHallOrderForPriorityChangeFromEdit = useCallback(
     (
       itemId: string,
-      newPriorityLevel: 'none' | 'priority' | 'highest',
-      oldPriorityLevel: 'none' | 'priority' | 'highest',
+      newPriorityLevel: "none" | "priority" | "highest",
+      oldPriorityLevel: "none" | "priority" | "highest",
     ) => {
       if (!activeEventName) return;
 
@@ -3187,7 +3653,9 @@ const App: React.FC = () => {
       const mapTabForItem = getMapTabForDate(item.eventDate);
       const mapHallIds = new Set(
         mapTabForItem
-          ? (hallDefinitions[activeEventName]?.[mapTabForItem] || []).map((h) => h.id)
+          ? (hallDefinitions[activeEventName]?.[mapTabForItem] || []).map(
+              (h) => h.id,
+            )
           : [],
       );
       const targetKey: string =
@@ -3196,11 +3664,12 @@ const App: React.FC = () => {
           : getMaplessKey(item.eventDate);
 
       const targetHalls = hallDefinitions[activeEventName]?.[targetKey] || [];
-      const targetMapData =
-        targetKey.startsWith(MAPLESS_HALL_KEY)
-          ? undefined
-          : mapData[activeEventName]?.[targetKey];
-      const targetSettings = hallRouteSettings[activeEventName]?.[targetKey] || {
+      const targetMapData = targetKey.startsWith(MAPLESS_HALL_KEY)
+        ? undefined
+        : mapData[activeEventName]?.[targetKey];
+      const targetSettings = hallRouteSettings[activeEventName]?.[
+        targetKey
+      ] || {
         hallOrder: [],
         hallVisitLists: [],
       };
@@ -3262,7 +3731,6 @@ const App: React.FC = () => {
     return true;
   };
 
-
   const handleVisitListDialogConfirm = useCallback(() => {
     handleVisitListConfirm();
     setShowVisitListConfirmDialog(false);
@@ -3272,7 +3740,6 @@ const App: React.FC = () => {
       setPendingTabChange(null);
     }
   }, [handleVisitListConfirm, pendingTabChange]);
-
 
   const handleVisitListDialogCancel = useCallback(() => {
     handleVisitListCancel();
@@ -3284,10 +3751,15 @@ const App: React.FC = () => {
     }
   }, [handleVisitListCancel, pendingTabChange]);
 
-
   const handleUpdateBlocks = useCallback(
     (blocks: BlockDefinition[]) => {
-      if (!activeEventName || !isMapTab || !currentMapData || !currentMapTabName) return;
+      if (
+        !activeEventName ||
+        !isMapTab ||
+        !currentMapData ||
+        !currentMapTabName
+      )
+        return;
 
       setMapData((prev) => ({
         ...prev,
@@ -3303,13 +3775,14 @@ const App: React.FC = () => {
     [activeEventName, isMapTab, currentMapTabName, currentMapData],
   );
 
-
   const handleUpdateHalls = useCallback(
     (halls: HallDefinition[]) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
 
       const { polygonHalls, maplessHalls } = splitHallsForStorage(halls);
-      const maplessKey = activeEventDate ? getMaplessKey(activeEventDate) : null;
+      const maplessKey = activeEventDate
+        ? getMaplessKey(activeEventDate)
+        : null;
 
       setHallDefinitions((prev) =>
         updateHallDefinitionsForHalls({
@@ -3335,7 +3808,6 @@ const App: React.FC = () => {
     },
     [activeEventName, activeEventDate, isMapTab, currentMapTabName],
   );
-
 
   const handleUpdateHallRouteSettings = useCallback(
     (settings: HallRouteSettings) => {
@@ -3395,7 +3867,10 @@ const App: React.FC = () => {
       const clonedByDate = cloneHallsForDates(sourceHalls, targetDates);
 
       setHallDefinitions((prev) => {
-        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        const updated = {
+          ...prev,
+          [activeEventName]: { ...prev[activeEventName] },
+        };
         for (const date of targetDates) {
           const targetKey = getMaplessKey(date);
           updated[activeEventName][targetKey] = clonedByDate.get(date)!.halls;
@@ -3404,12 +3879,19 @@ const App: React.FC = () => {
       });
 
       setHallRouteSettings((prev) => {
-        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        const updated = {
+          ...prev,
+          [activeEventName]: { ...prev[activeEventName] },
+        };
         for (const date of targetDates) {
           const targetKey = getMaplessKey(date);
           const { idMap } = clonedByDate.get(date)!;
-          const sourceSettings = prev[activeEventName]?.[sourceKey] || emptyHallRouteSettings();
-          updated[activeEventName][targetKey] = remapHallRouteSettings(sourceSettings, idMap);
+          const sourceSettings =
+            prev[activeEventName]?.[sourceKey] || emptyHallRouteSettings();
+          updated[activeEventName][targetKey] = remapHallRouteSettings(
+            sourceSettings,
+            idMap,
+          );
         }
         return updated;
       });
@@ -3421,7 +3903,8 @@ const App: React.FC = () => {
     (targetDates: string[]) => {
       if (!activeEventName || !isMapTab || !currentMapTabName) return;
 
-      const sourceHalls = hallDefinitions[activeEventName]?.[currentMapTabName] || [];
+      const sourceHalls =
+        hallDefinitions[activeEventName]?.[currentMapTabName] || [];
       if (sourceHalls.length === 0) return;
 
       const targetMapTabsByDate = new Map<string, string>();
@@ -3430,10 +3913,16 @@ const App: React.FC = () => {
         if (!targetMapTab) continue;
         targetMapTabsByDate.set(date, targetMapTab);
       }
-      const clonedByDate = cloneHallsForDates(sourceHalls, Array.from(targetMapTabsByDate.keys()));
+      const clonedByDate = cloneHallsForDates(
+        sourceHalls,
+        Array.from(targetMapTabsByDate.keys()),
+      );
 
       setHallDefinitions((prev) => {
-        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        const updated = {
+          ...prev,
+          [activeEventName]: { ...prev[activeEventName] },
+        };
         for (const [date, { halls }] of clonedByDate) {
           const targetMapTab = targetMapTabsByDate.get(date)!;
           updated[activeEventName][targetMapTab] = halls;
@@ -3442,19 +3931,32 @@ const App: React.FC = () => {
       });
 
       setHallRouteSettings((prev) => {
-        const updated = { ...prev, [activeEventName]: { ...prev[activeEventName] } };
+        const updated = {
+          ...prev,
+          [activeEventName]: { ...prev[activeEventName] },
+        };
         for (const [date, { idMap }] of clonedByDate) {
           const targetMapTab = targetMapTabsByDate.get(date)!;
           const sourceSettings =
-            prev[activeEventName]?.[currentMapTabName] || emptyHallRouteSettings();
-          updated[activeEventName][targetMapTab] = remapHallRouteSettings(sourceSettings, idMap);
+            prev[activeEventName]?.[currentMapTabName] ||
+            emptyHallRouteSettings();
+          updated[activeEventName][targetMapTab] = remapHallRouteSettings(
+            sourceSettings,
+            idMap,
+          );
         }
         return updated;
       });
     },
-    [activeEventName, isMapTab, currentMapTabName, hallDefinitions, hallRouteSettings, getMapTabForDate],
+    [
+      activeEventName,
+      isMapTab,
+      currentMapTabName,
+      hallDefinitions,
+      hallRouteSettings,
+      getMapTabForDate,
+    ],
   );
-
 
   const globalHallOrderMapTabName = useMemo(
     () => (activeEventDate ? getMapTabForDate(activeEventDate) : null),
@@ -3467,8 +3969,8 @@ const App: React.FC = () => {
     return ids.some((id) => {
       const it = items.find((i) => i.id === id);
       if (!it) return false;
-      const p = it.priorityLevel || 'none';
-      return p === 'priority' || p === 'highest';
+      const p = it.priorityLevel || "none";
+      return p === "priority" || p === "highest";
     });
   }, [activeEventName, activeEventDate, executeModeItems, items]);
 
@@ -3479,9 +3981,16 @@ const App: React.FC = () => {
       ? hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []
       : [];
     const maplessKey = activeEventDate ? getMaplessKey(activeEventDate) : null;
-    const maplessHalls = maplessKey ? hallDefinitions[activeEventName]?.[maplessKey] || [] : [];
+    const maplessHalls = maplessKey
+      ? hallDefinitions[activeEventName]?.[maplessKey] || []
+      : [];
     return [...mapHalls, ...maplessHalls];
-  }, [activeEventName, activeEventDate, globalHallOrderMapTabName, hallDefinitions]);
+  }, [
+    activeEventName,
+    activeEventDate,
+    globalHallOrderMapTabName,
+    hallDefinitions,
+  ]);
 
   const globalHallOrderRouteSettings = useMemo((): HallRouteSettings => {
     const executeIds =
@@ -3516,14 +4025,20 @@ const App: React.FC = () => {
 
       const mapHallIds = new Set<string>(
         globalHallOrderMapTabName
-          ? (hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] || []).map(
-              (h) => h.id,
-            )
+          ? (
+              hallDefinitions[activeEventName]?.[globalHallOrderMapTabName] ||
+              []
+            ).map((h) => h.id)
           : [],
       );
-      const maplessKey = activeEventDate ? getMaplessKey(activeEventDate) : null;
+      const maplessKey = activeEventDate
+        ? getMaplessKey(activeEventDate)
+        : null;
       const maplessHallIds = new Set<string>(
-        (maplessKey ? hallDefinitions[activeEventName]?.[maplessKey] || [] : []).map((h) => h.id),
+        (maplessKey
+          ? hallDefinitions[activeEventName]?.[maplessKey] || []
+          : []
+        ).map((h) => h.id),
       );
 
       const { mapSettings, maplessSettings } = splitGlobalHallRouteSettings({
@@ -3545,7 +4060,12 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeEventDate, globalHallOrderMapTabName, hallDefinitions],
+    [
+      activeEventName,
+      activeEventDate,
+      globalHallOrderMapTabName,
+      hallDefinitions,
+    ],
   );
 
   const getGlobalHallItemCount = useCallback(
@@ -3562,7 +4082,6 @@ const App: React.FC = () => {
     },
     [activeEventName, activeEventDate, executeModeItems, items, getItemHallId],
   );
-
 
   const handleReorderExecuteListByHallOrder = useCallback(
     (hallOrder: string[]) => {
@@ -3588,7 +4107,6 @@ const App: React.FC = () => {
         hallRouteSettings,
       });
 
-
       updateExecuteModeItems((prev) => {
         const eventItems = prev[activeEventName] || {};
         const dayItems = [...(eventItems[dayName] || [])];
@@ -3613,18 +4131,23 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeEventDate, getMapTabForDate, mapData, hallDefinitions, hallRouteSettings, items],
+    [
+      activeEventName,
+      activeEventDate,
+      getMapTabForDate,
+      mapData,
+      hallDefinitions,
+      hallRouteSettings,
+      items,
+    ],
   );
 
-
   const [hallDefinitionMode, setHallDefinitionMode] = useState(false);
-
 
   const [vertexSelectionMode, setVertexSelectionMode] = useState<{
     clickedVertices: { row: number; col: number }[];
     editingData?: unknown;
   } | null>(null);
-
 
   const [pendingVertexSelection, setPendingVertexSelection] = useState<{
     vertices: { row: number; col: number }[];
@@ -3635,21 +4158,21 @@ const App: React.FC = () => {
     showRuler: true,
   });
 
-
   const handleStartVertexSelection = useCallback((editingData?: unknown) => {
     setVertexSelectionMode({ clickedVertices: [], editingData });
     setHallDefinitionMode(false);
   }, []);
 
-
   const sortVerticesNonCrossing = useCallback(
-    (vertices: { row: number; col: number }[]): { row: number; col: number }[] => {
+    (
+      vertices: { row: number; col: number }[],
+    ): { row: number; col: number }[] => {
       if (vertices.length <= 2) return vertices;
 
-
-      const centroidRow = vertices.reduce((sum, v) => sum + v.row, 0) / vertices.length;
-      const centroidCol = vertices.reduce((sum, v) => sum + v.col, 0) / vertices.length;
-
+      const centroidRow =
+        vertices.reduce((sum, v) => sum + v.row, 0) / vertices.length;
+      const centroidCol =
+        vertices.reduce((sum, v) => sum + v.col, 0) / vertices.length;
 
       const sorted = [...vertices].sort((a, b) => {
         const angleA = Math.atan2(a.row - centroidRow, a.col - centroidCol);
@@ -3662,10 +4185,11 @@ const App: React.FC = () => {
     [],
   );
 
-
   const handleConfirmVertexSelection = useCallback(() => {
     if (vertexSelectionMode) {
-      const sorted = sortVerticesNonCrossing(vertexSelectionMode.clickedVertices);
+      const sorted = sortVerticesNonCrossing(
+        vertexSelectionMode.clickedVertices,
+      );
       setPendingVertexSelection({
         vertices: sorted,
         editingData: vertexSelectionMode.editingData,
@@ -3674,7 +4198,6 @@ const App: React.FC = () => {
     setVertexSelectionMode(null);
     setHallDefinitionMode(true);
   }, [sortVerticesNonCrossing, vertexSelectionMode]);
-
 
   const handleCancelVertexSelection = useCallback(() => {
     if (vertexSelectionMode?.editingData) {
@@ -3687,9 +4210,10 @@ const App: React.FC = () => {
     setHallDefinitionMode(true);
   }, [vertexSelectionMode]);
 
-
   useEffect(() => {
-    const handleMapCellClickForVertex = (e: CustomEvent<{ row: number; col: number }>) => {
+    const handleMapCellClickForVertex = (
+      e: CustomEvent<{ row: number; col: number }>,
+    ) => {
       if (!vertexSelectionMode) return;
 
       const { row, col } = e.detail;
@@ -3697,15 +4221,17 @@ const App: React.FC = () => {
       setVertexSelectionMode((prev) => {
         if (!prev) return prev;
 
-
-        const existingIndex = prev.clickedVertices.findIndex((v) => v.row === row && v.col === col);
+        const existingIndex = prev.clickedVertices.findIndex(
+          (v) => v.row === row && v.col === col,
+        );
         if (existingIndex !== -1) {
           return {
             ...prev,
-            clickedVertices: prev.clickedVertices.filter((_, i) => i !== existingIndex),
+            clickedVertices: prev.clickedVertices.filter(
+              (_, i) => i !== existingIndex,
+            ),
           };
         }
-
 
         if (prev.clickedVertices.length >= 6) {
           return prev;
@@ -3718,21 +4244,32 @@ const App: React.FC = () => {
       });
     };
 
-    window.addEventListener('mapCellClick', handleMapCellClickForVertex as EventListener);
+    window.addEventListener(
+      "mapCellClick",
+      handleMapCellClickForVertex as EventListener,
+    );
     return () => {
-      window.removeEventListener('mapCellClick', handleMapCellClickForVertex as EventListener);
+      window.removeEventListener(
+        "mapCellClick",
+        handleMapCellClickForVertex as EventListener,
+      );
     };
   }, [vertexSelectionMode]);
 
-
   const handleStartCellSelection = useCallback(
-    (type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual', editingData?: unknown) => {
-      setCellSelectionMode({ type, clickedCells: [], editingBlockData: editingData });
+    (
+      type: "corner" | "multiCorner" | "rangeStart" | "individual",
+      editingData?: unknown,
+    ) => {
+      setCellSelectionMode({
+        type,
+        clickedCells: [],
+        editingBlockData: editingData,
+      });
       setBlockDefinitionMode(false);
     },
     [],
   );
-
 
   const handleConfirmCellSelection = useCallback(() => {
     if (cellSelectionMode) {
@@ -3746,11 +4283,10 @@ const App: React.FC = () => {
     setBlockDefinitionMode(true);
   }, [cellSelectionMode]);
 
-
   const handleCancelCellSelection = useCallback(() => {
     if (cellSelectionMode?.editingBlockData) {
       setPendingCellSelection({
-        type: 'cancelled',
+        type: "cancelled",
         cells: [],
         editingData: cellSelectionMode.editingBlockData,
       });
@@ -3759,9 +4295,10 @@ const App: React.FC = () => {
     setBlockDefinitionMode(true);
   }, [cellSelectionMode]);
 
-
   useEffect(() => {
-    const handleMapCellClick = (e: CustomEvent<{ row: number; col: number }>) => {
+    const handleMapCellClick = (
+      e: CustomEvent<{ row: number; col: number }>,
+    ) => {
       if (!cellSelectionMode) return;
 
       const { row, col } = e.detail;
@@ -3769,15 +4306,17 @@ const App: React.FC = () => {
       setCellSelectionMode((prev) => {
         if (!prev) return prev;
 
-
-        const existingIndex = prev.clickedCells.findIndex((c) => c.row === row && c.col === col);
+        const existingIndex = prev.clickedCells.findIndex(
+          (c) => c.row === row && c.col === col,
+        );
         if (existingIndex >= 0) {
           return {
             ...prev,
-            clickedCells: prev.clickedCells.filter((_, i) => i !== existingIndex),
+            clickedCells: prev.clickedCells.filter(
+              (_, i) => i !== existingIndex,
+            ),
           };
         }
-
 
         return {
           ...prev,
@@ -3786,8 +4325,15 @@ const App: React.FC = () => {
       });
     };
 
-    window.addEventListener('mapCellClick', handleMapCellClick as EventListener);
-    return () => window.removeEventListener('mapCellClick', handleMapCellClick as EventListener);
+    window.addEventListener(
+      "mapCellClick",
+      handleMapCellClick as EventListener,
+    );
+    return () =>
+      window.removeEventListener(
+        "mapCellClick",
+        handleMapCellClick as EventListener,
+      );
   }, [cellSelectionMode]);
 
   const TabButton: React.FC<{
@@ -3840,12 +4386,12 @@ const App: React.FC = () => {
         onPointerLeave={handlePointerUp}
         className={`px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 whitespace-nowrap ${
           activeTab === tab
-            ? 'bg-blue-600 text-white'
-            : 'text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+            ? "bg-blue-600 text-white"
+            : "text-slate-600 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700"
         }`}
       >
-        {label}{' '}
-        {typeof count !== 'undefined' && (
+        {label}{" "}
+        {typeof count !== "undefined" && (
           <span className="text-xs bg-slate-200 dark:text-slate-700 rounded-full px-2 py-0.5 ml-1">
             {count}
           </span>
@@ -3857,9 +4403,12 @@ const App: React.FC = () => {
   const executeColumnItems = useMemo(() => {
     if (!activeEventName) return [];
     const currentEventDate = activeEventDate;
-    const executeIds = executeModeItems[activeEventName]?.[currentEventDate] || [];
+    const executeIds =
+      executeModeItems[activeEventName]?.[currentEventDate] || [];
     const itemsMap = new Map(items.map((item) => [item.id, item]));
-    return executeIds.map((id) => itemsMap.get(id)).filter(Boolean) as ShoppingItem[];
+    return executeIds
+      .map((id) => itemsMap.get(id))
+      .filter(Boolean) as ShoppingItem[];
   }, [activeEventName, activeTab, executeModeItems, items, eventDates]);
 
   useEffect(() => {
@@ -3883,14 +4432,15 @@ const App: React.FC = () => {
 
     const mode = dayModes[activeEventName]?.[currentEventDate];
 
-    if (mode === 'execute') {
-      if (sortState === 'Manual') {
+    if (mode === "execute") {
+      if (sortState === "Manual") {
         return executeColumnItems;
       }
-      const filterStatus = sortState as Exclude<SortState, 'Manual'>;
-      return executeColumnItems.filter((item) => matchesPurchaseStatusFilter(item, filterStatus));
+      const filterStatus = sortState as Exclude<SortState, "Manual">;
+      return executeColumnItems.filter((item) =>
+        matchesPurchaseStatusFilter(item, filterStatus),
+      );
     }
-
 
     return itemsForTab;
   }, [
@@ -3911,10 +4461,12 @@ const App: React.FC = () => {
   const temporaryVisibleItems = useMemo(() => {
     if (!activeEventName) return [];
     const mode = dayModes[activeEventName]?.[activeEventDate];
-    if (mode !== 'execute' || sortState === 'Manual') return [];
+    if (mode !== "execute" || sortState === "Manual") return [];
 
     return executeColumnItems.filter(
-      (item) => recentlyChangedItemIds.has(item.id) && !baseFilteredItemIds.has(item.id),
+      (item) =>
+        recentlyChangedItemIds.has(item.id) &&
+        !baseFilteredItemIds.has(item.id),
     );
   }, [
     activeEventDate,
@@ -3927,7 +4479,10 @@ const App: React.FC = () => {
   ]);
 
   const temporaryVisibleCount = temporaryVisibleItems.length;
-  const limitedCounts = useMemo(() => getLimitedPurchaseCounts(baseFilteredItems), [baseFilteredItems]);
+  const limitedCounts = useMemo(
+    () => getLimitedPurchaseCounts(baseFilteredItems),
+    [baseFilteredItems],
+  );
 
   const sortDisplayLabel = useMemo(() => {
     const buildTemporaryLabel = (baseLabel: string): string =>
@@ -3935,27 +4490,35 @@ const App: React.FC = () => {
         ? `${baseLabel}\uFF08\u4E00\u6642\u8868\u793A${temporaryVisibleCount}\u4EF6\uFF09`
         : baseLabel;
 
-    if (sortState !== 'LimitedPurchase') {
+    if (sortState !== "LimitedPurchase") {
       return buildTemporaryLabel(sortLabels[sortState]);
     }
 
     const details = [
-      limitedCounts.missing > 0 ? `\u672A\u5165\u529B${limitedCounts.missing}` : null,
+      limitedCounts.missing > 0
+        ? `\u672A\u5165\u529B${limitedCounts.missing}`
+        : null,
       temporaryVisibleCount > 0
         ? `\u4E00\u6642\u8868\u793A${temporaryVisibleCount}`
         : null,
     ].filter(Boolean);
 
     return details.length > 0
-      ? `\u9650\u6570 ${limitedCounts.total}\u4EF6\uFF08${details.join('\u30FB')}\uFF09`
+      ? `\u9650\u6570 ${limitedCounts.total}\u4EF6\uFF08${details.join("\u30FB")}\uFF09`
       : `\u9650\u6570 ${limitedCounts.total}\u4EF6`;
-  }, [limitedCounts.missing, limitedCounts.total, sortState, temporaryVisibleCount]);
+  }, [
+    limitedCounts.missing,
+    limitedCounts.total,
+    sortState,
+    temporaryVisibleCount,
+  ]);
 
   const visibleItemIds = useMemo(() => {
     const currentEventDate = activeEventDate;
-    if (!activeEventName) return new Set(baseFilteredItems.map((item) => item.id));
+    if (!activeEventName)
+      return new Set(baseFilteredItems.map((item) => item.id));
     const mode = dayModes[activeEventName]?.[currentEventDate];
-    if (mode !== 'execute' || sortState === 'Manual') {
+    if (mode !== "execute" || sortState === "Manual") {
       return new Set(baseFilteredItems.map((item) => item.id));
     }
 
@@ -3963,12 +4526,19 @@ const App: React.FC = () => {
       ...baseFilteredItems.map((item) => item.id),
       ...temporaryVisibleItems.map((item) => item.id),
     ]);
-  }, [activeEventDate, activeEventName, baseFilteredItems, dayModes, sortState, temporaryVisibleItems]);
+  }, [
+    activeEventDate,
+    activeEventName,
+    baseFilteredItems,
+    dayModes,
+    sortState,
+    temporaryVisibleItems,
+  ]);
 
   const visibleItems = useMemo(() => {
     if (!activeEventName) return currentTabItems;
     const mode = dayModes[activeEventName]?.[activeEventDate];
-    if (mode === 'execute') {
+    if (mode === "execute") {
       return executeColumnItems.filter((item) => visibleItemIds.has(item.id));
     }
     return baseFilteredItems;
@@ -3982,10 +4552,12 @@ const App: React.FC = () => {
     visibleItemIds,
   ]);
 
-
-
   const searchMatches = useMemo(() => {
-    if (!searchKeyword.trim() || !activeEventName || !eventDates.includes(activeTab)) {
+    if (
+      !searchKeyword.trim() ||
+      !activeEventName ||
+      !eventDates.includes(activeTab)
+    ) {
       return [];
     }
 
@@ -4005,7 +4577,6 @@ const App: React.FC = () => {
     return matches;
   }, [searchKeyword, activeEventName, activeTab, currentTabItems, eventDates]);
 
-
   useEffect(() => {
     if (searchKeyword.trim()) {
       if (searchMatches.length > 0) {
@@ -4020,15 +4591,14 @@ const App: React.FC = () => {
     }
   }, [searchKeyword, searchMatches]);
 
-
   useEffect(() => {
     setCurrentSearchIndex(-1);
     setHighlightedItemId(null);
   }, [activeTab]);
 
-
   const duplicateCircleItemIds = useMemo(() => {
-    if (!activeEventName || !eventDates.includes(activeTab)) return new Set<string>();
+    if (!activeEventName || !eventDates.includes(activeTab))
+      return new Set<string>();
     const itemsForTab = currentTabItems;
     const circleCountMap = new Map<string, number>();
     const circleItemIdsMap = new Map<string, string[]>();
@@ -4046,7 +4616,6 @@ const App: React.FC = () => {
       }
     });
 
-
     const duplicateIds = new Set<string>();
     circleCountMap.forEach((count, circle) => {
       if (count > 1) {
@@ -4058,50 +4627,68 @@ const App: React.FC = () => {
     return duplicateIds;
   }, [activeEventName, activeTab, currentTabItems, eventDates]);
 
-
   const availableBlocks = useMemo(() => {
     if (!activeEventName) return [];
     const currentEventDate = activeEventDate;
-    const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-    const candidateItems = currentTabItems.filter((item) => !executeIds.has(item.id));
-    const blocks = new Set(candidateItems.map((item) => item.block).filter(Boolean));
+    const executeIds = new Set(
+      executeModeItems[activeEventName]?.[currentEventDate] || [],
+    );
+    const candidateItems = currentTabItems.filter(
+      (item) => !executeIds.has(item.id),
+    );
+    const blocks = new Set(
+      candidateItems.map((item) => item.block).filter(Boolean),
+    );
     return Array.from(blocks).sort((a, b) => {
       const numA = Number(a);
       const numB = Number(b);
       if (!isNaN(numA) && !isNaN(numB)) {
         return numA - numB;
       }
-      return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
+      return a.localeCompare(b, "ja", { numeric: true, sensitivity: "base" });
     });
-  }, [activeEventName, activeTab, executeModeItems, currentTabItems, eventDates]);
+  }, [
+    activeEventName,
+    activeTab,
+    executeModeItems,
+    currentTabItems,
+    eventDates,
+  ]);
 
   const allBlocksForHallDefinition = useMemo(() => {
     if (!activeEventName) return [];
-    const blocks = new Set(currentTabItems.map((item) => item.block).filter(Boolean));
+    const blocks = new Set(
+      currentTabItems.map((item) => item.block).filter(Boolean),
+    );
     return Array.from(blocks).sort((a, b) => {
       const numA = Number(a);
       const numB = Number(b);
       if (!isNaN(numA) && !isNaN(numB)) {
         return numA - numB;
       }
-      return a.localeCompare(b, 'ja', { numeric: true, sensitivity: 'base' });
+      return a.localeCompare(b, "ja", { numeric: true, sensitivity: "base" });
     });
   }, [activeEventName, currentTabItems]);
 
   const currentMaplessHalls = useMemo(() => {
     if (!activeEventName || !activeEventDate) return [];
-    return hallDefinitions[activeEventName]?.[getMaplessKey(activeEventDate)] || [];
+    return (
+      hallDefinitions[activeEventName]?.[getMaplessKey(activeEventDate)] || []
+    );
   }, [activeEventName, activeEventDate, hallDefinitions]);
 
   const candidateColumnItems = useMemo(() => {
     if (!activeEventName) return [];
     const currentEventDate = activeEventDate;
-    const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+    const executeIds = new Set(
+      executeModeItems[activeEventName]?.[currentEventDate] || [],
+    );
     let filtered = currentTabItems.filter((item) => !executeIds.has(item.id));
 
-
     if (selectedBlockFilters.size > 0) {
-      filtered = filtered.filter((item) => selectedBlockFilters.has(item.block));
+      filtered = filtered.filter((item) =>
+        selectedBlockFilters.has(item.block),
+      );
     }
 
     if (candidateNumberSortDirection !== null) {
@@ -4109,15 +4696,15 @@ const App: React.FC = () => {
     }
 
     return [...filtered].sort((a, b) => {
-      const blockComparison = a.block.localeCompare(b.block, 'ja', {
+      const blockComparison = a.block.localeCompare(b.block, "ja", {
         numeric: true,
-        sensitivity: 'base',
+        sensitivity: "base",
       });
       if (blockComparison !== 0) return blockComparison;
 
-      return a.number.localeCompare(b.number, 'ja', {
+      return a.number.localeCompare(b.number, "ja", {
         numeric: true,
-        sensitivity: 'base',
+        sensitivity: "base",
       });
     });
   }, [
@@ -4130,16 +4717,17 @@ const App: React.FC = () => {
     candidateNumberSortDirection,
   ]);
 
-
   const visibleSearchMatches = useMemo(() => {
     if (searchMatches.length === 0) return [];
 
     const currentEventDate = activeEventDate;
-    const mode = activeEventName ? dayModes[activeEventName]?.[currentEventDate] : undefined;
+    const mode = activeEventName
+      ? dayModes[activeEventName]?.[currentEventDate]
+      : undefined;
 
     let visibleItemIds: Set<string>;
 
-    if (mode === 'execute') {
+    if (mode === "execute") {
       visibleItemIds = new Set(visibleItems.map((item) => item.id));
     } else {
       const allVisibleIds = new Set([
@@ -4161,15 +4749,13 @@ const App: React.FC = () => {
     candidateColumnItems,
   ]);
 
-
   const handleSearchNext = useCallback(() => {
     if (!searchKeyword.trim() || visibleSearchMatches.length === 0) {
       if (searchMatches.length > 0 && visibleSearchMatches.length === 0) {
-        alert('現在の絞り込み条件では一致する項目がありません。');
+        alert("現在の絞り込み条件では一致する項目がありません。");
       }
       return;
     }
-
 
     const startIndex = currentSearchIndex === -1 ? -1 : currentSearchIndex;
     const nextIndex = (startIndex + 1) % visibleSearchMatches.length;
@@ -4178,39 +4764,58 @@ const App: React.FC = () => {
     const nextItemId = visibleSearchMatches[nextIndex];
     setHighlightedItemId(nextItemId);
 
-
     setTimeout(() => {
       const element = document.querySelector(`[data-item-id="${nextItemId}"]`);
       if (element) {
-        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }, 100);
   }, [searchKeyword, visibleSearchMatches, currentSearchIndex, searchMatches]);
 
-
   const blocksWithPriorityRemarks = useMemo(() => {
     if (!activeEventName) return new Set<string>();
     const currentEventDate = activeEventDate;
-    const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
-    const candidateItems = currentTabItems.filter((item) => !executeIds.has(item.id));
+    const executeIds = new Set(
+      executeModeItems[activeEventName]?.[currentEventDate] || [],
+    );
+    const candidateItems = currentTabItems.filter(
+      (item) => !executeIds.has(item.id),
+    );
 
     const blocksWithPriority = new Set<string>();
     candidateItems.forEach((item) => {
-      if (item.remarks && (item.remarks.includes('優先') || item.remarks.includes('委託無'))) {
+      if (
+        item.remarks &&
+        (item.remarks.includes("優先") || item.remarks.includes("委託無"))
+      ) {
         blocksWithPriority.add(item.block);
       }
     });
 
     return blocksWithPriority;
-  }, [activeEventName, activeTab, executeModeItems, currentTabItems, eventDates]);
-
+  }, [
+    activeEventName,
+    activeTab,
+    executeModeItems,
+    currentTabItems,
+    eventDates,
+  ]);
 
   const hasCandidateSelection = useMemo(() => {
-    if (!activeEventName || currentMode !== 'edit' || selectedItemIds.size === 0) return false;
+    if (
+      !activeEventName ||
+      currentMode !== "edit" ||
+      selectedItemIds.size === 0
+    )
+      return false;
     const currentEventDate = activeEventDate;
-    const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+    const executeIds = new Set(
+      executeModeItems[activeEventName]?.[currentEventDate] || [],
+    );
     const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
-    return selectedItems.some((item) => currentTabItems.includes(item) && !executeIds.has(item.id));
+    return selectedItems.some(
+      (item) => currentTabItems.includes(item) && !executeIds.has(item.id),
+    );
   }, [
     activeEventName,
     activeTab,
@@ -4221,14 +4826,22 @@ const App: React.FC = () => {
     currentTabItems,
     eventDates,
   ]);
-
 
   const hasExecuteSelection = useMemo(() => {
-    if (!activeEventName || currentMode !== 'edit' || selectedItemIds.size === 0) return false;
+    if (
+      !activeEventName ||
+      currentMode !== "edit" ||
+      selectedItemIds.size === 0
+    )
+      return false;
     const currentEventDate = activeEventDate;
-    const executeIds = new Set(executeModeItems[activeEventName]?.[currentEventDate] || []);
+    const executeIds = new Set(
+      executeModeItems[activeEventName]?.[currentEventDate] || [],
+    );
     const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
-    return selectedItems.some((item) => currentTabItems.includes(item) && executeIds.has(item.id));
+    return selectedItems.some(
+      (item) => currentTabItems.includes(item) && executeIds.has(item.id),
+    );
   }, [
     activeEventName,
     activeTab,
@@ -4239,7 +4852,6 @@ const App: React.FC = () => {
     currentTabItems,
     eventDates,
   ]);
-
 
   const showMoveButtons =
     (hasCandidateSelection && !hasExecuteSelection) ||
@@ -4269,14 +4881,20 @@ const App: React.FC = () => {
         currentMode={currentMode}
         currentSearchIndex={currentSearchIndex}
         DEFAULT_OUTLINE_STYLE={DEFAULT_OUTLINE_STYLE}
-        DEFAULT_PURCHASE_STATUS_CONTROL_MODE={DEFAULT_PURCHASE_STATUS_CONTROL_MODE}
+        DEFAULT_PURCHASE_STATUS_CONTROL_MODE={
+          DEFAULT_PURCHASE_STATUS_CONTROL_MODE
+        }
         DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY={
           DEFAULT_SKIP_LIMITED_PURCHASE_FOR_SINGLE_QUANTITY
         }
         DEFAULT_UI_VISIBILITY={DEFAULT_UI_VISIBILITY}
         disablePriceUndefinedCheck={disablePriceUndefinedCheck}
-        disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
-        skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
+        disableLimitedPurchaseQuantityCheck={
+          disableLimitedPurchaseQuantityCheck
+        }
+        skipLimitedPurchaseForSingleQuantity={
+          skipLimitedPurchaseForSingleQuantity
+        }
         postEventDistributionCheckEnabled={postEventDistributionCheckEnabled}
         eventDates={eventDates}
         executeSpaceGroupingEnabled={executeSpaceGroupingEnabled}
@@ -4339,9 +4957,15 @@ const App: React.FC = () => {
         setMapTabMenuPosition={setMapTabMenuPosition}
         setMapViewActive={setMapViewActive}
         setDisablePriceUndefinedCheck={setDisablePriceUndefinedCheck}
-        setDisableLimitedPurchaseQuantityCheck={setDisableLimitedPurchaseQuantityCheck}
-        setSkipLimitedPurchaseForSingleQuantity={setSkipLimitedPurchaseForSingleQuantity}
-        setPostEventDistributionCheckEnabled={setPostEventDistributionCheckEnabled}
+        setDisableLimitedPurchaseQuantityCheck={
+          setDisableLimitedPurchaseQuantityCheck
+        }
+        setSkipLimitedPurchaseForSingleQuantity={
+          setSkipLimitedPurchaseForSingleQuantity
+        }
+        setPostEventDistributionCheckEnabled={
+          setPostEventDistributionCheckEnabled
+        }
         setNumberCellOutlineStyle={setNumberCellOutlineStyle}
         setPurchaseStatusControlMode={setPurchaseStatusControlMode}
         setSearchKeyword={setSearchKeyword}
@@ -4369,10 +4993,9 @@ const App: React.FC = () => {
         visibleSearchMatches={visibleSearchMatches}
       />
 
-
       {rawHideSomething &&
         activeEventName &&
-        (currentMode === 'focus' || currentMode === 'execute') && (
+        (currentMode === "focus" || currentMode === "execute") && (
           <button
             onClick={() => {
               setUiVisibilityOverride((prev) => !prev);
@@ -4380,11 +5003,13 @@ const App: React.FC = () => {
             }}
             className={`fixed left-3 top-3 z-[110] w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all touch-manipulation select-none ${
               uiVisibilityOverride
-                ? 'bg-blue-600 text-white hover:bg-blue-700'
-                : 'bg-white/80 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-600 backdrop-blur-sm border border-slate-200 dark:border-slate-600'
+                ? "bg-blue-600 text-white hover:bg-blue-700"
+                : "bg-white/80 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-600 backdrop-blur-sm border border-slate-200 dark:border-slate-600"
             }`}
-            title={uiVisibilityOverride ? '自動表示に戻す' : '画面要素をすべて表示'}
-            style={{ WebkitTapHighlightColor: 'transparent' }}
+            title={
+              uiVisibilityOverride ? "自動表示に戻す" : "画面要素をすべて表示"
+            }
+            style={{ WebkitTapHighlightColor: "transparent" }}
             type="button"
           >
             {uiVisibilityOverride ? (
@@ -4447,8 +5072,12 @@ const App: React.FC = () => {
         currentMapTabViewport={currentMapTabViewport}
         currentMode={currentMode}
         disablePriceUndefinedCheck={disablePriceUndefinedCheck}
-        disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
-        skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
+        disableLimitedPurchaseQuantityCheck={
+          disableLimitedPurchaseQuantityCheck
+        }
+        skipLimitedPurchaseForSingleQuantity={
+          skipLimitedPurchaseForSingleQuantity
+        }
         postEventDistributionCheckEnabled={postEventDistributionCheckEnabled}
         duplicateCircleItemIds={duplicateCircleItemIds}
         eventDates={eventDates}
@@ -4468,10 +5097,16 @@ const App: React.FC = () => {
         handleAddItemFromFocusMode={handleAddItemFromFocusMode}
         handleAddNewItemFromMap={handleAddNewItemFromMap}
         handleAddToExecuteListFromMap={handleAddToExecuteListFromMap}
-        handleAddToExecuteListFromMapAtPosition={handleAddToExecuteListFromMapAtPosition}
+        handleAddToExecuteListFromMapAtPosition={
+          handleAddToExecuteListFromMapAtPosition
+        }
         handleBatchAddToExecuteListFromMap={handleBatchAddToExecuteListFromMap}
-        handleBatchAddToExecuteListFromMapAtPosition={handleBatchAddToExecuteListFromMapAtPosition}
-        handleBatchRemoveFromExecuteListFromMap={handleBatchRemoveFromExecuteListFromMap}
+        handleBatchAddToExecuteListFromMapAtPosition={
+          handleBatchAddToExecuteListFromMapAtPosition
+        }
+        handleBatchRemoveFromExecuteListFromMap={
+          handleBatchRemoveFromExecuteListFromMap
+        }
         handleBulkAdd={handleBulkAdd}
         handleBulkStatusChange={handleBulkStatusChange}
         handleCandidateNumberSort={handleCandidateNumberSort}
@@ -4485,7 +5120,9 @@ const App: React.FC = () => {
         handleEditRequest={handleEditRequest}
         handleExecuteItemUpdate={handleExecuteItemUpdate}
         handleExecuteSpaceGroupOrderChange={handleExecuteSpaceGroupOrderChange}
-        handleExecuteToggleAllSpaceCollapse={handleExecuteToggleAllSpaceCollapse}
+        handleExecuteToggleAllSpaceCollapse={
+          handleExecuteToggleAllSpaceCollapse
+        }
         handleExecuteToggleSpaceCollapse={handleExecuteToggleSpaceCollapse}
         handleExportEvent={handleExportEvent}
         handleFocusMapRotationAngleChange={handleFocusMapRotationAngleChange}
@@ -4503,7 +5140,9 @@ const App: React.FC = () => {
         handleRemoveFromExecuteColumn={handleRemoveFromExecuteColumn}
         handleRemoveFromExecuteListFromMap={handleRemoveFromExecuteListFromMap}
         handleRenameEvent={handleRenameEvent}
-        handleReorderExecuteListByHallOrder={handleReorderExecuteListByHallOrder}
+        handleReorderExecuteListByHallOrder={
+          handleReorderExecuteListByHallOrder
+        }
         handleSelectEvent={handleSelectEvent}
         handleSelectItem={handleSelectItem}
         handleSelectSpaceGroupForRange={handleSelectSpaceGroupForRange}
@@ -4558,7 +5197,9 @@ const App: React.FC = () => {
         items={items}
         getHallsForDate={getHallsForDate}
         handleUpdateItem={handleUpdateItem}
-        handleUpdateHallOrderForPriorityChangeFromEdit={handleUpdateHallOrderForPriorityChangeFromEdit}
+        handleUpdateHallOrderForPriorityChangeFromEdit={
+          handleUpdateHallOrderForPriorityChangeFromEdit
+        }
         setEditDialogItem={setEditDialogItem}
         itemToDelete={itemToDelete}
         handleConfirmDelete={handleConfirmDelete}
@@ -4610,9 +5251,13 @@ const App: React.FC = () => {
         setGlobalHallOrderPanelOpen={setGlobalHallOrderPanelOpen}
         globalHallOrderHalls={globalHallOrderHalls}
         globalHallOrderRouteSettings={globalHallOrderRouteSettings}
-        handleUpdateGlobalHallRouteSettings={handleUpdateGlobalHallRouteSettings}
+        handleUpdateGlobalHallRouteSettings={
+          handleUpdateGlobalHallRouteSettings
+        }
         getGlobalHallItemCount={getGlobalHallItemCount}
-        handleReorderExecuteListByHallOrder={handleReorderExecuteListByHallOrder}
+        handleReorderExecuteListByHallOrder={
+          handleReorderExecuteListByHallOrder
+        }
         hallDefinitionMode={hallDefinitionMode}
         setHallDefinitionMode={setHallDefinitionMode}
         setPendingVertexSelection={setPendingVertexSelection}
@@ -4678,11 +5323,3 @@ const App: React.FC = () => {
 };
 
 export default App;
-
-
-
-
-
-
-
-

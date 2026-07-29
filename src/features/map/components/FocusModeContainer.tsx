@@ -1,21 +1,21 @@
-import React, { useEffect, useMemo, useRef } from 'react';
-import FocusMode from '../../../components/FocusMode';
-import { buildMergedHallRouteSettings } from '../../../utils/mergedHallRouteSettings';
-import { buildItemRoutingSignature } from '../../../utils/hallGrouping';
-import { buildDayMapVisitLookupSignature } from '../../../utils/mapRoutingSignature';
+import React, { useEffect, useMemo, useRef } from "react";
+import FocusMode from "../../../components/FocusMode";
+import { buildMergedHallRouteSettings } from "../../../utils/mergedHallRouteSettings";
+import { buildItemRoutingSignature } from "../../../utils/hallGrouping";
+import { buildDayMapVisitLookupSignature } from "../../../utils/mapRoutingSignature";
 import {
   buildActiveHallDefinitionsStore,
   buildActiveHallRouteSettingsStore,
   buildHallDefinitionsStoreRoutingSignature,
   buildHallRouteSettingsStoreRoutingSignature,
-} from '../../../utils/hallRoutingSignature';
+} from "../../../utils/hallRoutingSignature";
 import type {
   ExecuteModeItems,
   PurchaseStatus,
   PurchaseStatusControlMode,
   ShoppingItem,
-} from '../../../types/item';
-import type { FocusModeSessionState } from '../../../types/focus';
+} from "../../../types/item";
+import type { FocusModeSessionState } from "../../../types/focus";
 import type {
   HallDefinition,
   HallDefinitionsStore,
@@ -23,8 +23,8 @@ import type {
   MapDataStore,
   NumberCellOutlineStyle,
   HallRouteSettings,
-} from '../../../types/map';
-import { getMaplessKey } from '../../../types/map';
+} from "../../../types/map";
+import { getMaplessKey } from "../../../types/map";
 
 type FocusModeContainerProps = {
   activeEventName: string | null;
@@ -36,11 +36,13 @@ type FocusModeContainerProps = {
   hallDefinitions: HallDefinitionsStore;
   hallRouteSettings: HallRouteSettingsStore;
   onUpdateItem: (item: ShoppingItem) => void;
-  onModeChange: (mode: 'edit' | 'execute', lastItemId?: string) => void;
-  layoutMode: 'pc' | 'smartphone';
-  onLayoutModeChange: (mode: 'pc' | 'smartphone') => void;
+  onModeChange: (mode: "edit" | "execute", lastItemId?: string) => void;
+  layoutMode: "pc" | "smartphone";
+  onLayoutModeChange: (mode: "pc" | "smartphone") => void;
   onMapVisibilityChange?: (isMapVisible: boolean) => void;
-  onAddItem?: (item: Omit<ShoppingItem, 'id'> & { purchaseStatus?: PurchaseStatus }) => void;
+  onAddItem?: (
+    item: Omit<ShoppingItem, "id"> & { purchaseStatus?: PurchaseStatus },
+  ) => void;
   onEditRequest?: (item: ShoppingItem) => void;
   onDeleteRequest?: (item: ShoppingItem) => void;
   appZoomLevel?: number;
@@ -84,12 +86,12 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   disablePriceUndefinedCheck,
   disableLimitedPurchaseQuantityCheck,
   skipLimitedPurchaseForSingleQuantity,
-  purchaseStatusControlMode = 'cycle',
+  purchaseStatusControlMode = "cycle",
   postEventDistributionCheckEnabled = true,
 }) => {
   // 現在表示中の日付（タブ名が日付と一致すればそれ、そうでなければ先頭日）
   const currentDay = useMemo(
-    () => (eventDates.includes(activeTab) ? activeTab : eventDates[0] || ''),
+    () => (eventDates.includes(activeTab) ? activeTab : eventDates[0] || ""),
     [activeTab, eventDates],
   );
 
@@ -109,7 +111,10 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   } | null>(null);
 
   const stableExecuteModeItemIds = useMemo(() => {
-    if (stableExecuteModeItemIdsRef.current?.signature === executeModeItemIdsSignature) {
+    if (
+      stableExecuteModeItemIdsRef.current?.signature ===
+      executeModeItemIdsSignature
+    ) {
       return stableExecuteModeItemIdsRef.current.ids;
     }
 
@@ -131,7 +136,9 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   } | null>(null);
 
   const focusRouteRelevantItems = useMemo(() => {
-    if (focusRouteRelevantItemsRef.current?.signature === focusRouteItemsSignature) {
+    if (
+      focusRouteRelevantItemsRef.current?.signature === focusRouteItemsSignature
+    ) {
       return focusRouteRelevantItemsRef.current.items;
     }
 
@@ -182,8 +189,8 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
   const focusMapDataStore = useMemo(() => {
     const activeMapTabName = hasMapTab ? mapTabName : null;
     const signature = JSON.stringify([
-      activeEventName || '',
-      activeMapTabName || '',
+      activeEventName || "",
+      activeMapTabName || "",
       activeDayMapVisitLookupSignature,
     ]);
 
@@ -225,7 +232,9 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
         ? hallDefinitions[activeEventName]?.[activeMapTabName] || []
         : [];
     const activeMaplessHalls: HallDefinition[] =
-      activeEventName && maplessKey ? hallDefinitions[activeEventName]?.[maplessKey] || [] : [];
+      activeEventName && maplessKey
+        ? hallDefinitions[activeEventName]?.[maplessKey] || []
+        : [];
 
     const signature = buildHallDefinitionsStoreRoutingSignature({
       activeEventName,
@@ -263,7 +272,9 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
         ? hallRouteSettings[activeEventName]?.[activeMapTabName]
         : undefined;
     const activeMaplessSettings: HallRouteSettings | undefined =
-      activeEventName && maplessKey ? hallRouteSettings[activeEventName]?.[maplessKey] : undefined;
+      activeEventName && maplessKey
+        ? hallRouteSettings[activeEventName]?.[maplessKey]
+        : undefined;
 
     const signature = buildHallRouteSettingsStoreRoutingSignature({
       activeEventName,
@@ -293,10 +304,12 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
     if (!activeEventName) return [];
 
     const activeMapTabName = hasMapTab ? mapTabName : null;
-    const activeMapHalls =
-      activeMapTabName ? hallDefinitions[activeEventName]?.[activeMapTabName] || [] : [];
-    const activeMaplessHalls =
-      maplessKey ? hallDefinitions[activeEventName]?.[maplessKey] || [] : [];
+    const activeMapHalls = activeMapTabName
+      ? hallDefinitions[activeEventName]?.[activeMapTabName] || []
+      : [];
+    const activeMaplessHalls = maplessKey
+      ? hallDefinitions[activeEventName]?.[maplessKey] || []
+      : [];
 
     return [...activeMapHalls, ...activeMaplessHalls];
   }, [activeEventName, hasMapTab, mapTabName, maplessKey, hallDefinitions]);
@@ -361,7 +374,9 @@ const FocusModeContainer: React.FC<FocusModeContainerProps> = ({
       numberCellOutlineStyle={numberCellOutlineStyle}
       disablePriceUndefinedCheck={disablePriceUndefinedCheck}
       disableLimitedPurchaseQuantityCheck={disableLimitedPurchaseQuantityCheck}
-      skipLimitedPurchaseForSingleQuantity={skipLimitedPurchaseForSingleQuantity}
+      skipLimitedPurchaseForSingleQuantity={
+        skipLimitedPurchaseForSingleQuantity
+      }
       purchaseStatusControlMode={purchaseStatusControlMode}
       postEventDistributionCheckEnabled={postEventDistributionCheckEnabled}
     />

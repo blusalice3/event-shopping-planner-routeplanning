@@ -1,7 +1,7 @@
-import type { ShoppingItem } from './item';
+import type { ShoppingItem } from "./item";
 
 export interface BorderStyle {
-  style: 'thin' | 'medium' | 'thick' | 'double' | 'none';
+  style: "thin" | "medium" | "thick" | "double" | "none";
   color: string;
 }
 
@@ -39,7 +39,7 @@ export interface NumberCellInfo {
 }
 
 export interface CellGroup {
-  type: 'range' | 'individual';
+  type: "range" | "individual";
   startRow?: number;
   startCol?: number;
   endRow?: number;
@@ -47,7 +47,7 @@ export interface CellGroup {
   cells?: { row: number; col: number }[];
 }
 
-export type NumberCellOutlineStyle = 'rounded' | 'square' | 'none' | 'dashed';
+export type NumberCellOutlineStyle = "rounded" | "square" | "none" | "dashed";
 
 export interface BlockDefinition {
   name: string;
@@ -187,10 +187,10 @@ export interface MapCellStateDetail {
 }
 
 export type MapCellState =
-  | 'default'
-  | 'hasItems'
-  | 'partialVisit'
-  | 'allVisit'
+  | "default"
+  | "hasItems"
+  | "partialVisit"
+  | "allVisit"
   | MapCellStateDetail;
 
 export interface MapDisplayCell {
@@ -224,8 +224,8 @@ export interface RouteSegment {
   toRow: number;
   toCol: number;
   path: { row: number; col: number }[];
-  fromPriority?: 'none' | 'priority' | 'highest';
-  toPriority?: 'none' | 'priority' | 'highest';
+  fromPriority?: "none" | "priority" | "highest";
+  toPriority?: "none" | "priority" | "highest";
   fromItemId?: string;
   toItemId?: string;
   fromOrder?: number;
@@ -243,7 +243,7 @@ export const ZOOM_LEVELS: number[] = [15, 30, 50, 75, 100, 125, 150];
 export const MIN_ZOOM = 15;
 export const MAX_ZOOM = 200;
 
-export const MAPLESS_HALL_KEY = '__mapless__';
+export const MAPLESS_HALL_KEY = "__mapless__";
 
 export function getMaplessKey(eventDate: string): string {
   return `${MAPLESS_HALL_KEY}:${eventDate}`;

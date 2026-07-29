@@ -1,12 +1,12 @@
-import type { ShoppingItem } from './item';
+import type { ShoppingItem } from "./item";
 
 /**
  * Result saved from the limited-purchase quantity input dialog.
  */
 export type LimitedPurchaseDialogResult =
-  | { kind: 'limited'; actual: number; planned: number }
-  | { kind: 'purchased'; planned: number }
-  | { kind: 'defer'; planned: number };
+  | { kind: "limited"; actual: number; planned: number }
+  | { kind: "purchased"; planned: number }
+  | { kind: "defer"; planned: number };
 
 /**
  * Context for one target in the bulk limited-purchase input flow.

@@ -1,4 +1,4 @@
-import LimitedPurchaseConfirmDialog from './LimitedPurchaseConfirmDialog';
+import LimitedPurchaseConfirmDialog from "./LimitedPurchaseConfirmDialog";
 
 type LimitedPurchaseExcessConfirmDialogProps = {
   isOpen: boolean;

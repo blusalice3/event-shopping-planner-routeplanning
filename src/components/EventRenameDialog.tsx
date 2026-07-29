@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect } from "react";
 
 interface EventRenameDialogProps {
   currentName: string;
@@ -30,7 +30,9 @@ const EventRenameDialog: React.FC<EventRenameDialogProps> = ({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-md w-full mx-4">
         <div className="p-6">
-          <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">即売会名を変更</h2>
+          <h2 className="text-xl font-bold text-slate-900 dark:text-white mb-4">
+            即売会名を変更
+          </h2>
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>

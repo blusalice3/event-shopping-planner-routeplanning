@@ -1,36 +1,39 @@
-import React from 'react';
-import type { NavigatorEntry } from '../types';
-import type { SpaceNavigatorActionResult } from '../SpaceNavigatorContext';
+import React from "react";
+import type { NavigatorEntry } from "../types";
+import type { SpaceNavigatorActionResult } from "../SpaceNavigatorContext";
 
 interface SpaceNavigatorActionDialogProps {
   entry: NavigatorEntry;
   result: SpaceNavigatorActionResult | null;
-  pendingIntent: 'set-current' | 'temporary' | 'inspect' | null;
+  pendingIntent: "set-current" | "temporary" | "inspect" | null;
   busy: boolean;
-  onChoose: (intent: 'set-current' | 'temporary' | 'inspect', confirmed?: boolean) => void;
+  onChoose: (
+    intent: "set-current" | "temporary" | "inspect",
+    confirmed?: boolean,
+  ) => void;
   onCancel: () => void;
 }
 
 const actions = [
   {
-    intent: 'set-current' as const,
-    label: '現在地として移動',
-    description: '以後の「次へ」と再開位置をここへ移します',
-    className: 'bg-indigo-600 text-white hover:bg-indigo-700',
+    intent: "set-current" as const,
+    label: "現在地として移動",
+    description: "以後の「次へ」と再開位置をここへ移します",
+    className: "bg-indigo-600 text-white hover:bg-indigo-700",
   },
   {
-    intent: 'temporary' as const,
-    label: '一時移動して操作',
-    description: '現在地は残したまま、購入状態などを変更できます',
+    intent: "temporary" as const,
+    label: "一時移動して操作",
+    description: "現在地は残したまま、購入状態などを変更できます",
     className:
-      'bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/60 dark:text-blue-100',
+      "bg-blue-100 text-blue-800 hover:bg-blue-200 dark:bg-blue-900/60 dark:text-blue-100",
   },
   {
-    intent: 'inspect' as const,
-    label: '内容だけ確認',
-    description: '現在地は残したまま、変更操作を無効にして表示します',
+    intent: "inspect" as const,
+    label: "内容だけ確認",
+    description: "現在地は残したまま、変更操作を無効にして表示します",
     className:
-      'bg-slate-100 text-slate-800 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-100',
+      "bg-slate-100 text-slate-800 hover:bg-slate-200 dark:bg-slate-700 dark:text-slate-100",
   },
 ];
 
@@ -42,7 +45,9 @@ export function SpaceNavigatorActionDialog({
   onChoose,
   onCancel,
 }: SpaceNavigatorActionDialogProps) {
-  const needsConfirmation = Boolean(result?.requiresConfirmation && pendingIntent);
+  const needsConfirmation = Boolean(
+    result?.requiresConfirmation && pendingIntent,
+  );
 
   return (
     <div
@@ -69,16 +74,18 @@ export function SpaceNavigatorActionDialog({
           {entry.label}
         </h2>
         <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-          {entry.circles.slice(0, 2).join('・')}
-          {entry.circles.length > 2 ? `・ほか${entry.circles.length - 2}件` : ''}
+          {entry.circles.slice(0, 2).join("・")}
+          {entry.circles.length > 2
+            ? `・ほか${entry.circles.length - 2}件`
+            : ""}
         </p>
 
         {result?.message && (
           <div
             className={`mt-4 rounded-lg border px-3 py-2 text-sm ${
               needsConfirmation
-                ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-100'
-                : 'border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-700 dark:bg-rose-950/60 dark:text-rose-100'
+                ? "border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-100"
+                : "border-rose-300 bg-rose-50 text-rose-900 dark:border-rose-700 dark:bg-rose-950/60 dark:text-rose-100"
             }`}
             role="alert"
           >
@@ -106,7 +113,9 @@ export function SpaceNavigatorActionDialog({
                 className={`min-h-12 w-full rounded-lg px-4 py-3 text-left transition-colors disabled:opacity-50 ${action.className}`}
               >
                 <span className="block font-bold">{action.label}</span>
-                <span className="mt-0.5 block text-xs opacity-80">{action.description}</span>
+                <span className="mt-0.5 block text-xs opacity-80">
+                  {action.description}
+                </span>
               </button>
             ))
           )}

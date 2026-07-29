@@ -3,15 +3,15 @@ import type {
   EventMetadata,
   ExecuteModeItems,
   ShoppingItem,
-} from '../../types/item';
-import { extractEventDates } from '../../utils/eventDates';
-import { getItemKey } from '../../utils/itemComparison';
-import { resolveBulkAddTab } from './uiOrchestration';
+} from "../../types/item";
+import { extractEventDates } from "../../utils/eventDates";
+import { getItemKey } from "../../utils/itemComparison";
+import { resolveBulkAddTab } from "./uiOrchestration";
 
 export type BulkAddLayoutInfo = {
   itemKey: string;
   eventDate: string;
-  columnType: 'execute' | 'candidate';
+  columnType: "execute" | "candidate";
   order: number;
 };
 
@@ -19,7 +19,7 @@ export type BulkAddMetadata = {
   url?: string;
   sheetName?: string;
   layoutInfo?: BulkAddLayoutInfo[];
-  source?: 'spreadsheet' | 'app';
+  source?: "spreadsheet" | "app";
 };
 
 export type BulkAddUiPlan = {
@@ -28,8 +28,8 @@ export type BulkAddUiPlan = {
   nextActiveTab: string | null;
 };
 
-function resolveItemSource(metadata?: BulkAddMetadata): 'spreadsheet' | 'app' {
-  return metadata?.source ?? (metadata?.url ? 'spreadsheet' : 'app');
+function resolveItemSource(metadata?: BulkAddMetadata): "spreadsheet" | "app" {
+  return metadata?.source ?? (metadata?.url ? "spreadsheet" : "app");
 }
 
 export function hasBulkAddLayoutInfo(
@@ -39,17 +39,17 @@ export function hasBulkAddLayoutInfo(
 }
 
 export function buildBulkAddItems(
-  newItemsData: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[],
+  newItemsData: Omit<ShoppingItem, "id" | "purchaseStatus">[],
   metadata?: BulkAddMetadata,
 ): ShoppingItem[] {
   const itemSource = resolveItemSource(metadata);
-  const defaultProtectionLevel = itemSource === 'app' ? 'full' : 'none';
+  const defaultProtectionLevel = itemSource === "app" ? "full" : "none";
 
   return newItemsData.map((itemData) => ({
     id: crypto.randomUUID(),
     ...itemData,
     quantity: itemData.quantity ?? 1,
-    purchaseStatus: 'None',
+    purchaseStatus: "None",
     source: itemSource,
     protectionLevel: defaultProtectionLevel,
   }));
@@ -70,7 +70,9 @@ export function buildLayoutAppliedEventItems(
   const sortedItemsByDate: ShoppingItem[] = [];
 
   const layoutItemKeys = new Set(layoutInfo.map((layout) => layout.itemKey));
-  const otherItems = newItems.filter((item) => !layoutItemKeys.has(getItemKey(item)));
+  const otherItems = newItems.filter(
+    (item) => !layoutItemKeys.has(getItemKey(item)),
+  );
   const otherItemsByDate: Record<string, ShoppingItem[]> = {};
 
   otherItems.forEach((item) => {
@@ -82,13 +84,19 @@ export function buildLayoutAppliedEventItems(
 
   eventDatesForLayout.forEach((eventDate) => {
     const executeItemsForDate = layoutInfo
-      .filter((layout) => layout.eventDate === eventDate && layout.columnType === 'execute')
+      .filter(
+        (layout) =>
+          layout.eventDate === eventDate && layout.columnType === "execute",
+      )
       .sort((a, b) => a.order - b.order)
       .map((layout) => itemsMap.get(layout.itemKey))
       .filter(Boolean) as ShoppingItem[];
 
     const candidateItemsForDate = layoutInfo
-      .filter((layout) => layout.eventDate === eventDate && layout.columnType === 'candidate')
+      .filter(
+        (layout) =>
+          layout.eventDate === eventDate && layout.columnType === "candidate",
+      )
       .sort((a, b) => a.order - b.order)
       .map((layout) => itemsMap.get(layout.itemKey))
       .filter(Boolean) as ShoppingItem[];
@@ -112,28 +120,34 @@ export function buildLayoutAppliedEventItems(
   };
 }
 
-export function buildBulkAddEventMetadata(metadata?: BulkAddMetadata): EventMetadata | null {
+export function buildBulkAddEventMetadata(
+  metadata?: BulkAddMetadata,
+): EventMetadata | null {
   if (!metadata?.url) return null;
 
   return {
     spreadsheetUrl: metadata.url,
-    spreadsheetSheetName: metadata.sheetName || '',
+    spreadsheetSheetName: metadata.sheetName || "",
     lastImportDate: new Date().toISOString(),
   };
 }
 
-export function buildInitialDayModesForBulkAdd(newItems: ShoppingItem[]): DayModeState {
+export function buildInitialDayModesForBulkAdd(
+  newItems: ShoppingItem[],
+): DayModeState {
   const newEventDates = extractEventDates(newItems);
   const initialDayModes: DayModeState = {};
 
   newEventDates.forEach((date) => {
-    initialDayModes[date] = 'edit';
+    initialDayModes[date] = "edit";
   });
 
   return initialDayModes;
 }
 
-export function buildInitialExecuteItemsForBulkAdd(newItems: ShoppingItem[]): ExecuteModeItems {
+export function buildInitialExecuteItemsForBulkAdd(
+  newItems: ShoppingItem[],
+): ExecuteModeItems {
   const newEventDates = extractEventDates(newItems);
   const initialExecuteItems: ExecuteModeItems = {};
 
@@ -151,7 +165,9 @@ export function buildBulkAddUiPlan(
   existingEventItems: ShoppingItem[],
 ): BulkAddUiPlan {
   const nextActiveTab =
-    newItems.length > 0 ? resolveBulkAddTab(newItems, existingEventItems) : null;
+    newItems.length > 0
+      ? resolveBulkAddTab(newItems, existingEventItems)
+      : null;
 
   return {
     alertMessage: isNewEvent

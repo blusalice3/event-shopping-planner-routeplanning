@@ -1,12 +1,18 @@
-import React, { useState, useCallback, useMemo, useRef, useEffect } from 'react';
+import React, {
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+  useEffect,
+} from "react";
 import {
   BlockDetectionSettings,
   DEFAULT_BLOCK_DETECTION_SETTINGS,
   DayMapData,
   BlockDefinition,
   CellData,
-} from '../../types/map';
-import { parseMapFile } from '../../utils/xlsxMapParser';
+} from "../../types/map";
+import { parseMapFile } from "../../utils/xlsxMapParser";
 
 interface MapImportDialogProps {
   isOpen: boolean;
@@ -22,7 +28,7 @@ interface MapImportDialogProps {
 }
 
 // 設定のlocalStorageキー
-const SETTINGS_STORAGE_KEY = 'blockDetectionSettings';
+const SETTINGS_STORAGE_KEY = "blockDetectionSettings";
 
 const normalizeRotationAngle = (angle: number): number => {
   const normalized = Math.round(angle) % 360;
@@ -30,7 +36,9 @@ const normalizeRotationAngle = (angle: number): number => {
 };
 
 // 設定をlocalStorageから読み込む
-export function loadBlockDetectionSettings(eventName: string): BlockDetectionSettings | null {
+export function loadBlockDetectionSettings(
+  eventName: string,
+): BlockDetectionSettings | null {
   try {
     const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
     if (!stored) return null;
@@ -48,11 +56,13 @@ export function saveBlockDetectionSettings(
 ): void {
   try {
     const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    const all = stored ? (JSON.parse(stored) as Record<string, BlockDetectionSettings>) : {};
+    const all = stored
+      ? (JSON.parse(stored) as Record<string, BlockDetectionSettings>)
+      : {};
     all[eventName] = settings;
     localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(all));
   } catch (e) {
-    console.error('Failed to save block detection settings:', e);
+    console.error("Failed to save block detection settings:", e);
   }
 }
 
@@ -61,14 +71,14 @@ export function saveBlockDetectionSettings(
 function getBlockNameCategory(name: string): number {
   if (!name || name.length === 0) return 5;
   const ch = name.charCodeAt(0);
-  if (ch >= 0x41 && ch <= 0x5A) return 0; // A-Z
-  if (ch >= 0x61 && ch <= 0x7A) return 1; // a-z
-  if (ch >= 0x30A0 && ch <= 0x30FF) return 2; // カタカナ
-  if (ch >= 0x3040 && ch <= 0x309F) return 3; // ひらがな
+  if (ch >= 0x41 && ch <= 0x5a) return 0; // A-Z
+  if (ch >= 0x61 && ch <= 0x7a) return 1; // a-z
+  if (ch >= 0x30a0 && ch <= 0x30ff) return 2; // カタカナ
+  if (ch >= 0x3040 && ch <= 0x309f) return 3; // ひらがな
   if (
-    (ch >= 0x4E00 && ch <= 0x9FFF) ||
-    (ch >= 0x3400 && ch <= 0x4DBF) ||
-    (ch >= 0xF900 && ch <= 0xFAFF)
+    (ch >= 0x4e00 && ch <= 0x9fff) ||
+    (ch >= 0x3400 && ch <= 0x4dbf) ||
+    (ch >= 0xf900 && ch <= 0xfaff)
   )
     return 4; // 漢字
   return 5; // その他
@@ -85,7 +95,10 @@ function sortBlocksByCustomOrder(blocks: BlockDefinition[]): BlockDefinition[] {
       if (diff !== 0) return diff;
     }
     // 同一カテゴリ内はロケール順（数値対応）
-    return a.name.localeCompare(b.name, 'ja', { numeric: true, sensitivity: 'base' });
+    return a.name.localeCompare(b.name, "ja", {
+      numeric: true,
+      sensitivity: "base",
+    });
   });
 }
 
@@ -122,9 +135,9 @@ const MiniMapPreview: React.FC<MiniMapPreviewProps> = ({
       const cellSet = new Set<string>();
       if (block.cellGroups && block.cellGroups.length > 0) {
         block.cellGroups.forEach((group) => {
-          if (group.type === 'individual' && group.cells) {
+          if (group.type === "individual" && group.cells) {
             group.cells.forEach((c) => cellSet.add(`${c.row}-${c.col}`));
-          } else if (group.type === 'range') {
+          } else if (group.type === "range") {
             for (let r = group.startRow || 0; r <= (group.endRow || 0); r++) {
               for (let c = group.startCol || 0; c <= (group.endCol || 0); c++) {
                 cellSet.add(`${r}-${c}`);
@@ -139,7 +152,10 @@ const MiniMapPreview: React.FC<MiniMapPreviewProps> = ({
           }
         }
       }
-      result.set(block.name + '_' + block.startRow + '_' + block.startCol, cellSet);
+      result.set(
+        block.name + "_" + block.startRow + "_" + block.startCol,
+        cellSet,
+      );
     });
     return result;
   }, [blocks]);
@@ -148,7 +164,7 @@ const MiniMapPreview: React.FC<MiniMapPreviewProps> = ({
     const canvas = canvasRef.current;
     if (!canvas) return;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const CELL_SIZE = 3;
@@ -159,24 +175,30 @@ const MiniMapPreview: React.FC<MiniMapPreviewProps> = ({
     canvas.height = height;
 
     // 背景を白にクリア
-    ctx.fillStyle = '#ffffff';
+    ctx.fillStyle = "#ffffff";
     ctx.fillRect(0, 0, width, height);
 
     // セルの背景色を描画
     mapData.cells.forEach((cell) => {
       if (cell.backgroundColor) {
         ctx.fillStyle = cell.backgroundColor;
-        ctx.fillRect((cell.col - 1) * CELL_SIZE, (cell.row - 1) * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+        ctx.fillRect(
+          (cell.col - 1) * CELL_SIZE,
+          (cell.row - 1) * CELL_SIZE,
+          CELL_SIZE,
+          CELL_SIZE,
+        );
       }
     });
 
     // ブロックをハイライト
     blocks.forEach((block) => {
-      const blockKey = block.name + '_' + block.startRow + '_' + block.startCol;
+      const blockKey = block.name + "_" + block.startRow + "_" + block.startCol;
       const cellSet = blockCellSets.get(blockKey);
-      const isHighlighted = highlightBlockName === null || block.name === highlightBlockName;
+      const isHighlighted =
+        highlightBlockName === null || block.name === highlightBlockName;
       const alpha = isHighlighted ? 0.45 : 0.12;
-      const color = block.color || '#E3F2FD';
+      const color = block.color || "#E3F2FD";
 
       // 色をRGBに分解してalpha適用
       const r = parseInt(color.slice(1, 3), 16);
@@ -186,25 +208,32 @@ const MiniMapPreview: React.FC<MiniMapPreviewProps> = ({
 
       if (cellSet) {
         cellSet.forEach((key) => {
-          const [rowStr, colStr] = key.split('-');
+          const [rowStr, colStr] = key.split("-");
           const row = parseInt(rowStr, 10);
           const col = parseInt(colStr, 10);
-          ctx.fillRect((col - 1) * CELL_SIZE, (row - 1) * CELL_SIZE, CELL_SIZE, CELL_SIZE);
+          ctx.fillRect(
+            (col - 1) * CELL_SIZE,
+            (row - 1) * CELL_SIZE,
+            CELL_SIZE,
+            CELL_SIZE,
+          );
         });
       }
 
       // ハイライト中のブロックは枠線も描画（各構成領域ごとに個別の枠）
       if (highlightBlockName && block.name === highlightBlockName) {
-        ctx.strokeStyle = '#1976D2';
+        ctx.strokeStyle = "#1976D2";
         ctx.lineWidth = 2;
 
         if (block.cellGroups && block.cellGroups.length > 0) {
           // cellGroups がある場合は各グループごとにバウンディングボックスを計算して描画
           block.cellGroups.forEach((group) => {
-            let gMinRow = Infinity, gMinCol = Infinity;
-            let gMaxRow = 0, gMaxCol = 0;
+            let gMinRow = Infinity,
+              gMinCol = Infinity;
+            let gMaxRow = 0,
+              gMaxCol = 0;
 
-            if (group.type === 'range') {
+            if (group.type === "range") {
               gMinRow = group.startRow ?? block.startRow;
               gMinCol = group.startCol ?? block.startCol;
               gMaxRow = group.endRow ?? block.endRow;
@@ -242,12 +271,17 @@ const MiniMapPreview: React.FC<MiniMapPreviewProps> = ({
 
   return (
     <div>
-      <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">{sheetLabel}</p>
+      <p className="text-xs font-medium text-slate-500 dark:text-slate-400 mb-1">
+        {sheetLabel}
+      </p>
       <div
         className="border border-slate-200 dark:border-slate-600 rounded overflow-auto"
-        style={{ maxHeight: '200px' }}
+        style={{ maxHeight: "200px" }}
       >
-        <canvas ref={canvasRef} style={{ display: 'block', imageRendering: 'pixelated' }} />
+        <canvas
+          ref={canvasRef}
+          style={{ display: "block", imageRendering: "pixelated" }}
+        />
       </div>
     </div>
   );
@@ -269,11 +303,18 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
   const [isAccordionOpen, setIsAccordionOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
-  const [previewData, setPreviewData] = useState<Record<string, DayMapData> | null>(null);
-  const [previewSkippedSheets, setPreviewSkippedSheets] = useState<string[]>([]);
+  const [previewData, setPreviewData] = useState<Record<
+    string,
+    DayMapData
+  > | null>(null);
+  const [previewSkippedSheets, setPreviewSkippedSheets] = useState<string[]>(
+    [],
+  );
   const [highlightBlock, setHighlightBlock] = useState<string | null>(null);
-  const [activePreviewSheet, setActivePreviewSheet] = useState<string>('');
-  const [initialAngles, setInitialAngles] = useState<Record<string, number>>({});
+  const [activePreviewSheet, setActivePreviewSheet] = useState<string>("");
+  const [initialAngles, setInitialAngles] = useState<Record<string, number>>(
+    {},
+  );
 
   // ダイアログが開くときに設定をリセット
   useEffect(() => {
@@ -283,7 +324,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
       setPreviewSkippedSheets([]);
       setIsAccordionOpen(false);
       setHighlightBlock(null);
-      setActivePreviewSheet('');
+      setActivePreviewSheet("");
       setInitialAngles({});
     }
   }, [isOpen, savedSettings]);
@@ -291,7 +332,9 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
   const notifySkippedSheets = useCallback((skippedSheets: string[]) => {
     if (skippedSheets.length === 0) return;
     const uniqueSheets = Array.from(new Set(skippedSheets));
-    alert(`次のシートは解析に失敗したためスキップしました:\n${uniqueSheets.join('\n')}`);
+    alert(
+      `次のシートは解析に失敗したためスキップしました:\n${uniqueSheets.join("\n")}`,
+    );
   }, []);
 
   useEffect(() => {
@@ -302,7 +345,10 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
       let changed = false;
       const next = { ...prev };
       sheetNames.forEach((sheetName) => {
-        if (typeof next[sheetName] !== 'number' || Number.isNaN(next[sheetName])) {
+        if (
+          typeof next[sheetName] !== "number" ||
+          Number.isNaN(next[sheetName])
+        ) {
           next[sheetName] = 0;
           changed = true;
         }
@@ -332,12 +378,12 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
         const firstKey = Object.keys(parsedResult.data)[0];
         if (firstKey) setActivePreviewSheet(firstKey);
       } else {
-        setActivePreviewSheet('');
-        alert('マップデータの解析に失敗しました。');
+        setActivePreviewSheet("");
+        alert("マップデータの解析に失敗しました。");
       }
     } catch (error) {
-      console.error('Preview error:', error);
-      alert('プレビューに失敗しました。');
+      console.error("Preview error:", error);
+      alert("プレビューに失敗しました。");
     } finally {
       setIsPreviewing(false);
     }
@@ -364,26 +410,37 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
       notifySkippedSheets(skippedSheets);
 
       if (!data) {
-        alert('マップデータの解析に失敗しました。');
+        alert("マップデータの解析に失敗しました。");
         return;
       }
 
       const angleMap: Record<string, number> = {};
       Object.keys(data).forEach((sheetName) => {
         const rawAngle = initialAngles[sheetName];
-        const angle = typeof rawAngle === 'number' && Number.isFinite(rawAngle) ? rawAngle : 0;
+        const angle =
+          typeof rawAngle === "number" && Number.isFinite(rawAngle)
+            ? rawAngle
+            : 0;
         angleMap[sheetName] = normalizeRotationAngle(angle);
       });
       onImport(data, settings, angleMap);
     } catch (error) {
-      console.error('Import error:', error);
+      console.error("Import error:", error);
       alert(
-        `マップデータの取り込みに失敗しました: ${error instanceof Error ? error.message : '不明なエラー'}`,
+        `マップデータの取り込みに失敗しました: ${error instanceof Error ? error.message : "不明なエラー"}`,
       );
     } finally {
       setIsLoading(false);
     }
-  }, [file, settings, previewData, previewSkippedSheets, onImport, initialAngles, notifySkippedSheets]);
+  }, [
+    file,
+    settings,
+    previewData,
+    previewSkippedSheets,
+    onImport,
+    initialAngles,
+    notifySkippedSheets,
+  ]);
 
   // 初期値にリセット
   const handleResetSettings = useCallback(() => {
@@ -394,7 +451,10 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
 
   // 設定更新ヘルパー
   const updateSetting = useCallback(
-    <K extends keyof BlockDetectionSettings>(key: K, value: BlockDetectionSettings[K]) => {
+    <K extends keyof BlockDetectionSettings>(
+      key: K,
+      value: BlockDetectionSettings[K],
+    ) => {
       setSettings((prev) => ({ ...prev, [key]: value }));
       setPreviewData(null); // 設定変更したらプレビューをクリア
       setPreviewSkippedSheets([]);
@@ -403,7 +463,10 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
   );
 
   const updateCharType = useCallback(
-    (charType: keyof BlockDetectionSettings['allowedCharTypes'], value: boolean) => {
+    (
+      charType: keyof BlockDetectionSettings["allowedCharTypes"],
+      value: boolean,
+    ) => {
       setSettings((prev) => ({
         ...prev,
         allowedCharTypes: { ...prev.allowedCharTypes, [charType]: value },
@@ -429,12 +492,18 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
   // 全シートのブロック合計数
   const totalBlockCount = useMemo(() => {
     if (!previewData) return 0;
-    return Object.values(previewData).reduce((sum, d) => sum + d.blocks.length, 0);
+    return Object.values(previewData).reduce(
+      (sum, d) => sum + d.blocks.length,
+      0,
+    );
   }, [previewData]);
 
   // 現在の設定がデフォルトと同じか
   const isDefaultSettings = useMemo(() => {
-    return JSON.stringify(settings) === JSON.stringify(DEFAULT_BLOCK_DETECTION_SETTINGS);
+    return (
+      JSON.stringify(settings) ===
+      JSON.stringify(DEFAULT_BLOCK_DETECTION_SETTINGS)
+    );
   }, [settings]);
 
   if (!isOpen || !file) return null;
@@ -443,7 +512,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
       <div
         className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full mx-4 flex flex-col"
-        style={{ maxWidth: '640px', maxHeight: '90vh' }}
+        style={{ maxWidth: "640px", maxHeight: "90vh" }}
       >
         {/* ヘッダー */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex-shrink-0">
@@ -454,7 +523,12 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
             onClick={onClose}
             className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -471,7 +545,9 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
           <div className="flex items-center gap-2 text-sm text-slate-600 dark:text-slate-400">
             <span>📄</span>
             <span className="font-medium">{file.name}</span>
-            <span className="text-slate-400">({(file.size / 1024).toFixed(1)} KB)</span>
+            <span className="text-slate-400">
+              ({(file.size / 1024).toFixed(1)} KB)
+            </span>
           </div>
 
           {/* ===== 詳細設定アコーディオン ===== */}
@@ -489,7 +565,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                 )}
               </span>
               <svg
-                className={`w-4 h-4 transition-transform ${isAccordionOpen ? 'rotate-180' : ''}`}
+                className={`w-4 h-4 transition-transform ${isAccordionOpen ? "rotate-180" : ""}`}
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -517,7 +593,10 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       max={10}
                       value={settings.maxBlockNameLength}
                       onChange={(e) =>
-                        updateSetting('maxBlockNameLength', parseInt(e.target.value, 10))
+                        updateSetting(
+                          "maxBlockNameLength",
+                          parseInt(e.target.value, 10),
+                        )
                       }
                       className="flex-1"
                     />
@@ -535,12 +614,12 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                   <div className="flex flex-wrap gap-x-4 gap-y-1.5">
                     {(
                       [
-                        ['katakana', 'カタカナ'],
-                        ['hiragana', 'ひらがな'],
-                        ['alphabet', '英字'],
-                        ['kanji', '漢字'],
-                        ['digit', '数字'],
-                        ['symbol', '記号'],
+                        ["katakana", "カタカナ"],
+                        ["hiragana", "ひらがな"],
+                        ["alphabet", "英字"],
+                        ["kanji", "漢字"],
+                        ["digit", "数字"],
+                        ["symbol", "記号"],
                       ] as const
                     ).map(([key, label]) => (
                       <label
@@ -550,7 +629,9 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                         <input
                           type="checkbox"
                           checked={settings.allowedCharTypes[key]}
-                          onChange={(e) => updateCharType(key, e.target.checked)}
+                          onChange={(e) =>
+                            updateCharType(key, e.target.checked)
+                          }
                           className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
                         />
                         {label}
@@ -558,18 +639,26 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                     ))}
                   </div>
                   {/* 数字+記号のみ許可サブオプション */}
-                  {settings.allowedCharTypes.digit && settings.allowedCharTypes.symbol && (
-                    <label className="flex items-center gap-1.5 mt-2 ml-1 text-sm text-slate-600 dark:text-slate-400">
-                      <input
-                        type="checkbox"
-                        checked={settings.allowDigitSymbolOnly}
-                        onChange={(e) => updateSetting('allowDigitSymbolOnly', e.target.checked)}
-                        className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-                      />
-                      <span>数字+記号のみのブロック名を許可</span>
-                      <span className="text-xs text-slate-400">（例: 3-01）</span>
-                    </label>
-                  )}
+                  {settings.allowedCharTypes.digit &&
+                    settings.allowedCharTypes.symbol && (
+                      <label className="flex items-center gap-1.5 mt-2 ml-1 text-sm text-slate-600 dark:text-slate-400">
+                        <input
+                          type="checkbox"
+                          checked={settings.allowDigitSymbolOnly}
+                          onChange={(e) =>
+                            updateSetting(
+                              "allowDigitSymbolOnly",
+                              e.target.checked,
+                            )
+                          }
+                          className="w-3.5 h-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                        />
+                        <span>数字+記号のみのブロック名を許可</span>
+                        <span className="text-xs text-slate-400">
+                          （例: 3-01）
+                        </span>
+                      </label>
+                    )}
                 </div>
 
                 {/* 最小結合セル数 */}
@@ -584,7 +673,10 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       max={12}
                       value={settings.minMergedCellCount}
                       onChange={(e) =>
-                        updateSetting('minMergedCellCount', parseInt(e.target.value, 10))
+                        updateSetting(
+                          "minMergedCellCount",
+                          parseInt(e.target.value, 10),
+                        )
                       }
                       className="flex-1"
                     />
@@ -613,7 +705,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       value={settings.numberCellMin}
                       onChange={(e) =>
                         updateSetting(
-                          'numberCellMin',
+                          "numberCellMin",
                           Math.max(0, parseInt(e.target.value, 10) || 0),
                         )
                       }
@@ -627,8 +719,11 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       value={settings.numberCellMax}
                       onChange={(e) =>
                         updateSetting(
-                          'numberCellMax',
-                          Math.max(settings.numberCellMin, parseInt(e.target.value, 10) || 1),
+                          "numberCellMax",
+                          Math.max(
+                            settings.numberCellMin,
+                            parseInt(e.target.value, 10) || 1,
+                          ),
                         )
                       }
                       className="w-20 px-2 py-1 text-sm border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 text-center"
@@ -648,7 +743,10 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       max={20}
                       value={settings.minNumberCellsPerBlock}
                       onChange={(e) =>
-                        updateSetting('minNumberCellsPerBlock', parseInt(e.target.value, 10))
+                        updateSetting(
+                          "minNumberCellsPerBlock",
+                          parseInt(e.target.value, 10),
+                        )
                       }
                       className="flex-1"
                     />
@@ -673,7 +771,12 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       max={10000}
                       step={100}
                       value={settings.maxRegionSize}
-                      onChange={(e) => updateSetting('maxRegionSize', parseInt(e.target.value, 10))}
+                      onChange={(e) =>
+                        updateSetting(
+                          "maxRegionSize",
+                          parseInt(e.target.value, 10),
+                        )
+                      }
                       className="flex-1"
                     />
                     <span className="text-sm font-mono w-16 text-center text-slate-700 dark:text-slate-300">
@@ -694,7 +797,10 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       max={100}
                       value={settings.polygonThreshold}
                       onChange={(e) =>
-                        updateSetting('polygonThreshold', parseInt(e.target.value, 10))
+                        updateSetting(
+                          "polygonThreshold",
+                          parseInt(e.target.value, 10),
+                        )
                       }
                       className="flex-1"
                     />
@@ -730,7 +836,11 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
             >
               {isPreviewing ? (
                 <span className="flex items-center gap-1.5">
-                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                  <svg
+                    className="animate-spin w-4 h-4"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                  >
                     <circle
                       className="opacity-25"
                       cx="12"
@@ -748,7 +858,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                   検出中...
                 </span>
               ) : (
-                '🔍 プレビュー（ブロック検出）'
+                "🔍 プレビュー（ブロック検出）"
               )}
             </button>
             {previewData && (
@@ -773,8 +883,8 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                       }}
                       className={`px-2.5 py-1 text-xs rounded-md whitespace-nowrap transition-colors ${
                         activePreviewSheet === sheetName
-                          ? 'bg-blue-600 text-white'
-                          : 'bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600'
+                          ? "bg-blue-600 text-white"
+                          : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-400 border border-slate-200 dark:border-slate-600 hover:bg-slate-100 dark:hover:bg-slate-600"
                       }`}
                     >
                       {sheetName}
@@ -800,17 +910,23 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
                           <button
                             key={`${block.name}-${idx}`}
                             onClick={() =>
-                              setHighlightBlock(highlightBlock === block.name ? null : block.name)
+                              setHighlightBlock(
+                                highlightBlock === block.name
+                                  ? null
+                                  : block.name,
+                              )
                             }
                             className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-md border transition-colors ${
                               highlightBlock === block.name
-                                ? 'bg-blue-100 dark:bg-blue-900/40 border-blue-400 dark:border-blue-500 text-blue-800 dark:text-blue-200'
-                                : 'bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600'
+                                ? "bg-blue-100 dark:bg-blue-900/40 border-blue-400 dark:border-blue-500 text-blue-800 dark:text-blue-200"
+                                : "bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600"
                             }`}
                           >
                             <span
                               className="w-2.5 h-2.5 rounded-sm flex-shrink-0"
-                              style={{ backgroundColor: block.color || '#E3F2FD' }}
+                              style={{
+                                backgroundColor: block.color || "#E3F2FD",
+                              }}
                             />
                             <span className="font-medium">{block.name}</span>
                             <span className="text-slate-400 dark:text-slate-500">
@@ -885,7 +1001,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
         {/* フッター */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900/50 rounded-b-lg flex-shrink-0">
           <div className="text-xs text-slate-400">
-            {!isDefaultSettings && '⚙️ カスタム設定が適用されます'}
+            {!isDefaultSettings && "⚙️ カスタム設定が適用されます"}
           </div>
           <div className="flex gap-3">
             <button
@@ -899,7 +1015,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
               disabled={isLoading}
               className="px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-md transition-colors disabled:opacity-50"
             >
-              {isLoading ? '取り込み中...' : '取り込む'}
+              {isLoading ? "取り込み中..." : "取り込む"}
             </button>
           </div>
         </div>

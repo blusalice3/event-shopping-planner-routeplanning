@@ -1,11 +1,11 @@
-import * as React from 'react';
-import FocusMode from './FocusMode';
-import type { DayMapData, HallDefinition } from '../types/map';
-import type { FocusModeSessionState } from '../types/focus';
-import type { PurchaseStatusControlMode, ShoppingItem } from '../types/item';
+import * as React from "react";
+import FocusMode from "./FocusMode";
+import type { DayMapData, HallDefinition } from "../types/map";
+import type { FocusModeSessionState } from "../types/focus";
+import type { PurchaseStatusControlMode, ShoppingItem } from "../types/item";
 
 export const completedFixture: FocusModeSessionState = {
-  phase: 'normal',
+  phase: "normal",
   phaseIndex: 0,
   savedPhaseIndices: { normal: 0, postponed: 0, late: 0 },
   postponedItemIds: [],
@@ -15,7 +15,7 @@ export const completedFixture: FocusModeSessionState = {
 };
 
 export const incompleteSessionFixture: FocusModeSessionState = {
-  phase: 'normal',
+  phase: "normal",
   phaseIndex: 0,
   savedPhaseIndices: { normal: 0, postponed: 0, late: 0 },
   postponedItemIds: [],
@@ -28,38 +28,41 @@ export const incompleteSessionFixture: FocusModeSessionState = {
 export const singleVisitNoneItemFixture = {
   items: [
     {
-      id: 'item-1',
-      eventDate: '2026-01-01',
-      block: 'A',
-      number: '01a',
-      circle: 'サークル1',
-      title: 'タイトル1',
+      id: "item-1",
+      eventDate: "2026-01-01",
+      block: "A",
+      number: "01a",
+      circle: "サークル1",
+      title: "タイトル1",
       price: 1000,
       quantity: 1,
-      purchaseStatus: 'None',
-      priorityLevel: 'none',
-      remarks: '',
-      url: '',
+      purchaseStatus: "None",
+      priorityLevel: "none",
+      remarks: "",
+      url: "",
     } as ShoppingItem,
   ],
-  executeModeItemIds: ['item-1'],
+  executeModeItemIds: ["item-1"],
 };
 
 // 単一訪問先 + 単一アイテム(status=Postpone)fixture。auto-advance トリガ用
 export const singleVisitPostponeItemFixture = {
   items: [
-    { ...singleVisitNoneItemFixture.items[0], purchaseStatus: 'Postpone' as const },
+    {
+      ...singleVisitNoneItemFixture.items[0],
+      purchaseStatus: "Postpone" as const,
+    },
   ],
-  executeModeItemIds: ['item-1'],
+  executeModeItemIds: ["item-1"],
 };
 
 // 完了済み + lastPurchaseChangeAt あり fixture (pointer 復元時 lpc 保持検証用)
 export const completedWithLastChangeFixture: FocusModeSessionState = {
   ...completedFixture,
   lastPurchaseChangeAt: {
-    phase: 'normal',
+    phase: "normal",
     phaseIndex: 0,
-    visitKey: '2026-01-01-A-01a-none',
+    visitKey: "2026-01-01-A-01a-none",
   },
 };
 
@@ -74,7 +77,7 @@ const cloneSessionState = (
     lateItemIds: [...state.lateItemIds],
     lastPurchaseChangeAt: state.lastPurchaseChangeAt
       ? { ...state.lastPurchaseChangeAt }
-      : state.lastPurchaseChangeAt ?? null,
+      : (state.lastPurchaseChangeAt ?? null),
   };
 };
 
@@ -86,7 +89,7 @@ export const minimalProps = (
     executeModeItemIds?: string[];
     onUpdateItem?: (item: ShoppingItem) => void;
     onSessionStateChange?: (state: FocusModeSessionState) => void;
-    onModeChange?: (mode: 'edit' | 'execute', lastItemId?: string) => void;
+    onModeChange?: (mode: "edit" | "execute", lastItemId?: string) => void;
     disablePriceUndefinedCheck?: boolean;
     disableLimitedPurchaseQuantityCheck?: boolean;
     skipLimitedPurchaseForSingleQuantity?: boolean;
@@ -98,7 +101,7 @@ export const minimalProps = (
   executeModeItemIds: overrides.executeModeItemIds ?? [],
   onUpdateItem: overrides.onUpdateItem ?? (() => {}),
   onModeChange: overrides.onModeChange ?? (() => {}),
-  layoutMode: 'pc' as const,
+  layoutMode: "pc" as const,
   onLayoutModeChange: () => {},
   mapData: {} as { [dayMapName: string]: DayMapData },
   hallDefinitions: [] as HallDefinition[],
@@ -106,11 +109,13 @@ export const minimalProps = (
   resumeState: cloneSessionState(overrides.resumeState),
   onSessionStateChange: overrides.onSessionStateChange ?? (() => {}),
   disablePriceUndefinedCheck: overrides.disablePriceUndefinedCheck ?? false,
-  disableLimitedPurchaseQuantityCheck: overrides.disableLimitedPurchaseQuantityCheck ?? false,
+  disableLimitedPurchaseQuantityCheck:
+    overrides.disableLimitedPurchaseQuantityCheck ?? false,
   skipLimitedPurchaseForSingleQuantity:
     overrides.skipLimitedPurchaseForSingleQuantity ?? true,
-  purchaseStatusControlMode: overrides.purchaseStatusControlMode ?? 'cycle',
-  postEventDistributionCheckEnabled: overrides.postEventDistributionCheckEnabled ?? true,
+  purchaseStatusControlMode: overrides.purchaseStatusControlMode ?? "cycle",
+  postEventDistributionCheckEnabled:
+    overrides.postEventDistributionCheckEnabled ?? true,
 });
 
 /**

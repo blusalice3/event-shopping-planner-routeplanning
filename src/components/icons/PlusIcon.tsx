@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 
 const PlusIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
   <svg
@@ -9,7 +9,11 @@ const PlusIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
     stroke="currentColor"
     {...props}
   >
-    <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+    <path
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      d="M12 4.5v15m7.5-7.5h-15"
+    />
   </svg>
 );
 

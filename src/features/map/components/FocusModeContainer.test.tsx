@@ -200,12 +200,11 @@ describe("FocusModeContainer route merge cache", () => {
 
   it("passes purchase status control mode to FocusMode", () => {
     render(
-      <FocusModeContainer
-        {...baseProps}
-        purchaseStatusControlMode="radial"
-      />,
+      <FocusModeContainer {...baseProps} purchaseStatusControlMode="radial" />,
     );
 
-    expect(mocks.focusModeProps.at(-1)?.purchaseStatusControlMode).toBe("radial");
+    expect(mocks.focusModeProps.at(-1)?.purchaseStatusControlMode).toBe(
+      "radial",
+    );
   });
 });

@@ -1,6 +1,10 @@
-import type { DayMapData, HallDefinition, HallRouteSettings } from '../../../types/map';
-import type { ShoppingItem } from '../../../types/item';
-import { findItemHallIdByCell } from './geometry';
+import type {
+  DayMapData,
+  HallDefinition,
+  HallRouteSettings,
+} from "../../../types/map";
+import type { ShoppingItem } from "../../../types/item";
+import { findItemHallIdByCell } from "./geometry";
 
 export interface UpdateItemPriorityResult {
   items: ShoppingItem[];
@@ -12,7 +16,7 @@ export interface UpdateItemPriorityResult {
  */
 export function computeUpdateItemPriority(
   itemId: string,
-  priorityLevel: 'none' | 'priority' | 'highest',
+  priorityLevel: "none" | "priority" | "highest",
   allItems: ShoppingItem[],
   halls: HallDefinition[],
   mapData: DayMapData | undefined,
@@ -32,22 +36,22 @@ export function computeUpdateItemPriority(
 
   const buildGroupId = (
     hallId: string | null,
-    priority: 'none' | 'priority' | 'highest',
+    priority: "none" | "priority" | "highest",
   ): string => {
     if (hallId === null) {
-      if (priority === 'highest') return 'undefined:highest';
-      if (priority === 'priority') return 'undefined:priority';
-      return 'undefined';
+      if (priority === "highest") return "undefined:highest";
+      if (priority === "priority") return "undefined:priority";
+      return "undefined";
     }
-    if (priority === 'highest') return `${hallId}:highest`;
-    if (priority === 'priority') return `${hallId}:priority`;
+    if (priority === "highest") return `${hallId}:highest`;
+    if (priority === "priority") return `${hallId}:priority`;
     return hallId;
   };
 
   const newGroupId = buildGroupId(itemHallId, priorityLevel);
-  const oldPriority = item.priorityLevel || 'none';
+  const oldPriority = item.priorityLevel || "none";
   const oldGroupId = buildGroupId(itemHallId, oldPriority);
-  const baseGroupId = buildGroupId(itemHallId, 'none');
+  const baseGroupId = buildGroupId(itemHallId, "none");
 
   let newHallOrder = [...currentHallRouteSettings.hallOrder];
 
@@ -55,12 +59,12 @@ export function computeUpdateItemPriority(
     newHallOrder.push(baseGroupId);
   }
 
-  if (priorityLevel !== 'none' && !newHallOrder.includes(newGroupId)) {
-    const priorityGroupId = buildGroupId(itemHallId, 'priority');
+  if (priorityLevel !== "none" && !newHallOrder.includes(newGroupId)) {
+    const priorityGroupId = buildGroupId(itemHallId, "priority");
 
     let insertIndex = newHallOrder.length;
 
-    if (priorityLevel === 'highest') {
+    if (priorityLevel === "highest") {
       const priorityIndex = newHallOrder.indexOf(priorityGroupId);
       const baseIndex = newHallOrder.indexOf(baseGroupId);
 
@@ -69,7 +73,7 @@ export function computeUpdateItemPriority(
       } else if (baseIndex !== -1) {
         insertIndex = baseIndex;
       }
-    } else if (priorityLevel === 'priority') {
+    } else if (priorityLevel === "priority") {
       const baseIndex = newHallOrder.indexOf(baseGroupId);
       if (baseIndex !== -1) {
         insertIndex = baseIndex;
@@ -79,10 +83,10 @@ export function computeUpdateItemPriority(
     newHallOrder.splice(insertIndex, 0, newGroupId);
   }
 
-  if (oldPriority !== 'none' && oldGroupId !== newGroupId) {
+  if (oldPriority !== "none" && oldGroupId !== newGroupId) {
     const otherItemsInOldGroup = allItems.filter((i) => {
       if (i.id === itemId) return false;
-      if ((i.priorityLevel || 'none') !== oldPriority) return false;
+      if ((i.priorityLevel || "none") !== oldPriority) return false;
 
       const iHallId = findItemHallIdByCell(i, halls, mapData);
       return iHallId === itemHallId;
@@ -112,8 +116,8 @@ export function computeUpdateItemPriority(
  */
 export function computeHallOrderForPriorityChange(
   itemId: string,
-  newPriorityLevel: 'none' | 'priority' | 'highest',
-  oldPriorityLevel: 'none' | 'priority' | 'highest',
+  newPriorityLevel: "none" | "priority" | "highest",
+  oldPriorityLevel: "none" | "priority" | "highest",
   allItems: ShoppingItem[],
   halls: HallDefinition[],
   mapData: DayMapData | undefined,
@@ -126,21 +130,21 @@ export function computeHallOrderForPriorityChange(
 
   const buildGroupId = (
     hallId: string | null,
-    priority: 'none' | 'priority' | 'highest',
+    priority: "none" | "priority" | "highest",
   ): string => {
     if (hallId === null) {
-      if (priority === 'highest') return 'undefined:highest';
-      if (priority === 'priority') return 'undefined:priority';
-      return 'undefined';
+      if (priority === "highest") return "undefined:highest";
+      if (priority === "priority") return "undefined:priority";
+      return "undefined";
     }
-    if (priority === 'highest') return `${hallId}:highest`;
-    if (priority === 'priority') return `${hallId}:priority`;
+    if (priority === "highest") return `${hallId}:highest`;
+    if (priority === "priority") return `${hallId}:priority`;
     return hallId;
   };
 
   const newGroupId = buildGroupId(itemHallId, newPriorityLevel);
   const oldGroupId = buildGroupId(itemHallId, oldPriorityLevel);
-  const baseGroupId = buildGroupId(itemHallId, 'none');
+  const baseGroupId = buildGroupId(itemHallId, "none");
 
   let newHallOrder = [...currentHallRouteSettings.hallOrder];
 
@@ -148,25 +152,25 @@ export function computeHallOrderForPriorityChange(
     newHallOrder.push(baseGroupId);
   }
 
-  if (newPriorityLevel !== 'none' && !newHallOrder.includes(newGroupId)) {
-    const priorityGroupId = buildGroupId(itemHallId, 'priority');
+  if (newPriorityLevel !== "none" && !newHallOrder.includes(newGroupId)) {
+    const priorityGroupId = buildGroupId(itemHallId, "priority");
     let insertIndex = newHallOrder.length;
-    if (newPriorityLevel === 'highest') {
+    if (newPriorityLevel === "highest") {
       const priorityIndex = newHallOrder.indexOf(priorityGroupId);
       const baseIndex = newHallOrder.indexOf(baseGroupId);
       if (priorityIndex !== -1) insertIndex = priorityIndex;
       else if (baseIndex !== -1) insertIndex = baseIndex;
-    } else if (newPriorityLevel === 'priority') {
+    } else if (newPriorityLevel === "priority") {
       const baseIndex = newHallOrder.indexOf(baseGroupId);
       if (baseIndex !== -1) insertIndex = baseIndex;
     }
     newHallOrder.splice(insertIndex, 0, newGroupId);
   }
 
-  if (oldPriorityLevel !== 'none' && oldGroupId !== newGroupId) {
+  if (oldPriorityLevel !== "none" && oldGroupId !== newGroupId) {
     const otherItemsInOldGroup = allItems.filter((i) => {
       if (i.id === itemId) return false;
-      if ((i.priorityLevel || 'none') !== oldPriorityLevel) return false;
+      if ((i.priorityLevel || "none") !== oldPriorityLevel) return false;
       const iHallId = findItemHallIdByCell(i, halls, mapData);
       return iHallId === itemHallId;
     });

@@ -1,54 +1,57 @@
-import React, { useEffect, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
-import type { ShoppingItem } from '../types/item';
+import React, { useEffect, useMemo, useState } from "react";
+import { createPortal } from "react-dom";
+import type { ShoppingItem } from "../types/item";
 import {
   normalizePostEventDistributionAnswer,
   POST_EVENT_DISTRIBUTION_OPTIONS,
   type PostEventDistributionAnswer,
-} from '../utils/postEventDistributionCheck';
+} from "../utils/postEventDistributionCheck";
 
-export type PostEventDistributionCheckMode = 'single' | 'bulk';
+export type PostEventDistributionCheckMode = "single" | "bulk";
 
 type PostEventDistributionCheckDialogProps = {
   open: boolean;
   mode: PostEventDistributionCheckMode;
   targets: ShoppingItem[];
   onCancel: () => void;
-  onApply: (answers: { itemId: string; answer: PostEventDistributionAnswer }[]) => void;
+  onApply: (
+    answers: { itemId: string; answer: PostEventDistributionAnswer }[],
+  ) => void;
 };
 
 const getItemLabel = (item: ShoppingItem): string => {
   const title = item.title.trim();
   if (title) return title;
 
-  const space = [item.block, item.number].filter(Boolean).join('-');
-  return [item.circle, space].filter(Boolean).join(' / ') || 'タイトル未設定';
+  const space = [item.block, item.number].filter(Boolean).join("-");
+  return [item.circle, space].filter(Boolean).join(" / ") || "タイトル未設定";
 };
 
-const PostEventDistributionCheckDialog: React.FC<PostEventDistributionCheckDialogProps> = ({
-  open,
-  mode,
-  targets,
-  onCancel,
-  onApply,
-}) => {
+const PostEventDistributionCheckDialog: React.FC<
+  PostEventDistributionCheckDialogProps
+> = ({ open, mode, targets, onCancel, onApply }) => {
   const targetIds = useMemo(() => targets.map((item) => item.id), [targets]);
-  const [selectedAnswer, setSelectedAnswer] = useState('');
-  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(() => new Set(targetIds));
+  const [selectedAnswer, setSelectedAnswer] = useState("");
+  const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(
+    () => new Set(targetIds),
+  );
   const [itemAnswers, setItemAnswers] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!open) return;
-    setSelectedAnswer('');
+    setSelectedAnswer("");
     setSelectedItemIds(new Set(targetIds));
     setItemAnswers({});
   }, [open, targetIds]);
 
   if (!open || targets.length === 0) return null;
 
-  const isBulk = mode === 'bulk';
-  const allSelected = targetIds.length > 0 && targetIds.every((id) => selectedItemIds.has(id));
-  const applyTargetIds = isBulk ? targetIds.filter((id) => selectedItemIds.has(id)) : [targets[0].id];
+  const isBulk = mode === "bulk";
+  const allSelected =
+    targetIds.length > 0 && targetIds.every((id) => selectedItemIds.has(id));
+  const applyTargetIds = isBulk
+    ? targetIds.filter((id) => selectedItemIds.has(id))
+    : [targets[0].id];
   const canApply = applyTargetIds.length > 0;
 
   const toggleAll = (checked: boolean) => {
@@ -89,7 +92,9 @@ const PostEventDistributionCheckDialog: React.FC<PostEventDistributionCheckDialo
     onApply(
       applyTargetIds.map((itemId) => ({
         itemId,
-        answer: normalizePostEventDistributionAnswer(itemAnswers[itemId] ?? selectedAnswer),
+        answer: normalizePostEventDistributionAnswer(
+          itemAnswers[itemId] ?? selectedAnswer,
+        ),
       })),
     );
   };
@@ -112,9 +117,9 @@ const PostEventDistributionCheckDialog: React.FC<PostEventDistributionCheckDialo
         <div className="mt-4 space-y-4">
           <div className="space-y-2">
             <label className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-              {isBulk ? '一括回答' : '回答内容'}
+              {isBulk ? "一括回答" : "回答内容"}
               <select
-                aria-label={isBulk ? '一括回答' : '回答内容'}
+                aria-label={isBulk ? "一括回答" : "回答内容"}
                 value={selectedAnswer}
                 onChange={(event) => setSelectedAnswer(event.target.value)}
                 className="mt-1 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 dark:border-slate-600 dark:bg-slate-700 dark:text-white"
@@ -159,14 +164,20 @@ const PostEventDistributionCheckDialog: React.FC<PostEventDistributionCheckDialo
                     <input
                       type="checkbox"
                       checked={selectedItemIds.has(item.id)}
-                      onChange={(event) => toggleItem(item.id, event.target.checked)}
+                      onChange={(event) =>
+                        toggleItem(item.id, event.target.checked)
+                      }
                       className="mt-0.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600"
                     />
-                    <span className="min-w-0 flex-1 break-words">{getItemLabel(item)}</span>
+                    <span className="min-w-0 flex-1 break-words">
+                      {getItemLabel(item)}
+                    </span>
                     <select
                       aria-label={`${getItemLabel(item)}の回答内容`}
                       value={itemAnswers[item.id] ?? selectedAnswer}
-                      onChange={(event) => setItemAnswer(item.id, event.target.value)}
+                      onChange={(event) =>
+                        setItemAnswer(item.id, event.target.value)
+                      }
                       disabled={!selectedItemIds.has(item.id)}
                       className="col-span-2 w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-sm text-slate-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30 disabled:bg-slate-100 disabled:text-slate-400 dark:border-slate-600 dark:bg-slate-700 dark:text-white dark:disabled:bg-slate-800 sm:col-span-1"
                     >
@@ -209,7 +220,7 @@ const PostEventDistributionCheckDialog: React.FC<PostEventDistributionCheckDialo
     </div>
   );
 
-  if (typeof document === 'undefined') {
+  if (typeof document === "undefined") {
     return dialog;
   }
 

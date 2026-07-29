@@ -1,11 +1,11 @@
-import React, { useMemo } from 'react';
-import { ShoppingItem } from '../../types/item';
+import React, { useMemo } from "react";
+import { ShoppingItem } from "../../types/item";
 
 export type InsertPosition =
-  | { type: 'before'; referenceItemId: string }
-  | { type: 'after'; referenceItemId: string }
-  | { type: 'hallEnd' }
-  | { type: 'listEnd' };
+  | { type: "before"; referenceItemId: string }
+  | { type: "after"; referenceItemId: string }
+  | { type: "hallEnd" }
+  | { type: "listEnd" };
 
 interface NearbyVisitItem {
   item: ShoppingItem;
@@ -58,7 +58,13 @@ const PreviewMode: React.FC<{
   allVisitItems: VisitListEntry[];
   hasHallDefinition: boolean;
   onSelect: (position: InsertPosition) => void;
-}> = ({ addingItem, nearbyVisitItems, allVisitItems, hasHallDefinition, onSelect }) => {
+}> = ({
+  addingItem,
+  nearbyVisitItems,
+  allVisitItems,
+  hasHallDefinition,
+  onSelect,
+}) => {
   const contextCount = 3;
   const addingNum = extractNumeric(addingItem.number);
 
@@ -69,12 +75,16 @@ const PreviewMode: React.FC<{
 
   const displayItems = useMemo(() => {
     if (nearbyVisitItems.length === 0) return [] as VisitListEntry[];
-    const sorted = [...nearbyVisitItems].sort((a, b) => a.visitIndex - b.visitIndex);
+    const sorted = [...nearbyVisitItems].sort(
+      (a, b) => a.visitIndex - b.visitIndex,
+    );
     const minIdx = sorted[0].visitIndex;
     const maxIdx = sorted[sorted.length - 1].visitIndex;
     const rangeStart = Math.max(0, minIdx - contextCount);
     const rangeEnd = Math.min(allVisitItems.length - 1, maxIdx + contextCount);
-    return allVisitItems.filter((entry) => entry.visitIndex >= rangeStart && entry.visitIndex <= rangeEnd);
+    return allVisitItems.filter(
+      (entry) => entry.visitIndex >= rangeStart && entry.visitIndex <= rangeEnd,
+    );
   }, [nearbyVisitItems, allVisitItems]);
 
   return (
@@ -84,7 +94,7 @@ const PreviewMode: React.FC<{
           const isNearby = nearbyIndicesSet.has(entry.visitIndex);
           const nearbyNum = extractNumeric(entry.item.number);
           const label = `${entry.item.block}-${entry.item.number}`;
-          const circle = entry.item.circle || '';
+          const circle = entry.item.circle || "";
           const letter = indexToLetter(idx);
           const isLast = idx === displayItems.length - 1;
           const lastLetter = indexToLetter(displayItems.length);
@@ -96,8 +106,11 @@ const PreviewMode: React.FC<{
                 onSelect={() =>
                   onSelect(
                     idx === 0
-                      ? { type: 'before', referenceItemId: entry.item.id }
-                      : { type: 'after', referenceItemId: displayItems[idx - 1].item.id },
+                      ? { type: "before", referenceItemId: entry.item.id }
+                      : {
+                          type: "after",
+                          referenceItemId: displayItems[idx - 1].item.id,
+                        },
                   )
                 }
               />
@@ -105,15 +118,15 @@ const PreviewMode: React.FC<{
               <div
                 className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs ${
                   isNearby
-                    ? 'bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700'
-                    : 'bg-slate-50/50 dark:bg-slate-700/20'
+                    ? "bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700"
+                    : "bg-slate-50/50 dark:bg-slate-700/20"
                 }`}
               >
                 <span className="bg-slate-200 dark:bg-slate-600 px-1.5 py-0.5 rounded text-[10px] font-mono flex-shrink-0">
                   #{entry.visitIndex + 1}
                 </span>
                 <span
-                  className={`font-semibold flex-shrink-0 ${isNearby ? 'text-blue-700 dark:text-blue-300' : 'text-slate-600 dark:text-slate-400'}`}
+                  className={`font-semibold flex-shrink-0 ${isNearby ? "text-blue-700 dark:text-blue-300" : "text-slate-600 dark:text-slate-400"}`}
                 >
                   {label}
                 </span>
@@ -126,7 +139,7 @@ const PreviewMode: React.FC<{
                       ? `-${addingNum - nearbyNum}`
                       : nearbyNum > addingNum
                         ? `+${nearbyNum - addingNum}`
-                        : '同番'}
+                        : "同番"}
                   </span>
                 )}
               </div>
@@ -134,7 +147,9 @@ const PreviewMode: React.FC<{
               {isLast && (
                 <InsertMarker
                   letter={lastLetter}
-                  onSelect={() => onSelect({ type: 'after', referenceItemId: entry.item.id })}
+                  onSelect={() =>
+                    onSelect({ type: "after", referenceItemId: entry.item.id })
+                  }
                 />
               )}
             </React.Fragment>
@@ -146,14 +161,14 @@ const PreviewMode: React.FC<{
 
       {hasHallDefinition && (
         <button
-          onClick={() => onSelect({ type: 'hallEnd' })}
+          onClick={() => onSelect({ type: "hallEnd" })}
           className="w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors text-left flex items-center gap-2"
         >
           同じホールの末尾に追加
         </button>
       )}
       <button
-        onClick={() => onSelect({ type: 'listEnd' })}
+        onClick={() => onSelect({ type: "listEnd" })}
         className="w-full px-3 py-2 text-sm text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded-lg transition-colors text-left flex items-center gap-2"
       >
         リスト末尾に追加
@@ -190,7 +205,7 @@ const InsertPositionDialog: React.FC<InsertPositionDialogProps> = ({
           </div>
           <div className="text-xs opacity-90 mt-1">
             {addingItem.block}-{addingItem.number}
-            {addingItem.circle ? ` (${addingItem.circle})` : ''}
+            {addingItem.circle ? ` (${addingItem.circle})` : ""}
           </div>
         </div>
 

@@ -7,11 +7,11 @@
  *     block="A", number="01b"  → spaceKey="A-01b" （別スペース）
  */
 
-import { PurchaseStatus } from '../types/item';
+import { PurchaseStatus } from "../types/item";
 import {
   buildSpaceKey,
   normalizeBaseSpaceNumber,
-} from '../features/space-navigation/domain/visitIdentity';
+} from "../features/space-navigation/domain/visitIdentity";
 
 /**
  * ブース番号から末尾の追加数字を除去してベース番号を返す。
@@ -34,13 +34,13 @@ export function getSpaceKey(block: string, number: string): string {
  * 購入状態の略語マップ（表示順序も兼ねる）
  */
 const statusAbbrevMap: [PurchaseStatus, string][] = [
-  ['None', '未'],
-  ['Purchased', '購'],
-  ['SoldOut', '売'],
-  ['Postpone', '後'],
-  ['Late', '遅'],
-  ['LimitedPurchase', '限'],
-  ['Absent', '欠'],
+  ["None", "未"],
+  ["Purchased", "購"],
+  ["SoldOut", "売"],
+  ["Postpone", "後"],
+  ["Late", "遅"],
+  ["LimitedPurchase", "限"],
+  ["Absent", "欠"],
 ];
 
 /**
@@ -48,7 +48,9 @@ const statusAbbrevMap: [PurchaseStatus, string][] = [
  * 件数0のステータスは省略する。
  * 例: "未2 購3 売1 後2 遅1"
  */
-export function getStatusSummaryText(items: { purchaseStatus: PurchaseStatus }[]): string {
+export function getStatusSummaryText(
+  items: { purchaseStatus: PurchaseStatus }[],
+): string {
   const counts = new Map<PurchaseStatus, number>();
   for (const item of items) {
     counts.set(item.purchaseStatus, (counts.get(item.purchaseStatus) || 0) + 1);
@@ -56,5 +58,5 @@ export function getStatusSummaryText(items: { purchaseStatus: PurchaseStatus }[]
   return statusAbbrevMap
     .filter(([status]) => (counts.get(status) || 0) > 0)
     .map(([status, abbrev]) => `${abbrev}${counts.get(status)}`)
-    .join(' ');
+    .join(" ");
 }

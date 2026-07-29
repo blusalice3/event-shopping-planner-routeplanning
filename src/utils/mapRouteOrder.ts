@@ -1,18 +1,22 @@
-import type { ShoppingItem } from '../types/item';
-import type { DayMapData, HallDefinition } from '../types/map';
+import type { ShoppingItem } from "../types/item";
+import type { DayMapData, HallDefinition } from "../types/map";
 import {
   resolveItemGroupIdForMapRoute,
   sortItemsByGroupOrderWithResolver,
   sortItemsByHallOrder,
-} from './hallGrouping';
+} from "./hallGrouping";
 
-export const normalizeMapRouteDayText = (value: string | null | undefined): string =>
-  (value || '').replace(/\u3000/g, ' ').trim();
+export const normalizeMapRouteDayText = (
+  value: string | null | undefined,
+): string => (value || "").replace(/\u3000/g, " ").trim();
 
 export const resolveMapRouteHallOrder = (
   routeHallOrder: string[] | undefined,
   fallbackHallOrder: string[],
-): string[] => (routeHallOrder && routeHallOrder.length > 0 ? routeHallOrder : fallbackHallOrder);
+): string[] =>
+  routeHallOrder && routeHallOrder.length > 0
+    ? routeHallOrder
+    : fallbackHallOrder;
 
 export function buildMapRouteExecuteItemIds(params: {
   executeModeItemIds: string[];

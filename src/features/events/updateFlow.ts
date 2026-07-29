@@ -1,6 +1,10 @@
-import type { EventMetadata, ShoppingItem } from '../../types/item';
-import { fetchEventItemsFromSpreadsheet } from './sheetImport';
-import { createEventUpdateDiff, normalizeSheetItemsUrls, type EventUpdateDiff } from './updateDiff';
+import type { EventMetadata, ShoppingItem } from "../../types/item";
+import { fetchEventItemsFromSpreadsheet } from "./sheetImport";
+import {
+  createEventUpdateDiff,
+  normalizeSheetItemsUrls,
+  type EventUpdateDiff,
+} from "./updateDiff";
 
 export type SpreadsheetSource = {
   url: string;
@@ -16,7 +20,7 @@ export function resolveSpreadsheetSource(
 
   return {
     url,
-    sheetName: urlOverride?.sheetName || metadata?.spreadsheetSheetName || '',
+    sheetName: urlOverride?.sheetName || metadata?.spreadsheetSheetName || "",
   };
 }
 
@@ -24,7 +28,10 @@ export async function buildEventUpdateDiffFromSpreadsheet(
   currentItems: ShoppingItem[],
   source: SpreadsheetSource,
 ): Promise<EventUpdateDiff> {
-  const sheetItems = await fetchEventItemsFromSpreadsheet(source.url, source.sheetName);
+  const sheetItems = await fetchEventItemsFromSpreadsheet(
+    source.url,
+    source.sheetName,
+  );
   const normalizedSheetItems = normalizeSheetItemsUrls(sheetItems);
   return createEventUpdateDiff(currentItems, normalizedSheetItems);
 }

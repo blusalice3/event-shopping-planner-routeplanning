@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { ExportOptions } from '../types/export';
+import React, { useState } from "react";
+import { ExportOptions } from "../types/export";
 
 interface ExportOptionsDialogProps {
   isOpen: boolean;
@@ -20,18 +20,18 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
     includeMapData: hasMapData,
     includeBlockDefinitions: hasMapData,
     includeRouteInfo: hasMapData,
-    format: 'full',
+    format: "full",
   });
 
-  const handleFormatChange = (format: 'full' | 'simple') => {
-    if (format === 'simple') {
+  const handleFormatChange = (format: "full" | "simple") => {
+    if (format === "simple") {
       setOptions({
         includeItems: true,
         includeLayoutInfo: false,
         includeMapData: false,
         includeBlockDefinitions: false,
         includeRouteInfo: false,
-        format: 'simple',
+        format: "simple",
       });
     } else {
       setOptions({
@@ -40,7 +40,7 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
         includeMapData: hasMapData,
         includeBlockDefinitions: hasMapData,
         includeRouteInfo: hasMapData,
-        format: 'full',
+        format: "full",
       });
     }
   };
@@ -57,12 +57,19 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl max-w-md w-full mx-4">
         {/* ヘッダー */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-700">
-          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">エクスポート設定</h2>
+          <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
+            エクスポート設定
+          </h2>
           <button
             onClick={onClose}
             className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300"
           >
-            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <svg
+              className="w-5 h-5"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -97,12 +104,17 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
               <input
                 type="checkbox"
                 checked={options.includeLayoutInfo}
-                onChange={(e) => setOptions({ ...options, includeLayoutInfo: e.target.checked })}
-                disabled={options.format === 'simple'}
+                onChange={(e) =>
+                  setOptions({
+                    ...options,
+                    includeLayoutInfo: e.target.checked,
+                  })
+                }
+                disabled={options.format === "simple"}
                 className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
               />
               <span
-                className={`text-sm ${options.format === 'simple' ? 'text-slate-400' : 'text-slate-700 dark:text-slate-300'}`}
+                className={`text-sm ${options.format === "simple" ? "text-slate-400" : "text-slate-700 dark:text-slate-300"}`}
               >
                 配置情報（実行列・候補リストの順序）
               </span>
@@ -112,14 +124,16 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
               <input
                 type="checkbox"
                 checked={options.includeMapData}
-                onChange={(e) => setOptions({ ...options, includeMapData: e.target.checked })}
-                disabled={!hasMapData || options.format === 'simple'}
+                onChange={(e) =>
+                  setOptions({ ...options, includeMapData: e.target.checked })
+                }
+                disabled={!hasMapData || options.format === "simple"}
                 className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
               />
               <span
-                className={`text-sm ${!hasMapData || options.format === 'simple' ? 'text-slate-400' : 'text-slate-700 dark:text-slate-300'}`}
+                className={`text-sm ${!hasMapData || options.format === "simple" ? "text-slate-400" : "text-slate-700 dark:text-slate-300"}`}
               >
-                マップデータ {!hasMapData && '（データなし）'}
+                マップデータ {!hasMapData && "（データなし）"}
               </span>
             </label>
 
@@ -128,15 +142,18 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
                 type="checkbox"
                 checked={options.includeBlockDefinitions}
                 onChange={(e) =>
-                  setOptions({ ...options, includeBlockDefinitions: e.target.checked })
+                  setOptions({
+                    ...options,
+                    includeBlockDefinitions: e.target.checked,
+                  })
                 }
-                disabled={!hasMapData || options.format === 'simple'}
+                disabled={!hasMapData || options.format === "simple"}
                 className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
               />
               <span
-                className={`text-sm ${!hasMapData || options.format === 'simple' ? 'text-slate-400' : 'text-slate-700 dark:text-slate-300'}`}
+                className={`text-sm ${!hasMapData || options.format === "simple" ? "text-slate-400" : "text-slate-700 dark:text-slate-300"}`}
               >
-                ブロック定義 {!hasMapData && '（データなし）'}
+                ブロック定義 {!hasMapData && "（データなし）"}
               </span>
             </label>
 
@@ -144,14 +161,16 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
               <input
                 type="checkbox"
                 checked={options.includeRouteInfo}
-                onChange={(e) => setOptions({ ...options, includeRouteInfo: e.target.checked })}
-                disabled={!hasMapData || options.format === 'simple'}
+                onChange={(e) =>
+                  setOptions({ ...options, includeRouteInfo: e.target.checked })
+                }
+                disabled={!hasMapData || options.format === "simple"}
                 className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
               />
               <span
-                className={`text-sm ${!hasMapData || options.format === 'simple' ? 'text-slate-400' : 'text-slate-700 dark:text-slate-300'}`}
+                className={`text-sm ${!hasMapData || options.format === "simple" ? "text-slate-400" : "text-slate-700 dark:text-slate-300"}`}
               >
-                ルート情報 {!hasMapData && '（データなし）'}
+                ルート情報 {!hasMapData && "（データなし）"}
               </span>
             </label>
           </div>
@@ -169,15 +188,17 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
                 <input
                   type="radio"
                   name="format"
-                  checked={options.format === 'full'}
-                  onChange={() => handleFormatChange('full')}
+                  checked={options.format === "full"}
+                  onChange={() => handleFormatChange("full")}
                   className="w-4 h-4 border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <div>
                   <span className="text-sm text-slate-700 dark:text-slate-300">
                     完全版（.xlsx）
                   </span>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">全データ含む</p>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    全データ含む
+                  </p>
                 </div>
               </label>
 
@@ -185,8 +206,8 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
                 <input
                   type="radio"
                   name="format"
-                  checked={options.format === 'simple'}
-                  onChange={() => handleFormatChange('simple')}
+                  checked={options.format === "simple"}
+                  onChange={() => handleFormatChange("simple")}
                   className="w-4 h-4 border-slate-300 text-blue-600 focus:ring-blue-500"
                 />
                 <div>

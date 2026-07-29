@@ -1,13 +1,23 @@
-import type { LimitedBulkDialogContext } from '../types/limitedPurchase';
-import type { ShoppingItem } from '../types/item';
-import type { LimitedBulkInputTargetDecision } from './purchaseQuantity';
+import type { LimitedBulkDialogContext } from "../types/limitedPurchase";
+import type { ShoppingItem } from "../types/item";
+import type { LimitedBulkInputTargetDecision } from "./purchaseQuantity";
 
 export type LimitedBulkSubmitDecision =
-  | { kind: 'stale'; flowToken: symbol }
-  | { kind: 'notFound'; flowToken: symbol; nextIndex: number; nextSkippedCount: number }
-  | { kind: 'notTarget'; flowToken: symbol; nextIndex: number; nextSkippedCount: number }
+  | { kind: "stale"; flowToken: symbol }
   | {
-      kind: 'commit';
+      kind: "notFound";
+      flowToken: symbol;
+      nextIndex: number;
+      nextSkippedCount: number;
+    }
+  | {
+      kind: "notTarget";
+      flowToken: symbol;
+      nextIndex: number;
+      nextSkippedCount: number;
+    }
+  | {
+      kind: "commit";
       baseItem: ShoppingItem;
       flowToken: symbol;
       nextIndex: number;
@@ -33,12 +43,12 @@ export const computeLimitedBulkSubmitDecision = (
   const { context, isActiveFlow } = params;
 
   if (!isActiveFlow) {
-    return { kind: 'stale', flowToken: context.flowToken };
+    return { kind: "stale", flowToken: context.flowToken };
   }
 
   if (params.latestItem === undefined) {
     return {
-      kind: 'notFound',
+      kind: "notFound",
       flowToken: context.flowToken,
       nextIndex: context.index + 1,
       nextSkippedCount: context.skippedCount + 1,
@@ -47,7 +57,7 @@ export const computeLimitedBulkSubmitDecision = (
 
   if (!params.decision.isTarget) {
     return {
-      kind: 'notTarget',
+      kind: "notTarget",
       flowToken: context.flowToken,
       nextIndex: context.index + 1,
       nextSkippedCount: context.skippedCount + 1,
@@ -55,7 +65,7 @@ export const computeLimitedBulkSubmitDecision = (
   }
 
   return {
-    kind: 'commit',
+    kind: "commit",
     baseItem: params.latestItem,
     flowToken: context.flowToken,
     nextIndex: context.index + 1,
@@ -64,9 +74,9 @@ export const computeLimitedBulkSubmitDecision = (
 };
 
 export type LimitedBulkCancelDecision =
-  | { kind: 'stale'; flowToken: symbol }
+  | { kind: "stale"; flowToken: symbol }
   | {
-      kind: 'finish';
+      kind: "finish";
       flowToken: symbol;
       skippedCount: number;
       preserveStartNotification: boolean;
@@ -77,11 +87,11 @@ export const computeLimitedBulkCancelDecision = (params: {
   isActiveFlow: boolean;
 }): LimitedBulkCancelDecision => {
   if (!params.isActiveFlow) {
-    return { kind: 'stale', flowToken: params.context.flowToken };
+    return { kind: "stale", flowToken: params.context.flowToken };
   }
 
   return {
-    kind: 'finish',
+    kind: "finish",
     flowToken: params.context.flowToken,
     skippedCount: params.context.skippedCount,
     preserveStartNotification: params.context.preserveStartNotification,

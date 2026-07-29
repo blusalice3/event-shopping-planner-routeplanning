@@ -1,11 +1,11 @@
-import type { HallDefinition } from '../types/map';
+import type { HallDefinition } from "../types/map";
 
 /**
  * ブロック名を正規化（trim + NFKC）。
  * 大小文字は区別する (例: "E" と "e" は別ブロック扱い)。
  */
 export function normalizeBlockName(name: string): string {
-  return name.trim().normalize('NFKC');
+  return name.trim().normalize("NFKC");
 }
 
 /**

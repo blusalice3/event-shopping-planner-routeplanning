@@ -1,6 +1,6 @@
-import React from 'react';
-import { useOptionalSpaceNavigator } from '../SpaceNavigatorContext';
-import { NAVIGATOR_STATUS_COLORS } from './SpaceNavigatorLegend';
+import React from "react";
+import { useOptionalSpaceNavigator } from "../SpaceNavigatorContext";
+import { NAVIGATOR_STATUS_COLORS } from "./SpaceNavigatorLegend";
 
 export function SpaceNavigatorSettingsPanel() {
   const navigator = useOptionalSpaceNavigator();
@@ -17,11 +17,15 @@ export function SpaceNavigatorSettingsPanel() {
           <input
             type="checkbox"
             checked={settings.railVisible}
-            onChange={(event) => updateSettings({ railVisible: event.target.checked })}
+            onChange={(event) =>
+              updateSettings({ railVisible: event.target.checked })
+            }
             className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600"
           />
           <span>
-            <span className="block text-slate-700 dark:text-slate-200">細い色付きナビ</span>
+            <span className="block text-slate-700 dark:text-slate-200">
+              細い色付きナビ
+            </span>
             <span className="block text-[10px] text-slate-500 dark:text-slate-400">
               画面端をドラッグして訪問先を選べます
             </span>
@@ -31,7 +35,9 @@ export function SpaceNavigatorSettingsPanel() {
           <input
             type="checkbox"
             checked={settings.footerButtonVisible}
-            onChange={(event) => updateSettings({ footerButtonVisible: event.target.checked })}
+            onChange={(event) =>
+              updateSettings({ footerButtonVisible: event.target.checked })
+            }
             className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 dark:border-slate-600"
           />
           <span>
@@ -44,10 +50,15 @@ export function SpaceNavigatorSettingsPanel() {
           </span>
         </label>
         <fieldset>
-          <legend className="mb-1 text-slate-600 dark:text-slate-300">表示する側</legend>
+          <legend className="mb-1 text-slate-600 dark:text-slate-300">
+            表示する側
+          </legend>
           <div className="flex gap-4">
-            {(['left', 'right'] as const).map((side) => (
-              <label key={side} className="flex cursor-pointer items-center gap-1.5">
+            {(["left", "right"] as const).map((side) => (
+              <label
+                key={side}
+                className="flex cursor-pointer items-center gap-1.5"
+              >
                 <input
                   type="radio"
                   name="spaceNavigatorSide"
@@ -55,16 +66,22 @@ export function SpaceNavigatorSettingsPanel() {
                   onChange={() => updateSettings({ side })}
                   className="h-3.5 w-3.5 text-indigo-600 focus:ring-indigo-500"
                 />
-                <span>{side === 'left' ? '左側' : '右側'}</span>
+                <span>{side === "left" ? "左側" : "右側"}</span>
               </label>
             ))}
           </div>
         </fieldset>
         <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-900/40">
-          <p className="mb-1 text-[10px] text-slate-500 dark:text-slate-400">表示見本</p>
+          <p className="mb-1 text-[10px] text-slate-500 dark:text-slate-400">
+            表示見本
+          </p>
           <div className="flex h-4 overflow-hidden rounded border border-slate-300 dark:border-slate-600">
             {Object.values(NAVIGATOR_STATUS_COLORS).map((color) => (
-              <span key={color} className="flex-1" style={{ backgroundColor: color }} />
+              <span
+                key={color}
+                className="flex-1"
+                style={{ backgroundColor: color }}
+              />
             ))}
           </div>
         </div>
@@ -77,4 +94,3 @@ export function SpaceNavigatorSettingsPanel() {
     </div>
   );
 }
-

@@ -1,29 +1,32 @@
-import type { ShoppingItem } from '../types/item';
+import type { ShoppingItem } from "../types/item";
 
 export const SHOPPING_ITEM_SNAPSHOT_KEYS = [
-  'id',
-  'circle',
-  'eventDate',
-  'block',
-  'number',
-  'title',
-  'price',
-  'purchaseStatus',
-  'quantity',
-  'limitedPurchasedQuantity',
-  'remarks',
-  'url',
-  'priorityLevel',
-  'protectionLevel',
-  'source',
-  'assignedTo',
-  'lastSyncedAt',
-  'orderIndex',
-  'postponed',
-  'manualHallId',
+  "id",
+  "circle",
+  "eventDate",
+  "block",
+  "number",
+  "title",
+  "price",
+  "purchaseStatus",
+  "quantity",
+  "limitedPurchasedQuantity",
+  "remarks",
+  "url",
+  "priorityLevel",
+  "protectionLevel",
+  "source",
+  "assignedTo",
+  "lastSyncedAt",
+  "orderIndex",
+  "postponed",
+  "manualHallId",
 ] as const satisfies readonly (keyof ShoppingItem)[];
 
-export const areSameItemSnapshot = (a: ShoppingItem, b: ShoppingItem): boolean =>
+export const areSameItemSnapshot = (
+  a: ShoppingItem,
+  b: ShoppingItem,
+): boolean =>
   a.id === b.id &&
   a.circle === b.circle &&
   a.eventDate === b.eventDate &&

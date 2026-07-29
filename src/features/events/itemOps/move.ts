@@ -1,6 +1,10 @@
-import type { ExecuteModeItems, ShoppingItem, ViewMode } from '../../../types/item';
-import { getSpaceKey } from '../../../utils/spaceGrouping';
-import { expandSameSpacePriorityItemIds } from './executeList';
+import type {
+  ExecuteModeItems,
+  ShoppingItem,
+  ViewMode,
+} from "../../../types/item";
+import { getSpaceKey } from "../../../utils/spaceGrouping";
+import { expandSameSpacePriorityItemIds } from "./executeList";
 
 export interface MoveItemResult {
   eventListItems?: ShoppingItem[];
@@ -16,8 +20,8 @@ export interface MoveItemResult {
 export function computeMoveItem(params: {
   dragId: string;
   hoverId: string;
-  targetColumn?: 'execute' | 'candidate';
-  sourceColumn?: 'execute' | 'candidate';
+  targetColumn?: "execute" | "candidate";
+  sourceColumn?: "execute" | "candidate";
   mode: ViewMode | undefined;
   effectiveSelectedIds: Set<string>;
   allItems: ShoppingItem[];
@@ -41,18 +45,29 @@ export function computeMoveItem(params: {
   } = params;
 
   const isDragInEffectiveSelection = effectiveSelectedIds.has(dragId);
-  const isAppendToEnd = hoverId === '__END_OF_LIST__';
+  const isAppendToEnd = hoverId === "__END_OF_LIST__";
   const executeIdsSet = new Set(executeModeItems[dayName] || []);
 
   // ---- editモード列間移動 ----
-  if (mode === 'edit' && sourceColumn && targetColumn && sourceColumn !== targetColumn) {
-    if (sourceColumn === 'candidate' && targetColumn === 'execute') {
+  if (
+    mode === "edit" &&
+    sourceColumn &&
+    targetColumn &&
+    sourceColumn !== targetColumn
+  ) {
+    if (sourceColumn === "candidate" && targetColumn === "execute") {
       // candidate → execute
-      const currentTabItems = allItems.filter((item) => item.eventDate === dayName);
-      let candidateItems = currentTabItems.filter((item) => !executeIdsSet.has(item.id));
+      const currentTabItems = allItems.filter(
+        (item) => item.eventDate === dayName,
+      );
+      let candidateItems = currentTabItems.filter(
+        (item) => !executeIdsSet.has(item.id),
+      );
 
       if (selectedBlockFilters.size > 0) {
-        candidateItems = candidateItems.filter((item) => selectedBlockFilters.has(item.block));
+        candidateItems = candidateItems.filter((item) =>
+          selectedBlockFilters.has(item.block),
+        );
       }
 
       let itemsToMove: ShoppingItem[] = [];
@@ -62,13 +77,20 @@ export function computeMoveItem(params: {
           Array.from(effectiveSelectedIds),
           candidateItems,
         );
-        itemsToMove = candidateItems.filter((item) => expandedIds.includes(item.id));
+        itemsToMove = candidateItems.filter((item) =>
+          expandedIds.includes(item.id),
+        );
       } else {
         const item = candidateItems.find((item) => item.id === dragId);
         if (item) {
           // 単一アイテムでもスペースグループ全体を移動
-          const expandedIds = expandSameSpacePriorityItemIds([dragId], candidateItems);
-          itemsToMove = candidateItems.filter((i) => expandedIds.includes(i.id));
+          const expandedIds = expandSameSpacePriorityItemIds(
+            [dragId],
+            candidateItems,
+          );
+          itemsToMove = candidateItems.filter((i) =>
+            expandedIds.includes(i.id),
+          );
         }
       }
 
@@ -79,13 +101,19 @@ export function computeMoveItem(params: {
 
       if (isAppendToEnd) {
         return {
-          executeModeItems: { ...executeModeItems, [dayName]: [...dayItems, ...itemIdsToMove] },
+          executeModeItems: {
+            ...executeModeItems,
+            [dayName]: [...dayItems, ...itemIdsToMove],
+          },
         };
       } else {
         const hoverIndex = dayItems.findIndex((id) => id === hoverId);
         if (hoverIndex === -1) {
           return {
-            executeModeItems: { ...executeModeItems, [dayName]: [...dayItems, ...itemIdsToMove] },
+            executeModeItems: {
+              ...executeModeItems,
+              [dayName]: [...dayItems, ...itemIdsToMove],
+            },
           };
         }
         dayItems.splice(hoverIndex, 0, ...itemIdsToMove);
@@ -93,13 +121,15 @@ export function computeMoveItem(params: {
           executeModeItems: { ...executeModeItems, [dayName]: dayItems },
         };
       }
-    } else if (sourceColumn === 'execute' && targetColumn === 'candidate') {
+    } else if (sourceColumn === "execute" && targetColumn === "candidate") {
       // execute → candidate
       const executeItems = allItems.filter(
-        (item) => item.eventDate.includes(dayName) && executeIdsSet.has(item.id),
+        (item) =>
+          item.eventDate.includes(dayName) && executeIdsSet.has(item.id),
       );
       const candidateItems = allItems.filter(
-        (item) => item.eventDate.includes(dayName) && !executeIdsSet.has(item.id),
+        (item) =>
+          item.eventDate.includes(dayName) && !executeIdsSet.has(item.id),
       );
 
       let itemsToMove: ShoppingItem[] = [];
@@ -109,12 +139,17 @@ export function computeMoveItem(params: {
           Array.from(effectiveSelectedIds),
           executeItems,
         );
-        itemsToMove = executeItems.filter((item) => expandedIds.includes(item.id));
+        itemsToMove = executeItems.filter((item) =>
+          expandedIds.includes(item.id),
+        );
       } else {
         const item = executeItems.find((item) => item.id === dragId);
         if (item) {
           // 単一アイテムでもスペースグループ全体を移動
-          const expandedIds = expandSameSpacePriorityItemIds([dragId], executeItems);
+          const expandedIds = expandSameSpacePriorityItemIds(
+            [dragId],
+            executeItems,
+          );
           itemsToMove = executeItems.filter((i) => expandedIds.includes(i.id));
         }
       }
@@ -133,7 +168,9 @@ export function computeMoveItem(params: {
       if (isAppendToEnd) {
         newCandidateList = [...candidateItems, ...itemsToMove];
       } else {
-        const hoverIndex = candidateItems.findIndex((item) => item.id === hoverId);
+        const hoverIndex = candidateItems.findIndex(
+          (item) => item.id === hoverId,
+        );
         if (hoverIndex === -1) {
           newCandidateList = [...candidateItems, ...itemsToMove];
         } else {
@@ -156,7 +193,10 @@ export function computeMoveItem(params: {
         if (!item.eventDate.includes(dayName)) return item;
         if (executeIdsSet.has(item.id) && !itemIdsToMove.includes(item.id)) {
           return execShift.shift() || item;
-        } else if (!executeIdsSet.has(item.id) || itemIdsToMove.includes(item.id)) {
+        } else if (
+          !executeIdsSet.has(item.id) ||
+          itemIdsToMove.includes(item.id)
+        ) {
           return candShift.shift() || item;
         }
         return item;
@@ -170,9 +210,13 @@ export function computeMoveItem(params: {
   }
 
   // ---- editモード同列リオーダー: execute列内 ----
-  if (mode === 'edit' && targetColumn === 'execute') {
+  if (mode === "edit" && targetColumn === "execute") {
     // ホール・優先度境界チェック（isAppendToEndでもスキップしない）
-    if (areItemsInSameHall && !isAppendToEnd && !areItemsInSameHall(dragId, hoverId)) {
+    if (
+      areItemsInSameHall &&
+      !isAppendToEnd &&
+      !areItemsInSameHall(dragId, hoverId)
+    ) {
       return {};
     }
     // 末尾追加時もチェック: ドラッグ元の末尾隣接アイテムと比較してスペース分断を防止
@@ -191,20 +235,26 @@ export function computeMoveItem(params: {
     // 同一スペース+同一優先度キー取得ヘルパー
     const getIdSpacePriorityKey = (id: string): string => {
       const item = allItems.find((i) => i.id === id);
-      return item ? `${getSpaceKey(item.block, item.number)}::${item.priorityLevel || 'none'}` : '';
+      return item
+        ? `${getSpaceKey(item.block, item.number)}::${item.priorityLevel || "none"}`
+        : "";
     };
 
     // 選択を同一スペース+同一優先度グループ全体に展開
     const expandedSelection = new Set(
       expandSameSpacePriorityItemIds(
-        isDragInEffectiveSelection ? Array.from(effectiveSelectedIds) : [dragId],
+        isDragInEffectiveSelection
+          ? Array.from(effectiveSelectedIds)
+          : [dragId],
         allItems,
         { dayName, sourceIds: new Set(dayItems) },
       ),
     );
 
     const selectedBlock = dayItems.filter((id) => expandedSelection.has(id));
-    const listWithoutSelection = dayItems.filter((id) => !expandedSelection.has(id));
+    const listWithoutSelection = dayItems.filter(
+      (id) => !expandedSelection.has(id),
+    );
 
     if (isAppendToEnd) {
       return {
@@ -223,7 +273,8 @@ export function computeMoveItem(params: {
     const hoverGroupKey = getIdSpacePriorityKey(hoverId);
     while (
       targetIndex > 0 &&
-      getIdSpacePriorityKey(listWithoutSelection[targetIndex - 1]) === hoverGroupKey
+      getIdSpacePriorityKey(listWithoutSelection[targetIndex - 1]) ===
+        hoverGroupKey
     ) {
       targetIndex--;
     }
@@ -231,19 +282,23 @@ export function computeMoveItem(params: {
     listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
 
     return {
-      executeModeItems: { ...executeModeItems, [dayName]: listWithoutSelection },
+      executeModeItems: {
+        ...executeModeItems,
+        [dayName]: listWithoutSelection,
+      },
     };
   }
 
   // ---- editモード同列リオーダー: candidate列内 ----
-  if (mode === 'edit' && targetColumn === 'candidate') {
+  if (mode === "edit" && targetColumn === "candidate") {
     const candidateItems = allItems.filter(
       (item) => item.eventDate.includes(dayName) && !executeIdsSet.has(item.id),
     );
 
     const rebuildItems = (newCandidateList: ShoppingItem[]): ShoppingItem[] => {
       const executeItems = allItems.filter(
-        (item) => item.eventDate.includes(dayName) && executeIdsSet.has(item.id),
+        (item) =>
+          item.eventDate.includes(dayName) && executeIdsSet.has(item.id),
       );
       const execShift = [...executeItems];
       const candShift = [...newCandidateList];
@@ -259,7 +314,9 @@ export function computeMoveItem(params: {
     };
 
     if (isDragInEffectiveSelection) {
-      const selectedBlock = candidateItems.filter((item) => effectiveSelectedIds.has(item.id));
+      const selectedBlock = candidateItems.filter((item) =>
+        effectiveSelectedIds.has(item.id),
+      );
       const listWithoutSelection = candidateItems.filter(
         (item) => !effectiveSelectedIds.has(item.id),
       );
@@ -268,7 +325,9 @@ export function computeMoveItem(params: {
       if (isAppendToEnd) {
         newCandidateList = [...listWithoutSelection, ...selectedBlock];
       } else {
-        const targetIndex = listWithoutSelection.findIndex((item) => item.id === hoverId);
+        const targetIndex = listWithoutSelection.findIndex(
+          (item) => item.id === hoverId,
+        );
         if (targetIndex === -1) return {};
         listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
         newCandidateList = listWithoutSelection;
@@ -283,7 +342,9 @@ export function computeMoveItem(params: {
       if (isAppendToEnd) {
         candidateItems.push(draggedItem);
       } else {
-        const hoverIndex = candidateItems.findIndex((item) => item.id === hoverId);
+        const hoverIndex = candidateItems.findIndex(
+          (item) => item.id === hoverId,
+        );
         if (hoverIndex === -1) return {};
         candidateItems.splice(hoverIndex, 0, draggedItem);
       }
@@ -293,18 +354,24 @@ export function computeMoveItem(params: {
   }
 
   // ---- executeモードリオーダー ----
-  if (mode === 'execute') {
+  if (mode === "execute") {
     const newItems = [...allItems];
 
     if (isDragInEffectiveSelection) {
-      const selectedBlock = newItems.filter((item) => effectiveSelectedIds.has(item.id));
-      const listWithoutSelection = newItems.filter((item) => !effectiveSelectedIds.has(item.id));
+      const selectedBlock = newItems.filter((item) =>
+        effectiveSelectedIds.has(item.id),
+      );
+      const listWithoutSelection = newItems.filter(
+        (item) => !effectiveSelectedIds.has(item.id),
+      );
 
       if (isAppendToEnd) {
         return { eventListItems: [...listWithoutSelection, ...selectedBlock] };
       }
 
-      const targetIndex = listWithoutSelection.findIndex((item) => item.id === hoverId);
+      const targetIndex = listWithoutSelection.findIndex(
+        (item) => item.id === hoverId,
+      );
       if (targetIndex === -1) return {};
       listWithoutSelection.splice(targetIndex, 0, ...selectedBlock);
 
@@ -338,9 +405,9 @@ export function computeMoveItem(params: {
  * @param areItemsInSameHall - App.tsx側で定義されるホール判定コールバック
  */
 export function computeMoveItemVertical(
-  direction: 'up' | 'down',
+  direction: "up" | "down",
   itemId: string,
-  targetColumn: 'execute' | 'candidate' | undefined,
+  targetColumn: "execute" | "candidate" | undefined,
   mode: ViewMode | undefined,
   effectiveSelectedIds: Set<string>,
   allItems: ShoppingItem[],
@@ -352,25 +419,36 @@ export function computeMoveItemVertical(
   const executeIdsSet = new Set(executeModeItems[dayName] || []);
 
   // ---- editモード execute列 ----
-  if (mode === 'edit' && targetColumn === 'execute') {
+  if (mode === "edit" && targetColumn === "execute") {
     const dayItems = [...(executeModeItems[dayName] || [])];
     const currentIndex = dayItems.findIndex((id) => id === itemId);
 
-    if (direction === 'up') {
+    if (direction === "up") {
       if (currentIndex <= 0) return {};
       const targetId = dayItems[currentIndex - 1];
       if (!areItemsInSameHall(itemId, targetId)) return {};
 
       if (isDragInEffectiveSelection) {
-        const selectedIds = dayItems.filter((id) => effectiveSelectedIds.has(id));
-        const listWithoutSelection = dayItems.filter((id) => !effectiveSelectedIds.has(id));
-        const firstSelectedIndex = dayItems.findIndex((id) => effectiveSelectedIds.has(id));
+        const selectedIds = dayItems.filter((id) =>
+          effectiveSelectedIds.has(id),
+        );
+        const listWithoutSelection = dayItems.filter(
+          (id) => !effectiveSelectedIds.has(id),
+        );
+        const firstSelectedIndex = dayItems.findIndex((id) =>
+          effectiveSelectedIds.has(id),
+        );
         if (firstSelectedIndex > 0) {
           const targetIdForGroup = dayItems[firstSelectedIndex - 1];
           if (!areItemsInSameHall(selectedIds[0], targetIdForGroup)) return {};
           const newTargetIndex = firstSelectedIndex - 1;
           listWithoutSelection.splice(newTargetIndex, 0, ...selectedIds);
-          return { executeModeItems: { ...executeModeItems, [dayName]: listWithoutSelection } };
+          return {
+            executeModeItems: {
+              ...executeModeItems,
+              [dayName]: listWithoutSelection,
+            },
+          };
         }
         return {};
       } else {
@@ -378,7 +456,9 @@ export function computeMoveItemVertical(
           dayItems[currentIndex],
           dayItems[currentIndex - 1],
         ];
-        return { executeModeItems: { ...executeModeItems, [dayName]: dayItems } };
+        return {
+          executeModeItems: { ...executeModeItems, [dayName]: dayItems },
+        };
       }
     } else {
       // down
@@ -387,8 +467,12 @@ export function computeMoveItemVertical(
       if (!areItemsInSameHall(itemId, targetId)) return {};
 
       if (isDragInEffectiveSelection) {
-        const selectedIds = dayItems.filter((id) => effectiveSelectedIds.has(id));
-        const listWithoutSelection = dayItems.filter((id) => !effectiveSelectedIds.has(id));
+        const selectedIds = dayItems.filter((id) =>
+          effectiveSelectedIds.has(id),
+        );
+        const listWithoutSelection = dayItems.filter(
+          (id) => !effectiveSelectedIds.has(id),
+        );
 
         let lastSelectedIndex = -1;
         dayItems.forEach((id, index) => {
@@ -397,14 +481,29 @@ export function computeMoveItemVertical(
 
         if (lastSelectedIndex >= 0 && lastSelectedIndex < dayItems.length - 1) {
           const jumpOverItemId = dayItems[lastSelectedIndex + 1];
-          if (!areItemsInSameHall(selectedIds[selectedIds.length - 1], jumpOverItemId)) return {};
+          if (
+            !areItemsInSameHall(
+              selectedIds[selectedIds.length - 1],
+              jumpOverItemId,
+            )
+          )
+            return {};
 
           const targetIndexInListWithout = listWithoutSelection.findIndex(
             (id) => id === jumpOverItemId,
           );
           if (targetIndexInListWithout !== -1) {
-            listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedIds);
-            return { executeModeItems: { ...executeModeItems, [dayName]: listWithoutSelection } };
+            listWithoutSelection.splice(
+              targetIndexInListWithout + 1,
+              0,
+              ...selectedIds,
+            );
+            return {
+              executeModeItems: {
+                ...executeModeItems,
+                [dayName]: listWithoutSelection,
+              },
+            };
           }
         }
         return {};
@@ -413,13 +512,15 @@ export function computeMoveItemVertical(
           dayItems[currentIndex + 1],
           dayItems[currentIndex],
         ];
-        return { executeModeItems: { ...executeModeItems, [dayName]: dayItems } };
+        return {
+          executeModeItems: { ...executeModeItems, [dayName]: dayItems },
+        };
       }
     }
   }
 
   // ---- editモード candidate列 ----
-  if (mode === 'edit' && targetColumn === 'candidate') {
+  if (mode === "edit" && targetColumn === "candidate") {
     const candidateItems = allItems.filter(
       (item) => item.eventDate.includes(dayName) && !executeIdsSet.has(item.id),
     );
@@ -427,7 +528,8 @@ export function computeMoveItemVertical(
 
     const rebuildItems = (newCandidateList: ShoppingItem[]): ShoppingItem[] => {
       const executeItems = allItems.filter(
-        (item) => item.eventDate.includes(dayName) && executeIdsSet.has(item.id),
+        (item) =>
+          item.eventDate.includes(dayName) && executeIdsSet.has(item.id),
       );
       const execShift = [...executeItems];
       const candShift = [...newCandidateList];
@@ -442,11 +544,13 @@ export function computeMoveItemVertical(
       });
     };
 
-    if (direction === 'up') {
+    if (direction === "up") {
       if (currentIndex <= 0) return {};
 
       if (isDragInEffectiveSelection) {
-        const selectedBlock = candidateItems.filter((item) => effectiveSelectedIds.has(item.id));
+        const selectedBlock = candidateItems.filter((item) =>
+          effectiveSelectedIds.has(item.id),
+        );
         const listWithoutSelection = candidateItems.filter(
           (item) => !effectiveSelectedIds.has(item.id),
         );
@@ -469,10 +573,13 @@ export function computeMoveItemVertical(
       }
     } else {
       // down
-      if (currentIndex < 0 || currentIndex >= candidateItems.length - 1) return {};
+      if (currentIndex < 0 || currentIndex >= candidateItems.length - 1)
+        return {};
 
       if (isDragInEffectiveSelection) {
-        const selectedBlock = candidateItems.filter((item) => effectiveSelectedIds.has(item.id));
+        const selectedBlock = candidateItems.filter((item) =>
+          effectiveSelectedIds.has(item.id),
+        );
         const listWithoutSelection = candidateItems.filter(
           (item) => !effectiveSelectedIds.has(item.id),
         );
@@ -482,14 +589,21 @@ export function computeMoveItemVertical(
           if (effectiveSelectedIds.has(item.id)) lastSelectedIndex = index;
         });
 
-        if (lastSelectedIndex >= 0 && lastSelectedIndex < candidateItems.length - 1) {
+        if (
+          lastSelectedIndex >= 0 &&
+          lastSelectedIndex < candidateItems.length - 1
+        ) {
           const jumpOverItemId = candidateItems[lastSelectedIndex + 1].id;
           const targetIndexInListWithout = listWithoutSelection.findIndex(
             (item) => item.id === jumpOverItemId,
           );
 
           if (targetIndexInListWithout !== -1) {
-            listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedBlock);
+            listWithoutSelection.splice(
+              targetIndexInListWithout + 1,
+              0,
+              ...selectedBlock,
+            );
             return { eventListItems: rebuildItems(listWithoutSelection) };
           }
         }
@@ -505,15 +619,17 @@ export function computeMoveItemVertical(
   }
 
   // ---- executeモード ----
-  if (mode === 'execute') {
+  if (mode === "execute") {
     const newItems = [...allItems];
     const currentIndex = newItems.findIndex((item) => item.id === itemId);
 
-    if (direction === 'up') {
+    if (direction === "up") {
       if (currentIndex <= 0) return {};
 
       if (isDragInEffectiveSelection) {
-        const selectedBlock = newItems.filter((item) => effectiveSelectedIds.has(item.id));
+        const selectedBlock = newItems.filter((item) =>
+          effectiveSelectedIds.has(item.id),
+        );
         const listWithoutSelection = newItems.filter(
           (item) => !effectiveSelectedIds.has(item.id),
         );
@@ -539,7 +655,9 @@ export function computeMoveItemVertical(
       if (currentIndex < 0 || currentIndex >= newItems.length - 1) return {};
 
       if (isDragInEffectiveSelection) {
-        const selectedBlock = newItems.filter((item) => effectiveSelectedIds.has(item.id));
+        const selectedBlock = newItems.filter((item) =>
+          effectiveSelectedIds.has(item.id),
+        );
         const listWithoutSelection = newItems.filter(
           (item) => !effectiveSelectedIds.has(item.id),
         );
@@ -556,7 +674,11 @@ export function computeMoveItemVertical(
           );
 
           if (targetIndexInListWithout !== -1) {
-            listWithoutSelection.splice(targetIndexInListWithout + 1, 0, ...selectedBlock);
+            listWithoutSelection.splice(
+              targetIndexInListWithout + 1,
+              0,
+              ...selectedBlock,
+            );
             return { eventListItems: listWithoutSelection };
           }
         }

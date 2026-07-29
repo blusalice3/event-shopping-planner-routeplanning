@@ -1,4 +1,10 @@
-import React, { useRef, useEffect, useState, useCallback, useMemo } from 'react';
+import React, {
+  useRef,
+  useEffect,
+  useState,
+  useCallback,
+  useMemo,
+} from "react";
 import {
   DayMapData,
   CellData,
@@ -10,15 +16,21 @@ import {
   RouteSegment,
   MIN_ZOOM,
   MAX_ZOOM,
-} from '../../types/map';
-import { ShoppingItem } from '../../types/item';
-import { useCanvasViewport } from '../../features/map/canvas/useCanvasViewport';
-import { extractNumberFromItemNumber } from '../../utils/xlsxMapParser';
-import { findRouteLookupNumberCell } from '../../utils/mapRoutingSignature';
-import { generateRouteSegments, simplifyPath } from '../../utils/pathfinding';
-import { filterFirstRouteMarkers, normalizeMapRouteDayText } from '../../utils/mapRouteOrder';
-import type { MapRoutePoint } from '../../utils/mapRoutePoints';
-import { hitTestMapRoute, type MapRouteHitResult } from '../../utils/mapRouteHitTest';
+} from "../../types/map";
+import { ShoppingItem } from "../../types/item";
+import { useCanvasViewport } from "../../features/map/canvas/useCanvasViewport";
+import { extractNumberFromItemNumber } from "../../utils/xlsxMapParser";
+import { findRouteLookupNumberCell } from "../../utils/mapRoutingSignature";
+import { generateRouteSegments, simplifyPath } from "../../utils/pathfinding";
+import {
+  filterFirstRouteMarkers,
+  normalizeMapRouteDayText,
+} from "../../utils/mapRouteOrder";
+import type { MapRoutePoint } from "../../utils/mapRoutePoints";
+import {
+  hitTestMapRoute,
+  type MapRouteHitResult,
+} from "../../utils/mapRouteHitTest";
 import {
   findAllCrossingsIndexed,
   buildCrossingLookup,
@@ -26,8 +38,8 @@ import {
   collectEdgeWithBridges,
   BatchedPathRenderer,
   PixelEdge,
-} from '../../utils/routeRendering';
-import MapCanvasPresentation from './MapCanvasPresentation';
+} from "../../utils/routeRendering";
+import MapCanvasPresentation from "./MapCanvasPresentation";
 
 interface MapCanvasProps {
   mapData: DayMapData;
@@ -37,7 +49,11 @@ interface MapCanvasProps {
   zoomLevel: ZoomLevel;
   rotationAngle?: number;
   isRouteVisible: boolean;
-  onCellClick: (row: number, col: number, matchingItems: ShoppingItem[]) => void;
+  onCellClick: (
+    row: number,
+    col: number,
+    matchingItems: ShoppingItem[],
+  ) => void;
   selectedHall?: HallDefinition;
   vertexSelectionMode?: {
     clickedVertices: { row: number; col: number }[];
@@ -62,7 +78,7 @@ interface MapCanvasProps {
   forceRouteVisible?: boolean;
   routeInsertSelectionActive?: boolean;
   onRouteInsertHit?: (hit: MapRouteHitResult) => void;
-  onRouteInsertMiss?: (miss: { kind: 'cell' | 'blank' }) => void;
+  onRouteInsertMiss?: (miss: { kind: "cell" | "blank" }) => void;
 }
 
 const BASE_CELL_SIZE = 28; // Base cell size.
@@ -84,31 +100,34 @@ const extractDayNameFromMapName = (mapName: string): string => {
 
 const hasCellInputValue = (value: string | number | null): boolean => {
   if (value === null || value === undefined) return false;
-  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value === "string") return value.trim().length > 0;
   return true;
 };
 
 const TAP_ASSIST_DURATION_MS = 900;
 
-type PriorityIndicatorLevel = 'priority' | 'highest';
+type PriorityIndicatorLevel = "priority" | "highest";
 
 export const shouldHighlightCandidateRemarks = (
-  item: Pick<ShoppingItem, 'id' | 'remarks'>,
+  item: Pick<ShoppingItem, "id" | "remarks">,
   executeModeItemIds: ReadonlySet<string>,
 ): boolean =>
   !executeModeItemIds.has(item.id) &&
-  Boolean(item.remarks && (item.remarks.includes('優先') || item.remarks.includes('委託無')));
+  Boolean(
+    item.remarks &&
+    (item.remarks.includes("優先") || item.remarks.includes("委託無")),
+  );
 
 export const shouldDrawReadableNumberBackground = (
   state:
     | Pick<
         MapCellStateDetail,
-        'hasPriorityUnvisited' | 'hasWarningRemarksUnvisited'
+        "hasPriorityUnvisited" | "hasWarningRemarksUnvisited"
       >
     | undefined,
-  value: CellData['value'],
+  value: CellData["value"],
 ): boolean =>
-  typeof value === 'number' &&
+  typeof value === "number" &&
   Boolean(state?.hasPriorityUnvisited || state?.hasWarningRemarksUnvisited);
 
 interface HoverGuideState {
@@ -129,8 +148,8 @@ type RgbColor = { r: number; g: number; b: number };
 
 const parseCssColorToRgb = (color: string): RgbColor | null => {
   const normalized = color.trim().toLowerCase();
-  if (normalized === 'white') return { r: 255, g: 255, b: 255 };
-  if (normalized === 'black') return { r: 0, g: 0, b: 0 };
+  if (normalized === "white") return { r: 255, g: 255, b: 255 };
+  if (normalized === "black") return { r: 0, g: 0, b: 0 };
 
   const hexMatch = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
   if (hexMatch) {
@@ -178,17 +197,17 @@ const isDarkLikeColor = (color: string): boolean => {
 const resolveMapTextColorForTheme = (
   color: string | null | undefined,
   isDarkMode: boolean,
-  fallback = '#333333',
+  fallback = "#333333",
 ): string => {
   const baseColor = color?.trim() || fallback;
   if (!isDarkMode) return baseColor;
   if (isWhiteLikeColor(baseColor)) return baseColor;
-  return isDarkLikeColor(baseColor) ? '#FFFFFF' : baseColor;
+  return isDarkLikeColor(baseColor) ? "#FFFFFF" : baseColor;
 };
 
 const isNumberLikeCellValue = (value: string | number | null): boolean => {
-  if (typeof value === 'number') return true;
-  if (typeof value !== 'string') return false;
+  if (typeof value === "number") return true;
+  if (typeof value !== "string") return false;
   return /^\d+$/.test(value.trim());
 };
 
@@ -210,7 +229,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   selectionGuideOptions,
   initialOffset,
   offsetRef: externalOffsetRef,
-  numberCellOutlineStyle = 'rounded',
+  numberCellOutlineStyle = "rounded",
   routePointsOverride,
   routeSegmentsOverride,
   routeInsertMissMapDataOverride,
@@ -261,11 +280,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   });
   const [hoverGuide, setHoverGuide] = useState<HoverGuideState | null>(null);
   const [tapAssist, setTapAssist] = useState<TapAssistState | null>(null);
-  const lastPointerTypeRef = useRef<string>('mouse');
+  const lastPointerTypeRef = useRef<string>("mouse");
   const tapAssistTimerRef = useRef<number | null>(null);
 
   const isDarkMode =
-    typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark");
 
   const isDetailedView = true;
   const showNumbers = true;
@@ -400,16 +420,20 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const normalizedDayName = normalizeMapRouteDayText(dayName);
     if (!normalizedDayName) return states;
 
-    const getPriorityIndicatorLevel = (item: (typeof items)[number]): PriorityIndicatorLevel | null => {
-      const priorityLevel = item.priorityLevel || 'none';
-      return priorityLevel === 'priority' || priorityLevel === 'highest' ? priorityLevel : null;
+    const getPriorityIndicatorLevel = (
+      item: (typeof items)[number],
+    ): PriorityIndicatorLevel | null => {
+      const priorityLevel = item.priorityLevel || "none";
+      return priorityLevel === "priority" || priorityLevel === "highest"
+        ? priorityLevel
+        : null;
     };
 
     items.forEach((item) => {
       const itemEventDate = normalizeMapRouteDayText(item.eventDate);
       if (itemEventDate !== normalizedDayName) return;
 
-      const itemBlockName = item.block?.trim() || '';
+      const itemBlockName = item.block?.trim() || "";
       let block = mapData.blocks.find((b) => b.name === itemBlockName);
 
       if (!block) {
@@ -454,7 +478,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         if (!executeModeItemIdsSet.has(item.id)) {
           existing.hasPriorityUnvisited = true;
         }
-        if (priorityIndicatorLevel === 'highest') {
+        if (priorityIndicatorLevel === "highest") {
           existing.hasHighestPriorityLevel = true;
         } else {
           existing.hasPriorityLevel = true;
@@ -475,7 +499,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     states.forEach((state) => {
       if (state.items.length > 0) {
-        const allVisited = state.items.every((item) => executeModeItemIdsSet.has(item.id));
+        const allVisited = state.items.every((item) =>
+          executeModeItemIdsSet.has(item.id),
+        );
         state.isFullyVisited = allVisited;
       }
     });
@@ -507,11 +533,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       row: number;
       col: number;
       order: number;
-      priorityLevel: 'none' | 'priority' | 'highest';
+      priorityLevel: "none" | "priority" | "highest";
     }> = [];
 
     visitItems.forEach((item, index) => {
-      const itemBlockName = item.block?.trim() || '';
+      const itemBlockName = item.block?.trim() || "";
 
       let block = mapData.blocks.find((b) => b.name === itemBlockName);
       if (!block) {
@@ -534,7 +560,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           row: cell.row,
           col: cell.col,
           order: index,
-          priorityLevel: item.priorityLevel || 'none',
+          priorityLevel: item.priorityLevel || "none",
         });
       }
     });
@@ -609,22 +635,36 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     // Use cell-rounded edge keys for parallel route rendering.
     const roundToCell = (v: number): number => Math.round(v);
-    const getEdgeKeyLocal = (r1: number, c1: number, r2: number, c2: number): string => {
-      const rr1 = roundToCell(r1); const rc1 = roundToCell(c1);
-      const rr2 = roundToCell(r2); const rc2 = roundToCell(c2);
-      if (rr1 < rr2 || (rr1 === rr2 && rc1 < rc2)) return `${rr1},${rc1}-${rr2},${rc2}`;
+    const getEdgeKeyLocal = (
+      r1: number,
+      c1: number,
+      r2: number,
+      c2: number,
+    ): string => {
+      const rr1 = roundToCell(r1);
+      const rc1 = roundToCell(c1);
+      const rr2 = roundToCell(r2);
+      const rc2 = roundToCell(c2);
+      if (rr1 < rr2 || (rr1 === rr2 && rc1 < rc2))
+        return `${rr1},${rc1}-${rr2},${rc2}`;
       return `${rr2},${rc2}-${rr1},${rc1}`;
     };
 
-    const isGroupTransition = (fromPriority: string | undefined, toPriority: string | undefined): boolean => {
-      return (fromPriority || 'none') !== (toPriority || 'none');
+    const isGroupTransition = (
+      fromPriority: string | undefined,
+      toPriority: string | undefined,
+    ): boolean => {
+      return (fromPriority || "none") !== (toPriority || "none");
     };
 
-    const edgeUsage = new Map<string, Set<'none' | 'priority' | 'highest'>>();
+    const edgeUsage = new Map<string, Set<"none" | "priority" | "highest">>();
     routeSegments.forEach((segment) => {
       if (segment.path.length < 2) return;
       if (isGroupTransition(segment.fromPriority, segment.toPriority)) return;
-      const priority = (segment.fromPriority || 'none') as 'none' | 'priority' | 'highest';
+      const priority = (segment.fromPriority || "none") as
+        | "none"
+        | "priority"
+        | "highest";
       for (let i = 0; i < segment.path.length - 1; i++) {
         const p1 = segment.path[i];
         const p2 = segment.path[i + 1];
@@ -642,7 +682,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const container = containerRef.current;
     if (!canvas || !container) return;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const containerWidth = container.clientWidth;
@@ -677,7 +717,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const dy = ty - mapCenterY;
       const cos = Math.cos(rotationRadians);
       const sin = Math.sin(rotationRadians);
-      return { x: dx * cos + dy * sin + mapCenterX, y: -dx * sin + dy * cos + mapCenterY };
+      return {
+        x: dx * cos + dy * sin + mapCenterX,
+        y: -dx * sin + dy * cos + mapCenterY,
+      };
     };
     const viewportCorners = [
       viewToMap(0, 0),
@@ -685,17 +728,32 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       viewToMap(0, containerHeight),
       viewToMap(containerWidth, containerHeight),
     ];
-    const visibleMinX = Math.min(...viewportCorners.map((p) => p.x)) - cellSize * 2;
-    const visibleMaxX = Math.max(...viewportCorners.map((p) => p.x)) + cellSize * 2;
-    const visibleMinY = Math.min(...viewportCorners.map((p) => p.y)) - cellSize * 2;
-    const visibleMaxY = Math.max(...viewportCorners.map((p) => p.y)) + cellSize * 2;
+    const visibleMinX =
+      Math.min(...viewportCorners.map((p) => p.x)) - cellSize * 2;
+    const visibleMaxX =
+      Math.max(...viewportCorners.map((p) => p.x)) + cellSize * 2;
+    const visibleMinY =
+      Math.min(...viewportCorners.map((p) => p.y)) - cellSize * 2;
+    const visibleMaxY =
+      Math.max(...viewportCorners.map((p) => p.y)) + cellSize * 2;
 
     const visMinCol = Math.max(1, Math.floor(visibleMinX / cellSize) + 1);
-    const visMaxCol = Math.min(mapData.maxCol, Math.ceil(visibleMaxX / cellSize) + 1);
+    const visMaxCol = Math.min(
+      mapData.maxCol,
+      Math.ceil(visibleMaxX / cellSize) + 1,
+    );
     const visMinRow = Math.max(1, Math.floor(visibleMinY / cellSize) + 1);
-    const visMaxRow = Math.min(mapData.maxRow, Math.ceil(visibleMaxY / cellSize) + 1);
+    const visMaxRow = Math.min(
+      mapData.maxRow,
+      Math.ceil(visibleMaxY / cellSize) + 1,
+    );
 
-    const isCellVisible = (row: number, col: number, spanRows = 1, spanCols = 1): boolean => {
+    const isCellVisible = (
+      row: number,
+      col: number,
+      spanRows = 1,
+      spanCols = 1,
+    ): boolean => {
       return (
         col + spanCols - 1 >= visMinCol &&
         col <= visMaxCol &&
@@ -705,7 +763,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     };
 
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
+    ctx.imageSmoothingQuality = "high";
 
     const drawUprightText = (text: string, x: number, y: number) => {
       if (rotationRadians === 0) {
@@ -719,9 +777,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.restore();
     };
 
-    const splitTokenByWidth = (token: string, maxLineWidth: number): string[] => {
+    const splitTokenByWidth = (
+      token: string,
+      maxLineWidth: number,
+    ): string[] => {
       const chunks: string[] = [];
-      let current = '';
+      let current = "";
 
       Array.from(token).forEach((char) => {
         const next = current + char;
@@ -736,17 +797,17 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (current.length > 0) {
         chunks.push(current);
       }
-      return chunks.length > 0 ? chunks : [''];
+      return chunks.length > 0 ? chunks : [""];
     };
 
     const tokenizeLineForWrap = (line: string): string[] => {
       const tokens: string[] = [];
-      let currentAsciiWord = '';
+      let currentAsciiWord = "";
 
       const flushAsciiWord = () => {
         if (currentAsciiWord.length === 0) return;
         tokens.push(currentAsciiWord);
-        currentAsciiWord = '';
+        currentAsciiWord = "";
       };
 
       Array.from(line).forEach((char) => {
@@ -764,30 +825,36 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
       flushAsciiWord();
 
-      return tokens.length > 0 ? tokens : [''];
+      return tokens.length > 0 ? tokens : [""];
     };
 
-    const splitTextByWidth = (sourceText: string, maxLineWidth: number): string[] => {
-      const rawLines = sourceText.split('\n');
+    const splitTextByWidth = (
+      sourceText: string,
+      maxLineWidth: number,
+    ): string[] => {
+      const rawLines = sourceText.split("\n");
       const wrappedLines: string[] = [];
 
       rawLines.forEach((rawLine) => {
         if (rawLine.length === 0) {
-          wrappedLines.push('');
+          wrappedLines.push("");
           return;
         }
 
         const tokens = tokenizeLineForWrap(rawLine);
-        let current = '';
+        let current = "";
 
         tokens.forEach((token) => {
           const next = current + token;
-          if (current.length > 0 && ctx.measureText(next).width > maxLineWidth) {
+          if (
+            current.length > 0 &&
+            ctx.measureText(next).width > maxLineWidth
+          ) {
             wrappedLines.push(current.trimEnd());
 
             const normalizedToken = token.trimStart();
             if (normalizedToken.length === 0) {
-              current = '';
+              current = "";
               return;
             }
 
@@ -806,15 +873,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         wrappedLines.push(current.trimEnd());
       });
 
-      return wrappedLines.length > 0 ? wrappedLines : [''];
+      return wrappedLines.length > 0 ? wrappedLines : [""];
     };
 
     const trimLineToWidth = (line: string, maxLineWidth: number): string => {
       let next = line;
-      while (next.length > 0 && ctx.measureText(`${next}…`).width > maxLineWidth) {
+      while (
+        next.length > 0 &&
+        ctx.measureText(`${next}…`).width > maxLineWidth
+      ) {
         next = next.slice(0, -1);
       }
-      return next.length > 0 ? `${next}…` : '…';
+      return next.length > 0 ? `${next}…` : "…";
     };
 
     const drawFittedHorizontalTextInCell = (
@@ -825,18 +895,26 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       height: number,
       preferredFontSize: number,
     ) => {
-      const fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      const fontFamily =
+        '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
       const minFontSize = 6;
       const innerPaddingX = Math.max(1, preferredFontSize * 0.2);
       const innerPaddingY = Math.max(1, preferredFontSize * 0.2);
       const maxLineWidth = Math.max(1, width - innerPaddingX * 2);
       const maxTextHeight = Math.max(1, height - innerPaddingY * 2);
 
-      let resolvedFontSize = Math.max(minFontSize, Math.floor(preferredFontSize));
+      let resolvedFontSize = Math.max(
+        minFontSize,
+        Math.floor(preferredFontSize),
+      );
       let resolvedLineHeight = resolvedFontSize * 1.15;
       let resolvedLines = splitTextByWidth(sourceText, maxLineWidth);
 
-      for (let size = Math.max(minFontSize, Math.floor(preferredFontSize)); size >= minFontSize; size--) {
+      for (
+        let size = Math.max(minFontSize, Math.floor(preferredFontSize));
+        size >= minFontSize;
+        size--
+      ) {
         ctx.font = `${size}px ${fontFamily}`;
         const candidateLines = splitTextByWidth(sourceText, maxLineWidth);
         const candidateLineHeight = size * 1.15;
@@ -849,10 +927,16 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
 
       ctx.font = `${resolvedFontSize}px ${fontFamily}`;
-      const maxLines = Math.max(1, Math.floor(maxTextHeight / resolvedLineHeight));
+      const maxLines = Math.max(
+        1,
+        Math.floor(maxTextHeight / resolvedLineHeight),
+      );
       if (resolvedLines.length > maxLines) {
         const clamped = resolvedLines.slice(0, maxLines);
-        clamped[maxLines - 1] = trimLineToWidth(clamped[maxLines - 1], maxLineWidth);
+        clamped[maxLines - 1] = trimLineToWidth(
+          clamped[maxLines - 1],
+          maxLineWidth,
+        );
         resolvedLines = clamped;
       }
 
@@ -861,11 +945,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.rect(x, y, width, height);
       ctx.clip();
       ctx.font = `${resolvedFontSize}px ${fontFamily}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
 
       const totalTextHeight = resolvedLines.length * resolvedLineHeight;
-      const startY = y + (height - totalTextHeight) / 2 + resolvedLineHeight / 2;
+      const startY =
+        y + (height - totalTextHeight) / 2 + resolvedLineHeight / 2;
       const centerX = x + width / 2;
 
       resolvedLines.forEach((line, lineIndex) => {
@@ -874,8 +959,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
 
       ctx.restore();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
     };
 
     const drawFittedVerticalTextInCell = (
@@ -886,9 +971,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       height: number,
       preferredFontSize: number,
     ) => {
-      const fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      const fontFamily =
+        '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
       const minFontSize = 6;
-      const columns = sourceText.split(/\n/).map((line) => line || ' ');
+      const columns = sourceText.split(/\n/).map((line) => line || " ");
       const innerPaddingX = Math.max(1, preferredFontSize * 0.2);
       const innerPaddingY = Math.max(1, preferredFontSize * 0.2);
       const maxTextWidth = Math.max(1, width - innerPaddingX * 2);
@@ -898,12 +984,21 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const columnSpacing = fontSize * 1.2;
         const rowSpacing = fontSize * 1.1;
         const requiredWidth = columns.length * columnSpacing;
-        const requiredHeight = Math.max(...columns.map((column) => Array.from(column).length)) * rowSpacing;
+        const requiredHeight =
+          Math.max(...columns.map((column) => Array.from(column).length)) *
+          rowSpacing;
         return requiredWidth <= maxTextWidth && requiredHeight <= maxTextHeight;
       };
 
-      let resolvedFontSize = Math.max(minFontSize, Math.floor(preferredFontSize));
-      for (let size = Math.max(minFontSize, Math.floor(preferredFontSize)); size >= minFontSize; size--) {
+      let resolvedFontSize = Math.max(
+        minFontSize,
+        Math.floor(preferredFontSize),
+      );
+      for (
+        let size = Math.max(minFontSize, Math.floor(preferredFontSize));
+        size >= minFontSize;
+        size--
+      ) {
         if (canFitVerticalText(size)) {
           resolvedFontSize = size;
           break;
@@ -915,13 +1010,15 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const maxColumns = Math.max(1, Math.floor(maxTextWidth / columnSpacing));
       const maxRows = Math.max(1, Math.floor(maxTextHeight / rowSpacing));
 
-      let drawableColumns = columns.slice(0, maxColumns).map((column) => Array.from(column));
+      let drawableColumns = columns
+        .slice(0, maxColumns)
+        .map((column) => Array.from(column));
       const hadHiddenColumns = columns.length > maxColumns;
 
       drawableColumns = drawableColumns.map((chars) => {
         if (chars.length <= maxRows) return chars;
         const trimmed = chars.slice(0, maxRows);
-        trimmed[maxRows - 1] = '…';
+        trimmed[maxRows - 1] = "…";
         return trimmed;
       });
 
@@ -929,9 +1026,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const lastColumnIndex = drawableColumns.length - 1;
         const lastColumn = drawableColumns[lastColumnIndex];
         if (lastColumn.length < maxRows) {
-          lastColumn.push('…');
+          lastColumn.push("…");
         } else {
-          lastColumn[lastColumn.length - 1] = '…';
+          lastColumn[lastColumn.length - 1] = "…";
         }
       }
 
@@ -940,8 +1037,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.rect(x, y, width, height);
       ctx.clip();
       ctx.font = `${resolvedFontSize}px ${fontFamily}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
 
       const totalWidth = drawableColumns.length * columnSpacing;
       const startX = x + width / 2 + (totalWidth - columnSpacing) / 2;
@@ -958,23 +1055,23 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
 
       ctx.restore();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
     };
 
     const createWarningStripePattern = () => {
       if (isRotationInteracting) return null;
-      const patternCanvas = document.createElement('canvas');
+      const patternCanvas = document.createElement("canvas");
       const stripeSize = Math.max(8, cellSize * 0.4);
       patternCanvas.width = stripeSize * 2;
       patternCanvas.height = stripeSize * 2;
-      const patternCtx = patternCanvas.getContext('2d');
+      const patternCtx = patternCanvas.getContext("2d");
       if (!patternCtx) return null;
 
-      patternCtx.fillStyle = '#FFD600';
+      patternCtx.fillStyle = "#FFD600";
       patternCtx.fillRect(0, 0, stripeSize * 2, stripeSize * 2);
 
-      patternCtx.fillStyle = '#212121';
+      patternCtx.fillStyle = "#212121";
       patternCtx.beginPath();
       patternCtx.moveTo(0, stripeSize * 2);
       patternCtx.lineTo(stripeSize, stripeSize * 2);
@@ -985,15 +1082,21 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       patternCtx.closePath();
       patternCtx.fill();
 
-      return ctx.createPattern(patternCanvas, 'repeat');
+      return ctx.createPattern(patternCanvas, "repeat");
     };
 
     const warningPattern = createWarningStripePattern();
 
-    if (!isRotationInteracting && vertexSelectionMode && (showSelectionGrid || showSelectionRuler)) {
+    if (
+      !isRotationInteracting &&
+      vertexSelectionMode &&
+      (showSelectionGrid || showSelectionRuler)
+    ) {
       if (showSelectionGrid) {
         ctx.save();
-        ctx.strokeStyle = isDarkMode ? 'rgba(148, 163, 184, 0.22)' : 'rgba(59, 130, 246, 0.2)';
+        ctx.strokeStyle = isDarkMode
+          ? "rgba(148, 163, 184, 0.22)"
+          : "rgba(59, 130, 246, 0.2)";
         ctx.lineWidth = 1;
         ctx.setLineDash([2, 3]);
 
@@ -1021,13 +1124,15 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const labelFontSize = Math.max(8, Math.min(11, cellSize * 0.38));
         const topLabelHeight = Math.max(12, cellSize * 0.42);
         const leftLabelWidth = Math.max(18, cellSize * 0.55);
-        const labelBg = isDarkMode ? 'rgba(15, 23, 42, 0.78)' : 'rgba(255, 255, 255, 0.82)';
-        const labelText = isDarkMode ? '#E2E8F0' : '#1E293B';
+        const labelBg = isDarkMode
+          ? "rgba(15, 23, 42, 0.78)"
+          : "rgba(255, 255, 255, 0.82)";
+        const labelText = isDarkMode ? "#E2E8F0" : "#1E293B";
 
         ctx.save();
         ctx.font = `${labelFontSize}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
         ctx.fillStyle = labelBg;
 
         for (let col = visMinCol; col <= visMaxCol; col++) {
@@ -1059,24 +1164,42 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     // Resolve number-cell style values outside the loop.
     const outlineStyle = numberCellOutlineStyle;
-    const useInset = outlineStyle !== 'none';
+    const useInset = outlineStyle !== "none";
     const ncPad = useInset ? cellSize * 0.1 : 0;
-    const ncRadius = outlineStyle === 'rounded' ? Math.max(2, cellSize * 0.18) : 0;
-    const ncBg = isDarkMode ? '#1E293B' : '#FFFFFF';
-    const ncBorder = isDarkMode ? '#475569' : '#CBD5E1';
+    const ncRadius =
+      outlineStyle === "rounded" ? Math.max(2, cellSize * 0.18) : 0;
+    const ncBg = isDarkMode ? "#1E293B" : "#FFFFFF";
+    const ncBorder = isDarkMode ? "#475569" : "#CBD5E1";
     const ncBorderWidth = Math.max(1, cellSize * 0.055);
-    const drawStroke = outlineStyle !== 'none';
-    const isDashed = outlineStyle === 'dashed';
+    const drawStroke = outlineStyle !== "none";
+    const isDashed = outlineStyle === "dashed";
 
     // Build the cell path once per style.
-    const drawCellPath = ncRadius > 0
-      ? (rx: number, ry: number, rw: number, rh: number) => ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius)
-      : (rx: number, ry: number, rw: number, rh: number) => ctx.rect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2);
+    const drawCellPath =
+      ncRadius > 0
+        ? (rx: number, ry: number, rw: number, rh: number) =>
+            ctx.roundRect(
+              rx + ncPad,
+              ry + ncPad,
+              rw - ncPad * 2,
+              rh - ncPad * 2,
+              ncRadius,
+            )
+        : (rx: number, ry: number, rw: number, rh: number) =>
+            ctx.rect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2);
 
     // Collect geometry for batched drawing.
     const ncRects: { x: number; y: number; w: number; h: number }[] = [];
-    const overlayGroups = new Map<string, { x: number; y: number; w: number; h: number }[]>();
-    const patternOverlayCells: { x: number; y: number; w: number; h: number }[] = [];
+    const overlayGroups = new Map<
+      string,
+      { x: number; y: number; w: number; h: number }[]
+    >();
+    const patternOverlayCells: {
+      x: number;
+      y: number;
+      w: number;
+      h: number;
+    }[] = [];
 
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
@@ -1106,11 +1229,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       if (state) {
         if (state.isFullyVisited) {
           if (isNumberCell) {
-            const color = 'rgba(239, 83, 80, 0.5)';
+            const color = "rgba(239, 83, 80, 0.5)";
             if (!overlayGroups.has(color)) overlayGroups.set(color, []);
             overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
-            ctx.fillStyle = 'rgba(239, 83, 80, 0.5)';
+            ctx.fillStyle = "rgba(239, 83, 80, 0.5)";
             ctx.fillRect(x, y, width, height);
           }
         } else if (
@@ -1123,31 +1246,34 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             ctx.fillStyle = warningPattern;
             ctx.fillRect(x, y, width, height);
           }
-        } else if (state.hasPriorityUnvisited || state.hasWarningRemarksUnvisited) {
+        } else if (
+          state.hasPriorityUnvisited ||
+          state.hasWarningRemarksUnvisited
+        ) {
           if (isNumberCell) {
-            const color = 'rgba(255, 214, 0, 0.45)';
+            const color = "rgba(255, 214, 0, 0.45)";
             if (!overlayGroups.has(color)) overlayGroups.set(color, []);
             overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
-            ctx.fillStyle = 'rgba(255, 214, 0, 0.45)';
+            ctx.fillStyle = "rgba(255, 214, 0, 0.45)";
             ctx.fillRect(x, y, width, height);
           }
         } else if (state.isVisited) {
           if (isNumberCell) {
-            const color = 'rgba(255, 238, 88, 0.5)';
+            const color = "rgba(255, 238, 88, 0.5)";
             if (!overlayGroups.has(color)) overlayGroups.set(color, []);
             overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
-            ctx.fillStyle = 'rgba(255, 238, 88, 0.5)';
+            ctx.fillStyle = "rgba(255, 238, 88, 0.5)";
             ctx.fillRect(x, y, width, height);
           }
         } else if (state.hasItems) {
           if (isNumberCell) {
-            const color = 'rgba(66, 165, 245, 0.3)';
+            const color = "rgba(66, 165, 245, 0.3)";
             if (!overlayGroups.has(color)) overlayGroups.set(color, []);
             overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
-            ctx.fillStyle = 'rgba(66, 165, 245, 0.3)';
+            ctx.fillStyle = "rgba(66, 165, 245, 0.3)";
             ctx.fillRect(x, y, width, height);
           }
         }
@@ -1204,9 +1330,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     }
 
     if (showBorders && !isRotationInteracting) {
-      type DrawnBorder = NonNullable<CellData['borders']['top']>;
+      type DrawnBorder = NonNullable<CellData["borders"]["top"]>;
       type BorderEdge = {
-        orientation: 'h' | 'v';
+        orientation: "h" | "v";
         gridX: number;
         gridY: number;
         border: DrawnBorder;
@@ -1214,13 +1340,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
       const borderWeight = (border: DrawnBorder): number => {
         switch (border.style) {
-          case 'double':
+          case "double":
             return 4;
-          case 'thick':
+          case "thick":
             return 3;
-          case 'medium':
+          case "medium":
             return 2;
-          case 'thin':
+          case "thin":
           default:
             return 1;
         }
@@ -1237,7 +1363,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         if (candidateWeight > currentWeight) return candidate;
         if (candidateWeight < currentWeight) return current;
 
-        if (current.color === '#000000' && candidate.color !== '#000000') {
+        if (current.color === "#000000" && candidate.color !== "#000000") {
           return candidate;
         }
 
@@ -1246,7 +1372,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
       const edgeMap = new Map<string, BorderEdge>();
       const upsertEdge = (
-        orientation: 'h' | 'v',
+        orientation: "h" | "v",
         gridX: number,
         gridY: number,
         border: DrawnBorder | null,
@@ -1284,36 +1410,36 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         }
 
         if (topBorder) {
-          upsertEdge('h', startCol, startRow, topBorder);
+          upsertEdge("h", startCol, startRow, topBorder);
         }
         if (bottomBorder) {
-          upsertEdge('h', startCol, endRow, bottomBorder);
+          upsertEdge("h", startCol, endRow, bottomBorder);
         }
         if (leftBorder) {
-          upsertEdge('v', startCol, startRow, leftBorder);
+          upsertEdge("v", startCol, startRow, leftBorder);
         }
         if (rightBorder) {
-          upsertEdge('v', endCol, startRow, rightBorder);
+          upsertEdge("v", endCol, startRow, rightBorder);
         }
       });
 
       const softBorderColor = (color: string | undefined): string => {
-        const c = color || '#000000';
-        if (c === '#000000') return isDarkMode ? '#666666' : '#555555';
+        const c = color || "#000000";
+        if (c === "#000000") return isDarkMode ? "#666666" : "#555555";
         return c;
       };
 
       edgeMap.forEach(({ orientation, gridX, gridY, border }) => {
         let lineWidth = 1;
         switch (border.style) {
-          case 'double':
-          case 'thick':
+          case "double":
+          case "thick":
             lineWidth = 3;
             break;
-          case 'medium':
+          case "medium":
             lineWidth = 2;
             break;
-          case 'thin':
+          case "thin":
           default:
             lineWidth = 1;
             break;
@@ -1321,13 +1447,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
         const startX = gridX * cellSize;
         const startY = gridY * cellSize;
-        const endX = orientation === 'h' ? (gridX + 1) * cellSize : startX;
-        const endY = orientation === 'v' ? (gridY + 1) * cellSize : startY;
+        const endX = orientation === "h" ? (gridX + 1) * cellSize : startX;
+        const endY = orientation === "v" ? (gridY + 1) * cellSize : startY;
 
         ctx.beginPath();
         ctx.strokeStyle = softBorderColor(border.color);
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
         ctx.lineWidth = lineWidth;
         ctx.moveTo(startX, startY);
         ctx.lineTo(endX, endY);
@@ -1356,12 +1482,16 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         let fontSize: number;
         if (merge) {
           if (isVertical) {
-            const charCount = text.replace(/\n/g, '').length;
-            fontSize = Math.min(width * 0.6, (height / (charCount + 1)) * 0.9, 16);
+            const charCount = text.replace(/\n/g, "").length;
+            fontSize = Math.min(
+              width * 0.6,
+              (height / (charCount + 1)) * 0.9,
+              16,
+            );
           } else {
             fontSize = Math.min(width, height) * (isDetailedView ? 0.5 : 0.4);
           }
-        } else if (typeof cell.value === 'number') {
+        } else if (typeof cell.value === "number") {
           fontSize = Math.min(cellSize * 0.45, 14);
         } else {
           fontSize = Math.min(cellSize * 0.4, 12);
@@ -1370,13 +1500,15 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         fontSize = Math.max(fontSize, 8);
 
         ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
 
         const state = cellStates.get(`${cell.row}-${cell.col}`);
         const explicitFontColor = cell.fontColor?.trim();
         const enforceBlackNumberTextInDarkMode =
-          isDarkMode && Boolean(state?.hasItems) && isNumberLikeCellValue(cell.value);
+          isDarkMode &&
+          Boolean(state?.hasItems) &&
+          isNumberLikeCellValue(cell.value);
 
         if (shouldDrawReadableNumberBackground(state, cell.value)) {
           const textMetrics = ctx.measureText(text);
@@ -1390,32 +1522,48 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const bgHeight = textHeight + padding;
           const radius = Math.min(padding, bgHeight / 2);
 
-          ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+          ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
           ctx.beginPath();
           ctx.roundRect(bgX, bgY, bgWidth, bgHeight, radius);
           ctx.fill();
 
-          if (enforceBlackNumberTextInDarkMode && !isWhiteLikeColor(explicitFontColor)) {
-            ctx.fillStyle = '#111111';
+          if (
+            enforceBlackNumberTextInDarkMode &&
+            !isWhiteLikeColor(explicitFontColor)
+          ) {
+            ctx.fillStyle = "#111111";
           } else if (explicitFontColor) {
-            ctx.fillStyle = resolveMapTextColorForTheme(explicitFontColor, isDarkMode, '#212121');
+            ctx.fillStyle = resolveMapTextColorForTheme(
+              explicitFontColor,
+              isDarkMode,
+              "#212121",
+            );
           } else {
-            ctx.fillStyle = '#212121';
+            ctx.fillStyle = "#212121";
           }
-        } else if (enforceBlackNumberTextInDarkMode && !isWhiteLikeColor(explicitFontColor)) {
-          ctx.fillStyle = '#111111';
+        } else if (
+          enforceBlackNumberTextInDarkMode &&
+          !isWhiteLikeColor(explicitFontColor)
+        ) {
+          ctx.fillStyle = "#111111";
         } else if (explicitFontColor) {
-          ctx.fillStyle = resolveMapTextColorForTheme(explicitFontColor, isDarkMode);
+          ctx.fillStyle = resolveMapTextColorForTheme(
+            explicitFontColor,
+            isDarkMode,
+          );
         } else if (state?.isFullyVisited) {
-          ctx.fillStyle = '#B71C1C';
+          ctx.fillStyle = "#B71C1C";
         } else if (state?.isVisited) {
-          ctx.fillStyle = '#F57F17';
+          ctx.fillStyle = "#F57F17";
         } else if (state?.hasItems) {
-          ctx.fillStyle = '#1565C0';
+          ctx.fillStyle = "#1565C0";
         } else if (numberCellSet.has(`${cell.row}-${cell.col}`)) {
-          ctx.fillStyle = isDarkMode ? '#E2E8F0' : '#334155';
+          ctx.fillStyle = isDarkMode ? "#E2E8F0" : "#334155";
         } else {
-          ctx.fillStyle = resolveMapTextColorForTheme(cell.fontColor, isDarkMode);
+          ctx.fillStyle = resolveMapTextColorForTheme(
+            cell.fontColor,
+            isDarkMode,
+          );
         }
 
         if (isVertical) {
@@ -1428,7 +1576,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             const startX = x + width / 2 + (totalWidth - lineSpacing) / 2;
 
             lines.forEach((line, lineIndex) => {
-              const chars = line.split('');
+              const chars = line.split("");
               const totalHeight = chars.length * fontSize * 1.1;
               const startY = y + (height - totalHeight) / 2 + fontSize / 2;
               const lineX = startX - lineIndex * lineSpacing;
@@ -1456,26 +1604,33 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const y = (cell.row - 1) * cellSize;
 
         const merge = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-        const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
-        const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
+        const width = merge
+          ? (merge.endCol - merge.startCol + 1) * cellSize
+          : cellSize;
+        const height = merge
+          ? (merge.endRow - merge.startRow + 1) * cellSize
+          : cellSize;
 
         const dotSize = Math.max(cellSize * 0.4, 4);
         ctx.beginPath();
 
         if (state.isFullyVisited) {
-          ctx.fillStyle = '#EF5350';
-        } else if (state.hasPriorityUnvisited || state.hasWarningRemarksUnvisited) {
+          ctx.fillStyle = "#EF5350";
+        } else if (
+          state.hasPriorityUnvisited ||
+          state.hasWarningRemarksUnvisited
+        ) {
           ctx.arc(x + width / 2, y + height / 2, dotSize / 2, 0, Math.PI * 2);
-          ctx.fillStyle = '#FFD600';
+          ctx.fillStyle = "#FFD600";
           ctx.fill();
-          ctx.strokeStyle = '#212121';
+          ctx.strokeStyle = "#212121";
           ctx.lineWidth = Math.max(1, dotSize * 0.2);
           ctx.stroke();
           return; // Priority markers are drawn with a custom stroked dot, so skip the common fill path.
         } else if (state.isVisited) {
-          ctx.fillStyle = '#FFEE58';
+          ctx.fillStyle = "#FFEE58";
         } else {
-          ctx.fillStyle = '#42A5F5';
+          ctx.fillStyle = "#42A5F5";
         }
 
         ctx.arc(x + width / 2, y + height / 2, dotSize / 2, 0, Math.PI * 2);
@@ -1505,30 +1660,39 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const drawPriorityDot = (level: PriorityIndicatorLevel, cx: number) => {
         ctx.beginPath();
         ctx.arc(cx, cy, radius, 0, Math.PI * 2);
-        ctx.fillStyle = level === 'highest' ? '#EF4444' : '#F97316';
+        ctx.fillStyle = level === "highest" ? "#EF4444" : "#F97316";
         ctx.fill();
         ctx.lineWidth = Math.max(1, radius * 0.28);
-        ctx.strokeStyle = isDarkMode ? 'rgba(15, 23, 42, 0.9)' : 'rgba(255, 255, 255, 0.95)';
+        ctx.strokeStyle = isDarkMode
+          ? "rgba(15, 23, 42, 0.9)"
+          : "rgba(255, 255, 255, 0.95)";
         ctx.stroke();
       };
 
       if (state.hasHighestPriorityLevel) {
-        drawPriorityDot('highest', x + inset + radius);
+        drawPriorityDot("highest", x + inset + radius);
       }
       if (state.hasPriorityLevel) {
-        drawPriorityDot('priority', x + width - inset - radius);
+        drawPriorityDot("priority", x + width - inset - radius);
       }
     });
 
-    if (!isRotationInteracting && effectiveRouteVisible && routeSegments.length > 0 && routeCrossingData) {
-      const getPriorityColor = (priority: 'none' | 'priority' | 'highest' | undefined): string => {
+    if (
+      !isRotationInteracting &&
+      effectiveRouteVisible &&
+      routeSegments.length > 0 &&
+      routeCrossingData
+    ) {
+      const getPriorityColor = (
+        priority: "none" | "priority" | "highest" | undefined,
+      ): string => {
         switch (priority) {
-          case 'highest':
-            return '#EF4444';
-          case 'priority':
-            return '#F97316';
+          case "highest":
+            return "#EF4444";
+          case "priority":
+            return "#F97316";
           default:
-            return '#1976D2';
+            return "#1976D2";
         }
       };
 
@@ -1536,8 +1700,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         fromPriority: string | undefined,
         toPriority: string | undefined,
       ): boolean => {
-        const from = fromPriority || 'none';
-        const to = toPriority || 'none';
+        const from = fromPriority || "none";
+        const to = toPriority || "none";
         return from !== to;
       };
 
@@ -1555,7 +1719,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
       // Use cell-rounded edge keys for parallel route rendering.
       const roundToCell = (v: number): number => Math.round(v);
-      const getEdgeKey = (r1: number, c1: number, r2: number, c2: number): string => {
+      const getEdgeKey = (
+        r1: number,
+        c1: number,
+        r2: number,
+        c2: number,
+      ): string => {
         const rr1 = roundToCell(r1);
         const rc1 = roundToCell(c1);
         const rr2 = roundToCell(r2);
@@ -1594,9 +1763,14 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       routeSegments.forEach((segment, segIdx) => {
         if (segment.path.length < 2) return;
 
-        const isTransition = isGroupTransition(segment.fromPriority, segment.toPriority);
-        const segmentPriority = segment.fromPriority || 'none';
-        const baseColor = isTransition ? '#9CA3AF' : getPriorityColor(segment.fromPriority);
+        const isTransition = isGroupTransition(
+          segment.fromPriority,
+          segment.toPriority,
+        );
+        const segmentPriority = segment.fromPriority || "none";
+        const baseColor = isTransition
+          ? "#9CA3AF"
+          : getPriorityColor(segment.fromPriority);
         const collector = batcher.beginGroup(baseColor, lineWidth);
 
         for (let i = 0; i < segment.path.length - 1; i++) {
@@ -1642,9 +1816,15 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
           // Draw with bridge gaps where route lines cross.
           collectEdgeWithBridges(
-            collector, px1, py1, px2, py2,
-            segIdx, i,
-            crossingLookup, bridgeParams,
+            collector,
+            px1,
+            py1,
+            px2,
+            py2,
+            segIdx,
+            i,
+            crossingLookup,
+            bridgeParams,
           );
         }
 
@@ -1657,7 +1837,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const endY = (last.row - 0.5) * cellSize;
 
           // Cull arrowheads outside the viewport.
-          if (endX >= visMinX && endX <= visMaxX && endY >= visMinY && endY <= visMaxY) {
+          if (
+            endX >= visMinX &&
+            endX <= visMaxX &&
+            endY >= visMinY &&
+            endY <= visMaxY
+          ) {
             const angle = Math.atan2(
               (last.row - prev.row) * cellSize,
               (last.col - prev.col) * cellSize,
@@ -1666,7 +1851,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             const arrowSize = Math.max(6, cellSize * 0.25);
             batcher.addTriangle(
               baseColor,
-              endX, endY,
+              endX,
+              endY,
               endX - arrowSize * Math.cos(angle - Math.PI / 6),
               endY - arrowSize * Math.sin(angle - Math.PI / 6),
               endX - arrowSize * Math.cos(angle + Math.PI / 6),
@@ -1685,7 +1871,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const py = (point.row - 0.5) * cellSize;
 
           // Viewport culling.
-          if (px < visMinX || px > visMaxX || py < visMinY || py > visMaxY) return;
+          if (px < visMinX || px > visMaxX || py < visMinY || py > visMaxY)
+            return;
 
           const circleSize = Math.max(12, cellSize * 0.5);
           const pointColor = getPriorityColor(point.priorityLevel);
@@ -1696,9 +1883,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           ctx.fill();
 
           ctx.font = `bold ${Math.max(8, circleSize * 0.6)}px sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillStyle = '#FFFFFF';
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillStyle = "#FFFFFF";
           drawUprightText(String(point.order + 1), px, py);
         });
       }
@@ -1710,11 +1897,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
       ctx.save();
 
-      ctx.strokeStyle = '#FF6B00';
+      ctx.strokeStyle = "#FF6B00";
       ctx.lineWidth = Math.max(4, cellSize * 0.15);
       ctx.strokeRect(x - 2, y - 2, cellSize + 4, cellSize + 4);
 
-      ctx.strokeStyle = '#FFD600';
+      ctx.strokeStyle = "#FFD600";
       ctx.lineWidth = Math.max(2, cellSize * 0.08);
       ctx.strokeRect(x + 2, y + 2, cellSize - 4, cellSize - 4);
 
@@ -1728,17 +1915,24 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const hoverCenterY = (hoverGuide.row - 0.5) * cellSize;
 
       ctx.save();
-      ctx.strokeStyle = '#0EA5E9';
+      ctx.strokeStyle = "#0EA5E9";
       ctx.lineWidth = Math.max(2, cellSize * 0.08);
-      ctx.strokeRect(hoverCellX + 1, hoverCellY + 1, cellSize - 2, cellSize - 2);
+      ctx.strokeRect(
+        hoverCellX + 1,
+        hoverCellY + 1,
+        cellSize - 2,
+        cellSize - 2,
+      );
 
       if (vertexSelectionMode.clickedVertices.length > 0) {
         const lastVertex =
-          vertexSelectionMode.clickedVertices[vertexSelectionMode.clickedVertices.length - 1];
+          vertexSelectionMode.clickedVertices[
+            vertexSelectionMode.clickedVertices.length - 1
+          ];
         const lastX = (lastVertex.col - 0.5) * cellSize;
         const lastY = (lastVertex.row - 0.5) * cellSize;
         ctx.beginPath();
-        ctx.strokeStyle = 'rgba(14, 165, 233, 0.85)';
+        ctx.strokeStyle = "rgba(14, 165, 233, 0.85)";
         ctx.lineWidth = Math.max(2, cellSize * 0.08);
         ctx.setLineDash([6, 4]);
         ctx.moveTo(lastX, lastY);
@@ -1749,29 +1943,47 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
       const label = `(${hoverGuide.row},${hoverGuide.col})`;
       ctx.font = `${Math.max(10, cellSize * 0.33)}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
       const labelPaddingX = 7;
       const labelWidth = ctx.measureText(label).width + labelPaddingX * 2;
       const labelHeight = Math.max(18, cellSize * 0.46);
       const labelX = hoverCenterX + labelWidth / 2 + 6;
       const labelY = hoverCenterY - labelHeight / 2 - 6;
 
-      ctx.fillStyle = isDarkMode ? 'rgba(15, 23, 42, 0.92)' : 'rgba(255, 255, 255, 0.94)';
-      ctx.fillRect(labelX - labelWidth / 2, labelY - labelHeight / 2, labelWidth, labelHeight);
-      ctx.strokeStyle = 'rgba(14, 165, 233, 0.9)';
+      ctx.fillStyle = isDarkMode
+        ? "rgba(15, 23, 42, 0.92)"
+        : "rgba(255, 255, 255, 0.94)";
+      ctx.fillRect(
+        labelX - labelWidth / 2,
+        labelY - labelHeight / 2,
+        labelWidth,
+        labelHeight,
+      );
+      ctx.strokeStyle = "rgba(14, 165, 233, 0.9)";
       ctx.lineWidth = 1;
-      ctx.strokeRect(labelX - labelWidth / 2, labelY - labelHeight / 2, labelWidth, labelHeight);
-      ctx.fillStyle = isDarkMode ? '#E2E8F0' : '#0F172A';
+      ctx.strokeRect(
+        labelX - labelWidth / 2,
+        labelY - labelHeight / 2,
+        labelWidth,
+        labelHeight,
+      );
+      ctx.fillStyle = isDarkMode ? "#E2E8F0" : "#0F172A";
       drawUprightText(label, labelX, labelY);
       ctx.restore();
     }
 
-    if (!isRotationInteracting && vertexSelectionMode && vertexSelectionMode.clickedVertices.length >= 3) {
+    if (
+      !isRotationInteracting &&
+      vertexSelectionMode &&
+      vertexSelectionMode.clickedVertices.length >= 3
+    ) {
       const vertices = vertexSelectionMode.clickedVertices;
 
-      const centroidRow = vertices.reduce((s, v) => s + v.row, 0) / vertices.length;
-      const centroidCol = vertices.reduce((s, v) => s + v.col, 0) / vertices.length;
+      const centroidRow =
+        vertices.reduce((s, v) => s + v.row, 0) / vertices.length;
+      const centroidCol =
+        vertices.reduce((s, v) => s + v.col, 0) / vertices.length;
       const sortedVertices = [...vertices].sort((a, b) => {
         return (
           Math.atan2(a.row - centroidRow, a.col - centroidCol) -
@@ -1780,7 +1992,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       });
 
       ctx.beginPath();
-      ctx.fillStyle = 'rgba(255, 0, 0, 0.4)';
+      ctx.fillStyle = "rgba(255, 0, 0, 0.4)";
 
       sortedVertices.forEach((vertex, i) => {
         const px = (vertex.col - 0.5) * cellSize;
@@ -1801,8 +2013,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const py = (vertex.row - 0.5) * cellSize;
 
         ctx.beginPath();
-        ctx.fillStyle = '#FFFFFF';
-        ctx.strokeStyle = '#FF0000';
+        ctx.fillStyle = "#FFFFFF";
+        ctx.strokeStyle = "#FF0000";
         ctx.lineWidth = 2;
         const markerSize = Math.max(10, cellSize * 0.4);
         ctx.arc(px, py, markerSize / 2, 0, Math.PI * 2);
@@ -1811,17 +2023,21 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
         // Draw the vertex order label.
         ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#FF0000';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#FF0000";
         drawUprightText(String(i + 1), px, py);
       });
-    } else if (!isRotationInteracting && vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
+    } else if (
+      !isRotationInteracting &&
+      vertexSelectionMode &&
+      vertexSelectionMode.clickedVertices.length > 0
+    ) {
       const vertices = vertexSelectionMode.clickedVertices;
 
       if (vertices.length >= 2) {
         ctx.beginPath();
-        ctx.strokeStyle = 'rgba(255, 0, 0, 0.6)';
+        ctx.strokeStyle = "rgba(255, 0, 0, 0.6)";
         ctx.lineWidth = Math.max(2, cellSize * 0.08);
 
         vertices.forEach((vertex, i) => {
@@ -1843,8 +2059,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const py = (vertex.row - 0.5) * cellSize;
 
         ctx.beginPath();
-        ctx.fillStyle = '#FFFFFF';
-        ctx.strokeStyle = '#FF0000';
+        ctx.fillStyle = "#FFFFFF";
+        ctx.strokeStyle = "#FF0000";
         ctx.lineWidth = 2;
         const markerSize = Math.max(10, cellSize * 0.4);
         ctx.arc(px, py, markerSize / 2, 0, Math.PI * 2);
@@ -1852,30 +2068,38 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         ctx.stroke();
 
         ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#FF0000';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#FF0000";
         drawUprightText(String(i + 1), px, py);
       });
     }
 
-    if (!isRotationInteracting && cellSelectionMode && cellSelectionMode.clickedCells.length > 0) {
+    if (
+      !isRotationInteracting &&
+      cellSelectionMode &&
+      cellSelectionMode.clickedCells.length > 0
+    ) {
       const clickedCells = cellSelectionMode.clickedCells;
       const selType = cellSelectionMode.type;
 
       if (clickedCells.length >= 2) {
-        if (selType === 'individual') {
+        if (selType === "individual") {
           clickedCells.forEach((cell) => {
             const mergeInfo = mergedCellsMap.get(`${cell.row}-${cell.col}`);
-            const cx = mergeInfo ? (mergeInfo.startCol - 1) * cellSize : (cell.col - 1) * cellSize;
-            const cy = mergeInfo ? (mergeInfo.startRow - 1) * cellSize : (cell.row - 1) * cellSize;
+            const cx = mergeInfo
+              ? (mergeInfo.startCol - 1) * cellSize
+              : (cell.col - 1) * cellSize;
+            const cy = mergeInfo
+              ? (mergeInfo.startRow - 1) * cellSize
+              : (cell.row - 1) * cellSize;
             const cw = mergeInfo
               ? (mergeInfo.endCol - mergeInfo.startCol + 1) * cellSize
               : cellSize;
             const ch = mergeInfo
               ? (mergeInfo.endRow - mergeInfo.startRow + 1) * cellSize
               : cellSize;
-            ctx.fillStyle = 'rgba(144, 238, 144, 0.35)';
+            ctx.fillStyle = "rgba(144, 238, 144, 0.35)";
             ctx.fillRect(cx, cy, cw, ch);
           });
         } else {
@@ -1900,9 +2124,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const ry = (minRow - 1) * cellSize;
           const rw = (displayMaxCol - minCol + 1) * cellSize;
           const rh = (displayMaxRow - minRow + 1) * cellSize;
-          ctx.fillStyle = 'rgba(144, 238, 144, 0.35)';
+          ctx.fillStyle = "rgba(144, 238, 144, 0.35)";
           ctx.fillRect(rx, ry, rw, rh);
-          ctx.strokeStyle = 'rgba(76, 175, 80, 0.7)';
+          ctx.strokeStyle = "rgba(76, 175, 80, 0.7)";
           ctx.lineWidth = 2;
           ctx.setLineDash([6, 3]);
           ctx.strokeRect(rx, ry, rw, rh);
@@ -1915,17 +2139,23 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         let px: number, py: number;
         if (mergeInfo) {
           px =
-            (mergeInfo.startCol - 1 + (mergeInfo.endCol - mergeInfo.startCol + 1) / 2) * cellSize;
+            (mergeInfo.startCol -
+              1 +
+              (mergeInfo.endCol - mergeInfo.startCol + 1) / 2) *
+            cellSize;
           py =
-            (mergeInfo.startRow - 1 + (mergeInfo.endRow - mergeInfo.startRow + 1) / 2) * cellSize;
+            (mergeInfo.startRow -
+              1 +
+              (mergeInfo.endRow - mergeInfo.startRow + 1) / 2) *
+            cellSize;
         } else {
           px = (cell.col - 0.5) * cellSize;
           py = (cell.row - 0.5) * cellSize;
         }
 
         ctx.beginPath();
-        ctx.fillStyle = '#FFFFFF';
-        ctx.strokeStyle = '#2196F3';
+        ctx.fillStyle = "#FFFFFF";
+        ctx.strokeStyle = "#2196F3";
         ctx.lineWidth = 2;
         const markerSize = Math.max(10, cellSize * 0.4);
         ctx.arc(px, py, markerSize / 2, 0, Math.PI * 2);
@@ -1934,9 +2164,9 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
         // Draw the vertex order label.
         ctx.font = `bold ${Math.max(8, markerSize * 0.7)}px sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillStyle = '#2196F3';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#2196F3";
         drawUprightText(String(i + 1), px, py);
       });
     }
@@ -1953,7 +2183,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       );
       const srcY = Math.max(
         0,
-        Math.min(containerHeight - sourceSize, tapAssist.viewY - sourceSize / 2),
+        Math.min(
+          containerHeight - sourceSize,
+          tapAssist.viewY - sourceSize / 2,
+        ),
       );
       const lensCenterX = Math.max(
         lensRadius + 8,
@@ -1961,15 +2194,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       );
       const lensCenterY = Math.max(
         lensRadius + 8,
-        Math.min(containerHeight - lensRadius - 8, tapAssist.viewY - lensRadius - 20),
+        Math.min(
+          containerHeight - lensRadius - 8,
+          tapAssist.viewY - lensRadius - 20,
+        ),
       );
 
       ctx.save();
-      ctx.shadowColor = 'rgba(15, 23, 42, 0.35)';
+      ctx.shadowColor = "rgba(15, 23, 42, 0.35)";
       ctx.shadowBlur = 10;
       ctx.beginPath();
       ctx.arc(lensCenterX, lensCenterY, lensRadius, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+      ctx.fillStyle = "rgba(255, 255, 255, 0.95)";
       ctx.fill();
       ctx.clip();
       ctx.drawImage(
@@ -1983,7 +2219,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         lensDiameter,
         lensDiameter,
       );
-      ctx.strokeStyle = '#0EA5E9';
+      ctx.strokeStyle = "#0EA5E9";
       ctx.lineWidth = 2;
       ctx.stroke();
 
@@ -1992,7 +2228,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.lineTo(lensCenterX + 10, lensCenterY);
       ctx.moveTo(lensCenterX, lensCenterY - 10);
       ctx.lineTo(lensCenterX, lensCenterY + 10);
-      ctx.strokeStyle = 'rgba(14, 165, 233, 0.9)';
+      ctx.strokeStyle = "rgba(14, 165, 233, 0.9)";
       ctx.lineWidth = 1.5;
       ctx.stroke();
       ctx.restore();
@@ -2003,20 +2239,32 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const labelY = lensCenterY + lensRadius + 12;
       ctx.save();
       ctx.font = `${Math.max(10, cellSize * 0.34)}px sans-serif`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
       const labelWidth = ctx.measureText(label).width + labelPaddingX * 2;
       const labelHeight = Math.max(18, cellSize * 0.45) + labelPaddingY;
       const labelX = Math.max(
         labelWidth / 2 + 8,
         Math.min(containerWidth - labelWidth / 2 - 8, lensCenterX),
       );
-      ctx.fillStyle = isDarkMode ? 'rgba(15, 23, 42, 0.92)' : 'rgba(255, 255, 255, 0.94)';
-      ctx.fillRect(labelX - labelWidth / 2, labelY - labelHeight / 2, labelWidth, labelHeight);
-      ctx.strokeStyle = '#0EA5E9';
+      ctx.fillStyle = isDarkMode
+        ? "rgba(15, 23, 42, 0.92)"
+        : "rgba(255, 255, 255, 0.94)";
+      ctx.fillRect(
+        labelX - labelWidth / 2,
+        labelY - labelHeight / 2,
+        labelWidth,
+        labelHeight,
+      );
+      ctx.strokeStyle = "#0EA5E9";
       ctx.lineWidth = 1;
-      ctx.strokeRect(labelX - labelWidth / 2, labelY - labelHeight / 2, labelWidth, labelHeight);
-      ctx.fillStyle = isDarkMode ? '#E2E8F0' : '#0F172A';
+      ctx.strokeRect(
+        labelX - labelWidth / 2,
+        labelY - labelHeight / 2,
+        labelWidth,
+        labelHeight,
+      );
+      ctx.fillStyle = isDarkMode ? "#E2E8F0" : "#0F172A";
       ctx.fillText(label, labelX, labelY);
       ctx.restore();
     }
@@ -2068,19 +2316,28 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     routeSegmentsOverride.length > 0;
 
   const getRouteInsertMissKind = useCallback(
-    (row: number, col: number): 'cell' | 'blank' => {
-      if (!routeInsertSelectionActive) return 'blank';
-      if (!routeInsertMissMapDataOverride) return 'blank';
+    (row: number, col: number): "cell" | "blank" => {
+      if (!routeInsertSelectionActive) return "blank";
+      if (!routeInsertMissMapDataOverride) return "blank";
 
       const missMapData = routeInsertMissMapDataOverride;
-      if (row < 1 || row > missMapData.maxRow || col < 1 || col > missMapData.maxCol) {
-        return 'blank';
+      if (
+        row < 1 ||
+        row > missMapData.maxRow ||
+        col < 1 ||
+        col > missMapData.maxCol
+      ) {
+        return "blank";
       }
 
       const isOnMissMap =
-        missMapData.cells.some((cell) => cell.row === row && cell.col === col) ||
+        missMapData.cells.some(
+          (cell) => cell.row === row && cell.col === col,
+        ) ||
         missMapData.blocks.some((block) =>
-          block.numberCells.some((numberCell) => numberCell.row === row && numberCell.col === col),
+          block.numberCells.some(
+            (numberCell) => numberCell.row === row && numberCell.col === col,
+          ),
         ) ||
         missMapData.mergedCells.some(
           (merge) =>
@@ -2090,8 +2347,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
             col <= merge.endCol,
         );
 
-      if (!isOnMissMap) return 'blank';
-      return cellStates.has(`${row}-${col}`) || isOnMissMap ? 'cell' : 'blank';
+      if (!isOnMissMap) return "blank";
+      return cellStates.has(`${row}-${col}`) || isOnMissMap ? "cell" : "blank";
     },
     [cellStates, routeInsertMissMapDataOverride, routeInsertSelectionActive],
   );
@@ -2122,18 +2379,23 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         return;
       }
 
-      if (vertexSelectionMode && vertexSelectionMode.clickedVertices.length > 0) {
+      if (
+        vertexSelectionMode &&
+        vertexSelectionMode.clickedVertices.length > 0
+      ) {
         const markerSize = Math.max(10, cellSize * 0.4);
         const clickRadius = markerSize;
 
         for (const vertex of vertexSelectionMode.clickedVertices) {
           const markerX = (vertex.col - 0.5) * cellSize;
           const markerY = (vertex.row - 0.5) * cellSize;
-          const distance = Math.sqrt(Math.pow(x - markerX, 2) + Math.pow(y - markerY, 2));
+          const distance = Math.sqrt(
+            Math.pow(x - markerX, 2) + Math.pow(y - markerY, 2),
+          );
 
           if (distance <= clickRadius) {
             window.dispatchEvent(
-              new CustomEvent('mapCellClick', {
+              new CustomEvent("mapCellClick", {
                 detail: { row: vertex.row, col: vertex.col },
               }),
             );
@@ -2154,8 +2416,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const mi = mergedCellsMap.get(`${cell.row}-${cell.col}`);
           let mx: number, my: number;
           if (mi) {
-            mx = (mi.startCol - 1 + (mi.endCol - mi.startCol + 1) / 2) * cellSize;
-            my = (mi.startRow - 1 + (mi.endRow - mi.startRow + 1) / 2) * cellSize;
+            mx =
+              (mi.startCol - 1 + (mi.endCol - mi.startCol + 1) / 2) * cellSize;
+            my =
+              (mi.startRow - 1 + (mi.endRow - mi.startRow + 1) / 2) * cellSize;
           } else {
             mx = (cell.col - 0.5) * cellSize;
             my = (cell.row - 0.5) * cellSize;
@@ -2163,7 +2427,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
           const distance = Math.sqrt(Math.pow(x - mx, 2) + Math.pow(y - my, 2));
           if (distance <= clickRadius) {
             window.dispatchEvent(
-              new CustomEvent('mapCellClick', {
+              new CustomEvent("mapCellClick", {
                 detail: { row: cell.row, col: cell.col },
               }),
             );
@@ -2191,7 +2455,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
       const shouldShowTapAssist =
         (vertexSelectionMode || cellSelectionMode) &&
-        (pointerType === 'touch' || pointerType === 'pen');
+        (pointerType === "touch" || pointerType === "pen");
       if (shouldShowTapAssist) {
         showTapAssist({
           row: resolvedRow,
@@ -2202,7 +2466,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       }
 
       window.dispatchEvent(
-        new CustomEvent('mapCellClick', {
+        new CustomEvent("mapCellClick", {
           detail: { row: resolvedRow, col: resolvedCol },
         }),
       );
@@ -2238,13 +2502,18 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (isDraggingRef.current) return;
 
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const now =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
       if (now < suppressClickUntilRef.current) return;
 
       const metrics = getPointerViewMetrics(e.clientX, e.clientY);
       if (!metrics) return;
 
-      handleTapAtViewPosition(metrics.viewX, metrics.viewY, lastPointerTypeRef.current);
+      handleTapAtViewPosition(
+        metrics.viewX,
+        metrics.viewY,
+        lastPointerTypeRef.current,
+      );
     },
     [getPointerViewMetrics, handleTapAtViewPosition],
   );
@@ -2366,13 +2635,19 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         return { row, col, viewX, viewY };
       });
     },
-    [cellSize, getPointerViewMetrics, mapData.maxRow, mapData.maxCol, toMapCoordinates],
+    [
+      cellSize,
+      getPointerViewMetrics,
+      mapData.maxRow,
+      mapData.maxCol,
+      toMapCoordinates,
+    ],
   );
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       lastPointerTypeRef.current = e.pointerType;
-      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+      if (e.pointerType === "touch" || e.pointerType === "pen") {
         e.preventDefault();
       }
       if (activeTouchesRef.current.size >= 2) return;
@@ -2387,13 +2662,16 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       lastPointerTypeRef.current = e.pointerType;
-      if (e.pointerType === 'mouse' && vertexSelectionMode) {
+      if (e.pointerType === "mouse" && vertexSelectionMode) {
         updateHoverGuideFromPointer(e.clientX, e.clientY);
-      } else if (e.pointerType !== 'mouse' && hoverGuide) {
+      } else if (e.pointerType !== "mouse" && hoverGuide) {
         setHoverGuide(null);
       }
 
-      if ((e.pointerType === 'touch' || e.pointerType === 'pen') && isPinchGestureRef.current) {
+      if (
+        (e.pointerType === "touch" || e.pointerType === "pen") &&
+        isPinchGestureRef.current
+      ) {
         return;
       }
       if (e.buttons !== 1) return;
@@ -2403,7 +2681,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const dy = e.clientY - dragStartRef.current.y;
 
       const dragThreshold =
-        lastPointerTypeRef.current === 'touch' || lastPointerTypeRef.current === 'pen' ? 10 : 5;
+        lastPointerTypeRef.current === "touch" ||
+        lastPointerTypeRef.current === "pen"
+          ? 10
+          : 5;
       if (Math.abs(dx) > dragThreshold || Math.abs(dy) > dragThreshold) {
         isDraggingRef.current = true;
         setIsDragging(true);
@@ -2454,7 +2735,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       lastPointerTypeRef.current = e.pointerType;
       const wasDragging = isDraggingRef.current;
-      const isTouchPointer = e.pointerType === 'touch' || e.pointerType === 'pen';
+      const isTouchPointer =
+        e.pointerType === "touch" || e.pointerType === "pen";
       if (isTouchPointer) {
         e.preventDefault();
       }
@@ -2463,11 +2745,13 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const metrics = getPointerViewMetrics(e.clientX, e.clientY);
         if (metrics) {
           handleTapAtViewPosition(metrics.viewX, metrics.viewY, e.pointerType);
-          const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          const now =
+            typeof performance !== "undefined" ? performance.now() : Date.now();
           suppressClickUntilRef.current = now + 450;
         }
       } else if (wasDragging) {
-        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const now =
+          typeof performance !== "undefined" ? performance.now() : Date.now();
         suppressClickUntilRef.current = now + 450;
       }
 
@@ -2505,16 +2789,15 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       onPointerUp={handlePointerUp}
       onPointerLeave={handlePointerLeave}
       onPointerCancel={handlePointerCancel}
-      cursor={isDragging ? 'grabbing' : routeInsertSelectionActive ? 'crosshair' : 'grab'}
+      cursor={
+        isDragging
+          ? "grabbing"
+          : routeInsertSelectionActive
+            ? "crosshair"
+            : "grab"
+      }
     />
   );
 };
 
 export default React.memo(MapCanvas);
-
-
-
-
-
-
-

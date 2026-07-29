@@ -1,4 +1,7 @@
-export function removeRecordKey<T>(record: Record<string, T>, key: string): Record<string, T> {
+export function removeRecordKey<T>(
+  record: Record<string, T>,
+  key: string,
+): Record<string, T> {
   const nextRecord = { ...record };
   delete nextRecord[key];
   return nextRecord;

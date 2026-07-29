@@ -6,25 +6,25 @@ import {
   useRef,
   useState,
   type RefObject,
-} from 'react';
-import type { ShoppingItem } from '../../../types/item';
+} from "react";
+import type { ShoppingItem } from "../../../types/item";
 import {
   useOptionalSpaceNavigator,
   type SpaceNavigatorLocationSnapshot,
   type SpaceNavigatorRegistration,
   type TemporaryNavigationMode,
-} from '../SpaceNavigatorContext';
-import { buildExecutionNavigatorEntries } from '../domain/buildNavigatorEntries';
-import { evaluateNavigationGuard } from '../domain/navigationGuard';
-import type { NavigatorEntry } from '../types';
+} from "../SpaceNavigatorContext";
+import { buildExecutionNavigatorEntries } from "../domain/buildNavigatorEntries";
+import { evaluateNavigationGuard } from "../domain/navigationGuard";
+import type { NavigatorEntry } from "../types";
 
-const VISIT_ID_ATTRIBUTE = 'data-space-navigation-visit-id';
-const ANCHOR_ATTRIBUTE = 'data-space-navigation-anchor';
+const VISIT_ID_ATTRIBUTE = "data-space-navigation-visit-id";
+const ANCHOR_ATTRIBUTE = "data-space-navigation-anchor";
 const PROGRAMMATIC_SCROLL_IDLE_MS = 120;
 const PROGRAMMATIC_SCROLL_TIMEOUT_MS = 2_000;
 
 type RestorePoint = Parameters<
-  NonNullable<SpaceNavigatorRegistration['onRestore']>
+  NonNullable<SpaceNavigatorRegistration["onRestore"]>
 >[0];
 
 interface ExecutionSnapshotPayload {
@@ -48,7 +48,7 @@ export interface UseExecutionSpaceNavigatorOptions {
   enabled: boolean;
   registrationId: string;
   items: readonly ShoppingItem[];
-  layoutMode: 'pc' | 'smartphone';
+  layoutMode: "pc" | "smartphone";
   showSpaceGroups: boolean;
   collapsedSpaces?: ReadonlySet<string>;
   onToggleSpaceCollapse?: (groupKey: string) => void;
@@ -67,14 +67,14 @@ export interface ExecutionSpaceNavigatorState {
 }
 
 function getLegacyGroupKey(entry: NavigatorEntry): string {
-  return entry.priorityLevel === 'none'
+  return entry.priorityLevel === "none"
     ? entry.spaceKey
     : `${entry.spaceKey}:${entry.priorityLevel}`;
 }
 
 function nextFrame(): Promise<void> {
   return new Promise((resolve) => {
-    if (typeof window.requestAnimationFrame === 'function') {
+    if (typeof window.requestAnimationFrame === "function") {
       window.requestAnimationFrame(() => resolve());
       return;
     }
@@ -86,8 +86,8 @@ async function scrollElementIntoViewAndWait(
   element: HTMLElement,
   behavior: ScrollBehavior,
 ): Promise<void> {
-  if (behavior !== 'smooth') {
-    element.scrollIntoView({ block: 'center', behavior });
+  if (behavior !== "smooth") {
+    element.scrollIntoView({ block: "center", behavior });
     await nextFrame();
     await nextFrame();
     return;
@@ -104,18 +104,18 @@ async function scrollElementIntoViewAndWait(
     const finish = () => {
       if (finished) return;
       finished = true;
-      window.removeEventListener('scroll', handleScroll);
+      window.removeEventListener("scroll", handleScroll);
       if (settledTimerId !== null) window.clearTimeout(settledTimerId);
       if (timeoutId !== null) window.clearTimeout(timeoutId);
       if (
         firstFrameId !== null &&
-        typeof window.cancelAnimationFrame === 'function'
+        typeof window.cancelAnimationFrame === "function"
       ) {
         window.cancelAnimationFrame(firstFrameId);
       }
       if (
         secondFrameId !== null &&
-        typeof window.cancelAnimationFrame === 'function'
+        typeof window.cancelAnimationFrame === "function"
       ) {
         window.cancelAnimationFrame(secondFrameId);
       }
@@ -124,10 +124,7 @@ async function scrollElementIntoViewAndWait(
 
     const scheduleSettled = () => {
       if (settledTimerId !== null) window.clearTimeout(settledTimerId);
-      settledTimerId = window.setTimeout(
-        finish,
-        PROGRAMMATIC_SCROLL_IDLE_MS,
-      );
+      settledTimerId = window.setTimeout(finish, PROGRAMMATIC_SCROLL_IDLE_MS);
     };
 
     function handleScroll() {
@@ -135,11 +132,11 @@ async function scrollElementIntoViewAndWait(
       scheduleSettled();
     }
 
-    window.addEventListener('scroll', handleScroll, { passive: true });
+    window.addEventListener("scroll", handleScroll, { passive: true });
     timeoutId = window.setTimeout(finish, PROGRAMMATIC_SCROLL_TIMEOUT_MS);
-    element.scrollIntoView({ block: 'center', behavior });
+    element.scrollIntoView({ block: "center", behavior });
 
-    if (typeof window.requestAnimationFrame === 'function') {
+    if (typeof window.requestAnimationFrame === "function") {
       firstFrameId = window.requestAnimationFrame(() => {
         firstFrameId = null;
         secondFrameId = window.requestAnimationFrame(() => {
@@ -163,18 +160,18 @@ function getWindowScrollTop(): number {
 }
 
 function scrollWindowTo(top: number): void {
-  if (typeof window.scrollTo !== 'function') return;
+  if (typeof window.scrollTo !== "function") return;
   try {
-    window.scrollTo({ top, behavior: 'auto' });
+    window.scrollTo({ top, behavior: "auto" });
   } catch {
     window.scrollTo(0, top);
   }
 }
 
 function scrollWindowBy(top: number): void {
-  if (typeof window.scrollBy !== 'function') return;
+  if (typeof window.scrollBy !== "function") return;
   try {
-    window.scrollBy({ top, behavior: 'auto' });
+    window.scrollBy({ top, behavior: "auto" });
   } catch {
     window.scrollBy(0, top);
   }
@@ -277,17 +274,23 @@ export function useExecutionSpaceNavigator(
   const setDisplayedVisit = useCallback(
     (visitId: string, updateFormal: boolean): boolean => {
       const latestEntries = entriesRef.current;
-      const nextIndex = latestEntries.findIndex((entry) => entry.id === visitId);
+      const nextIndex = latestEntries.findIndex(
+        (entry) => entry.id === visitId,
+      );
       if (nextIndex < 0) return false;
       const nextEntry = latestEntries[nextIndex];
       currentIndexRef.current = nextIndex;
       currentVisitIdRef.current = nextEntry.id;
-      setCurrentIndex((previous) => (previous === nextIndex ? previous : nextIndex));
+      setCurrentIndex((previous) =>
+        previous === nextIndex ? previous : nextIndex,
+      );
 
       if (updateFormal) {
         formalIndexRef.current = nextIndex;
         formalVisitIdRef.current = nextEntry.id;
-        setFormalIndex((previous) => (previous === nextIndex ? previous : nextIndex));
+        setFormalIndex((previous) =>
+          previous === nextIndex ? previous : nextIndex,
+        );
       }
       return true;
     },
@@ -328,7 +331,7 @@ export function useExecutionSpaceNavigator(
     (visitId: string): HTMLElement | null => {
       const anchors = findAnchors(visitId);
       if (anchors.length === 0) return null;
-      const preferredKind = showSpaceGroups ? 'heading' : 'item';
+      const preferredKind = showSpaceGroups ? "heading" : "item";
       return (
         anchors.find(
           (element) => element.dataset.spaceNavigationAnchor === preferredKind,
@@ -357,19 +360,24 @@ export function useExecutionSpaceNavigator(
   );
 
   const revealEntry = useCallback(
-    async (entry: NavigatorEntry, behavior: ScrollBehavior = 'smooth') => {
+    async (entry: NavigatorEntry, behavior: ScrollBehavior = "smooth") => {
       await ensureEntryExpanded(entry);
       await nextFrame();
       const anchor = findPreferredAnchor(entry.id);
       if (!anchor) return;
 
-      if (typeof anchor.scrollIntoView === 'function') {
+      if (typeof anchor.scrollIntoView === "function") {
         await scrollElementIntoViewAndWait(anchor, behavior);
         return;
       }
 
       const rect = anchor.getBoundingClientRect();
-      scrollWindowTo(getWindowScrollTop() + rect.top + rect.height / 2 - window.innerHeight / 2);
+      scrollWindowTo(
+        getWindowScrollTop() +
+          rect.top +
+          rect.height / 2 -
+          window.innerHeight / 2,
+      );
       await nextFrame();
       await nextFrame();
     },
@@ -396,7 +404,7 @@ export function useExecutionSpaceNavigator(
 
   const onNavigate = useCallback(
     async (
-      request: Parameters<SpaceNavigatorRegistration['onNavigate']>[0],
+      request: Parameters<SpaceNavigatorRegistration["onNavigate"]>[0],
     ) => {
       const latestEntries = entriesRef.current;
       const targetIndex = latestEntries.findIndex(
@@ -405,7 +413,7 @@ export function useExecutionSpaceNavigator(
       if (targetIndex < 0) {
         return {
           ok: false,
-          message: '選択した訪問先は絞り込み対象外になりました',
+          message: "選択した訪問先は絞り込み対象外になりました",
         };
       }
       const targetEntry = latestEntries[targetIndex];
@@ -436,16 +444,16 @@ export function useExecutionSpaceNavigator(
           deferredLimitedItemIds: deferredIds,
         },
       });
-      const blockedByPrice = guard.blockingReasons.includes('price');
-      const blockedByLimited = guard.blockingReasons.includes('limited');
+      const blockedByPrice = guard.blockingReasons.includes("price");
+      const blockedByLimited = guard.blockingReasons.includes("limited");
 
       let guardMessage: string | null = null;
       if (blockedByPrice && blockedByLimited) {
-        guardMessage = '価格と限数の実購入数を入力してください';
+        guardMessage = "価格と限数の実購入数を入力してください";
       } else if (blockedByPrice) {
-        guardMessage = '価格未定のアイテムがあります。価格を入力してください。';
+        guardMessage = "価格未定のアイテムがあります。価格を入力してください。";
       } else if (blockedByLimited) {
-        guardMessage = '限数未入力があります。実購入数を入力してください';
+        guardMessage = "限数未入力があります。実購入数を入力してください";
       }
 
       onGuardFeedback?.({
@@ -459,49 +467,43 @@ export function useExecutionSpaceNavigator(
       if (!guard.allowed) {
         return { ok: false, message: guardMessage ?? undefined };
       }
-      if (
-        guard.advisoryReasons.includes('unvisited') &&
-        !request.confirmed
-      ) {
+      if (guard.advisoryReasons.includes("unvisited") && !request.confirmed) {
         return {
           ok: false,
           requiresConfirmation: true,
-          message: '現在のスペースに未購入のアイテムがあります。移動しますか？',
+          message: "現在のスペースに未購入のアイテムがあります。移動しますか？",
         };
       }
 
       temporaryModeRef.current =
-        request.intent === 'set-current' ? null : request.intent;
+        request.intent === "set-current" ? null : request.intent;
       const operation = beginProgrammaticNavigation(targetEntry.id);
       let keepTargetLock = false;
       try {
         if (
-          !setDisplayedVisit(
-            targetEntry.id,
-            request.intent === 'set-current',
-          )
+          !setDisplayedVisit(targetEntry.id, request.intent === "set-current")
         ) {
           return {
             ok: false,
-            message: '選択した訪問先は絞り込み対象外になりました',
+            message: "選択した訪問先は絞り込み対象外になりました",
           };
         }
         await revealEntry(targetEntry);
         if (!isCurrentProgrammaticNavigation(operation)) {
           return {
             ok: false,
-            message: '表示条件が切り替わったため、移動を取り消しました',
+            message: "表示条件が切り替わったため、移動を取り消しました",
           };
         }
         if (
           !setDisplayedVisit(
             operation.targetVisitId,
-            request.intent === 'set-current',
+            request.intent === "set-current",
           )
         ) {
           return {
             ok: false,
-            message: '移動先が絞り込み対象外になりました',
+            message: "移動先が絞り込み対象外になりました",
           };
         }
         keepTargetLock = true;
@@ -556,9 +558,10 @@ export function useExecutionSpaceNavigator(
 
         const anchor = findPreferredAnchor(targetEntry.id);
         const savedOffset = snapshot?.location?.anchorOffset;
-        if (anchor && typeof savedOffset === 'number') {
+        if (anchor && typeof savedOffset === "number") {
           const rect = anchor.getBoundingClientRect();
-          const currentOffset = rect.top + rect.height / 2 - window.innerHeight / 2;
+          const currentOffset =
+            rect.top + rect.height / 2 - window.innerHeight / 2;
           scrollWindowBy(currentOffset - savedOffset);
         } else {
           scrollWindowTo(snapshot?.location?.scrollTop ?? point.scrollTop ?? 0);
@@ -577,7 +580,7 @@ export function useExecutionSpaceNavigator(
 
       if (exactIndex < 0) {
         notify?.(
-          '元の訪問先が絞り込み対象外になったため、最も近い訪問先へ戻りました',
+          "元の訪問先が絞り込み対象外になったため、最も近い訪問先へ戻りました",
         );
       }
     },
@@ -599,7 +602,7 @@ export function useExecutionSpaceNavigator(
         ? { ok: true }
         : {
             ok: false,
-            message: '現在の訪問先は絞り込み対象外になりました',
+            message: "現在の訪問先は絞り込み対象外になりました",
           };
     },
     [setDisplayedVisit],
@@ -684,7 +687,7 @@ export function useExecutionSpaceNavigator(
 
     if (currentWasRemoved || formalWasRemoved) {
       notify?.(
-        '絞り込みにより表示中の訪問先が対象外になったため、最も近い訪問先へ移動しました',
+        "絞り込みにより表示中の訪問先が対象外になったため、最も近い訪問先へ移動しました",
       );
     }
     if (currentWasRemoved) {
@@ -748,7 +751,7 @@ export function useExecutionSpaceNavigator(
     if (!emptyRecoveryNotifiedRef.current) {
       emptyRecoveryNotifiedRef.current = true;
       notify?.(
-        '絞り込み結果が0件になったため、一時移動を終了して元の位置に戻りました',
+        "絞り込み結果が0件になったため、一時移動を終了して元の位置に戻りました",
       );
     }
 
@@ -791,7 +794,7 @@ export function useExecutionSpaceNavigator(
         programmaticTargetVisitIdRef.current = null;
         programmaticTargetScrollTopRef.current = null;
       }
-      const preferredKind = showSpaceGroups ? 'heading' : 'item';
+      const preferredKind = showSpaceGroups ? "heading" : "item";
       const anchors = Array.from(
         container.querySelectorAll<HTMLElement>(
           `[${VISIT_ID_ATTRIBUTE}][${ANCHOR_ATTRIBUTE}="${preferredKind}"]`,
@@ -813,15 +816,12 @@ export function useExecutionSpaceNavigator(
       }
 
       if (!nearest) return;
-      setDisplayedEntry(
-        nearest.index,
-        temporaryModeRef.current === null,
-      );
+      setDisplayedEntry(nearest.index, temporaryModeRef.current === null);
     };
 
     const scheduleUpdate = () => {
       if (frameId !== null) return;
-      if (typeof window.requestAnimationFrame === 'function') {
+      if (typeof window.requestAnimationFrame === "function") {
         frameId = window.requestAnimationFrame(updateFromViewportCenter);
       } else {
         updateFromViewportCenter();
@@ -829,19 +829,22 @@ export function useExecutionSpaceNavigator(
     };
 
     scheduleUpdate();
-    window.addEventListener('scroll', scheduleUpdate, { passive: true });
-    window.addEventListener('resize', scheduleUpdate);
+    window.addEventListener("scroll", scheduleUpdate, { passive: true });
+    window.addEventListener("resize", scheduleUpdate);
     const observer =
-      typeof ResizeObserver === 'function'
+      typeof ResizeObserver === "function"
         ? new ResizeObserver(scheduleUpdate)
         : null;
     observer?.observe(container);
 
     return () => {
-      window.removeEventListener('scroll', scheduleUpdate);
-      window.removeEventListener('resize', scheduleUpdate);
+      window.removeEventListener("scroll", scheduleUpdate);
+      window.removeEventListener("resize", scheduleUpdate);
       observer?.disconnect();
-      if (frameId !== null && typeof window.cancelAnimationFrame === 'function') {
+      if (
+        frameId !== null &&
+        typeof window.cancelAnimationFrame === "function"
+      ) {
         window.cancelAnimationFrame(frameId);
       }
     };
@@ -850,7 +853,7 @@ export function useExecutionSpaceNavigator(
   const registration = useMemo<SpaceNavigatorRegistration>(
     () => ({
       id: registrationId,
-      mode: 'execute',
+      mode: "execute",
       entries,
       currentIndex,
       formalIndex,

@@ -1,10 +1,10 @@
-import React from 'react';
-import { ShoppingItem } from '../types/item';
+import React from "react";
+import { ShoppingItem } from "../types/item";
 
 interface UpdateConfirmationModalProps {
   itemsToDelete: ShoppingItem[];
   itemsToUpdate: ShoppingItem[];
-  itemsToAdd: Omit<ShoppingItem, 'id' | 'purchaseStatus'>[];
+  itemsToAdd: Omit<ShoppingItem, "id" | "purchaseStatus">[];
   protectedFromDelete?: number; // 保護により削除されなかったアイテム数
   protectedFromUpdate?: number; // 保護により更新されなかったアイテム数
   onConfirm: () => void;
@@ -42,7 +42,9 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
                       • {item.circle} - {item.title}
                     </li>
                   ))}
-                  {itemsToDelete.length > 5 && <li>...他 {itemsToDelete.length - 5}件</li>}
+                  {itemsToDelete.length > 5 && (
+                    <li>...他 {itemsToDelete.length - 5}件</li>
+                  )}
                 </ul>
               </div>
             )}
@@ -58,7 +60,9 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
                       • {item.circle} - {item.title}
                     </li>
                   ))}
-                  {itemsToUpdate.length > 5 && <li>...他 {itemsToUpdate.length - 5}件</li>}
+                  {itemsToUpdate.length > 5 && (
+                    <li>...他 {itemsToUpdate.length - 5}件</li>
+                  )}
                 </ul>
               </div>
             )}
@@ -74,7 +78,9 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
                       • {item.circle} - {item.title}
                     </li>
                   ))}
-                  {itemsToAdd.length > 5 && <li>...他 {itemsToAdd.length - 5}件</li>}
+                  {itemsToAdd.length > 5 && (
+                    <li>...他 {itemsToAdd.length - 5}件</li>
+                  )}
                 </ul>
               </div>
             )}
@@ -85,9 +91,15 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
                   <span>🔐</span> 保護されたアイテム
                 </h3>
                 <p className="text-sm text-amber-600 dark:text-amber-300">
-                  {protectedFromDelete > 0 && <span>削除から保護: {protectedFromDelete}件</span>}
-                  {protectedFromDelete > 0 && protectedFromUpdate > 0 && <span>、</span>}
-                  {protectedFromUpdate > 0 && <span>更新から保護: {protectedFromUpdate}件</span>}
+                  {protectedFromDelete > 0 && (
+                    <span>削除から保護: {protectedFromDelete}件</span>
+                  )}
+                  {protectedFromDelete > 0 && protectedFromUpdate > 0 && (
+                    <span>、</span>
+                  )}
+                  {protectedFromUpdate > 0 && (
+                    <span>更新から保護: {protectedFromUpdate}件</span>
+                  )}
                 </p>
               </div>
             )}

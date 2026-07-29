@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState } from "react";
 
 export type UIVisibilityConfig = {
   header: boolean;
@@ -24,20 +24,24 @@ export const DEFAULT_UI_VISIBILITY: UIVisibilitySettings = {
 };
 
 export function useUIVisibilitySettings() {
-  const [uiVisibilitySettings, setUiVisibilitySettings] = useState<UIVisibilitySettings>(() => {
-    try {
-      const saved = localStorage.getItem('uiVisibilitySettings');
-      if (saved) {
-        return { ...DEFAULT_UI_VISIBILITY, ...JSON.parse(saved) };
+  const [uiVisibilitySettings, setUiVisibilitySettings] =
+    useState<UIVisibilitySettings>(() => {
+      try {
+        const saved = localStorage.getItem("uiVisibilitySettings");
+        if (saved) {
+          return { ...DEFAULT_UI_VISIBILITY, ...JSON.parse(saved) };
+        }
+      } catch {
+        // Ignore malformed localStorage payload.
       }
-    } catch {
-      // Ignore malformed localStorage payload.
-    }
-    return DEFAULT_UI_VISIBILITY;
-  });
+      return DEFAULT_UI_VISIBILITY;
+    });
 
   useEffect(() => {
-    localStorage.setItem('uiVisibilitySettings', JSON.stringify(uiVisibilitySettings));
+    localStorage.setItem(
+      "uiVisibilitySettings",
+      JSON.stringify(uiVisibilitySettings),
+    );
   }, [uiVisibilitySettings]);
 
   return { uiVisibilitySettings, setUiVisibilitySettings } as const;

@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import SingleQuantityLimitedPurchaseChoiceDialog from './SingleQuantityLimitedPurchaseChoiceDialog';
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import SingleQuantityLimitedPurchaseChoiceDialog from "./SingleQuantityLimitedPurchaseChoiceDialog";
 
 const renderDialog = () => {
   const onPurchased = vi.fn();
@@ -18,8 +18,8 @@ const renderDialog = () => {
     />,
   );
 
-  const dialog = screen.getByRole('dialog');
-  const buttons = within(dialog).getAllByRole('button');
+  const dialog = screen.getByRole("dialog");
+  const buttons = within(dialog).getAllByRole("button");
 
   return {
     dialog,
@@ -32,19 +32,25 @@ const renderDialog = () => {
   };
 };
 
-describe('SingleQuantityLimitedPurchaseChoiceDialog', () => {
-  it('renders as a modal dialog and places initial focus on purchased', () => {
+describe("SingleQuantityLimitedPurchaseChoiceDialog", () => {
+  it("renders as a modal dialog and places initial focus on purchased", () => {
     const { dialog, purchasedButton } = renderDialog();
 
-    expect(dialog).toHaveAttribute('aria-modal', 'true');
-    expect(dialog).toHaveAttribute('aria-labelledby');
-    expect(dialog).toHaveAttribute('aria-describedby');
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveAttribute("aria-labelledby");
+    expect(dialog).toHaveAttribute("aria-describedby");
     expect(purchasedButton).toHaveFocus();
   });
 
-  it('calls each action handler from its button', () => {
-    const { cancelButton, limitedButton, purchasedButton, onCancel, onLimited, onPurchased } =
-      renderDialog();
+  it("calls each action handler from its button", () => {
+    const {
+      cancelButton,
+      limitedButton,
+      purchasedButton,
+      onCancel,
+      onLimited,
+      onPurchased,
+    } = renderDialog();
 
     fireEvent.click(purchasedButton);
     fireEvent.click(limitedButton);
@@ -55,26 +61,26 @@ describe('SingleQuantityLimitedPurchaseChoiceDialog', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('treats Escape as cancel', () => {
+  it("treats Escape as cancel", () => {
     const { onCancel } = renderDialog();
 
-    fireEvent.keyDown(document, { key: 'Escape' });
+    fireEvent.keyDown(document, { key: "Escape" });
 
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('traps Tab between the three dialog buttons', () => {
+  it("traps Tab between the three dialog buttons", () => {
     const { dialog, cancelButton, purchasedButton } = renderDialog();
 
     expect(purchasedButton).toHaveFocus();
-    fireEvent.keyDown(dialog, { key: 'Tab' });
+    fireEvent.keyDown(dialog, { key: "Tab" });
     expect(cancelButton).toHaveFocus();
 
-    fireEvent.keyDown(dialog, { key: 'Tab', shiftKey: true });
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
     expect(purchasedButton).toHaveFocus();
   });
 
-  it('stops dialog mouse events from React parents and document bubble listeners', () => {
+  it("stops dialog mouse events from React parents and document bubble listeners", () => {
     const parentClick = vi.fn();
     const documentMouseDown = vi.fn();
     const documentMouseUp = vi.fn();
@@ -91,11 +97,11 @@ describe('SingleQuantityLimitedPurchaseChoiceDialog', () => {
       </div>,
     );
 
-    document.addEventListener('mousedown', documentMouseDown);
-    document.addEventListener('mouseup', documentMouseUp);
-    document.addEventListener('click', documentClick);
+    document.addEventListener("mousedown", documentMouseDown);
+    document.addEventListener("mouseup", documentMouseUp);
+    document.addEventListener("click", documentClick);
 
-    const dialog = screen.getByRole('dialog');
+    const dialog = screen.getByRole("dialog");
     fireEvent.mouseDown(dialog);
     fireEvent.mouseUp(dialog);
     fireEvent.click(dialog);
@@ -105,8 +111,8 @@ describe('SingleQuantityLimitedPurchaseChoiceDialog', () => {
     expect(documentMouseUp).not.toHaveBeenCalled();
     expect(documentClick).not.toHaveBeenCalled();
 
-    document.removeEventListener('mousedown', documentMouseDown);
-    document.removeEventListener('mouseup', documentMouseUp);
-    document.removeEventListener('click', documentClick);
+    document.removeEventListener("mousedown", documentMouseDown);
+    document.removeEventListener("mouseup", documentMouseUp);
+    document.removeEventListener("click", documentClick);
   });
 });

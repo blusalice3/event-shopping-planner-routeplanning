@@ -1,5 +1,5 @@
-import React from 'react';
-import { ShoppingItem } from '../types/item';
+import React from "react";
+import { ShoppingItem } from "../types/item";
 
 interface DeleteConfirmationModalProps {
   item: ShoppingItem;
@@ -23,7 +23,10 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
         className="bg-white dark:bg-slate-800 rounded-lg shadow-xl p-6 w-full max-w-md"
         onClick={(e) => e.stopPropagation()}
       >
-        <h3 id="delete-modal-title" className="text-lg font-bold text-slate-900 dark:text-white">
+        <h3
+          id="delete-modal-title"
+          className="text-lg font-bold text-slate-900 dark:text-white"
+        >
           アイテムを削除
         </h3>
         <p className="mt-2 text-sm text-slate-600 dark:text-slate-400">
@@ -31,19 +34,25 @@ const DeleteConfirmationModal: React.FC<DeleteConfirmationModalProps> = ({
         </p>
         <div className="mt-4 p-4 bg-slate-100 dark:bg-slate-700/50 rounded-md space-y-2 text-sm text-slate-800 dark:text-slate-200">
           <div>
-            <span className="font-semibold text-slate-500 dark:text-slate-400">サークル:</span>{' '}
+            <span className="font-semibold text-slate-500 dark:text-slate-400">
+              サークル:
+            </span>{" "}
             {item.circle}
           </div>
           <div>
-            <span className="font-semibold text-slate-500 dark:text-slate-400">タイトル:</span>{' '}
-            {item.title || '(タイトルなし)'}
+            <span className="font-semibold text-slate-500 dark:text-slate-400">
+              タイトル:
+            </span>{" "}
+            {item.title || "(タイトルなし)"}
           </div>
           <div>
-            <span className="font-semibold text-slate-500 dark:text-slate-400">価格:</span>{' '}
+            <span className="font-semibold text-slate-500 dark:text-slate-400">
+              価格:
+            </span>{" "}
             {item.price === null ? (
               <span className="text-red-600 dark:text-red-400">価格未定</span>
             ) : item.price === 0 ? (
-              '¥0'
+              "¥0"
             ) : (
               `¥${item.price.toLocaleString()}`
             )}

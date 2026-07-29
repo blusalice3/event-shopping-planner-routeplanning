@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
-import TrashIcon from './icons/TrashIcon';
+import React, { useState } from "react";
+import TrashIcon from "./icons/TrashIcon";
 
-const DocumentArrowDownIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+const DocumentArrowDownIcon: React.FC<React.SVGProps<SVGSVGElement>> = (
+  props,
+) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     fill="none"
@@ -18,7 +20,9 @@ const DocumentArrowDownIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) =
   </svg>
 );
 
-const DocumentArrowUpIcon: React.FC<React.SVGProps<SVGSVGElement>> = (props) => (
+const DocumentArrowUpIcon: React.FC<React.SVGProps<SVGSVGElement>> = (
+  props,
+) => (
   <svg
     xmlns="http://www.w3.org/2000/svg"
     fill="none"
@@ -59,7 +63,11 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
   const [menuVisibleFor, setMenuVisibleFor] = useState<string | null>(null);
 
   const handleDelete = (eventName: string) => {
-    if (window.confirm(`「${eventName}」を削除しますか？この操作は元に戻せません。`)) {
+    if (
+      window.confirm(
+        `「${eventName}」を削除しますか？この操作は元に戻せません。`,
+      )
+    ) {
       onDelete(eventName);
       setMenuVisibleFor(null);
     }
@@ -67,7 +75,10 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
 
   const handleDocumentClick = React.useCallback(
     (e: MouseEvent) => {
-      if (menuVisibleFor && !(e.target as Element).closest('[data-menu-owner]')) {
+      if (
+        menuVisibleFor &&
+        !(e.target as Element).closest("[data-menu-owner]")
+      ) {
         setMenuVisibleFor(null);
       }
     },
@@ -75,9 +86,9 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
   );
 
   React.useEffect(() => {
-    document.addEventListener('click', handleDocumentClick);
+    document.addEventListener("click", handleDocumentClick);
     return () => {
-      document.removeEventListener('click', handleDocumentClick);
+      document.removeEventListener("click", handleDocumentClick);
     };
   }, [handleDocumentClick]);
 
@@ -134,7 +145,9 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
                     }
                   }}
                 >
-                  <span className="font-medium text-slate-800 dark:text-slate-200">{name}</span>
+                  <span className="font-medium text-slate-800 dark:text-slate-200">
+                    {name}
+                  </span>
                 </div>
                 <button
                   onClick={(e) => {
@@ -144,7 +157,11 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
                   className="p-3 mr-1 text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 rounded transition-colors"
                   aria-label="メニュー"
                 >
-                  <svg className="w-5 h-5" viewBox="0 0 24 24" fill="currentColor">
+                  <svg
+                    className="w-5 h-5"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                  >
                     <circle cx="12" cy="5" r="2" />
                     <circle cx="12" cy="12" r="2" />
                     <circle cx="12" cy="19" r="2" />

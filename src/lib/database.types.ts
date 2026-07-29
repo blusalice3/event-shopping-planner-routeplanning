@@ -1,15 +1,21 @@
-export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
+export type Json =
+  | string
+  | number
+  | boolean
+  | null
+  | { [key: string]: Json | undefined }
+  | Json[];
 
-export type MemberStatus = 'roaming' | 'inQueue' | 'done' | 'resting';
+export type MemberStatus = "roaming" | "inQueue" | "done" | "resting";
 
 export type RoomItemPurchaseStatus =
-  | 'None'
-  | 'Purchased'
-  | 'SoldOut'
-  | 'Absent'
-  | 'Postpone'
-  | 'Late'
-  | 'LimitedPurchase';
+  | "None"
+  | "Purchased"
+  | "SoldOut"
+  | "Absent"
+  | "Postpone"
+  | "Late"
+  | "LimitedPurchase";
 
 export interface Database {
   public: {

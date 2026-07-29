@@ -1,4 +1,4 @@
-import { ShoppingItem } from '../types/item';
+import { ShoppingItem } from "../types/item";
 
 export function extractEventDates(items: ShoppingItem[]): string[] {
   const eventDates = new Set<string>();
@@ -9,9 +9,9 @@ export function extractEventDates(items: ShoppingItem[]): string[] {
   });
 
   return Array.from(eventDates).sort((a, b) => {
-    const numA = parseInt(a.match(/\d+/)?.[0] || '0', 10);
-    const numB = parseInt(b.match(/\d+/)?.[0] || '0', 10);
+    const numA = parseInt(a.match(/\d+/)?.[0] || "0", 10);
+    const numB = parseInt(b.match(/\d+/)?.[0] || "0", 10);
     if (numA !== numB) return numA - numB;
-    return a.localeCompare(b, 'ja');
+    return a.localeCompare(b, "ja");
   });
 }

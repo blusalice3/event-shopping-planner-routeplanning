@@ -1,14 +1,14 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import type { LimitedPurchaseDialogResult } from '../types/limitedPurchase';
-export type { LimitedPurchaseDialogResult } from '../types/limitedPurchase';
-import LimitedPurchaseConfirmDialog from './LimitedPurchaseConfirmDialog';
-import LimitedPurchaseExcessConfirmDialog from './LimitedPurchaseExcessConfirmDialog';
+import React, { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import type { LimitedPurchaseDialogResult } from "../types/limitedPurchase";
+export type { LimitedPurchaseDialogResult } from "../types/limitedPurchase";
+import LimitedPurchaseConfirmDialog from "./LimitedPurchaseConfirmDialog";
+import LimitedPurchaseExcessConfirmDialog from "./LimitedPurchaseExcessConfirmDialog";
 import {
   parseDecimalIntegerInput,
   validateLimitedPurchasePlannedQuantity,
   type LimitedPurchaseValidationError,
-} from '../utils/purchaseQuantity';
+} from "../utils/purchaseQuantity";
 
 type LimitedPurchaseDialogProps = {
   isOpen: boolean;
@@ -23,17 +23,20 @@ type LimitedPurchaseDialogProps = {
 };
 
 const toMessage = (error: LimitedPurchaseValidationError): string => {
-  if (error === 'planned_required') return '購入予定量を入力してください';
-  if (error === 'actual_required') return '実購入数を入力してください';
-  if (error === 'planned_not_integer') return '購入予定量は整数で入力してください';
-  if (error === 'actual_not_integer') return '実購入数は整数で入力してください';
-  if (error === 'planned_not_positive') return '購入予定量は1以上で入力してください';
-  if (error === 'actual_not_positive') return '実購入数は1以上で入力してください';
-  return '限数購入では実購入数を購入予定量より少なくしてください';
+  if (error === "planned_required") return "購入予定量を入力してください";
+  if (error === "actual_required") return "実購入数を入力してください";
+  if (error === "planned_not_integer")
+    return "購入予定量は整数で入力してください";
+  if (error === "actual_not_integer") return "実購入数は整数で入力してください";
+  if (error === "planned_not_positive")
+    return "購入予定量は1以上で入力してください";
+  if (error === "actual_not_positive")
+    return "実購入数は1以上で入力してください";
+  return "限数購入では実購入数を購入予定量より少なくしてください";
 };
 
 const SINGLE_QUANTITY_LIMITED_MESSAGE =
-  '限数として保存するには、購入予定数を2以上に変更してください。';
+  "限数として保存するには、購入予定数を2以上に変更してください。";
 
 const stopDialogEvent = (event: React.SyntheticEvent) => {
   event.stopPropagation();
@@ -51,11 +54,15 @@ export default function LimitedPurchaseDialog({
   onSubmit,
   onCancel,
 }: LimitedPurchaseDialogProps) {
-  const [actualText, setActualText] = useState('');
+  const [actualText, setActualText] = useState("");
   const [plannedText, setPlannedText] = useState(String(initialPlanned));
   const [error, setError] = useState<string | null>(null);
-  const [excessConfirm, setExcessConfirm] = useState<{ planned: number } | null>(null);
-  const [sameQuantityConfirm, setSameQuantityConfirm] = useState<{ planned: number } | null>(null);
+  const [excessConfirm, setExcessConfirm] = useState<{
+    planned: number;
+  } | null>(null);
+  const [sameQuantityConfirm, setSameQuantityConfirm] = useState<{
+    planned: number;
+  } | null>(null);
   const saveButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
@@ -65,7 +72,7 @@ export default function LimitedPurchaseDialog({
       setSameQuantityConfirm(null);
       return;
     }
-    setActualText(initialActual === undefined ? '' : String(initialActual));
+    setActualText(initialActual === undefined ? "" : String(initialActual));
     setPlannedText(String(initialPlanned));
     setError(null);
     setExcessConfirm(null);
@@ -76,7 +83,7 @@ export default function LimitedPurchaseDialog({
     if (!isOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== "Escape") return;
       event.preventDefault();
       if (sameQuantityConfirm !== null) {
         setSameQuantityConfirm(null);
@@ -91,8 +98,8 @@ export default function LimitedPurchaseDialog({
       onCancel();
     };
 
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [excessConfirm, isOpen, onCancel, sameQuantityConfirm]);
 
   if (!isOpen) return null;
@@ -116,27 +123,27 @@ export default function LimitedPurchaseDialog({
     const planned = parseDecimalIntegerInput(plannedText);
 
     if (actual === undefined) {
-      setError(toMessage('actual_required'));
+      setError(toMessage("actual_required"));
       return;
     }
     if (!Number.isInteger(actual)) {
-      setError(toMessage('actual_not_integer'));
+      setError(toMessage("actual_not_integer"));
       return;
     }
     if (actual < 1) {
-      setError(toMessage('actual_not_positive'));
+      setError(toMessage("actual_not_positive"));
       return;
     }
     if (planned === undefined) {
-      setError(toMessage('planned_required'));
+      setError(toMessage("planned_required"));
       return;
     }
     if (!Number.isInteger(planned)) {
-      setError(toMessage('planned_not_integer'));
+      setError(toMessage("planned_not_integer"));
       return;
     }
     if (planned < 1) {
-      setError(toMessage('planned_not_positive'));
+      setError(toMessage("planned_not_positive"));
       return;
     }
 
@@ -155,7 +162,7 @@ export default function LimitedPurchaseDialog({
       return;
     }
 
-    onSubmit({ kind: 'limited', actual, planned });
+    onSubmit({ kind: "limited", actual, planned });
   };
 
   const handleDefer = () => {
@@ -168,7 +175,7 @@ export default function LimitedPurchaseDialog({
     }
 
     if (validation.ok) {
-      onSubmit({ kind: 'defer', planned: planned! });
+      onSubmit({ kind: "defer", planned: planned! });
       return;
     }
 
@@ -202,7 +209,9 @@ export default function LimitedPurchaseDialog({
             限数購入の数量
           </h3>
           {itemTitle && (
-            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">対象: {itemTitle}</p>
+            <p className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+              対象: {itemTitle}
+            </p>
           )}
           <label className="mt-4 block text-sm font-medium text-slate-700 dark:text-slate-200">
             実購入数
@@ -229,7 +238,9 @@ export default function LimitedPurchaseDialog({
             />
           </label>
           {error ? (
-            <p className="mt-3 text-sm text-red-600 dark:text-red-300">{error}</p>
+            <p className="mt-3 text-sm text-red-600 dark:text-red-300">
+              {error}
+            </p>
           ) : shouldShowSingleQuantityHelp ? (
             <p className="mt-3 text-sm text-red-600 dark:text-red-300">
               {SINGLE_QUANTITY_LIMITED_MESSAGE}
@@ -245,7 +256,11 @@ export default function LimitedPurchaseDialog({
                 この商品を後で入力
               </button>
             )}
-            <button type="button" onClick={onCancel} className="rounded px-3 py-2 text-sm">
+            <button
+              type="button"
+              onClick={onCancel}
+              className="rounded px-3 py-2 text-sm"
+            >
               キャンセル
             </button>
             <button
@@ -270,7 +285,7 @@ export default function LimitedPurchaseDialog({
         onCancel={closeSameQuantityConfirm}
         onConfirm={() => {
           if (!sameQuantityConfirm) return;
-          onSubmit({ kind: 'purchased', planned: sameQuantityConfirm.planned });
+          onSubmit({ kind: "purchased", planned: sameQuantityConfirm.planned });
           setSameQuantityConfirm(null);
         }}
       />
@@ -280,14 +295,14 @@ export default function LimitedPurchaseDialog({
         onFix={closeExcessConfirm}
         onConvertToPurchased={() => {
           if (!excessConfirm) return;
-          onSubmit({ kind: 'purchased', planned: excessConfirm.planned });
+          onSubmit({ kind: "purchased", planned: excessConfirm.planned });
           setExcessConfirm(null);
         }}
       />
     </>
   );
 
-  if (typeof document === 'undefined') {
+  if (typeof document === "undefined") {
     return dialogContent;
   }
 

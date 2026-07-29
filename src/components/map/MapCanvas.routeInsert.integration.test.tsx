@@ -1,9 +1,9 @@
-import React from 'react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, waitFor } from '@testing-library/react';
-import type { DayMapData, RouteSegment } from '../../types/map';
-import type { MapRoutePoint } from '../../utils/mapRoutePoints';
-import MapCanvas from './MapCanvas';
+import React from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { fireEvent, render, waitFor } from "@testing-library/react";
+import type { DayMapData, RouteSegment } from "../../types/map";
+import type { MapRoutePoint } from "../../utils/mapRoutePoints";
+import MapCanvas from "./MapCanvas";
 
 const makeCanvasContext = () =>
   new Proxy(
@@ -38,7 +38,7 @@ const mapData: DayMapData = {
   mergedCells: [],
   blocks: [
     {
-      name: 'A',
+      name: "A",
       startRow: 1,
       startCol: 1,
       endRow: 5,
@@ -50,24 +50,24 @@ const mapData: DayMapData = {
 
 const routePoints: MapRoutePoint[] = [
   {
-    itemId: 'a',
+    itemId: "a",
     row: 1,
     col: 1,
     order: 0,
-    priorityLevel: 'none',
+    priorityLevel: "none",
     groupKey: null,
     hallId: null,
-    anchorLabel: '1. A の後',
+    anchorLabel: "1. A の後",
   },
   {
-    itemId: 'b',
+    itemId: "b",
     row: 1,
     col: 3,
     order: 1,
-    priorityLevel: 'none',
+    priorityLevel: "none",
     groupKey: null,
     hallId: null,
-    anchorLabel: '2. B の後',
+    anchorLabel: "2. B の後",
   },
 ];
 
@@ -81,8 +81,8 @@ const routeSegments: RouteSegment[] = [
       { row: 1, col: 1 },
       { row: 1, col: 3 },
     ],
-    fromItemId: 'a',
-    toItemId: 'b',
+    fromItemId: "a",
+    toItemId: "b",
     fromOrder: 0,
     toOrder: 1,
   },
@@ -93,7 +93,7 @@ const renderCanvas = (
 ) => {
   const props: React.ComponentProps<typeof MapCanvas> = {
     mapData,
-    mapName: 'Day1マップ',
+    mapName: "Day1マップ",
     items: [],
     executeModeItemIds: [],
     zoomLevel: 100,
@@ -107,23 +107,24 @@ const renderCanvas = (
       <MapCanvas {...props} />
     </div>,
   );
-  const canvas = rendered.container.querySelector('canvas');
-  if (!canvas) throw new Error('canvas not found');
+  const canvas = rendered.container.querySelector("canvas");
+  if (!canvas) throw new Error("canvas not found");
   return { ...rendered, canvas, props };
 };
 
-describe('MapCanvas route insert integration', () => {
+describe("MapCanvas route insert integration", () => {
   beforeEach(() => {
-    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    Object.defineProperty(HTMLElement.prototype, "clientWidth", {
       configurable: true,
       value: 280,
     });
-    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+    Object.defineProperty(HTMLElement.prototype, "clientHeight", {
       configurable: true,
       value: 280,
     });
-    HTMLCanvasElement.prototype.getContext = vi.fn(() => makeCanvasContext()) as unknown as
-      typeof HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = vi.fn(() =>
+      makeCanvasContext(),
+    ) as unknown as typeof HTMLCanvasElement.prototype.getContext;
     HTMLCanvasElement.prototype.getBoundingClientRect = vi.fn(() => ({
       x: 0,
       y: 0,
@@ -141,12 +142,12 @@ describe('MapCanvas route insert integration', () => {
     vi.restoreAllMocks();
   });
 
-  it('short-circuits route insert marker taps before regular cell dispatch', async () => {
+  it("short-circuits route insert marker taps before regular cell dispatch", async () => {
     const onRouteInsertHit = vi.fn();
     const onRouteInsertMiss = vi.fn();
     const onCellClick = vi.fn();
     const mapCellClick = vi.fn();
-    window.addEventListener('mapCellClick', mapCellClick);
+    window.addEventListener("mapCellClick", mapCellClick);
 
     const { canvas } = renderCanvas({
       routeInsertSelectionActive: true,
@@ -158,28 +159,28 @@ describe('MapCanvas route insert integration', () => {
       onRouteInsertMiss,
       onCellClick,
       vertexSelectionMode: { clickedVertices: [{ row: 1, col: 1 }] },
-      cellSelectionMode: { type: 'test', clickedCells: [{ row: 1, col: 1 }] },
+      cellSelectionMode: { type: "test", clickedCells: [{ row: 1, col: 1 }] },
     });
 
     await waitFor(() => expect(canvas.width).toBe(280));
     fireEvent.click(canvas, { clientX: 14, clientY: 14 });
 
     expect(onRouteInsertHit).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'marker', itemId: 'a' }),
+      expect.objectContaining({ type: "marker", itemId: "a" }),
     );
     expect(onRouteInsertMiss).not.toHaveBeenCalled();
     expect(onCellClick).not.toHaveBeenCalled();
     expect(mapCellClick).not.toHaveBeenCalled();
 
-    window.removeEventListener('mapCellClick', mapCellClick);
+    window.removeEventListener("mapCellClick", mapCellClick);
   });
 
-  it('short-circuits route insert line taps before regular cell dispatch', async () => {
+  it("short-circuits route insert line taps before regular cell dispatch", async () => {
     const onRouteInsertHit = vi.fn();
     const onRouteInsertMiss = vi.fn();
     const onCellClick = vi.fn();
     const mapCellClick = vi.fn();
-    window.addEventListener('mapCellClick', mapCellClick);
+    window.addEventListener("mapCellClick", mapCellClick);
 
     const { canvas } = renderCanvas({
       routeInsertSelectionActive: true,
@@ -191,23 +192,23 @@ describe('MapCanvas route insert integration', () => {
       onRouteInsertMiss,
       onCellClick,
       vertexSelectionMode: { clickedVertices: [{ row: 1, col: 2 }] },
-      cellSelectionMode: { type: 'test', clickedCells: [{ row: 1, col: 2 }] },
+      cellSelectionMode: { type: "test", clickedCells: [{ row: 1, col: 2 }] },
     });
 
     await waitFor(() => expect(canvas.width).toBe(280));
     fireEvent.click(canvas, { clientX: 42, clientY: 14 });
 
     expect(onRouteInsertHit).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'line', fromItemId: 'a' }),
+      expect.objectContaining({ type: "line", fromItemId: "a" }),
     );
     expect(onRouteInsertMiss).not.toHaveBeenCalled();
     expect(onCellClick).not.toHaveBeenCalled();
     expect(mapCellClick).not.toHaveBeenCalled();
 
-    window.removeEventListener('mapCellClick', mapCellClick);
+    window.removeEventListener("mapCellClick", mapCellClick);
   });
 
-  it('hit tests route insert lines after rotated view coordinates are mapped back', async () => {
+  it("hit tests route insert lines after rotated view coordinates are mapped back", async () => {
     const onRouteInsertHit = vi.fn();
     const onRouteInsertMiss = vi.fn();
     const onCellClick = vi.fn();
@@ -230,13 +231,13 @@ describe('MapCanvas route insert integration', () => {
     fireEvent.click(canvas, { clientX: 126, clientY: 42 });
 
     expect(onRouteInsertHit).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'line', fromItemId: 'a' }),
+      expect.objectContaining({ type: "line", fromItemId: "a" }),
     );
     expect(onRouteInsertMiss).not.toHaveBeenCalled();
     expect(onCellClick).not.toHaveBeenCalled();
   });
 
-  it('reports blank instead of falling back to display map data when the strict miss snapshot is absent', async () => {
+  it("reports blank instead of falling back to display map data when the strict miss snapshot is absent", async () => {
     const onRouteInsertMiss = vi.fn();
     const onCellClick = vi.fn();
 
@@ -250,11 +251,11 @@ describe('MapCanvas route insert integration', () => {
     await waitFor(() => expect(canvas.width).toBe(280));
     fireEvent.click(canvas, { clientX: 42, clientY: 42 });
 
-    expect(onRouteInsertMiss).toHaveBeenCalledWith({ kind: 'blank' });
+    expect(onRouteInsertMiss).toHaveBeenCalledWith({ kind: "blank" });
     expect(onCellClick).not.toHaveBeenCalled();
   });
 
-  it('classifies route insert misses from the strict snapshot only', async () => {
+  it("classifies route insert misses from the strict snapshot only", async () => {
     const onRouteInsertMiss = vi.fn();
 
     const { canvas } = renderCanvas({
@@ -268,7 +269,7 @@ describe('MapCanvas route insert integration', () => {
     fireEvent.click(canvas, { clientX: 42, clientY: 42 });
     fireEvent.click(canvas, { clientX: 126, clientY: 126 });
 
-    expect(onRouteInsertMiss).toHaveBeenNthCalledWith(1, { kind: 'cell' });
-    expect(onRouteInsertMiss).toHaveBeenNthCalledWith(2, { kind: 'blank' });
+    expect(onRouteInsertMiss).toHaveBeenNthCalledWith(1, { kind: "cell" });
+    expect(onRouteInsertMiss).toHaveBeenNthCalledWith(2, { kind: "blank" });
   });
 });

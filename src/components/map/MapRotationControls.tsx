@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState } from "react";
 
 type MapRotationControlsProps = {
   angle: number;
@@ -19,8 +19,8 @@ const MapRotationControls: React.FC<MapRotationControlsProps> = ({
   angle,
   initialAngle,
   onAngleChange,
-  className = '',
-  sliderClassName = '',
+  className = "",
+  sliderClassName = "",
   showHint = false,
   defaultExpanded = false,
 }) => {
@@ -39,9 +39,9 @@ const MapRotationControls: React.FC<MapRotationControlsProps> = ({
         type="button"
         onClick={() => setIsExpanded((prev) => !prev)}
         className="px-1.5 py-1 text-xs rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600"
-        title={isExpanded ? '回転操作を折りたたむ' : '回転操作を展開'}
+        title={isExpanded ? "回転操作を折りたたむ" : "回転操作を展開"}
       >
-        {isExpanded ? '▾' : '▸'}
+        {isExpanded ? "▾" : "▸"}
       </button>
       <span className="text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
         回転
@@ -57,12 +57,16 @@ const MapRotationControls: React.FC<MapRotationControlsProps> = ({
             max={359}
             step={1}
             value={normalizedAngle}
-            onChange={(e) => onAngleChange(normalizeRotationAngle(Number(e.target.value)))}
+            onChange={(e) =>
+              onAngleChange(normalizeRotationAngle(Number(e.target.value)))
+            }
             className={`w-24 accent-blue-600 ${sliderClassName}`}
           />
           <button
             type="button"
-            onClick={() => onAngleChange(normalizeRotationAngle(normalizedAngle + 15))}
+            onClick={() =>
+              onAngleChange(normalizeRotationAngle(normalizedAngle + 15))
+            }
             className="px-1.5 py-1 text-xs rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600"
             title="+15° (時計回り)"
           >
@@ -70,7 +74,9 @@ const MapRotationControls: React.FC<MapRotationControlsProps> = ({
           </button>
           <button
             type="button"
-            onClick={() => onAngleChange(normalizeRotationAngle(normalizedAngle + 45))}
+            onClick={() =>
+              onAngleChange(normalizeRotationAngle(normalizedAngle + 45))
+            }
             className="px-1.5 py-1 text-xs rounded bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-600"
             title="+45° (時計回り)"
           >

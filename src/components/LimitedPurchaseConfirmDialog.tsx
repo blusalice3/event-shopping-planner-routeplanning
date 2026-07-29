@@ -1,4 +1,4 @@
-import React, { useEffect, useId, useRef } from 'react';
+import React, { useEffect, useId, useRef } from "react";
 
 type LimitedPurchaseConfirmDialogProps = {
   isOpen: boolean;
@@ -7,7 +7,7 @@ type LimitedPurchaseConfirmDialogProps = {
   message: string;
   cancelLabel: string;
   confirmLabel: string;
-  initialFocus: 'cancel' | 'confirm';
+  initialFocus: "cancel" | "confirm";
   onCancel: () => void;
   onConfirm: () => void;
 };
@@ -35,14 +35,17 @@ export default function LimitedPurchaseConfirmDialog({
 
   useEffect(() => {
     if (!isOpen) return;
-    const target = initialFocus === 'confirm' ? confirmButtonRef.current : cancelButtonRef.current;
+    const target =
+      initialFocus === "confirm"
+        ? confirmButtonRef.current
+        : cancelButtonRef.current;
     target?.focus();
   }, [initialFocus, isOpen]);
 
   if (!isOpen) return null;
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Tab') return;
+    if (event.key !== "Tab") return;
 
     const first = cancelButtonRef.current;
     const last = confirmButtonRef.current;
@@ -82,10 +85,16 @@ export default function LimitedPurchaseConfirmDialog({
         onPointerDown={stopDialogEvent}
         onPointerUp={stopDialogEvent}
       >
-        <h3 id={titleId} className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3
+          id={titleId}
+          className="text-base font-semibold text-slate-900 dark:text-slate-100"
+        >
           {title}
         </h3>
-        <p id={descriptionId} className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+        <p
+          id={descriptionId}
+          className="mt-2 text-sm text-slate-600 dark:text-slate-300"
+        >
           {message}
         </p>
         <div className="mt-4 flex justify-end gap-2">

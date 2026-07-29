@@ -1,7 +1,14 @@
-import { describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import FocusMode from './FocusMode';
+import { describe, expect, it, vi } from "vitest";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import FocusMode from "./FocusMode";
 import {
   StatefulFocusModeHarness,
   completedFixture,
@@ -9,8 +16,8 @@ import {
   incompleteSessionFixture,
   minimalProps,
   singleVisitNoneItemFixture,
-} from './FocusMode.fixtures';
-import type { ShoppingItem } from '../types/item';
+} from "./FocusMode.fixtures";
+import type { ShoppingItem } from "../types/item";
 
 // fake timers は必要なテストだけでスコープを絞る。
 // runAllTimersAsync は setInterval 等も一気に走って過剰進行するため、pending な timer だけを複数回 drain する。
@@ -25,113 +32,125 @@ const flushAsync = async (cycles = 3) => {
 const limitedItemsFixture = {
   items: [
     {
-      id: 'limited-1',
-      eventDate: '2026-01-01',
-      block: 'A',
-      number: '01a',
-      circle: 'サークル1',
-      title: '限数1',
+      id: "limited-1",
+      eventDate: "2026-01-01",
+      block: "A",
+      number: "01a",
+      circle: "サークル1",
+      title: "限数1",
       price: 1000,
       quantity: 5,
-      purchaseStatus: 'LimitedPurchase',
-      priorityLevel: 'none',
-      remarks: '',
-      url: '',
+      purchaseStatus: "LimitedPurchase",
+      priorityLevel: "none",
+      remarks: "",
+      url: "",
     },
     {
-      id: 'limited-2',
-      eventDate: '2026-01-01',
-      block: 'A',
-      number: '01a',
-      circle: 'サークル1',
-      title: '限数2',
+      id: "limited-2",
+      eventDate: "2026-01-01",
+      block: "A",
+      number: "01a",
+      circle: "サークル1",
+      title: "限数2",
       price: 1200,
       quantity: 5,
-      purchaseStatus: 'LimitedPurchase',
-      priorityLevel: 'none',
-      remarks: '',
-      url: '',
+      purchaseStatus: "LimitedPurchase",
+      priorityLevel: "none",
+      remarks: "",
+      url: "",
     },
     {
-      id: 'next-visit',
-      eventDate: '2026-01-01',
-      block: 'A',
-      number: '02a',
-      circle: 'サークル2',
-      title: '次の訪問先',
+      id: "next-visit",
+      eventDate: "2026-01-01",
+      block: "A",
+      number: "02a",
+      circle: "サークル2",
+      title: "次の訪問先",
       price: 500,
       quantity: 1,
-      purchaseStatus: 'None',
-      priorityLevel: 'none',
-      remarks: '',
-      url: '',
+      purchaseStatus: "None",
+      priorityLevel: "none",
+      remarks: "",
+      url: "",
     },
   ] satisfies ShoppingItem[],
-  executeModeItemIds: ['limited-1', 'limited-2', 'next-visit'],
+  executeModeItemIds: ["limited-1", "limited-2", "next-visit"],
 };
 
 const clickLimitedDeferAt = (index: number) => {
-  fireEvent.click(screen.getAllByRole('button', { name: '-/5' })[index]);
-  fireEvent.click(screen.getByRole('button', { name: 'この商品を後で入力' }));
+  fireEvent.click(screen.getAllByRole("button", { name: "-/5" })[index]);
+  fireEvent.click(screen.getByRole("button", { name: "この商品を後で入力" }));
 };
 
 const clickNextVisitButton = () => {
-  fireEvent.click(screen.getByTitle('次の訪問先'));
+  fireEvent.click(screen.getByTitle("次の訪問先"));
 };
 
 const clickPrevVisitButton = () => {
-  fireEvent.click(screen.getByTitle('前の訪問先'));
+  fireEvent.click(screen.getByTitle("前の訪問先"));
 };
 
 const fillLimitedActualAndSaveAt = (index: number, actual: string) => {
-  fireEvent.click(screen.getAllByRole('button', { name: '-/5' })[index]);
-  const dialog = screen.getByRole('dialog', { name: '限数購入の数量' });
-  const [actualInput] = within(dialog).getAllByRole('textbox');
+  fireEvent.click(screen.getAllByRole("button", { name: "-/5" })[index]);
+  const dialog = screen.getByRole("dialog", { name: "限数購入の数量" });
+  const [actualInput] = within(dialog).getAllByRole("textbox");
   fireEvent.change(actualInput, { target: { value: actual } });
-  fireEvent.click(within(dialog).getByRole('button', { name: '保存' }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "保存" }));
 };
 
 const expectCurrentVisitBlockedByLimited = async () => {
   clickNextVisitButton();
   expect(
-    await screen.findByText('限数未入力があります。実購入数を入力してください'),
+    await screen.findByText("限数未入力があります。実購入数を入力してください"),
   ).toBeInTheDocument();
-  expect(screen.getByText('A-01A')).toBeInTheDocument();
+  expect(screen.getByText("A-01A")).toBeInTheDocument();
 };
 
-describe('FocusMode resume dialog - integration', () => {
-  it('completed resume state with no visits renders the empty visit state', () => {
+describe("FocusMode resume dialog - integration", () => {
+  it("completed resume state with no visits renders the empty visit state", () => {
     render(<FocusMode {...minimalProps({ resumeState: completedFixture })} />);
 
-    expect(screen.getByText('訪問先がありません')).toBeInTheDocument();
-    expect(screen.queryByText('全ての訪問先を確認しました')).toBeNull();
+    expect(screen.getByText("訪問先がありません")).toBeInTheDocument();
+    expect(screen.queryByText("全ての訪問先を確認しました")).toBeNull();
   });
 
-  it('同一マウントで resumeState=null → non-null (isCompleted=true) 遷移時に再開ダイアログが表示される', async () => {
+  it("同一マウントで resumeState=null → non-null (isCompleted=true) 遷移時に再開ダイアログが表示される", async () => {
     const { rerender } = render(
-      <FocusMode {...minimalProps({ resumeState: null, ...singleVisitNoneItemFixture })} />,
+      <FocusMode
+        {...minimalProps({ resumeState: null, ...singleVisitNoneItemFixture })}
+      />,
     );
-    expect(screen.queryByText('集中モードを再開しますか？')).toBeNull();
+    expect(screen.queryByText("集中モードを再開しますか？")).toBeNull();
 
     rerender(
       <FocusMode
-        {...minimalProps({ resumeState: completedFixture, ...singleVisitNoneItemFixture })}
+        {...minimalProps({
+          resumeState: completedFixture,
+          ...singleVisitNoneItemFixture,
+        })}
       />,
     );
 
-    expect(await screen.findByText('集中モードを再開しますか？')).toBeInTheDocument();
+    expect(
+      await screen.findByText("集中モードを再開しますか？"),
+    ).toBeInTheDocument();
   });
 
-  it('初回 resumeState=isCompleted=true → 再開ダイアログが表示される', async () => {
+  it("初回 resumeState=isCompleted=true → 再開ダイアログが表示される", async () => {
     render(
       <FocusMode
-        {...minimalProps({ resumeState: completedFixture, ...singleVisitNoneItemFixture })}
+        {...minimalProps({
+          resumeState: completedFixture,
+          ...singleVisitNoneItemFixture,
+        })}
       />,
     );
-    expect(await screen.findByText('集中モードを再開しますか？')).toBeInTheDocument();
+    expect(
+      await screen.findByText("集中モードを再開しますか？"),
+    ).toBeInTheDocument();
   });
 
-  it('初回 resumeState=isCompleted=true → ダイアログ表示中に isCompleted=false の書き戻しが発生しない', async () => {
+  it("初回 resumeState=isCompleted=true → ダイアログ表示中に isCompleted=false の書き戻しが発生しない", async () => {
     vi.useFakeTimers();
     try {
       const onSessionStateChange = vi.fn();
@@ -145,7 +164,9 @@ describe('FocusMode resume dialog - integration', () => {
         />,
       );
       await flushAsync();
-      expect(screen.getByText('集中モードを再開しますか？')).toBeInTheDocument();
+      expect(
+        screen.getByText("集中モードを再開しますか？"),
+      ).toBeInTheDocument();
       await flushAsync();
 
       const hasFalseWrite = onSessionStateChange.mock.calls.some(
@@ -158,7 +179,7 @@ describe('FocusMode resume dialog - integration', () => {
     }
   });
 
-  it('pointer 選択で完了画面が表示される (lastPurchaseChangeAt あり)', async () => {
+  it("pointer 選択で完了画面が表示される (lastPurchaseChangeAt あり)", async () => {
     const user = userEvent.setup();
     render(
       <FocusMode
@@ -168,30 +189,39 @@ describe('FocusMode resume dialog - integration', () => {
         })}
       />,
     );
-    await screen.findByText('集中モードを再開しますか？');
-    await user.click(screen.getByRole('button', { name: /離脱時のポインタ位置/ }));
-    expect(await screen.findByText('全ての訪問先を確認しました')).toBeInTheDocument();
-  });
-
-  it('normalStart 選択で通常フェーズ先頭の訪問 UI が表示される(完了画面ではない)', async () => {
-    const user = userEvent.setup();
-    render(
-      <FocusMode
-        {...minimalProps({ resumeState: completedFixture, ...singleVisitNoneItemFixture })}
-      />,
+    await screen.findByText("集中モードを再開しますか？");
+    await user.click(
+      screen.getByRole("button", { name: /離脱時のポインタ位置/ }),
     );
-    await screen.findByText('集中モードを再開しますか？');
-    await user.click(screen.getByRole('button', { name: /通常フェーズの最初から/ }));
-
-    // 完了画面でも訪問先なし画面でもなく、通常の訪問 UI が出ること
-    expect(screen.queryByText('全ての訪問先を確認しました')).toBeNull();
-    expect(screen.queryByText('訪問先がありません')).toBeNull();
     expect(
-      await screen.findByRole('button', { name: /Current status:/ }),
+      await screen.findByText("全ての訪問先を確認しました"),
     ).toBeInTheDocument();
   });
 
-  it('pointer 選択後も lastPurchaseChangeAt が親 payload に保持される', async () => {
+  it("normalStart 選択で通常フェーズ先頭の訪問 UI が表示される(完了画面ではない)", async () => {
+    const user = userEvent.setup();
+    render(
+      <FocusMode
+        {...minimalProps({
+          resumeState: completedFixture,
+          ...singleVisitNoneItemFixture,
+        })}
+      />,
+    );
+    await screen.findByText("集中モードを再開しますか？");
+    await user.click(
+      screen.getByRole("button", { name: /通常フェーズの最初から/ }),
+    );
+
+    // 完了画面でも訪問先なし画面でもなく、通常の訪問 UI が出ること
+    expect(screen.queryByText("全ての訪問先を確認しました")).toBeNull();
+    expect(screen.queryByText("訪問先がありません")).toBeNull();
+    expect(
+      await screen.findByRole("button", { name: /Current status:/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("pointer 選択後も lastPurchaseChangeAt が親 payload に保持される", async () => {
     const user = userEvent.setup();
     const onSessionStateChange = vi.fn();
     render(
@@ -204,9 +234,11 @@ describe('FocusMode resume dialog - integration', () => {
       />,
     );
 
-    await screen.findByText('集中モードを再開しますか？');
-    await user.click(screen.getByRole('button', { name: /離脱時のポインタ位置/ }));
-    await screen.findByText('全ての訪問先を確認しました');
+    await screen.findByText("集中モードを再開しますか？");
+    await user.click(
+      screen.getByRole("button", { name: /離脱時のポインタ位置/ }),
+    );
+    await screen.findByText("全ての訪問先を確認しました");
 
     const latestCall = onSessionStateChange.mock.calls.at(-1);
     expect(latestCall).toBeDefined();
@@ -217,7 +249,7 @@ describe('FocusMode resume dialog - integration', () => {
     );
   });
 
-  it('全アイテムを後回しにしても自動遷移せず phase/phaseIndex が動かない', async () => {
+  it("全アイテムを後回しにしても自動遷移せず phase/phaseIndex が動かない", async () => {
     const onSessionStateChange = vi.fn();
 
     // Phase 1: real timers でクリック操作を行い、全アイテムを後回しにする
@@ -229,11 +261,12 @@ describe('FocusMode resume dialog - integration', () => {
         onSessionStateChange={onSessionStateChange}
       />,
     );
-    expect(screen.queryByText('集中モードを再開しますか？')).toBeNull();
+    expect(screen.queryByText("集中モードを再開しますか？")).toBeNull();
 
     // 購入状態トグル button を 4 回クリック(None → Purchased → SoldOut → Absent → Postpone)
     // fireEvent.click は fake timers に依存せず同期的に click を発火する
-    const statusButton = () => screen.getByRole('button', { name: /Current status:/ });
+    const statusButton = () =>
+      screen.getByRole("button", { name: /Current status:/ });
     fireEvent.click(statusButton()); // → Purchased
     fireEvent.click(statusButton()); // → SoldOut
     fireEvent.click(statusButton()); // → Absent
@@ -273,7 +306,7 @@ describe('FocusMode resume dialog - integration', () => {
     }
   });
 
-  it('null → non-null (isCompleted=true) 遷移直後、遷移中ガードで isCompleted=false の書き戻しが発生しない', async () => {
+  it("null → non-null (isCompleted=true) 遷移直後、遷移中ガードで isCompleted=false の書き戻しが発生しない", async () => {
     vi.useFakeTimers();
     try {
       const onSessionStateChange = vi.fn();
@@ -301,9 +334,12 @@ describe('FocusMode resume dialog - integration', () => {
       );
       await flushAsync();
 
-      expect(screen.getByText('集中モードを再開しますか？')).toBeInTheDocument();
+      expect(
+        screen.getByText("集中モードを再開しますか？"),
+      ).toBeInTheDocument();
 
-      const postTransitionCalls = onSessionStateChange.mock.calls.slice(callCountBefore);
+      const postTransitionCalls =
+        onSessionStateChange.mock.calls.slice(callCountBefore);
       expect(postTransitionCalls).toHaveLength(0);
       const hasFalseWrite = postTransitionCalls.some(
         ([payload]) => payload.isCompleted === false,
@@ -316,8 +352,8 @@ describe('FocusMode resume dialog - integration', () => {
   });
 });
 
-describe('FocusMode limited purchase defer - integration', () => {
-  it('blocks moving forward when only part of the current visit is deferred', async () => {
+describe("FocusMode limited purchase defer - integration", () => {
+  it("blocks moving forward when only part of the current visit is deferred", async () => {
     render(
       <StatefulFocusModeHarness
         initialItems={limitedItemsFixture.items}
@@ -329,11 +365,15 @@ describe('FocusMode limited purchase defer - integration', () => {
     clickLimitedDeferAt(0);
     clickNextVisitButton();
 
-    expect(await screen.findByText('限数未入力があります。実購入数を入力してください')).toBeInTheDocument();
-    expect(screen.getByText('A-01A')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "限数未入力があります。実購入数を入力してください",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("A-01A")).toBeInTheDocument();
   });
 
-  it('allows moving forward after every missing limited purchase item in the visit is deferred', async () => {
+  it("allows moving forward after every missing limited purchase item in the visit is deferred", async () => {
     render(
       <StatefulFocusModeHarness
         initialItems={limitedItemsFixture.items}
@@ -346,13 +386,13 @@ describe('FocusMode limited purchase defer - integration', () => {
     clickLimitedDeferAt(1);
     clickNextVisitButton();
 
-    expect(await screen.findByText('A-02A')).toBeInTheDocument();
+    expect(await screen.findByText("A-02A")).toBeInTheDocument();
   });
 
-  it('allows moving forward after every missing limited purchase item is deferred from bulk limited flow', async () => {
+  it("allows moving forward after every missing limited purchase item is deferred from bulk limited flow", async () => {
     const items = limitedItemsFixture.items.map((item) =>
-      item.id.startsWith('limited-')
-        ? { ...item, purchaseStatus: 'None' as const }
+      item.id.startsWith("limited-")
+        ? { ...item, purchaseStatus: "None" as const }
         : item,
     );
 
@@ -364,15 +404,17 @@ describe('FocusMode limited purchase defer - integration', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: '全限数' }));
-    fireEvent.click(screen.getByRole('button', { name: 'この商品を後で入力' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'この商品を後で入力' }));
+    fireEvent.click(screen.getByRole("button", { name: "全限数" }));
+    fireEvent.click(screen.getByRole("button", { name: "この商品を後で入力" }));
+    fireEvent.click(
+      await screen.findByRole("button", { name: "この商品を後で入力" }),
+    );
     clickNextVisitButton();
 
-    expect(await screen.findByText('A-02A')).toBeInTheDocument();
+    expect(await screen.findByText("A-02A")).toBeInTheDocument();
   });
 
-  it('keeps the deferred exception when returning to the same visit during the same focus session', async () => {
+  it("keeps the deferred exception when returning to the same visit during the same focus session", async () => {
     render(
       <StatefulFocusModeHarness
         initialItems={limitedItemsFixture.items}
@@ -384,23 +426,23 @@ describe('FocusMode limited purchase defer - integration', () => {
     clickLimitedDeferAt(0);
     clickLimitedDeferAt(1);
     clickNextVisitButton();
-    expect(await screen.findByText('A-02A')).toBeInTheDocument();
+    expect(await screen.findByText("A-02A")).toBeInTheDocument();
 
     clickPrevVisitButton();
-    expect(await screen.findByText('A-01A')).toBeInTheDocument();
+    expect(await screen.findByText("A-01A")).toBeInTheDocument();
     clickNextVisitButton();
 
-    expect(await screen.findByText('A-02A')).toBeInTheDocument();
+    expect(await screen.findByText("A-02A")).toBeInTheDocument();
   });
 
-  it('keeps price blocking active even when limited purchase checks are deferred', async () => {
+  it("keeps price blocking active even when limited purchase checks are deferred", async () => {
     const items = [
       ...limitedItemsFixture.items.slice(0, 2),
       {
         ...limitedItemsFixture.items[0],
-        id: 'price-missing',
-        title: '価格未定',
-        purchaseStatus: 'Purchased' as const,
+        id: "price-missing",
+        title: "価格未定",
+        purchaseStatus: "Purchased" as const,
         price: null,
       },
       limitedItemsFixture.items[2],
@@ -409,7 +451,12 @@ describe('FocusMode limited purchase defer - integration', () => {
     render(
       <StatefulFocusModeHarness
         initialItems={items}
-        executeModeItemIds={['limited-1', 'limited-2', 'price-missing', 'next-visit']}
+        executeModeItemIds={[
+          "limited-1",
+          "limited-2",
+          "price-missing",
+          "next-visit",
+        ]}
         resumeState={incompleteSessionFixture}
       />,
     );
@@ -418,11 +465,15 @@ describe('FocusMode limited purchase defer - integration', () => {
     clickLimitedDeferAt(1);
     clickNextVisitButton();
 
-    expect(await screen.findByText('価格未定のアイテムがあります。価格を入力してください。')).toBeInTheDocument();
-    expect(screen.getByText('A-01A')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "価格未定のアイテムがあります。価格を入力してください。",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("A-01A")).toBeInTheDocument();
   });
 
-  it('preserves the existing global limited purchase check disable behavior', async () => {
+  it("preserves the existing global limited purchase check disable behavior", async () => {
     render(
       <StatefulFocusModeHarness
         initialItems={limitedItemsFixture.items}
@@ -434,10 +485,10 @@ describe('FocusMode limited purchase defer - integration', () => {
 
     clickNextVisitButton();
 
-    expect(await screen.findByText('A-02A')).toBeInTheDocument();
+    expect(await screen.findByText("A-02A")).toBeInTheDocument();
   });
 
-  it('resets deferred limited purchase state after remounting focus mode', async () => {
+  it("resets deferred limited purchase state after remounting focus mode", async () => {
     const first = render(
       <StatefulFocusModeHarness
         initialItems={limitedItemsFixture.items}
@@ -449,7 +500,7 @@ describe('FocusMode limited purchase defer - integration', () => {
     clickLimitedDeferAt(0);
     clickLimitedDeferAt(1);
     clickNextVisitButton();
-    expect(await screen.findByText('A-02A')).toBeInTheDocument();
+    expect(await screen.findByText("A-02A")).toBeInTheDocument();
     first.unmount();
 
     render(
@@ -461,11 +512,15 @@ describe('FocusMode limited purchase defer - integration', () => {
     );
     clickNextVisitButton();
 
-    expect(await screen.findByText('限数未入力があります。実購入数を入力してください')).toBeInTheDocument();
-    expect(screen.getByText('A-01A')).toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        "限数未入力があります。実購入数を入力してください",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText("A-01A")).toBeInTheDocument();
   });
 
-  it('clears deferred state after a limited item receives an actual quantity and later becomes missing again through props', async () => {
+  it("clears deferred state after a limited item receives an actual quantity and later becomes missing again through props", async () => {
     const { rerender } = render(
       <FocusMode
         {...minimalProps({
@@ -480,7 +535,7 @@ describe('FocusMode limited purchase defer - integration', () => {
     clickLimitedDeferAt(1);
 
     const withActualQuantity = limitedItemsFixture.items.map((item) =>
-      item.id === 'limited-1' ? { ...item, limitedPurchasedQuantity: 2 } : item,
+      item.id === "limited-1" ? { ...item, limitedPurchasedQuantity: 2 } : item,
     );
     rerender(
       <FocusMode
@@ -491,7 +546,9 @@ describe('FocusMode limited purchase defer - integration', () => {
         })}
       />,
     );
-    await waitFor(() => expect(screen.getByRole('button', { name: '2/5' })).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "2/5" })).toBeInTheDocument(),
+    );
 
     rerender(
       <FocusMode
@@ -502,12 +559,14 @@ describe('FocusMode limited purchase defer - integration', () => {
         })}
       />,
     );
-    await waitFor(() => expect(screen.getAllByRole('button', { name: '-/5' })).toHaveLength(2));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "-/5" })).toHaveLength(2),
+    );
 
     await expectCurrentVisitBlockedByLimited();
   });
 
-  it('clears deferred state after a limited item changes to another status and later becomes missing again through props', async () => {
+  it("clears deferred state after a limited item changes to another status and later becomes missing again through props", async () => {
     const { rerender } = render(
       <FocusMode
         {...minimalProps({
@@ -522,7 +581,9 @@ describe('FocusMode limited purchase defer - integration', () => {
     clickLimitedDeferAt(1);
 
     const withPurchasedItem = limitedItemsFixture.items.map((item) =>
-      item.id === 'limited-1' ? { ...item, purchaseStatus: 'Purchased' as const } : item,
+      item.id === "limited-1"
+        ? { ...item, purchaseStatus: "Purchased" as const }
+        : item,
     );
     rerender(
       <FocusMode
@@ -533,7 +594,9 @@ describe('FocusMode limited purchase defer - integration', () => {
         })}
       />,
     );
-    await waitFor(() => expect(screen.getAllByRole('button', { name: '-/5' })).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "-/5" })).toHaveLength(1),
+    );
 
     rerender(
       <FocusMode
@@ -544,12 +607,14 @@ describe('FocusMode limited purchase defer - integration', () => {
         })}
       />,
     );
-    await waitFor(() => expect(screen.getAllByRole('button', { name: '-/5' })).toHaveLength(2));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "-/5" })).toHaveLength(2),
+    );
 
     await expectCurrentVisitBlockedByLimited();
   });
 
-  it('clears deferred state when a deferred item leaves and re-enters execute scope', async () => {
+  it("clears deferred state when a deferred item leaves and re-enters execute scope", async () => {
     const { rerender } = render(
       <FocusMode
         {...minimalProps({
@@ -567,12 +632,12 @@ describe('FocusMode limited purchase defer - integration', () => {
       <FocusMode
         {...minimalProps({
           items: limitedItemsFixture.items,
-          executeModeItemIds: ['next-visit'],
+          executeModeItemIds: ["next-visit"],
           resumeState: incompleteSessionFixture,
         })}
       />,
     );
-    await waitFor(() => expect(screen.getByText('A-02A')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("A-02A")).toBeInTheDocument());
 
     rerender(
       <FocusMode
@@ -583,12 +648,12 @@ describe('FocusMode limited purchase defer - integration', () => {
         })}
       />,
     );
-    await waitFor(() => expect(screen.getByText('A-01A')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("A-01A")).toBeInTheDocument());
 
     await expectCurrentVisitBlockedByLimited();
   });
 
-  it('clears deferred state when a deferred item visit key changes', async () => {
+  it("clears deferred state when a deferred item visit key changes", async () => {
     const { rerender } = render(
       <FocusMode
         {...minimalProps({
@@ -603,7 +668,7 @@ describe('FocusMode limited purchase defer - integration', () => {
     clickLimitedDeferAt(1);
 
     const movedItems = limitedItemsFixture.items.map((item) =>
-      item.id.startsWith('limited-') ? { ...item, block: 'B' } : item,
+      item.id.startsWith("limited-") ? { ...item, block: "B" } : item,
     );
     rerender(
       <FocusMode
@@ -614,16 +679,18 @@ describe('FocusMode limited purchase defer - integration', () => {
         })}
       />,
     );
-    await waitFor(() => expect(screen.getByText('B-01A')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("B-01A")).toBeInTheDocument());
 
     clickNextVisitButton();
     expect(
-      await screen.findByText('限数未入力があります。実購入数を入力してください'),
+      await screen.findByText(
+        "限数未入力があります。実購入数を入力してください",
+      ),
     ).toBeInTheDocument();
-    expect(screen.getByText('B-01A')).toBeInTheDocument();
+    expect(screen.getByText("B-01A")).toBeInTheDocument();
   });
 
-  it('clears deferred state when an empty visit removes blinking state and deferred items are re-added', async () => {
+  it("clears deferred state when an empty visit removes blinking state and deferred items are re-added", async () => {
     const { rerender } = render(
       <FocusMode
         {...minimalProps({
@@ -646,7 +713,9 @@ describe('FocusMode limited purchase defer - integration', () => {
         })}
       />,
     );
-    await waitFor(() => expect(screen.getByText('訪問先がありません')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(screen.getByText("訪問先がありません")).toBeInTheDocument(),
+    );
 
     rerender(
       <FocusMode
@@ -657,16 +726,18 @@ describe('FocusMode limited purchase defer - integration', () => {
         })}
       />,
     );
-    await waitFor(() => expect(screen.getByText('A-01A')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText("A-01A")).toBeInTheDocument());
 
     await expectCurrentVisitBlockedByLimited();
   });
 
-  it('clears deferred state when a deferred item is saved from the limited dialog and later becomes missing again', async () => {
+  it("clears deferred state when a deferred item is saved from the limited dialog and later becomes missing again", async () => {
     let items: ShoppingItem[] = limitedItemsFixture.items;
     let view: ReturnType<typeof render>;
     const onUpdateItem = vi.fn((updatedItem: ShoppingItem) => {
-      items = items.map((item) => (item.id === updatedItem.id ? updatedItem : item));
+      items = items.map((item) =>
+        item.id === updatedItem.id ? updatedItem : item,
+      );
       view.rerender(
         <FocusMode
           {...minimalProps({
@@ -692,8 +763,10 @@ describe('FocusMode limited purchase defer - integration', () => {
 
     clickLimitedDeferAt(0);
     clickLimitedDeferAt(1);
-    fillLimitedActualAndSaveAt(0, '2');
-    await waitFor(() => expect(screen.getByRole('button', { name: '2/5' })).toBeInTheDocument());
+    fillLimitedActualAndSaveAt(0, "2");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "2/5" })).toBeInTheDocument(),
+    );
 
     items = limitedItemsFixture.items;
     view.rerender(
@@ -706,16 +779,20 @@ describe('FocusMode limited purchase defer - integration', () => {
         })}
       />,
     );
-    await waitFor(() => expect(screen.getAllByRole('button', { name: '-/5' })).toHaveLength(2));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "-/5" })).toHaveLength(2),
+    );
 
     await expectCurrentVisitBlockedByLimited();
   });
 
-  it('clears deferred state when a deferred item is committed as purchased and later becomes missing again', async () => {
+  it("clears deferred state when a deferred item is committed as purchased and later becomes missing again", async () => {
     let items: ShoppingItem[] = limitedItemsFixture.items;
     let view: ReturnType<typeof render>;
     const onUpdateItem = vi.fn((updatedItem: ShoppingItem) => {
-      items = items.map((item) => (item.id === updatedItem.id ? updatedItem : item));
+      items = items.map((item) =>
+        item.id === updatedItem.id ? updatedItem : item,
+      );
       view.rerender(
         <FocusMode
           {...minimalProps({
@@ -741,14 +818,15 @@ describe('FocusMode limited purchase defer - integration', () => {
 
     clickLimitedDeferAt(0);
     clickLimitedDeferAt(1);
-    fillLimitedActualAndSaveAt(0, '5');
+    fillLimitedActualAndSaveAt(0, "5");
     fireEvent.click(
-      within(screen.getByRole('dialog', { name: '購入済として保存しますか？' })).getByRole(
-        'button',
-        { name: '購入済にする' },
-      ),
+      within(
+        screen.getByRole("dialog", { name: "購入済として保存しますか？" }),
+      ).getByRole("button", { name: "購入済にする" }),
     );
-    await waitFor(() => expect(screen.getAllByRole('button', { name: '-/5' })).toHaveLength(1));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "-/5" })).toHaveLength(1),
+    );
 
     items = limitedItemsFixture.items;
     view.rerender(
@@ -761,17 +839,21 @@ describe('FocusMode limited purchase defer - integration', () => {
         })}
       />,
     );
-    await waitFor(() => expect(screen.getAllByRole('button', { name: '-/5' })).toHaveLength(2));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: "-/5" })).toHaveLength(2),
+    );
 
     await expectCurrentVisitBlockedByLimited();
   });
 
-  it('clears deferred state when all-limited toggle clears missing limited items and they later become missing again', async () => {
+  it("clears deferred state when all-limited toggle clears missing limited items and they later become missing again", async () => {
     let items: ShoppingItem[] = limitedItemsFixture.items;
     let view: ReturnType<typeof render>;
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
     const onUpdateItem = vi.fn((updatedItem: ShoppingItem) => {
-      items = items.map((item) => (item.id === updatedItem.id ? updatedItem : item));
+      items = items.map((item) =>
+        item.id === updatedItem.id ? updatedItem : item,
+      );
       view.rerender(
         <FocusMode
           {...minimalProps({
@@ -798,8 +880,10 @@ describe('FocusMode limited purchase defer - integration', () => {
 
       clickLimitedDeferAt(0);
       clickLimitedDeferAt(1);
-      fireEvent.click(screen.getByRole('button', { name: '全限数' }));
-      await waitFor(() => expect(screen.queryByRole('button', { name: '-/5' })).toBeNull());
+      fireEvent.click(screen.getByRole("button", { name: "全限数" }));
+      await waitFor(() =>
+        expect(screen.queryByRole("button", { name: "-/5" })).toBeNull(),
+      );
 
       items = limitedItemsFixture.items;
       view.rerender(
@@ -812,7 +896,9 @@ describe('FocusMode limited purchase defer - integration', () => {
           })}
         />,
       );
-      await waitFor(() => expect(screen.getAllByRole('button', { name: '-/5' })).toHaveLength(2));
+      await waitFor(() =>
+        expect(screen.getAllByRole("button", { name: "-/5" })).toHaveLength(2),
+      );
 
       await expectCurrentVisitBlockedByLimited();
     } finally {

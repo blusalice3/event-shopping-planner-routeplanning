@@ -1,25 +1,32 @@
-import React from 'react';
-import { useOptionalSpaceNavigator } from '../SpaceNavigatorContext';
+import React from "react";
+import { useOptionalSpaceNavigator } from "../SpaceNavigatorContext";
 
 export function TemporaryNavigationBanner() {
   const navigator = useOptionalSpaceNavigator();
-  if (!navigator?.registration || !navigator.temporaryMode || navigator.history.length === 0) {
+  if (
+    !navigator?.registration ||
+    !navigator.temporaryMode ||
+    navigator.history.length === 0
+  ) {
     return null;
   }
 
-  const current = navigator.registration.entries[navigator.registration.currentIndex];
+  const current =
+    navigator.registration.entries[navigator.registration.currentIndex];
   const previous = navigator.history[navigator.history.length - 1];
-  const previousLabel = previous.snapshot?.label ?? '元のスペース';
+  const previousLabel = previous.snapshot?.label ?? "元のスペース";
 
   return (
     <div className="fixed left-1/2 top-[calc(env(safe-area-inset-top)+.5rem)] z-[60] w-[calc(100%-1rem)] max-w-2xl -translate-x-1/2 rounded-xl border border-indigo-300 bg-white/95 px-3 py-2 shadow-xl backdrop-blur dark:border-indigo-700 dark:bg-slate-800/95">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="min-w-0">
           <p className="text-[11px] font-bold text-indigo-600 dark:text-indigo-300">
-            {navigator.temporaryMode === 'inspect' ? '内容だけ確認中・編集不可' : '一時移動中'}
+            {navigator.temporaryMode === "inspect"
+              ? "内容だけ確認中・編集不可"
+              : "一時移動中"}
           </p>
           <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
-            {current?.label ?? '選択したスペース'}
+            {current?.label ?? "選択したスペース"}
           </p>
         </div>
         <div className="flex w-full max-w-full flex-wrap items-center justify-end gap-2 sm:w-auto">

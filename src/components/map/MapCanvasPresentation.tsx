@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 
 type MapCanvasPresentationProps = {
   containerRef: React.RefObject<HTMLDivElement>;
@@ -10,7 +10,7 @@ type MapCanvasPresentationProps = {
   onPointerUp: (e: React.PointerEvent<HTMLCanvasElement>) => void;
   onPointerLeave: (e: React.PointerEvent<HTMLCanvasElement>) => void;
   onPointerCancel: (e: React.PointerEvent<HTMLCanvasElement>) => void;
-  cursor?: React.CSSProperties['cursor'];
+  cursor?: React.CSSProperties["cursor"];
 };
 
 const MapCanvasPresentation: React.FC<MapCanvasPresentationProps> = ({
@@ -30,8 +30,8 @@ const MapCanvasPresentation: React.FC<MapCanvasPresentationProps> = ({
       ref={containerRef}
       className="relative bg-white dark:bg-slate-800 overflow-hidden"
       style={{
-        width: '100%',
-        height: '100%',
+        width: "100%",
+        height: "100%",
       }}
     >
       <canvas
@@ -43,8 +43,8 @@ const MapCanvasPresentation: React.FC<MapCanvasPresentationProps> = ({
         onPointerLeave={onPointerLeave}
         onPointerCancel={onPointerCancel}
         style={{
-          cursor: cursor || (isDragging ? 'grabbing' : 'grab'),
-          touchAction: 'none',
+          cursor: cursor || (isDragging ? "grabbing" : "grab"),
+          touchAction: "none",
         }}
       />
     </div>

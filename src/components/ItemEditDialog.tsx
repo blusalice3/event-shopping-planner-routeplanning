@@ -1,8 +1,8 @@
-import React, { useState, useCallback, useMemo } from 'react';
-import type { ShoppingItem, PurchaseStatus } from '../types/item';
-import type { HallDefinition } from '../types/map';
-import { findHallsByBlockName } from '../utils/hallFallback';
-import LimitedPurchaseExcessConfirmDialog from './LimitedPurchaseExcessConfirmDialog';
+import React, { useState, useCallback, useMemo } from "react";
+import type { ShoppingItem, PurchaseStatus } from "../types/item";
+import type { HallDefinition } from "../types/map";
+import { findHallsByBlockName } from "../utils/hallFallback";
+import LimitedPurchaseExcessConfirmDialog from "./LimitedPurchaseExcessConfirmDialog";
 import {
   applyLimitedPurchase,
   applyPurchasedFromLimitedInput,
@@ -13,7 +13,7 @@ import {
   validateLimitedPurchasePlannedQuantity,
   validateLimitedPurchaseQuantities,
   type LimitedPurchaseValidationError,
-} from '../utils/purchaseQuantity';
+} from "../utils/purchaseQuantity";
 
 interface ItemEditDialogProps {
   item: ShoppingItem;
@@ -21,17 +21,25 @@ interface ItemEditDialogProps {
   onClose: () => void;
   allItems?: ShoppingItem[];
   halls?: HallDefinition[];
-  onPriorityChange?: (itemId: string, level: 'none' | 'priority' | 'highest') => void;
+  onPriorityChange?: (
+    itemId: string,
+    level: "none" | "priority" | "highest",
+  ) => void;
 }
 
-const toLimitedPurchaseMessage = (error: LimitedPurchaseValidationError): string => {
-  if (error === 'planned_required') return '購入予定量を入力してください';
-  if (error === 'actual_required') return '実購入数を入力してください';
-  if (error === 'planned_not_integer') return '購入予定量は整数で入力してください';
-  if (error === 'actual_not_integer') return '実購入数は整数で入力してください';
-  if (error === 'planned_not_positive') return '購入予定量は1以上で入力してください';
-  if (error === 'actual_not_positive') return '実購入数は1以上で入力してください';
-  return '限数購入では実購入数を購入予定量より少なくしてください';
+const toLimitedPurchaseMessage = (
+  error: LimitedPurchaseValidationError,
+): string => {
+  if (error === "planned_required") return "購入予定量を入力してください";
+  if (error === "actual_required") return "実購入数を入力してください";
+  if (error === "planned_not_integer")
+    return "購入予定量は整数で入力してください";
+  if (error === "actual_not_integer") return "実購入数は整数で入力してください";
+  if (error === "planned_not_positive")
+    return "購入予定量は1以上で入力してください";
+  if (error === "actual_not_positive")
+    return "実購入数は1以上で入力してください";
+  return "限数購入では実購入数を購入予定量より少なくしてください";
 };
 
 export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
@@ -48,24 +56,30 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
     eventDate: item.eventDate,
     block: item.block,
     number: item.number,
-    price: item.price === null ? '' : String(item.price),
+    price: item.price === null ? "" : String(item.price),
     quantity: String(item.quantity ?? 1),
     purchaseStatus: item.purchaseStatus as string,
     remarks: item.remarks,
-    url: item.url || '',
-    priorityLevel: (item.priorityLevel || 'none') as 'none' | 'priority' | 'highest',
-    manualHallId: item.manualHallId || '',
+    url: item.url || "",
+    priorityLevel: (item.priorityLevel || "none") as
+      | "none"
+      | "priority"
+      | "highest",
+    manualHallId: item.manualHallId || "",
   });
   const [limitedActualText, setLimitedActualText] = useState(
-    item.purchaseStatus === 'LimitedPurchase'
-      ? String(getActualPurchasedQuantity(item) ?? '')
-      : '',
+    item.purchaseStatus === "LimitedPurchase"
+      ? String(getActualPurchasedQuantity(item) ?? "")
+      : "",
   );
-  const [limitedPlannedText, setLimitedPlannedText] = useState(String(getPlannedQuantity(item)));
+  const [limitedPlannedText, setLimitedPlannedText] = useState(
+    String(getPlannedQuantity(item)),
+  );
   const [limitedError, setLimitedError] = useState<string | null>(null);
-  const [excessConfirm, setExcessConfirm] = useState<{ item: ShoppingItem; planned: number } | null>(
-    null,
-  );
+  const [excessConfirm, setExcessConfirm] = useState<{
+    item: ShoppingItem;
+    planned: number;
+  } | null>(null);
 
   // 現在のブロックが属するホール候補（blockNamesに含まれているホール）
   const blockHallCandidates = useMemo(
@@ -76,8 +90,9 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
   const showHallSelector = blockHallCandidates.length > 1;
 
   const formInputClass =
-    'w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white';
-  const labelClass = 'block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1';
+    "w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white";
+  const labelClass =
+    "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
 
   const priceOptions = useMemo(() => {
     const options: number[] = [0];
@@ -87,18 +102,24 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
     return options;
   }, []);
 
-  const handlePriceInputChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/[^0-9]/g, '');
-    setForm((prev) => ({ ...prev, price: value }));
-  }, []);
+  const handlePriceInputChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const value = e.target.value.replace(/[^0-9]/g, "");
+      setForm((prev) => ({ ...prev, price: value }));
+    },
+    [],
+  );
 
-  const handlePriceSelectChange = useCallback((e: React.ChangeEvent<HTMLSelectElement>) => {
-    setForm((prev) => ({ ...prev, price: e.target.value }));
-  }, []);
+  const handlePriceSelectChange = useCallback(
+    (e: React.ChangeEvent<HTMLSelectElement>) => {
+      setForm((prev) => ({ ...prev, price: e.target.value }));
+    },
+    [],
+  );
 
   const handleSave = useCallback(() => {
     if (!form.circle.trim()) return;
-    const price = form.price === '' ? null : parseInt(form.price, 10) || 0;
+    const price = form.price === "" ? null : parseInt(form.price, 10) || 0;
     const baseItem: ShoppingItem = {
       ...item,
       circle: form.circle,
@@ -114,10 +135,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
       manualHallId: form.manualHallId || undefined,
     };
 
-    if (form.purchaseStatus === 'LimitedPurchase') {
+    if (form.purchaseStatus === "LimitedPurchase") {
       const planned = parseDecimalIntegerInput(limitedPlannedText);
-      if (limitedActualText.trim() === '') {
-        const plannedValidation = validateLimitedPurchasePlannedQuantity(planned);
+      if (limitedActualText.trim() === "") {
+        const plannedValidation =
+          validateLimitedPurchasePlannedQuantity(planned);
         if (!plannedValidation.ok) {
           setLimitedError(toLimitedPurchaseMessage(plannedValidation.error));
           return;
@@ -129,17 +151,26 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
       const actual = parseDecimalIntegerInput(limitedActualText);
       const validation = validateLimitedPurchaseQuantities(actual, planned);
       if (validation.ok) {
-        onSave(applyLimitedPurchase(baseItem, { actual: actual!, planned: planned! }));
+        onSave(
+          applyLimitedPurchase(baseItem, {
+            actual: actual!,
+            planned: planned!,
+          }),
+        );
         return;
       }
 
       if (
-        validation.error === 'actual_not_less_than_planned' &&
+        validation.error === "actual_not_less_than_planned" &&
         actual !== undefined &&
         planned !== undefined
       ) {
         if (actual === planned) {
-          if (window.confirm('全て購入できているので「購入済」にします。よろしいですか？')) {
+          if (
+            window.confirm(
+              "全て購入できているので「購入済」にします。よろしいですか？",
+            )
+          ) {
             onSave(applyPurchasedFromLimitedInput(baseItem, planned));
           }
           return;
@@ -193,7 +224,9 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               <input
                 type="text"
                 value={form.circle}
-                onChange={(e) => setForm((prev) => ({ ...prev, circle: e.target.value }))}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, circle: e.target.value }))
+                }
                 className={formInputClass}
                 placeholder="サークル名"
                 autoFocus
@@ -212,7 +245,9 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               <input
                 type="text"
                 value={form.title}
-                onChange={(e) => setForm((prev) => ({ ...prev, title: e.target.value }))}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, title: e.target.value }))
+                }
                 className={formInputClass}
                 placeholder="新刊セット"
               />
@@ -224,7 +259,9 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               <input
                 type="text"
                 value={form.eventDate}
-                onChange={(e) => setForm((prev) => ({ ...prev, eventDate: e.target.value }))}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, eventDate: e.target.value }))
+                }
                 className={formInputClass}
               />
             </div>
@@ -233,7 +270,9 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               <input
                 type="text"
                 value={form.block}
-                onChange={(e) => setForm((prev) => ({ ...prev, block: e.target.value }))}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, block: e.target.value }))
+                }
                 className={formInputClass}
               />
             </div>
@@ -242,7 +281,9 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               <input
                 type="text"
                 value={form.number}
-                onChange={(e) => setForm((prev) => ({ ...prev, number: e.target.value }))}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, number: e.target.value }))
+                }
                 className={formInputClass}
                 placeholder="01a"
               />
@@ -259,14 +300,18 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
                 placeholder="0"
                 inputMode="numeric"
               />
-              <span className="absolute right-3 top-9 text-slate-500 dark:text-slate-400">円</span>
+              <span className="absolute right-3 top-9 text-slate-500 dark:text-slate-400">
+                円
+              </span>
             </div>
             <div>
               <label className={labelClass}>クイック選択</label>
               <select
                 onChange={handlePriceSelectChange}
                 className={formInputClass}
-                value={priceOptions.includes(Number(form.price)) ? form.price : ''}
+                value={
+                  priceOptions.includes(Number(form.price)) ? form.price : ""
+                }
               >
                 <option value="" disabled>
                   金額を選択...
@@ -280,7 +325,7 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {form.purchaseStatus === 'LimitedPurchase' ? (
+            {form.purchaseStatus === "LimitedPurchase" ? (
               <>
                 <div>
                   <label className={labelClass}>実購入数</label>
@@ -312,7 +357,9 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
                 <label className={labelClass}>数量</label>
                 <select
                   value={form.quantity}
-                  onChange={(e) => setForm((prev) => ({ ...prev, quantity: e.target.value }))}
+                  onChange={(e) =>
+                    setForm((prev) => ({ ...prev, quantity: e.target.value }))
+                  }
                   className={formInputClass}
                 >
                   {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
@@ -336,9 +383,11 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
                     ...prev,
                     purchaseStatus: nextStatus,
                   }));
-                  if (nextStatus === 'LimitedPurchase') {
+                  if (nextStatus === "LimitedPurchase") {
                     setLimitedPlannedText(String(getPlannedQuantity(item)));
-                    setLimitedActualText(String(getActualPurchasedQuantity(item) ?? ''));
+                    setLimitedActualText(
+                      String(getActualPurchasedQuantity(item) ?? ""),
+                    );
                     setLimitedError(null);
                   }
                 }}
@@ -355,7 +404,9 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
             </div>
           </div>
           {limitedError && (
-            <p className="text-sm text-red-600 dark:text-red-300">{limitedError}</p>
+            <p className="text-sm text-red-600 dark:text-red-300">
+              {limitedError}
+            </p>
           )}
           {showHallSelector && (
             <div className="border border-amber-200 dark:border-amber-700/50 bg-amber-50/50 dark:bg-amber-900/20 rounded-lg p-3">
@@ -372,7 +423,9 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
                 }
                 className={formInputClass}
               >
-                <option value="">自動判定（いずれか1つに決定できない場合は未割当）</option>
+                <option value="">
+                  自動判定（いずれか1つに決定できない場合は未割当）
+                </option>
                 {blockHallCandidates.map((h) => (
                   <option key={h.id} value={h.id}>
                     {h.name}
@@ -392,7 +445,10 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
                 onChange={(e) =>
                   setForm((prev) => ({
                     ...prev,
-                    priorityLevel: e.target.value as 'none' | 'priority' | 'highest',
+                    priorityLevel: e.target.value as
+                      | "none"
+                      | "priority"
+                      | "highest",
                   }))
                 }
                 className={formInputClass}
@@ -401,13 +457,17 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
                 <option value="priority">優先</option>
                 <option value="highest">最優先</option>
               </select>
-              {form.priorityLevel !== 'none' && (
+              {form.priorityLevel !== "none" && (
                 <div className="flex items-center gap-1.5 mt-1.5">
                   <span
-                    className={`inline-block w-2.5 h-2.5 rounded-full ${form.priorityLevel === 'highest' ? 'bg-red-500' : 'bg-orange-500'}`}
+                    className={`inline-block w-2.5 h-2.5 rounded-full ${form.priorityLevel === "highest" ? "bg-red-500" : "bg-orange-500"}`}
                   />
-                  <span className={`text-xs ${form.priorityLevel === 'highest' ? 'text-red-600 dark:text-red-400' : 'text-orange-600 dark:text-orange-400'}`}>
-                    {form.priorityLevel === 'highest' ? '最優先アイテムとして設定されます' : '優先アイテムとして設定されます'}
+                  <span
+                    className={`text-xs ${form.priorityLevel === "highest" ? "text-red-600 dark:text-red-400" : "text-orange-600 dark:text-orange-400"}`}
+                  >
+                    {form.priorityLevel === "highest"
+                      ? "最優先アイテムとして設定されます"
+                      : "優先アイテムとして設定されます"}
                   </span>
                 </div>
               )}
@@ -419,7 +479,9 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               <input
                 type="text"
                 value={form.remarks}
-                onChange={(e) => setForm((prev) => ({ ...prev, remarks: e.target.value }))}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, remarks: e.target.value }))
+                }
                 className={formInputClass}
                 placeholder="スケブお願い"
               />
@@ -429,7 +491,9 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               <input
                 type="text"
                 value={form.url}
-                onChange={(e) => setForm((prev) => ({ ...prev, url: e.target.value }))}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, url: e.target.value }))
+                }
                 className={formInputClass}
                 placeholder="https://example.com"
               />
@@ -456,7 +520,12 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
           onFix={() => setExcessConfirm(null)}
           onConvertToPurchased={() => {
             if (!excessConfirm) return;
-            onSave(applyPurchasedFromLimitedInput(excessConfirm.item, excessConfirm.planned));
+            onSave(
+              applyPurchasedFromLimitedInput(
+                excessConfirm.item,
+                excessConfirm.planned,
+              ),
+            );
             setExcessConfirm(null);
           }}
         />

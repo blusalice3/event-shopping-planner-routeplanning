@@ -4,7 +4,7 @@ import {
   RouteSegment,
   DayMapData,
   RoutePathConstraint,
-} from '../types/map';
+} from "../types/map";
 
 // サブセル解像度: 各セルをN×Nに分割
 const SUB_CELL_RESOLUTION = 3;
@@ -36,11 +36,11 @@ function isPassableCell(
   if (!cell) return true;
 
   // 数値セルは通過不可
-  if (cell.value !== null && typeof cell.value === 'number') return false;
+  if (cell.value !== null && typeof cell.value === "number") return false;
   if (cell.value !== null && /^\d+$/.test(String(cell.value))) return false;
 
   // 塗りつぶしセルは通過不可
-  if (cell.backgroundColor && cell.backgroundColor !== '#FFFFFF') return false;
+  if (cell.backgroundColor && cell.backgroundColor !== "#FFFFFF") return false;
 
   return true;
 }
@@ -64,7 +64,10 @@ function cellToSubCell(row: number, col: number): { sr: number; sc: number } {
 
 // サブセル座標を描画用の小数row/col座標に変換
 // 変換後は既存の (val - 0.5) * cellSize でピクセル座標になる
-function subCellToFractional(sr: number, sc: number): { row: number; col: number } {
+function subCellToFractional(
+  sr: number,
+  sc: number,
+): { row: number; col: number } {
   return {
     row: (sr + 0.5) / SUB_CELL_RESOLUTION + 0.5,
     col: (sc + 0.5) / SUB_CELL_RESOLUTION + 0.5,
@@ -109,39 +112,93 @@ function buildBufferCostMap(
   // 隣接方向とバッファ対象サブセルの対応
   // dr,dcは通過不可セルから見た通過可能セルの方向
   // 通過不可セルに面するエッジサブセルのみにペナルティ（中央・反対側は自由通行）
-  const neighborOffsets: { dr: number; dc: number; getSubCells: (r: number, c: number) => { sr: number; sc: number }[] }[] = [
+  const neighborOffsets: {
+    dr: number;
+    dc: number;
+    getSubCells: (r: number, c: number) => { sr: number; sc: number }[];
+  }[] = [
     // 通過可能セルが上(dr=-1) → 下端(localRow=2)が通過不可セルに面する
-    { dr: -1, dc: 0, getSubCells: (r, c) => {
-      const baseSr = (r - 1) * N + (N - 1); // localRow=2
-      const baseSc = (c - 1) * N;
-      return [{ sr: baseSr, sc: baseSc }, { sr: baseSr, sc: baseSc + 1 }, { sr: baseSr, sc: baseSc + 2 }];
-    }},
+    {
+      dr: -1,
+      dc: 0,
+      getSubCells: (r, c) => {
+        const baseSr = (r - 1) * N + (N - 1); // localRow=2
+        const baseSc = (c - 1) * N;
+        return [
+          { sr: baseSr, sc: baseSc },
+          { sr: baseSr, sc: baseSc + 1 },
+          { sr: baseSr, sc: baseSc + 2 },
+        ];
+      },
+    },
     // 通過可能セルが下(dr=1) → 上端(localRow=0)が通過不可セルに面する
-    { dr: 1, dc: 0, getSubCells: (r, c) => {
-      const baseSr = (r - 1) * N; // localRow=0
-      const baseSc = (c - 1) * N;
-      return [{ sr: baseSr, sc: baseSc }, { sr: baseSr, sc: baseSc + 1 }, { sr: baseSr, sc: baseSc + 2 }];
-    }},
+    {
+      dr: 1,
+      dc: 0,
+      getSubCells: (r, c) => {
+        const baseSr = (r - 1) * N; // localRow=0
+        const baseSc = (c - 1) * N;
+        return [
+          { sr: baseSr, sc: baseSc },
+          { sr: baseSr, sc: baseSc + 1 },
+          { sr: baseSr, sc: baseSc + 2 },
+        ];
+      },
+    },
     // 通過可能セルが左(dc=-1) → 右端(localCol=2)が通過不可セルに面する
-    { dr: 0, dc: -1, getSubCells: (r, c) => {
-      const baseSr = (r - 1) * N;
-      const baseSc = (c - 1) * N + (N - 1); // localCol=2
-      return [{ sr: baseSr, sc: baseSc }, { sr: baseSr + 1, sc: baseSc }, { sr: baseSr + 2, sc: baseSc }];
-    }},
+    {
+      dr: 0,
+      dc: -1,
+      getSubCells: (r, c) => {
+        const baseSr = (r - 1) * N;
+        const baseSc = (c - 1) * N + (N - 1); // localCol=2
+        return [
+          { sr: baseSr, sc: baseSc },
+          { sr: baseSr + 1, sc: baseSc },
+          { sr: baseSr + 2, sc: baseSc },
+        ];
+      },
+    },
     // 通過可能セルが右(dc=1) → 左端(localCol=0)が通過不可セルに面する
-    { dr: 0, dc: 1, getSubCells: (r, c) => {
-      const baseSr = (r - 1) * N;
-      const baseSc = (c - 1) * N; // localCol=0
-      return [{ sr: baseSr, sc: baseSc }, { sr: baseSr + 1, sc: baseSc }, { sr: baseSr + 2, sc: baseSc }];
-    }},
+    {
+      dr: 0,
+      dc: 1,
+      getSubCells: (r, c) => {
+        const baseSr = (r - 1) * N;
+        const baseSc = (c - 1) * N; // localCol=0
+        return [
+          { sr: baseSr, sc: baseSc },
+          { sr: baseSr + 1, sc: baseSc },
+          { sr: baseSr + 2, sc: baseSc },
+        ];
+      },
+    },
     // 通過可能セルが左上(dr=-1,dc=-1) → 右下角(localRow=2,localCol=2)
-    { dr: -1, dc: -1, getSubCells: (r, c) => [{ sr: (r - 1) * N + (N - 1), sc: (c - 1) * N + (N - 1) }] },
+    {
+      dr: -1,
+      dc: -1,
+      getSubCells: (r, c) => [
+        { sr: (r - 1) * N + (N - 1), sc: (c - 1) * N + (N - 1) },
+      ],
+    },
     // 通過可能セルが右上(dr=-1,dc=1) → 左下角(localRow=2,localCol=0)
-    { dr: -1, dc: 1, getSubCells: (r, c) => [{ sr: (r - 1) * N + (N - 1), sc: (c - 1) * N }] },
+    {
+      dr: -1,
+      dc: 1,
+      getSubCells: (r, c) => [{ sr: (r - 1) * N + (N - 1), sc: (c - 1) * N }],
+    },
     // 通過可能セルが左下(dr=1,dc=-1) → 右上角(localRow=0,localCol=2)
-    { dr: 1, dc: -1, getSubCells: (r, c) => [{ sr: (r - 1) * N, sc: (c - 1) * N + (N - 1) }] },
+    {
+      dr: 1,
+      dc: -1,
+      getSubCells: (r, c) => [{ sr: (r - 1) * N, sc: (c - 1) * N + (N - 1) }],
+    },
     // 通過可能セルが右下(dr=1,dc=1) → 左上角(localRow=0,localCol=0)
-    { dr: 1, dc: 1, getSubCells: (r, c) => [{ sr: (r - 1) * N, sc: (c - 1) * N }] },
+    {
+      dr: 1,
+      dc: 1,
+      getSubCells: (r, c) => [{ sr: (r - 1) * N, sc: (c - 1) * N }],
+    },
   ];
 
   for (let row = 1; row <= maxRow; row++) {
@@ -153,8 +210,15 @@ function buildBufferCostMap(
       for (const offset of neighborOffsets) {
         const neighborRow = row + offset.dr;
         const neighborCol = col + offset.dc;
-        if (neighborRow < 1 || neighborCol < 1 || neighborRow > maxRow || neighborCol > maxCol) continue;
-        if (!isPassableCell(cellsMap, neighborRow, neighborCol, maxRow, maxCol)) continue;
+        if (
+          neighborRow < 1 ||
+          neighborCol < 1 ||
+          neighborRow > maxRow ||
+          neighborCol > maxCol
+        )
+          continue;
+        if (!isPassableCell(cellsMap, neighborRow, neighborCol, maxRow, maxCol))
+          continue;
 
         const subCells = offset.getSubCells(neighborRow, neighborCol);
         for (const { sr, sc } of subCells) {
@@ -176,8 +240,8 @@ interface HeapNode {
   f: number;
   parentSr: number;
   parentSc: number;
-  dirDr: number;  // この地点に到達した方向 (-1, 0, 1)
-  dirDc: number;  // この地点に到達した方向 (-1, 0, 1)
+  dirDr: number; // この地点に到達した方向 (-1, 0, 1)
+  dirDc: number; // この地点に到達した方向 (-1, 0, 1)
 }
 
 // 方向インデックス: up=0, down=1, left=2, right=3, start=4(方向なし)
@@ -216,7 +280,10 @@ class BinaryHeap {
     while (idx > 0) {
       const parentIdx = (idx - 1) >> 1;
       if (this.heap[idx].f >= this.heap[parentIdx].f) break;
-      [this.heap[idx], this.heap[parentIdx]] = [this.heap[parentIdx], this.heap[idx]];
+      [this.heap[idx], this.heap[parentIdx]] = [
+        this.heap[parentIdx],
+        this.heap[idx],
+      ];
       idx = parentIdx;
     }
   }
@@ -227,10 +294,15 @@ class BinaryHeap {
       let smallest = idx;
       const left = 2 * idx + 1;
       const right = 2 * idx + 2;
-      if (left < length && this.heap[left].f < this.heap[smallest].f) smallest = left;
-      if (right < length && this.heap[right].f < this.heap[smallest].f) smallest = right;
+      if (left < length && this.heap[left].f < this.heap[smallest].f)
+        smallest = left;
+      if (right < length && this.heap[right].f < this.heap[smallest].f)
+        smallest = right;
       if (smallest === idx) break;
-      [this.heap[idx], this.heap[smallest]] = [this.heap[smallest], this.heap[idx]];
+      [this.heap[idx], this.heap[smallest]] = [
+        this.heap[smallest],
+        this.heap[idx],
+      ];
       idx = smallest;
     }
   }
@@ -243,14 +315,19 @@ function heuristic(r1: number, c1: number, r2: number, c2: number): number {
 
 // 方向（上下左右のみ：直交ルーティング）
 const DIRECTIONS = [
-  { dr: -1, dc: 0, cost: 1 },   // 上
-  { dr: 1, dc: 0, cost: 1 },    // 下
-  { dr: 0, dc: -1, cost: 1 },   // 左
-  { dr: 0, dc: 1, cost: 1 },    // 右
+  { dr: -1, dc: 0, cost: 1 }, // 上
+  { dr: 1, dc: 0, cost: 1 }, // 下
+  { dr: 0, dc: -1, cost: 1 }, // 左
+  { dr: 0, dc: 1, cost: 1 }, // 右
 ];
 
 // サブセルが特定セル内にあるかを判定
-function isSubCellInCell(sr: number, sc: number, cellRow: number, cellCol: number): boolean {
+function isSubCellInCell(
+  sr: number,
+  sc: number,
+  cellRow: number,
+  cellCol: number,
+): boolean {
   const N = SUB_CELL_RESOLUTION;
   const { row, col } = subCellToCell(sr, sc);
   return row === cellRow && col === cellCol;
@@ -278,7 +355,8 @@ function findSubCellPath(
   const maxSubCol = maxCol * N;
 
   // バッファコストマップが未提供の場合は構築
-  const effectiveBufferMap = bufferCostMap ?? buildBufferCostMap(cellsMap, maxRow, maxCol);
+  const effectiveBufferMap =
+    bufferCostMap ?? buildBufferCostMap(cellsMap, maxRow, maxCol);
 
   // セル座標 → サブセル座標（中央）
   const start = cellToSubCell(startRow, startCol);
@@ -300,7 +378,15 @@ function findSubCellPath(
     // スタートセル・ゴールセル内のサブセルは通過可能として扱う
     if (isSubCellInCell(sr, sc, startCellRow, startCellCol)) return true;
     if (isSubCellInCell(sr, sc, goalCellRow, goalCellCol)) return true;
-    return isPassableSubCell(cellsMap, sr, sc, maxSubRow, maxSubCol, maxRow, maxCol);
+    return isPassableSubCell(
+      cellsMap,
+      sr,
+      sc,
+      maxSubRow,
+      maxSubCol,
+      maxRow,
+      maxCol,
+    );
   };
 
   const subKey = (sr: number, sc: number) => sr * maxSubCol + sc;
@@ -329,10 +415,15 @@ function findSubCellPath(
   const openHeap = new BinaryHeap();
   const h0 = heuristic(start.sr, start.sc, goalSr, goalSc);
   openHeap.push({
-    sr: start.sr, sc: start.sc,
-    g: 0, h: h0, f: h0,
-    parentSr: -1, parentSc: -1,
-    dirDr: 0, dirDc: 0,
+    sr: start.sr,
+    sc: start.sc,
+    g: 0,
+    h: h0,
+    f: h0,
+    parentSr: -1,
+    parentSc: -1,
+    dirDr: 0,
+    dirDc: 0,
   });
 
   const maxIterations = maxSubRow * maxSubCol * 5;
@@ -388,15 +479,18 @@ function findSubCellPath(
       let moveCost = dir.cost;
 
       // ターンペナルティ（スタート地点以外で方向が変わった場合）
-      const isTurn = (current.dirDr !== 0 || current.dirDc !== 0) &&
-                     (dir.dr !== current.dirDr || dir.dc !== current.dirDc);
+      const isTurn =
+        (current.dirDr !== 0 || current.dirDc !== 0) &&
+        (dir.dr !== current.dirDr || dir.dc !== current.dirDc);
       if (isTurn) {
         moveCost += TURN_PENALTY;
       }
 
       // バッファゾーンペナルティ（スタートセル・ゴールセルは除外）
-      if (!isSubCellInCell(newSr, newSc, startCellRow, startCellCol) &&
-          !isSubCellInCell(newSr, newSc, goalCellRow, goalCellCol)) {
+      if (
+        !isSubCellInCell(newSr, newSc, startCellRow, startCellCol) &&
+        !isSubCellInCell(newSr, newSc, goalCellRow, goalCellCol)
+      ) {
         moveCost += effectiveBufferMap.get(subKey(newSr, newSc)) ?? 0;
       }
 
@@ -417,10 +511,15 @@ function findSubCellPath(
 
         const newH = heuristic(newSr, newSc, goalSr, goalSc);
         openHeap.push({
-          sr: newSr, sc: newSc,
-          g: newG, h: newH, f: newG + newH,
-          parentSr: current.sr, parentSc: current.sc,
-          dirDr: dir.dr, dirDc: dir.dc,
+          sr: newSr,
+          sc: newSc,
+          g: newG,
+          h: newH,
+          f: newG + newH,
+          parentSr: current.sr,
+          parentSc: current.sc,
+          dirDr: dir.dr,
+          dirDc: dir.dc,
         });
       }
     }
@@ -439,7 +538,7 @@ function findSubCellPath(
 
 // 直交コリニアマージ: 同一方向の連続ポイントを除去し、曲がり角のみ残す
 function mergeCollinearPoints(
-  subPath: { sr: number; sc: number }[]
+  subPath: { sr: number; sc: number }[],
 ): { sr: number; sc: number }[] {
   if (subPath.length <= 2) return subPath;
 
@@ -514,15 +613,20 @@ export function findPath(
   });
 
   return findSubCellPath(
-    cellsMap, mapData.maxRow, mapData.maxCol,
-    startRow, startCol, endRow, endCol,
+    cellsMap,
+    mapData.maxRow,
+    mapData.maxCol,
+    startRow,
+    startCol,
+    endRow,
+    endCol,
   ).path;
 }
 
 export type RouteVisitPoint = {
   row: number;
   col: number;
-  priorityLevel?: 'none' | 'priority' | 'highest';
+  priorityLevel?: "none" | "priority" | "highest";
   itemId?: string;
   order?: number;
 };
@@ -557,15 +661,24 @@ export function generateRouteSegments(
 
   const segments: RouteSegment[] = [];
   const usedSubCells = new Map<string, number>();
-  const bufferCostMap = buildBufferCostMap(cellsMap, mapData.maxRow, mapData.maxCol);
+  const bufferCostMap = buildBufferCostMap(
+    cellsMap,
+    mapData.maxRow,
+    mapData.maxCol,
+  );
 
   for (let i = 0; i < visitPoints.length - 1; i++) {
     const from = visitPoints[i];
     const to = visitPoints[i + 1];
 
     const result = findSubCellPath(
-      cellsMap, mapData.maxRow, mapData.maxCol,
-      from.row, from.col, to.row, to.col,
+      cellsMap,
+      mapData.maxRow,
+      mapData.maxCol,
+      from.row,
+      from.col,
+      to.row,
+      to.col,
       usedSubCells,
       bufferCostMap,
     );
@@ -580,8 +693,8 @@ export function generateRouteSegments(
       toRow: to.row,
       toCol: to.col,
       path,
-      fromPriority: from.priorityLevel || 'none',
-      toPriority: to.priorityLevel || 'none',
+      fromPriority: from.priorityLevel || "none",
+      toPriority: to.priorityLevel || "none",
       fromItemId: from.itemId,
       toItemId: to.itemId,
       fromOrder: from.order,
@@ -606,20 +719,32 @@ export function generateRouteSegmentsStrict(
 
   const segments: RouteSegment[] = [];
   const usedSubCells = new Map<string, number>();
-  const bufferCostMap = buildBufferCostMap(cellsMap, mapData.maxRow, mapData.maxCol);
+  const bufferCostMap = buildBufferCostMap(
+    cellsMap,
+    mapData.maxRow,
+    mapData.maxCol,
+  );
 
   for (let i = 0; i < visitPoints.length - 1; i++) {
     const from = visitPoints[i];
     const to = visitPoints[i + 1];
     const result = findSubCellPath(
-      cellsMap, mapData.maxRow, mapData.maxCol,
-      from.row, from.col, to.row, to.col,
+      cellsMap,
+      mapData.maxRow,
+      mapData.maxCol,
+      from.row,
+      from.col,
+      to.row,
+      to.col,
       usedSubCells,
       bufferCostMap,
     );
     const path = result.path;
 
-    if (result.usedFallback || options?.pathConstraint?.isPathAllowed(path) === false) {
+    if (
+      result.usedFallback ||
+      options?.pathConstraint?.isPathAllowed(path) === false
+    ) {
       return {
         ok: false,
         segments,
@@ -634,8 +759,8 @@ export function generateRouteSegmentsStrict(
       toRow: to.row,
       toCol: to.col,
       path,
-      fromPriority: from.priorityLevel || 'none',
-      toPriority: to.priorityLevel || 'none',
+      fromPriority: from.priorityLevel || "none",
+      toPriority: to.priorityLevel || "none",
       fromItemId: from.itemId,
       toItemId: to.itemId,
       fromOrder: from.order,
@@ -657,7 +782,9 @@ export function simplifyPath(
   const isOrthogonal = path.every((p, i) => {
     if (i === 0) return true;
     const prev = path[i - 1];
-    return Math.abs(p.row - prev.row) < 0.01 || Math.abs(p.col - prev.col) < 0.01;
+    return (
+      Math.abs(p.row - prev.row) < 0.01 || Math.abs(p.col - prev.col) < 0.01
+    );
   });
   if (isOrthogonal) {
     // 同一方向の連続ポイントを除去（曲がり角は保持）
@@ -729,7 +856,10 @@ function pointToLineDistance(
     return Math.sqrt((px - x1) ** 2 + (py - y1) ** 2);
   }
 
-  const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)));
+  const t = Math.max(
+    0,
+    Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy)),
+  );
 
   const nearestX = x1 + t * dx;
   const nearestY = y1 + t * dy;

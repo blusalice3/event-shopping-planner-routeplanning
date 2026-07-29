@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen, within } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
-import LimitedPurchaseExcessConfirmDialog from './LimitedPurchaseExcessConfirmDialog';
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import LimitedPurchaseExcessConfirmDialog from "./LimitedPurchaseExcessConfirmDialog";
 
-describe('LimitedPurchaseExcessConfirmDialog', () => {
-  it('keeps the existing props and focuses the safe fix action first', () => {
+describe("LimitedPurchaseExcessConfirmDialog", () => {
+  it("keeps the existing props and focuses the safe fix action first", () => {
     const onFix = vi.fn();
     const onConvertToPurchased = vi.fn();
 
@@ -17,8 +17,8 @@ describe('LimitedPurchaseExcessConfirmDialog', () => {
       />,
     );
 
-    const dialog = screen.getByRole('dialog');
-    const buttons = within(dialog).getAllByRole('button');
+    const dialog = screen.getByRole("dialog");
+    const buttons = within(dialog).getAllByRole("button");
 
     expect(buttons[0]).toHaveFocus();
 

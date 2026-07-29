@@ -1,7 +1,10 @@
-import type { DayMapData, HallDefinition } from '../../../types/map';
-import type { ShoppingItem } from '../../../types/item';
-import { resolveHallByBlockName, resolveManualHallId } from '../../../utils/hallFallback';
-import { findRouteLookupNumberCell } from '../../../utils/mapRoutingSignature';
+import type { DayMapData, HallDefinition } from "../../../types/map";
+import type { ShoppingItem } from "../../../types/item";
+import {
+  resolveHallByBlockName,
+  resolveManualHallId,
+} from "../../../utils/hallFallback";
+import { findRouteLookupNumberCell } from "../../../utils/mapRoutingSignature";
 
 function isPointInPoly(
   row: number,
@@ -15,7 +18,10 @@ function isPointInPoly(
       yi = vertices[i].row;
     const xj = vertices[j].col,
       yj = vertices[j].row;
-    if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
+    if (
+      yi > row !== yj > row &&
+      col < ((xj - xi) * (row - yi)) / (yj - yi) + xi
+    ) {
       inside = !inside;
     }
   }
@@ -37,14 +43,17 @@ export function findItemHallId(
 
   // 2. 既存のポリゴン判定
   if (mapData && halls.length > 0) {
-    const blockName = item.block?.trim() || '';
+    const blockName = item.block?.trim() || "";
     const block = mapData.blocks.find((b) => b.name === blockName);
     if (block) {
       const centerRow = (block.startRow + block.endRow) / 2;
       const centerCol = (block.startCol + block.endCol) / 2;
 
       for (const hall of halls) {
-        if (hall.vertices.length >= 4 && isPointInPoly(centerRow, centerCol, hall.vertices)) {
+        if (
+          hall.vertices.length >= 4 &&
+          isPointInPoly(centerRow, centerCol, hall.vertices)
+        ) {
           return hall.id;
         }
       }

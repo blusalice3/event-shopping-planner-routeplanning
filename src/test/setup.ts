@@ -1,9 +1,9 @@
-import '@testing-library/jest-dom/vitest';
-import { afterEach } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import "@testing-library/jest-dom/vitest";
+import { afterEach } from "vitest";
+import { cleanup } from "@testing-library/react";
 
 // jsdom には ResizeObserver が存在しないので最小限 polyfill する
-if (typeof globalThis.ResizeObserver === 'undefined') {
+if (typeof globalThis.ResizeObserver === "undefined") {
   class ResizeObserverPolyfill {
     observe() {}
     unobserve() {}

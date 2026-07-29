@@ -1,5 +1,5 @@
-import type { ShoppingItem } from '../../types/item';
-import { extractEventDates } from '../../utils/eventDates';
+import type { ShoppingItem } from "../../types/item";
+import { extractEventDates } from "../../utils/eventDates";
 
 export function resolveEventListTab(items: ShoppingItem[]): string | null {
   const dates = extractEventDates(items);
@@ -26,9 +26,11 @@ type ImportMessageParams = {
   itemCount: number;
 };
 
-export function buildImportCompletionMessage(params: ImportMessageParams): string {
+export function buildImportCompletionMessage(
+  params: ImportMessageParams,
+): string {
   if (params.errors.length > 0) {
-    return `取り込みが警告付きで完了しました:\n${params.errors.join('\n')}`;
+    return `取り込みが警告付きで完了しました:\n${params.errors.join("\n")}`;
   }
   if (params.isUpdate) {
     return `${params.eventName}を更新しました。\n${params.itemCount}件`;

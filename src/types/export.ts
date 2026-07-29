@@ -1,5 +1,10 @@
-import type { DayModeState, EventMetadata, ExecuteModeItems, ShoppingItem } from './item';
-import type { BlockDefinition, DayMapData, RouteSettings } from './map';
+import type {
+  DayModeState,
+  EventMetadata,
+  ExecuteModeItems,
+  ShoppingItem,
+} from "./item";
+import type { BlockDefinition, DayMapData, RouteSettings } from "./map";
 
 export interface ExportOptions {
   includeItems: boolean;
@@ -7,7 +12,7 @@ export interface ExportOptions {
   includeMapData: boolean;
   includeBlockDefinitions: boolean;
   includeRouteInfo: boolean;
-  format: 'full' | 'simple';
+  format: "full" | "simple";
 }
 
 export interface ExportData {

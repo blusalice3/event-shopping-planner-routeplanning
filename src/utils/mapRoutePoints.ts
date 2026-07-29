@@ -1,14 +1,14 @@
-import type { ShoppingItem } from '../types/item';
-import type { DayMapData, HallDefinition } from '../types/map';
+import type { ShoppingItem } from "../types/item";
+import type { DayMapData, HallDefinition } from "../types/map";
 import {
   getMapRouteGroupParts,
   isManualHallCompatibleForMapRoute,
   resolveItemGroupIdForMapRoute,
   resolveMapRouteCellCandidatesForItem,
-} from './hallGrouping';
-import { normalizeMapRouteDayText } from './mapRouteOrder';
+} from "./hallGrouping";
+import { normalizeMapRouteDayText } from "./mapRouteOrder";
 
-export type MapRoutePriorityLevel = 'none' | 'priority' | 'highest';
+export type MapRoutePriorityLevel = "none" | "priority" | "highest";
 
 export interface MapRoutePoint {
   itemId: string;
@@ -46,18 +46,21 @@ export function resolveMapRoutePoints(
   const routePoints: MapRoutePoint[] = [];
   const missingItemIds: string[] = [];
   const orderOffset = params.orderOffset ?? 0;
-  const selectedHallId = params.selectedHallId ?? 'all';
+  const selectedHallId = params.selectedHallId ?? "all";
 
   params.itemIds.forEach((itemId, index) => {
     const item = itemsById.get(itemId);
-    if (!item || normalizeMapRouteDayText(item.eventDate) !== normalizedDayName) {
+    if (
+      !item ||
+      normalizeMapRouteDayText(item.eventDate) !== normalizedDayName
+    ) {
       missingItemIds.push(itemId);
       return;
     }
 
     if (
       params.respectManualHallMismatch === true &&
-      selectedHallId !== 'all' &&
+      selectedHallId !== "all" &&
       !isManualHallCompatibleForMapRoute({
         item,
         hallDefinitions: params.hallDefinitions,
@@ -94,7 +97,7 @@ export function resolveMapRoutePoints(
       row: resolved.cell.row,
       col: resolved.cell.col,
       order,
-      priorityLevel: (item.priorityLevel || 'none') as MapRoutePriorityLevel,
+      priorityLevel: (item.priorityLevel || "none") as MapRoutePriorityLevel,
       groupKey,
       hallId,
       anchorLabel: `${order + 1}. ${item.circle || itemId} / ${item.block}-${item.number} の後`,

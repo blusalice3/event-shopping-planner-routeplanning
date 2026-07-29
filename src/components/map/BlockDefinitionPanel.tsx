@@ -1,11 +1,11 @@
-import React, { useState, useCallback, useMemo, useEffect } from 'react';
+import React, { useState, useCallback, useMemo, useEffect } from "react";
 import {
   DayMapData,
   BlockDefinition,
   CellData,
   NumberCellInfo,
   CellGroup,
-} from '../../types/map';
+} from "../../types/map";
 
 interface BlockDefinitionPanelProps {
   isOpen: boolean;
@@ -13,7 +13,7 @@ interface BlockDefinitionPanelProps {
   mapData: DayMapData;
   onUpdateBlocks: (blocks: BlockDefinition[]) => void;
   onStartCellSelection: (
-    type: 'corner' | 'multiCorner' | 'rangeStart' | 'individual',
+    type: "corner" | "multiCorner" | "rangeStart" | "individual",
     editingData?: unknown,
   ) => void;
   pendingCellSelection?: {
@@ -25,22 +25,22 @@ interface BlockDefinitionPanelProps {
 }
 
 const BLOCK_COLORS = [
-  '#E3F2FD',
-  '#E8F5E9',
-  '#FFF3E0',
-  '#F3E5F5',
-  '#E0F7FA',
-  '#FBE9E7',
-  '#F1F8E9',
-  '#FCE4EC',
-  '#E8EAF6',
-  '#FFFDE7',
-  '#EFEBE9',
-  '#ECEFF1',
+  "#E3F2FD",
+  "#E8F5E9",
+  "#FFF3E0",
+  "#F3E5F5",
+  "#E0F7FA",
+  "#FBE9E7",
+  "#F1F8E9",
+  "#FCE4EC",
+  "#E8EAF6",
+  "#FFFDE7",
+  "#EFEBE9",
+  "#ECEFF1",
 ];
 
-type SortDirection = 'asc' | 'desc';
-type EditMode = 'normal' | 'multi' | 'wall';
+type SortDirection = "asc" | "desc";
+type EditMode = "normal" | "multi" | "wall";
 
 interface MultiRange {
   startRow: number;
@@ -69,14 +69,17 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
   onClearPendingCellSelection,
 }) => {
   const [blocks, setBlocks] = useState<BlockDefinition[]>(mapData.blocks);
-  const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(null);
-  const [editingBlock, setEditingBlock] = useState<Partial<BlockDefinition> | null>(null);
+  const [selectedBlockIndex, setSelectedBlockIndex] = useState<number | null>(
+    null,
+  );
+  const [editingBlock, setEditingBlock] =
+    useState<Partial<BlockDefinition> | null>(null);
   const [isAddingNew, setIsAddingNew] = useState(false);
-  const [sortDirection, setSortDirection] = useState<SortDirection>('asc');
-  const [editMode, setEditMode] = useState<EditMode>('normal');
+  const [sortDirection, setSortDirection] = useState<SortDirection>("asc");
+  const [editMode, setEditMode] = useState<EditMode>("normal");
   const [wallCellGroups, setWallCellGroups] = useState<CellGroup[]>([]);
   const [multiRanges, setMultiRanges] = useState<MultiRange[]>([]);
-  const [activeTab, setActiveTab] = useState<'list' | 'edit'>('list');
+  const [activeTab, setActiveTab] = useState<"list" | "edit">("list");
 
   const cellsMap = useMemo(() => {
     const map = new Map<string, CellData>();
@@ -86,8 +89,8 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
 
   const sortedBlocks = useMemo(() => {
     return [...blocks].sort((a, b) => {
-      const cmp = a.name.localeCompare(b.name, 'ja');
-      return sortDirection === 'asc' ? cmp : -cmp;
+      const cmp = a.name.localeCompare(b.name, "ja");
+      return sortDirection === "asc" ? cmp : -cmp;
     });
   }, [blocks, sortDirection]);
 
@@ -103,8 +106,11 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
           const cell = cellsMap.get(`${r}-${c}`);
           if (cell && !cell.isMerged && cell.value !== null) {
             const num =
-              typeof cell.value === 'number' ? cell.value : Number(String(cell.value).trim());
-            if (!isNaN(num) && num > 0 && num <= 100) cells.push({ row: r, col: c, value: num });
+              typeof cell.value === "number"
+                ? cell.value
+                : Number(String(cell.value).trim());
+            if (!isNaN(num) && num > 0 && num <= 100)
+              cells.push({ row: r, col: c, value: num });
           }
         }
       }
@@ -129,18 +135,18 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       setEditMode(data.editMode);
       setWallCellGroups(data.wallCellGroups);
       setMultiRanges(data.multiRanges || []);
-      setActiveTab('edit');
+      setActiveTab("edit");
     }
 
     // キャンセルの場合はデータ復元のみで終了
-    if (type === 'cancelled') {
+    if (type === "cancelled") {
       if (onClearPendingCellSelection) {
         onClearPendingCellSelection();
       }
       return;
     }
 
-    if (type === 'corner' && cells.length >= 4) {
+    if (type === "corner" && cells.length >= 4) {
       // 通常モードの4角選択
       const rows = cells.map((c) => c.row),
         cols = cells.map((c) => c.col);
@@ -157,7 +163,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
         range.endCol,
       );
       setEditingBlock((prev) => ({ ...prev, ...range, numberCells: numCells }));
-    } else if (type === 'multiCorner' && cells.length >= 4) {
+    } else if (type === "multiCorner" && cells.length >= 4) {
       // 複数範囲モードの4角選択（1つの範囲を追加）
       const rows = cells.map((c) => c.row),
         cols = cells.map((c) => c.col);
@@ -168,27 +174,32 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
         endCol: Math.max(...cols),
       };
       setMultiRanges((prev) => [...prev, newRange]);
-    } else if (type === 'rangeStart' && cells.length >= 2) {
+    } else if (type === "rangeStart" && cells.length >= 2) {
       // 壁ブロックの範囲選択
       const [start, end] = cells;
       const g: CellGroup = {
-        type: 'range',
+        type: "range",
         startRow: Math.min(start.row, end.row),
         startCol: Math.min(start.col, end.col),
         endRow: Math.max(start.row, end.row),
         endCol: Math.max(start.col, end.col),
       };
       setWallCellGroups((prev) => (prev.length >= 6 ? prev : [...prev, g]));
-    } else if (type === 'individual' && cells.length > 0) {
+    } else if (type === "individual" && cells.length > 0) {
       // 個別セル選択
-      const g: CellGroup = { type: 'individual', cells: [...cells] };
+      const g: CellGroup = { type: "individual", cells: [...cells] };
       setWallCellGroups((prev) => (prev.length >= 6 ? prev : [...prev, g]));
     }
 
     if (onClearPendingCellSelection) {
       onClearPendingCellSelection();
     }
-  }, [pendingCellSelection, isOpen, detectNumberCells, onClearPendingCellSelection]);
+  }, [
+    pendingCellSelection,
+    isOpen,
+    detectNumberCells,
+    onClearPendingCellSelection,
+  ]);
 
   // 通常モード：4角選択を開始
   const handleStartCornerSelection = useCallback(() => {
@@ -201,7 +212,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       multiRanges,
       currentBlocks: blocks,
     };
-    onStartCellSelection('corner', editingData);
+    onStartCellSelection("corner", editingData);
   }, [
     editingBlock,
     isAddingNew,
@@ -219,12 +230,12 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       block: editingBlock || {},
       isAddingNew,
       selectedIndex: selectedBlockIndex,
-      editMode: 'multi',
+      editMode: "multi",
       wallCellGroups,
       multiRanges,
       currentBlocks: blocks,
     };
-    onStartCellSelection('multiCorner', editingData);
+    onStartCellSelection("multiCorner", editingData);
   }, [
     editingBlock,
     isAddingNew,
@@ -246,7 +257,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       multiRanges,
       currentBlocks: blocks,
     };
-    onStartCellSelection('rangeStart', editingData);
+    onStartCellSelection("rangeStart", editingData);
   }, [
     editingBlock,
     isAddingNew,
@@ -269,7 +280,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       multiRanges,
       currentBlocks: blocks,
     };
-    onStartCellSelection('individual', editingData);
+    onStartCellSelection("individual", editingData);
   }, [
     editingBlock,
     isAddingNew,
@@ -283,17 +294,27 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
 
   // 壁ブロックの数値セル
   const wallBlockNumberCells = useMemo(() => {
-    if (editMode !== 'wall') return [];
+    if (editMode !== "wall") return [];
     const all: NumberCellInfo[] = [];
     wallCellGroups.forEach((g) => {
-      if (g.type === 'range' && g.startRow && g.startCol && g.endRow && g.endCol) {
-        all.push(...detectNumberCells(g.startRow, g.startCol, g.endRow, g.endCol));
-      } else if (g.type === 'individual' && g.cells) {
+      if (
+        g.type === "range" &&
+        g.startRow &&
+        g.startCol &&
+        g.endRow &&
+        g.endCol
+      ) {
+        all.push(
+          ...detectNumberCells(g.startRow, g.startCol, g.endRow, g.endCol),
+        );
+      } else if (g.type === "individual" && g.cells) {
         g.cells.forEach((c) => {
           const cell = cellsMap.get(`${c.row}-${c.col}`);
           if (cell && !cell.isMerged && cell.value !== null) {
             const num =
-              typeof cell.value === 'number' ? cell.value : Number(String(cell.value).trim());
+              typeof cell.value === "number"
+                ? cell.value
+                : Number(String(cell.value).trim());
             if (!isNaN(num) && num > 0 && num <= 100)
               all.push({ row: c.row, col: c.col, value: num });
           }
@@ -301,26 +322,39 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       }
     });
     return all
-      .filter((c, i, s) => i === s.findIndex((x) => x.row === c.row && x.col === c.col))
+      .filter(
+        (c, i, s) =>
+          i === s.findIndex((x) => x.row === c.row && x.col === c.col),
+      )
       .sort((a, b) => a.value - b.value);
   }, [editMode, wallCellGroups, detectNumberCells, cellsMap]);
 
   // 複数範囲モードの数値セル
   const multiRangeNumberCells = useMemo(() => {
-    if (editMode !== 'multi') return [];
+    if (editMode !== "multi") return [];
     const all: NumberCellInfo[] = [];
     multiRanges.forEach((range) => {
-      all.push(...detectNumberCells(range.startRow, range.startCol, range.endRow, range.endCol));
+      all.push(
+        ...detectNumberCells(
+          range.startRow,
+          range.startCol,
+          range.endRow,
+          range.endCol,
+        ),
+      );
     });
     return all
-      .filter((c, i, s) => i === s.findIndex((x) => x.row === c.row && x.col === c.col))
+      .filter(
+        (c, i, s) =>
+          i === s.findIndex((x) => x.row === c.row && x.col === c.col),
+      )
       .sort((a, b) => a.value - b.value);
   }, [editMode, multiRanges, detectNumberCells]);
 
   // プレビュー用の数値セル
   const previewNumberCells = useMemo(() => {
-    if (editMode === 'wall') return wallBlockNumberCells;
-    if (editMode === 'multi') return multiRangeNumberCells;
+    if (editMode === "wall") return wallBlockNumberCells;
+    if (editMode === "multi") return multiRangeNumberCells;
     if (!editingBlock?.startRow || !editingBlock?.endRow) return [];
     return detectNumberCells(
       editingBlock.startRow,
@@ -328,11 +362,17 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       editingBlock.endRow,
       editingBlock.endCol || 1,
     );
-  }, [editingBlock, editMode, wallBlockNumberCells, multiRangeNumberCells, detectNumberCells]);
+  }, [
+    editingBlock,
+    editMode,
+    wallBlockNumberCells,
+    multiRangeNumberCells,
+    detectNumberCells,
+  ]);
 
   const handleSaveBlock = useCallback(() => {
     if (!editingBlock?.name?.trim()) {
-      alert('ブロック名を入力してください');
+      alert("ブロック名を入力してください");
       return;
     }
     const name = editingBlock.name.trim();
@@ -343,10 +383,10 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
 
     let saved: BlockDefinition;
 
-    if (editMode === 'wall') {
+    if (editMode === "wall") {
       // 壁ブロック
       if (!wallCellGroups.length) {
-        alert('セル群を定義してください');
+        alert("セル群を定義してください");
         return;
       }
       let minR = Infinity,
@@ -354,7 +394,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
         maxR = 0,
         maxC = 0;
       wallCellGroups.forEach((g) => {
-        if (g.type === 'range') {
+        if (g.type === "range") {
           minR = Math.min(minR, g.startRow || Infinity);
           minC = Math.min(minC, g.startCol || Infinity);
           maxR = Math.max(maxR, g.endRow || 0);
@@ -379,10 +419,10 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
         isWallBlock: true,
         cellGroups: [...wallCellGroups],
       };
-    } else if (editMode === 'multi') {
+    } else if (editMode === "multi") {
       // 複数範囲ブロック
       if (multiRanges.length === 0) {
-        alert('少なくとも1つの範囲を定義してください');
+        alert("少なくとも1つの範囲を定義してください");
         return;
       }
       let minR = Infinity,
@@ -397,7 +437,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
       });
       // cellGroupsとして保存
       const cellGroups: CellGroup[] = multiRanges.map((r) => ({
-        type: 'range' as const,
+        type: "range" as const,
         startRow: r.startRow,
         startCol: r.startCol,
         endRow: r.endRow,
@@ -418,7 +458,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
     } else {
       // 通常ブロック
       if (!editingBlock.startRow || !editingBlock.endRow) {
-        alert('マップ上で4つの角をクリックして範囲を指定してください');
+        alert("マップ上で4つの角をクリックして範囲を指定してください");
         return;
       }
       saved = {
@@ -461,7 +501,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
     setIsAddingNew(false);
     setWallCellGroups([]);
     setMultiRanges([]);
-    setActiveTab('list');
+    setActiveTab("list");
   }, [
     editingBlock,
     isAddingNew,
@@ -482,8 +522,8 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
     setIsAddingNew(false);
     setWallCellGroups([]);
     setMultiRanges([]);
-    setEditMode('normal');
-    setActiveTab('list');
+    setEditMode("normal");
+    setActiveTab("list");
   }, []);
 
   // モード切り替え
@@ -492,9 +532,11 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
     setWallCellGroups([]);
     setMultiRanges([]);
     // 範囲情報をリセット
-    if (newMode !== 'normal') {
+    if (newMode !== "normal") {
       setEditingBlock((prev) =>
-        prev ? { ...prev, startRow: 0, startCol: 0, endRow: 0, endCol: 0 } : prev,
+        prev
+          ? { ...prev, startRow: 0, startCol: 0, endRow: 0, endCol: 0 }
+          : prev,
       );
     }
   }, []);
@@ -505,7 +547,9 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-hidden flex flex-col">
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">ブロック定義</h2>
+          <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+            ブロック定義
+          </h2>
           <button
             onClick={() => {
               setBlocks(mapData.blocks);
@@ -520,28 +564,28 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
         <div className="flex-1 overflow-auto p-6">
           <div className="mb-4 flex gap-2">
             <button
-              onClick={() => setActiveTab('list')}
+              onClick={() => setActiveTab("list")}
               className={`px-3 py-1.5 text-sm rounded ${
-                activeTab === 'list'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+                activeTab === "list"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
               }`}
             >
               一覧
             </button>
             <button
-              onClick={() => setActiveTab('edit')}
+              onClick={() => setActiveTab("edit")}
               className={`px-3 py-1.5 text-sm rounded ${
-                activeTab === 'edit'
-                  ? 'bg-blue-600 text-white'
-                  : 'bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300'
+                activeTab === "edit"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-700 dark:bg-slate-700 dark:text-slate-300"
               }`}
             >
               編集
             </button>
           </div>
 
-          {activeTab === 'list' && (
+          {activeTab === "list" && (
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
@@ -549,35 +593,38 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                 </h3>
                 <div className="flex gap-2">
                   <button
-                    onClick={() => setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                    onClick={() =>
+                      setSortDirection((d) => (d === "asc" ? "desc" : "asc"))
+                    }
                     className="px-2 py-1 text-xs rounded bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"
                   >
-                    {sortDirection === 'asc' ? '↑昇順' : '↓降順'}
+                    {sortDirection === "asc" ? "↑昇順" : "↓降順"}
                   </button>
                   <button
                     onClick={() => {
                       setIsAddingNew(true);
                       setSelectedBlockIndex(null);
-                      setEditMode('normal');
+                      setEditMode("normal");
                       setEditingBlock({
-                        name: '',
+                        name: "",
                         startRow: 0,
                         startCol: 0,
                         endRow: 0,
                         endCol: 0,
                         numberCells: [],
-                        color: BLOCK_COLORS[blocks.length % BLOCK_COLORS.length],
+                        color:
+                          BLOCK_COLORS[blocks.length % BLOCK_COLORS.length],
                       });
                       setWallCellGroups([]);
                       setMultiRanges([]);
-                      setActiveTab('edit');
+                      setActiveTab("edit");
                     }}
                     className="px-3 py-1.5 text-xs rounded bg-blue-600 text-white hover:bg-blue-700"
                   >
                     + 新規
                   </button>
                   <button
-                    onClick={() => confirm('全て削除？') && setBlocks([])}
+                    onClick={() => confirm("全て削除？") && setBlocks([])}
                     className="px-3 py-1.5 text-xs rounded bg-red-100 text-red-700 hover:bg-red-200 dark:bg-red-900/30 dark:text-red-400"
                   >
                     全削除
@@ -596,8 +643,8 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                       key={`${b.name}-${i}`}
                       className={`p-3 rounded-lg border transition-colors ${
                         selectedBlockIndex === i
-                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
-                          : 'border-slate-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700/50'
+                          ? "border-blue-500 bg-blue-50 dark:bg-blue-900/20"
+                          : "border-slate-200 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-700/50"
                       }`}
                     >
                       <div className="flex items-center justify-between">
@@ -607,15 +654,20 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                             setEditingBlock({ ...b });
                             setIsAddingNew(false);
                             if (b.isWallBlock) {
-                              setEditMode('wall');
-                              setWallCellGroups(b.cellGroups ? [...b.cellGroups] : []);
+                              setEditMode("wall");
+                              setWallCellGroups(
+                                b.cellGroups ? [...b.cellGroups] : [],
+                              );
                               setMultiRanges([]);
-                            } else if (b.cellGroups && b.cellGroups.length > 0) {
-                              setEditMode('multi');
+                            } else if (
+                              b.cellGroups &&
+                              b.cellGroups.length > 0
+                            ) {
+                              setEditMode("multi");
                               setWallCellGroups([]);
                               setMultiRanges(
                                 b.cellGroups
-                                  .filter((g) => g.type === 'range')
+                                  .filter((g) => g.type === "range")
                                   .map((g) => ({
                                     startRow: g.startRow || 0,
                                     startCol: g.startCol || 0,
@@ -624,17 +676,17 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                                   })),
                               );
                             } else {
-                              setEditMode('normal');
+                              setEditMode("normal");
                               setWallCellGroups([]);
                               setMultiRanges([]);
                             }
-                            setActiveTab('edit');
+                            setActiveTab("edit");
                           }}
                           className="flex flex-1 items-center gap-2 text-left"
                         >
                           <div
                             className="flex h-8 w-8 items-center justify-center rounded text-xs font-bold"
-                            style={{ backgroundColor: b.color || '#E3F2FD' }}
+                            style={{ backgroundColor: b.color || "#E3F2FD" }}
                           >
                             {b.name}
                           </div>
@@ -646,11 +698,13 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                                   [壁]
                                 </span>
                               )}
-                              {!b.isWallBlock && b.cellGroups && b.cellGroups.length > 0 && (
-                                <span className="ml-2 text-xs text-purple-600 dark:text-purple-400">
-                                  [複数範囲]
-                                </span>
-                              )}
+                              {!b.isWallBlock &&
+                                b.cellGroups &&
+                                b.cellGroups.length > 0 && (
+                                  <span className="ml-2 text-xs text-purple-600 dark:text-purple-400">
+                                    [複数範囲]
+                                  </span>
+                                )}
                             </div>
                             <div className="text-xs text-slate-500 dark:text-slate-400">
                               {b.numberCells.length}セル
@@ -665,12 +719,14 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                         <button
                           onClick={() => {
                             if (confirm(`「${b.name}」を削除？`)) {
-                              setBlocks((prev) => prev.filter((x) => x.name !== b.name));
+                              setBlocks((prev) =>
+                                prev.filter((x) => x.name !== b.name),
+                              );
                               if (selectedBlockIndex === i) {
                                 setSelectedBlockIndex(null);
                                 setEditingBlock(null);
                                 setIsAddingNew(false);
-                                setActiveTab('list');
+                                setActiveTab("list");
                               }
                             }
                           }}
@@ -686,30 +742,30 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
             </div>
           )}
 
-          {activeTab === 'edit' && (
+          {activeTab === "edit" && (
             <div className="rounded-lg bg-slate-50 p-4 dark:bg-slate-900">
               {editingBlock ? (
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-slate-700 dark:text-slate-300">
-                      {isAddingNew ? '新規ブロック追加' : 'ブロック編集'}
+                      {isAddingNew ? "新規ブロック追加" : "ブロック編集"}
                     </h3>
                     <div className="flex gap-1">
                       <button
-                        onClick={() => handleSwitchMode('normal')}
-                        className={`px-2 py-1 text-xs rounded ${editMode === 'normal' ? 'bg-blue-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'}`}
+                        onClick={() => handleSwitchMode("normal")}
+                        className={`px-2 py-1 text-xs rounded ${editMode === "normal" ? "bg-blue-500 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
                       >
                         通常
                       </button>
                       <button
-                        onClick={() => handleSwitchMode('multi')}
-                        className={`px-2 py-1 text-xs rounded ${editMode === 'multi' ? 'bg-purple-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'}`}
+                        onClick={() => handleSwitchMode("multi")}
+                        className={`px-2 py-1 text-xs rounded ${editMode === "multi" ? "bg-purple-500 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
                       >
                         複数範囲
                       </button>
                       <button
-                        onClick={() => handleSwitchMode('wall')}
-                        className={`px-2 py-1 text-xs rounded ${editMode === 'wall' ? 'bg-orange-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300'}`}
+                        onClick={() => handleSwitchMode("wall")}
+                        className={`px-2 py-1 text-xs rounded ${editMode === "wall" ? "bg-orange-500 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
                       >
                         壁
                       </button>
@@ -722,14 +778,19 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                     </label>
                     <input
                       type="text"
-                      value={editingBlock.name || ''}
-                      onChange={(e) => setEditingBlock((eb) => ({ ...eb, name: e.target.value }))}
+                      value={editingBlock.name || ""}
+                      onChange={(e) =>
+                        setEditingBlock((eb) => ({
+                          ...eb,
+                          name: e.target.value,
+                        }))
+                      }
                       placeholder="例: ア, め, N"
                       className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 dark:border-slate-600 dark:bg-slate-800 dark:text-white"
                     />
                   </div>
 
-                  {editMode === 'normal' && (
+                  {editMode === "normal" && (
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
                         範囲指定
@@ -746,15 +807,16 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                         editingBlock.endRow > 0 && (
                           <div className="mt-2 rounded bg-green-50 p-2 dark:bg-green-900/20">
                             <div className="text-xs text-green-700 dark:text-green-400">
-                              範囲: 行{editingBlock.startRow}-{editingBlock.endRow}, 列
-                              {editingBlock.startCol}-{editingBlock.endCol}
+                              範囲: 行{editingBlock.startRow}-
+                              {editingBlock.endRow}, 列{editingBlock.startCol}-
+                              {editingBlock.endCol}
                             </div>
                           </div>
                         )}
                     </div>
                   )}
 
-                  {editMode === 'multi' && (
+                  {editMode === "multi" && (
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
                         複数範囲指定（Nブロックなど）
@@ -767,11 +829,14 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                               className="flex items-center justify-between rounded border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-800"
                             >
                               <span className="text-xs text-slate-600 dark:text-slate-400">
-                                範囲{i + 1}: 行{r.startRow}-{r.endRow}, 列{r.startCol}-{r.endCol}
+                                範囲{i + 1}: 行{r.startRow}-{r.endRow}, 列
+                                {r.startCol}-{r.endCol}
                               </span>
                               <button
                                 onClick={() =>
-                                  setMultiRanges((prev) => prev.filter((_, j) => j !== i))
+                                  setMultiRanges((prev) =>
+                                    prev.filter((_, j) => j !== i),
+                                  )
                                 }
                                 className="text-sm text-red-500"
                               >
@@ -790,7 +855,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                     </div>
                   )}
 
-                  {editMode === 'wall' && (
+                  {editMode === "wall" && (
                     <div>
                       <label className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-400">
                         セル群 (最大6)
@@ -803,13 +868,15 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                               className="flex items-center justify-between rounded border border-slate-200 bg-white p-2 dark:border-slate-700 dark:bg-slate-800"
                             >
                               <span className="text-xs text-slate-600 dark:text-slate-400">
-                                {g.type === 'range'
+                                {g.type === "range"
                                   ? `範囲(${g.startRow},${g.startCol})-(${g.endRow},${g.endCol})`
                                   : `個別${g.cells?.length}セル`}
                               </span>
                               <button
                                 onClick={() =>
-                                  setWallCellGroups((prev) => prev.filter((_, j) => j !== i))
+                                  setWallCellGroups((prev) =>
+                                    prev.filter((_, j) => j !== i),
+                                  )
                                 }
                                 className="text-sm text-red-500"
                               >
@@ -846,8 +913,10 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                       {BLOCK_COLORS.map((c) => (
                         <button
                           key={c}
-                          onClick={() => setEditingBlock((eb) => ({ ...eb, color: c }))}
-                          className={`h-8 w-8 rounded border-2 ${editingBlock.color === c ? 'border-blue-500' : 'border-transparent'}`}
+                          onClick={() =>
+                            setEditingBlock((eb) => ({ ...eb, color: c }))
+                          }
+                          className={`h-8 w-8 rounded border-2 ${editingBlock.color === c ? "border-blue-500" : "border-transparent"}`}
                           style={{ backgroundColor: c }}
                         />
                       ))}
@@ -881,7 +950,7 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                       onClick={handleSaveBlock}
                       className="flex-1 rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700"
                     >
-                      {isAddingNew ? '追加' : '保存'}
+                      {isAddingNew ? "追加" : "保存"}
                     </button>
                     <button
                       onClick={handleCancelEdit}
@@ -893,9 +962,11 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                 </div>
               ) : (
                 <div className="py-10 text-center text-slate-500 dark:text-slate-400">
-                  <p className="mb-2">編集するブロックを一覧から選択してください。</p>
+                  <p className="mb-2">
+                    編集するブロックを一覧から選択してください。
+                  </p>
                   <button
-                    onClick={() => setActiveTab('list')}
+                    onClick={() => setActiveTab("list")}
                     className="rounded bg-slate-200 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
                   >
                     一覧へ戻る

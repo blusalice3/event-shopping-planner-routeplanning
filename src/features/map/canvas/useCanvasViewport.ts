@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type React from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type React from "react";
 
 export interface Point {
   x: number;
@@ -58,7 +58,9 @@ export const useCanvasViewport = ({
 }: UseCanvasViewportOptions) => {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [offset, setOffsetState] = useState<Point>(initialOffset ?? { x: 0, y: 0 });
+  const [offset, setOffsetState] = useState<Point>(
+    initialOffset ?? { x: 0, y: 0 },
+  );
   const internalOffsetRef = useRef(offset);
   const offsetRef = externalOffsetRef ?? internalOffsetRef;
   const zoomLevelRef = useRef(zoomLevel);
@@ -78,7 +80,7 @@ export const useCanvasViewport = ({
   const [isRotationInteracting, setIsRotationInteracting] = useState(false);
   const rotationInteractionTimerRef = useRef<number | null>(null);
 
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  const dpr = typeof window !== "undefined" ? window.devicePixelRatio || 1 : 1;
   const scale = zoomLevel / 100;
   const cellSize = baseCellSize * scale;
 
@@ -98,8 +100,14 @@ export const useCanvasViewport = ({
     () => (normalizedRotationAngle * Math.PI) / 180,
     [normalizedRotationAngle],
   );
-  const mapCenterX = useMemo(() => (mapMaxCol * cellSize) / 2, [mapMaxCol, cellSize]);
-  const mapCenterY = useMemo(() => (mapMaxRow * cellSize) / 2, [mapMaxRow, cellSize]);
+  const mapCenterX = useMemo(
+    () => (mapMaxCol * cellSize) / 2,
+    [mapMaxCol, cellSize],
+  );
+  const mapCenterY = useMemo(
+    () => (mapMaxRow * cellSize) / 2,
+    [mapMaxRow, cellSize],
+  );
 
   const toMapCoordinates = useCallback(
     (viewX: number, viewY: number, currentOffset?: Point) => {
@@ -237,7 +245,9 @@ export const useCanvasViewport = ({
       const viewY = e.clientY - rect.top;
       const currentZoom = zoomLevelRef.current;
       const zoomDelta = -e.deltaY * 0.1;
-      const newZoom = Math.round(Math.max(minZoom, Math.min(maxZoom, currentZoom + zoomDelta)));
+      const newZoom = Math.round(
+        Math.max(minZoom, Math.min(maxZoom, currentZoom + zoomDelta)),
+      );
 
       if (newZoom === currentZoom) return;
 
@@ -269,7 +279,10 @@ export const useCanvasViewport = ({
     (e: TouchEvent) => {
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
-        activeTouchesRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+        activeTouchesRef.current.set(touch.identifier, {
+          x: touch.clientX,
+          y: touch.clientY,
+        });
       }
 
       if (activeTouchesRef.current.size === 2) {
@@ -292,7 +305,10 @@ export const useCanvasViewport = ({
     (e: TouchEvent) => {
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
-        activeTouchesRef.current.set(touch.identifier, { x: touch.clientX, y: touch.clientY });
+        activeTouchesRef.current.set(touch.identifier, {
+          x: touch.clientX,
+          y: touch.clientY,
+        });
       }
 
       if (activeTouchesRef.current.size === 2 && onZoomChange) {
@@ -312,7 +328,10 @@ export const useCanvasViewport = ({
         const midY = (touches[0].y + touches[1].y) / 2 - rect.top;
         const scaleRatio = currentDist / pinchStartDistRef.current;
         const newZoom = Math.round(
-          Math.max(minZoom, Math.min(maxZoom, pinchStartZoomRef.current * scaleRatio)),
+          Math.max(
+            minZoom,
+            Math.min(maxZoom, pinchStartZoomRef.current * scaleRatio),
+          ),
         );
 
         if (newZoom === zoomLevelRef.current) return;
@@ -353,7 +372,9 @@ export const useCanvasViewport = ({
         setIsDragging(false);
 
         if (activeTouchesRef.current.size === 1) {
-          const remainingTouch = Array.from(activeTouchesRef.current.values())[0];
+          const remainingTouch = Array.from(
+            activeTouchesRef.current.values(),
+          )[0];
           dragStartRef.current = { x: remainingTouch.x, y: remainingTouch.y };
           dragStartOffsetRef.current = { ...offsetRef.current };
         }
@@ -366,18 +387,22 @@ export const useCanvasViewport = ({
     const container = containerRef.current;
     if (!container) return;
 
-    container.addEventListener('wheel', handleWheel, { passive: false });
-    container.addEventListener('touchstart', handleTouchStart, { passive: false });
-    container.addEventListener('touchmove', handleTouchMove, { passive: false });
-    container.addEventListener('touchend', handleTouchEnd);
-    container.addEventListener('touchcancel', handleTouchEnd);
+    container.addEventListener("wheel", handleWheel, { passive: false });
+    container.addEventListener("touchstart", handleTouchStart, {
+      passive: false,
+    });
+    container.addEventListener("touchmove", handleTouchMove, {
+      passive: false,
+    });
+    container.addEventListener("touchend", handleTouchEnd);
+    container.addEventListener("touchcancel", handleTouchEnd);
 
     return () => {
-      container.removeEventListener('wheel', handleWheel);
-      container.removeEventListener('touchstart', handleTouchStart);
-      container.removeEventListener('touchmove', handleTouchMove);
-      container.removeEventListener('touchend', handleTouchEnd);
-      container.removeEventListener('touchcancel', handleTouchEnd);
+      container.removeEventListener("wheel", handleWheel);
+      container.removeEventListener("touchstart", handleTouchStart);
+      container.removeEventListener("touchmove", handleTouchMove);
+      container.removeEventListener("touchend", handleTouchEnd);
+      container.removeEventListener("touchcancel", handleTouchEnd);
     };
   }, [handleWheel, handleTouchStart, handleTouchMove, handleTouchEnd]);
 

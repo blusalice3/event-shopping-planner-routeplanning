@@ -3,15 +3,15 @@ import type {
   EventMetadata,
   ExecuteModeItems,
   ShoppingItem,
-} from '../../types/item';
-import type { ExportOptions } from '../../types/export';
+} from "../../types/item";
+import type { ExportOptions } from "../../types/export";
 import type {
   HallDefinitionsStore,
   HallRouteSettingsStore,
   MapDataStore,
   RouteSettingsStore,
-} from '../../types/map';
-import { exportToXlsx } from '../../utils/exportImport';
+} from "../../types/map";
+import { exportToXlsx } from "../../utils/exportImport";
 
 type ExportStores = {
   executeModeItems: Record<string, ExecuteModeItems>;
@@ -22,13 +22,18 @@ type ExportStores = {
   hallRouteSettings: HallRouteSettingsStore;
 };
 
-export function hasExportableItems(items: ShoppingItem[] | undefined): items is ShoppingItem[] {
+export function hasExportableItems(
+  items: ShoppingItem[] | undefined,
+): items is ShoppingItem[] {
   return !!items && items.length > 0;
 }
 
-function buildExportFilename(eventName: string, format: ExportOptions['format']): string {
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '').slice(0, 15);
-  const suffix = format === 'full' ? 'full' : 'simple';
+function buildExportFilename(
+  eventName: string,
+  format: ExportOptions["format"],
+): string {
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "").slice(0, 15);
+  const suffix = format === "full" ? "full" : "simple";
   return `${eventName}_${timestamp}_${suffix}.xlsx`;
 }
 

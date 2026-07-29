@@ -1,6 +1,6 @@
-export type FocusPhase = 'normal' | 'postponed' | 'late';
+export type FocusPhase = "normal" | "postponed" | "late";
 
-export type FocusMapCenteringMode = 'prevToCurrent' | 'currentOnly';
+export type FocusMapCenteringMode = "prevToCurrent" | "currentOnly";
 
 export interface FocusModeSessionState {
   phase: FocusPhase;

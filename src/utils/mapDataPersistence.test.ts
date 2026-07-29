@@ -1,6 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import type { CellData, MapDataStore } from '../types/map';
-import { compactMapDataForStorage, expandMapDataFromStorage } from './mapDataPersistence';
+import { describe, expect, it } from "vitest";
+import type { CellData, MapDataStore } from "../types/map";
+import {
+  compactMapDataForStorage,
+  expandMapDataFromStorage,
+} from "./mapDataPersistence";
 
 const emptyBorders = {
   top: null,
@@ -23,12 +26,12 @@ function makeCell(overrides: Partial<CellData> = {}): CellData {
   };
 }
 
-describe('mapDataPersistence', () => {
-  it('omits empty default cells and restores persisted render cells on load', () => {
+describe("mapDataPersistence", () => {
+  it("omits empty default cells and restores persisted render cells on load", () => {
     const mapData: MapDataStore = {
       Event: {
-        '1日目マップ': {
-          sheetName: '1日目',
+        "1日目マップ": {
+          sheetName: "1日目",
           maxRow: 2,
           maxCol: 2,
           cells: [
@@ -36,14 +39,14 @@ describe('mapDataPersistence', () => {
             makeCell({
               row: 2,
               col: 2,
-              value: 'A',
-              backgroundColor: '#ffffff',
-              fontColor: '#000000',
+              value: "A",
+              backgroundColor: "#ffffff",
+              fontColor: "#000000",
               borders: {
                 ...emptyBorders,
                 top: {
-                  style: 'thin',
-                  color: '#111111',
+                  style: "thin",
+                  color: "#111111",
                 },
               },
               isMerged: true,
@@ -57,7 +60,7 @@ describe('mapDataPersistence', () => {
           mergedCells: [],
           blocks: [
             {
-              name: 'A',
+              name: "A",
               startRow: 2,
               startCol: 2,
               endRow: 2,
@@ -70,20 +73,23 @@ describe('mapDataPersistence', () => {
     };
 
     const compacted = compactMapDataForStorage(mapData);
-    const compactedCells = (compacted.Event['1日目マップ'] as { cells: Record<string, unknown>[] })
-      .cells;
+    const compactedCells = (
+      compacted.Event["1日目マップ"] as { cells: Record<string, unknown>[] }
+    ).cells;
 
     expect(compactedCells).toHaveLength(1);
-    expect(compactedCells[0].value).toBe('A');
-    expect(compactedCells[0].borders).toEqual(mapData.Event['1日目マップ'].cells[1].borders);
+    expect(compactedCells[0].value).toBe("A");
+    expect(compactedCells[0].borders).toEqual(
+      mapData.Event["1日目マップ"].cells[1].borders,
+    );
 
     expect(expandMapDataFromStorage(compacted)).toEqual({
       Event: {
-        '1日目マップ': {
-          ...mapData.Event['1日目マップ'],
+        "1日目マップ": {
+          ...mapData.Event["1日目マップ"],
           cells: [
             {
-              ...mapData.Event['1日目マップ'].cells[1],
+              ...mapData.Event["1日目マップ"].cells[1],
               backgroundColor: null,
             },
           ],

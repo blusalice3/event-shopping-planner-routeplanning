@@ -3,7 +3,7 @@
  * 罫線、結合セル、背景色、ブロック定義を正確に抽出
  */
 
-import ExcelJS from 'exceljs';
+import ExcelJS from "exceljs";
 import {
   CellData,
   CellBorders,
@@ -14,37 +14,43 @@ import {
   NumberCellInfo,
   BlockDetectionSettings,
   DEFAULT_BLOCK_DETECTION_SETTINGS,
-} from '../types/map';
-import { ShoppingItem } from '../types/item';
+} from "../types/map";
+import { ShoppingItem } from "../types/item";
 
-type BorderWeight = 'thin' | 'medium' | 'thick' | 'double';
+type BorderWeight = "thin" | "medium" | "thick" | "double";
 
 type ThemeColorMap = Map<number, string>;
 
 const DEFAULT_THEME_COLORS: Record<number, string> = {
-  0: '#FFFFFF',
-  1: '#000000',
-  2: '#E7E6E6',
-  3: '#44546A',
-  4: '#4472C4',
-  5: '#ED7D31',
-  6: '#A5A5A5',
-  7: '#FFC000',
-  8: '#5B9BD5',
-  9: '#F79646',
-  10: '#0563C1',
-  11: '#954F72',
+  0: "#FFFFFF",
+  1: "#000000",
+  2: "#E7E6E6",
+  3: "#44546A",
+  4: "#4472C4",
+  5: "#ED7D31",
+  6: "#A5A5A5",
+  7: "#FFC000",
+  8: "#5B9BD5",
+  9: "#F79646",
+  10: "#0563C1",
+  11: "#954F72",
 };
 
 const DEFAULT_THEME_COLOR_MAP: ThemeColorMap = new Map(
-  Object.entries(DEFAULT_THEME_COLORS).map(([index, color]) => [parseInt(index, 10), color]),
+  Object.entries(DEFAULT_THEME_COLORS).map(([index, color]) => [
+    parseInt(index, 10),
+    color,
+  ]),
 );
 
-function parseThemeColorFromXml(themeXml: string, tagName: string): string | null {
-  const escapedTag = tagName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+function parseThemeColorFromXml(
+  themeXml: string,
+  tagName: string,
+): string | null {
+  const escapedTag = tagName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const blockPattern = new RegExp(
     `<a:${escapedTag}\\b[^>]*>([\\s\\S]*?)<\\/a:${escapedTag}>`,
-    'i',
+    "i",
   );
   const blockMatch = themeXml.match(blockPattern);
   if (!blockMatch) return null;
@@ -55,7 +61,9 @@ function parseThemeColorFromXml(themeXml: string, tagName: string): string | nul
     return `#${srgbMatch[1].toUpperCase()}`;
   }
 
-  const sysClrMatch = blockXml.match(/<a:sysClr[^>]*lastClr="([0-9A-Fa-f]{6})"/i);
+  const sysClrMatch = blockXml.match(
+    /<a:sysClr[^>]*lastClr="([0-9A-Fa-f]{6})"/i,
+  );
   if (sysClrMatch) {
     return `#${sysClrMatch[1].toUpperCase()}`;
   }
@@ -71,30 +79,33 @@ function buildWorkbookThemeColorMap(workbook: ExcelJS.Workbook): ThemeColorMap {
   let themeXml: string | null = null;
   if (Array.isArray(themes)) {
     themeXml =
-      themes.find((value): value is string => typeof value === 'string' && value.length > 0) ??
-      null;
-  } else if (typeof themes === 'object' && themes !== null) {
+      themes.find(
+        (value): value is string =>
+          typeof value === "string" && value.length > 0,
+      ) ?? null;
+  } else if (typeof themes === "object" && themes !== null) {
     themeXml =
       Object.values(themes as Record<string, unknown>).find(
-        (value): value is string => typeof value === 'string' && value.length > 0,
+        (value): value is string =>
+          typeof value === "string" && value.length > 0,
       ) ?? null;
   }
 
   if (!themeXml) return themeColorMap;
 
   const themeTags: string[] = [
-    'lt1',
-    'dk1',
-    'lt2',
-    'dk2',
-    'accent1',
-    'accent2',
-    'accent3',
-    'accent4',
-    'accent5',
-    'accent6',
-    'hlink',
-    'folHlink',
+    "lt1",
+    "dk1",
+    "lt2",
+    "dk2",
+    "accent1",
+    "accent2",
+    "accent3",
+    "accent4",
+    "accent5",
+    "accent6",
+    "hlink",
+    "folHlink",
   ];
 
   themeTags.forEach((tagName, index) => {
@@ -110,12 +121,15 @@ function buildWorkbookThemeColorMap(workbook: ExcelJS.Workbook): ThemeColorMap {
 function applyTintToHexColor(color: string, tint?: number): string {
   const normalized = normalizeHexColor(color);
   if (!normalized) return color;
-  if (typeof tint !== 'number' || Number.isNaN(tint) || tint === 0) return normalized;
+  if (typeof tint !== "number" || Number.isNaN(tint) || tint === 0)
+    return normalized;
 
   const safeTint = Math.max(-1, Math.min(1, tint));
   const hex = normalized.substring(1);
 
-  const channels = [0, 2, 4].map((offset) => parseInt(hex.substring(offset, offset + 2), 16));
+  const channels = [0, 2, 4].map((offset) =>
+    parseInt(hex.substring(offset, offset + 2), 16),
+  );
   const tintedChannels = channels.map((channel) => {
     const adjusted =
       safeTint < 0
@@ -124,12 +138,18 @@ function applyTintToHexColor(color: string, tint?: number): string {
     return Math.max(0, Math.min(255, Math.round(adjusted)));
   });
 
-  const tintedHex = tintedChannels.map((value) => value.toString(16).padStart(2, '0')).join('');
+  const tintedHex = tintedChannels
+    .map((value) => value.toString(16).padStart(2, "0"))
+    .join("");
   return `#${tintedHex.toUpperCase()}`;
 }
 
-function getThemeColor(themeIndex: number, themeColorMap: ThemeColorMap): string | null {
-  const color = themeColorMap.get(themeIndex) ?? DEFAULT_THEME_COLORS[themeIndex] ?? null;
+function getThemeColor(
+  themeIndex: number,
+  themeColorMap: ThemeColorMap,
+): string | null {
+  const color =
+    themeColorMap.get(themeIndex) ?? DEFAULT_THEME_COLORS[themeIndex] ?? null;
   return color ? normalizeHexColor(color) : null;
 }
 
@@ -161,7 +181,7 @@ function resolveExcelColor(
 
 function isMediumOrThickBorder(style?: ExcelJS.BorderStyle): boolean {
   if (!style) return false;
-  return style === 'medium' || style === 'thick' || style === 'double';
+  return style === "medium" || style === "thick" || style === "double";
 }
 
 // ExcelJSの罫線スタイルを変換
@@ -170,33 +190,33 @@ function convertExcelJSBorder(
   themeColorMap: ThemeColorMap = DEFAULT_THEME_COLOR_MAP,
 ): BorderStyle | null {
   if (!border || !border.style) return null;
-  if ((border.style as string) === 'none') return null;
+  if ((border.style as string) === "none") return null;
 
   const styleMap: Record<string, BorderWeight> = {
-    thin: 'thin',
-    medium: 'medium',
-    thick: 'thick',
-    double: 'double',
-    hair: 'thin',
-    dotted: 'thin',
-    dashed: 'thin',
-    dashDot: 'thin',
-    dashDotDot: 'thin',
-    mediumDashed: 'medium',
-    mediumDashDot: 'medium',
-    mediumDashDotDot: 'medium',
-    slantDashDot: 'medium',
+    thin: "thin",
+    medium: "medium",
+    thick: "thick",
+    double: "double",
+    hair: "thin",
+    dotted: "thin",
+    dashed: "thin",
+    dashDot: "thin",
+    dashDotDot: "thin",
+    mediumDashed: "medium",
+    mediumDashDot: "medium",
+    mediumDashDotDot: "medium",
+    slantDashDot: "medium",
   };
 
-  const color = resolveExcelColor(border.color, themeColorMap) ?? '#000000';
+  const color = resolveExcelColor(border.color, themeColorMap) ?? "#000000";
 
   return {
-    style: styleMap[border.style] || 'thin',
+    style: styleMap[border.style] || "thin",
     color,
   };
 }
 
-type BorderDirection = 'top' | 'right' | 'bottom' | 'left';
+type BorderDirection = "top" | "right" | "bottom" | "left";
 
 type MergeRange = {
   startRow: number;
@@ -207,7 +227,9 @@ type MergeRange = {
 
 const toCellKey = (row: number, col: number): string => `${row}-${col}`;
 
-function buildMergeRangeMap(mergedCells: MergedCellInfo[]): Map<string, MergeRange> {
+function buildMergeRangeMap(
+  mergedCells: MergedCellInfo[],
+): Map<string, MergeRange> {
   const rangeMap = new Map<string, MergeRange>();
   mergedCells.forEach((merge) => {
     rangeMap.set(toCellKey(merge.startRow, merge.startCol), {
@@ -222,22 +244,22 @@ function buildMergeRangeMap(mergedCells: MergedCellInfo[]): Map<string, MergeRan
 
 function getBorderStyleWeight(style?: ExcelJS.BorderStyle): number {
   switch (style) {
-    case 'thin':
-    case 'hair':
-    case 'dotted':
-    case 'dashed':
-    case 'dashDot':
-    case 'dashDotDot':
+    case "thin":
+    case "hair":
+    case "dotted":
+    case "dashed":
+    case "dashDot":
+    case "dashDotDot":
       return 1;
-    case 'medium':
-    case 'mediumDashed':
-    case 'mediumDashDot':
-    case 'mediumDashDotDot':
-    case 'slantDashDot':
+    case "medium":
+    case "mediumDashed":
+    case "mediumDashDot":
+    case "mediumDashDotDot":
+    case "slantDashDot":
       return 2;
-    case 'thick':
+    case "thick":
       return 3;
-    case 'double':
+    case "double":
       return 4;
     default:
       return 0;
@@ -251,7 +273,9 @@ function pickStrongestBorder(
   let selectedWeight = 0;
 
   candidates.forEach((candidate) => {
-    const weight = getBorderStyleWeight(candidate?.style as ExcelJS.BorderStyle | undefined);
+    const weight = getBorderStyleWeight(
+      candidate?.style as ExcelJS.BorderStyle | undefined,
+    );
     if (weight > selectedWeight) {
       selected = candidate;
       selectedWeight = weight;
@@ -279,15 +303,15 @@ function resolveMergedRangeEdgeBorder(
 ): Partial<ExcelJS.Border> | undefined {
   const candidates: Array<Partial<ExcelJS.Border> | undefined> = [];
 
-  if (side === 'top' || side === 'bottom') {
-    const row = side === 'top' ? mergeRange.startRow : mergeRange.endRow;
+  if (side === "top" || side === "bottom") {
+    const row = side === "top" ? mergeRange.startRow : mergeRange.endRow;
     for (let col = mergeRange.startCol; col <= mergeRange.endCol; col++) {
       candidates.push(worksheet.getCell(row, col).border?.[side]);
     }
     return pickStrongestBorder(candidates);
   }
 
-  const col = side === 'left' ? mergeRange.startCol : mergeRange.endCol;
+  const col = side === "left" ? mergeRange.startCol : mergeRange.endCol;
   for (let row = mergeRange.startRow; row <= mergeRange.endRow; row++) {
     candidates.push(worksheet.getCell(row, col).border?.[side]);
   }
@@ -304,10 +328,10 @@ function resolveMergedRangeDisplayBorders(
   left?: Partial<ExcelJS.Border>;
 } {
   return {
-    top: resolveMergedRangeEdgeBorder(worksheet, mergeRange, 'top'),
-    right: resolveMergedRangeEdgeBorder(worksheet, mergeRange, 'right'),
-    bottom: resolveMergedRangeEdgeBorder(worksheet, mergeRange, 'bottom'),
-    left: resolveMergedRangeEdgeBorder(worksheet, mergeRange, 'left'),
+    top: resolveMergedRangeEdgeBorder(worksheet, mergeRange, "top"),
+    right: resolveMergedRangeEdgeBorder(worksheet, mergeRange, "right"),
+    bottom: resolveMergedRangeEdgeBorder(worksheet, mergeRange, "bottom"),
+    left: resolveMergedRangeEdgeBorder(worksheet, mergeRange, "left"),
   };
 }
 
@@ -324,42 +348,42 @@ function resolveEffectiveBorderSide(
     return worksheet.getCell(row, col).border?.[side];
   }
 
-  if (side === 'top' && row !== mergeRange.startRow) return undefined;
-  if (side === 'bottom' && row !== mergeRange.endRow) return undefined;
-  if (side === 'left' && col !== mergeRange.startCol) return undefined;
-  if (side === 'right' && col !== mergeRange.endCol) return undefined;
+  if (side === "top" && row !== mergeRange.startRow) return undefined;
+  if (side === "bottom" && row !== mergeRange.endRow) return undefined;
+  if (side === "left" && col !== mergeRange.startCol) return undefined;
+  if (side === "right" && col !== mergeRange.endCol) return undefined;
 
   return resolveMergedRangeEdgeBorder(worksheet, mergeRange, side);
 }
 
 function getIndexedColor(colorIndex: number): string | null {
   const indexedColors: Record<number, string> = {
-    0: '#000000',
-    1: '#FFFFFF',
-    2: '#FF0000',
-    3: '#00FF00',
-    4: '#0000FF',
-    5: '#FFFF00',
-    6: '#FF00FF',
-    7: '#00FFFF',
-    8: '#000000',
-    9: '#FFFFFF',
-    10: '#FF0000',
-    11: '#00FF00',
-    12: '#0000FF',
-    13: '#FFFF00',
-    14: '#FF00FF',
-    15: '#00FFFF',
-    16: '#800000',
-    17: '#008000',
-    18: '#000080',
-    19: '#808000',
-    20: '#800080',
-    21: '#008080',
-    22: '#C0C0C0',
-    23: '#808080',
-    64: '#000000',
-    65: '#FFFFFF',
+    0: "#000000",
+    1: "#FFFFFF",
+    2: "#FF0000",
+    3: "#00FF00",
+    4: "#0000FF",
+    5: "#FFFF00",
+    6: "#FF00FF",
+    7: "#00FFFF",
+    8: "#000000",
+    9: "#FFFFFF",
+    10: "#FF0000",
+    11: "#00FF00",
+    12: "#0000FF",
+    13: "#FFFF00",
+    14: "#FF00FF",
+    15: "#00FFFF",
+    16: "#800000",
+    17: "#008000",
+    18: "#000080",
+    19: "#808000",
+    20: "#800080",
+    21: "#008080",
+    22: "#C0C0C0",
+    23: "#808080",
+    64: "#000000",
+    65: "#FFFFFF",
   };
 
   return indexedColors[colorIndex] ?? null;
@@ -371,10 +395,10 @@ function getBackgroundColorFromExcelJS(
 ): string | null {
   if (!fill) return null;
 
-  if (fill.type === 'pattern' && fill.pattern !== 'none') {
+  if (fill.type === "pattern" && fill.pattern !== "none") {
     const patternFill = fill as ExcelJS.FillPattern;
     const color = resolveExcelColor(patternFill.fgColor, themeColorMap);
-    if (color === '#FFFFFF' || color === null) return null;
+    if (color === "#FFFFFF" || color === null) return null;
     return color;
   }
 
@@ -389,28 +413,39 @@ function getFontColorFromExcelJS(
   return resolveExcelColor(font.color, themeColorMap);
 }
 
-function extractCellValue(cellValue: ExcelJS.CellValue): string | number | null {
+function extractCellValue(
+  cellValue: ExcelJS.CellValue,
+): string | number | null {
   if (cellValue === null || cellValue === undefined) return null;
 
-  if (typeof cellValue === 'string' || typeof cellValue === 'number') {
+  if (typeof cellValue === "string" || typeof cellValue === "number") {
     return cellValue;
   }
 
-  if (typeof cellValue === 'object') {
-    if ('richText' in cellValue && Array.isArray((cellValue as { richText: unknown[] }).richText)) {
-      const richText = (cellValue as { richText: Array<{ text: string }> }).richText;
-      const text = richText.map((rt) => rt.text || '').join('');
+  if (typeof cellValue === "object") {
+    if (
+      "richText" in cellValue &&
+      Array.isArray((cellValue as { richText: unknown[] }).richText)
+    ) {
+      const richText = (cellValue as { richText: Array<{ text: string }> })
+        .richText;
+      const text = richText.map((rt) => rt.text || "").join("");
       return text || null;
     }
 
-    if ('result' in cellValue) {
+    if ("result" in cellValue) {
       const result = (cellValue as { result?: unknown }).result;
-      if (typeof result === 'string' || typeof result === 'number') {
+      if (typeof result === "string" || typeof result === "number") {
         return result;
       }
-      if (typeof result === 'object' && result !== null && 'richText' in (result as object)) {
-        const richText = (result as { richText: Array<{ text: string }> }).richText;
-        const text = richText.map((rt) => rt.text || '').join('');
+      if (
+        typeof result === "object" &&
+        result !== null &&
+        "richText" in (result as object)
+      ) {
+        const richText = (result as { richText: Array<{ text: string }> })
+          .richText;
+        const text = richText.map((rt) => rt.text || "").join("");
         return text || null;
       }
     }
@@ -427,7 +462,8 @@ function isBlockName(
   if (extracted === null) return false;
 
   const str = String(extracted).trim();
-  if (str.length === 0 || str.length > settings.maxBlockNameLength) return false;
+  if (str.length === 0 || str.length > settings.maxBlockNameLength)
+    return false;
 
   const isKatakana = (ch: string) => /[\u30A0-\u30FF]/u.test(ch);
   const isHiragana = (ch: string) => /[\u3040-\u309F]/u.test(ch);
@@ -474,7 +510,11 @@ function isBlockName(
 
   if (hasContentType) return true;
 
-  if (settings.allowDigitSymbolOnly && settings.allowedCharTypes.digit && settings.allowedCharTypes.symbol) {
+  if (
+    settings.allowDigitSymbolOnly &&
+    settings.allowedCharTypes.digit &&
+    settings.allowedCharTypes.symbol
+  ) {
     return hasDigit && hasSymbol;
   }
 
@@ -498,13 +538,13 @@ function extractNumericCellValue(value: ExcelJS.CellValue): number | null {
   const extracted = extractCellValue(value);
   if (extracted === null || extracted === undefined) return null;
 
-  if (typeof extracted === 'number') {
+  if (typeof extracted === "number") {
     if (Number.isNaN(extracted) || !Number.isFinite(extracted)) return null;
     return extracted;
   }
 
   const str = String(extracted).trim();
-  if (str === '') return null;
+  if (str === "") return null;
 
   const num = Number(str);
   if (Number.isNaN(num) || !Number.isFinite(num)) return null;
@@ -513,18 +553,18 @@ function extractNumericCellValue(value: ExcelJS.CellValue): number | null {
 
 function generateBlockColor(index: number): string {
   const colors = [
-    '#E3F2FD',
-    '#E8F5E9',
-    '#FFF3E0',
-    '#F3E5F5',
-    '#E0F7FA',
-    '#FBE9E7',
-    '#F1F8E9',
-    '#FCE4EC',
-    '#E8EAF6',
-    '#FFFDE7',
-    '#EFEBE9',
-    '#ECEFF1',
+    "#E3F2FD",
+    "#E8F5E9",
+    "#FFF3E0",
+    "#F3E5F5",
+    "#E0F7FA",
+    "#FBE9E7",
+    "#F1F8E9",
+    "#FCE4EC",
+    "#E8EAF6",
+    "#FFFDE7",
+    "#EFEBE9",
+    "#ECEFF1",
   ];
   return colors[index % colors.length];
 }
@@ -541,7 +581,9 @@ function findBorderedRegion(
   maxRegionSize: number = 2000,
 ): Set<string> {
   const region = new Set<string>();
-  const queue: Array<{ row: number; col: number }> = [{ row: startRow, col: startCol }];
+  const queue: Array<{ row: number; col: number }> = [
+    { row: startRow, col: startCol },
+  ];
 
   while (queue.length > 0 && region.size < maxRegionSize) {
     const { row, col } = queue.shift()!;
@@ -600,16 +642,16 @@ function findBorderedRegion(
       return true;
     };
 
-    if (canMoveTo(row - 1, col, 'top', 'bottom')) {
+    if (canMoveTo(row - 1, col, "top", "bottom")) {
       queue.push({ row: row - 1, col });
     }
-    if (canMoveTo(row + 1, col, 'bottom', 'top')) {
+    if (canMoveTo(row + 1, col, "bottom", "top")) {
       queue.push({ row: row + 1, col });
     }
-    if (canMoveTo(row, col - 1, 'left', 'right')) {
+    if (canMoveTo(row, col - 1, "left", "right")) {
       queue.push({ row, col: col - 1 });
     }
-    if (canMoveTo(row, col + 1, 'right', 'left')) {
+    if (canMoveTo(row, col + 1, "right", "left")) {
       queue.push({ row, col: col + 1 });
     }
   }
@@ -633,17 +675,17 @@ function hasThickBorderBetween(
   let nextSide: BorderDirection;
 
   if (row2 === row1 - 1 && col2 === col1) {
-    currentSide = 'top';
-    nextSide = 'bottom';
+    currentSide = "top";
+    nextSide = "bottom";
   } else if (row2 === row1 + 1 && col2 === col1) {
-    currentSide = 'bottom';
-    nextSide = 'top';
+    currentSide = "bottom";
+    nextSide = "top";
   } else if (col2 === col1 - 1 && row2 === row1) {
-    currentSide = 'left';
-    nextSide = 'right';
+    currentSide = "left";
+    nextSide = "right";
   } else if (col2 === col1 + 1 && row2 === row1) {
-    currentSide = 'right';
-    nextSide = 'left';
+    currentSide = "right";
+    nextSide = "left";
   } else {
     return false;
   }
@@ -693,12 +735,13 @@ function regionContainsOtherBlockName(
   settings: BlockDetectionSettings,
 ): boolean {
   for (const key of region) {
-    const [rowStr, colStr] = key.split('-');
+    const [rowStr, colStr] = key.split("-");
     const row = parseInt(rowStr, 10);
     const col = parseInt(colStr, 10);
 
     const mergeParent = mergeMap.get(key);
-    if (mergeParent && (mergeParent.row !== row || mergeParent.col !== col)) continue;
+    if (mergeParent && (mergeParent.row !== row || mergeParent.col !== col))
+      continue;
 
     const cell = worksheet.getCell(row, col);
     if (isBlockName(cell.value, settings)) {
@@ -740,10 +783,10 @@ function computeExteriorCells(
   }
 
   const directions: [number, number, BorderDirection, BorderDirection][] = [
-    [-1, 0, 'top', 'bottom'],
-    [1, 0, 'bottom', 'top'],
-    [0, -1, 'left', 'right'],
-    [0, 1, 'right', 'left'],
+    [-1, 0, "top", "bottom"],
+    [1, 0, "bottom", "top"],
+    [0, -1, "left", "right"],
+    [0, 1, "right", "left"],
   ];
 
   while (qi < queue.length) {
@@ -776,12 +819,22 @@ function computeExteriorCells(
 
       // 太い罫線があれば移動不可
       const s1 = resolveEffectiveBorderSide(
-        worksheet, row, col, currentSide, mergeMap, mergeRangeMap,
+        worksheet,
+        row,
+        col,
+        currentSide,
+        mergeMap,
+        mergeRangeMap,
       )?.style as ExcelJS.BorderStyle | undefined;
       if (isMediumOrThickBorder(s1)) continue;
 
       const s2 = resolveEffectiveBorderSide(
-        worksheet, nr, nc, nextSide, mergeMap, mergeRangeMap,
+        worksheet,
+        nr,
+        nc,
+        nextSide,
+        mergeMap,
+        mergeRangeMap,
       )?.style as ExcelJS.BorderStyle | undefined;
       if (isMediumOrThickBorder(s2)) continue;
 
@@ -810,7 +863,7 @@ function findEnclosedRegion(
   maxCol: number,
   visited: Set<string>,
   maxRegionSize: number = 2000,
-  blockName: string = '',
+  blockName: string = "",
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
   exteriorCells: Set<string> = new Set(),
 ): Set<string> {
@@ -846,7 +899,7 @@ function findEnclosedRegion(
     const candidates: Array<{ row: number; col: number }> = [];
 
     for (const key of region) {
-      const [rowStr, colStr] = key.split('-');
+      const [rowStr, colStr] = key.split("-");
       const row = parseInt(rowStr, 10);
       const col = parseInt(colStr, 10);
 
@@ -858,12 +911,24 @@ function findEnclosedRegion(
       ];
 
       for (const n of neighbors) {
-        if (n.row < 1 || n.row > maxRow || n.col < 1 || n.col > maxCol) continue;
+        if (n.row < 1 || n.row > maxRow || n.col < 1 || n.col > maxCol)
+          continue;
         const nKey = toCellKey(n.row, n.col);
-        if (region.has(nKey) || visited.has(nKey) || rejectedCells.has(nKey)) continue;
+        if (region.has(nKey) || visited.has(nKey) || rejectedCells.has(nKey))
+          continue;
 
         // 太い罫線でブロックされていない隣接セルは対象外
-        if (!hasThickBorderBetween(worksheet, row, col, n.row, n.col, mergeMap, mergeRangeMap)) {
+        if (
+          !hasThickBorderBetween(
+            worksheet,
+            row,
+            col,
+            n.row,
+            n.col,
+            mergeMap,
+            mergeRangeMap,
+          )
+        ) {
           continue;
         }
 
@@ -907,7 +972,13 @@ function findEnclosedRegion(
       // プローブ領域に別のブロック名が含まれていないか確認
       if (
         blockName &&
-        regionContainsOtherBlockName(probe, worksheet, mergeMap, blockName, settings)
+        regionContainsOtherBlockName(
+          probe,
+          worksheet,
+          mergeMap,
+          blockName,
+          settings,
+        )
       ) {
         probe.forEach((k) => rejectedCells.add(k));
         continue;
@@ -934,7 +1005,7 @@ function extractNumberCellsFromRegion(
   const numberCells: NumberCellInfo[] = [];
 
   region.forEach((key) => {
-    const [rowStr, colStr] = key.split('-');
+    const [rowStr, colStr] = key.split("-");
     const row = parseInt(rowStr, 10);
     const col = parseInt(colStr, 10);
 
@@ -947,7 +1018,8 @@ function extractNumberCellsFromRegion(
     const value = cell.value;
 
     if (isNumberCell(value, settings)) {
-      const numValue = typeof value === 'number' ? value : parseInt(String(value), 10);
+      const numValue =
+        typeof value === "number" ? value : parseInt(String(value), 10);
       numberCells.push({ row, col, value: numValue });
     }
   });
@@ -964,9 +1036,9 @@ function normalizeHexColor(color: string | null | undefined): string | null {
   const m3 = trimmed.match(hex3);
   if (m3) {
     const expanded = m3[1]
-      .split('')
+      .split("")
       .map((ch) => ch + ch)
-      .join('');
+      .join("");
     return `#${expanded}`.toUpperCase();
   }
 
@@ -988,13 +1060,22 @@ function collectMediumOrThickBorderColorsForCell(
   themeColorMap: ThemeColorMap,
 ): Set<string> {
   const colors = new Set<string>();
-  const sides: BorderDirection[] = ['top', 'right', 'bottom', 'left'];
+  const sides: BorderDirection[] = ["top", "right", "bottom", "left"];
 
   sides.forEach((side) => {
-    const border = resolveEffectiveBorderSide(worksheet, row, col, side, mergeMap, mergeRangeMap);
+    const border = resolveEffectiveBorderSide(
+      worksheet,
+      row,
+      col,
+      side,
+      mergeMap,
+      mergeRangeMap,
+    );
     const style = border?.style as ExcelJS.BorderStyle | undefined;
     if (!isMediumOrThickBorder(style)) return;
-    const normalized = normalizeHexColor(convertExcelJSBorder(border, themeColorMap)?.color);
+    const normalized = normalizeHexColor(
+      convertExcelJSBorder(border, themeColorMap)?.color,
+    );
     if (normalized) {
       colors.add(normalized);
     }
@@ -1014,7 +1095,7 @@ function collectRegionMediumOrThickBorderColors(
 
   regions.forEach((region) => {
     region.forEach((key) => {
-      const [rowStr, colStr] = key.split('-');
+      const [rowStr, colStr] = key.split("-");
       const row = parseInt(rowStr, 10);
       const col = parseInt(colStr, 10);
       const cellColors = collectMediumOrThickBorderColorsForCell(
@@ -1068,7 +1149,9 @@ function findNumberCellsByBorderColors(
         mergeRangeMap,
         themeColorMap,
       );
-      const hasMatch = Array.from(borderColors).some((color) => targetColors.has(color));
+      const hasMatch = Array.from(borderColors).some((color) =>
+        targetColors.has(color),
+      );
       if (!hasMatch) continue;
 
       const numValue = parsedValue;
@@ -1093,7 +1176,7 @@ function calculateBoundingBox(region: Set<string>): {
     maxCol = 0;
 
   region.forEach((key) => {
-    const [rowStr, colStr] = key.split('-');
+    const [rowStr, colStr] = key.split("-");
     const row = parseInt(rowStr, 10);
     const col = parseInt(colStr, 10);
 
@@ -1140,7 +1223,11 @@ function detectBlocksWithExcelJS(
   // 外部セルの事前計算（シート端からBFS、太い罫線で停止）
   // これにより各ブロック候補のプローブ時に包囲判定がO(1)になる
   const exteriorCells = computeExteriorCells(
-    worksheet, mergeMap, mergeRangeMap, maxRow, maxCol,
+    worksheet,
+    mergeMap,
+    mergeRangeMap,
+    maxRow,
+    maxCol,
   );
 
   const processBlockNameCandidate = (
@@ -1171,7 +1258,12 @@ function detectBlocksWithExcelJS(
     // この領域内のセルをグローバルに処理済みとしてマーク
     region.forEach((key) => globalProcessedCells.add(key));
 
-    const numberCells = extractNumberCellsFromRegion(region, worksheet, mergeMap, settings);
+    const numberCells = extractNumberCellsFromRegion(
+      region,
+      worksheet,
+      mergeMap,
+      settings,
+    );
 
     if (blockGroups.has(blockName)) {
       const group = blockGroups.get(blockName)!;
@@ -1191,7 +1283,10 @@ function detectBlocksWithExcelJS(
     const rows = merge.endRow - merge.startRow + 1;
     const cols = merge.endCol - merge.startCol + 1;
     const cellCount = rows * cols;
-    return cellCount >= settings.minMergedCellCount && isBlockName(merge.value, settings);
+    return (
+      cellCount >= settings.minMergedCellCount &&
+      isBlockName(merge.value, settings)
+    );
   });
 
   blockNameMerges.forEach((merge) => {
@@ -1202,7 +1297,12 @@ function detectBlocksWithExcelJS(
         nameCellCoords.push({ row: r, col: c });
       }
     }
-    processBlockNameCandidate(blockName, merge.startRow, merge.startCol, nameCellCoords);
+    processBlockNameCandidate(
+      blockName,
+      merge.startRow,
+      merge.startCol,
+      nameCellCoords,
+    );
   });
 
   for (let row = 1; row <= maxRow; row++) {
@@ -1212,7 +1312,8 @@ function detectBlocksWithExcelJS(
       if (globalProcessedCells.has(key)) continue;
 
       const mergeParent = mergeMap.get(key);
-      if (mergeParent && (mergeParent.row !== row || mergeParent.col !== col)) continue;
+      if (mergeParent && (mergeParent.row !== row || mergeParent.col !== col))
+        continue;
 
       const cell = worksheet.getCell(row, col);
       if (!isBlockName(cell.value, settings)) continue;
@@ -1227,7 +1328,8 @@ function detectBlocksWithExcelJS(
     const uniqueNumberCells = group.numberCells
       .filter(
         (cell, index, self) =>
-          index === self.findIndex((c) => c.row === cell.row && c.col === cell.col),
+          index ===
+          self.findIndex((c) => c.row === cell.row && c.col === cell.col),
       )
       .sort((a, b) => a.value - b.value);
 
@@ -1238,7 +1340,9 @@ function detectBlocksWithExcelJS(
       mergeRangeMap,
       themeColorMap,
     );
-    const nonBlackColors = Array.from(regionBorderColors).filter((color) => color !== '#000000');
+    const nonBlackColors = Array.from(regionBorderColors).filter(
+      (color) => color !== "#000000",
+    );
 
     let colorExpandedNumberCells: NumberCellInfo[] = [];
     if (nonBlackColors.length > 0) {
@@ -1256,7 +1360,8 @@ function detectBlocksWithExcelJS(
       colorExpandedNumberCells = strictColorExpandedCells;
 
       const strictMin = strictColorExpandedCells[0]?.value;
-      const strictMax = strictColorExpandedCells[strictColorExpandedCells.length - 1]?.value;
+      const strictMax =
+        strictColorExpandedCells[strictColorExpandedCells.length - 1]?.value;
       const isLikelyRangeClipped =
         strictColorExpandedCells.length === 0 ||
         strictMin === settings.numberCellMin ||
@@ -1275,7 +1380,9 @@ function detectBlocksWithExcelJS(
           true,
         );
 
-        if (relaxedColorExpandedCells.length > strictColorExpandedCells.length) {
+        if (
+          relaxedColorExpandedCells.length > strictColorExpandedCells.length
+        ) {
           colorExpandedNumberCells = relaxedColorExpandedCells;
         }
       }
@@ -1284,11 +1391,15 @@ function detectBlocksWithExcelJS(
     const nameCellKeys = new Set(
       group.nameCells.map((nc) => `${nc.row}-${nc.col}`),
     );
-    const mergedNumberCells = [...uniqueNumberCells, ...colorExpandedNumberCells]
+    const mergedNumberCells = [
+      ...uniqueNumberCells,
+      ...colorExpandedNumberCells,
+    ]
       .filter(
         (cell, index, self) =>
           !nameCellKeys.has(`${cell.row}-${cell.col}`) &&
-          index === self.findIndex((c) => c.row === cell.row && c.col === cell.col),
+          index ===
+            self.findIndex((c) => c.row === cell.row && c.col === cell.col),
       )
       .sort((a, b) => a.value - b.value);
 
@@ -1304,7 +1415,8 @@ function detectBlocksWithExcelJS(
     const boxArea =
       (boundingBox.endRow - boundingBox.startRow + 1) *
       (boundingBox.endCol - boundingBox.startCol + 1);
-    const isPolygon = allCells.size < boxArea * (settings.polygonThreshold / 100);
+    const isPolygon =
+      allCells.size < boxArea * (settings.polygonThreshold / 100);
 
     const blockDef: BlockDefinition = {
       name: blockName,
@@ -1315,7 +1427,8 @@ function detectBlocksWithExcelJS(
       numberCells: mergedNumberCells,
       nameCells: group.nameCells.filter(
         (cell, index, self) =>
-          index === self.findIndex((c) => c.row === cell.row && c.col === cell.col),
+          index ===
+          self.findIndex((c) => c.row === cell.row && c.col === cell.col),
       ),
       color: generateBlockColor(colorIndex++),
       isAutoDetected: true,
@@ -1323,9 +1436,9 @@ function detectBlocksWithExcelJS(
 
     if (isPolygon) {
       blockDef.cellGroups = group.regions.map((region) => ({
-        type: 'individual' as const,
+        type: "individual" as const,
         cells: Array.from(region).map((key) => {
-          const [rowStr, colStr] = key.split('-');
+          const [rowStr, colStr] = key.split("-");
           return { row: parseInt(rowStr, 10), col: parseInt(colStr, 10) };
         }),
       }));
@@ -1403,11 +1516,15 @@ async function parseMapSheetWithExcelJS(
       const cell = worksheet.getCell(row, col);
 
       const mergeParent = mergeMap.get(toCellKey(row, col));
-      const isMerged = !!mergeParent && (mergeParent.row !== row || mergeParent.col !== col);
+      const isMerged =
+        !!mergeParent && (mergeParent.row !== row || mergeParent.col !== col);
 
       const value = extractCellValue(cell.value);
 
-      const backgroundColor = getBackgroundColorFromExcelJS(cell.fill, themeColorMap);
+      const backgroundColor = getBackgroundColorFromExcelJS(
+        cell.fill,
+        themeColorMap,
+      );
 
       const fontColor = getFontColorFromExcelJS(cell.font, themeColorMap);
 
@@ -1427,7 +1544,8 @@ async function parseMapSheetWithExcelJS(
 
       const alignment = cell.alignment;
       const isVerticalText =
-        alignment?.textRotation === 'vertical' || alignment?.textRotation === 255;
+        alignment?.textRotation === "vertical" ||
+        alignment?.textRotation === 255;
 
       cells.push({
         row,
@@ -1489,21 +1607,25 @@ async function parseMapSheetWithExcelJS(
       col: nameCell.col + IMPORT_CLICK_MARGIN,
     })),
     cellGroups: block.cellGroups?.map((group) => {
-      if (group.type === 'range') {
+      if (group.type === "range") {
         return {
           ...group,
           startRow:
-            typeof group.startRow === 'number'
+            typeof group.startRow === "number"
               ? group.startRow + IMPORT_CLICK_MARGIN
               : group.startRow,
           startCol:
-            typeof group.startCol === 'number'
+            typeof group.startCol === "number"
               ? group.startCol + IMPORT_CLICK_MARGIN
               : group.startCol,
           endRow:
-            typeof group.endRow === 'number' ? group.endRow + IMPORT_CLICK_MARGIN : group.endRow,
+            typeof group.endRow === "number"
+              ? group.endRow + IMPORT_CLICK_MARGIN
+              : group.endRow,
           endCol:
-            typeof group.endCol === 'number' ? group.endCol + IMPORT_CLICK_MARGIN : group.endCol,
+            typeof group.endCol === "number"
+              ? group.endCol + IMPORT_CLICK_MARGIN
+              : group.endCol,
         };
       }
       return {
@@ -1565,7 +1687,11 @@ export async function parseMapFile(
       const match = sheetName.match(dayPattern);
       if (match) {
         try {
-          const mapData = await parseMapSheetWithExcelJS(workbook, sheetName, settings);
+          const mapData = await parseMapSheetWithExcelJS(
+            workbook,
+            sheetName,
+            settings,
+          );
           if (mapData) {
             const mapName = `${match[1]}マップ`;
             result[mapName] = mapData;
@@ -1585,11 +1711,11 @@ export async function parseMapFile(
       error: null,
     };
   } catch (error) {
-    console.error('Error parsing map file:', error);
+    console.error("Error parsing map file:", error);
     return {
       data: null,
       skippedSheets: [],
-      error: error instanceof Error ? error.message : '不明なエラー',
+      error: error instanceof Error ? error.message : "不明なエラー",
     };
   }
 }
@@ -1624,7 +1750,7 @@ export function matchItemToCell(
 ): { row: number; col: number } | null {
   if (item.eventDate !== dayName) return null;
 
-  const itemBlockName = item.block?.trim() || '';
+  const itemBlockName = item.block?.trim() || "";
 
   let block = mapData.blocks.find((b) => b.name === itemBlockName);
 
@@ -1667,7 +1793,10 @@ export function createBlockDefinition(
     for (let c = startCol; c <= endCol; c++) {
       const cell = cellsMap.get(`${r}-${c}`);
       if (cell && !cell.isMerged && cell.value !== null) {
-        const num = typeof cell.value === 'number' ? cell.value : Number(String(cell.value).trim());
+        const num =
+          typeof cell.value === "number"
+            ? cell.value
+            : Number(String(cell.value).trim());
         if (
           !isNaN(num) &&
           Number.isInteger(num) &&
@@ -1701,7 +1830,7 @@ export function createBlockDefinition(
     endRow,
     endCol,
     numberCells: numberCells.sort((a, b) => a.value - b.value),
-    color: '#E3F2FD',
+    color: "#E3F2FD",
   };
 
   if (nameCells.length > 0) {

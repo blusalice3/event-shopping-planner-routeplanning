@@ -1,5 +1,11 @@
-import { useEffect, useId, useRef, type KeyboardEvent, type SyntheticEvent } from 'react';
-import { createPortal } from 'react-dom';
+import {
+  useEffect,
+  useId,
+  useRef,
+  type KeyboardEvent,
+  type SyntheticEvent,
+} from "react";
+import { createPortal } from "react-dom";
 
 type SingleQuantityLimitedPurchaseChoiceDialogProps = {
   isOpen: boolean;
@@ -34,21 +40,21 @@ export default function SingleQuantityLimitedPurchaseChoiceDialog({
     if (!isOpen) return;
 
     const handleKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== "Escape") return;
       event.preventDefault();
       onCancel();
     };
 
-    document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener("keydown", handleKeyDown);
     return () => {
-      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener("keydown", handleKeyDown);
     };
   }, [isOpen, onCancel]);
 
   if (!isOpen) return null;
 
   const handleDialogKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
-    if (event.key !== 'Tab') return;
+    if (event.key !== "Tab") return;
 
     const focusableButtons = [
       cancelButtonRef.current,
@@ -94,10 +100,16 @@ export default function SingleQuantityLimitedPurchaseChoiceDialog({
         onPointerDown={stopDialogEvent}
         onPointerUp={stopDialogEvent}
       >
-        <h3 id={titleId} className="text-base font-semibold text-slate-900 dark:text-slate-100">
+        <h3
+          id={titleId}
+          className="text-base font-semibold text-slate-900 dark:text-slate-100"
+        >
           限数にしますか？
         </h3>
-        <p id={descriptionId} className="mt-2 text-sm text-slate-600 dark:text-slate-300">
+        <p
+          id={descriptionId}
+          className="mt-2 text-sm text-slate-600 dark:text-slate-300"
+        >
           数量が1のため、通常は購入済として扱います。限数にしますか？
         </p>
         <div className="mt-4 flex flex-wrap justify-end gap-2">

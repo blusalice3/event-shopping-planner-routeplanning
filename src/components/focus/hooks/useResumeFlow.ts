@@ -1,10 +1,17 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import type { FocusModeSessionState, FocusPhase } from '../../../types/focus';
-import type { ShoppingItem } from '../../../types/item';
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+import type { FocusModeSessionState, FocusPhase } from "../../../types/focus";
+import type { ShoppingItem } from "../../../types/item";
 import {
   buildResumeChoiceDialogState,
   type ResumeChoiceDialogState,
-} from '../resumeChoice';
+} from "../resumeChoice";
 
 type VisitGroup = {
   key: string;
@@ -14,7 +21,8 @@ type VisitGroup = {
 const isSameIdSet = (a: Set<string>, b: Set<string>) =>
   a.size === b.size && [...a].every((id) => b.has(id));
 
-const buildIdSetSignature = (ids: Set<string>) => Array.from(ids).sort().join('\u001e');
+const buildIdSetSignature = (ids: Set<string>) =>
+  Array.from(ids).sort().join("\u001e");
 
 interface UseResumeFlowArgs {
   resumeState: FocusModeSessionState | null;
@@ -42,12 +50,23 @@ export function useResumeFlow({
   const didSyncOnResumeRef = useRef(false);
   const hadResumeStateRef = useRef(Boolean(resumeState));
   const didInitResumeChoiceRef = useRef(false);
-  const initialResumeStateRef = useRef<FocusModeSessionState | null>(resumeState ?? null);
-  const [pendingResumeSyncSignature, setPendingResumeSyncSignature] = useState<string | null>(null);
-  const [isResumeSyncComplete, setIsResumeSyncComplete] = useState(() => !resumeState);
-  const [isResumeCompletionChecked, setIsResumeCompletionChecked] = useState(() => !resumeState);
-  const [isResumeInitResolved, setIsResumeInitResolved] = useState(() => !resumeState);
-  const isResumeTransitioning = Boolean(resumeState) && !hadResumeStateRef.current;
+  const initialResumeStateRef = useRef<FocusModeSessionState | null>(
+    resumeState ?? null,
+  );
+  const [pendingResumeSyncSignature, setPendingResumeSyncSignature] = useState<
+    string | null
+  >(null);
+  const [isResumeSyncComplete, setIsResumeSyncComplete] = useState(
+    () => !resumeState,
+  );
+  const [isResumeCompletionChecked, setIsResumeCompletionChecked] = useState(
+    () => !resumeState,
+  );
+  const [isResumeInitResolved, setIsResumeInitResolved] = useState(
+    () => !resumeState,
+  );
+  const isResumeTransitioning =
+    Boolean(resumeState) && !hadResumeStateRef.current;
 
   const resumeSyncCandidateSignature = useMemo(
     () =>
@@ -107,8 +126,12 @@ export function useResumeFlow({
     const postponedNow = new Set(currentPostponedItemIds);
     const lateNow = new Set(currentLateItemIds);
 
-    setPostponedPhaseItemIds((prev) => (isSameIdSet(prev, postponedNow) ? prev : postponedNow));
-    setLatePhaseItemIds((prev) => (isSameIdSet(prev, lateNow) ? prev : lateNow));
+    setPostponedPhaseItemIds((prev) =>
+      isSameIdSet(prev, postponedNow) ? prev : postponedNow,
+    );
+    setLatePhaseItemIds((prev) =>
+      isSameIdSet(prev, lateNow) ? prev : lateNow,
+    );
 
     didSyncOnResumeRef.current = true;
     setIsResumeSyncComplete(true);

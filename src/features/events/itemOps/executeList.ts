@@ -1,7 +1,11 @@
-import type { DayMapData, HallDefinition, HallRouteSettings } from '../../../types/map';
-import type { ExecuteModeItems, ShoppingItem } from '../../../types/item';
-import { getSpaceKey } from '../../../utils/spaceGrouping';
-import { findItemHallId } from './geometry';
+import type {
+  DayMapData,
+  HallDefinition,
+  HallRouteSettings,
+} from "../../../types/map";
+import type { ExecuteModeItems, ShoppingItem } from "../../../types/item";
+import { getSpaceKey } from "../../../utils/spaceGrouping";
+import { findItemHallId } from "./geometry";
 
 export interface MapExecuteInsertResult {
   accepted: boolean;
@@ -44,13 +48,17 @@ export function expandSameSpacePriorityItemIds(
     addIfAvailable(item.id);
 
     const spaceKey = getSpaceKey(item.block, item.number);
-    const priorityLevel = item.priorityLevel || 'none';
+    const priorityLevel = item.priorityLevel || "none";
     for (const sibling of allItems) {
-      if (options.excludeSeedIdsFromSiblingExpansion && seedIdsSet.has(sibling.id)) continue;
+      if (
+        options.excludeSeedIdsFromSiblingExpansion &&
+        seedIdsSet.has(sibling.id)
+      )
+        continue;
       if (options.dayName && sibling.eventDate !== options.dayName) continue;
       if (sibling.eventDate !== item.eventDate) continue;
       if (getSpaceKey(sibling.block, sibling.number) !== spaceKey) continue;
-      if ((sibling.priorityLevel || 'none') !== priorityLevel) continue;
+      if ((sibling.priorityLevel || "none") !== priorityLevel) continue;
       addIfAvailable(sibling.id);
     }
   }
@@ -92,22 +100,26 @@ function isSameSpacePriorityGroup(
   const item2 = itemsMap.get(id2);
   if (!item1 || !item2) return false;
   return (
-    getSpaceKey(item1.block, item1.number) === getSpaceKey(item2.block, item2.number) &&
-    (item1.priorityLevel || 'none') === (item2.priorityLevel || 'none')
+    getSpaceKey(item1.block, item1.number) ===
+      getSpaceKey(item2.block, item2.number) &&
+    (item1.priorityLevel || "none") === (item2.priorityLevel || "none")
   );
 }
 
 export function computeInsertIntoExecuteAtPosition(
   itemIds: string[],
   referenceItemId: string,
-  position: 'before' | 'after',
+  position: "before" | "after",
   executeModeItems: ExecuteModeItems,
   dayName: string,
   allItems: ShoppingItem[],
   options: {
     expandSiblings?: boolean;
     requireReference?: boolean;
-    canInsertWithReference?: (insertedItemId: string, referenceItemId: string) => boolean;
+    canInsertWithReference?: (
+      insertedItemId: string,
+      referenceItemId: string,
+    ) => boolean;
   } = {},
 ): ExecutePositionInsertResult {
   const currentDayItems = [...(executeModeItems[dayName] || [])];
@@ -116,9 +128,15 @@ export function computeInsertIntoExecuteAtPosition(
     return { accepted: false, executeModeItems, insertedItemIds: [] };
   }
 
-  const insertedItemIds = options.expandSiblings === false
-    ? itemIds.filter((id) => !currentDayItems.includes(id))
-    : expandMapExecuteInsertItemIds(itemIds, dayName, allItems, executeModeItems);
+  const insertedItemIds =
+    options.expandSiblings === false
+      ? itemIds.filter((id) => !currentDayItems.includes(id))
+      : expandMapExecuteInsertItemIds(
+          itemIds,
+          dayName,
+          allItems,
+          executeModeItems,
+        );
   if (insertedItemIds.length === 0) {
     return { accepted: false, executeModeItems, insertedItemIds: [] };
   }
@@ -126,13 +144,17 @@ export function computeInsertIntoExecuteAtPosition(
   if (
     options.canInsertWithReference &&
     refIndex >= 0 &&
-    insertedItemIds.some((id) => !options.canInsertWithReference!(id, referenceItemId))
+    insertedItemIds.some(
+      (id) => !options.canInsertWithReference!(id, referenceItemId),
+    )
   ) {
     return { accepted: false, executeModeItems, insertedItemIds: [] };
   }
 
   const itemsMap = new Map(allItems.map((item) => [item.id, item]));
-  const dayItems = currentDayItems.filter((id) => !insertedItemIds.includes(id));
+  const dayItems = currentDayItems.filter(
+    (id) => !insertedItemIds.includes(id),
+  );
   let insertIndex = dayItems.length;
 
   const currentRefIndex = dayItems.indexOf(referenceItemId);
@@ -142,18 +164,26 @@ export function computeInsertIntoExecuteAtPosition(
 
     while (
       groupStart > 0 &&
-      isSameSpacePriorityGroup(dayItems[groupStart - 1], referenceItemId, itemsMap)
+      isSameSpacePriorityGroup(
+        dayItems[groupStart - 1],
+        referenceItemId,
+        itemsMap,
+      )
     ) {
       groupStart--;
     }
     while (
       groupEnd < dayItems.length - 1 &&
-      isSameSpacePriorityGroup(dayItems[groupEnd + 1], referenceItemId, itemsMap)
+      isSameSpacePriorityGroup(
+        dayItems[groupEnd + 1],
+        referenceItemId,
+        itemsMap,
+      )
     ) {
       groupEnd++;
     }
 
-    insertIndex = position === 'before' ? groupStart : groupEnd + 1;
+    insertIndex = position === "before" ? groupStart : groupEnd + 1;
   } else if (options.requireReference !== false) {
     return { accepted: false, executeModeItems, insertedItemIds: [] };
   }
@@ -195,7 +225,12 @@ export function computeAddToExecuteListFromMapWithResult(
   hallRouteSettingsForMap: HallRouteSettings,
   mapData: DayMapData | undefined,
 ): MapExecuteInsertResult {
-  const insertItemIds = expandMapExecuteInsertItemIds([itemId], dayName, allItems, executeModeItems);
+  const insertItemIds = expandMapExecuteInsertItemIds(
+    [itemId],
+    dayName,
+    allItems,
+    executeModeItems,
+  );
   if (insertItemIds.length === 0) {
     return { accepted: false, executeModeItems, insertedItemIds: [] };
   }
@@ -271,7 +306,7 @@ export function computeAddToExecuteListFromMapWithResult(
 export function computeAddToExecuteListFromMapAtPosition(
   itemId: string,
   referenceItemId: string,
-  position: 'before' | 'after',
+  position: "before" | "after",
   executeModeItems: ExecuteModeItems,
   dayName: string,
 ): ExecuteModeItems {
@@ -302,7 +337,9 @@ export function computeRemoveFromExecuteListFromMap(
   const removeIds = allItems
     ? expandExecuteRemovalItemIds([itemId], dayName, allItems, executeModeItems)
     : [itemId];
-  const dayItems = (executeModeItems[dayName] || []).filter((id) => !removeIds.includes(id));
+  const dayItems = (executeModeItems[dayName] || []).filter(
+    (id) => !removeIds.includes(id),
+  );
   return { ...executeModeItems, [dayName]: dayItems };
 }
 
@@ -323,9 +360,13 @@ export function computeMoveToExecuteColumn(
   const executeIdsSet = new Set(executeModeItems[dayName] || []);
   const currentTabItems = allItems.filter((item) => item.eventDate === dayName);
 
-  let candidateItems = currentTabItems.filter((item) => !executeIdsSet.has(item.id));
+  let candidateItems = currentTabItems.filter(
+    (item) => !executeIdsSet.has(item.id),
+  );
   if (selectedBlockFilters.size > 0) {
-    candidateItems = candidateItems.filter((item) => selectedBlockFilters.has(item.block));
+    candidateItems = candidateItems.filter((item) =>
+      selectedBlockFilters.has(item.block),
+    );
   }
 
   const itemIdsSet = new Set(itemIds);
@@ -348,7 +389,7 @@ export function computeMoveToExecuteColumn(
     }
 
     const newSpaceKey = getSpaceKey(newItem.block, newItem.number);
-    const newPriority = newItem.priorityLevel || 'none';
+    const newPriority = newItem.priorityLevel || "none";
 
     // resultIds内で同一spaceKey+priorityLevelの最後の兄弟を検索
     let lastSiblingIndex = -1;
@@ -357,7 +398,7 @@ export function computeMoveToExecuteColumn(
       if (!existingItem) continue;
       if (
         getSpaceKey(existingItem.block, existingItem.number) === newSpaceKey &&
-        (existingItem.priorityLevel || 'none') === newPriority
+        (existingItem.priorityLevel || "none") === newPriority
       ) {
         lastSiblingIndex = i;
         break;
@@ -419,7 +460,7 @@ export function reorderExecuteIdsForSpaceAdjacency(
   if (!targetItem) return executeModeItems;
 
   const targetSpaceKey = getSpaceKey(targetItem.block, targetItem.number);
-  const targetPriority = targetItem.priorityLevel || 'none';
+  const targetPriority = targetItem.priorityLevel || "none";
 
   // 同一spaceKey+priorityLevelの兄弟インデックスを収集
   const siblingIndices: number[] = [];
@@ -431,7 +472,7 @@ export function reorderExecuteIdsForSpaceAdjacency(
     if (!item) continue;
     if (
       getSpaceKey(item.block, item.number) === targetSpaceKey &&
-      (item.priorityLevel || 'none') === targetPriority
+      (item.priorityLevel || "none") === targetPriority
     ) {
       siblingIndices.push(i);
     }
@@ -443,7 +484,10 @@ export function reorderExecuteIdsForSpaceAdjacency(
   // 既に兄弟と隣接している場合は何もしない
   const lastSiblingIndex = siblingIndices[siblingIndices.length - 1];
   const firstSiblingIndex = siblingIndices[0];
-  if (targetIndex >= firstSiblingIndex - 1 && targetIndex <= lastSiblingIndex + 1) {
+  if (
+    targetIndex >= firstSiblingIndex - 1 &&
+    targetIndex <= lastSiblingIndex + 1
+  ) {
     // 兄弟の範囲内または直接隣接している
     return executeModeItems;
   }

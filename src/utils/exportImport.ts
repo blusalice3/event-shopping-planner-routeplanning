@@ -3,25 +3,25 @@
  * IndexedDBのデータをxlsxファイルにエクスポート/インポート
  */
 
-import ExcelJS from 'exceljs';
+import ExcelJS from "exceljs";
 import {
   ShoppingItem,
   EventMetadata,
   DayModeState,
   ExecuteModeItems,
   PurchaseStatuses,
-} from '../types/item';
+} from "../types/item";
 import {
   MapDataStore,
   RouteSettingsStore,
   HallDefinitionsStore,
   HallRouteSettingsStore,
-} from '../types/map';
-import { ExportOptions } from '../types/export';
+} from "../types/map";
+import { ExportOptions } from "../types/export";
 import {
   normalizeLimitedPurchaseFields,
   validateLimitedPurchaseQuantities,
-} from './purchaseQuantity';
+} from "./purchaseQuantity";
 
 // エクスポートデータの型
 export interface ExportData {
@@ -65,55 +65,57 @@ export interface ItemFallbackWarning {
   reasons: string[];
 }
 
-const EXPORT_VERSION = '2.1';
+const EXPORT_VERSION = "2.1";
 
 type StrictPositiveIntegerCellParseResult =
-  | { kind: 'empty' }
-  | { kind: 'value'; value: number }
-  | { kind: 'invalid'; raw: string };
+  | { kind: "empty" }
+  | { kind: "value"; value: number }
+  | { kind: "invalid"; raw: string };
 
 const isFormulaCellValue = (
   rawValue: ExcelJS.CellValue,
 ): rawValue is ExcelJS.CellFormulaValue | ExcelJS.CellSharedFormulaValue =>
-  typeof rawValue === 'object' &&
+  typeof rawValue === "object" &&
   rawValue !== null &&
-  ('formula' in rawValue || 'sharedFormula' in rawValue);
+  ("formula" in rawValue || "sharedFormula" in rawValue);
 
 const parseStrictPositiveIntegerScalar = (
   rawValue: number | string,
 ): StrictPositiveIntegerCellParseResult => {
-  if (typeof rawValue === 'number') {
+  if (typeof rawValue === "number") {
     return Number.isInteger(rawValue) && rawValue >= 1
-      ? { kind: 'value', value: rawValue }
-      : { kind: 'invalid', raw: String(rawValue) };
+      ? { kind: "value", value: rawValue }
+      : { kind: "invalid", raw: String(rawValue) };
   }
 
   const rawText = rawValue.trim();
-  if (rawText === '') return { kind: 'empty' };
-  if (!/^\d+$/.test(rawText)) return { kind: 'invalid', raw: rawText };
+  if (rawText === "") return { kind: "empty" };
+  if (!/^\d+$/.test(rawText)) return { kind: "invalid", raw: rawText };
 
   const value = Number(rawText);
-  return value >= 1 ? { kind: 'value', value } : { kind: 'invalid', raw: rawText };
+  return value >= 1
+    ? { kind: "value", value }
+    : { kind: "invalid", raw: rawText };
 };
 
 const parseStrictPositiveIntegerCell = (
   rawValue: ExcelJS.CellValue,
 ): StrictPositiveIntegerCellParseResult => {
-  if (rawValue === null || rawValue === undefined) return { kind: 'empty' };
+  if (rawValue === null || rawValue === undefined) return { kind: "empty" };
 
-  if (typeof rawValue === 'number' || typeof rawValue === 'string') {
+  if (typeof rawValue === "number" || typeof rawValue === "string") {
     return parseStrictPositiveIntegerScalar(rawValue);
   }
 
   if (isFormulaCellValue(rawValue)) {
     const result = rawValue.result;
-    if (typeof result === 'number' || typeof result === 'string') {
+    if (typeof result === "number" || typeof result === "string") {
       return parseStrictPositiveIntegerScalar(result);
     }
-    return { kind: 'invalid', raw: '数式結果なし' };
+    return { kind: "invalid", raw: "数式結果なし" };
   }
 
-  return { kind: 'invalid', raw: '非対応セル形式' };
+  return { kind: "invalid", raw: "非対応セル形式" };
 };
 
 /**
@@ -134,30 +136,30 @@ export async function exportToXlsx(
   },
 ): Promise<Blob> {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = 'Event Shopping Planner';
+  workbook.creator = "Event Shopping Planner";
   workbook.created = new Date();
 
   // 1. アイテムデータシート（必須）
-  const itemsSheet = workbook.addWorksheet('アイテムデータ');
+  const itemsSheet = workbook.addWorksheet("アイテムデータ");
 
   // ヘッダー
   itemsSheet.columns = [
-    { header: 'ID', key: 'id', width: 40 },
-    { header: 'サークル名', key: 'circle', width: 20 },
-    { header: '参加日', key: 'eventDate', width: 12 },
-    { header: 'ブロック', key: 'block', width: 10 },
-    { header: 'ナンバー', key: 'number', width: 10 },
-    { header: 'タイトル', key: 'title', width: 30 },
-    { header: '価格', key: 'price', width: 10 },
-    { header: '数量', key: 'quantity', width: 8 },
-    { header: 'ステータス', key: 'purchaseStatus', width: 12 },
-    { header: '備考', key: 'remarks', width: 30 },
-    { header: 'URL', key: 'url', width: 50 },
-    { header: '優先度', key: 'priorityLevel', width: 10 },
-    { header: '保護レベル', key: 'protectionLevel', width: 12 },
-    { header: '追加元', key: 'source', width: 12 },
-    { header: '手動ホール', key: 'manualHallId', width: 20 },
-    { header: '限数実購入数', key: 'limitedPurchasedQuantity', width: 14 },
+    { header: "ID", key: "id", width: 40 },
+    { header: "サークル名", key: "circle", width: 20 },
+    { header: "参加日", key: "eventDate", width: 12 },
+    { header: "ブロック", key: "block", width: 10 },
+    { header: "ナンバー", key: "number", width: 10 },
+    { header: "タイトル", key: "title", width: 30 },
+    { header: "価格", key: "price", width: 10 },
+    { header: "数量", key: "quantity", width: 8 },
+    { header: "ステータス", key: "purchaseStatus", width: 12 },
+    { header: "備考", key: "remarks", width: 30 },
+    { header: "URL", key: "url", width: 50 },
+    { header: "優先度", key: "priorityLevel", width: 10 },
+    { header: "保護レベル", key: "protectionLevel", width: 12 },
+    { header: "追加元", key: "source", width: 12 },
+    { header: "手動ホール", key: "manualHallId", width: 20 },
+    { header: "限数実購入数", key: "limitedPurchasedQuantity", width: 14 },
   ];
 
   // データ
@@ -173,48 +175,50 @@ export async function exportToXlsx(
       quantity: item.quantity,
       purchaseStatus: item.purchaseStatus,
       remarks: item.remarks,
-      url: item.url || '',
-      priorityLevel: item.priorityLevel || 'none',
-      protectionLevel: item.protectionLevel || '',
-      source: item.source || '',
-      manualHallId: item.manualHallId || '',
+      url: item.url || "",
+      priorityLevel: item.priorityLevel || "none",
+      protectionLevel: item.protectionLevel || "",
+      source: item.source || "",
+      manualHallId: item.manualHallId || "",
       limitedPurchasedQuantity:
-        item.purchaseStatus === 'LimitedPurchase' ? item.limitedPurchasedQuantity ?? '' : '',
+        item.purchaseStatus === "LimitedPurchase"
+          ? (item.limitedPurchasedQuantity ?? "")
+          : "",
     });
   });
 
   // ヘッダー行のスタイル
   itemsSheet.getRow(1).font = { bold: true };
   itemsSheet.getRow(1).fill = {
-    type: 'pattern',
-    pattern: 'solid',
-    fgColor: { argb: 'FFE0E0E0' },
+    type: "pattern",
+    pattern: "solid",
+    fgColor: { argb: "FFE0E0E0" },
   };
 
   // 2. メタデータシート
-  if (options.format === 'full') {
-    const metaSheet = workbook.addWorksheet('メタデータ');
+  if (options.format === "full") {
+    const metaSheet = workbook.addWorksheet("メタデータ");
     metaSheet.columns = [
-      { header: 'キー', key: 'key', width: 30 },
-      { header: '値', key: 'value', width: 100 },
+      { header: "キー", key: "key", width: 30 },
+      { header: "値", key: "value", width: 100 },
     ];
 
-    metaSheet.addRow({ key: 'version', value: EXPORT_VERSION });
-    metaSheet.addRow({ key: 'exportDate', value: new Date().toISOString() });
-    metaSheet.addRow({ key: 'eventName', value: eventName });
+    metaSheet.addRow({ key: "version", value: EXPORT_VERSION });
+    metaSheet.addRow({ key: "exportDate", value: new Date().toISOString() });
+    metaSheet.addRow({ key: "eventName", value: eventName });
 
     if (additionalData.metadata) {
       metaSheet.addRow({
-        key: 'spreadsheetUrl',
-        value: additionalData.metadata.spreadsheetUrl || '',
+        key: "spreadsheetUrl",
+        value: additionalData.metadata.spreadsheetUrl || "",
       });
       metaSheet.addRow({
-        key: 'spreadsheetSheetName',
-        value: additionalData.metadata.spreadsheetSheetName || '',
+        key: "spreadsheetSheetName",
+        value: additionalData.metadata.spreadsheetSheetName || "",
       });
       metaSheet.addRow({
-        key: 'lastImportDate',
-        value: additionalData.metadata.lastImportDate || '',
+        key: "lastImportDate",
+        value: additionalData.metadata.lastImportDate || "",
       });
     }
 
@@ -222,19 +226,20 @@ export async function exportToXlsx(
   }
 
   // 3. 配置情報シート
-  if (options.includeLayoutInfo && options.format === 'full') {
-    const layoutSheet = workbook.addWorksheet('配置情報');
+  if (options.includeLayoutInfo && options.format === "full") {
+    const layoutSheet = workbook.addWorksheet("配置情報");
     layoutSheet.columns = [
-      { header: 'タイプ', key: 'type', width: 20 },
-      { header: '参加日', key: 'eventDate', width: 12 },
-      { header: 'データ', key: 'data', width: 100 },
+      { header: "タイプ", key: "type", width: 20 },
+      { header: "参加日", key: "eventDate", width: 12 },
+      { header: "データ", key: "data", width: 100 },
     ];
 
     // 実行モードアイテム
-    const eventExecuteItems = additionalData.executeModeItems?.[eventName] || {};
+    const eventExecuteItems =
+      additionalData.executeModeItems?.[eventName] || {};
     Object.entries(eventExecuteItems).forEach(([eventDate, itemIds]) => {
       layoutSheet.addRow({
-        type: 'executeModeItems',
+        type: "executeModeItems",
         eventDate,
         data: JSON.stringify(itemIds),
       });
@@ -244,7 +249,7 @@ export async function exportToXlsx(
     const eventDayModes = additionalData.dayModes?.[eventName] || {};
     Object.entries(eventDayModes).forEach(([eventDate, mode]) => {
       layoutSheet.addRow({
-        type: 'dayModes',
+        type: "dayModes",
         eventDate,
         data: mode,
       });
@@ -254,13 +259,13 @@ export async function exportToXlsx(
   }
 
   // 4. マップデータシート
-  if (options.includeMapData && options.format === 'full') {
+  if (options.includeMapData && options.format === "full") {
     const eventMapData = additionalData.mapData?.[eventName];
     if (eventMapData) {
-      const mapSheet = workbook.addWorksheet('マップデータ');
+      const mapSheet = workbook.addWorksheet("マップデータ");
       mapSheet.columns = [
-        { header: 'マップ名', key: 'mapName', width: 20 },
-        { header: 'データ', key: 'data', width: 200 },
+        { header: "マップ名", key: "mapName", width: 20 },
+        { header: "データ", key: "data", width: 200 },
       ];
 
       Object.entries(eventMapData).forEach(([mapName, data]) => {
@@ -275,12 +280,12 @@ export async function exportToXlsx(
   }
 
   // 5. ルート情報シート
-  if (options.includeRouteInfo && options.format === 'full') {
-    const routeSheet = workbook.addWorksheet('ルート情報');
+  if (options.includeRouteInfo && options.format === "full") {
+    const routeSheet = workbook.addWorksheet("ルート情報");
     routeSheet.columns = [
-      { header: 'タイプ', key: 'type', width: 20 },
-      { header: 'マップ名', key: 'mapName', width: 20 },
-      { header: 'データ', key: 'data', width: 200 },
+      { header: "タイプ", key: "type", width: 20 },
+      { header: "マップ名", key: "mapName", width: 20 },
+      { header: "データ", key: "data", width: 200 },
     ];
 
     // ルート設定
@@ -288,7 +293,7 @@ export async function exportToXlsx(
     if (eventRouteSettings) {
       Object.entries(eventRouteSettings).forEach(([mapName, data]) => {
         routeSheet.addRow({
-          type: 'routeSettings',
+          type: "routeSettings",
           mapName,
           data: JSON.stringify(data),
         });
@@ -300,7 +305,7 @@ export async function exportToXlsx(
     if (eventHallDefinitions) {
       Object.entries(eventHallDefinitions).forEach(([mapName, data]) => {
         routeSheet.addRow({
-          type: 'hallDefinitions',
+          type: "hallDefinitions",
           mapName,
           data: JSON.stringify(data),
         });
@@ -308,11 +313,12 @@ export async function exportToXlsx(
     }
 
     // ホールルート設定
-    const eventHallRouteSettings = additionalData.hallRouteSettings?.[eventName];
+    const eventHallRouteSettings =
+      additionalData.hallRouteSettings?.[eventName];
     if (eventHallRouteSettings) {
       Object.entries(eventHallRouteSettings).forEach(([mapName, data]) => {
         routeSheet.addRow({
-          type: 'hallRouteSettings',
+          type: "hallRouteSettings",
           mapName,
           data: JSON.stringify(data),
         });
@@ -325,7 +331,7 @@ export async function exportToXlsx(
   // Blobとして出力
   const buffer = await workbook.xlsx.writeBuffer();
   return new Blob([buffer], {
-    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
 }
 
@@ -335,7 +341,7 @@ export async function exportToXlsx(
 export async function importFromXlsx(file: File): Promise<ImportResult> {
   const result: ImportResult = {
     success: false,
-    eventName: '',
+    eventName: "",
     items: [],
     errors: [],
   };
@@ -346,51 +352,62 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
     await workbook.xlsx.load(arrayBuffer);
 
     // 1. アイテムデータシートを読み込み
-    const itemsSheet = workbook.getWorksheet('アイテムデータ');
+    const itemsSheet = workbook.getWorksheet("アイテムデータ");
     if (!itemsSheet) {
-      result.errors.push('アイテムデータシートが見つかりません');
+      result.errors.push("アイテムデータシートが見つかりません");
       return result;
     }
 
     const items: ShoppingItem[] = [];
     const itemFallbackWarnings: ItemFallbackWarning[] = [];
-    const validPurchaseStatuses = new Set<string>(PurchaseStatuses as readonly string[]);
+    const validPurchaseStatuses = new Set<string>(
+      PurchaseStatuses as readonly string[],
+    );
 
     itemsSheet.eachRow((row, rowNumber) => {
       if (rowNumber === 1) return; // ヘッダーをスキップ
 
       const rowReasons: string[] = [];
 
-      const rawId = String(row.getCell(1).value ?? '').trim();
+      const rawId = String(row.getCell(1).value ?? "").trim();
       const itemId = rawId || crypto.randomUUID();
       if (!rawId) {
-        rowReasons.push('IDが空のため自動採番しました');
+        rowReasons.push("IDが空のため自動採番しました");
       }
 
-      const circle = String(row.getCell(2).value ?? '');
-      const eventDate = String(row.getCell(3).value ?? '');
-      const block = String(row.getCell(4).value ?? '');
-      const number = String(row.getCell(5).value ?? '');
-      const title = String(row.getCell(6).value ?? '');
+      const circle = String(row.getCell(2).value ?? "");
+      const eventDate = String(row.getCell(3).value ?? "");
+      const block = String(row.getCell(4).value ?? "");
+      const number = String(row.getCell(5).value ?? "");
+      const title = String(row.getCell(6).value ?? "");
 
       const rawPrice = row.getCell(7).value;
       let price: number | null = null;
-      if (rawPrice !== null && rawPrice !== undefined && String(rawPrice).trim() !== '') {
+      if (
+        rawPrice !== null &&
+        rawPrice !== undefined &&
+        String(rawPrice).trim() !== ""
+      ) {
         const parsedPrice = Number(rawPrice);
         if (Number.isFinite(parsedPrice)) {
           price = parsedPrice;
-      } else {
-          rowReasons.push(`価格「${String(rawPrice)}」は不正のため空値で補完しました`);
+        } else {
+          rowReasons.push(
+            `価格「${String(rawPrice)}」は不正のため空値で補完しました`,
+          );
         }
       }
 
       const rawQuantity = row.getCell(8).value;
       const parsedQuantity = parseStrictPositiveIntegerCell(rawQuantity);
       let quantity = 1;
-      if (parsedQuantity.kind === 'value') {
+      if (parsedQuantity.kind === "value") {
         quantity = parsedQuantity.value;
       } else {
-        const raw = parsedQuantity.kind === 'invalid' ? `「${parsedQuantity.raw}」` : '空欄';
+        const raw =
+          parsedQuantity.kind === "invalid"
+            ? `「${parsedQuantity.raw}」`
+            : "空欄";
         rowReasons.push(`購入予定量${raw}は不正のため1で補完しました`);
       }
 
@@ -398,76 +415,93 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         quantity = Math.max(1, Math.floor(quantity));
       }
 
-      const rawPurchaseStatus = String(row.getCell(9).value ?? '').trim();
-      const purchaseStatus: ShoppingItem['purchaseStatus'] = validPurchaseStatuses.has(rawPurchaseStatus)
-        ? (rawPurchaseStatus as ShoppingItem['purchaseStatus'])
-        : 'None';
+      const rawPurchaseStatus = String(row.getCell(9).value ?? "").trim();
+      const purchaseStatus: ShoppingItem["purchaseStatus"] =
+        validPurchaseStatuses.has(rawPurchaseStatus)
+          ? (rawPurchaseStatus as ShoppingItem["purchaseStatus"])
+          : "None";
       if (rawPurchaseStatus && !validPurchaseStatuses.has(rawPurchaseStatus)) {
-        rowReasons.push(`ステータス「${rawPurchaseStatus}」は不正のためNoneで補完しました`);
+        rowReasons.push(
+          `ステータス「${rawPurchaseStatus}」は不正のためNoneで補完しました`,
+        );
       }
 
-      const remarks = String(row.getCell(10).value ?? '');
-      const url = String(row.getCell(11).value ?? '');
+      const remarks = String(row.getCell(10).value ?? "");
+      const url = String(row.getCell(11).value ?? "");
 
       // 優先度の値を取得（列12）
-      const priorityValue = String(row.getCell(12).value ?? '').trim();
-      let priorityLevel: 'none' | 'priority' | 'highest' | undefined;
-      if (priorityValue === 'highest') {
-        priorityLevel = 'highest';
-      } else if (priorityValue === 'priority') {
-        priorityLevel = 'priority';
-      } else if (priorityValue === 'none' || priorityValue === '') {
+      const priorityValue = String(row.getCell(12).value ?? "").trim();
+      let priorityLevel: "none" | "priority" | "highest" | undefined;
+      if (priorityValue === "highest") {
+        priorityLevel = "highest";
+      } else if (priorityValue === "priority") {
+        priorityLevel = "priority";
+      } else if (priorityValue === "none" || priorityValue === "") {
         priorityLevel = undefined; // 'none'は保存しない（デフォルト値）
       } else {
-        rowReasons.push(`優先度「${priorityValue}」は不正のため未設定で補完しました`);
+        rowReasons.push(
+          `優先度「${priorityValue}」は不正のため未設定で補完しました`,
+        );
       }
 
       // 保護レベルの値を取得（列13）
-      const protectionValue = String(row.getCell(13).value ?? '').trim();
-      let protectionLevel: 'full' | 'deletable' | 'none' | undefined;
-      if (protectionValue === 'full') {
-        protectionLevel = 'full';
-      } else if (protectionValue === 'deletable') {
-        protectionLevel = 'deletable';
-      } else if (protectionValue === 'none') {
-        protectionLevel = 'none';
+      const protectionValue = String(row.getCell(13).value ?? "").trim();
+      let protectionLevel: "full" | "deletable" | "none" | undefined;
+      if (protectionValue === "full") {
+        protectionLevel = "full";
+      } else if (protectionValue === "deletable") {
+        protectionLevel = "deletable";
+      } else if (protectionValue === "none") {
+        protectionLevel = "none";
       } else {
         protectionLevel = undefined; // 未設定
         if (protectionValue) {
-          rowReasons.push(`保護レベル「${protectionValue}」は不正のため未設定で補完しました`);
+          rowReasons.push(
+            `保護レベル「${protectionValue}」は不正のため未設定で補完しました`,
+          );
         }
       }
 
       // 追加元の値を取得（列14）
-      const sourceValue = String(row.getCell(14).value ?? '').trim();
-      let source: 'spreadsheet' | 'app' | undefined;
-      if (sourceValue === 'app') {
-        source = 'app';
-      } else if (sourceValue === 'spreadsheet') {
-        source = 'spreadsheet';
+      const sourceValue = String(row.getCell(14).value ?? "").trim();
+      let source: "spreadsheet" | "app" | undefined;
+      if (sourceValue === "app") {
+        source = "app";
+      } else if (sourceValue === "spreadsheet") {
+        source = "spreadsheet";
       } else {
         source = undefined; // 未設定
         if (sourceValue) {
-          rowReasons.push(`追加元「${sourceValue}」は不正のため未設定で補完しました`);
+          rowReasons.push(
+            `追加元「${sourceValue}」は不正のため未設定で補完しました`,
+          );
         }
       }
 
       // 手動ホールIDを取得（列15、後方互換: 古いファイルは空）
-      const manualHallValue = String(row.getCell(15).value ?? '').trim();
+      const manualHallValue = String(row.getCell(15).value ?? "").trim();
       const manualHallId = manualHallValue || undefined;
-      const parsedLimitedPurchasedQuantity = parseStrictPositiveIntegerCell(row.getCell(16).value);
+      const parsedLimitedPurchasedQuantity = parseStrictPositiveIntegerCell(
+        row.getCell(16).value,
+      );
       let limitedPurchasedQuantity: number | undefined;
 
-      if (parsedLimitedPurchasedQuantity.kind === 'value') {
+      if (parsedLimitedPurchasedQuantity.kind === "value") {
         limitedPurchasedQuantity = parsedLimitedPurchasedQuantity.value;
-      } else if (parsedLimitedPurchasedQuantity.kind === 'invalid') {
+      } else if (parsedLimitedPurchasedQuantity.kind === "invalid") {
         rowReasons.push(
           `限数実購入数「${parsedLimitedPurchasedQuantity.raw}」は不正のため未入力にしました`,
         );
       }
 
-      if (purchaseStatus === 'LimitedPurchase' && limitedPurchasedQuantity !== undefined) {
-        const validation = validateLimitedPurchaseQuantities(limitedPurchasedQuantity, quantity);
+      if (
+        purchaseStatus === "LimitedPurchase" &&
+        limitedPurchasedQuantity !== undefined
+      ) {
+        const validation = validateLimitedPurchaseQuantities(
+          limitedPurchasedQuantity,
+          quantity,
+        );
         if (!validation.ok) {
           rowReasons.push(
             `限数実購入数「${limitedPurchasedQuantity}」は購入予定量「${quantity}」に対して不正のため未入力にしました`,
@@ -476,8 +510,11 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         }
       }
 
-      if (purchaseStatus !== 'LimitedPurchase' && limitedPurchasedQuantity !== undefined) {
-        rowReasons.push('限数以外の限数実購入数は無視しました');
+      if (
+        purchaseStatus !== "LimitedPurchase" &&
+        limitedPurchasedQuantity !== undefined
+      ) {
+        rowReasons.push("限数以外の限数実購入数は無視しました");
         limitedPurchasedQuantity = undefined;
       }
 
@@ -497,7 +534,9 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         protectionLevel,
         source,
         manualHallId,
-        ...(limitedPurchasedQuantity !== undefined ? { limitedPurchasedQuantity } : {}),
+        ...(limitedPurchasedQuantity !== undefined
+          ? { limitedPurchasedQuantity }
+          : {}),
       });
 
       if (item.circle || item.title) {
@@ -518,48 +557,48 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
     }
 
     // 2. メタデータシートを読み込み
-    const metaSheet = workbook.getWorksheet('メタデータ');
+    const metaSheet = workbook.getWorksheet("メタデータ");
     if (metaSheet) {
       const metaMap = new Map<string, string>();
       metaSheet.eachRow((row, rowNumber) => {
         if (rowNumber === 1) return;
-        const key = String(row.getCell(1).value || '');
-        const value = String(row.getCell(2).value || '');
+        const key = String(row.getCell(1).value || "");
+        const value = String(row.getCell(2).value || "");
         if (key) metaMap.set(key, value);
       });
 
-      result.eventName = metaMap.get('eventName') || '';
+      result.eventName = metaMap.get("eventName") || "";
 
-      if (metaMap.has('spreadsheetUrl')) {
+      if (metaMap.has("spreadsheetUrl")) {
         result.metadata = {
-          spreadsheetUrl: metaMap.get('spreadsheetUrl') || '',
-          spreadsheetSheetName: metaMap.get('spreadsheetSheetName') || '',
-          lastImportDate: metaMap.get('lastImportDate') || '',
+          spreadsheetUrl: metaMap.get("spreadsheetUrl") || "",
+          spreadsheetSheetName: metaMap.get("spreadsheetSheetName") || "",
+          lastImportDate: metaMap.get("lastImportDate") || "",
         };
       }
     }
 
     // イベント名がない場合はファイル名から推測
     if (!result.eventName) {
-      result.eventName = file.name.replace(/\.xlsx$/i, '');
+      result.eventName = file.name.replace(/\.xlsx$/i, "");
     }
 
     // 3. 配置情報シートを読み込み
-    const layoutSheet = workbook.getWorksheet('配置情報');
+    const layoutSheet = workbook.getWorksheet("配置情報");
     if (layoutSheet) {
       const executeModeItems: Record<string, string[]> = {};
       const dayModes: Record<string, string> = {};
 
       layoutSheet.eachRow((row, rowNumber) => {
         if (rowNumber === 1) return;
-        const type = String(row.getCell(1).value || '');
-        const eventDate = String(row.getCell(2).value || '');
-        const data = String(row.getCell(3).value || '');
+        const type = String(row.getCell(1).value || "");
+        const eventDate = String(row.getCell(2).value || "");
+        const data = String(row.getCell(3).value || "");
 
         try {
-          if (type === 'executeModeItems') {
+          if (type === "executeModeItems") {
             executeModeItems[eventDate] = JSON.parse(data);
-          } else if (type === 'dayModes') {
+          } else if (type === "dayModes") {
             dayModes[eventDate] = data;
           }
         } catch (e) {
@@ -567,20 +606,23 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         }
       });
 
-      if (Object.keys(executeModeItems).length > 0 || Object.keys(dayModes).length > 0) {
+      if (
+        Object.keys(executeModeItems).length > 0 ||
+        Object.keys(dayModes).length > 0
+      ) {
         result.layoutInfo = { executeModeItems, dayModes };
       }
     }
 
     // 4. マップデータシートを読み込み
-    const mapSheet = workbook.getWorksheet('マップデータ');
+    const mapSheet = workbook.getWorksheet("マップデータ");
     if (mapSheet) {
       const mapData: Record<string, unknown> = {};
 
       mapSheet.eachRow((row, rowNumber) => {
         if (rowNumber === 1) return;
-        const mapName = String(row.getCell(1).value || '');
-        const data = String(row.getCell(2).value || '');
+        const mapName = String(row.getCell(1).value || "");
+        const data = String(row.getCell(2).value || "");
 
         try {
           if (mapName && data) {
@@ -597,7 +639,7 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
     }
 
     // 5. ルート情報シートを読み込み
-    const routeSheet = workbook.getWorksheet('ルート情報');
+    const routeSheet = workbook.getWorksheet("ルート情報");
     if (routeSheet) {
       const routeSettings: Record<string, unknown> = {};
       const hallDefinitions: Record<string, unknown[]> = {};
@@ -605,16 +647,16 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
 
       routeSheet.eachRow((row, rowNumber) => {
         if (rowNumber === 1) return;
-        const type = String(row.getCell(1).value || '');
-        const mapName = String(row.getCell(2).value || '');
-        const data = String(row.getCell(3).value || '');
+        const type = String(row.getCell(1).value || "");
+        const mapName = String(row.getCell(2).value || "");
+        const data = String(row.getCell(3).value || "");
 
         try {
-          if (type === 'routeSettings' && mapName && data) {
+          if (type === "routeSettings" && mapName && data) {
             routeSettings[mapName] = JSON.parse(data);
-          } else if (type === 'hallDefinitions' && mapName && data) {
+          } else if (type === "hallDefinitions" && mapName && data) {
             hallDefinitions[mapName] = JSON.parse(data);
-          } else if (type === 'hallRouteSettings' && mapName && data) {
+          } else if (type === "hallRouteSettings" && mapName && data) {
             hallRouteSettings[mapName] = JSON.parse(data);
           }
         } catch (e) {
@@ -635,9 +677,9 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
 
     result.success = true;
   } catch (error) {
-    console.error('Import error:', error);
+    console.error("Import error:", error);
     result.errors.push(
-      `インポートエラー: ${error instanceof Error ? error.message : '不明なエラー'}`,
+      `インポートエラー: ${error instanceof Error ? error.message : "不明なエラー"}`,
     );
   }
 
@@ -649,7 +691,7 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
  */
 export function downloadBlob(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const a = document.createElement("a");
   a.href = url;
   a.download = filename;
   document.body.appendChild(a);

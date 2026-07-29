@@ -1,23 +1,23 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { FocusPhase } from '../../../types/focus';
-import type { ShoppingItem } from '../../../types/item';
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { FocusPhase } from "../../../types/focus";
+import type { ShoppingItem } from "../../../types/item";
 import {
   useOptionalSpaceNavigator,
   type SpaceNavigatorActionResult,
   type SpaceNavigatorRegistration,
-} from '../SpaceNavigatorContext';
-import { buildFocusNavigatorEntries } from '../domain/buildNavigatorEntries';
-import { evaluateNavigationGuard } from '../domain/navigationGuard';
+} from "../SpaceNavigatorContext";
+import { buildFocusNavigatorEntries } from "../domain/buildNavigatorEntries";
+import { evaluateNavigationGuard } from "../domain/navigationGuard";
 import {
   buildStatusSegments,
   countNavigatorStatuses,
   getNavigatorWarningKinds,
-} from '../domain/statusSegments';
+} from "../domain/statusSegments";
 import type {
   FocusNavigatorSources,
   NavigationGuardResult,
   NavigatorEntry,
-} from '../types';
+} from "../types";
 
 type DisplaySnapshot = {
   entry: NavigatorEntry;
@@ -30,28 +30,30 @@ type RestorePayload = {
 export interface UseFocusSpaceNavigatorArgs {
   registrationId: string;
   enabled: boolean;
-  layoutMode: 'pc' | 'smartphone';
+  layoutMode: "pc" | "smartphone";
   sourcesByPhase: FocusNavigatorSources;
   officialPhase: FocusPhase;
   officialPhaseIndex: number;
   latestItemsById: ReadonlyMap<string, ShoppingItem>;
   disablePriceUndefinedCheck: boolean;
   disableLimitedPurchaseQuantityCheck: boolean;
-  getDeferredLimitedItemIds: (entry: NavigatorEntry) => ReadonlySet<string> | undefined;
+  getDeferredLimitedItemIds: (
+    entry: NavigatorEntry,
+  ) => ReadonlySet<string> | undefined;
   onCommitOfficial: (entry: NavigatorEntry) => void;
   onGuardResult: (result: NavigationGuardResult) => void;
   onInteractionStart?: () => void;
 }
 
-const phaseOrder: readonly FocusPhase[] = ['normal', 'postponed', 'late'];
+const phaseOrder: readonly FocusPhase[] = ["normal", "postponed", "late"];
 const EMPTY_ITEM_IDS: readonly string[] = [];
 
 const getBlockingMessage = (result: NavigationGuardResult): string => {
-  const hasPrice = result.blockingReasons.includes('price');
-  const hasLimited = result.blockingReasons.includes('limited');
-  if (hasPrice && hasLimited) return '価格と限数の実購入数を入力してください';
-  if (hasPrice) return '価格未定のアイテムがあります。価格を入力してください。';
-  return '限数未入力があります。実購入数を入力してください';
+  const hasPrice = result.blockingReasons.includes("price");
+  const hasLimited = result.blockingReasons.includes("limited");
+  if (hasPrice && hasLimited) return "価格と限数の実購入数を入力してください";
+  if (hasPrice) return "価格未定のアイテムがあります。価格を入力してください。";
+  return "限数未入力があります。実購入数を入力してください";
 };
 
 const refreshSnapshotEntry = (
@@ -61,9 +63,13 @@ const refreshSnapshotEntry = (
   const latestItems = snapshot.entry.itemIds.map(
     (itemId) =>
       latestItemsById.get(itemId) ??
-      (snapshot.entry.items.find((item) => item.id === itemId) as ShoppingItem | undefined),
+      (snapshot.entry.items.find((item) => item.id === itemId) as
+        | ShoppingItem
+        | undefined),
   );
-  const items = latestItems.filter((item): item is ShoppingItem => item !== undefined);
+  const items = latestItems.filter(
+    (item): item is ShoppingItem => item !== undefined,
+  );
   return {
     ...snapshot.entry,
     items,
@@ -77,21 +83,25 @@ const insertRetainedEntry = (
   entries: readonly NavigatorEntry[],
   retainedEntry: NavigatorEntry | null,
 ): NavigatorEntry[] => {
-  if (!retainedEntry || entries.some((entry) => entry.id === retainedEntry.id)) {
+  if (
+    !retainedEntry ||
+    entries.some((entry) => entry.id === retainedEntry.id)
+  ) {
     return entries.map((entry) => ({ ...entry }));
   }
 
-  const phase = retainedEntry.phase ?? 'normal';
+  const phase = retainedEntry.phase ?? "normal";
   const phaseEntries = entries.filter((entry) => entry.phase === phase);
   const phaseStart = entries.findIndex((entry) => entry.phase === phase);
   let insertionIndex: number;
   if (phaseStart >= 0) {
-    insertionIndex = phaseStart + Math.min(retainedEntry.phaseIndex, phaseEntries.length);
+    insertionIndex =
+      phaseStart + Math.min(retainedEntry.phaseIndex, phaseEntries.length);
   } else {
     const phasePosition = phaseOrder.indexOf(phase);
-    const nextPhase = phaseOrder.slice(phasePosition + 1).find((candidate) =>
-      entries.some((entry) => entry.phase === candidate),
-    );
+    const nextPhase = phaseOrder
+      .slice(phasePosition + 1)
+      .find((candidate) => entries.some((entry) => entry.phase === candidate));
     insertionIndex = nextPhase
       ? entries.findIndex((entry) => entry.phase === nextPhase)
       : entries.length;
@@ -101,7 +111,7 @@ const insertRetainedEntry = (
   next.splice(insertionIndex, 0, retainedEntry);
   const phaseCounts = new Map<FocusPhase, number>();
   return next.map((entry, index) => {
-    const entryPhase = entry.phase ?? 'normal';
+    const entryPhase = entry.phase ?? "normal";
     const phaseIndex = phaseCounts.get(entryPhase) ?? 0;
     phaseCounts.set(entryPhase, phaseIndex + 1);
     return { ...entry, index, phaseIndex };
@@ -124,7 +134,8 @@ export function useFocusSpaceNavigator({
   onInteractionStart,
 }: UseFocusSpaceNavigatorArgs) {
   const navigator = useOptionalSpaceNavigator();
-  const [displaySnapshot, setDisplaySnapshot] = useState<DisplaySnapshot | null>(null);
+  const [displaySnapshot, setDisplaySnapshot] =
+    useState<DisplaySnapshot | null>(null);
   const [recenterRevision, setRecenterRevision] = useState(0);
 
   const baseEntries = useMemo(
@@ -133,7 +144,9 @@ export function useFocusSpaceNavigator({
   );
   const refreshedRetainedEntry = useMemo(
     () =>
-      displaySnapshot ? refreshSnapshotEntry(displaySnapshot, latestItemsById) : null,
+      displaySnapshot
+        ? refreshSnapshotEntry(displaySnapshot, latestItemsById)
+        : null,
     [displaySnapshot, latestItemsById],
   );
   const entries = useMemo(
@@ -141,23 +154,33 @@ export function useFocusSpaceNavigator({
     [baseEntries, refreshedRetainedEntry],
   );
 
-  const formalPhaseEntries = baseEntries.filter((entry) => entry.phase === officialPhase);
+  const formalPhaseEntries = baseEntries.filter(
+    (entry) => entry.phase === officialPhase,
+  );
   const formalBaseEntry =
     formalPhaseEntries.length > 0
       ? formalPhaseEntries[
-          Math.min(Math.max(0, officialPhaseIndex), formalPhaseEntries.length - 1)
+          Math.min(
+            Math.max(0, officialPhaseIndex),
+            formalPhaseEntries.length - 1,
+          )
         ]
       : null;
   const formalEntry = formalBaseEntry
-    ? entries.find((entry) => entry.id === formalBaseEntry.id) ?? null
+    ? (entries.find((entry) => entry.id === formalBaseEntry.id) ?? null)
     : null;
-  const formalIndex = formalEntry ? entries.findIndex((entry) => entry.id === formalEntry.id) : 0;
+  const formalIndex = formalEntry
+    ? entries.findIndex((entry) => entry.id === formalEntry.id)
+    : 0;
   const displayEntry =
     (displaySnapshot
       ? entries.find((entry) => entry.id === displaySnapshot.entry.id)
       : formalEntry) ?? null;
   const currentIndex = displayEntry
-    ? Math.max(0, entries.findIndex((entry) => entry.id === displayEntry.id))
+    ? Math.max(
+        0,
+        entries.findIndex((entry) => entry.id === displayEntry.id),
+      )
     : formalIndex;
 
   const makeDisplaySnapshot = useCallback(
@@ -175,7 +198,7 @@ export function useFocusSpaceNavigator({
   const runGuard = useCallback(
     (
       targetIndex: number,
-      intent: 'set-current' | 'temporary' | 'inspect',
+      intent: "set-current" | "temporary" | "inspect",
     ): NavigationGuardResult => {
       const currentEntry = entries[currentIndex];
       const result = evaluateNavigationGuard({
@@ -205,22 +228,29 @@ export function useFocusSpaceNavigator({
   );
 
   const resolvePromotedEntry = useCallback(
-    (entry: NavigatorEntry): { entry: NavigatorEntry | null; didFallback: boolean } => {
-      const liveEntry = baseEntries.find((candidate) => candidate.id === entry.id);
+    (
+      entry: NavigatorEntry,
+    ): { entry: NavigatorEntry | null; didFallback: boolean } => {
+      const liveEntry = baseEntries.find(
+        (candidate) => candidate.id === entry.id,
+      );
       if (liveEntry) return { entry: liveEntry, didFallback: false };
-      if (entry.phase === 'normal') return { entry: null, didFallback: false };
+      if (entry.phase === "normal") return { entry: null, didFallback: false };
       const normalFallback = baseEntries.find(
         (candidate) =>
-          candidate.phase === 'normal' &&
+          candidate.phase === "normal" &&
           candidate.spaceKey === entry.spaceKey &&
           candidate.priorityLevel === entry.priorityLevel,
       );
-      return { entry: normalFallback ?? null, didFallback: Boolean(normalFallback) };
+      return {
+        entry: normalFallback ?? null,
+        didFallback: Boolean(normalFallback),
+      };
     },
     [baseEntries],
   );
 
-  const handleNavigate = useCallback<SpaceNavigatorRegistration['onNavigate']>(
+  const handleNavigate = useCallback<SpaceNavigatorRegistration["onNavigate"]>(
     ({ entry, index, intent, confirmed }) => {
       const guard = runGuard(index, intent);
       if (!guard.allowed) {
@@ -231,20 +261,24 @@ export function useFocusSpaceNavigator({
       }
       if (
         guard.checked &&
-        guard.advisoryReasons.includes('unvisited') &&
+        guard.advisoryReasons.includes("unvisited") &&
         !confirmed
       ) {
         return {
           ok: false,
           requiresConfirmation: true,
-          message: '現在のスペースに未購入のアイテムがあります。確認して移動してください。',
+          message:
+            "現在のスペースに未購入のアイテムがあります。確認して移動してください。",
         };
       }
 
-      if (intent === 'set-current') {
+      if (intent === "set-current") {
         const resolved = resolvePromotedEntry(entry);
         if (!resolved.entry) {
-          return { ok: false, message: '選択した訪問先を現在地にできませんでした' };
+          return {
+            ok: false,
+            message: "選択した訪問先を現在地にできませんでした",
+          };
         }
         onCommitOfficial(resolved.entry);
         setDisplaySnapshot(null);
@@ -255,19 +289,21 @@ export function useFocusSpaceNavigator({
       return {
         ok: true,
         message:
-          guard.checked && guard.advisoryReasons.includes('unvisited')
-            ? '前のスペースに未購入のアイテムがあります'
+          guard.checked && guard.advisoryReasons.includes("unvisited")
+            ? "前のスペースに未購入のアイテムがあります"
             : undefined,
       };
     },
     [makeDisplaySnapshot, onCommitOfficial, resolvePromotedEntry, runGuard],
   );
 
-  const handlePromote = useCallback<NonNullable<SpaceNavigatorRegistration['onPromote']>>(
+  const handlePromote = useCallback<
+    NonNullable<SpaceNavigatorRegistration["onPromote"]>
+  >(
     (entry) => {
       const resolved = resolvePromotedEntry(entry);
       if (!resolved.entry) {
-        return { ok: false, message: '一時移動先を現在地にできませんでした' };
+        return { ok: false, message: "一時移動先を現在地にできませんでした" };
       }
       onCommitOfficial(resolved.entry);
       setDisplaySnapshot(null);
@@ -275,30 +311,31 @@ export function useFocusSpaceNavigator({
       return {
         ok: true,
         message: resolved.didFallback
-          ? '対象フェーズから移動済みのため、同じスペースの通常フェーズを現在地にしました'
+          ? "対象フェーズから移動済みのため、同じスペースの通常フェーズを現在地にしました"
           : undefined,
       };
     },
     [onCommitOfficial, resolvePromotedEntry],
   );
 
-  const handleRestore = useCallback<NonNullable<SpaceNavigatorRegistration['onRestore']>>(
-    (point) => {
-      const payload = point.snapshot?.location?.payload as RestorePayload | undefined;
-      if (payload?.displaySnapshot) {
-        setDisplaySnapshot(payload.displaySnapshot);
-      } else {
-        setDisplaySnapshot(null);
-      }
-      setRecenterRevision((revision) => revision + 1);
-    },
-    [],
-  );
+  const handleRestore = useCallback<
+    NonNullable<SpaceNavigatorRegistration["onRestore"]>
+  >((point) => {
+    const payload = point.snapshot?.location?.payload as
+      | RestorePayload
+      | undefined;
+    if (payload?.displaySnapshot) {
+      setDisplaySnapshot(payload.displaySnapshot);
+    } else {
+      setDisplaySnapshot(null);
+    }
+    setRecenterRevision((revision) => revision + 1);
+  }, []);
 
   const registration = useMemo<SpaceNavigatorRegistration>(
     () => ({
       id: registrationId,
-      mode: 'focus',
+      mode: "focus",
       entries,
       currentIndex,
       formalIndex,
@@ -341,7 +378,9 @@ export function useFocusSpaceNavigator({
     updateRegistration(registration);
   }, [enabled, registration, updateRegistration]);
 
-  const previousFormalEntryIdRef = useRef<string | null>(formalEntry?.id ?? null);
+  const previousFormalEntryIdRef = useRef<string | null>(
+    formalEntry?.id ?? null,
+  );
   useEffect(() => {
     if (displaySnapshot) return;
     const nextId = formalEntry?.id ?? null;
@@ -360,18 +399,18 @@ export function useFocusSpaceNavigator({
       if (!targetEntry) {
         return {
           ok: false,
-          message: delta > 0 ? '最後の訪問先です' : '最初の訪問先です',
+          message: delta > 0 ? "最後の訪問先です" : "最初の訪問先です",
         };
       }
       if (delta > 0) {
-        const guard = runGuard(targetIndex, 'temporary');
+        const guard = runGuard(targetIndex, "temporary");
         if (!guard.allowed) {
           const message = getBlockingMessage(guard);
           navigator?.notify(message);
           return { ok: false, message };
         }
-        if (guard.advisoryReasons.includes('unvisited')) {
-          navigator?.notify('前のスペースに未購入のアイテムがあります');
+        if (guard.advisoryReasons.includes("unvisited")) {
+          navigator?.notify("前のスペースに未購入のアイテムがあります");
         }
       }
       setDisplaySnapshot(makeDisplaySnapshot(targetEntry));

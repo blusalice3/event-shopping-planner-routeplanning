@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useRef, useEffect, useCallback, useMemo } from "react";
 import {
   DayMapData,
   CellData,
@@ -8,21 +8,21 @@ import {
   NumberCellOutlineStyle,
   MIN_ZOOM,
   MAX_ZOOM,
-} from '../types/map';
-import { ShoppingItem } from '../types/item';
-import { FocusMapCenteringMode } from '../types/focus';
+} from "../types/map";
+import { ShoppingItem } from "../types/item";
+import { FocusMapCenteringMode } from "../types/focus";
 import {
   rotatePointAroundCenter,
   useCanvasViewport,
-} from '../features/map/canvas/useCanvasViewport';
-import { extractNumberFromItemNumber } from '../utils/xlsxMapParser';
-import { findRouteLookupNumberCell } from '../utils/mapRoutingSignature';
-import { findPath, simplifyPath } from '../utils/pathfinding';
+} from "../features/map/canvas/useCanvasViewport";
+import { extractNumberFromItemNumber } from "../utils/xlsxMapParser";
+import { findRouteLookupNumberCell } from "../utils/mapRoutingSignature";
+import { findPath, simplifyPath } from "../utils/pathfinding";
 import {
   buildSpaceKey,
   normalizeBaseSpaceNumber,
   normalizeSpaceBlock,
-} from '../features/space-navigation/domain/visitIdentity';
+} from "../features/space-navigation/domain/visitIdentity";
 import {
   findAllCrossingsIndexed,
   buildCrossingLookup,
@@ -30,7 +30,7 @@ import {
   collectEdgeWithBridges,
   BatchedPathRenderer,
   PixelEdge,
-} from '../utils/routeRendering';
+} from "../utils/routeRendering";
 
 interface FocusModeMapCanvasProps {
   mapData: DayMapData;
@@ -42,10 +42,14 @@ interface FocusModeMapCanvasProps {
   currentVisitKey: string | null;
   nextVisitKey: string | null;
   prevVisitKey: string | null;
-  currentPhase: 'normal' | 'postponed' | 'late';
-  selectedHallMode?: string | 'follow';
+  currentPhase: "normal" | "postponed" | "late";
+  selectedHallMode?: string | "follow";
   onZoomChange?: (newZoom: number) => void;
-  onCellClick?: (blockName: string, number: number, matchingItems: ShoppingItem[]) => void;
+  onCellClick?: (
+    blockName: string,
+    number: number,
+    matchingItems: ShoppingItem[],
+  ) => void;
   appZoomLevel?: number;
   hallDefinitions?: HallDefinition[];
   rotationAngle?: number;
@@ -57,9 +61,15 @@ interface FocusModeMapCanvasProps {
   numberCellOutlineStyle?: NumberCellOutlineStyle;
   mapCenteringMode?: FocusMapCenteringMode;
   // ルート再計算を避けるため、FocusMode 側で事前計算したデータを受け取る。
-  precomputedVisitKeyCellMap?: Map<string, { row: number; col: number; key: string }>;
+  precomputedVisitKeyCellMap?: Map<
+    string,
+    { row: number; col: number; key: string }
+  >;
   precomputedAllVisitCellCoords?: { row: number; col: number; key: string }[];
-  precomputedRouteSegments?: { path: { row: number; col: number }[]; segmentIndex: number }[];
+  precomputedRouteSegments?: {
+    path: { row: number; col: number }[];
+    segmentIndex: number;
+  }[];
 }
 
 const BASE_CELL_SIZE = 28;
@@ -68,7 +78,7 @@ const FILLED_SCROLL_MARGIN = 25;
 
 const hasCellInputValue = (value: string | number | null): boolean => {
   if (value === null || value === undefined) return false;
-  if (typeof value === 'string') return value.trim().length > 0;
+  if (typeof value === "string") return value.trim().length > 0;
   return true;
 };
 
@@ -80,8 +90,8 @@ type RgbColor = { r: number; g: number; b: number };
 
 const parseCssColorToRgb = (color: string): RgbColor | null => {
   const normalized = color.trim().toLowerCase();
-  if (normalized === 'white') return { r: 255, g: 255, b: 255 };
-  if (normalized === 'black') return { r: 0, g: 0, b: 0 };
+  if (normalized === "white") return { r: 255, g: 255, b: 255 };
+  if (normalized === "black") return { r: 0, g: 0, b: 0 };
 
   const hexMatch = normalized.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
   if (hexMatch) {
@@ -129,12 +139,12 @@ const isDarkLikeColor = (color: string): boolean => {
 const resolveMapTextColorForTheme = (
   color: string | null | undefined,
   isDarkMode: boolean,
-  fallback = '#333333',
+  fallback = "#333333",
 ): string => {
   const baseColor = color?.trim() || fallback;
   if (!isDarkMode) return baseColor;
   if (isWhiteLikeColor(baseColor)) return baseColor;
-  return isDarkLikeColor(baseColor) ? '#FFFFFF' : baseColor;
+  return isDarkLikeColor(baseColor) ? "#FFFFFF" : baseColor;
 };
 
 const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
@@ -148,7 +158,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   nextVisitKey,
   prevVisitKey,
   currentPhase,
-  selectedHallMode = 'follow',
+  selectedHallMode = "follow",
   onZoomChange,
   onCellClick,
   appZoomLevel = 100,
@@ -159,8 +169,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   currentPhaseIndex = 0,
   currentRouteIndex = currentPhaseIndex,
   recenterRevision = 0,
-  numberCellOutlineStyle = 'rounded',
-  mapCenteringMode = 'prevToCurrent',
+  numberCellOutlineStyle = "rounded",
+  mapCenteringMode = "prevToCurrent",
   precomputedVisitKeyCellMap,
   precomputedAllVisitCellCoords,
   precomputedRouteSegments,
@@ -202,7 +212,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   });
   const appScale = Math.max(0.01, appZoomLevel / 100);
   const isDarkMode =
-    typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+    typeof document !== "undefined" &&
+    document.documentElement.classList.contains("dark");
   const isDetailedView = true;
   const showNumbers = true;
   const showBorders = true;
@@ -227,7 +238,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
   const dayName = useMemo(() => {
     const dayMatch = mapName.match(/^(.+)マップ$/);
-    return dayMatch ? dayMatch[1].trim() : '';
+    return dayMatch ? dayMatch[1].trim() : "";
   }, [mapName]);
 
   const cellStates = useMemo(() => {
@@ -253,17 +264,18 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     if (!dayName) return states;
 
     items.forEach((item) => {
-      const itemEventDate = item.eventDate?.trim() || '';
+      const itemEventDate = item.eventDate?.trim() || "";
       if (itemEventDate !== dayName) return;
 
-      const itemBlockName = normalizeSpaceBlock(item.block || '');
+      const itemBlockName = normalizeSpaceBlock(item.block || "");
       let block = mapData.blocks.find(
         (candidate) => normalizeSpaceBlock(candidate.name) === itemBlockName,
       );
       if (!block) {
         const candidates = mapData.blocks.filter(
           (candidate) =>
-            normalizeSpaceBlock(candidate.name).toLowerCase() === itemBlockName.toLowerCase(),
+            normalizeSpaceBlock(candidate.name).toLowerCase() ===
+            itemBlockName.toLowerCase(),
         );
         if (candidates.length === 1) {
           block = candidates[0];
@@ -271,7 +283,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
       if (!block) return;
 
-      const numStr = extractNumberFromItemNumber(normalizeBaseSpaceNumber(item.number));
+      const numStr = extractNumberFromItemNumber(
+        normalizeBaseSpaceNumber(item.number),
+      );
       if (!numStr) return;
 
       const num = parseInt(numStr, 10);
@@ -300,17 +314,17 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       existing.items.push(item);
       existing.visitKeys.add(visitKey);
 
-      if (item.purchaseStatus === 'None') {
+      if (item.purchaseStatus === "None") {
         existing.allProcessed = false;
       } else {
         existing.allNone = false;
       }
-      if (item.purchaseStatus === 'Postpone') {
+      if (item.purchaseStatus === "Postpone") {
         existing.hasPostponed = true;
       } else {
         existing.allPostponed = false;
       }
-      if (item.purchaseStatus === 'Late') {
+      if (item.purchaseStatus === "Late") {
         existing.hasLate = true;
       } else {
         existing.allLate = false;
@@ -322,15 +336,17 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     states.forEach((state, _key) => {
       const hasFinalStatus = state.items.some(
         (item) =>
-          item.purchaseStatus === 'Purchased' ||
-          item.purchaseStatus === 'SoldOut' ||
-          item.purchaseStatus === 'Absent',
+          item.purchaseStatus === "Purchased" ||
+          item.purchaseStatus === "SoldOut" ||
+          item.purchaseStatus === "Absent",
       );
       const onlyPostponedOrLate = state.items.every(
-        (item) => item.purchaseStatus === 'Postpone' || item.purchaseStatus === 'Late',
+        (item) =>
+          item.purchaseStatus === "Postpone" || item.purchaseStatus === "Late",
       );
       state.isVisited =
-        !state.allNone && (hasFinalStatus || (!state.allNone && !onlyPostponedOrLate));
+        !state.allNone &&
+        (hasFinalStatus || (!state.allNone && !onlyPostponedOrLate));
 
       if (currentVisitKey && state.visitKeys.has(currentVisitKey)) {
         state.isCurrentPosition = true;
@@ -344,12 +360,19 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     });
 
     return states;
-  }, [mapData.blocks, items, dayName, currentVisitKey, nextVisitKey, prevVisitKey]);
+  }, [
+    mapData.blocks,
+    items,
+    dayName,
+    currentVisitKey,
+    nextVisitKey,
+    prevVisitKey,
+  ]);
 
   const currentCellCoords = useMemo(() => {
     for (const [key, state] of cellStates.entries()) {
       if (state.isCurrentPosition) {
-        const [row, col] = key.split('-').map(Number);
+        const [row, col] = key.split("-").map(Number);
         return { row, col };
       }
     }
@@ -359,7 +382,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const nextCellCoords = useMemo(() => {
     for (const [key, state] of cellStates.entries()) {
       if (state.isNextDestination) {
-        const [row, col] = key.split('-').map(Number);
+        const [row, col] = key.split("-").map(Number);
         return { row, col };
       }
     }
@@ -369,7 +392,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const prevCellCoords = useMemo(() => {
     for (const [key, state] of cellStates.entries()) {
       if (state.isPreviousPosition) {
-        const [row, col] = key.split('-').map(Number);
+        const [row, col] = key.split("-").map(Number);
         return { row, col };
       }
     }
@@ -393,24 +416,56 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       if (state.isCurrentPosition) {
         if (currentPhaseIndex === 0) {
           // 各フェーズの最初の訪問セルにはフェーズ別ラベルを表示する。
-          if (currentPhase === 'normal') {
-            labels.set(key, { text: '始', bgColor: 'rgba(255,109,0,0.5)', textColor: '#FFFFFF' });
-          } else if (currentPhase === 'postponed') {
-            labels.set(key, { text: '後始', bgColor: 'rgba(156,39,176,0.5)', textColor: '#FFFFFF' });
+          if (currentPhase === "normal") {
+            labels.set(key, {
+              text: "始",
+              bgColor: "rgba(255,109,0,0.5)",
+              textColor: "#FFFFFF",
+            });
+          } else if (currentPhase === "postponed") {
+            labels.set(key, {
+              text: "後始",
+              bgColor: "rgba(156,39,176,0.5)",
+              textColor: "#FFFFFF",
+            });
           } else {
-            labels.set(key, { text: '遅始', bgColor: 'rgba(33,150,243,0.5)', textColor: '#FFFFFF' });
+            labels.set(key, {
+              text: "遅始",
+              bgColor: "rgba(33,150,243,0.5)",
+              textColor: "#FFFFFF",
+            });
           }
         } else {
-          labels.set(key, { text: '\u6B21', bgColor: 'rgba(255,109,0,0.5)', textColor: '#FFFFFF' });
+          labels.set(key, {
+            text: "\u6B21",
+            bgColor: "rgba(255,109,0,0.5)",
+            textColor: "#FFFFFF",
+          });
         }
       } else if (state.allProcessed && state.allPostponed) {
-        labels.set(key, { text: '後', bgColor: 'rgba(156,39,176,0.4)', textColor: 'rgba(156,39,176,0.9)' });
+        labels.set(key, {
+          text: "後",
+          bgColor: "rgba(156,39,176,0.4)",
+          textColor: "rgba(156,39,176,0.9)",
+        });
       } else if (state.allProcessed && state.allLate) {
-        labels.set(key, { text: '遅', bgColor: 'rgba(33,150,243,0.4)', textColor: 'rgba(33,150,243,0.9)' });
+        labels.set(key, {
+          text: "遅",
+          bgColor: "rgba(33,150,243,0.4)",
+          textColor: "rgba(33,150,243,0.9)",
+        });
       } else if (state.allProcessed) {
-        labels.set(key, { text: '済', bgColor: 'rgba(158,158,158,0.5)', textColor: 'rgba(76,175,80,0.8)' });
+        labels.set(key, {
+          text: "済",
+          bgColor: "rgba(158,158,158,0.5)",
+          textColor: "rgba(76,175,80,0.8)",
+        });
       } else if (state.allNone) {
-        labels.set(key, { text: '\u672A', bgColor: 'rgba(66,165,245,0.3)', textColor: 'rgba(33,150,243,0.8)' });
+        labels.set(key, {
+          text: "\u672A",
+          bgColor: "rgba(66,165,245,0.3)",
+          textColor: "rgba(33,150,243,0.8)",
+        });
       }
     });
 
@@ -442,7 +497,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
             yi = vertices[i].row;
           const xj = vertices[j].col,
             yj = vertices[j].row;
-          if (yi > row !== yj > row && col < ((xj - xi) * (row - yi)) / (yj - yi) + xi) {
+          if (
+            yi > row !== yj > row &&
+            col < ((xj - xi) * (row - yi)) / (yj - yi) + xi
+          ) {
             inside = !inside;
           }
         }
@@ -457,7 +515,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     if (!prevCellCoords || !currentCellCoords) return false;
     if (!hallDefinitions || hallDefinitions.length === 0) return true;
     const prevHall = findHallForCell(prevCellCoords.row, prevCellCoords.col);
-    const currentHall = findHallForCell(currentCellCoords.row, currentCellCoords.col);
+    const currentHall = findHallForCell(
+      currentCellCoords.row,
+      currentCellCoords.col,
+    );
     if (!prevHall || !currentHall) return false;
     return prevHall.id === currentHall.id;
   }, [prevCellCoords, currentCellCoords, hallDefinitions, findHallForCell]);
@@ -530,14 +591,21 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
   const calcOptimalZoom = useCallback(
     (
-      bounds: { minRow: number; maxRow: number; minCol: number; maxCol: number },
+      bounds: {
+        minRow: number;
+        maxRow: number;
+        minCol: number;
+        maxCol: number;
+      },
       containerWidth: number,
       containerHeight: number,
     ): number => {
       const bWidth = bounds.maxCol - bounds.minCol + 1;
       const bHeight = bounds.maxRow - bounds.minRow + 1;
-      const requiredWidthZoom = (containerWidth / (bWidth * BASE_CELL_SIZE)) * 100;
-      const requiredHeightZoom = (containerHeight / (bHeight * BASE_CELL_SIZE)) * 100;
+      const requiredWidthZoom =
+        (containerWidth / (bWidth * BASE_CELL_SIZE)) * 100;
+      const requiredHeightZoom =
+        (containerHeight / (bHeight * BASE_CELL_SIZE)) * 100;
       return Math.min(requiredWidthZoom, requiredHeightZoom, 100);
     },
     [],
@@ -581,7 +649,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
   const effectiveShowPrevRef = useRef<boolean>(true);
 
-  const routeBounds = mapCenteringMode === 'currentOnly' ? routeBoundsCurrentOnly : routeBoundsPrevCurrent;
+  const routeBounds =
+    mapCenteringMode === "currentOnly"
+      ? routeBoundsCurrentOnly
+      : routeBoundsPrevCurrent;
 
   const prevCenterRequestRef = useRef<string | null>(null);
 
@@ -624,10 +695,18 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const containerHeight = container.clientHeight;
 
     if (routeBounds && currentCellCoords) {
-      effectiveShowPrevRef.current = mapCenteringMode === 'prevToCurrent' && showPrevRoute;
+      effectiveShowPrevRef.current =
+        mapCenteringMode === "prevToCurrent" && showPrevRoute;
 
-      const optimalZoom = calcOptimalZoom(routeBounds, containerWidth, containerHeight);
-      const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(optimalZoom)));
+      const optimalZoom = calcOptimalZoom(
+        routeBounds,
+        containerWidth,
+        containerHeight,
+      );
+      const newZoom = Math.max(
+        MIN_ZOOM,
+        Math.min(MAX_ZOOM, Math.round(optimalZoom)),
+      );
 
       if (onZoomChange) {
         onZoomChange(newZoom);
@@ -707,7 +786,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   ]);
 
   useEffect(() => {
-    const centerRequestKey = `${currentVisitKey ?? ''}:${recenterRevision}`;
+    const centerRequestKey = `${currentVisitKey ?? ""}:${recenterRevision}`;
     if (prevCenterRequestRef.current === centerRequestKey) {
       return;
     }
@@ -720,10 +799,18 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    effectiveShowPrevRef.current = mapCenteringMode === 'prevToCurrent' && showPrevRoute;
+    effectiveShowPrevRef.current =
+      mapCenteringMode === "prevToCurrent" && showPrevRoute;
 
-    const optimalZoom = calcOptimalZoom(routeBounds, containerWidth, containerHeight);
-    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(optimalZoom)));
+    const optimalZoom = calcOptimalZoom(
+      routeBounds,
+      containerWidth,
+      containerHeight,
+    );
+    const newZoom = Math.max(
+      MIN_ZOOM,
+      Math.min(MAX_ZOOM, Math.round(optimalZoom)),
+    );
 
     if (onZoomChange) {
       onZoomChange(newZoom);
@@ -771,10 +858,18 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    effectiveShowPrevRef.current = mapCenteringMode === 'prevToCurrent' && showPrevRoute;
+    effectiveShowPrevRef.current =
+      mapCenteringMode === "prevToCurrent" && showPrevRoute;
 
-    const optimalZoom = calcOptimalZoom(routeBounds, containerWidth, containerHeight);
-    const newZoom = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(optimalZoom)));
+    const optimalZoom = calcOptimalZoom(
+      routeBounds,
+      containerWidth,
+      containerHeight,
+    );
+    const newZoom = Math.max(
+      MIN_ZOOM,
+      Math.min(MAX_ZOOM, Math.round(optimalZoom)),
+    );
 
     if (onZoomChange) {
       onZoomChange(newZoom);
@@ -839,7 +934,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const container = containerRef.current;
     if (!canvas || !container) return;
 
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const containerWidth = container.clientWidth;
@@ -865,7 +960,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     }
 
     ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = 'high';
+    ctx.imageSmoothingQuality = "high";
 
     // toMapCoordinates への依存を避けるため、表示座標からマップ座標への変換をここで行う。
     const viewToMap = (viewX: number, viewY: number) => {
@@ -876,7 +971,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const dy = ty - mapCenterY;
       const cos = Math.cos(rotationRadians);
       const sin = Math.sin(rotationRadians);
-      return { x: dx * cos + dy * sin + mapCenterX, y: -dx * sin + dy * cos + mapCenterY };
+      return {
+        x: dx * cos + dy * sin + mapCenterX,
+        y: -dx * sin + dy * cos + mapCenterY,
+      };
     };
     const viewportCorners = [
       viewToMap(0, 0),
@@ -884,15 +982,25 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       viewToMap(0, containerHeight),
       viewToMap(containerWidth, containerHeight),
     ];
-    const visibleMinX = Math.min(...viewportCorners.map((point) => point.x)) - cellSize * 2;
-    const visibleMaxX = Math.max(...viewportCorners.map((point) => point.x)) + cellSize * 2;
-    const visibleMinY = Math.min(...viewportCorners.map((point) => point.y)) - cellSize * 2;
-    const visibleMaxY = Math.max(...viewportCorners.map((point) => point.y)) + cellSize * 2;
+    const visibleMinX =
+      Math.min(...viewportCorners.map((point) => point.x)) - cellSize * 2;
+    const visibleMaxX =
+      Math.max(...viewportCorners.map((point) => point.x)) + cellSize * 2;
+    const visibleMinY =
+      Math.min(...viewportCorners.map((point) => point.y)) - cellSize * 2;
+    const visibleMaxY =
+      Math.max(...viewportCorners.map((point) => point.y)) + cellSize * 2;
 
     const visMinCol = Math.max(1, Math.floor(visibleMinX / cellSize) + 1);
-    const visMaxCol = Math.min(mapData.maxCol, Math.ceil(visibleMaxX / cellSize) + 1);
+    const visMaxCol = Math.min(
+      mapData.maxCol,
+      Math.ceil(visibleMaxX / cellSize) + 1,
+    );
     const visMinRow = Math.max(1, Math.floor(visibleMinY / cellSize) + 1);
-    const visMaxRow = Math.min(mapData.maxRow, Math.ceil(visibleMaxY / cellSize) + 1);
+    const visMaxRow = Math.min(
+      mapData.maxRow,
+      Math.ceil(visibleMaxY / cellSize) + 1,
+    );
 
     const isCellVisible = (
       row: number,
@@ -920,9 +1028,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.restore();
     };
 
-    const splitTokenByWidth = (token: string, maxLineWidth: number): string[] => {
+    const splitTokenByWidth = (
+      token: string,
+      maxLineWidth: number,
+    ): string[] => {
       const chunks: string[] = [];
-      let current = '';
+      let current = "";
 
       Array.from(token).forEach((char) => {
         const next = current + char;
@@ -937,17 +1048,17 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       if (current.length > 0) {
         chunks.push(current);
       }
-      return chunks.length > 0 ? chunks : [''];
+      return chunks.length > 0 ? chunks : [""];
     };
 
     const tokenizeLineForWrap = (line: string): string[] => {
       const tokens: string[] = [];
-      let currentAsciiWord = '';
+      let currentAsciiWord = "";
 
       const flushAsciiWord = () => {
         if (currentAsciiWord.length === 0) return;
         tokens.push(currentAsciiWord);
-        currentAsciiWord = '';
+        currentAsciiWord = "";
       };
 
       Array.from(line).forEach((char) => {
@@ -965,30 +1076,36 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
       flushAsciiWord();
 
-      return tokens.length > 0 ? tokens : [''];
+      return tokens.length > 0 ? tokens : [""];
     };
 
-    const splitTextByWidth = (sourceText: string, maxLineWidth: number): string[] => {
-      const rawLines = sourceText.split('\n');
+    const splitTextByWidth = (
+      sourceText: string,
+      maxLineWidth: number,
+    ): string[] => {
+      const rawLines = sourceText.split("\n");
       const wrappedLines: string[] = [];
 
       rawLines.forEach((rawLine) => {
         if (rawLine.length === 0) {
-          wrappedLines.push('');
+          wrappedLines.push("");
           return;
         }
 
         const tokens = tokenizeLineForWrap(rawLine);
-        let current = '';
+        let current = "";
 
         tokens.forEach((token) => {
           const next = current + token;
-          if (current.length > 0 && ctx.measureText(next).width > maxLineWidth) {
+          if (
+            current.length > 0 &&
+            ctx.measureText(next).width > maxLineWidth
+          ) {
             wrappedLines.push(current.trimEnd());
 
             const normalizedToken = token.trimStart();
             if (normalizedToken.length === 0) {
-              current = '';
+              current = "";
               return;
             }
 
@@ -1007,15 +1124,18 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         wrappedLines.push(current.trimEnd());
       });
 
-      return wrappedLines.length > 0 ? wrappedLines : [''];
+      return wrappedLines.length > 0 ? wrappedLines : [""];
     };
 
     const trimLineToWidth = (line: string, maxLineWidth: number): string => {
       let next = line;
-      while (next.length > 0 && ctx.measureText(`${next}…`).width > maxLineWidth) {
+      while (
+        next.length > 0 &&
+        ctx.measureText(`${next}…`).width > maxLineWidth
+      ) {
         next = next.slice(0, -1);
       }
-      return next.length > 0 ? `${next}…` : '…';
+      return next.length > 0 ? `${next}…` : "…";
     };
 
     const drawFittedHorizontalTextInCell = (
@@ -1026,18 +1146,26 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       height: number,
       preferredFontSize: number,
     ) => {
-      const fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      const fontFamily =
+        '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
       const minFontSize = 6;
       const innerPaddingX = Math.max(1, preferredFontSize * 0.2);
       const innerPaddingY = Math.max(1, preferredFontSize * 0.2);
       const maxLineWidth = Math.max(1, width - innerPaddingX * 2);
       const maxTextHeight = Math.max(1, height - innerPaddingY * 2);
 
-      let resolvedFontSize = Math.max(minFontSize, Math.floor(preferredFontSize));
+      let resolvedFontSize = Math.max(
+        minFontSize,
+        Math.floor(preferredFontSize),
+      );
       let resolvedLineHeight = resolvedFontSize * 1.15;
       let resolvedLines = splitTextByWidth(sourceText, maxLineWidth);
 
-      for (let size = Math.max(minFontSize, Math.floor(preferredFontSize)); size >= minFontSize; size--) {
+      for (
+        let size = Math.max(minFontSize, Math.floor(preferredFontSize));
+        size >= minFontSize;
+        size--
+      ) {
         ctx.font = `${size}px ${fontFamily}`;
         const candidateLines = splitTextByWidth(sourceText, maxLineWidth);
         const candidateLineHeight = size * 1.15;
@@ -1050,10 +1178,16 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       }
 
       ctx.font = `${resolvedFontSize}px ${fontFamily}`;
-      const maxLines = Math.max(1, Math.floor(maxTextHeight / resolvedLineHeight));
+      const maxLines = Math.max(
+        1,
+        Math.floor(maxTextHeight / resolvedLineHeight),
+      );
       if (resolvedLines.length > maxLines) {
         const clamped = resolvedLines.slice(0, maxLines);
-        clamped[maxLines - 1] = trimLineToWidth(clamped[maxLines - 1], maxLineWidth);
+        clamped[maxLines - 1] = trimLineToWidth(
+          clamped[maxLines - 1],
+          maxLineWidth,
+        );
         resolvedLines = clamped;
       }
 
@@ -1062,11 +1196,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.rect(x, y, width, height);
       ctx.clip();
       ctx.font = `${resolvedFontSize}px ${fontFamily}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
 
       const totalTextHeight = resolvedLines.length * resolvedLineHeight;
-      const startY = y + (height - totalTextHeight) / 2 + resolvedLineHeight / 2;
+      const startY =
+        y + (height - totalTextHeight) / 2 + resolvedLineHeight / 2;
       const centerX = x + width / 2;
 
       resolvedLines.forEach((line, lineIndex) => {
@@ -1075,8 +1210,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
 
       ctx.restore();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
     };
 
     const drawFittedVerticalTextInCell = (
@@ -1087,9 +1222,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       height: number,
       preferredFontSize: number,
     ) => {
-      const fontFamily = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
+      const fontFamily =
+        '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif';
       const minFontSize = 6;
-      const columns = sourceText.split(/\n/).map((line) => line || ' ');
+      const columns = sourceText.split(/\n/).map((line) => line || " ");
       const innerPaddingX = Math.max(1, preferredFontSize * 0.2);
       const innerPaddingY = Math.max(1, preferredFontSize * 0.2);
       const maxTextWidth = Math.max(1, width - innerPaddingX * 2);
@@ -1099,12 +1235,21 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         const columnSpacing = fontSize * 1.2;
         const rowSpacing = fontSize * 1.1;
         const requiredWidth = columns.length * columnSpacing;
-        const requiredHeight = Math.max(...columns.map((column) => Array.from(column).length)) * rowSpacing;
+        const requiredHeight =
+          Math.max(...columns.map((column) => Array.from(column).length)) *
+          rowSpacing;
         return requiredWidth <= maxTextWidth && requiredHeight <= maxTextHeight;
       };
 
-      let resolvedFontSize = Math.max(minFontSize, Math.floor(preferredFontSize));
-      for (let size = Math.max(minFontSize, Math.floor(preferredFontSize)); size >= minFontSize; size--) {
+      let resolvedFontSize = Math.max(
+        minFontSize,
+        Math.floor(preferredFontSize),
+      );
+      for (
+        let size = Math.max(minFontSize, Math.floor(preferredFontSize));
+        size >= minFontSize;
+        size--
+      ) {
         if (canFitVerticalText(size)) {
           resolvedFontSize = size;
           break;
@@ -1116,13 +1261,15 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const maxColumns = Math.max(1, Math.floor(maxTextWidth / columnSpacing));
       const maxRows = Math.max(1, Math.floor(maxTextHeight / rowSpacing));
 
-      let drawableColumns = columns.slice(0, maxColumns).map((column) => Array.from(column));
+      let drawableColumns = columns
+        .slice(0, maxColumns)
+        .map((column) => Array.from(column));
       const hadHiddenColumns = columns.length > maxColumns;
 
       drawableColumns = drawableColumns.map((chars) => {
         if (chars.length <= maxRows) return chars;
         const trimmed = chars.slice(0, maxRows);
-        trimmed[maxRows - 1] = '…';
+        trimmed[maxRows - 1] = "…";
         return trimmed;
       });
 
@@ -1130,9 +1277,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         const lastColumnIndex = drawableColumns.length - 1;
         const lastColumn = drawableColumns[lastColumnIndex];
         if (lastColumn.length < maxRows) {
-          lastColumn.push('…');
+          lastColumn.push("…");
         } else {
-          lastColumn[lastColumn.length - 1] = '…';
+          lastColumn[lastColumn.length - 1] = "…";
         }
       }
 
@@ -1141,8 +1288,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ctx.rect(x, y, width, height);
       ctx.clip();
       ctx.font = `${resolvedFontSize}px ${fontFamily}`;
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
 
       const totalWidth = drawableColumns.length * columnSpacing;
       const startX = x + width / 2 + (totalWidth - columnSpacing) / 2;
@@ -1159,29 +1306,42 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       });
 
       ctx.restore();
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
     };
 
     // 番号セルのスタイル値はループ外で解決する。
     const outlineStyle = numberCellOutlineStyle;
-    const useInset = outlineStyle !== 'none';
+    const useInset = outlineStyle !== "none";
     const ncPad = useInset ? cellSize * 0.1 : 0;
-    const ncRadius = outlineStyle === 'rounded' ? Math.max(2, cellSize * 0.18) : 0;
-    const ncBg = isDarkMode ? '#1E293B' : '#FFFFFF';
-    const ncBorder = isDarkMode ? '#475569' : '#CBD5E1';
+    const ncRadius =
+      outlineStyle === "rounded" ? Math.max(2, cellSize * 0.18) : 0;
+    const ncBg = isDarkMode ? "#1E293B" : "#FFFFFF";
+    const ncBorder = isDarkMode ? "#475569" : "#CBD5E1";
     const ncBorderWidth = Math.max(1, cellSize * 0.055);
-    const drawStroke = outlineStyle !== 'none';
-    const isDashed = outlineStyle === 'dashed';
+    const drawStroke = outlineStyle !== "none";
+    const isDashed = outlineStyle === "dashed";
 
     // セルのパス生成処理をスタイルごとにまとめる。
-    const drawCellPath = ncRadius > 0
-      ? (rx: number, ry: number, rw: number, rh: number) => ctx.roundRect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2, ncRadius)
-      : (rx: number, ry: number, rw: number, rh: number) => ctx.rect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2);
+    const drawCellPath =
+      ncRadius > 0
+        ? (rx: number, ry: number, rw: number, rh: number) =>
+            ctx.roundRect(
+              rx + ncPad,
+              ry + ncPad,
+              rw - ncPad * 2,
+              rh - ncPad * 2,
+              ncRadius,
+            )
+        : (rx: number, ry: number, rw: number, rh: number) =>
+            ctx.rect(rx + ncPad, ry + ncPad, rw - ncPad * 2, rh - ncPad * 2);
 
     // 一括描画用にジオメトリを収集する。
     const ncRects: { x: number; y: number; w: number; h: number }[] = [];
-    const overlayGroups = new Map<string, { x: number; y: number; w: number; h: number }[]>();
+    const overlayGroups = new Map<
+      string,
+      { x: number; y: number; w: number; h: number }[]
+    >();
 
     mapData.cells.forEach((cell) => {
       if (cell.isMerged) return;
@@ -1220,29 +1380,29 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           }
         } else if (state.isVisited) {
           if (isNumberCell) {
-            const color = 'rgba(158, 158, 158, 0.5)';
+            const color = "rgba(158, 158, 158, 0.5)";
             if (!overlayGroups.has(color)) overlayGroups.set(color, []);
             overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
-            ctx.fillStyle = 'rgba(158, 158, 158, 0.5)';
+            ctx.fillStyle = "rgba(158, 158, 158, 0.5)";
             ctx.fillRect(x, y, width, height);
           }
-        } else if (state.hasPostponed && currentPhase !== 'postponed') {
+        } else if (state.hasPostponed && currentPhase !== "postponed") {
           if (isNumberCell) {
-            const color = 'rgba(156, 39, 176, 0.4)';
+            const color = "rgba(156, 39, 176, 0.4)";
             if (!overlayGroups.has(color)) overlayGroups.set(color, []);
             overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
-            ctx.fillStyle = 'rgba(156, 39, 176, 0.4)';
+            ctx.fillStyle = "rgba(156, 39, 176, 0.4)";
             ctx.fillRect(x, y, width, height);
           }
-        } else if (state.hasLate && currentPhase !== 'late') {
+        } else if (state.hasLate && currentPhase !== "late") {
           if (isNumberCell) {
-            const color = 'rgba(33, 150, 243, 0.4)';
+            const color = "rgba(33, 150, 243, 0.4)";
             if (!overlayGroups.has(color)) overlayGroups.set(color, []);
             overlayGroups.get(color)!.push({ x, y, w: width, h: height });
           } else {
-            ctx.fillStyle = 'rgba(33, 150, 243, 0.4)';
+            ctx.fillStyle = "rgba(33, 150, 243, 0.4)";
             ctx.fillRect(x, y, width, height);
           }
         }
@@ -1287,9 +1447,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
     // セル境界線を描画する。
     if (showBorders && !isRotationInteracting) {
-      type DrawnBorder = NonNullable<CellData['borders']['top']>;
+      type DrawnBorder = NonNullable<CellData["borders"]["top"]>;
       type BorderEdge = {
-        orientation: 'h' | 'v';
+        orientation: "h" | "v";
         gridX: number;
         gridY: number;
         border: DrawnBorder;
@@ -1297,13 +1457,13 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       const borderWeight = (border: DrawnBorder): number => {
         switch (border.style) {
-          case 'double':
+          case "double":
             return 4;
-          case 'thick':
+          case "thick":
             return 3;
-          case 'medium':
+          case "medium":
             return 2;
-          case 'thin':
+          case "thin":
           default:
             return 1;
         }
@@ -1320,7 +1480,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         if (candidateWeight > currentWeight) return candidate;
         if (candidateWeight < currentWeight) return current;
 
-        if (current.color === '#000000' && candidate.color !== '#000000') {
+        if (current.color === "#000000" && candidate.color !== "#000000") {
           return candidate;
         }
 
@@ -1329,7 +1489,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
       const edgeMap = new Map<string, BorderEdge>();
       const upsertEdge = (
-        orientation: 'h' | 'v',
+        orientation: "h" | "v",
         gridX: number,
         gridY: number,
         border: DrawnBorder | null,
@@ -1365,36 +1525,36 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         }
 
         if (topBorder) {
-          upsertEdge('h', startCol, startRow, topBorder);
+          upsertEdge("h", startCol, startRow, topBorder);
         }
         if (bottomBorder) {
-          upsertEdge('h', startCol, endRow, bottomBorder);
+          upsertEdge("h", startCol, endRow, bottomBorder);
         }
         if (leftBorder) {
-          upsertEdge('v', startCol, startRow, leftBorder);
+          upsertEdge("v", startCol, startRow, leftBorder);
         }
         if (rightBorder) {
-          upsertEdge('v', endCol, startRow, rightBorder);
+          upsertEdge("v", endCol, startRow, rightBorder);
         }
       });
 
       const softBorderColor = (color: string | undefined): string => {
-        const c = color || '#000000';
-        if (c === '#000000') return isDarkMode ? '#666666' : '#555555';
+        const c = color || "#000000";
+        if (c === "#000000") return isDarkMode ? "#666666" : "#555555";
         return c;
       };
 
       edgeMap.forEach(({ orientation, gridX, gridY, border }) => {
         let lineWidth = 1;
         switch (border.style) {
-          case 'double':
-          case 'thick':
+          case "double":
+          case "thick":
             lineWidth = 3;
             break;
-          case 'medium':
+          case "medium":
             lineWidth = 2;
             break;
-          case 'thin':
+          case "thin":
           default:
             lineWidth = 1;
             break;
@@ -1402,13 +1562,13 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
         const startX = gridX * cellSize;
         const startY = gridY * cellSize;
-        const endX = orientation === 'h' ? (gridX + 1) * cellSize : startX;
-        const endY = orientation === 'v' ? (gridY + 1) * cellSize : startY;
+        const endX = orientation === "h" ? (gridX + 1) * cellSize : startX;
+        const endY = orientation === "v" ? (gridY + 1) * cellSize : startY;
 
         ctx.beginPath();
         ctx.strokeStyle = softBorderColor(border.color);
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
         ctx.lineWidth = lineWidth;
         ctx.moveTo(startX, startY);
         ctx.lineTo(endX, endY);
@@ -1436,12 +1596,16 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         let fontSize: number;
         if (merge) {
           if (isVertical) {
-            const charCount = text.replace(/\n/g, '').length;
-            fontSize = Math.min(width * 0.6, (height / (charCount + 1)) * 0.9, 16);
+            const charCount = text.replace(/\n/g, "").length;
+            fontSize = Math.min(
+              width * 0.6,
+              (height / (charCount + 1)) * 0.9,
+              16,
+            );
           } else {
             fontSize = Math.min(width, height) * (isDetailedView ? 0.5 : 0.4);
           }
-        } else if (typeof cell.value === 'number') {
+        } else if (typeof cell.value === "number") {
           fontSize = Math.min(cellSize * 0.45, 14);
         } else {
           fontSize = Math.min(cellSize * 0.4, 12);
@@ -1449,23 +1613,29 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         fontSize = Math.max(fontSize, 8);
 
         ctx.font = `${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
 
         const state = cellStates.get(`${cell.row}-${cell.col}`);
         const explicitFontColor = cell.fontColor?.trim();
         if (explicitFontColor) {
-          ctx.fillStyle = resolveMapTextColorForTheme(explicitFontColor, isDarkMode);
+          ctx.fillStyle = resolveMapTextColorForTheme(
+            explicitFontColor,
+            isDarkMode,
+          );
         } else if (state?.isCurrentPosition) {
-          ctx.fillStyle = '#E65100';
+          ctx.fillStyle = "#E65100";
         } else if (state?.isVisited) {
-          ctx.fillStyle = resolveMapTextColorForTheme('#616161', isDarkMode);
+          ctx.fillStyle = resolveMapTextColorForTheme("#616161", isDarkMode);
         } else if (state?.hasItems) {
-          ctx.fillStyle = '#1565C0';
+          ctx.fillStyle = "#1565C0";
         } else if (numberCellSet.has(`${cell.row}-${cell.col}`)) {
-          ctx.fillStyle = isDarkMode ? '#E2E8F0' : '#334155';
+          ctx.fillStyle = isDarkMode ? "#E2E8F0" : "#334155";
         } else {
-          ctx.fillStyle = resolveMapTextColorForTheme(cell.fontColor, isDarkMode);
+          ctx.fillStyle = resolveMapTextColorForTheme(
+            cell.fontColor,
+            isDarkMode,
+          );
         }
 
         if (isVertical) {
@@ -1478,7 +1648,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
             const startX = x + width / 2 + (totalWidth - lineSpacing) / 2;
 
             lines.forEach((line, lineIndex) => {
-              const chars = line.split('');
+              const chars = line.split("");
               const totalHeight = chars.length * fontSize * 1.1;
               const startY = y + (height - totalHeight) / 2 + fontSize / 2;
               const lineX = startX - lineIndex * lineSpacing;
@@ -1498,7 +1668,11 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     }
 
     // ドラッグ中の再描画で再計算しないよう、ルート交差データをキャッシュする。
-    if (!isRotationInteracting && routeSegments.length > 0 && routeCrossingData) {
+    if (
+      !isRotationInteracting &&
+      routeSegments.length > 0 &&
+      routeCrossingData
+    ) {
       const lineWidth = Math.max(2, cellSize * 0.08);
       const { crossingLookup, bridgeParams } = routeCrossingData;
 
@@ -1519,12 +1693,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
         // 現在フェーズ位置に応じてルート線の見た目を切り替える。
         if (segment.segmentIndex < currentRouteIndex - 1) {
-          strokeStyle = 'rgba(156, 163, 175, 0.4)';
+          strokeStyle = "rgba(156, 163, 175, 0.4)";
         } else if (segment.segmentIndex === currentRouteIndex - 1) {
-          strokeStyle = 'rgba(255, 109, 0, 0.6)';
+          strokeStyle = "rgba(255, 109, 0, 0.6)";
           currentLineWidth = Math.max(3, cellSize * 0.1);
         } else {
-          strokeStyle = 'rgba(66, 165, 245, 0.4)';
+          strokeStyle = "rgba(66, 165, 245, 0.4)";
         }
 
         const collector = batcher.beginGroup(strokeStyle, currentLineWidth);
@@ -1546,9 +1720,15 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
           // ルート線の交差箇所にはブリッジ用の隙間を入れて描画する。
           collectEdgeWithBridges(
-            collector, px1, py1, px2, py2,
-            segIdx, i,
-            crossingLookup, bridgeParams,
+            collector,
+            px1,
+            py1,
+            px2,
+            py2,
+            segIdx,
+            i,
+            crossingLookup,
+            bridgeParams,
           );
         }
       });
@@ -1559,20 +1739,24 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     // ラベルを描画する。
     if (!isRotationInteracting) {
       cellLabels.forEach((label, key) => {
-        const [row, col] = key.split('-').map(Number);
+        const [row, col] = key.split("-").map(Number);
         if (!isCellVisible(row, col, 1, 1)) return;
 
         const x = (col - 1) * cellSize;
         const y = (row - 1) * cellSize;
 
         const merge = mergedCellsMap.get(key);
-        const width = merge ? (merge.endCol - merge.startCol + 1) * cellSize : cellSize;
-        const height = merge ? (merge.endRow - merge.startRow + 1) * cellSize : cellSize;
+        const width = merge
+          ? (merge.endCol - merge.startCol + 1) * cellSize
+          : cellSize;
+        const height = merge
+          ? (merge.endRow - merge.startRow + 1) * cellSize
+          : cellSize;
 
         // 現在対象セルを枠線で強調する。
         const state = cellStates.get(key);
         if (state?.isCurrentPosition) {
-          ctx.strokeStyle = 'rgba(255, 109, 0, 0.8)';
+          ctx.strokeStyle = "rgba(255, 109, 0, 0.8)";
           ctx.lineWidth = Math.max(3, cellSize * 0.12);
           ctx.strokeRect(x - 1, y - 1, width + 2, height + 2);
         }
@@ -1582,23 +1766,23 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           // 現在対象セルはピンとラベルをセル上部に描画する。
           const pinFontSize = Math.max(12, cellSize * 0.45);
           ctx.font = `${pinFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'bottom';
+          ctx.textAlign = "center";
+          ctx.textBaseline = "bottom";
           const pinY = y; // ピンの描画位置。
-          drawUprightText('\u{1F4CD}', x + width / 2, pinY);
+          drawUprightText("\u{1F4CD}", x + width / 2, pinY);
 
           // ラベルはピンの上に配置する。
           const labelFontSize = Math.max(10, cellSize * 0.35);
           ctx.font = `bold ${labelFontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-          ctx.textBaseline = 'bottom';
+          ctx.textBaseline = "bottom";
           ctx.fillStyle = label.textColor;
           drawUprightText(label.text, x + width / 2, pinY - pinFontSize);
         } else {
           // その他のラベルはセル中央に描画する。
           const fontSize = Math.max(10, cellSize * 0.35);
           ctx.font = `bold ${fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
           ctx.fillStyle = label.textColor;
           drawUprightText(label.text, x + width / 2, y + height / 2);
         }
@@ -1640,8 +1824,12 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   }, [drawCanvas]);
 
   const activeScrollBounds = useMemo(() => {
-    const isExplicitHallSelection = selectedHallMode !== 'follow';
-    if (isExplicitHallSelection && selectedHall && selectedHall.vertices.length >= 4) {
+    const isExplicitHallSelection = selectedHallMode !== "follow";
+    if (
+      isExplicitHallSelection &&
+      selectedHall &&
+      selectedHall.vertices.length >= 4
+    ) {
       const rows = selectedHall.vertices.map((v) => v.row);
       const cols = selectedHall.vertices.map((v) => v.col);
       return {
@@ -1713,10 +1901,34 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     const boundsBottom = activeScrollBounds.maxRow * cellSize;
 
     const rotatedCorners = [
-      rotatePointAroundCenter(boundsLeft, boundsTop, mapCenterX, mapCenterY, rotationRadians),
-      rotatePointAroundCenter(boundsRight, boundsTop, mapCenterX, mapCenterY, rotationRadians),
-      rotatePointAroundCenter(boundsLeft, boundsBottom, mapCenterX, mapCenterY, rotationRadians),
-      rotatePointAroundCenter(boundsRight, boundsBottom, mapCenterX, mapCenterY, rotationRadians),
+      rotatePointAroundCenter(
+        boundsLeft,
+        boundsTop,
+        mapCenterX,
+        mapCenterY,
+        rotationRadians,
+      ),
+      rotatePointAroundCenter(
+        boundsRight,
+        boundsTop,
+        mapCenterX,
+        mapCenterY,
+        rotationRadians,
+      ),
+      rotatePointAroundCenter(
+        boundsLeft,
+        boundsBottom,
+        mapCenterX,
+        mapCenterY,
+        rotationRadians,
+      ),
+      rotatePointAroundCenter(
+        boundsRight,
+        boundsBottom,
+        mapCenterX,
+        mapCenterY,
+        rotationRadians,
+      ),
     ];
 
     const rotatedMinX = Math.min(...rotatedCorners.map((point) => point.x));
@@ -1732,26 +1944,32 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     };
   }, [activeScrollBounds, cellSize, mapCenterX, mapCenterY, rotationRadians]);
 
-  const isCellInBlock = useCallback((row: number, col: number, block: BlockDefinition): boolean => {
-    if (block.cellGroups && block.cellGroups.length > 0) {
-      return block.cellGroups.some((group) => {
-        if (group.type === 'range') {
-          return (
-            row >= (group.startRow || 0) &&
-            row <= (group.endRow || 0) &&
-            col >= (group.startCol || 0) &&
-            col <= (group.endCol || 0)
-          );
-        } else if (group.type === 'individual' && group.cells) {
-          return group.cells.some((c) => c.row === row && c.col === col);
-        }
-        return false;
-      });
-    }
-    return (
-      row >= block.startRow && row <= block.endRow && col >= block.startCol && col <= block.endCol
-    );
-  }, []);
+  const isCellInBlock = useCallback(
+    (row: number, col: number, block: BlockDefinition): boolean => {
+      if (block.cellGroups && block.cellGroups.length > 0) {
+        return block.cellGroups.some((group) => {
+          if (group.type === "range") {
+            return (
+              row >= (group.startRow || 0) &&
+              row <= (group.endRow || 0) &&
+              col >= (group.startCol || 0) &&
+              col <= (group.endCol || 0)
+            );
+          } else if (group.type === "individual" && group.cells) {
+            return group.cells.some((c) => c.row === row && c.col === col);
+          }
+          return false;
+        });
+      }
+      return (
+        row >= block.startRow &&
+        row <= block.endRow &&
+        col >= block.startCol &&
+        col <= block.endCol
+      );
+    },
+    [],
+  );
 
   const getPointerViewMetrics = useCallback(
     (clientX: number, clientY: number) => {
@@ -1782,8 +2000,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       let resolvedCol = col;
       for (const merge of mapData.mergedCells) {
         if (
-          row >= merge.startRow && row <= merge.endRow &&
-          col >= merge.startCol && col <= merge.endCol
+          row >= merge.startRow &&
+          row <= merge.endRow &&
+          col >= merge.startCol &&
+          col <= merge.endCol
         ) {
           resolvedRow = merge.startRow;
           resolvedCol = merge.startCol;
@@ -1794,12 +2014,19 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       for (const block of mapData.blocks) {
         if (!isCellInBlock(resolvedRow, resolvedCol, block)) continue;
 
-        if (block.nameCells && block.nameCells.some((nc) => nc.row === resolvedRow && nc.col === resolvedCol)) {
+        if (
+          block.nameCells &&
+          block.nameCells.some(
+            (nc) => nc.row === resolvedRow && nc.col === resolvedCol,
+          )
+        ) {
           continue;
         }
 
         let foundNumber: number | null = null;
-        const numberCell = block.numberCells.find((nc) => nc.row === resolvedRow && nc.col === resolvedCol);
+        const numberCell = block.numberCells.find(
+          (nc) => nc.row === resolvedRow && nc.col === resolvedCol,
+        );
         if (numberCell) {
           foundNumber = numberCell.value;
         }
@@ -1819,8 +2046,14 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 
         if (foundNumber !== null) {
           const matchingItems = items.filter((item) => {
-            if (normalizeSpaceBlock(item.block) !== normalizeSpaceBlock(block.name)) return false;
-            const numStr = extractNumberFromItemNumber(normalizeBaseSpaceNumber(item.number));
+            if (
+              normalizeSpaceBlock(item.block) !==
+              normalizeSpaceBlock(block.name)
+            )
+              return false;
+            const numStr = extractNumberFromItemNumber(
+              normalizeBaseSpaceNumber(item.number),
+            );
             const numValue = numStr ? parseInt(numStr, 10) : 0;
             return numValue === foundNumber;
           });
@@ -1829,14 +2062,23 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         break;
       }
     },
-    [cellSize, mapData, onCellClick, isCellInBlock, cellsMap, items, toMapCoordinates],
+    [
+      cellSize,
+      mapData,
+      onCellClick,
+      isCellInBlock,
+      cellsMap,
+      items,
+      toMapCoordinates,
+    ],
   );
 
   const handleClick = useCallback(
     (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (isDraggingRef.current) return;
 
-      const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+      const now =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
       if (now < suppressClickUntilRef.current) return;
 
       const metrics = getPointerViewMetrics(e.clientX, e.clientY);
@@ -1846,20 +2088,26 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
     [getPointerViewMetrics, handleTapAtViewPosition],
   );
 
-  const handlePointerDown = useCallback((e: React.PointerEvent<HTMLCanvasElement>) => {
-    if (e.pointerType === 'touch' || e.pointerType === 'pen') {
-      e.preventDefault();
-    }
-    if (activeTouchesRef.current.size >= 2) return;
-    isDraggingRef.current = false;
-    setIsDragging(false);
-    dragStartRef.current = { x: e.clientX, y: e.clientY };
-    dragStartOffsetRef.current = { ...offsetRef.current };
-  }, []);
+  const handlePointerDown = useCallback(
+    (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (e.pointerType === "touch" || e.pointerType === "pen") {
+        e.preventDefault();
+      }
+      if (activeTouchesRef.current.size >= 2) return;
+      isDraggingRef.current = false;
+      setIsDragging(false);
+      dragStartRef.current = { x: e.clientX, y: e.clientY };
+      dragStartOffsetRef.current = { ...offsetRef.current };
+    },
+    [],
+  );
 
   const handlePointerMove = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
-      if ((e.pointerType === 'touch' || e.pointerType === 'pen') && isPinchGestureRef.current) {
+      if (
+        (e.pointerType === "touch" || e.pointerType === "pen") &&
+        isPinchGestureRef.current
+      ) {
         return;
       }
       if (e.buttons !== 1) return;
@@ -1868,7 +2116,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       const dx = (e.clientX - dragStartRef.current.x) / appScale;
       const dy = (e.clientY - dragStartRef.current.y) / appScale;
       const dragThreshold =
-        e.pointerType === 'touch' || e.pointerType === 'pen' ? 10 : 5;
+        e.pointerType === "touch" || e.pointerType === "pen" ? 10 : 5;
 
       if (Math.abs(dx) > dragThreshold || Math.abs(dy) > dragThreshold) {
         isDraggingRef.current = true;
@@ -1909,7 +2157,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   const handlePointerUp = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
       const wasDragging = isDraggingRef.current;
-      const isTouchPointer = e.pointerType === 'touch' || e.pointerType === 'pen';
+      const isTouchPointer =
+        e.pointerType === "touch" || e.pointerType === "pen";
       if (isTouchPointer) {
         e.preventDefault();
       }
@@ -1918,11 +2167,13 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         const metrics = getPointerViewMetrics(e.clientX, e.clientY);
         if (metrics) {
           handleTapAtViewPosition(metrics.viewX, metrics.viewY);
-          const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+          const now =
+            typeof performance !== "undefined" ? performance.now() : Date.now();
           suppressClickUntilRef.current = now + 400;
         }
       } else if (wasDragging) {
-        const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+        const now =
+          typeof performance !== "undefined" ? performance.now() : Date.now();
         suppressClickUntilRef.current = now + 400;
       }
 
@@ -1944,8 +2195,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
       ref={containerRef}
       className="relative bg-white dark:bg-slate-800 overflow-hidden"
       style={{
-        width: '100%',
-        height: '100%',
+        width: "100%",
+        height: "100%",
       }}
     >
       <canvas
@@ -1957,8 +2208,8 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         onPointerLeave={handlePointerLeave}
         onPointerCancel={handlePointerCancel}
         style={{
-          cursor: isDragging ? 'grabbing' : 'grab',
-          touchAction: 'none',
+          cursor: isDragging ? "grabbing" : "grab",
+          touchAction: "none",
         }}
       />
     </div>
@@ -1966,5 +2217,3 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
 };
 
 export default React.memo(FocusModeMapCanvas);
-
-

@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
-import type { CellData, DayMapData, HallDefinition } from '../types/map';
-import { buildSelectedHallRouteMapData } from './mapRouteMapData';
+import { describe, expect, it } from "vitest";
+import type { CellData, DayMapData, HallDefinition } from "../types/map";
+import { buildSelectedHallRouteMapData } from "./mapRouteMapData";
 
 const cell = (row: number, col: number): CellData => ({
   row,
@@ -11,8 +11,8 @@ const cell = (row: number, col: number): CellData => ({
 });
 
 const hall: HallDefinition = {
-  id: 'h1',
-  name: 'Hall 1',
+  id: "h1",
+  name: "Hall 1",
   vertices: [
     { row: 1, col: 1 },
     { row: 1, col: 3 },
@@ -21,16 +21,18 @@ const hall: HallDefinition = {
   ],
 };
 
-describe('buildSelectedHallRouteMapData', () => {
-  it('filters strict map data without reviving outside number or merged cells', () => {
+describe("buildSelectedHallRouteMapData", () => {
+  it("filters strict map data without reviving outside number or merged cells", () => {
     const mapData: DayMapData = {
       maxRow: 4,
       maxCol: 4,
       cells: [cell(2, 2), cell(4, 4)],
-      mergedCells: [{ startRow: 4, startCol: 4, endRow: 4, endCol: 4, value: null }],
+      mergedCells: [
+        { startRow: 4, startCol: 4, endRow: 4, endCol: 4, value: null },
+      ],
       blocks: [
         {
-          name: 'A',
+          name: "A",
           startRow: 1,
           startCol: 1,
           endRow: 4,
@@ -53,7 +55,7 @@ describe('buildSelectedHallRouteMapData', () => {
     expect(result?.hallConstrainedPathfindingMapData.maxRow).toBe(4);
   });
 
-  it('keeps boundary number cells and retained merged-cell bounds in strict map data', () => {
+  it("keeps boundary number cells and retained merged-cell bounds in strict map data", () => {
     const mapData: DayMapData = {
       maxRow: 6,
       maxCol: 6,
@@ -64,7 +66,7 @@ describe('buildSelectedHallRouteMapData', () => {
       ],
       blocks: [
         {
-          name: 'A',
+          name: "A",
           startRow: 1,
           startCol: 1,
           endRow: 6,
@@ -84,7 +86,9 @@ describe('buildSelectedHallRouteMapData', () => {
       col: 2,
       value: 1,
     });
-    expect(result?.strictFilteredMapData.blocks[0].numberCells).not.toContainEqual({
+    expect(
+      result?.strictFilteredMapData.blocks[0].numberCells,
+    ).not.toContainEqual({
       row: 5,
       col: 5,
       value: 2,
@@ -96,7 +100,7 @@ describe('buildSelectedHallRouteMapData', () => {
     expect(result?.strictFilteredMapData.maxCol).toBe(3);
   });
 
-  it('returns null for missing or invalid selected hall route contexts', () => {
+  it("returns null for missing or invalid selected hall route contexts", () => {
     const mapData: DayMapData = {
       maxRow: 4,
       maxCol: 4,
@@ -118,7 +122,7 @@ describe('buildSelectedHallRouteMapData', () => {
     ).toBeNull();
   });
 
-  it('blocks outside-hall cells for pathfinding while preserving full map bounds', () => {
+  it("blocks outside-hall cells for pathfinding while preserving full map bounds", () => {
     const mapData: DayMapData = {
       maxRow: 4,
       maxCol: 4,
@@ -135,16 +139,18 @@ describe('buildSelectedHallRouteMapData', () => {
       expect.objectContaining({
         row: 4,
         col: 4,
-        backgroundColor: '#000000',
+        backgroundColor: "#000000",
       }),
     );
-    expect(result?.hallConstrainedPathfindingMapData.cells).toContainEqual(cell(2, 2));
+    expect(result?.hallConstrainedPathfindingMapData.cells).toContainEqual(
+      cell(2, 2),
+    );
   });
 
-  it('rejects route paths whose segment leaves the selected hall polygon', () => {
+  it("rejects route paths whose segment leaves the selected hall polygon", () => {
     const concaveHall: HallDefinition = {
-      id: 'concave',
-      name: 'Concave',
+      id: "concave",
+      name: "Concave",
       vertices: [
         { row: 1, col: 1 },
         { row: 1, col: 5 },
