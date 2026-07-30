@@ -13,7 +13,6 @@ import {
   BlockDefinition,
   CellGroup,
   MapViewportState,
-  RoutePathConstraint,
   RouteSegment,
   MIN_ZOOM,
   MAX_ZOOM,
@@ -49,10 +48,9 @@ import {
 } from "../../utils/mapRoutePoints";
 import { buildSelectedHallRouteMapData } from "../../utils/mapRouteMapData";
 import {
-  generateRouteSegments,
-  generateRouteSegmentsStrict,
-  simplifyPath,
-} from "../../utils/pathfinding";
+  calculateRouteSegmentsPair,
+  createRouteInsertMapSnapshots,
+} from "./mapViewRouteCalculations";
 import { validateMapSmartInsert } from "../../utils/mapSmartInsert";
 import type { MapRouteHitResult } from "../../utils/mapRouteHitTest";
 import { expandSameSpacePriorityItemIds } from "../../features/events/itemOps";
@@ -92,54 +90,6 @@ type MapRouteInsertPendingState = {
   errorMessage: string | null;
   duplicateCandidates: RouteInsertAnchorCandidate[];
 } | null;
-
-function cloneDayMapDataForRouteInsertSnapshot(
-  mapData: DayMapData,
-): DayMapData {
-  return {
-    ...mapData,
-    cells: mapData.cells.map((cell) => ({
-      ...cell,
-      borders: cell.borders ? { ...cell.borders } : cell.borders,
-    })),
-    blocks: mapData.blocks.map((block) => ({
-      ...block,
-      numberCells: block.numberCells.map((numberCell) => ({ ...numberCell })),
-      nameCells: block.nameCells?.map((nameCell) => ({ ...nameCell })),
-      cellGroups: block.cellGroups?.map((group) => ({
-        ...group,
-        cells: group.cells?.map((cell) => ({ ...cell })),
-      })),
-    })),
-    mergedCells: mapData.mergedCells.map((merge) => ({ ...merge })),
-  };
-}
-
-function simplifyStrictRouteSegments(
-  segments: RouteSegment[],
-  pathConstraint?: RoutePathConstraint,
-): RouteSegment[] | null {
-  const simplifiedSegments = segments
-    .map((segment) => ({
-      ...segment,
-      path: segment.path.map((point) => ({ ...point })),
-    }))
-    .map((segment) => ({
-      ...segment,
-      path: simplifyPath(segment.path),
-    }));
-
-  if (
-    pathConstraint &&
-    simplifiedSegments.some(
-      (segment) => !pathConstraint.isPathAllowed(segment.path),
-    )
-  ) {
-    return null;
-  }
-
-  return simplifiedSegments;
-}
 
 interface MapViewProps {
   mapData: DayMapData;
@@ -346,6 +296,14 @@ const MapView: React.FC<MapViewProps> = ({
     () => new Set(executeModeItemIds),
     [executeModeItemIds],
   );
+  const itemsById = useMemo(() => {
+    const indexedItems = new Map<string, ShoppingItem>();
+    for (const item of items) {
+      // Array.findと同じく、重複IDがあっても先頭のアイテムを優先する。
+      if (!indexedItems.has(item.id)) indexedItems.set(item.id, item);
+    }
+    return indexedItems;
+  }, [items]);
   const mapDayName = useMemo(
     () => extractDayNameFromMapName(mapName),
     [mapName],
@@ -516,7 +474,7 @@ const MapView: React.FC<MapViewProps> = ({
       const { hallId, priority } = parseGroupId(groupId);
 
       return executeModeItemIds.filter((itemId) => {
-        const item = items.find((i) => i.id === itemId);
+        const item = itemsById.get(itemId);
         if (!item) return false;
 
         const belongsToHall =
@@ -529,19 +487,19 @@ const MapView: React.FC<MapViewProps> = ({
         return itemPriority === priority;
       }).length;
     },
-    [executeModeItemIds, items, getItemHallId, isItemInHall, parseGroupId],
+    [executeModeItemIds, itemsById, getItemHallId, isItemInHall, parseGroupId],
   );
 
   const getHallTotalExecuteCount = useCallback(
     (hallId: string): number => {
       return executeModeItemIds.filter((itemId) => {
-        const item = items.find((i) => i.id === itemId);
+        const item = itemsById.get(itemId);
         if (!item) return false;
 
         return isItemInHall(item, hallId);
       }).length;
     },
-    [executeModeItemIds, items, isItemInHall],
+    [executeModeItemIds, itemsById, isItemInHall],
   );
 
   const getTotalItemCountInHall = useCallback(
@@ -617,11 +575,11 @@ const MapView: React.FC<MapViewProps> = ({
     }
 
     return executeModeItemIds.filter((itemId) => {
-      const item = items.find((i) => i.id === itemId);
+      const item = itemsById.get(itemId);
       if (!item) return false;
       return isItemInHall(item, selectedHallId);
     });
-  }, [executeModeItemIds, items, selectedHallId, halls, isItemInHall]);
+  }, [executeModeItemIds, itemsById, selectedHallId, halls, isItemInHall]);
 
   const effectiveRouteHallOrder = useMemo(
     () => resolveMapRouteHallOrder(routeHallOrder, hallRouteSettings.hallOrder),
@@ -800,41 +758,34 @@ const MapView: React.FC<MapViewProps> = ({
     selectedHallId === "all" || halls.length === 0
       ? mapData
       : hallConstrainedPathfindingMapData;
-
-  const displayRouteSegments = useMemo(() => {
-    if (displayRoutePoints.length < 2) return [];
-    return generateRouteSegments(
+  const mapInsertRoutePathConstraint =
+    selectedHallId === "all" || halls.length === 0
+      ? undefined
+      : selectedHallRoutePathConstraint;
+  const includeDisplayRoute =
+    isRouteVisible && (halls.length === 0 || selectedHallId !== "all");
+  const includeMapInsertRoute = smartInsertEnabled && smartInsertMode === "map";
+  const { displayRouteSegments, mapInsertRouteSegments } = useMemo(
+    () =>
+      calculateRouteSegmentsPair({
+        displayMapData: displayRoutePathfindingMapData,
+        displayRoutePoints,
+        mapInsertMapData: mapInsertRoutePathfindingMapData,
+        mapInsertRoutePoints,
+        mapInsertPathConstraint: mapInsertRoutePathConstraint,
+        includeDisplayRoute,
+        includeMapInsertRoute,
+      }),
+    [
       displayRoutePathfindingMapData,
       displayRoutePoints,
-    ).map((segment) => ({
-      ...segment,
-      path: simplifyPath(segment.path),
-    }));
-  }, [displayRoutePoints, displayRoutePathfindingMapData]);
-
-  const mapInsertRouteSegments = useMemo(() => {
-    if (mapInsertRoutePoints.length < 2) return [];
-    if (!mapInsertRoutePathfindingMapData) return [];
-    const pathConstraint =
-      selectedHallId === "all" || halls.length === 0
-        ? undefined
-        : selectedHallRoutePathConstraint;
-    const result = generateRouteSegmentsStrict(
       mapInsertRoutePathfindingMapData,
       mapInsertRoutePoints,
-      {
-        pathConstraint,
-      },
-    );
-    if (!result.ok) return [];
-    return simplifyStrictRouteSegments(result.segments, pathConstraint) ?? [];
-  }, [
-    mapInsertRoutePoints,
-    mapInsertRoutePathfindingMapData,
-    selectedHallId,
-    halls.length,
-    selectedHallRoutePathConstraint,
-  ]);
+      mapInsertRoutePathConstraint,
+      includeDisplayRoute,
+      includeMapInsertRoute,
+    ],
+  );
 
   const routeExecuteModeItemIds = displayRouteExecuteModeItemIds;
 
@@ -1010,7 +961,7 @@ const MapView: React.FC<MapViewProps> = ({
     (itemIds: string[]) => {
       let updatedHallVisitLists = [...hallRouteSettings.hallVisitLists];
       for (const itemId of itemIds) {
-        const item = items.find((i) => i.id === itemId);
+        const item = itemsById.get(itemId);
         if (!item) continue;
         const hallId = getItemHallId(item);
         if (!hallId) continue;
@@ -1036,7 +987,7 @@ const MapView: React.FC<MapViewProps> = ({
         hallVisitLists: updatedHallVisitLists,
       });
     },
-    [items, getItemHallId, hallRouteSettings, onUpdateHallRouteSettings],
+    [itemsById, getItemHallId, hallRouteSettings, onUpdateHallRouteSettings],
   );
 
   const hallRouteSettingsRef = useRef(hallRouteSettings);
@@ -1131,16 +1082,16 @@ const MapView: React.FC<MapViewProps> = ({
       setPopupState((prev) => ({ ...prev, isOpen: false }));
       setInsertDialogState({ isOpen: false, item: null });
       setBatchInsertPendingIds(null);
+      const routeInsertMapSnapshots = createRouteInsertMapSnapshots(
+        filteredMapData,
+        routeResolutionMapData,
+      );
       const nextPending: MapRouteInsertPendingState = {
         itemIds: [...itemIds],
         representativeItem: { ...representativeItem },
         existingRoutePointsAtStart,
         existingRouteSegmentsAtStart,
-        canvasMapDataAtStart:
-          cloneDayMapDataForRouteInsertSnapshot(filteredMapData),
-        routeInsertMissMapDataAtStart: cloneDayMapDataForRouteInsertSnapshot(
-          routeResolutionMapData,
-        ),
+        ...routeInsertMapSnapshots,
         pendingMapPoints: pendingMapPointsAtStart,
         validationPoints: validationPointsAtStart,
         pendingHallVisitEntries: pendingHallVisitEntriesAtStart,
@@ -1173,7 +1124,7 @@ const MapView: React.FC<MapViewProps> = ({
 
   const handleAddToVisitList = useCallback(
     (itemId: string) => {
-      const item = items.find((i) => i.id === itemId);
+      const item = itemsById.get(itemId);
       if (!item) return;
 
       const newItemPrefix = extractNumberAlphaPrefix(item.number);
@@ -1182,7 +1133,7 @@ const MapView: React.FC<MapViewProps> = ({
         let lastMatchId: string | null = null;
 
         executeModeItemIds.forEach((eid) => {
-          const existingItem = items.find((i) => i.id === eid);
+          const existingItem = itemsById.get(eid);
           if (!existingItem) return;
           const existingBlock = existingItem.block?.trim() || "";
           if (existingBlock !== itemBlock) return;
@@ -1227,20 +1178,6 @@ const MapView: React.FC<MapViewProps> = ({
       const numValue = parseInt(itemNum, 10);
       const itemBlock = item.block?.trim().toLowerCase() || "";
 
-      const nearbyVisitItems: { item: ShoppingItem; visitIndex: number }[] = [];
-      executeModeItemIds.forEach((eid, idx) => {
-        const existingItem = items.find((i) => i.id === eid);
-        if (!existingItem) return;
-        const existingBlock = existingItem.block?.trim().toLowerCase() || "";
-        if (existingBlock !== itemBlock) return;
-        const existingNum = extractNumberFromItemNumber(existingItem.number);
-        if (!existingNum) return;
-        const existingNumValue = parseInt(existingNum, 10);
-        if (Math.abs(existingNumValue - numValue) <= 3) {
-          nearbyVisitItems.push({ item: existingItem, visitIndex: idx });
-        }
-      });
-
       if (smartInsertEnabled && smartInsertMode === "map") {
         const pendingIds = expandUninsertedMapSiblingIds([itemId]);
         const started =
@@ -1254,6 +1191,20 @@ const MapView: React.FC<MapViewProps> = ({
         if (insertedIds) batchAddToHallVisitList(insertedIds);
         return;
       }
+
+      const nearbyVisitItems: { item: ShoppingItem; visitIndex: number }[] = [];
+      executeModeItemIds.forEach((eid, idx) => {
+        const existingItem = itemsById.get(eid);
+        if (!existingItem) return;
+        const existingBlock = existingItem.block?.trim().toLowerCase() || "";
+        if (existingBlock !== itemBlock) return;
+        const existingNum = extractNumberFromItemNumber(existingItem.number);
+        if (!existingNum) return;
+        const existingNumValue = parseInt(existingNum, 10);
+        if (Math.abs(existingNumValue - numValue) <= 3) {
+          nearbyVisitItems.push({ item: existingItem, visitIndex: idx });
+        }
+      });
 
       if (
         smartInsertMode !== "preview" ||
@@ -1273,7 +1224,7 @@ const MapView: React.FC<MapViewProps> = ({
     [
       onAddToExecuteList,
       onAddToExecuteListAtPosition,
-      items,
+      itemsById,
       executeModeItemIds,
       batchAddToHallVisitList,
       normalizeInsertedItemIds,
@@ -1481,7 +1432,7 @@ const MapView: React.FC<MapViewProps> = ({
 
     const result: { item: ShoppingItem; visitIndex: number }[] = [];
     executeModeItemIds.forEach((eid, idx) => {
-      const existingItem = items.find((i) => i.id === eid);
+      const existingItem = itemsById.get(eid);
       if (!existingItem) return;
       const existingBlock = existingItem.block?.trim().toLowerCase() || "";
       if (existingBlock !== itemBlock) return;
@@ -1494,7 +1445,7 @@ const MapView: React.FC<MapViewProps> = ({
     });
 
     return result;
-  }, [insertDialogState.item, items, executeModeItemIds]);
+  }, [insertDialogState.item, itemsById, executeModeItemIds]);
 
   const insertDialogHasHall = useMemo(() => {
     const item = insertDialogState.item;
@@ -1506,13 +1457,13 @@ const MapView: React.FC<MapViewProps> = ({
     if (smartInsertMode !== "preview") return [];
     return executeModeItemIds
       .map((eid, idx) => {
-        const item = items.find((i) => i.id === eid);
+        const item = itemsById.get(eid);
         return item ? { item, visitIndex: idx } : null;
       })
       .filter(
         (v): v is { item: ShoppingItem; visitIndex: number } => v !== null,
       );
-  }, [smartInsertMode, executeModeItemIds, items]);
+  }, [smartInsertMode, executeModeItemIds, itemsById]);
 
   const handleRemoveFromVisitList = useCallback(
     (itemId: string) => {
@@ -1546,8 +1497,8 @@ const MapView: React.FC<MapViewProps> = ({
       if (itemIds.length === 0) return;
 
       const sortedIds = [...itemIds].sort((aId, bId) => {
-        const a = items.find((i) => i.id === aId);
-        const b = items.find((i) => i.id === bId);
+        const a = itemsById.get(aId);
+        const b = itemsById.get(bId);
         if (!a || !b) return 0;
         const suffixA = a.number.replace(/^\d+/, "");
         const suffixB = b.number.replace(/^\d+/, "");
@@ -1561,7 +1512,7 @@ const MapView: React.FC<MapViewProps> = ({
         return numA - numB;
       });
 
-      const firstItem = items.find((i) => i.id === sortedIds[0]);
+      const firstItem = itemsById.get(sortedIds[0]);
       if (!firstItem) return;
 
       const newItemPrefix = extractNumberAlphaPrefix(firstItem.number);
@@ -1570,7 +1521,7 @@ const MapView: React.FC<MapViewProps> = ({
       if (newItemPrefix && onBatchAddToExecuteListAtPosition) {
         let lastMatchId: string | null = null;
         executeModeItemIds.forEach((eid) => {
-          const existingItem = items.find((i) => i.id === eid);
+          const existingItem = itemsById.get(eid);
           if (!existingItem) return;
           const existingBlock = existingItem.block?.trim() || "";
           if (existingBlock !== itemBlock) return;
@@ -1626,7 +1577,7 @@ const MapView: React.FC<MapViewProps> = ({
         const nearbyVisitItems: { item: ShoppingItem; visitIndex: number }[] =
           [];
         executeModeItemIds.forEach((eid, idx) => {
-          const existingItem = items.find((i) => i.id === eid);
+          const existingItem = itemsById.get(eid);
           if (!existingItem) return;
           const existingBlock = existingItem.block?.trim().toLowerCase() || "";
           if (existingBlock !== itemBlockLower) return;
@@ -1663,7 +1614,7 @@ const MapView: React.FC<MapViewProps> = ({
       }
     },
     [
-      items,
+      itemsById,
       executeModeItemIds,
       onAddToExecuteList,
       onAddToExecuteListAtPosition,

@@ -47,10 +47,9 @@ const renderPopup = (
 };
 
 describe("CellItemsPopup limited purchase actions", () => {
-  it("shows a direct edit button for limited purchase items without requiring long press", async () => {
+  it("shows a direct edit button for limited purchase items without requiring long press", () => {
     const { onAddToVisitList, onClose, onEditRequest } = renderPopup();
 
-    await new Promise((resolve) => setTimeout(resolve, 450));
     fireEvent.click(screen.getByRole("button", { name: "限数を編集" }));
 
     expect(onAddToVisitList).not.toHaveBeenCalled();

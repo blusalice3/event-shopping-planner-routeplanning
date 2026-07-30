@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   shouldDrawReadableNumberBackground,
   shouldHighlightCandidateRemarks,
+  syncCanvasBackingStoreSize,
 } from "./MapCanvas";
 
 describe("shouldHighlightCandidateRemarks", () => {
@@ -51,5 +52,41 @@ describe("shouldDrawReadableNumberBackground", () => {
         "42",
       ),
     ).toBe(false);
+  });
+});
+
+describe("syncCanvasBackingStoreSize", () => {
+  it("does not reset an already correctly sized backing store", () => {
+    let width = 0;
+    let height = 0;
+    let widthWrites = 0;
+    let heightWrites = 0;
+    const canvas = {
+      style: { width: "", height: "" },
+      get width() {
+        return width;
+      },
+      set width(value: number) {
+        widthWrites++;
+        width = value;
+      },
+      get height() {
+        return height;
+      },
+      set height(value: number) {
+        heightWrites++;
+        height = value;
+      },
+    } as unknown as HTMLCanvasElement;
+
+    syncCanvasBackingStoreSize(canvas, 281, 201, 1.25);
+    syncCanvasBackingStoreSize(canvas, 281, 201, 1.25);
+
+    expect(canvas.style.width).toBe("281px");
+    expect(canvas.style.height).toBe("201px");
+    expect(width).toBe(351);
+    expect(height).toBe(251);
+    expect(widthWrites).toBe(1);
+    expect(heightWrites).toBe(1);
   });
 });

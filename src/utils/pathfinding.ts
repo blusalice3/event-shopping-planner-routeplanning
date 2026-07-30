@@ -20,21 +20,7 @@ const BUFFER_PENALTY = 3;
 const TURN_PENALTY = 0.5;
 
 // セルが通過可能かどうかを判定（元のセル単位）
-function isPassableCell(
-  cellsMap: Map<string, CellData>,
-  row: number,
-  col: number,
-  maxRow: number,
-  maxCol: number,
-): boolean {
-  if (row < 1 || col < 1 || row > maxRow || col > maxCol) return false;
-
-  const key = `${row}-${col}`;
-  const cell = cellsMap.get(key);
-
-  // セルが存在しない場合は通過可能
-  if (!cell) return true;
-
+function isPassableCellData(cell: CellData): boolean {
   // 数値セルは通過不可
   if (cell.value !== null && typeof cell.value === "number") return false;
   if (cell.value !== null && /^\d+$/.test(String(cell.value))) return false;
@@ -74,40 +60,30 @@ function subCellToFractional(
   };
 }
 
-// サブセルが通過可能かどうかを判定
-function isPassableSubCell(
-  cellsMap: Map<string, CellData>,
-  sr: number,
-  sc: number,
-  maxSubRow: number,
-  maxSubCol: number,
-  maxRow: number,
-  maxCol: number,
-): boolean {
-  if (sr < 0 || sc < 0 || sr >= maxSubRow || sc >= maxSubCol) return false;
-  const { row, col } = subCellToCell(sr, sc);
-  return isPassableCell(cellsMap, row, col, maxRow, maxCol);
-}
-
 // 通過不可セルに隣接するサブセルのバッファコストマップを構築
 // 経路がなるべく数値セルの境界近くを通らないようにするためのペナルティマップ
 // エッジサブセルのみに軽いペナルティを設定し、最短経路を維持しつつセル中央を通るよう誘導
-function buildBufferCostMap(
-  cellsMap: Map<string, CellData>,
+function buildBufferCostGrid(
+  passableCells: Uint8Array,
   maxRow: number,
   maxCol: number,
-): Map<number, number> {
+): Uint8Array {
   const N = SUB_CELL_RESOLUTION;
   const maxSubCol = maxCol * N;
-  const bufferMap = new Map<number, number>();
+  const bufferGrid = new Uint8Array(maxRow * N * maxSubCol);
 
   const setBuffer = (sr: number, sc: number, penalty: number) => {
     const key = sr * maxSubCol + sc;
-    const existing = bufferMap.get(key) ?? 0;
-    if (penalty > existing) {
-      bufferMap.set(key, penalty);
+    if (penalty > bufferGrid[key]) {
+      bufferGrid[key] = penalty;
     }
   };
+  const isPassable = (row: number, col: number): boolean =>
+    row >= 1 &&
+    col >= 1 &&
+    row <= maxRow &&
+    col <= maxCol &&
+    passableCells[(row - 1) * maxCol + col - 1] === 1;
 
   // 隣接方向とバッファ対象サブセルの対応
   // dr,dcは通過不可セルから見た通過可能セルの方向
@@ -204,7 +180,7 @@ function buildBufferCostMap(
   for (let row = 1; row <= maxRow; row++) {
     for (let col = 1; col <= maxCol; col++) {
       // 通過不可セルを見つける
-      if (isPassableCell(cellsMap, row, col, maxRow, maxCol)) continue;
+      if (isPassable(row, col)) continue;
 
       // 隣接する通過可能セルのエッジサブセルにペナルティを設定
       for (const offset of neighborOffsets) {
@@ -217,8 +193,7 @@ function buildBufferCostMap(
           neighborCol > maxCol
         )
           continue;
-        if (!isPassableCell(cellsMap, neighborRow, neighborCol, maxRow, maxCol))
-          continue;
+        if (!isPassable(neighborRow, neighborCol)) continue;
 
         const subCells = offset.getSubCells(neighborRow, neighborCol);
         for (const { sr, sc } of subCells) {
@@ -228,7 +203,154 @@ function buildBufferCostMap(
     }
   }
 
-  return bufferMap;
+  return bufferGrid;
+}
+
+type PathfindingScratch = {
+  gScores: Float64Array;
+  parentStateKeys: Int32Array;
+  seenGenerations: Uint32Array;
+  closedGenerations: Uint32Array;
+  generation: number;
+};
+
+type PathfindingContext = {
+  maxRow: number;
+  maxCol: number;
+  maxSubRow: number;
+  maxSubCol: number;
+  passableCells: Uint8Array;
+  bufferCosts: Uint8Array;
+  normalRouteCache: RouteSegmentsCacheEntry[];
+  strictRouteCache: StrictRouteSegmentsCacheEntry[];
+};
+
+const MAX_SHARED_PATHFINDING_STATE_COUNT = 1_000_000;
+let sharedPathfindingScratch: PathfindingScratch | null = null;
+
+const createPathfindingScratch = (stateCount: number): PathfindingScratch => ({
+  gScores: new Float64Array(stateCount),
+  parentStateKeys: new Int32Array(stateCount),
+  seenGenerations: new Uint32Array(stateCount),
+  closedGenerations: new Uint32Array(stateCount),
+  generation: 0,
+});
+
+function getPathfindingScratch(stateCount: number): PathfindingScratch {
+  // 異常に大きなマップの作業領域はアプリ存続中に保持し続けない。
+  if (stateCount > MAX_SHARED_PATHFINDING_STATE_COUNT) {
+    return createPathfindingScratch(stateCount);
+  }
+  if (
+    !sharedPathfindingScratch ||
+    sharedPathfindingScratch.gScores.length < stateCount
+  ) {
+    sharedPathfindingScratch = createPathfindingScratch(stateCount);
+  }
+  return sharedPathfindingScratch;
+}
+
+type CachedPathfindingContext = {
+  cells: CellData[];
+  cellSnapshots: {
+    row: number;
+    col: number;
+    value: CellData["value"];
+    backgroundColor: CellData["backgroundColor"];
+  }[];
+  maxRow: number;
+  maxCol: number;
+  context: PathfindingContext;
+};
+
+const pathfindingContextCache = new WeakMap<
+  DayMapData,
+  CachedPathfindingContext
+>();
+
+const snapshotPathfindingCells = (
+  cells: CellData[],
+): CachedPathfindingContext["cellSnapshots"] =>
+  cells.map((cell) => ({
+    row: cell.row,
+    col: cell.col,
+    value: cell.value,
+    backgroundColor: cell.backgroundColor,
+  }));
+
+const haveSamePathfindingCells = (
+  cells: CellData[],
+  snapshots: CachedPathfindingContext["cellSnapshots"],
+): boolean =>
+  cells.length === snapshots.length &&
+  cells.every((cell, index) => {
+    const snapshot = snapshots[index];
+    return (
+      cell.row === snapshot.row &&
+      cell.col === snapshot.col &&
+      Object.is(cell.value, snapshot.value) &&
+      cell.backgroundColor === snapshot.backgroundColor
+    );
+  });
+
+function createPathfindingContext(mapData: DayMapData): PathfindingContext {
+  const { maxRow, maxCol } = mapData;
+  const passableCells = new Uint8Array(maxRow * maxCol);
+  passableCells.fill(1);
+
+  // 従来のMapと同様、同じ座標が複数ある場合は後のセルを優先する。
+  for (const cell of mapData.cells) {
+    if (
+      cell.row < 1 ||
+      cell.col < 1 ||
+      cell.row > maxRow ||
+      cell.col > maxCol
+    ) {
+      continue;
+    }
+    passableCells[(cell.row - 1) * maxCol + cell.col - 1] = isPassableCellData(
+      cell,
+    )
+      ? 1
+      : 0;
+  }
+
+  const maxSubRow = maxRow * SUB_CELL_RESOLUTION;
+  const maxSubCol = maxCol * SUB_CELL_RESOLUTION;
+
+  return {
+    maxRow,
+    maxCol,
+    maxSubRow,
+    maxSubCol,
+    passableCells,
+    bufferCosts: buildBufferCostGrid(passableCells, maxRow, maxCol),
+    normalRouteCache: [],
+    strictRouteCache: [],
+  };
+}
+
+function getPathfindingContext(mapData: DayMapData): PathfindingContext {
+  const cached = pathfindingContextCache.get(mapData);
+  if (
+    cached &&
+    cached.cells === mapData.cells &&
+    cached.maxRow === mapData.maxRow &&
+    cached.maxCol === mapData.maxCol &&
+    haveSamePathfindingCells(mapData.cells, cached.cellSnapshots)
+  ) {
+    return cached.context;
+  }
+
+  const context = createPathfindingContext(mapData);
+  pathfindingContextCache.set(mapData, {
+    cells: mapData.cells,
+    cellSnapshots: snapshotPathfindingCells(mapData.cells),
+    maxRow: mapData.maxRow,
+    maxCol: mapData.maxCol,
+    context,
+  });
+  return context;
 }
 
 // --- Binary Heap (優先度キュー) ---
@@ -236,10 +358,7 @@ interface HeapNode {
   sr: number;
   sc: number;
   g: number;
-  h: number;
   f: number;
-  parentSr: number;
-  parentSc: number;
   dirDr: number; // この地点に到達した方向 (-1, 0, 1)
   dirDc: number; // この地点に到達した方向 (-1, 0, 1)
 }
@@ -340,23 +459,24 @@ export type PathfindingResult = {
 };
 
 function findSubCellPath(
-  cellsMap: Map<string, CellData>,
-  maxRow: number,
-  maxCol: number,
+  context: PathfindingContext,
+  scratch: PathfindingScratch,
   startRow: number,
   startCol: number,
   endRow: number,
   endCol: number,
-  usedSubCells?: Map<string, number>,
-  bufferCostMap?: Map<number, number>,
+  usedSubCells?: Uint32Array,
 ): PathfindingResult {
   const N = SUB_CELL_RESOLUTION;
-  const maxSubRow = maxRow * N;
-  const maxSubCol = maxCol * N;
-
-  // バッファコストマップが未提供の場合は構築
-  const effectiveBufferMap =
-    bufferCostMap ?? buildBufferCostMap(cellsMap, maxRow, maxCol);
+  const { maxRow, maxCol, maxSubRow, maxSubCol, passableCells, bufferCosts } =
+    context;
+  scratch.generation++;
+  if (scratch.generation === 0xffffffff) {
+    scratch.seenGenerations.fill(0);
+    scratch.closedGenerations.fill(0);
+    scratch.generation = 1;
+  }
+  const generation = scratch.generation;
 
   // セル座標 → サブセル座標（中央）
   const start = cellToSubCell(startRow, startCol);
@@ -375,18 +495,14 @@ function findSubCellPath(
   // サブセルが通過可能か判定（スタートセル・ゴールセル例外付き）
   const isPassableOrException = (sr: number, sc: number): boolean => {
     if (sr < 0 || sc < 0 || sr >= maxSubRow || sc >= maxSubCol) return false;
+    const zeroBasedRow = Math.floor(sr / N);
+    const zeroBasedCol = Math.floor(sc / N);
     // スタートセル・ゴールセル内のサブセルは通過可能として扱う
-    if (isSubCellInCell(sr, sc, startCellRow, startCellCol)) return true;
-    if (isSubCellInCell(sr, sc, goalCellRow, goalCellCol)) return true;
-    return isPassableSubCell(
-      cellsMap,
-      sr,
-      sc,
-      maxSubRow,
-      maxSubCol,
-      maxRow,
-      maxCol,
-    );
+    if (zeroBasedRow === startCellRow - 1 && zeroBasedCol === startCellCol - 1)
+      return true;
+    if (zeroBasedRow === goalCellRow - 1 && zeroBasedCol === goalCellCol - 1)
+      return true;
+    return passableCells[zeroBasedRow * maxCol + zeroBasedCol] === 1;
   };
 
   const subKey = (sr: number, sc: number) => sr * maxSubCol + sc;
@@ -401,16 +517,12 @@ function findSubCellPath(
     return { sr: Math.floor(posKey / maxSubCol), sc: posKey % maxSubCol };
   };
 
-  // g値マップとparentマップ（方向対応）
-  const gMap = new Map<number, number>();
-  const parentMap = new Map<number, number>(); // stateKey → parentStateKey
-  const closedSet = new Set<number>();
-
   const startDi = dirIndex(0, 0); // start: 方向なし
   const startStateKey = stateKey(start.sr, start.sc, startDi);
 
-  gMap.set(startStateKey, 0);
-  parentMap.set(startStateKey, -1); // スタートは親なし
+  scratch.gScores[startStateKey] = 0;
+  scratch.parentStateKeys[startStateKey] = -1; // スタートは親なし
+  scratch.seenGenerations[startStateKey] = generation;
 
   const openHeap = new BinaryHeap();
   const h0 = heuristic(start.sr, start.sc, goalSr, goalSc);
@@ -418,10 +530,7 @@ function findSubCellPath(
     sr: start.sr,
     sc: start.sc,
     g: 0,
-    h: h0,
     f: h0,
-    parentSr: -1,
-    parentSc: -1,
     dirDr: 0,
     dirDc: 0,
   });
@@ -437,8 +546,8 @@ function findSubCellPath(
     const currentStateKey = stateKey(current.sr, current.sc, currentDi);
 
     // 既に処理済みならスキップ
-    if (closedSet.has(currentStateKey)) continue;
-    closedSet.add(currentStateKey);
+    if (scratch.closedGenerations[currentStateKey] === generation) continue;
+    scratch.closedGenerations[currentStateKey] = generation;
 
     // ゴール到達
     if (current.sr === goalSr && current.sc === goalSc) {
@@ -447,9 +556,10 @@ function findSubCellPath(
       let key = currentStateKey;
       while (key !== -1) {
         const pos = stateKeyToPos(key);
-        subPath.unshift(pos);
-        key = parentMap.get(key) ?? -1;
+        subPath.push(pos);
+        key = scratch.parentStateKeys[key] ?? -1;
       }
+      subPath.reverse();
 
       // 直交コリニアマージ: 同一方向の連続点を除去
       const optimized = mergeCollinearPoints(subPath);
@@ -468,7 +578,7 @@ function findSubCellPath(
       const newDi = dirIndex(dir.dr, dir.dc);
       const newStateKey = stateKey(newSr, newSc, newDi);
 
-      if (closedSet.has(newStateKey)) continue;
+      if (scratch.closedGenerations[newStateKey] === generation) continue;
 
       // 通過可否判定（スタートセル・ゴールセルは例外で通過可能）
       if (!isPassableOrException(newSr, newSc)) {
@@ -488,36 +598,43 @@ function findSubCellPath(
 
       // バッファゾーンペナルティ（スタートセル・ゴールセルは除外）
       if (
-        !isSubCellInCell(newSr, newSc, startCellRow, startCellCol) &&
-        !isSubCellInCell(newSr, newSc, goalCellRow, goalCellCol)
+        !(
+          Math.floor(newSr / N) === startCellRow - 1 &&
+          Math.floor(newSc / N) === startCellCol - 1
+        ) &&
+        !(
+          Math.floor(newSr / N) === goalCellRow - 1 &&
+          Math.floor(newSc / N) === goalCellCol - 1
+        )
       ) {
-        moveCost += effectiveBufferMap.get(subKey(newSr, newSc)) ?? 0;
+        moveCost += bufferCosts[subKey(newSr, newSc)];
       }
 
       // 既存ルートとの重複ペナルティ
       if (usedSubCells) {
-        const usageCount = usedSubCells.get(`${newSr}-${newSc}`) ?? 0;
+        const usageCount = usedSubCells[subKey(newSr, newSc)];
         if (usageCount > 0) {
           moveCost *= 1 + usageCount * OVERLAP_PENALTY;
         }
       }
 
       const newG = current.g + moveCost;
-      const existingG = gMap.get(newStateKey);
+      const existingG =
+        scratch.seenGenerations[newStateKey] === generation
+          ? scratch.gScores[newStateKey]
+          : undefined;
 
       if (existingG === undefined || newG < existingG) {
-        gMap.set(newStateKey, newG);
-        parentMap.set(newStateKey, currentStateKey);
+        scratch.gScores[newStateKey] = newG;
+        scratch.parentStateKeys[newStateKey] = currentStateKey;
+        scratch.seenGenerations[newStateKey] = generation;
 
         const newH = heuristic(newSr, newSc, goalSr, goalSc);
         openHeap.push({
           sr: newSr,
           sc: newSc,
           g: newG,
-          h: newH,
           f: newG + newH,
-          parentSr: current.sr,
-          parentSc: current.sc,
           dirDr: dir.dr,
           dirDc: dir.dc,
         });
@@ -568,13 +685,14 @@ function mergeCollinearPoints(
 // コーナーポイントだけでなく、直線セグメント上の全中間サブセルも補間してマークする
 function markPathSubCells(
   path: { row: number; col: number }[],
-  usedSubCells: Map<string, number>,
+  usedSubCells: Uint32Array,
+  maxSubCol: number,
 ): void {
   const N = SUB_CELL_RESOLUTION;
 
   const markPoint = (sr: number, sc: number) => {
-    const key = `${sr}-${sc}`;
-    usedSubCells.set(key, (usedSubCells.get(key) ?? 0) + 1);
+    const key = sr * maxSubCol + sc;
+    usedSubCells[key]++;
   };
 
   for (let i = 0; i < path.length; i++) {
@@ -607,20 +725,12 @@ export function findPath(
   endRow: number,
   endCol: number,
 ): { row: number; col: number }[] {
-  const cellsMap = new Map<string, CellData>();
-  mapData.cells.forEach((cell) => {
-    cellsMap.set(`${cell.row}-${cell.col}`, cell);
-  });
-
-  return findSubCellPath(
-    cellsMap,
-    mapData.maxRow,
-    mapData.maxCol,
-    startRow,
-    startCol,
-    endRow,
-    endCol,
-  ).path;
+  const context = getPathfindingContext(mapData);
+  const scratch = getPathfindingScratch(
+    context.maxSubRow * context.maxSubCol * 5,
+  );
+  return findSubCellPath(context, scratch, startRow, startCol, endRow, endCol)
+    .path;
 }
 
 export type RouteVisitPoint = {
@@ -629,6 +739,111 @@ export type RouteVisitPoint = {
   priorityLevel?: "none" | "priority" | "highest";
   itemId?: string;
   order?: number;
+};
+
+const ROUTE_CACHE_LIMIT = 4;
+
+type RouteSegmentsCacheEntry = {
+  visitPoints: RouteVisitPoint[];
+  segments: RouteSegment[];
+};
+
+type StrictRouteSegmentsCacheEntry = RouteSegmentsCacheEntry & {
+  ok: boolean;
+  failedFromIndex?: number;
+};
+
+const snapshotRouteVisitPoints = (
+  visitPoints: RouteVisitPoint[],
+): RouteVisitPoint[] =>
+  visitPoints.map(({ row, col, priorityLevel, itemId, order }) => ({
+    row,
+    col,
+    priorityLevel,
+    itemId,
+    order,
+  }));
+
+const areEquivalentRouteVisitPoints = (
+  first: RouteVisitPoint,
+  second: RouteVisitPoint,
+): boolean =>
+  first.row === second.row &&
+  first.col === second.col &&
+  first.priorityLevel === second.priorityLevel &&
+  first.itemId === second.itemId &&
+  first.order === second.order;
+
+const getCommonRoutePointPrefixLength = (
+  first: RouteVisitPoint[],
+  second: RouteVisitPoint[],
+): number => {
+  const limit = Math.min(first.length, second.length);
+  let index = 0;
+  while (
+    index < limit &&
+    areEquivalentRouteVisitPoints(first[index], second[index])
+  ) {
+    index++;
+  }
+  return index;
+};
+
+const cloneRouteSegments = (segments: RouteSegment[]): RouteSegment[] =>
+  segments.map((segment) => ({
+    ...segment,
+    path: segment.path.map((point) => ({ ...point })),
+  }));
+
+const touchRouteCacheEntry = <T>(cache: T[], entryIndex: number): T => {
+  const [entry] = cache.splice(entryIndex, 1);
+  cache.push(entry);
+  return entry;
+};
+
+const pushRouteCacheEntry = <T>(cache: T[], entry: T): void => {
+  cache.push(entry);
+  if (cache.length > ROUTE_CACHE_LIMIT) cache.shift();
+};
+
+const findExactRouteCacheEntry = <T extends RouteSegmentsCacheEntry>(
+  cache: T[],
+  visitPoints: RouteVisitPoint[],
+): T | undefined => {
+  for (let index = cache.length - 1; index >= 0; index--) {
+    if (
+      cache[index].visitPoints.length === visitPoints.length &&
+      getCommonRoutePointPrefixLength(cache[index].visitPoints, visitPoints) ===
+        visitPoints.length
+    ) {
+      return touchRouteCacheEntry(cache, index);
+    }
+  }
+  return undefined;
+};
+
+const findBestPrefixRouteCacheEntry = <T extends RouteSegmentsCacheEntry>(
+  cache: T[],
+  visitPoints: RouteVisitPoint[],
+  canReuse: (entry: T) => boolean,
+): { entry: T; prefixLength: number } | undefined => {
+  let best: { entry: T; entryIndex: number; prefixLength: number } | undefined;
+
+  for (let index = cache.length - 1; index >= 0; index--) {
+    const entry = cache[index];
+    if (!canReuse(entry)) continue;
+    const prefixLength = getCommonRoutePointPrefixLength(
+      entry.visitPoints,
+      visitPoints,
+    );
+    if (prefixLength > (best?.prefixLength ?? 1)) {
+      best = { entry, entryIndex: index, prefixLength };
+    }
+  }
+
+  if (!best) return undefined;
+  touchRouteCacheEntry(cache, best.entryIndex);
+  return { entry: best.entry, prefixLength: best.prefixLength };
 };
 
 export type GenerateRouteSegmentsResult =
@@ -654,38 +869,52 @@ export function generateRouteSegments(
 ): RouteSegment[] {
   if (visitPoints.length < 2) return [];
 
-  const cellsMap = new Map<string, CellData>();
-  mapData.cells.forEach((cell) => {
-    cellsMap.set(`${cell.row}-${cell.col}`, cell);
-  });
+  const context = getPathfindingContext(mapData);
+  const exactCacheEntry = findExactRouteCacheEntry(
+    context.normalRouteCache,
+    visitPoints,
+  );
+  if (exactCacheEntry) return cloneRouteSegments(exactCacheEntry.segments);
 
-  const segments: RouteSegment[] = [];
-  const usedSubCells = new Map<string, number>();
-  const bufferCostMap = buildBufferCostMap(
-    cellsMap,
-    mapData.maxRow,
-    mapData.maxCol,
+  const prefixCacheEntry = findBestPrefixRouteCacheEntry(
+    context.normalRouteCache,
+    visitPoints,
+    () => true,
+  );
+  const reusableSegmentCount = prefixCacheEntry
+    ? prefixCacheEntry.prefixLength - 1
+    : 0;
+  const segments = prefixCacheEntry
+    ? cloneRouteSegments(
+        prefixCacheEntry.entry.segments.slice(0, reusableSegmentCount),
+      )
+    : [];
+  const usedSubCells = new Uint32Array(context.maxSubRow * context.maxSubCol);
+  let scratch: PathfindingScratch | undefined;
+  segments.forEach((segment) =>
+    markPathSubCells(segment.path, usedSubCells, context.maxSubCol),
   );
 
-  for (let i = 0; i < visitPoints.length - 1; i++) {
+  for (let i = reusableSegmentCount; i < visitPoints.length - 1; i++) {
     const from = visitPoints[i];
     const to = visitPoints[i + 1];
+    scratch ??= getPathfindingScratch(
+      context.maxSubRow * context.maxSubCol * 5,
+    );
 
     const result = findSubCellPath(
-      cellsMap,
-      mapData.maxRow,
-      mapData.maxCol,
+      context,
+      scratch,
       from.row,
       from.col,
       to.row,
       to.col,
       usedSubCells,
-      bufferCostMap,
     );
     const path = result.path;
 
     // この経路のサブセルを使用済みとしてマーク
-    markPathSubCells(path, usedSubCells);
+    markPathSubCells(path, usedSubCells, context.maxSubCol);
 
     segments.push({
       fromRow: from.row,
@@ -702,6 +931,10 @@ export function generateRouteSegments(
     });
   }
 
+  pushRouteCacheEntry(context.normalRouteCache, {
+    visitPoints: snapshotRouteVisitPoints(visitPoints),
+    segments: cloneRouteSegments(segments),
+  });
   return segments;
 }
 
@@ -712,32 +945,61 @@ export function generateRouteSegmentsStrict(
 ): GenerateRouteSegmentsResult {
   if (visitPoints.length < 2) return { ok: true, segments: [] };
 
-  const cellsMap = new Map<string, CellData>();
-  mapData.cells.forEach((cell) => {
-    cellsMap.set(`${cell.row}-${cell.col}`, cell);
-  });
+  const context = getPathfindingContext(mapData);
+  const canUseCache = options?.pathConstraint === undefined;
+  const exactCacheEntry = canUseCache
+    ? findExactRouteCacheEntry(context.strictRouteCache, visitPoints)
+    : undefined;
+  if (exactCacheEntry) {
+    const segments = cloneRouteSegments(exactCacheEntry.segments);
+    if (exactCacheEntry.ok) return { ok: true, segments };
+    const failedFromIndex = exactCacheEntry.failedFromIndex ?? 0;
+    return {
+      ok: false,
+      segments,
+      failedSegment: {
+        from: visitPoints[failedFromIndex],
+        to: visitPoints[failedFromIndex + 1],
+        fromIndex: failedFromIndex,
+      },
+    };
+  }
 
-  const segments: RouteSegment[] = [];
-  const usedSubCells = new Map<string, number>();
-  const bufferCostMap = buildBufferCostMap(
-    cellsMap,
-    mapData.maxRow,
-    mapData.maxCol,
+  const prefixCacheEntry = canUseCache
+    ? findBestPrefixRouteCacheEntry(
+        context.strictRouteCache,
+        visitPoints,
+        (entry) => entry.ok,
+      )
+    : undefined;
+  const reusableSegmentCount = prefixCacheEntry
+    ? prefixCacheEntry.prefixLength - 1
+    : 0;
+  const segments = prefixCacheEntry
+    ? cloneRouteSegments(
+        prefixCacheEntry.entry.segments.slice(0, reusableSegmentCount),
+      )
+    : [];
+  const usedSubCells = new Uint32Array(context.maxSubRow * context.maxSubCol);
+  let scratch: PathfindingScratch | undefined;
+  segments.forEach((segment) =>
+    markPathSubCells(segment.path, usedSubCells, context.maxSubCol),
   );
 
-  for (let i = 0; i < visitPoints.length - 1; i++) {
+  for (let i = reusableSegmentCount; i < visitPoints.length - 1; i++) {
     const from = visitPoints[i];
     const to = visitPoints[i + 1];
+    scratch ??= getPathfindingScratch(
+      context.maxSubRow * context.maxSubCol * 5,
+    );
     const result = findSubCellPath(
-      cellsMap,
-      mapData.maxRow,
-      mapData.maxCol,
+      context,
+      scratch,
       from.row,
       from.col,
       to.row,
       to.col,
       usedSubCells,
-      bufferCostMap,
     );
     const path = result.path;
 
@@ -745,6 +1007,14 @@ export function generateRouteSegmentsStrict(
       result.usedFallback ||
       options?.pathConstraint?.isPathAllowed(path) === false
     ) {
+      if (canUseCache) {
+        pushRouteCacheEntry(context.strictRouteCache, {
+          visitPoints: snapshotRouteVisitPoints(visitPoints),
+          segments: cloneRouteSegments(segments),
+          ok: false,
+          failedFromIndex: i,
+        });
+      }
       return {
         ok: false,
         segments,
@@ -752,7 +1022,7 @@ export function generateRouteSegmentsStrict(
       };
     }
 
-    markPathSubCells(path, usedSubCells);
+    markPathSubCells(path, usedSubCells, context.maxSubCol);
     segments.push({
       fromRow: from.row,
       fromCol: from.col,
@@ -768,6 +1038,13 @@ export function generateRouteSegmentsStrict(
     });
   }
 
+  if (canUseCache) {
+    pushRouteCacheEntry(context.strictRouteCache, {
+      visitPoints: snapshotRouteVisitPoints(visitPoints),
+      segments: cloneRouteSegments(segments),
+      ok: true,
+    });
+  }
   return { ok: true, segments };
 }
 

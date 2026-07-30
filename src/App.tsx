@@ -78,7 +78,7 @@ import {
   computeDeleteItem,
   computeAddItemFromFocusMode,
   computeAddToExecuteListFromMapWithResult,
-  computeRemoveFromExecuteListFromMap,
+  computeRemoveFromExecuteListFromMapWithResult,
   computeMoveToExecuteColumn,
   computeRemoveFromExecuteColumn,
   computeMoveItem,
@@ -86,7 +86,6 @@ import {
   computeUpdateItemPriority,
   computeHallOrderForPriorityChange,
   computeInsertIntoExecuteAtPosition,
-  expandExecuteRemovalItemIds,
   reorderExecuteIdsForSpaceAdjacency,
 } from "./features/events/itemOps";
 import {
@@ -2907,21 +2906,15 @@ const App: React.FC = () => {
       const dayName = activeEventDate;
       const currentForEvent =
         executeModeItemsRef.current[activeEventName] || {};
-      const removeIds = expandExecuteRemovalItemIds(
+      const result = computeRemoveFromExecuteListFromMapWithResult(
         [itemId],
-        dayName,
-        items,
-        currentForEvent,
-      );
-      const newExecuteItems = computeRemoveFromExecuteListFromMap(
-        itemId,
         currentForEvent,
         dayName,
         items,
       );
 
-      commitExecuteModeItemsForEvent(activeEventName, newExecuteItems);
-      return removeIds;
+      commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
+      return result.removedItemIds;
     },
     [
       activeEventName,
@@ -3027,27 +3020,16 @@ const App: React.FC = () => {
       if (!activeEventName || !isMapTab || !activeEventDate) return;
       const dayName = activeEventDate;
 
-      let current = executeModeItemsRef.current[activeEventName] || {};
-      const removedItemIds: string[] = [];
-      for (const id of itemIds) {
-        const removeIds = expandExecuteRemovalItemIds(
-          [id],
-          dayName,
-          items,
-          current,
-        );
-        current = computeRemoveFromExecuteListFromMap(
-          id,
-          current,
-          dayName,
-          items,
-        );
-        removedItemIds.push(
-          ...removeIds.filter((removeId) => !removedItemIds.includes(removeId)),
-        );
-      }
-      commitExecuteModeItemsForEvent(activeEventName, current);
-      return removedItemIds;
+      const currentForEvent =
+        executeModeItemsRef.current[activeEventName] || {};
+      const result = computeRemoveFromExecuteListFromMapWithResult(
+        itemIds,
+        currentForEvent,
+        dayName,
+        items,
+      );
+      commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems);
+      return result.removedItemIds;
     },
     [
       activeEventName,

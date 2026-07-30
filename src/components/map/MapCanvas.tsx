@@ -107,6 +107,37 @@ const hasCellInputValue = (value: string | number | null): boolean => {
 const TAP_ASSIST_DURATION_MS = 900;
 
 type PriorityIndicatorLevel = "priority" | "highest";
+type ResolvedMapCellItem = {
+  key: string;
+  item: ShoppingItem;
+};
+
+export const syncCanvasBackingStoreSize = (
+  canvas: HTMLCanvasElement,
+  cssWidth: number,
+  cssHeight: number,
+  dpr: number,
+): void => {
+  const cssWidthValue = `${cssWidth}px`;
+  const cssHeightValue = `${cssHeight}px`;
+  if (canvas.style.width !== cssWidthValue) {
+    canvas.style.width = cssWidthValue;
+  }
+  if (canvas.style.height !== cssHeightValue) {
+    canvas.style.height = cssHeightValue;
+  }
+
+  // Canvas width/height setters truncate fractional values and reset the whole
+  // drawing state. Avoid invoking them when the backing store is already sized.
+  const backingWidth = Math.max(0, Math.trunc(cssWidth * dpr));
+  const backingHeight = Math.max(0, Math.trunc(cssHeight * dpr));
+  if (canvas.width !== backingWidth) {
+    canvas.width = backingWidth;
+  }
+  if (canvas.height !== backingHeight) {
+    canvas.height = backingHeight;
+  }
+};
 
 export const shouldHighlightCandidateRemarks = (
   item: Pick<ShoppingItem, "id" | "remarks">,
@@ -413,21 +444,11 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     return new Set(executeModeItemIds);
   }, [executeModeItemIds]);
 
-  const cellStates = useMemo(() => {
-    const states = new Map<string, MapCellStateDetail>();
-
+  const resolvedMapCellItems = useMemo(() => {
+    const resolvedItems: ResolvedMapCellItem[] = [];
     const dayName = extractDayNameFromMapName(mapName);
     const normalizedDayName = normalizeMapRouteDayText(dayName);
-    if (!normalizedDayName) return states;
-
-    const getPriorityIndicatorLevel = (
-      item: (typeof items)[number],
-    ): PriorityIndicatorLevel | null => {
-      const priorityLevel = item.priorityLevel || "none";
-      return priorityLevel === "priority" || priorityLevel === "highest"
-        ? priorityLevel
-        : null;
-    };
+    if (!normalizedDayName) return resolvedItems;
 
     items.forEach((item) => {
       const itemEventDate = normalizeMapRouteDayText(item.eventDate);
@@ -454,7 +475,25 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       const cell = findRouteLookupNumberCell(block, num);
       if (!cell) return;
 
-      const key = `${cell.row}-${cell.col}`;
+      resolvedItems.push({ key: `${cell.row}-${cell.col}`, item });
+    });
+
+    return resolvedItems;
+  }, [mapData.blocks, items, mapName]);
+
+  const cellStates = useMemo(() => {
+    const states = new Map<string, MapCellStateDetail>();
+
+    const getPriorityIndicatorLevel = (
+      item: ShoppingItem,
+    ): PriorityIndicatorLevel | null => {
+      const priorityLevel = item.priorityLevel || "none";
+      return priorityLevel === "priority" || priorityLevel === "highest"
+        ? priorityLevel
+        : null;
+    };
+
+    resolvedMapCellItems.forEach(({ key, item }) => {
       const existing = states.get(key) || {
         hasItems: false,
         itemCount: 0,
@@ -507,7 +546,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     });
 
     return states;
-  }, [mapData.blocks, items, mapName, executeModeItemIdsSet]);
+  }, [resolvedMapCellItems, executeModeItemIdsSet]);
 
   const routePoints = useMemo(() => {
     if (!effectiveRouteVisible) return [];
@@ -688,10 +727,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     const containerWidth = container.clientWidth;
     const containerHeight = container.clientHeight;
 
-    canvas.style.width = `${containerWidth}px`;
-    canvas.style.height = `${containerHeight}px`;
-    canvas.width = containerWidth * dpr;
-    canvas.height = containerHeight * dpr;
+    syncCanvasBackingStoreSize(canvas, containerWidth, containerHeight, dpr);
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 

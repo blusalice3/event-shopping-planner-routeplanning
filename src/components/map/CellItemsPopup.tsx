@@ -2,6 +2,7 @@ import React, {
   useState,
   useRef,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useCallback,
 } from "react";
@@ -63,6 +64,8 @@ const statusLabels: Record<PurchaseStatus, string> = {
   Late: "遅参",
   LimitedPurchase: "限数",
 };
+
+const CELL_POPUP_OPENING_CLICK_GUARD_MS = 400;
 
 const getExternalUrlHref = (url?: string) => {
   const trimmedUrl = url?.trim();
@@ -293,18 +296,25 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     }
   }, [isOpen, items.length]);
 
+  // 表示元のpointerup後に発生する互換clickだけを、DOM反映時点から抑止する。
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      suppressPopupClickUntilRef.current = 0;
+      return;
+    }
+    const now =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    suppressPopupClickUntilRef.current =
+      now + CELL_POPUP_OPENING_CLICK_GUARD_MS;
+  }, [isOpen]);
+
   // ダイアログが閉じたらサブ状態もリセット
   useEffect(() => {
     if (!isOpen) {
       setAddDialogOpen(false);
       setLongPressItem(null);
       setEditingItem(null);
-      suppressPopupClickUntilRef.current = 0;
-      return;
     }
-    const now =
-      typeof performance !== "undefined" ? performance.now() : Date.now();
-    suppressPopupClickUntilRef.current = now + 400;
   }, [isOpen]);
 
   // 最適なポップアップ位置を計算
@@ -404,12 +414,12 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     clearLongPressTimer();
   };
 
+  const handlePopupInteractionStart = () => {
+    // ポップアップ内で始まった新しい操作は、表示元のジェスチャーとは別操作。
+    suppressPopupClickUntilRef.current = 0;
+  };
+
   const handleItemClick = (item: ShoppingItem) => {
-    const now =
-      typeof performance !== "undefined" ? performance.now() : Date.now();
-    if (now < suppressPopupClickUntilRef.current) {
-      return;
-    }
     if (isLongPress.current || suppressNextClick.current) {
       isLongPress.current = false;
       suppressNextClick.current = false;
@@ -418,10 +428,10 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     handleVisitToggle(item);
   };
 
-  const handlePopupClickCapture = (e: React.SyntheticEvent) => {
+  const handlePopupClickCapture = (e: React.MouseEvent<HTMLDivElement>) => {
     const now =
       typeof performance !== "undefined" ? performance.now() : Date.now();
-    if (now < suppressPopupClickUntilRef.current) {
+    if (now < suppressPopupClickUntilRef.current && e.detail > 0) {
       e.preventDefault();
       e.stopPropagation();
     }
@@ -490,6 +500,8 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
         className="fixed z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 max-w-sm w-80 transition-all duration-150"
         style={{ left: computedPosition.x, top: computedPosition.y }}
         onClickCapture={handlePopupClickCapture}
+        onPointerDownCapture={handlePopupInteractionStart}
+        onTouchStartCapture={handlePopupInteractionStart}
       >
         {/* ヘッダー */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700 gap-2">

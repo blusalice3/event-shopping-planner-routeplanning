@@ -7,7 +7,10 @@ import {
   computeInsertIntoExecuteAtPosition,
   computeMoveItem,
   computeRemoveFromExecuteListFromMap,
+  computeRemoveFromExecuteListFromMapWithResult,
   computeUpdateItemPriority,
+  expandExecuteRemovalItemIds,
+  expandSameSpacePriorityItemIds,
   reorderExecuteIdsForSpaceAdjacency,
 } from "./index";
 
@@ -120,6 +123,87 @@ describe("itemOps regressions", () => {
     );
 
     expect(result[dayName]).toEqual(["a3"]);
+  });
+
+  it("keeps batch map removal equivalent to sequential removal, including returned ID order", () => {
+    const allItems = [
+      makeItem("a1", "A", "01a", "priority"),
+      makeItem("a2", "A", "01a2", "priority"),
+      makeItem("b1", "B", "02b"),
+      makeItem("b2", "B", "02b2"),
+      makeItem("c1", "C", "03"),
+    ];
+    const executeModeItems: ExecuteModeItems = {
+      [dayName]: ["b1", "a1", "c1", "a2", "b2"],
+    };
+    const requestedIds = ["a2", "b2", "a1"];
+
+    let sequentialItems = executeModeItems;
+    const sequentialRemovedIds: string[] = [];
+    for (const itemId of requestedIds) {
+      const removeIds = expandExecuteRemovalItemIds(
+        [itemId],
+        dayName,
+        allItems,
+        sequentialItems,
+      );
+      const removeIdsSet = new Set(removeIds);
+      sequentialItems = {
+        ...sequentialItems,
+        [dayName]: (sequentialItems[dayName] || []).filter(
+          (id) => !removeIdsSet.has(id),
+        ),
+      };
+      for (const removeId of removeIds) {
+        if (!sequentialRemovedIds.includes(removeId)) {
+          sequentialRemovedIds.push(removeId);
+        }
+      }
+    }
+
+    const result = computeRemoveFromExecuteListFromMapWithResult(
+      requestedIds,
+      executeModeItems,
+      dayName,
+      allItems,
+    );
+
+    expect(result.removedItemIds).toEqual(["a2", "a1", "b2", "b1"]);
+    expect(result.removedItemIds).toEqual(sequentialRemovedIds);
+    expect(result.executeModeItems).toEqual(sequentialItems);
+    expect(result.executeModeItems[dayName]).toEqual(["c1"]);
+  });
+
+  it("removes an inserted sibling when the requested batch seed is not inserted", () => {
+    const allItems = [
+      makeItem("a1", "A", "01a", "priority"),
+      makeItem("a2", "A", "01a2", "priority"),
+    ];
+    const executeModeItems: ExecuteModeItems = { [dayName]: ["a1"] };
+
+    const result = computeRemoveFromExecuteListFromMapWithResult(
+      ["a2"],
+      executeModeItems,
+      dayName,
+      allItems,
+    );
+
+    expect(result.removedItemIds).toEqual(["a1"]);
+    expect(result.executeModeItems[dayName]).toEqual([]);
+  });
+
+  it("keeps seed-first ordering when multiple seeds share one expanded group", () => {
+    const allItems = [
+      makeItem("a2", "A", "01a2", "priority"),
+      makeItem("a1", "A", "01a", "priority"),
+      makeItem("a3", "A", "01a3", "priority"),
+    ];
+
+    const result = expandSameSpacePriorityItemIds(["a1", "a2"], allItems, {
+      excludeSeedIdsFromSiblingExpansion: true,
+    });
+
+    expect(result).toEqual(["a1", "a3", "a2"]);
   });
 
   it("snaps positioned map insert after an existing same-space same-priority group", () => {

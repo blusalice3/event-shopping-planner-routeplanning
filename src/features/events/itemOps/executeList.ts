@@ -19,6 +19,11 @@ export interface ExecutePositionInsertResult {
   insertedItemIds: string[];
 }
 
+export interface MapExecuteRemovalResult {
+  executeModeItems: ExecuteModeItems;
+  removedItemIds: string[];
+}
+
 export function expandSameSpacePriorityItemIds(
   itemIds: string[],
   allItems: ShoppingItem[],
@@ -32,9 +37,15 @@ export function expandSameSpacePriorityItemIds(
   const seedIdsSet = new Set(itemIds);
   const expandedIds: string[] = [];
   const expandedIdsSet = new Set<string>();
+  const itemsById = new Map<string, ShoppingItem>();
+  for (const item of allItems) {
+    // Array.findと同じく、重複IDがあっても先頭を優先する。
+    if (!itemsById.has(item.id)) itemsById.set(item.id, item);
+  }
+  const expandedGroupKeys = new Set<string>();
 
   for (const itemId of itemIds) {
-    const item = allItems.find((i) => i.id === itemId);
+    const item = itemsById.get(itemId);
     if (!item) continue;
     if (options.dayName && item.eventDate !== options.dayName) continue;
 
@@ -49,6 +60,10 @@ export function expandSameSpacePriorityItemIds(
 
     const spaceKey = getSpaceKey(item.block, item.number);
     const priorityLevel = item.priorityLevel || "none";
+    const groupKey = JSON.stringify([item.eventDate, spaceKey, priorityLevel]);
+    if (expandedGroupKeys.has(groupKey)) continue;
+    expandedGroupKeys.add(groupKey);
+
     for (const sibling of allItems) {
       if (
         options.excludeSeedIdsFromSiblingExpansion &&
@@ -334,13 +349,40 @@ export function computeRemoveFromExecuteListFromMap(
   dayName: string,
   allItems?: ShoppingItem[],
 ): ExecuteModeItems {
-  const removeIds = allItems
-    ? expandExecuteRemovalItemIds([itemId], dayName, allItems, executeModeItems)
-    : [itemId];
+  return computeRemoveFromExecuteListFromMapWithResult(
+    [itemId],
+    executeModeItems,
+    dayName,
+    allItems,
+  ).executeModeItems;
+}
+
+/**
+ * マップから指定アイテムと同一スペース・同一優先度の兄弟を一括除去し、
+ * 実際に除去対象となったIDを従来と同じ先着順で返す。
+ */
+export function computeRemoveFromExecuteListFromMapWithResult(
+  itemIds: string[],
+  executeModeItems: ExecuteModeItems,
+  dayName: string,
+  allItems?: ShoppingItem[],
+): MapExecuteRemovalResult {
+  if (itemIds.length === 0) {
+    return { executeModeItems, removedItemIds: [] };
+  }
+
+  const removedItemIds = allItems
+    ? expandExecuteRemovalItemIds(itemIds, dayName, allItems, executeModeItems)
+    : itemIds;
+  const removedItemIdsSet = new Set(removedItemIds);
   const dayItems = (executeModeItems[dayName] || []).filter(
-    (id) => !removeIds.includes(id),
+    (id) => !removedItemIdsSet.has(id),
   );
-  return { ...executeModeItems, [dayName]: dayItems };
+
+  return {
+    executeModeItems: { ...executeModeItems, [dayName]: dayItems },
+    removedItemIds,
+  };
 }
 
 // ────────────────────────────────────────────────

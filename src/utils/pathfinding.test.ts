@@ -195,6 +195,112 @@ describe("pathfinding utilities", () => {
     }
   });
 
+  it("reuses only an equivalent route prefix and preserves full-generation output", () => {
+    const createRouteMap = () =>
+      createMapData(8, 8, [
+        { row: 3, col: 2, value: 1 },
+        { row: 3, col: 3, value: 1 },
+        { row: 3, col: 5, value: 1 },
+        { row: 3, col: 6, value: 1 },
+        { row: 6, col: 3, value: 1 },
+        { row: 6, col: 4, value: 1 },
+        { row: 6, col: 6, value: 1 },
+      ]);
+    const basePoints = [
+      { row: 1, col: 1, itemId: "a", order: 0 },
+      { row: 1, col: 8, itemId: "b", order: 1 },
+      { row: 5, col: 8, itemId: "c", order: 2 },
+      { row: 8, col: 8, itemId: "d", order: 3 },
+      { row: 8, col: 1, itemId: "e", order: 4 },
+    ];
+    const variants = [
+      [...basePoints, { row: 4, col: 1, itemId: "tail", order: 5 }],
+      [
+        ...basePoints.slice(0, 3),
+        { row: 4, col: 4, itemId: "middle", order: 3 },
+        ...basePoints.slice(3).map((point) => ({
+          ...point,
+          order: (point.order ?? 0) + 1,
+        })),
+      ],
+      basePoints.slice(0, -1),
+    ];
+
+    const cachedNormalMap = createRouteMap();
+    const cachedStrictMap = createRouteMap();
+    generateRouteSegments(cachedNormalMap, basePoints);
+    generateRouteSegmentsStrict(cachedStrictMap, basePoints);
+
+    for (const variant of variants) {
+      expect(generateRouteSegments(cachedNormalMap, variant)).toEqual(
+        generateRouteSegments(createRouteMap(), variant),
+      );
+      expect(generateRouteSegmentsStrict(cachedStrictMap, variant)).toEqual(
+        generateRouteSegmentsStrict(createRouteMap(), variant),
+      );
+    }
+  });
+
+  it("returns independent route objects from the exact-result cache", () => {
+    const mapData = createMapData(4, 4, []);
+    const visitPoints = [
+      { row: 1, col: 1, itemId: "a", order: 0 },
+      { row: 4, col: 4, itemId: "b", order: 1 },
+    ];
+
+    const first = generateRouteSegmentsStrict(mapData, visitPoints);
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+    const expected = structuredClone(first);
+    first.segments[0].path[0].row = 999;
+
+    expect(generateRouteSegmentsStrict(mapData, visitPoints)).toEqual(expected);
+  });
+
+  it("invalidates prepared pathfinding data after an in-place relevant cell change", () => {
+    const blockingCell: CellData = {
+      row: 2,
+      col: 2,
+      value: null,
+      backgroundColor: "#FFFFFF",
+      borders: { top: null, right: null, bottom: null, left: null },
+    };
+    const mapData = createMapData(3, 3, [blockingCell]);
+    const openPath = findPath(mapData, 2, 1, 2, 3);
+    expect(openPath).toHaveLength(2);
+
+    mapData.cells[0].value = 2;
+    const blockedPath = findPath(mapData, 2, 1, 2, 3);
+
+    expect(blockedPath).not.toEqual(openPath);
+    expect(
+      blockedPath.some(
+        (point) =>
+          Math.abs(point.row - 2) < 0.2 && Math.abs(point.col - 2) < 0.2,
+      ),
+    ).toBe(false);
+  });
+
+  it("rechecks stateful path constraints instead of caching their result", () => {
+    const mapData = createMapData(3, 3, []);
+    const visitPoints = [
+      { row: 1, col: 1, itemId: "a", order: 0 },
+      { row: 1, col: 3, itemId: "b", order: 1 },
+    ];
+    let allowPath = true;
+    const pathConstraint = {
+      isPathAllowed: () => allowPath,
+    };
+
+    expect(
+      generateRouteSegmentsStrict(mapData, visitPoints, { pathConstraint }).ok,
+    ).toBe(true);
+    allowPath = false;
+    expect(
+      generateRouteSegmentsStrict(mapData, visitPoints, { pathConstraint }).ok,
+    ).toBe(false);
+  });
+
   it("simplifies a mostly straight path", () => {
     const path = [
       { row: 1, col: 1 },

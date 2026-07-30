@@ -272,4 +272,55 @@ describe("MapCanvas route insert integration", () => {
     expect(onRouteInsertMiss).toHaveBeenNthCalledWith(1, { kind: "cell" });
     expect(onRouteInsertMiss).toHaveBeenNthCalledWith(2, { kind: "blank" });
   });
+
+  it("reuses item-to-cell resolution when only execute-list membership changes", async () => {
+    let numberCellIterations = 0;
+    const trackedNumberCells = new Proxy([{ row: 1, col: 1, value: 1 }], {
+      get(target, property, receiver) {
+        if (property === Symbol.iterator) {
+          numberCellIterations++;
+          return target[Symbol.iterator].bind(target);
+        }
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    const trackedMapData: DayMapData = {
+      ...mapData,
+      blocks: [{ ...mapData.blocks[0], numberCells: trackedNumberCells }],
+    };
+    const item = {
+      id: "item-1",
+      eventDate: "Day1",
+      block: "A",
+      number: "1",
+      circle: "Circle",
+      title: "Title",
+      price: null,
+      quantity: 1,
+      remarks: "",
+      purchaseStatus: "None" as const,
+    };
+
+    const { canvas, props, rerender } = renderCanvas({
+      mapData: trackedMapData,
+      items: [item],
+    });
+    await waitFor(() => expect(canvas.width).toBe(280));
+    const iterationsAfterInitialRender = numberCellIterations;
+    const getContextMock = vi.mocked(HTMLCanvasElement.prototype.getContext);
+    const drawCountBeforeUpdate = getContextMock.mock.calls.length;
+
+    rerender(
+      <div style={{ width: 280, height: 280 }}>
+        <MapCanvas {...props} executeModeItemIds={["item-1"]} />
+      </div>,
+    );
+
+    await waitFor(() =>
+      expect(getContextMock.mock.calls.length).toBeGreaterThan(
+        drawCountBeforeUpdate,
+      ),
+    );
+    expect(numberCellIterations).toBe(iterationsAfterInitialRender);
+  });
 });

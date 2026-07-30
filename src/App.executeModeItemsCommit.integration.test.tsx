@@ -179,8 +179,12 @@ describe("App executeModeItems commit integration", () => {
       "commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems)",
     );
     expect(mapRemoveHandler).toContain(
-      "commitExecuteModeItemsForEvent(activeEventName, newExecuteItems)",
+      "commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems)",
     );
+    expect(mapRemoveHandler).toContain(
+      "computeRemoveFromExecuteListFromMapWithResult",
+    );
+    expect(mapRemoveHandler).not.toContain("expandExecuteRemovalItemIds");
     expect(mapBatchAddHandler).toContain(
       "commitExecuteModeItemsForEvent(activeEventName, current)",
     );
@@ -188,8 +192,13 @@ describe("App executeModeItems commit integration", () => {
       "commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems)",
     );
     expect(mapBatchRemoveHandler).toContain(
-      "commitExecuteModeItemsForEvent(activeEventName, current)",
+      "commitExecuteModeItemsForEvent(activeEventName, result.executeModeItems)",
     );
+    expect(mapBatchRemoveHandler).toContain(
+      "computeRemoveFromExecuteListFromMapWithResult",
+    );
+    expect(mapBatchRemoveHandler).not.toContain("for (const id of itemIds)");
+    expect(mapBatchRemoveHandler).not.toContain("expandExecuteRemovalItemIds");
     expect(mapMoveFirstHandler).toContain("updateExecuteModeItems((prev)");
     expect(mapMoveLastHandler).toContain("updateExecuteModeItems((prev)");
   });
