@@ -109,6 +109,7 @@ type AppMainContentProps = {
   handleCandidateNumberSort: () => void;
   handleClearBlockFilters: () => void;
   handleClearNewItemDefaults: () => void;
+  handleClearRangeSelection: () => void;
   handleCollapseAndOpenNext: NonNullable<
     ShoppingListProps["onCollapseAndOpenNext"]
   >;
@@ -265,6 +266,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     handleCandidateNumberSort,
     handleClearBlockFilters,
     handleClearNewItemDefaults,
+    handleClearRangeSelection,
     handleCollapseAndOpenNext,
     handleDeleteEvent,
     handleDeleteItemFromMap,
@@ -467,6 +469,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                         onClick={() => {
                           setSpaceGroupingEnabled((prev: boolean) => !prev);
                           setCollapsedSpaces(new Set());
+                          handleClearRangeSelection();
                         }}
                         className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
                           spaceGroupingEnabled
@@ -508,6 +511,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                   onMoveToColumn={handleMoveToExecuteColumn}
                   columnType="execute"
                   currentDay={activeEventDate}
+                  rangeScopeId={activeEventName ?? ""}
                   onMoveItemUp={handleMoveItemUp}
                   onMoveItemDown={handleMoveItemDown}
                   rangeStart={rangeStart}
@@ -620,6 +624,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                   onRemoveFromColumn={handleRemoveFromExecuteColumn}
                   columnType="candidate"
                   currentDay={activeEventDate}
+                  rangeScopeId={activeEventName ?? ""}
                   onMoveItemUp={handleMoveItemUp}
                   onMoveItemDown={handleMoveItemDown}
                   rangeStart={rangeStart}
@@ -701,6 +706,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
               onSelectItem={handleSelectItem}
               columnType="execute"
               currentDay={activeEventDate}
+              rangeScopeId={activeEventName ?? ""}
               onMoveItemUp={handleMoveItemUp}
               onMoveItemDown={handleMoveItemDown}
               rangeStart={rangeStart}

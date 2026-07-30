@@ -1,16 +1,26 @@
 import { useCallback, useState } from "react";
-import type { DayMapData, HallDefinition } from "../../../types/map";
-import type { ShoppingItem } from "../../../types/item";
-import { buildGroupId, getHallIdForItem } from "../../../utils/hallGrouping";
-import { getSpaceKey } from "../../../utils/spaceGrouping";
+import {
+  resolveRangeSelection,
+  toggleRangeSelection,
+  type RangeEndpoint,
+  type RangePresentation,
+} from "../domain/rangeSelection";
 
-export type ListColumnType = "execute" | "candidate";
+export type ListRangeSelection = RangeEndpoint | null;
 
-export type ListRangeSelection = {
-  itemId: string;
-  columnType: ListColumnType;
-  sourceType?: "item" | "spaceHeader";
-} | null;
+const isSameEndpoint = (
+  endpoint: RangeEndpoint | null,
+  candidate: RangeEndpoint,
+): boolean => {
+  if (!endpoint) return false;
+  if (endpoint.kind === "item" && candidate.kind === "item") {
+    return endpoint.itemId === candidate.itemId;
+  }
+  if (endpoint.kind === "group" && candidate.kind === "group") {
+    return endpoint.groupKey === candidate.groupKey;
+  }
+  return false;
+};
 
 export const useListInteractionState = () => {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(
@@ -33,6 +43,11 @@ export const useListInteractionState = () => {
 
   const clearSelection = useCallback(() => {
     setSelectedItemIds(new Set());
+    setRangeStart(null);
+    setRangeEnd(null);
+  }, []);
+
+  const clearRangeSelection = useCallback(() => {
     setRangeStart(null);
     setRangeEnd(null);
   }, []);
@@ -78,27 +93,23 @@ export const useListInteractionState = () => {
   }, []);
 
   const selectItemForRange = useCallback(
-    (
-      itemId: string,
-      columnType: ListColumnType,
-      currentItems: ShoppingItem[],
-    ) => {
+    (itemId: string, presentation: RangePresentation) => {
+      const endpoint: RangeEndpoint = {
+        kind: "item",
+        itemId,
+        scopeKey: presentation.scopeKey,
+      };
+
       setSelectedItemIds((prev) => {
         const next = new Set(prev);
         const wasSelected = next.has(itemId);
 
         if (wasSelected) {
           next.delete(itemId);
-          if (
-            rangeStart?.itemId === itemId &&
-            rangeStart.columnType === columnType
-          ) {
+          if (isSameEndpoint(rangeStart, endpoint)) {
             setRangeStart(null);
             setRangeEnd(null);
-          } else if (
-            rangeEnd?.itemId === itemId &&
-            rangeEnd.columnType === columnType
-          ) {
+          } else if (isSameEndpoint(rangeEnd, endpoint)) {
             setRangeEnd(null);
           }
           return next;
@@ -108,25 +119,29 @@ export const useListInteractionState = () => {
 
         if (
           !rangeStart ||
-          rangeStart.columnType !== columnType ||
-          rangeStart.sourceType === "spaceHeader"
+          rangeStart.scopeKey !== presentation.scopeKey ||
+          rangeStart.kind !== endpoint.kind
         ) {
-          setRangeStart({ itemId, columnType, sourceType: "item" });
+          setRangeStart(endpoint);
           setRangeEnd(null);
           return next;
         }
 
-        const startIndex = currentItems.findIndex(
-          (item) => item.id === rangeStart.itemId,
+        const resolution = resolveRangeSelection(
+          presentation,
+          rangeStart,
+          endpoint,
         );
-        const currentIndex = currentItems.findIndex(
-          (item) => item.id === itemId,
-        );
-        if (startIndex !== -1 && currentIndex !== -1) {
-          const isAdjacent = Math.abs(startIndex - currentIndex) === 1;
-          setRangeEnd(
-            isAdjacent ? null : { itemId, columnType, sourceType: "item" },
-          );
+        if (resolution.valid) {
+          setRangeEnd(endpoint);
+        } else if (
+          resolution.reason === "adjacent" ||
+          resolution.reason === "same-endpoint"
+        ) {
+          setRangeEnd(null);
+        } else {
+          setRangeStart(endpoint);
+          setRangeEnd(null);
         }
 
         return next;
@@ -137,21 +152,15 @@ export const useListInteractionState = () => {
 
   const selectSpaceGroupForRange = useCallback(
     (
-      firstItemId: string,
-      allItemIds: string[],
-      columnType: ListColumnType,
-      currentItems: ShoppingItem[],
+      groupKey: string,
+      allItemIds: readonly string[],
+      presentation: RangePresentation,
     ) => {
-      const groupOrder: string[] = [];
-      const groupFirstItemMap = new Map<string, string>();
-
-      for (const item of currentItems) {
-        const key = getSpaceKey(item.block, item.number);
-        if (!groupFirstItemMap.has(key)) {
-          groupOrder.push(key);
-          groupFirstItemMap.set(key, item.id);
-        }
-      }
+      const endpoint: RangeEndpoint = {
+        kind: "group",
+        groupKey,
+        scopeKey: presentation.scopeKey,
+      };
 
       setSelectedItemIds((prev) => {
         const next = new Set(prev);
@@ -159,10 +168,10 @@ export const useListInteractionState = () => {
 
         if (allSelected) {
           allItemIds.forEach((id) => next.delete(id));
-          if (rangeStart && allItemIds.includes(rangeStart.itemId)) {
+          if (isSameEndpoint(rangeStart, endpoint)) {
             setRangeStart(null);
             setRangeEnd(null);
-          } else if (rangeEnd && allItemIds.includes(rangeEnd.itemId)) {
+          } else if (isSameEndpoint(rangeEnd, endpoint)) {
             setRangeEnd(null);
           }
           return next;
@@ -172,49 +181,29 @@ export const useListInteractionState = () => {
 
         if (
           !rangeStart ||
-          rangeStart.columnType !== columnType ||
-          rangeStart.sourceType === "item"
+          rangeStart.scopeKey !== presentation.scopeKey ||
+          rangeStart.kind !== endpoint.kind
         ) {
-          setRangeStart({
-            itemId: firstItemId,
-            columnType,
-            sourceType: "spaceHeader",
-          });
+          setRangeStart(endpoint);
           setRangeEnd(null);
           return next;
         }
 
-        const startItem = currentItems.find(
-          (item) => item.id === rangeStart.itemId,
+        const resolution = resolveRangeSelection(
+          presentation,
+          rangeStart,
+          endpoint,
         );
-        const currentItem = currentItems.find(
-          (item) => item.id === firstItemId,
-        );
-        const startKey = startItem
-          ? getSpaceKey(startItem.block, startItem.number)
-          : null;
-        const currentKey = currentItem
-          ? getSpaceKey(currentItem.block, currentItem.number)
-          : null;
-
-        if (startKey && currentKey) {
-          const startGroupIdx = groupOrder.indexOf(startKey);
-          const currentGroupIdx = groupOrder.indexOf(currentKey);
-          const isAdjacent =
-            startGroupIdx !== -1 &&
-            currentGroupIdx !== -1 &&
-            Math.abs(startGroupIdx - currentGroupIdx) === 1;
-          setRangeEnd(
-            isAdjacent
-              ? null
-              : { itemId: firstItemId, columnType, sourceType: "spaceHeader" },
-          );
+        if (resolution.valid) {
+          setRangeEnd(endpoint);
+        } else if (
+          resolution.reason === "adjacent" ||
+          resolution.reason === "same-endpoint"
+        ) {
+          setRangeEnd(null);
         } else {
-          setRangeEnd({
-            itemId: firstItemId,
-            columnType,
-            sourceType: "spaceHeader",
-          });
+          setRangeStart(endpoint);
+          setRangeEnd(null);
         }
 
         return next;
@@ -223,163 +212,25 @@ export const useListInteractionState = () => {
     [rangeEnd, rangeStart],
   );
 
-  const toggleRangeItemsSelection = useCallback(
-    (rangeItems: ShoppingItem[]) => {
+  const toggleRangeItemIdsSelection = useCallback(
+    (rangeItemIds: readonly string[]) => {
       setSelectedItemIds((prev) => {
-        const allSelected = rangeItems.every((item) => prev.has(item.id));
-        const next = new Set(prev);
-        if (allSelected) {
-          rangeItems.forEach((item) => next.delete(item.id));
-          setRangeStart(null);
-          setRangeEnd(null);
-        } else {
-          rangeItems.forEach((item) => next.add(item.id));
+        const result = toggleRangeSelection(prev, rangeItemIds);
+        if (result.operation === "deselect") {
+          clearRangeSelection();
         }
-        return next;
+        return result.selectedItemIds;
       });
     },
-    [],
-  );
-
-  const toggleCurrentRangeSelection = useCallback(
-    (
-      columnType: ListColumnType,
-      currentItems: ShoppingItem[],
-      options: {
-        halls: HallDefinition[];
-        currentMapData: DayMapData | null;
-      },
-    ) => {
-      if (
-        !rangeStart ||
-        rangeStart.columnType !== columnType ||
-        !rangeEnd ||
-        rangeEnd.columnType !== columnType
-      ) {
-        return;
-      }
-
-      if (spaceGroupingEnabled) {
-        const startItem = currentItems.find(
-          (item) => item.id === rangeStart.itemId,
-        );
-        const endItem = currentItems.find(
-          (item) => item.id === rangeEnd.itemId,
-        );
-        if (!startItem || !endItem) return;
-
-        const startKey = getSpaceKey(startItem.block, startItem.number);
-        const endKey = getSpaceKey(endItem.block, endItem.number);
-        let rangeItems: ShoppingItem[];
-
-        if (startKey === endKey) {
-          const groupItems = currentItems.filter(
-            (item) => getSpaceKey(item.block, item.number) === startKey,
-          );
-          const startIndex = groupItems.findIndex(
-            (item) => item.id === rangeStart.itemId,
-          );
-          const endIndex = groupItems.findIndex(
-            (item) => item.id === rangeEnd.itemId,
-          );
-          if (startIndex === -1 || endIndex === -1) return;
-          rangeItems = groupItems.slice(
-            Math.min(startIndex, endIndex),
-            Math.max(startIndex, endIndex) + 1,
-          );
-        } else {
-          const groupOrder: string[] = [];
-          for (const item of currentItems) {
-            const key = getSpaceKey(item.block, item.number);
-            if (!groupOrder.includes(key)) {
-              groupOrder.push(key);
-            }
-          }
-          const startGrpIdx = groupOrder.indexOf(startKey);
-          const endGrpIdx = groupOrder.indexOf(endKey);
-          if (startGrpIdx === -1 || endGrpIdx === -1) return;
-          const rangeSpaceKeys = new Set(
-            groupOrder.slice(
-              Math.min(startGrpIdx, endGrpIdx),
-              Math.max(startGrpIdx, endGrpIdx) + 1,
-            ),
-          );
-          rangeItems = currentItems.filter((item) =>
-            rangeSpaceKeys.has(getSpaceKey(item.block, item.number)),
-          );
-        }
-
-        toggleRangeItemsSelection(rangeItems);
-        return;
-      }
-
-      const { halls, currentMapData } = options;
-      if (halls.length > 0) {
-        const getItemGroupId = (item: ShoppingItem): string | null =>
-          buildGroupId(
-            getHallIdForItem(item, currentMapData ?? null, halls),
-            item.priorityLevel || "none",
-          );
-
-        const startItem = currentItems.find(
-          (item) => item.id === rangeStart.itemId,
-        );
-        const endItem = currentItems.find(
-          (item) => item.id === rangeEnd.itemId,
-        );
-        if (!startItem || !endItem) return;
-
-        const startGroupId = getItemGroupId(startItem);
-        const endGroupId = getItemGroupId(endItem);
-        if (startGroupId !== endGroupId) return;
-
-        const groupItems = currentItems.filter(
-          (item) => getItemGroupId(item) === startGroupId,
-        );
-        const startIndex = groupItems.findIndex(
-          (item) => item.id === rangeStart.itemId,
-        );
-        const endIndex = groupItems.findIndex(
-          (item) => item.id === rangeEnd.itemId,
-        );
-        if (startIndex === -1 || endIndex === -1) return;
-
-        toggleRangeItemsSelection(
-          groupItems.slice(
-            Math.min(startIndex, endIndex),
-            Math.max(startIndex, endIndex) + 1,
-          ),
-        );
-        return;
-      }
-
-      const startIndex = currentItems.findIndex(
-        (item) => item.id === rangeStart.itemId,
-      );
-      const endIndex = currentItems.findIndex(
-        (item) => item.id === rangeEnd.itemId,
-      );
-      if (startIndex === -1 || endIndex === -1) return;
-
-      toggleRangeItemsSelection(
-        currentItems.slice(
-          Math.min(startIndex, endIndex),
-          Math.max(startIndex, endIndex) + 1,
-        ),
-      );
-    },
-    [rangeEnd, rangeStart, spaceGroupingEnabled, toggleRangeItemsSelection],
+    [clearRangeSelection],
   );
 
   return {
     selectedItemIds,
-    setSelectedItemIds,
     selectedBlockFilters,
     setSelectedBlockFilters,
     rangeStart,
-    setRangeStart,
     rangeEnd,
-    setRangeEnd,
     spaceGroupingEnabled,
     setSpaceGroupingEnabled,
     collapsedSpaces,
@@ -389,13 +240,13 @@ export const useListInteractionState = () => {
     executeCollapsedSpaces,
     setExecuteCollapsedSpaces,
     clearSelection,
+    clearRangeSelection,
     clearBlockFilters,
     toggleBlockFilter,
     toggleCollapsedSpace,
     toggleExecuteCollapsedSpace,
     selectItemForRange,
     selectSpaceGroupForRange,
-    toggleRangeItemsSelection,
-    toggleCurrentRangeSelection,
+    toggleRangeItemIdsSelection,
   };
 };

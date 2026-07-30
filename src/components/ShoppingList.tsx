@@ -64,6 +64,12 @@ import {
   type ExecutionNavigationGuardFeedback,
 } from "../features/space-navigation/hooks/useExecutionSpaceNavigator";
 import { acquireBodyScrollLock } from "../utils/bodyScrollLock";
+import {
+  buildRangePresentation,
+  resolveRangeSelection,
+  type RangeEndpoint,
+  type RangePresentation,
+} from "../features/lists/domain/rangeSelection";
 
 type PriorityLevel = "none" | "priority" | "highest";
 
@@ -103,11 +109,16 @@ interface ShoppingListProps {
   onEditRequest: (item: ShoppingItem) => void;
   onDeleteRequest: (item: ShoppingItem) => void;
   selectedItemIds: Set<string>;
-  onSelectItem: (itemId: string, columnType?: "execute" | "candidate") => void;
+  onSelectItem: (
+    itemId: string,
+    columnType: "execute" | "candidate" | undefined,
+    presentation: RangePresentation,
+  ) => void;
   onMoveToColumn?: (itemIds: string[]) => void;
   onRemoveFromColumn?: (itemIds: string[]) => void;
   columnType?: "execute" | "candidate";
   currentDay?: string;
+  rangeScopeId?: string;
   onMoveItemUp?: (
     itemId: string,
     targetColumn?: "execute" | "candidate",
@@ -116,9 +127,9 @@ interface ShoppingListProps {
     itemId: string,
     targetColumn?: "execute" | "candidate",
   ) => void;
-  rangeStart?: { itemId: string; columnType: "execute" | "candidate" } | null;
-  rangeEnd?: { itemId: string; columnType: "execute" | "candidate" } | null;
-  onToggleRangeSelection?: (columnType: "execute" | "candidate") => void;
+  rangeStart?: RangeEndpoint | null;
+  rangeEnd?: RangeEndpoint | null;
+  onToggleRangeSelection?: (rangeItemIds: readonly string[]) => void;
   duplicateCircleItemIds?: Set<string>;
   highlightedItemId?: string | null;
   layoutMode?: "pc" | "smartphone";
@@ -135,9 +146,9 @@ interface ShoppingListProps {
   onToggleAllSpaceCollapse?: (collapse: boolean) => void;
   onSetSpaceGroupDragItemIds?: (itemIds: string[] | null) => void;
   onSelectSpaceGroupForRange?: (
-    firstItemId: string,
+    groupKey: string,
     allItemIds: string[],
-    columnType: "execute" | "candidate",
+    presentation: RangePresentation,
   ) => void;
   onAddItem?: (
     item: Omit<ShoppingItem, "id"> & { purchaseStatus?: PurchaseStatus },
@@ -434,6 +445,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   onRemoveFromColumn: _onRemoveFromColumn,
   columnType,
   currentDay,
+  rangeScopeId = "",
   onMoveItemUp,
   onMoveItemDown,
   rangeStart,
@@ -1319,6 +1331,71 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     showSpaceGroups,
   ]);
 
+  const rangePresentation = useMemo((): RangePresentation => {
+    if (showSpaceGroups) {
+      const groups = spaceGroups.map((group) => ({
+        key: group.groupKey,
+        itemIds: group.items.map((item) => item.id),
+      }));
+      return buildRangePresentation({
+        scopeKey: JSON.stringify([
+          rangeScopeId,
+          currentDay ?? null,
+          columnType ?? null,
+          viewMode,
+          "space",
+          groups,
+          spaceGroups.map((group) => [group.groupKey, group.isCollapsed]),
+        ]),
+        grouping: "space",
+        groups,
+      });
+    }
+
+    if (showHallGroups) {
+      const groups = hallGroups.map((group) => ({
+        key: group.groupId,
+        itemIds: group.items.map((item) => item.id),
+      }));
+      return buildRangePresentation({
+        scopeKey: JSON.stringify([
+          rangeScopeId,
+          currentDay ?? null,
+          columnType ?? null,
+          viewMode,
+          "hall",
+          groups,
+        ]),
+        grouping: "hall",
+        groups,
+      });
+    }
+
+    const itemIds = items.map((item) => item.id);
+    return buildRangePresentation({
+      scopeKey: JSON.stringify([
+        rangeScopeId,
+        currentDay ?? null,
+        columnType ?? null,
+        viewMode,
+        "flat",
+        itemIds,
+      ]),
+      grouping: "flat",
+      itemIds,
+    });
+  }, [
+    columnType,
+    currentDay,
+    hallGroups,
+    items,
+    rangeScopeId,
+    showHallGroups,
+    showSpaceGroups,
+    spaceGroups,
+    viewMode,
+  ]);
+
   // スペースグループの表示順序をApp.tsxに通知
   useEffect(() => {
     if (!isInspecting && onSpaceGroupOrderChange && spaceGroups.length > 0) {
@@ -1347,241 +1424,199 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     return blockColorMapResult;
   }, [items, showSpaceGroups]);
 
-  const groupRangeInfo = useMemo(() => {
-    if (
-      !showHallGroups ||
-      !rangeStart ||
-      !rangeEnd ||
-      !columnType ||
-      rangeStart.columnType !== columnType ||
-      rangeEnd.columnType !== columnType
-    ) {
-      return null;
-    }
-
-    let startGroupId: string | null = null;
-    let endGroupId: string | null = null;
-    let startHallIndex = -1;
-    let endHallIndex = -1;
-
-    for (const group of hallGroups) {
-      const startIdx = group.items.findIndex(
-        (item) => item.id === rangeStart.itemId,
-      );
-      if (startIdx !== -1) {
-        startGroupId = group.groupId;
-        startHallIndex = startIdx;
-      }
-      const endIdx = group.items.findIndex(
-        (item) => item.id === rangeEnd.itemId,
-      );
-      if (endIdx !== -1) {
-        endGroupId = group.groupId;
-        endHallIndex = endIdx;
-      }
-    }
-
-    if (
-      startGroupId !== endGroupId ||
-      startHallIndex === -1 ||
-      endHallIndex === -1
-    ) {
-      return null;
-    }
-
-    const group = hallGroups.find((g) => g.groupId === startGroupId);
-    if (!group) return null;
-
-    const minIndex = Math.min(startHallIndex, endHallIndex);
-    const maxIndex = Math.max(startHallIndex, endHallIndex);
-    const rangeItems = group.items.slice(minIndex, maxIndex + 1);
-    const allSelected = rangeItems.every((item) =>
-      selectedItemIds.has(item.id),
+  const resolvedRange = useMemo(() => {
+    if (!rangeStart || !rangeEnd) return null;
+    const resolution = resolveRangeSelection(
+      rangePresentation,
+      rangeStart,
+      rangeEnd,
     );
+    return resolution.valid ? resolution : null;
+  }, [rangeEnd, rangePresentation, rangeStart]);
 
+  const rangeItemsById = useMemo(
+    () => new Map(items.map((item) => [item.id, item])),
+    [items],
+  );
+
+  const resolvedRangeSummary = useMemo(() => {
+    if (!resolvedRange || !rangeStart || !rangeEnd) return null;
+
+    const endpointItemIds = new Set<string>();
+    const addEndpointItems = (
+      endpoint: RangeEndpoint,
+      groupIndex: number | null,
+    ) => {
+      if (endpoint.kind === "item") {
+        endpointItemIds.add(endpoint.itemId);
+        return;
+      }
+      if (groupIndex === null) return;
+      rangePresentation.groups[groupIndex]?.itemIds.forEach((itemId) =>
+        endpointItemIds.add(itemId),
+      );
+    };
+
+    addEndpointItems(rangeStart, resolvedRange.start.groupIndex);
+    addEndpointItems(rangeEnd, resolvedRange.end.groupIndex);
+
+    const allSelected = resolvedRange.itemIds.every((itemId) =>
+      selectedItemIds.has(itemId),
+    );
     const onlyStartEndSelected =
-      rangeItems.length > 2 &&
-      selectedItemIds.has(rangeItems[0].id) &&
-      selectedItemIds.has(rangeItems[rangeItems.length - 1].id) &&
-      rangeItems.slice(1, -1).every((item) => !selectedItemIds.has(item.id));
+      resolvedRange.itemIds.length > endpointItemIds.size &&
+      endpointItemIds.size > 0 &&
+      [...endpointItemIds].every((itemId) => selectedItemIds.has(itemId)) &&
+      resolvedRange.itemIds.every(
+        (itemId) => endpointItemIds.has(itemId) || !selectedItemIds.has(itemId),
+      );
 
     return {
-      groupId: startGroupId,
-      startIndex: minIndex,
-      endIndex: maxIndex,
-      rangeItems,
       allSelected,
       onlyStartEndSelected,
+      rangeItems: resolvedRange.itemIds
+        .map((itemId) => rangeItemsById.get(itemId))
+        .filter((item): item is ShoppingItem => item !== undefined),
     };
   }, [
-    showHallGroups,
-    rangeStart,
     rangeEnd,
-    columnType,
-    hallGroups,
+    rangeItemsById,
+    rangePresentation.groups,
+    rangeStart,
+    resolvedRange,
     selectedItemIds,
+  ]);
+
+  const groupRangeInfo = useMemo(() => {
+    if (
+      rangePresentation.grouping !== "hall" ||
+      !resolvedRange ||
+      !resolvedRangeSummary ||
+      resolvedRange.coverage !== "item-slice" ||
+      resolvedRange.start.kind !== "item" ||
+      resolvedRange.end.kind !== "item" ||
+      resolvedRange.start.groupIndex === null ||
+      resolvedRange.start.groupIndex !== resolvedRange.end.groupIndex
+    ) {
+      return null;
+    }
+
+    const group = hallGroups[resolvedRange.start.groupIndex];
+    if (!group) return null;
+
+    return {
+      groupId: group.groupId,
+      startIndex: Math.min(
+        resolvedRange.start.itemIndex,
+        resolvedRange.end.itemIndex,
+      ),
+      endIndex: Math.max(
+        resolvedRange.start.itemIndex,
+        resolvedRange.end.itemIndex,
+      ),
+      ...resolvedRangeSummary,
+    };
+  }, [
+    hallGroups,
+    rangePresentation.grouping,
+    resolvedRange,
+    resolvedRangeSummary,
   ]);
 
   const spaceGroupRangeInfo = useMemo(() => {
     if (
-      !showSpaceGroups ||
-      !rangeStart ||
-      !rangeEnd ||
-      !columnType ||
-      rangeStart.columnType !== columnType ||
-      rangeEnd.columnType !== columnType
+      rangePresentation.grouping !== "space" ||
+      !resolvedRange ||
+      !resolvedRangeSummary ||
+      resolvedRange.coverage !== "item-slice" ||
+      resolvedRange.start.kind !== "item" ||
+      resolvedRange.end.kind !== "item" ||
+      resolvedRange.start.groupIndex === null ||
+      resolvedRange.start.groupIndex !== resolvedRange.end.groupIndex
     ) {
       return null;
     }
 
-    let startGroupKey: string | null = null;
-    let endGroupKey: string | null = null;
-    let startIdx = -1;
-    let endIdx = -1;
-
-    for (const group of spaceGroups) {
-      const si = group.items.findIndex((item) => item.id === rangeStart.itemId);
-      if (si !== -1) {
-        startGroupKey = group.groupKey;
-        startIdx = si;
-      }
-      const ei = group.items.findIndex((item) => item.id === rangeEnd.itemId);
-      if (ei !== -1) {
-        endGroupKey = group.groupKey;
-        endIdx = ei;
-      }
-    }
-
-    if (startGroupKey !== endGroupKey || startIdx === -1 || endIdx === -1) {
-      return null;
-    }
-
-    const group = spaceGroups.find((g) => g.groupKey === startGroupKey);
+    const group = spaceGroups[resolvedRange.start.groupIndex];
     if (!group) return null;
 
-    const minIndex = Math.min(startIdx, endIdx);
-    const maxIndex = Math.max(startIdx, endIdx);
-    const rangeItems = group.items.slice(minIndex, maxIndex + 1);
-    const allSelected = rangeItems.every((item) =>
-      selectedItemIds.has(item.id),
-    );
-
-    const onlyStartEndSelected =
-      rangeItems.length > 2 &&
-      selectedItemIds.has(rangeItems[0].id) &&
-      selectedItemIds.has(rangeItems[rangeItems.length - 1].id) &&
-      rangeItems.slice(1, -1).every((item) => !selectedItemIds.has(item.id));
-
     return {
-      groupKey: startGroupKey,
-      startIndex: minIndex,
-      endIndex: maxIndex,
-      rangeItems,
-      allSelected,
-      onlyStartEndSelected,
+      groupKey: group.groupKey,
+      startIndex: Math.min(
+        resolvedRange.start.itemIndex,
+        resolvedRange.end.itemIndex,
+      ),
+      endIndex: Math.max(
+        resolvedRange.start.itemIndex,
+        resolvedRange.end.itemIndex,
+      ),
+      ...resolvedRangeSummary,
     };
   }, [
-    showSpaceGroups,
-    rangeStart,
-    rangeEnd,
-    columnType,
+    rangePresentation.grouping,
+    resolvedRange,
+    resolvedRangeSummary,
     spaceGroups,
-    selectedItemIds,
   ]);
 
   const crossSpaceGroupRangeInfo = useMemo(() => {
     if (
-      !showSpaceGroups ||
-      !rangeStart ||
-      !rangeEnd ||
-      !columnType ||
-      rangeStart.columnType !== columnType ||
-      rangeEnd.columnType !== columnType
+      rangePresentation.grouping !== "space" ||
+      !resolvedRange ||
+      !resolvedRangeSummary ||
+      resolvedRange.coverage !== "group-span" ||
+      resolvedRange.start.groupIndex === null ||
+      resolvedRange.end.groupIndex === null
     ) {
       return null;
     }
 
-    let startGroupIdx = -1;
-    let endGroupIdx = -1;
-
-    for (let i = 0; i < spaceGroups.length; i++) {
-      if (spaceGroups[i].items.some((item) => item.id === rangeStart.itemId))
-        startGroupIdx = i;
-      if (spaceGroups[i].items.some((item) => item.id === rangeEnd.itemId))
-        endGroupIdx = i;
-    }
-
-    if (startGroupIdx === -1 || endGroupIdx === -1) return null;
-    if (startGroupIdx === endGroupIdx) return null; // 同一グループはspaceGroupRangeInfoで処理
-    const minIdx = Math.min(startGroupIdx, endGroupIdx);
-    const maxIdx = Math.max(startGroupIdx, endGroupIdx);
-
-    const rangeGroupItems = spaceGroups
-      .slice(minIdx, maxIdx + 1)
-      .flatMap((g) => g.items);
-    const onlyStartEndSelected =
-      rangeGroupItems.length > 2 &&
-      selectedItemIds.has(rangeGroupItems[0].id) &&
-      selectedItemIds.has(rangeGroupItems[rangeGroupItems.length - 1].id) &&
-      rangeGroupItems
-        .slice(1, -1)
-        .every((item) => !selectedItemIds.has(item.id));
+    const startGroupIndex = Math.min(
+      resolvedRange.start.groupIndex,
+      resolvedRange.end.groupIndex,
+    );
+    const endGroupIndex = Math.max(
+      resolvedRange.start.groupIndex,
+      resolvedRange.end.groupIndex,
+    );
 
     return {
-      startGroupIndex: minIdx,
-      endGroupIndex: maxIdx,
+      startGroupIndex,
+      endGroupIndex,
       rangeGroupIndices: Array.from(
-        { length: maxIdx - minIdx + 1 },
-        (_, i) => minIdx + i,
+        { length: endGroupIndex - startGroupIndex + 1 },
+        (_, index) => startGroupIndex + index,
       ),
-      onlyStartEndSelected,
+      rangeGroupItems: resolvedRangeSummary.rangeItems,
+      allSelected: resolvedRangeSummary.allSelected,
+      onlyStartEndSelected: resolvedRangeSummary.onlyStartEndSelected,
     };
-  }, [
-    showSpaceGroups,
-    rangeStart,
-    rangeEnd,
-    columnType,
-    spaceGroups,
-    selectedItemIds,
-  ]);
+  }, [rangePresentation.grouping, resolvedRange, resolvedRangeSummary]);
 
   const rangeInfo = useMemo(() => {
     if (
-      !rangeStart ||
-      !rangeEnd ||
-      !columnType ||
-      rangeStart.columnType !== columnType ||
-      rangeEnd.columnType !== columnType
+      rangePresentation.grouping !== "flat" ||
+      !resolvedRange ||
+      !resolvedRangeSummary ||
+      resolvedRange.coverage !== "item-slice" ||
+      resolvedRange.start.kind !== "item" ||
+      resolvedRange.end.kind !== "item"
     ) {
       return null;
     }
 
-    const startIndex = items.findIndex((item) => item.id === rangeStart.itemId);
-    const endIndex = items.findIndex((item) => item.id === rangeEnd.itemId);
-
-    if (startIndex === -1 || endIndex === -1) return null;
-
-    const minIndex = Math.min(startIndex, endIndex);
-    const maxIndex = Math.max(startIndex, endIndex);
-    const rangeItems = items.slice(minIndex, maxIndex + 1);
-    const allSelected = rangeItems.every((item) =>
-      selectedItemIds.has(item.id),
-    );
-
-    const onlyStartEndSelected =
-      rangeItems.length > 2 &&
-      selectedItemIds.has(rangeItems[0].id) &&
-      selectedItemIds.has(rangeItems[rangeItems.length - 1].id) &&
-      rangeItems.slice(1, -1).every((item) => !selectedItemIds.has(item.id));
-
     return {
-      startIndex: minIndex,
-      endIndex: maxIndex,
-      rangeItems,
-      allSelected,
-      onlyStartEndSelected,
+      startIndex: Math.min(
+        resolvedRange.start.displayIndex,
+        resolvedRange.end.displayIndex,
+      ),
+      endIndex: Math.max(
+        resolvedRange.start.displayIndex,
+        resolvedRange.end.displayIndex,
+      ),
+      ...resolvedRangeSummary,
     };
-  }, [rangeStart, rangeEnd, columnType, items, selectedItemIds]);
+  }, [rangePresentation.grouping, resolvedRange, resolvedRangeSummary]);
 
   const handleDragStart = (
     e: React.DragEvent<HTMLDivElement>,
@@ -2189,19 +2224,25 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 columnType
               ) {
                 onSelectSpaceGroupForRange(
-                  group.items[0].id,
+                  group.groupKey,
                   groupItemIds,
-                  columnType,
+                  rangePresentation,
                 );
+                return;
+              }
+              if (onToggleRangeSelection) {
+                onToggleRangeSelection(groupItemIds);
                 return;
               }
               if (allItemsSelected) {
                 // 全解除
-                groupItemIds.forEach((id) => onSelectItem(id, columnType));
+                groupItemIds.forEach((id) =>
+                  onSelectItem(id, columnType, rangePresentation),
+                );
               } else {
                 groupItemIds.forEach((id) => {
                   if (!selectedItemIds.has(id)) {
-                    onSelectItem(id, columnType);
+                    onSelectItem(id, columnType, rangePresentation);
                   }
                 });
               }
@@ -2891,7 +2932,18 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                             : "opacity-100"
                         }`}
                         style={{ width: "40px" }}
-                        onClick={() => onToggleRangeSelection(columnType!)}
+                        title={
+                          crossSpaceGroupRangeInfo!.allSelected
+                            ? "範囲内のチェックを外す"
+                            : "範囲内のチェックを入れる"
+                        }
+                        onClick={() =>
+                          onToggleRangeSelection(
+                            crossSpaceGroupRangeInfo!.rangeGroupItems.map(
+                              (item) => item.id,
+                            ),
+                          )
+                        }
                       >
                         <svg
                           className="absolute w-full h-full"
@@ -3079,7 +3131,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                               onDeleteRequest={onDeleteRequest}
                               isSelected={selectedItemIds.has(item.id)}
                               onSelectItem={(itemId) =>
-                                onSelectItem(itemId, columnType)
+                                onSelectItem(
+                                  itemId,
+                                  columnType,
+                                  rangePresentation,
+                                )
                               }
                               blockBackgroundColor={blockColorMap.get(item.id)}
                               onMoveUp={
@@ -3156,8 +3212,17 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                       : "opacity-100"
                                   }`}
                                   style={{ width: "40px" }}
+                                  title={
+                                    spaceGroupRangeInfo!.allSelected
+                                      ? "範囲内のチェックを外す"
+                                      : "範囲内のチェックを入れる"
+                                  }
                                   onClick={() =>
-                                    onToggleRangeSelection(columnType!)
+                                    onToggleRangeSelection(
+                                      spaceGroupRangeInfo!.rangeItems.map(
+                                        (rangeItem) => rangeItem.id,
+                                      ),
+                                    )
                                   }
                                 >
                                   <svg
@@ -3757,7 +3822,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         onDeleteRequest={onDeleteRequest}
                         isSelected={selectedItemIds.has(item.id)}
                         onSelectItem={(itemId) =>
-                          onSelectItem(itemId, columnType)
+                          onSelectItem(itemId, columnType, rangePresentation)
                         }
                         blockBackgroundColor={blockColorMap.get(item.id)}
                         onMoveUp={
@@ -3819,7 +3884,18 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                               : "opacity-100"
                           }`}
                           style={{ width: "40px" }}
-                          onClick={() => onToggleRangeSelection(columnType!)}
+                          title={
+                            groupRangeInfo!.allSelected
+                              ? "範囲内のチェックを外す"
+                              : "範囲内のチェックを入れる"
+                          }
+                          onClick={() =>
+                            onToggleRangeSelection(
+                              groupRangeInfo!.rangeItems.map(
+                                (rangeItem) => rangeItem.id,
+                              ),
+                            )
+                          }
                         >
                           <svg
                             className="absolute w-full h-full"
@@ -4020,7 +4096,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               onEditRequest={onEditRequest}
               onDeleteRequest={onDeleteRequest}
               isSelected={selectedItemIds.has(item.id)}
-              onSelectItem={(itemId) => onSelectItem(itemId, columnType)}
+              onSelectItem={(itemId) =>
+                onSelectItem(itemId, columnType, rangePresentation)
+              }
               blockBackgroundColor={blockColorMap.get(item.id)}
               onMoveUp={
                 onMoveItemUp
@@ -4077,7 +4155,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
-                    onToggleRangeSelection(columnType!);
+                    onToggleRangeSelection(
+                      rangeInfo.rangeItems.map((rangeItem) => rangeItem.id),
+                    );
                   }}
                   className={`pointer-events-auto absolute w-full h-full transition-opacity ${
                     rangeInfo.onlyStartEndSelected
@@ -4234,7 +4314,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onToggleRangeSelection(columnType!);
+                      onToggleRangeSelection(
+                        rangeInfo.rangeItems.map((rangeItem) => rangeItem.id),
+                      );
                     }}
                     className={`pointer-events-auto absolute w-full h-full transition-opacity ${
                       rangeInfo.onlyStartEndSelected

@@ -17,6 +17,10 @@ import {
   loadBlockDetectionSettings,
 } from "../../../components/map";
 import type { EventUpdateDiff } from "../../../features/events/updateDiff";
+import {
+  formatMovePlanCount,
+  type MovePlan,
+} from "../../lists/domain/movePlan";
 import type {
   ActiveTab,
   BulkSortDirection,
@@ -200,8 +204,10 @@ type AppOverlayLayerProps = {
   handleClearSelection: () => void;
   showMoveButtons: boolean;
   hasCandidateSelection: boolean;
+  candidateMovePlan: MovePlan;
   handleMoveToExecuteColumn: (itemIds: string[]) => void;
   hasExecuteSelection: boolean;
+  executeMovePlan: MovePlan;
   handleRemoveFromExecuteColumn: (itemIds: string[]) => void;
   smartInsertToast: string | null;
   smartInsertToastType: "success" | "error";
@@ -319,8 +325,10 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
   handleClearSelection,
   showMoveButtons,
   hasCandidateSelection,
+  candidateMovePlan,
   handleMoveToExecuteColumn,
   hasExecuteSelection,
+  executeMovePlan,
   handleRemoveFromExecuteColumn,
   smartInsertToast,
   smartInsertToastType,
@@ -739,21 +747,21 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
                 {showMoveButtons && hasCandidateSelection && (
                   <button
                     onClick={() =>
-                      handleMoveToExecuteColumn(Array.from(selectedItemIds))
+                      handleMoveToExecuteColumn(candidateMovePlan.requested)
                     }
                     className="px-3 py-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors"
                   >
-                    ⇦実行列へ ({selectedItemIds.size})
+                    ⇦実行列へ ({formatMovePlanCount(candidateMovePlan)})
                   </button>
                 )}
                 {showMoveButtons && hasExecuteSelection && (
                   <button
                     onClick={() =>
-                      handleRemoveFromExecuteColumn(Array.from(selectedItemIds))
+                      handleRemoveFromExecuteColumn(executeMovePlan.requested)
                     }
                     className="px-3 py-2 text-xs font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 active:bg-blue-800 transition-colors"
                   >
-                    ⇨候補へ ({selectedItemIds.size})
+                    ⇨候補へ ({formatMovePlanCount(executeMovePlan)})
                   </button>
                 )}
               </div>

@@ -1,4 +1,5 @@
 import type { ViewMode } from "../../types/item";
+import type { RangeEndpoint } from "../lists/domain/rangeSelection";
 
 export type ActiveTab = "eventList" | "import" | string;
 export type SortState =
@@ -55,10 +56,6 @@ export type MapTabMenuPosition = {
   top: number;
 };
 
-export type RangeSelectionState = {
-  itemId: string;
-  columnType: ColumnType;
-  sourceType?: "item" | "spaceHeader";
-} | null;
+export type RangeSelectionState = RangeEndpoint | null;
 
 export type AppViewMode = ViewMode;

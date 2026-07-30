@@ -59,6 +59,7 @@ const minimalAppHeaderShellProps = (): ComponentProps<
   handleBlockSortToggle: vi.fn(),
   handleBlockSortToggleCandidate: vi.fn(),
   handleBulkSort: vi.fn(),
+  handleClearRangeSelection: vi.fn(),
   handleClearSelection: vi.fn(),
   handleMapTabRotationAngleChange: vi.fn(),
   handleMoveToExecuteColumn: vi.fn(),
@@ -69,6 +70,18 @@ const minimalAppHeaderShellProps = (): ComponentProps<
   handleZoomChange: vi.fn(),
   hasCandidateSelection: false,
   hasExecuteSelection: false,
+  candidateMovePlan: {
+    requested: [],
+    effective: [],
+    implicit: [],
+    excluded: { missing: [], wrongDate: [], notInSourceColumn: [] },
+  },
+  executeMovePlan: {
+    requested: [],
+    effective: [],
+    implicit: [],
+    excluded: { missing: [], wrongDate: [], notInSourceColumn: [] },
+  },
   hasUndefinedPriorityItems: false,
   isMapTab: false,
   items: [],
@@ -120,7 +133,6 @@ const minimalAppHeaderShellProps = (): ComponentProps<
   setPurchaseStatusControlMode: vi.fn(),
   setSearchKeyword: vi.fn(),
   setSelectedBlockFilters: vi.fn(),
-  setSelectedItemIds: vi.fn(),
   setSimpleHallDefinitionMode: vi.fn(),
   setThemeMode: vi.fn(),
   setUiVisibilitySettings: vi.fn(),
@@ -239,5 +251,109 @@ describe("AppHeaderShell purchase status settings integration", () => {
 
     fireEvent.click(document.querySelector(".fixed.inset-0.z-40")!);
     expect(props.onCloseUiSettingsPanel).toHaveBeenCalledOnce();
+  });
+});
+
+describe("AppHeaderShell move plan integration", () => {
+  it("shows selected and effective candidate counts and submits explicit IDs", () => {
+    const props = minimalAppHeaderShellProps();
+    props.currentMode = "edit";
+    props.uiSettingsPanelOpen = false;
+    props.showMoveButtons = true;
+    props.hasCandidateSelection = true;
+    props.selectedItemIds = new Set(["a", "b"]);
+    props.items = [
+      {
+        id: "a",
+        circle: "A",
+        eventDate: "Day1",
+        block: "A",
+        number: "01",
+        title: "",
+        price: null,
+        purchaseStatus: "None",
+        quantity: 1,
+        remarks: "",
+      },
+    ];
+    props.candidateMovePlan = {
+      requested: ["a", "b"],
+      effective: ["a", "b", "c"],
+      implicit: ["c"],
+      excluded: { missing: [], wrongDate: [], notInSourceColumn: [] },
+    };
+
+    render(<AppHeaderShell {...props} />);
+
+    const moveButton = screen.getByRole("button", {
+      name: "選択したアイテムを実行列に移動 (選択2件（移動3件）)",
+    });
+    fireEvent.click(moveButton);
+
+    expect(props.handleMoveToExecuteColumn).toHaveBeenCalledWith(["a", "b"]);
+  });
+
+  it("keeps the concise count when the move plan has no implicit additions", () => {
+    const props = minimalAppHeaderShellProps();
+    props.currentMode = "edit";
+    props.uiSettingsPanelOpen = false;
+    props.showMoveButtons = true;
+    props.hasExecuteSelection = true;
+    props.selectedItemIds = new Set(["a", "b"]);
+    props.items = [
+      {
+        id: "a",
+        circle: "A",
+        eventDate: "Day1",
+        block: "A",
+        number: "01",
+        title: "",
+        price: null,
+        purchaseStatus: "None",
+        quantity: 1,
+        remarks: "",
+      },
+    ];
+    props.executeMovePlan = {
+      requested: ["a", "b"],
+      effective: ["a", "b"],
+      implicit: [],
+      excluded: { missing: [], wrongDate: [], notInSourceColumn: [] },
+    };
+
+    render(<AppHeaderShell {...props} />);
+
+    expect(
+      screen.getByRole("button", {
+        name: "選択したアイテムを実行列から戻す (2件)",
+      }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe("AppHeaderShell range reset integration", () => {
+  it("clears range endpoints when execute grouping changes", () => {
+    const props = minimalAppHeaderShellProps();
+    props.uiSettingsPanelOpen = false;
+    props.items = [
+      {
+        id: "a",
+        circle: "A",
+        eventDate: "Day1",
+        block: "A",
+        number: "01",
+        title: "",
+        price: null,
+        purchaseStatus: "None",
+        quantity: 1,
+        remarks: "",
+      },
+    ];
+
+    render(<AppHeaderShell {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "スペース別" }));
+
+    expect(props.handleClearRangeSelection).toHaveBeenCalledOnce();
+    expect(props.setExecuteCollapsedSpaces).toHaveBeenCalledWith(new Set());
   });
 });

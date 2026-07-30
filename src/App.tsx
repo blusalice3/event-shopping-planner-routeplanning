@@ -87,7 +87,6 @@ import {
   computeHallOrderForPriorityChange,
   computeInsertIntoExecuteAtPosition,
   expandExecuteRemovalItemIds,
-  expandSameSpacePriorityItemIds,
   reorderExecuteIdsForSpaceAdjacency,
 } from "./features/events/itemOps";
 import {
@@ -110,6 +109,11 @@ import {
 } from "./features/map/domain/hallOperations";
 import { useMapSelectors } from "./features/map/hooks/useMapSelectors";
 import { useListInteractionState } from "./features/lists/hooks/useListInteractionState";
+import type { RangePresentation } from "./features/lists/domain/rangeSelection";
+import {
+  buildMovePlan,
+  getCandidateSourceOrderedIds,
+} from "./features/lists/domain/movePlan";
 import AppHeaderShell from "./features/app-shell/components/AppHeaderShell";
 import AppMainContent from "./features/app-shell/components/AppMainContent";
 import AppOverlayLayer from "./features/app-shell/components/AppOverlayLayer";
@@ -363,13 +367,10 @@ const App: React.FC = () => {
   >(new Set());
   const {
     selectedItemIds,
-    setSelectedItemIds,
     selectedBlockFilters,
     setSelectedBlockFilters,
     rangeStart,
-    setRangeStart,
     rangeEnd,
-    setRangeEnd,
     spaceGroupingEnabled,
     setSpaceGroupingEnabled,
     collapsedSpaces,
@@ -379,13 +380,14 @@ const App: React.FC = () => {
     executeCollapsedSpaces,
     setExecuteCollapsedSpaces,
     clearSelection,
+    clearRangeSelection,
     clearBlockFilters,
     toggleBlockFilter,
     toggleCollapsedSpace,
     toggleExecuteCollapsedSpace,
     selectItemForRange,
     selectSpaceGroupForRange,
-    toggleCurrentRangeSelection,
+    toggleRangeItemIdsSelection,
   } = useListInteractionState();
 
   const [newItemDefaults, setNewItemDefaults] = useState<{
@@ -1141,6 +1143,7 @@ const App: React.FC = () => {
       sourceColumn?: "execute" | "candidate",
     ) => {
       if (!activeEventName) return;
+      clearRangeSelection();
       setSortState("Manual");
       setBlockSortDirection(null);
 
@@ -1220,6 +1223,7 @@ const App: React.FC = () => {
       eventLists,
       areItemsInSameHall,
       areItemsInSameHallGroup,
+      clearRangeSelection,
     ],
   );
   const handleMoveItemVerticalInternal = useCallback(
@@ -1229,6 +1233,7 @@ const App: React.FC = () => {
       targetColumn?: "execute" | "candidate",
     ) => {
       if (!activeEventName) return;
+      clearRangeSelection();
       setSortState("Manual");
       setBlockSortDirection(null);
 
@@ -1384,6 +1389,7 @@ const App: React.FC = () => {
       items,
       areItemsInSameHall,
       areItemsInSameHallGroup,
+      clearRangeSelection,
     ],
   );
 
@@ -1399,104 +1405,69 @@ const App: React.FC = () => {
     [handleMoveItemVerticalInternal],
   );
 
-  const expandToFullSpaceGroups = useCallback(
-    (itemIds: string[]): string[] => {
-      return expandSameSpacePriorityItemIds(itemIds, items);
-    },
-    [items],
-  );
-
   const handleMoveToExecuteColumn = useCallback(
     (itemIds: string[]) => {
       if (!activeEventName) return;
 
       const currentEventDate = activeEventDate;
-
-      const expandedIds = expandToFullSpaceGroups(itemIds);
-
-      if (
-        rangeStart &&
-        expandedIds.includes(rangeStart.itemId) &&
-        rangeStart.columnType === "candidate"
-      ) {
-        setRangeStart(null);
-        setRangeEnd(null);
-      } else if (
-        rangeEnd &&
-        expandedIds.includes(rangeEnd.itemId) &&
-        rangeEnd.columnType === "candidate"
-      ) {
-        setRangeEnd(null);
-      }
+      const currentExecuteIds =
+        executeModeItemsRef.current[activeEventName]?.[currentEventDate] || [];
+      const plan = buildMovePlan({
+        requestedIds: itemIds,
+        sourceOrderedIds: getCandidateSourceOrderedIds(
+          items,
+          currentEventDate,
+          currentExecuteIds,
+        ),
+        allItems: items,
+        dayName: currentEventDate,
+        expansionPolicy: "same-visit",
+      });
+      const effectiveIds = plan.effective;
 
       updateExecuteModeItems((prev) => ({
         ...prev,
         [activeEventName]: computeMoveToExecuteColumn(
-          expandedIds,
+          effectiveIds,
           currentEventDate,
           items,
           prev[activeEventName] || {},
-          selectedBlockFilters,
+          new Set(),
         ),
       }));
 
-      setSelectedItemIds(new Set());
+      clearSelection();
     },
-    [
-      activeEventName,
-      activeTab,
-      eventDates,
-      rangeStart,
-      rangeEnd,
-      items,
-      executeModeItems,
-      selectedBlockFilters,
-      expandToFullSpaceGroups,
-    ],
+    [activeEventDate, activeEventName, clearSelection, items],
   );
   const handleRemoveFromExecuteColumn = useCallback(
     (itemIds: string[]) => {
       if (!activeEventName) return;
 
       const currentEventDate = activeEventDate;
-
-      const expandedIds = expandToFullSpaceGroups(itemIds);
-
-      if (
-        rangeStart &&
-        expandedIds.includes(rangeStart.itemId) &&
-        rangeStart.columnType === "execute"
-      ) {
-        setRangeStart(null);
-        setRangeEnd(null);
-      } else if (
-        rangeEnd &&
-        expandedIds.includes(rangeEnd.itemId) &&
-        rangeEnd.columnType === "execute"
-      ) {
-        setRangeEnd(null);
-      }
+      const plan = buildMovePlan({
+        requestedIds: itemIds,
+        sourceOrderedIds:
+          executeModeItemsRef.current[activeEventName]?.[currentEventDate] ||
+          [],
+        allItems: items,
+        dayName: currentEventDate,
+        expansionPolicy: "same-visit",
+      });
+      const effectiveIds = plan.effective;
 
       updateExecuteModeItems((prev) => ({
         ...prev,
         [activeEventName]: computeRemoveFromExecuteColumn(
-          expandedIds,
+          effectiveIds,
           prev[activeEventName] || {},
           currentEventDate,
         ),
       }));
 
-      setSelectedItemIds(new Set());
+      clearSelection();
     },
-    [
-      activeEventName,
-      activeTab,
-      eventDates,
-      rangeStart,
-      rangeEnd,
-      executeModeItems,
-      expandToFullSpaceGroups,
-    ],
+    [activeEventDate, activeEventName, clearSelection, items],
   );
 
   const handleToggleMode = useCallback(() => {
@@ -1525,9 +1496,9 @@ const App: React.FC = () => {
       },
     }));
 
-    setSelectedItemIds(new Set());
+    clearSelection();
     setCandidateNumberSortDirection(null);
-  }, [activeEventName, activeTab, dayModes, eventDates]);
+  }, [activeEventDate, activeEventName, clearSelection, dayModes]);
 
   const handleSetViewMode = useCallback(
     (mode: ViewMode, scrollToItemId?: string) => {
@@ -1542,7 +1513,7 @@ const App: React.FC = () => {
         },
       }));
 
-      setSelectedItemIds(new Set());
+      clearSelection();
       setCandidateNumberSortDirection(null);
 
       if (mode !== "focus") {
@@ -1565,6 +1536,7 @@ const App: React.FC = () => {
       activeEventName,
       activeEventDate,
       activeTab,
+      clearSelection,
       closeUiSettingsPanel,
       eventDates,
     ],
@@ -1580,11 +1552,11 @@ const App: React.FC = () => {
       }
 
       setActiveEventName(eventName);
-      setSelectedItemIds(new Set());
+      clearSelection();
       setSelectedBlockFilters(new Set());
       setActiveTab(nextTab);
     },
-    [eventLists],
+    [clearSelection, eventLists],
   );
 
   const handleDeleteEvent = useCallback(
@@ -1668,7 +1640,7 @@ const App: React.FC = () => {
   );
 
   const handleSortToggle = () => {
-    setSelectedItemIds(new Set());
+    clearSelection();
     setBlockSortDirection(null);
     setRecentlyChangedItemIds(new Set());
     const currentIndex = sortCycle.indexOf(sortState);
@@ -1715,7 +1687,7 @@ const App: React.FC = () => {
     });
 
     setBlockSortDirection(nextDirection);
-    setSelectedItemIds(new Set());
+    clearSelection();
   };
 
   const handleBlockSortToggleCandidate = () => {
@@ -1767,7 +1739,7 @@ const App: React.FC = () => {
     });
 
     setBlockSortDirection(nextDirection);
-    setSelectedItemIds(new Set());
+    clearSelection();
   };
 
   const handleEditRequest = (item: ShoppingItem) => {
@@ -1824,89 +1796,26 @@ const App: React.FC = () => {
     }
   };
 
-  const getListColumnItems = useCallback(
-    (
-      columnType: "execute" | "candidate",
-      currentEventDate: string,
-    ): ShoppingItem[] => {
-      if (!activeEventName) return [];
-
-      if (columnType === "execute") {
-        const executeIds =
-          executeModeItems[activeEventName]?.[currentEventDate] || [];
-        const itemsMap = new Map(items.map((item) => [item.id, item]));
-        return executeIds
-          .map((id) => itemsMap.get(id))
-          .filter(Boolean) as ShoppingItem[];
-      }
-
-      const executeIds = new Set(
-        executeModeItems[activeEventName]?.[currentEventDate] || [],
-      );
-      let filtered = items.filter(
-        (item) =>
-          item.eventDate === currentEventDate && !executeIds.has(item.id),
-      );
-      if (selectedBlockFilters.size > 0) {
-        filtered = filtered.filter((item) =>
-          selectedBlockFilters.has(item.block),
-        );
-      }
-      return filtered;
-    },
-    [activeEventName, executeModeItems, items, selectedBlockFilters],
-  );
-
   const handleSelectItem = useCallback(
-    (itemId: string, columnType?: "execute" | "candidate") => {
-      setSortState("Manual");
-      setBlockSortDirection(null);
-
-      const currentEventDate = activeEventDate;
-      const currentColumnType =
-        columnType ||
-        (activeEventName
-          ? executeModeItems[activeEventName]?.[currentEventDate]?.includes(
-              itemId,
-            )
-            ? "execute"
-            : "candidate"
-          : "execute");
-
-      selectItemForRange(
-        itemId,
-        currentColumnType,
-        getListColumnItems(currentColumnType, currentEventDate),
-      );
+    (
+      itemId: string,
+      _columnType: "execute" | "candidate" | undefined,
+      presentation: RangePresentation,
+    ) => {
+      selectItemForRange(itemId, presentation);
     },
-    [
-      activeTab,
-      activeEventName,
-      executeModeItems,
-      eventDates,
-      getListColumnItems,
-      selectItemForRange,
-    ],
+    [selectItemForRange],
   );
 
   const handleSelectSpaceGroupForRange = useCallback(
     (
-      firstItemId: string,
+      groupKey: string,
       allItemIds: string[],
-      columnType: "execute" | "candidate",
+      presentation: RangePresentation,
     ) => {
-      setSortState("Manual");
-      setBlockSortDirection(null);
-
-      const currentEventDate = activeEventDate;
-      selectSpaceGroupForRange(
-        firstItemId,
-        allItemIds,
-        columnType,
-        getListColumnItems(columnType, currentEventDate),
-      );
+      selectSpaceGroupForRange(groupKey, allItemIds, presentation);
     },
-    [activeEventDate, getListColumnItems, selectSpaceGroupForRange],
+    [selectSpaceGroupForRange],
   );
 
   const spaceGroupDragItemIdsRef = useRef<string[] | null>(null);
@@ -2013,29 +1922,41 @@ const App: React.FC = () => {
     });
 
     setCandidateNumberSortDirection(nextDirection);
-    setSelectedItemIds(new Set());
+    clearSelection();
   }, [
     activeEventName,
     activeTab,
     executeModeItems,
     selectedBlockFilters,
     candidateNumberSortDirection,
+    clearSelection,
     eventDates,
   ]);
 
   const handleClearSelection = clearSelection;
-  const handleToggleBlockFilter = toggleBlockFilter;
-  const handleClearBlockFilters = clearBlockFilters;
+  const handleToggleBlockFilter = useCallback(
+    (block: string) => {
+      clearRangeSelection();
+      toggleBlockFilter(block);
+    },
+    [clearRangeSelection, toggleBlockFilter],
+  );
+  const handleClearBlockFilters = useCallback(() => {
+    clearRangeSelection();
+    clearBlockFilters();
+  }, [clearBlockFilters, clearRangeSelection]);
 
   const handleToggleSpaceCollapse = useCallback(
     (spaceKey: string) => {
+      clearRangeSelection();
       toggleCollapsedSpace(spaceKey);
     },
-    [toggleCollapsedSpace],
+    [clearRangeSelection, toggleCollapsedSpace],
   );
 
   const handleToggleAllSpaceCollapse = useCallback(
     (collapse: boolean) => {
+      clearRangeSelection();
       if (!collapse) {
         setCollapsedSpaces(new Set());
       } else {
@@ -2052,18 +1973,20 @@ const App: React.FC = () => {
         setCollapsedSpaces(allGroupKeys);
       }
     },
-    [items, activeEventDate],
+    [activeEventDate, clearRangeSelection, items],
   );
 
   const handleExecuteToggleSpaceCollapse = useCallback(
     (spaceKey: string) => {
+      clearRangeSelection();
       toggleExecuteCollapsedSpace(spaceKey);
     },
-    [toggleExecuteCollapsedSpace],
+    [clearRangeSelection, toggleExecuteCollapsedSpace],
   );
 
   const handleExecuteToggleAllSpaceCollapse = useCallback(
     (collapse: boolean) => {
+      clearRangeSelection();
       if (!collapse) {
         setExecuteCollapsedSpaces(new Set());
       } else {
@@ -2085,7 +2008,13 @@ const App: React.FC = () => {
         setExecuteCollapsedSpaces(allGroupKeys);
       }
     },
-    [activeEventName, activeEventDate, executeModeItems, items],
+    [
+      activeEventDate,
+      activeEventName,
+      clearRangeSelection,
+      executeModeItems,
+      items,
+    ],
   );
 
   const handleBulkStatusChange = useCallback(
@@ -2240,22 +2169,26 @@ const App: React.FC = () => {
     [],
   );
 
-  const handleCollapseAndOpenNext = useCallback((currentGroupKey: string) => {
-    const order = executeSpaceGroupOrderRef.current;
-    const currentIndex = order.indexOf(currentGroupKey);
-    const nextKey =
-      currentIndex >= 0 && currentIndex < order.length - 1
-        ? order[currentIndex + 1]
-        : null;
-    setExecuteCollapsedSpaces((prev) => {
-      const next = new Set(prev);
-      next.add(currentGroupKey);
-      if (nextKey) {
-        next.delete(nextKey);
-      }
-      return next;
-    });
-  }, []);
+  const handleCollapseAndOpenNext = useCallback(
+    (currentGroupKey: string) => {
+      clearRangeSelection();
+      const order = executeSpaceGroupOrderRef.current;
+      const currentIndex = order.indexOf(currentGroupKey);
+      const nextKey =
+        currentIndex >= 0 && currentIndex < order.length - 1
+          ? order[currentIndex + 1]
+          : null;
+      setExecuteCollapsedSpaces((prev) => {
+        const next = new Set(prev);
+        next.add(currentGroupKey);
+        if (nextKey) {
+          next.delete(nextKey);
+        }
+        return next;
+      });
+    },
+    [clearRangeSelection],
+  );
 
   const handleSetSpaceGroupDragItemIds = useCallback(
     (itemIds: string[] | null) => {
@@ -2265,32 +2198,16 @@ const App: React.FC = () => {
   );
 
   const handleToggleRangeSelection = useCallback(
-    (columnType: "execute" | "candidate") => {
-      if (!activeEventName) return;
-
-      const currentEventDate = activeEventDate;
-      toggleCurrentRangeSelection(
-        columnType,
-        getListColumnItems(columnType, currentEventDate),
-        {
-          halls: getHallsForDate(currentEventDate),
-          currentMapData: getMapDataForDate(currentEventDate),
-        },
-      );
+    (rangeItemIds: readonly string[]) => {
+      toggleRangeItemIdsSelection(rangeItemIds);
     },
-    [
-      activeEventName,
-      activeEventDate,
-      getListColumnItems,
-      getHallsForDate,
-      getMapDataForDate,
-      toggleCurrentRangeSelection,
-    ],
+    [toggleRangeItemIdsSelection],
   );
 
   const handleBulkSort = useCallback(
     (direction: BulkSortDirection) => {
       if (!activeEventName || selectedItemIds.size === 0) return;
+      clearRangeSelection();
       setSortState("Manual");
       setBlockSortDirection(null);
       const currentEventDate = activeEventDate;
@@ -2446,6 +2363,7 @@ const App: React.FC = () => {
       dayModes,
       executeModeItems,
       eventDates,
+      clearRangeSelection,
     ],
   );
 
@@ -4371,7 +4289,7 @@ const App: React.FC = () => {
         onClick();
       } else {
         setItemToEdit(null);
-        setSelectedItemIds(new Set());
+        clearSelection();
         setSelectedBlockFilters(new Set());
         setCandidateNumberSortDirection(null);
         setCollapsedSpaces(new Set());
@@ -4802,57 +4720,53 @@ const App: React.FC = () => {
     eventDates,
   ]);
 
-  const hasCandidateSelection = useMemo(() => {
-    if (
-      !activeEventName ||
-      currentMode !== "edit" ||
-      selectedItemIds.size === 0
-    )
-      return false;
-    const currentEventDate = activeEventDate;
-    const executeIds = new Set(
-      executeModeItems[activeEventName]?.[currentEventDate] || [],
-    );
-    const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
-    return selectedItems.some(
-      (item) => currentTabItems.includes(item) && !executeIds.has(item.id),
-    );
-  }, [
-    activeEventName,
-    activeTab,
-    currentMode,
-    selectedItemIds,
-    items,
-    executeModeItems,
-    currentTabItems,
-    eventDates,
-  ]);
+  const currentExecuteOrderedIds = useMemo(
+    () =>
+      activeEventName
+        ? executeModeItems[activeEventName]?.[activeEventDate] || []
+        : [],
+    [activeEventDate, activeEventName, executeModeItems],
+  );
+  const candidateSourceOrderedIds = useMemo(
+    () =>
+      getCandidateSourceOrderedIds(
+        items,
+        activeEventDate,
+        currentExecuteOrderedIds,
+      ),
+    [activeEventDate, currentExecuteOrderedIds, items],
+  );
+  const selectedIdsForMovePlan = useMemo(
+    () => Array.from(selectedItemIds),
+    [selectedItemIds],
+  );
+  const candidateMovePlan = useMemo(
+    () =>
+      buildMovePlan({
+        requestedIds: selectedIdsForMovePlan,
+        sourceOrderedIds: candidateSourceOrderedIds,
+        allItems: items,
+        dayName: activeEventDate,
+        expansionPolicy: "same-visit",
+      }),
+    [activeEventDate, candidateSourceOrderedIds, items, selectedIdsForMovePlan],
+  );
+  const executeMovePlan = useMemo(
+    () =>
+      buildMovePlan({
+        requestedIds: selectedIdsForMovePlan,
+        sourceOrderedIds: currentExecuteOrderedIds,
+        allItems: items,
+        dayName: activeEventDate,
+        expansionPolicy: "same-visit",
+      }),
+    [activeEventDate, currentExecuteOrderedIds, items, selectedIdsForMovePlan],
+  );
 
-  const hasExecuteSelection = useMemo(() => {
-    if (
-      !activeEventName ||
-      currentMode !== "edit" ||
-      selectedItemIds.size === 0
-    )
-      return false;
-    const currentEventDate = activeEventDate;
-    const executeIds = new Set(
-      executeModeItems[activeEventName]?.[currentEventDate] || [],
-    );
-    const selectedItems = items.filter((item) => selectedItemIds.has(item.id));
-    return selectedItems.some(
-      (item) => currentTabItems.includes(item) && executeIds.has(item.id),
-    );
-  }, [
-    activeEventName,
-    activeTab,
-    currentMode,
-    selectedItemIds,
-    items,
-    executeModeItems,
-    currentTabItems,
-    eventDates,
-  ]);
+  const hasCandidateSelection =
+    currentMode === "edit" && candidateMovePlan.requested.length > 0;
+  const hasExecuteSelection =
+    currentMode === "edit" && executeMovePlan.requested.length > 0;
 
   const showMoveButtons =
     (hasCandidateSelection && !hasExecuteSelection) ||
@@ -4908,6 +4822,7 @@ const App: React.FC = () => {
         handleBlockSortToggleCandidate={handleBlockSortToggleCandidate}
         handleBulkSort={handleBulkSort}
         handleClearSelection={handleClearSelection}
+        handleClearRangeSelection={clearRangeSelection}
         handleMapTabRotationAngleChange={handleMapTabRotationAngleChange}
         handleMoveToExecuteColumn={handleMoveToExecuteColumn}
         handleRemoveFromExecuteColumn={handleRemoveFromExecuteColumn}
@@ -4917,6 +4832,8 @@ const App: React.FC = () => {
         handleZoomChange={handleZoomChange}
         hasCandidateSelection={hasCandidateSelection}
         hasExecuteSelection={hasExecuteSelection}
+        candidateMovePlan={candidateMovePlan}
+        executeMovePlan={executeMovePlan}
         hasUndefinedPriorityItems={hasUndefinedPriorityItems}
         isMapTab={isMapTab}
         items={items}
@@ -4972,7 +4889,6 @@ const App: React.FC = () => {
         setPurchaseStatusControlMode={setPurchaseStatusControlMode}
         setSearchKeyword={setSearchKeyword}
         setSelectedBlockFilters={setSelectedBlockFilters}
-        setSelectedItemIds={setSelectedItemIds}
         setSimpleHallDefinitionMode={setSimpleHallDefinitionMode}
         setThemeMode={setThemeMode}
         onCloseUiSettingsPanel={closeUiSettingsPanel}
@@ -5115,6 +5031,7 @@ const App: React.FC = () => {
         handleCandidateNumberSort={handleCandidateNumberSort}
         handleClearBlockFilters={handleClearBlockFilters}
         handleClearNewItemDefaults={handleClearNewItemDefaults}
+        handleClearRangeSelection={clearRangeSelection}
         handleCollapseAndOpenNext={handleCollapseAndOpenNext}
         handleDeleteEvent={handleDeleteEvent}
         handleDeleteItemFromMap={handleDeleteItemFromMap}
@@ -5313,8 +5230,10 @@ const App: React.FC = () => {
         handleClearSelection={handleClearSelection}
         showMoveButtons={showMoveButtons}
         hasCandidateSelection={hasCandidateSelection}
+        candidateMovePlan={candidateMovePlan}
         handleMoveToExecuteColumn={handleMoveToExecuteColumn}
         hasExecuteSelection={hasExecuteSelection}
+        executeMovePlan={executeMovePlan}
         handleRemoveFromExecuteColumn={handleRemoveFromExecuteColumn}
         smartInsertToast={smartInsertToast}
         smartInsertToastType={smartInsertToastType}

@@ -6,6 +6,10 @@ import SearchBar from "../../../components/SearchBar";
 import MapRotationControls from "../../../components/map/MapRotationControls";
 import { SpaceNavigatorSettingsPanel } from "../../space-navigation/components/SpaceNavigatorSettingsPanel";
 import { useOptionalSpaceNavigator } from "../../space-navigation/SpaceNavigatorContext";
+import {
+  formatMovePlanCount,
+  type MovePlan,
+} from "../../lists/domain/movePlan";
 import { acquireBodyScrollLock } from "../../../utils/bodyScrollLock";
 import type { ThemeMode } from "../../../hooks/useThemeMode";
 import type { UIVisibilitySettings } from "../../../hooks/useUIVisibilitySettings";
@@ -179,6 +183,7 @@ type AppHeaderShellProps = {
   handleBlockSortToggle: () => void;
   handleBlockSortToggleCandidate: () => void;
   handleBulkSort: (direction: BulkSortDirection) => void;
+  handleClearRangeSelection: () => void;
   handleClearSelection: () => void;
   handleMapTabRotationAngleChange: (angle: number) => void;
   handleMoveToExecuteColumn: (itemIds: string[]) => void;
@@ -189,6 +194,8 @@ type AppHeaderShellProps = {
   handleZoomChange: (newZoom: number) => void;
   hasCandidateSelection: boolean;
   hasExecuteSelection: boolean;
+  candidateMovePlan: MovePlan;
+  executeMovePlan: MovePlan;
   hasUndefinedPriorityItems: boolean;
   isMapTab: boolean;
   items: ShoppingItem[];
@@ -253,7 +260,6 @@ type AppHeaderShellProps = {
   >;
   setSearchKeyword: React.Dispatch<React.SetStateAction<string>>;
   setSelectedBlockFilters: React.Dispatch<React.SetStateAction<Set<string>>>;
-  setSelectedItemIds: React.Dispatch<React.SetStateAction<Set<string>>>;
   setSimpleHallDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
   setThemeMode: React.Dispatch<React.SetStateAction<ThemeMode>>;
   setUiVisibilitySettings: React.Dispatch<
@@ -312,6 +318,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     handleBlockSortToggle,
     handleBlockSortToggleCandidate,
     handleBulkSort,
+    handleClearRangeSelection,
     handleClearSelection,
     handleMapTabRotationAngleChange,
     handleMoveToExecuteColumn,
@@ -322,6 +329,8 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     handleZoomChange,
     hasCandidateSelection,
     hasExecuteSelection,
+    candidateMovePlan,
+    executeMovePlan,
     hasUndefinedPriorityItems,
     isMapTab,
     items,
@@ -374,7 +383,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     setPurchaseStatusControlMode,
     setSearchKeyword,
     setSelectedBlockFilters,
-    setSelectedItemIds,
     setSimpleHallDefinitionMode,
     setThemeMode,
     setUiVisibilitySettings,
@@ -1489,26 +1497,26 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                         <button
                           onClick={() =>
                             handleMoveToExecuteColumn(
-                              Array.from(selectedItemIds),
+                              candidateMovePlan.requested,
                             )
                           }
                           className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
                         >
-                          選択したアイテムを実行列に移動 ({selectedItemIds.size}
-                          件)
+                          選択したアイテムを実行列に移動 (
+                          {formatMovePlanCount(candidateMovePlan)})
                         </button>
                       )}
                       {showMoveButtons && hasExecuteSelection && (
                         <button
                           onClick={() =>
                             handleRemoveFromExecuteColumn(
-                              Array.from(selectedItemIds),
+                              executeMovePlan.requested,
                             )
                           }
                           className="px-3 py-1.5 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors flex-shrink-0"
                         >
                           選択したアイテムを実行列から戻す (
-                          {selectedItemIds.size}件)
+                          {formatMovePlanCount(executeMovePlan)})
                         </button>
                       )}
                     </>
@@ -1533,6 +1541,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       onClick={() => {
                         setExecuteSpaceGroupingEnabled((prev) => !prev);
                         setExecuteCollapsedSpaces(new Set());
+                        handleClearRangeSelection();
                       }}
                       className={`px-2 py-1 text-xs font-medium rounded transition-colors flex-shrink-0 ${
                         executeSpaceGroupingEnabled
@@ -1555,7 +1564,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                   onClick={() => {
                     setActiveEventName(null);
                     setItemToEdit(null);
-                    setSelectedItemIds(new Set());
+                    handleClearSelection();
                     setSelectedBlockFilters(new Set());
                     setActiveTab("eventList");
                   }}
@@ -1594,6 +1603,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                           onClick={() => {
                             setExecuteSpaceGroupingEnabled((prev) => !prev);
                             setExecuteCollapsedSpaces(new Set());
+                            handleClearRangeSelection();
                           }}
                           className={`px-2 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap flex-shrink-0 ${
                             executeSpaceGroupingEnabled
