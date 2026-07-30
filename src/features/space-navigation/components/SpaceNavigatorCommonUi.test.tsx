@@ -140,7 +140,7 @@ describe("SpaceNavigatorPicker", () => {
     vi.unstubAllGlobals();
   });
 
-  it("uses five rows on a 360x640-class viewport and fills the available panel height", () => {
+  it("renders every smartphone entry in a native vertical scroller", () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
       value: 360,
@@ -158,21 +158,36 @@ describe("SpaceNavigatorPicker", () => {
     );
 
     const windowElement = screen.getByTestId("space-navigator-window");
-    expect(windowElement).toHaveAttribute("data-visible-row-count", "5");
-    expect(windowElement).toHaveStyle({
-      gridTemplateRows: "repeat(5, minmax(0, 1fr))",
-    });
+    expect(windowElement).toHaveAttribute("data-visible-row-count", "9");
+    expect(windowElement).toHaveAttribute("data-scroll-mode", "native");
+    expect(windowElement.querySelectorAll("button")).toHaveLength(
+      entries.length,
+    );
+    expect(windowElement.style.gridTemplateRows).toBe("");
+    expect(windowElement.style.touchAction).toBe("pan-y");
     expect(windowElement.style.maxHeight).toBe("");
-    expect(windowElement).toHaveClass("flex-1");
+    expect(windowElement).toHaveClass(
+      "flex-1",
+      "overflow-y-auto",
+      "overscroll-contain",
+    );
+    expect(windowElement).not.toHaveClass("overflow-hidden");
     expect(
       windowElement.querySelector('[aria-current="true"]'),
     ).toHaveTextContent(entries[4].label);
+    expect(windowElement.querySelector('[aria-current="true"]')).toHaveClass(
+      "min-h-[68px]",
+      "bg-indigo-100/70",
+    );
+    expect(
+      screen.queryByTestId("space-navigator-selection"),
+    ).not.toBeInTheDocument();
     expect(screen.getByRole("dialog", { name: "スペース一覧" })).toHaveStyle({
       bottom: "var(--footer-height, 0px)",
     });
     expect(
       screen.getByText(
-        "ホイールまたは上下ドラッグで候補を移動し、スペースをタップしてください。ドラッグ終了だけでは移動しません。",
+        "一覧を上下にスクロールして、移動先のスペースをタップしてください。",
       ),
     ).toBeInTheDocument();
   });
@@ -237,7 +252,7 @@ describe("SpaceNavigatorPicker", () => {
       <SpaceNavigatorPicker
         entries={entries}
         candidateIndex={entries.length - 1}
-        layoutMode="smartphone"
+        layoutMode="pc"
         side="left"
         onCandidateChange={vi.fn()}
         onSelect={vi.fn()}
@@ -273,9 +288,9 @@ describe("SpaceNavigatorPicker", () => {
     const windowElement = screen.getByTestId("space-navigator-window");
     expect(windowElement).toHaveAttribute("data-visible-row-count", "3");
     expect(windowElement.querySelectorAll("button")).toHaveLength(3);
-    expect(screen.getByTestId("space-navigator-selection")).toHaveStyle({
-      top: `${(2.5 / 3) * 100}%`,
-    });
+    expect(
+      screen.queryByTestId("space-navigator-selection"),
+    ).not.toBeInTheDocument();
   });
 
   it("opens a non-central tapped space directly on a smartphone", () => {
@@ -322,95 +337,150 @@ describe("SpaceNavigatorPicker", () => {
     expect(onSelect).toHaveBeenCalledWith(2);
   });
 
-  it.each(["pc", "smartphone"] as const)(
-    "moves the %s candidate from the latest wheel position and clamps at the boundary",
-    (layoutMode) => {
-      const onCandidateChange = vi.fn();
-      const onSelect = vi.fn();
-      const view = render(
-        <SpaceNavigatorPicker
-          entries={entries}
-          candidateIndex={4}
-          layoutMode={layoutMode}
-          side="left"
-          onCandidateChange={onCandidateChange}
-          onSelect={onSelect}
-          onClose={vi.fn()}
-        />,
-      );
+  it("moves the PC candidate from the latest wheel position and clamps at the boundary", () => {
+    const onCandidateChange = vi.fn();
+    const onSelect = vi.fn();
+    const view = render(
+      <SpaceNavigatorPicker
+        entries={entries}
+        candidateIndex={4}
+        layoutMode="pc"
+        side="left"
+        onCandidateChange={onCandidateChange}
+        onSelect={onSelect}
+        onClose={vi.fn()}
+      />,
+    );
 
-      const windowElement = screen.getByTestId("space-navigator-window");
-      const wheelDown = new WheelEvent("wheel", {
-        bubbles: true,
-        cancelable: true,
-        deltaY: 100,
-      });
-      fireEvent(windowElement, wheelDown);
-      expect(onCandidateChange).toHaveBeenLastCalledWith(5);
+    const windowElement = screen.getByTestId("space-navigator-window");
+    const wheelDown = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 100,
+    });
+    fireEvent(windowElement, wheelDown);
+    expect(onCandidateChange).toHaveBeenLastCalledWith(5);
 
-      const secondWheelDown = new WheelEvent("wheel", {
-        bubbles: true,
-        cancelable: true,
-        deltaY: 100,
-      });
-      fireEvent(windowElement, secondWheelDown);
-      expect(onCandidateChange).toHaveBeenLastCalledWith(6);
+    const secondWheelDown = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 100,
+    });
+    fireEvent(windowElement, secondWheelDown);
+    expect(onCandidateChange).toHaveBeenLastCalledWith(6);
 
-      const wheelUp = new WheelEvent("wheel", {
-        bubbles: true,
-        cancelable: true,
-        deltaY: -100,
-      });
-      fireEvent(windowElement, wheelUp);
-      expect(onCandidateChange).toHaveBeenLastCalledWith(5);
-      expect(onSelect).not.toHaveBeenCalled();
+    const wheelUp = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: -100,
+    });
+    fireEvent(windowElement, wheelUp);
+    expect(onCandidateChange).toHaveBeenLastCalledWith(5);
+    expect(onSelect).not.toHaveBeenCalled();
 
-      fireEvent.wheel(windowElement, { deltaX: 100, deltaY: 0 });
-      expect(onCandidateChange).toHaveBeenCalledTimes(3);
+    fireEvent.wheel(windowElement, { deltaX: 100, deltaY: 0 });
+    expect(onCandidateChange).toHaveBeenCalledTimes(3);
 
-      view.rerender(
-        <SpaceNavigatorPicker
-          entries={entries}
-          candidateIndex={entries.length - 1}
-          layoutMode={layoutMode}
-          side="left"
-          onCandidateChange={onCandidateChange}
-          onSelect={onSelect}
-          onClose={vi.fn()}
-        />,
-      );
-      fireEvent.wheel(windowElement, { deltaY: 100 });
-      expect(onCandidateChange).toHaveBeenLastCalledWith(entries.length - 1);
-    },
-  );
+    view.rerender(
+      <SpaceNavigatorPicker
+        entries={entries}
+        candidateIndex={entries.length - 1}
+        layoutMode="pc"
+        side="left"
+        onCandidateChange={onCandidateChange}
+        onSelect={onSelect}
+        onClose={vi.fn()}
+      />,
+    );
+    fireEvent.wheel(windowElement, { deltaY: 100 });
+    expect(onCandidateChange).toHaveBeenLastCalledWith(entries.length - 1);
+  });
 
-  it.each(["pc", "smartphone"] as const)(
-    "accumulates small %s trackpad deltas before advancing one space",
-    (layoutMode) => {
-      const onCandidateChange = vi.fn();
-      render(
-        <SpaceNavigatorPicker
-          entries={entries}
-          candidateIndex={4}
-          layoutMode={layoutMode}
-          side="left"
-          onCandidateChange={onCandidateChange}
-          onSelect={vi.fn()}
-          onClose={vi.fn()}
-        />,
-      );
+  it("leaves smartphone wheel input to the native scroller", () => {
+    const onCandidateChange = vi.fn();
+    render(
+      <SpaceNavigatorPicker
+        entries={entries}
+        candidateIndex={4}
+        layoutMode="smartphone"
+        side="left"
+        onCandidateChange={onCandidateChange}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
 
-      const windowElement = screen.getByTestId("space-navigator-window");
-      fireEvent.wheel(windowElement, { deltaY: 10 });
-      fireEvent.wheel(windowElement, { deltaY: 10 });
-      fireEvent.wheel(windowElement, { deltaY: 10 });
-      expect(onCandidateChange).not.toHaveBeenCalled();
+    const windowElement = screen.getByTestId("space-navigator-window");
+    const wheelEvent = new WheelEvent("wheel", {
+      bubbles: true,
+      cancelable: true,
+      deltaY: 100,
+    });
+    fireEvent(windowElement, wheelEvent);
 
-      fireEvent.wheel(windowElement, { deltaY: 10 });
-      expect(onCandidateChange).toHaveBeenCalledOnce();
-      expect(onCandidateChange).toHaveBeenCalledWith(5);
-    },
-  );
+    expect(onCandidateChange).not.toHaveBeenCalled();
+    expect(wheelEvent.defaultPrevented).toBe(false);
+  });
+
+  it("does not capture a smartphone pointer drag inside a space row", () => {
+    const onCandidateChange = vi.fn();
+    const onSelect = vi.fn();
+    render(
+      <SpaceNavigatorPicker
+        entries={entries}
+        candidateIndex={4}
+        layoutMode="smartphone"
+        side="left"
+        onCandidateChange={onCandidateChange}
+        onSelect={onSelect}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const windowElement = screen.getByTestId("space-navigator-window");
+    const setPointerCapture = vi.fn();
+    Object.assign(windowElement, {
+      setPointerCapture,
+      hasPointerCapture: vi.fn(() => false),
+      releasePointerCapture: vi.fn(),
+    });
+    const row = screen.getByRole("button", {
+      name: new RegExp(entries[4].label),
+    });
+
+    dispatchPointer(row, "pointerdown", 17, 260);
+    dispatchPointer(row, "pointermove", 17, 120);
+    dispatchPointer(row, "pointerup", 17, 120);
+
+    expect(setPointerCapture).not.toHaveBeenCalled();
+    expect(onCandidateChange).not.toHaveBeenCalled();
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("accumulates small PC trackpad deltas before advancing one space", () => {
+    const onCandidateChange = vi.fn();
+    render(
+      <SpaceNavigatorPicker
+        entries={entries}
+        candidateIndex={4}
+        layoutMode="pc"
+        side="left"
+        onCandidateChange={onCandidateChange}
+        onSelect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const windowElement = screen.getByTestId("space-navigator-window");
+    fireEvent.wheel(windowElement, { deltaY: 10 });
+    fireEvent.wheel(windowElement, { deltaY: 10 });
+    fireEvent.wheel(windowElement, { deltaY: 10 });
+    expect(onCandidateChange).not.toHaveBeenCalled();
+
+    fireEvent.wheel(windowElement, { deltaY: 10 });
+    expect(onCandidateChange).toHaveBeenCalledOnce();
+    expect(onCandidateChange).toHaveBeenCalledWith(5);
+  });
 
   it("updates only the candidate during a drag and does not select on pointer release", () => {
     const onCandidateChange = vi.fn();
@@ -419,7 +489,7 @@ describe("SpaceNavigatorPicker", () => {
       <SpaceNavigatorPicker
         entries={entries}
         candidateIndex={4}
-        layoutMode="smartphone"
+        layoutMode="pc"
         side="left"
         onCandidateChange={onCandidateChange}
         onSelect={onSelect}
@@ -467,7 +537,7 @@ describe("SpaceNavigatorPicker", () => {
       <SpaceNavigatorPicker
         entries={entries}
         candidateIndex={4}
-        layoutMode="smartphone"
+        layoutMode="pc"
         side="left"
         onCandidateChange={onCandidateChange}
         onSelect={onSelect}

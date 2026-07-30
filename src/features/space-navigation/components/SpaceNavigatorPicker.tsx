@@ -1,4 +1,10 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { NavigatorEntry, NavigatorStatusKind } from "../types";
 import type { SpaceNavigatorSide } from "../hooks/useSpaceNavigatorSettings";
 import { clampCandidateIndex } from "../domain/candidateIndex";
@@ -60,6 +66,7 @@ export function SpaceNavigatorPicker({
 }: SpaceNavigatorPickerProps) {
   const sheetRef = useRef<HTMLElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const selectedRowRef = useRef<HTMLButtonElement>(null);
   const dragRef = useRef<{
     pointerId: number;
     startY: number;
@@ -73,6 +80,8 @@ export function SpaceNavigatorPicker({
   candidateIndexRef.current = candidateIndex;
 
   useEffect(() => {
+    if (layoutMode === "smartphone") return;
+
     const updateWindowRadius = () => {
       const measuredHeight =
         listRef.current?.getBoundingClientRect().height ?? 0;
@@ -97,9 +106,13 @@ export function SpaceNavigatorPicker({
       window.removeEventListener("resize", updateWindowRadius);
       observer?.disconnect();
     };
-  }, []);
+  }, [layoutMode]);
 
   const rows = useMemo(() => {
+    if (layoutMode === "smartphone") {
+      return entries.map((entry, index) => ({ index, entry }));
+    }
+
     const visibleRowCount = Math.min(entries.length, windowRadius * 2 + 1);
     const maxWindowStart = Math.max(0, entries.length - visibleRowCount);
     const windowStart = Math.min(
@@ -111,11 +124,29 @@ export function SpaceNavigatorPicker({
       const index = windowStart + offset;
       return { index, entry: entries[index] };
     });
-  }, [candidateIndex, entries, windowRadius]);
+  }, [candidateIndex, entries, layoutMode, windowRadius]);
   const selectedRowIndex = Math.max(
     0,
     rows.findIndex(({ index }) => index === candidateIndex),
   );
+
+  useLayoutEffect(() => {
+    if (layoutMode !== "smartphone") return;
+    const selectedRow = selectedRowRef.current;
+    const list = listRef.current;
+    if (!selectedRow || !list) return;
+
+    if (typeof selectedRow.scrollIntoView === "function") {
+      selectedRow.scrollIntoView({ block: "center", inline: "nearest" });
+      return;
+    }
+
+    list.scrollTop = Math.max(
+      0,
+      selectedRow.offsetTop -
+        Math.max(0, (list.clientHeight - selectedRow.offsetHeight) / 2),
+    );
+  }, [candidateIndex, entries.length, layoutMode]);
 
   return (
     <div
@@ -161,20 +192,35 @@ export function SpaceNavigatorPicker({
 
         <div
           ref={listRef}
-          className="relative mx-3 my-3 grid min-h-0 flex-1 select-none overflow-hidden rounded-xl border border-slate-200 bg-slate-100/70 dark:border-slate-700 dark:bg-slate-950/50"
-          style={{
-            gridTemplateRows: `repeat(${rows.length}, minmax(0, 1fr))`,
-            touchAction: "none",
-          }}
+          className={`relative mx-3 my-3 min-h-0 flex-1 select-none rounded-xl border border-slate-200 bg-slate-100/70 dark:border-slate-700 dark:bg-slate-950/50 ${
+            layoutMode === "smartphone"
+              ? "block overflow-y-auto overscroll-contain"
+              : "grid overflow-hidden"
+          }`}
+          style={
+            layoutMode === "smartphone"
+              ? {
+                  touchAction: "pan-y",
+                  WebkitOverflowScrolling: "touch",
+                }
+              : {
+                  gridTemplateRows: `repeat(${rows.length}, minmax(0, 1fr))`,
+                  touchAction: "none",
+                }
+          }
           data-testid="space-navigator-window"
           data-visible-row-count={rows.length}
+          data-scroll-mode={
+            layoutMode === "smartphone" ? "native" : "candidate"
+          }
           onClick={(event) => {
+            if (layoutMode === "smartphone") return;
             if (event.target === event.currentTarget && didDragRef.current) {
               didDragRef.current = false;
             }
           }}
           onWheel={(event) => {
-            if (event.deltaY === 0) return;
+            if (layoutMode === "smartphone" || event.deltaY === 0) return;
             event.stopPropagation();
             const deltaScale =
               event.deltaMode === 1
@@ -202,6 +248,7 @@ export function SpaceNavigatorPicker({
             onCandidateChange(nextIndex);
           }}
           onPointerDown={(event) => {
+            if (layoutMode === "smartphone") return;
             dragRef.current = {
               pointerId: event.pointerId,
               startY: event.clientY,
@@ -211,6 +258,7 @@ export function SpaceNavigatorPicker({
             didDragRef.current = false;
           }}
           onPointerMove={(event) => {
+            if (layoutMode === "smartphone") return;
             const drag = dragRef.current;
             if (!drag || drag.pointerId !== event.pointerId) return;
             if (event.pointerType === "mouse" && event.buttons === 0) {
@@ -240,12 +288,14 @@ export function SpaceNavigatorPicker({
             );
           }}
           onPointerUp={(event) => {
+            if (layoutMode === "smartphone") return;
             if (event.currentTarget.hasPointerCapture(event.pointerId)) {
               event.currentTarget.releasePointerCapture(event.pointerId);
             }
             dragRef.current = null;
           }}
           onPointerLeave={(event) => {
+            if (layoutMode === "smartphone") return;
             const drag = dragRef.current;
             if (
               drag &&
@@ -257,6 +307,7 @@ export function SpaceNavigatorPicker({
             }
           }}
           onPointerCancel={(event) => {
+            if (layoutMode === "smartphone") return;
             if (event.currentTarget.hasPointerCapture(event.pointerId)) {
               event.currentTarget.releasePointerCapture(event.pointerId);
             }
@@ -264,12 +315,13 @@ export function SpaceNavigatorPicker({
             didDragRef.current = false;
           }}
           onLostPointerCapture={(event) => {
+            if (layoutMode === "smartphone") return;
             if (dragRef.current?.pointerId === event.pointerId) {
               dragRef.current = null;
             }
           }}
         >
-          {rows.length > 0 && (
+          {layoutMode === "pc" && rows.length > 0 && (
             <div
               className="pointer-events-none absolute left-0 right-0 z-10 -translate-y-1/2 border-y-2 border-indigo-500 bg-indigo-100/20 dark:bg-indigo-400/10"
               style={{
@@ -292,10 +344,21 @@ export function SpaceNavigatorPicker({
             return (
               <button
                 key={`${entry.id}-${rowIndex}`}
+                ref={
+                  layoutMode === "smartphone" && isSelected
+                    ? selectedRowRef
+                    : undefined
+                }
                 type="button"
-                className={`relative z-20 flex min-h-0 w-full items-center gap-3 overflow-hidden border-b border-slate-200/70 px-3 text-left transition-colors last:border-b-0 dark:border-slate-700/70 ${
+                className={`relative z-20 flex w-full items-center gap-3 overflow-hidden border-b border-slate-200/70 px-3 text-left transition-colors last:border-b-0 dark:border-slate-700/70 ${
+                  layoutMode === "smartphone" ? "min-h-[68px]" : "min-h-0"
+                } ${
                   isSelected
-                    ? "font-semibold text-indigo-950 dark:text-indigo-100"
+                    ? `font-semibold text-indigo-950 dark:text-indigo-100 ${
+                        layoutMode === "smartphone"
+                          ? "bg-indigo-100/70 dark:bg-indigo-900/40"
+                          : ""
+                      }`
                     : "text-slate-600 hover:bg-white/70 dark:text-slate-300 dark:hover:bg-slate-800/70"
                 }`}
                 onClick={() => {
@@ -362,7 +425,7 @@ export function SpaceNavigatorPicker({
         <p className="shrink-0 px-4 pb-3 text-center text-[11px] text-slate-500 dark:text-slate-400">
           {layoutMode === "pc"
             ? "ホイールまたは上下ドラッグで候補を移動し、スペースをクリックしてください。"
-            : "ホイールまたは上下ドラッグで候補を移動し、スペースをタップしてください。ドラッグ終了だけでは移動しません。"}
+            : "一覧を上下にスクロールして、移動先のスペースをタップしてください。"}
         </p>
       </section>
     </div>
