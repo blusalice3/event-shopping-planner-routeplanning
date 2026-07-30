@@ -725,6 +725,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
           {currentMode === "execute" && (
             <SummaryBar
               items={visibleItems}
+              layoutMode={layoutMode}
               filterLabel={!showHeaderBar ? sortDisplayLabel : undefined}
               onFilterToggle={!showHeaderBar ? handleSortToggle : undefined}
             />

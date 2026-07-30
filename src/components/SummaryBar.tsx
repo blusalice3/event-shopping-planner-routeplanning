@@ -11,12 +11,14 @@ import { useOptionalSpaceNavigator } from "../features/space-navigation/SpaceNav
 
 interface SummaryBarProps {
   items: ShoppingItem[];
+  layoutMode?: "pc" | "smartphone";
   filterLabel?: string;
   onFilterToggle?: () => void;
 }
 
 const SummaryBar: React.FC<SummaryBarProps> = ({
   items,
+  layoutMode = "pc",
   filterLabel,
   onFilterToggle,
 }) => {
@@ -76,6 +78,75 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
     };
   }, [items]);
 
+  const purchasedSummary = (
+    <div
+      className={
+        layoutMode === "smartphone"
+          ? "text-sm leading-5 text-slate-700 dark:text-slate-300"
+          : "text-slate-700 dark:text-slate-300"
+      }
+    >
+      <span className="font-semibold tabular-nums">
+        {summary.purchasedItems}
+      </span>{" "}
+      / <span className="tabular-nums">{summary.totalItems}</span> 件購入済み
+      {summary.limitedMissingItems > 0 && (
+        <span className="ml-2 text-orange-600 dark:text-orange-300">
+          限数未入力 {summary.limitedMissingItems}件
+        </span>
+      )}
+    </div>
+  );
+
+  const filterButton =
+    filterLabel && onFilterToggle ? (
+      <button
+        onClick={onFilterToggle}
+        className={`font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 touch-manipulation select-none ${
+          layoutMode === "smartphone"
+            ? "min-h-11 min-w-11 px-2 py-1 text-sm"
+            : "px-3 py-1.5 text-sm"
+        }`}
+        title="購入状態フィルタ切替"
+        aria-label={`購入状態フィルタ切替（現在: ${filterLabel}）`}
+        style={{ WebkitTapHighlightColor: "transparent" }}
+        type="button"
+      >
+        {filterLabel}
+      </button>
+    ) : null;
+
+  const spaceNavigatorButton = (
+    <SpaceNavigatorFooterButton compact={layoutMode === "smartphone"} />
+  );
+
+  const remainingSummary = (
+    <div
+      className={
+        layoutMode === "smartphone"
+          ? "flex flex-wrap items-baseline gap-x-1 leading-5"
+          : ""
+      }
+    >
+      <span
+        className={
+          layoutMode === "smartphone"
+            ? "text-xs text-slate-500 dark:text-slate-400"
+            : "text-sm text-slate-500 dark:text-slate-400"
+        }
+      >
+        残りの合計{" "}
+      </span>
+      <span
+        className={`font-bold text-blue-600 dark:text-blue-400 tabular-nums whitespace-nowrap ${
+          layoutMode === "smartphone" ? "text-lg" : "text-xl"
+        }`}
+      >
+        ¥{summary.remainingCost.toLocaleString()}
+      </span>
+    </div>
+  );
+
   return (
     <div
       ref={barRef}
@@ -86,38 +157,32 @@ const SummaryBar: React.FC<SummaryBarProps> = ({
           : undefined,
       }}
     >
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-3">
-        <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
-          <div className="text-slate-700 dark:text-slate-300">
-            <span className="font-semibold">{summary.purchasedItems}</span> /{" "}
-            {summary.totalItems} 件購入済み
-            {summary.limitedMissingItems > 0 && (
-              <span className="ml-2 text-orange-600 dark:text-orange-300">
-                限数未入力 {summary.limitedMissingItems}件
-              </span>
-            )}
+      <div
+        className={`max-w-4xl mx-auto ${
+          layoutMode === "smartphone"
+            ? "px-3 py-2"
+            : "px-4 sm:px-6 lg:px-8 py-3"
+        }`}
+      >
+        {layoutMode === "smartphone" ? (
+          <div className="flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-left">
+            <div className="flex flex-1 basis-32 flex-col justify-center">
+              {purchasedSummary}
+              {remainingSummary}
+            </div>
+            <div className="flex shrink-0 items-center gap-2 empty:hidden">
+              {filterButton}
+              {spaceNavigatorButton}
+            </div>
           </div>
-          {filterLabel && onFilterToggle && (
-            <button
-              onClick={onFilterToggle}
-              className="px-3 py-1.5 text-sm font-medium rounded-md transition-colors duration-200 text-blue-600 bg-blue-100 hover:bg-blue-200 dark:text-blue-300 dark:bg-blue-900/50 dark:hover:bg-blue-900 touch-manipulation select-none"
-              title="購入状態フィルタ切替"
-              style={{ WebkitTapHighlightColor: "transparent" }}
-              type="button"
-            >
-              {filterLabel}
-            </button>
-          )}
-          <SpaceNavigatorFooterButton />
-          <div>
-            <span className="text-sm text-slate-500 dark:text-slate-400">
-              残りの合計{" "}
-            </span>
-            <span className="font-bold text-xl text-blue-600 dark:text-blue-400">
-              ¥{summary.remainingCost.toLocaleString()}
-            </span>
+        ) : (
+          <div className="flex flex-col sm:flex-row justify-between items-center text-center sm:text-left gap-2">
+            {purchasedSummary}
+            {filterButton}
+            {spaceNavigatorButton}
+            {remainingSummary}
           </div>
-        </div>
+        )}
       </div>
     </div>
   );
