@@ -1,5 +1,5 @@
 import type React from "react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { FocusPhase } from "../../types/focus";
 import type { ShoppingItem } from "../../types/item";
@@ -70,6 +70,7 @@ const formInputClass =
   "w-full p-2 border border-slate-300 dark:border-slate-600 rounded-md bg-white dark:bg-slate-900 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-slate-900 dark:text-white";
 const labelClass =
   "block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1";
+const CELL_POPUP_OPENING_CLICK_GUARD_MS = 500;
 
 const useModalInteractionLock = (isOpen: boolean) => {
   useEffect(() => {
@@ -183,8 +184,64 @@ export function CellItemPopup({
 }) {
   useModalInteractionLock(state.isOpen);
   const operationLockRef = useRef(false);
+  const suppressOpeningClickRef = useRef(false);
+  const openingClickGuardTimerRef = useRef<number | null>(null);
   const [busyVisitId, setBusyVisitId] = useState<string | null>(null);
+
+  // A touch pointerup can mount this popup before its compatibility click is
+  // hit-tested. Arm the guard before that click can reach a newly added button.
+  useLayoutEffect(() => {
+    if (openingClickGuardTimerRef.current !== null) {
+      window.clearTimeout(openingClickGuardTimerRef.current);
+      openingClickGuardTimerRef.current = null;
+    }
+    suppressOpeningClickRef.current = state.isOpen;
+    if (!state.isOpen) return;
+
+    openingClickGuardTimerRef.current = window.setTimeout(() => {
+      suppressOpeningClickRef.current = false;
+      openingClickGuardTimerRef.current = null;
+    }, CELL_POPUP_OPENING_CLICK_GUARD_MS);
+
+    return () => {
+      if (openingClickGuardTimerRef.current !== null) {
+        window.clearTimeout(openingClickGuardTimerRef.current);
+        openingClickGuardTimerRef.current = null;
+      }
+      suppressOpeningClickRef.current = false;
+    };
+  }, [state.blockName, state.isOpen, state.number]);
+
   if (!state.isOpen) return null;
+
+  const clearOpeningClickGuard = () => {
+    suppressOpeningClickRef.current = false;
+    if (openingClickGuardTimerRef.current !== null) {
+      window.clearTimeout(openingClickGuardTimerRef.current);
+      openingClickGuardTimerRef.current = null;
+    }
+  };
+
+  const handlePopupInteractionStart = (event: React.SyntheticEvent) => {
+    // A new gesture that starts inside the popup is an intentional interaction.
+    clearOpeningClickGuard();
+    event.stopPropagation();
+  };
+
+  const handlePopupClickCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    const shouldSuppress = suppressOpeningClickRef.current && event.detail > 0;
+    clearOpeningClickGuard();
+    if (!shouldSuppress) return;
+
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleBackdropClick = (event: React.MouseEvent<HTMLDivElement>) => {
+    if (event.target === event.currentTarget) {
+      onClose();
+    }
+  };
 
   const handleTemporaryMove = async (target: CellTemporaryTarget) => {
     if (target.disabled || operationLockRef.current || !onTemporaryMove) return;
@@ -205,8 +262,10 @@ export function CellItemPopup({
       role="dialog"
       aria-modal="true"
       aria-label={`${state.blockName}-${state.number}のアイテム`}
-      onPointerDown={(event) => event.stopPropagation()}
-      onTouchStart={(event) => event.stopPropagation()}
+      onClick={handleBackdropClick}
+      onClickCapture={handlePopupClickCapture}
+      onPointerDown={handlePopupInteractionStart}
+      onTouchStart={handlePopupInteractionStart}
       onWheel={(event) => event.stopPropagation()}
     >
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-sm w-full mx-4 overflow-hidden">
