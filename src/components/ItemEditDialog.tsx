@@ -4,6 +4,10 @@ import type { HallDefinition } from "../types/map";
 import { findHallsByBlockName } from "../utils/hallFallback";
 import LimitedPurchaseExcessConfirmDialog from "./LimitedPurchaseExcessConfirmDialog";
 import {
+  buildQuantityOptions,
+  isStandardQuantityOption,
+} from "./quantityOptions";
+import {
   applyLimitedPurchase,
   applyPurchasedFromLimitedInput,
   clearLimitedPurchase,
@@ -101,6 +105,10 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
     }
     return options;
   }, []);
+  const quantityOptions = useMemo(
+    () => buildQuantityOptions(form.quantity),
+    [form.quantity],
+  );
 
   const handlePriceInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -289,13 +297,29 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               />
             </div>
           </div>
+          {item.catalogPrice !== undefined && (
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                カタログ価格（シート・読み取り専用）
+              </p>
+              <output
+                aria-label="カタログ価格（シート・読み取り専用）"
+                className="mt-1 block font-semibold text-slate-800 dark:text-slate-100"
+              >
+                {item.catalogPrice === null
+                  ? "未定"
+                  : `${item.catalogPrice.toLocaleString()}円`}
+              </output>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
             <div className="relative">
-              <label className={labelClass}>頒布価格</label>
+              <label className={labelClass}>購入金額（利用者が編集）</label>
               <input
                 type="text"
                 value={form.price}
                 onChange={handlePriceInputChange}
+                aria-label="購入金額"
                 className={`${formInputClass} pr-12`}
                 placeholder="0"
                 inputMode="numeric"
@@ -357,19 +381,17 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
                 <label className={labelClass}>数量</label>
                 <select
                   value={form.quantity}
+                  aria-label="数量"
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, quantity: e.target.value }))
                   }
                   className={formInputClass}
                 >
-                  {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                  {quantityOptions.map((num) => (
                     <option key={num} value={num}>
-                      {num}
+                      {isStandardQuantityOption(num) ? num : `${num}（現在値）`}
                     </option>
                   ))}
-                  {Number(form.quantity) > 10 && (
-                    <option value={form.quantity}>{form.quantity}</option>
-                  )}
                 </select>
               </div>
             )}
@@ -473,15 +495,29 @@ export const ItemEditDialog: React.FC<ItemEditDialogProps> = ({
               )}
             </div>
           )}
+          {item.sheetRemarks?.trim() && (
+            <div className="rounded-md border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900/50">
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                シート備考（読み取り専用）
+              </p>
+              <p
+                aria-label="シート備考（読み取り専用）"
+                className="mt-1 whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100"
+              >
+                {item.sheetRemarks}
+              </p>
+            </div>
+          )}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className={labelClass}>備考</label>
+              <label className={labelClass}>利用者メモ</label>
               <input
                 type="text"
                 value={form.remarks}
                 onChange={(e) =>
                   setForm((prev) => ({ ...prev, remarks: e.target.value }))
                 }
+                aria-label="利用者メモ"
                 className={formInputClass}
                 placeholder="スケブお願い"
               />

@@ -1,13 +1,23 @@
-import React from "react";
-import { ShoppingItem } from "../types/item";
+import React, { useEffect, useState } from "react";
+import type { EventUpdateApplyOptions } from "../features/events/updateApply";
+import type {
+  LimitedPurchaseQuantityConflict,
+  PendingPurchasedQuantityChange,
+  QuantitySyncWarning,
+  SpreadsheetItemToAdd,
+} from "../features/events/updateDiff";
+import type { ShoppingItem } from "../types/item";
 
 interface UpdateConfirmationModalProps {
   itemsToDelete: ShoppingItem[];
   itemsToUpdate: ShoppingItem[];
-  itemsToAdd: Omit<ShoppingItem, "id" | "purchaseStatus">[];
+  itemsToAdd: SpreadsheetItemToAdd[];
   protectedFromDelete?: number; // 保護により削除されなかったアイテム数
   protectedFromUpdate?: number; // 保護により更新されなかったアイテム数
-  onConfirm: () => void;
+  quantityWarnings?: QuantitySyncWarning[];
+  pendingPurchasedQuantityChanges?: PendingPurchasedQuantityChange[];
+  limitedPurchaseQuantityConflicts?: LimitedPurchaseQuantityConflict[];
+  onConfirm: (options: EventUpdateApplyOptions) => void;
   onCancel: () => void;
 }
 
@@ -17,10 +27,19 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
   itemsToAdd,
   protectedFromDelete = 0,
   protectedFromUpdate = 0,
+  quantityWarnings = [],
+  pendingPurchasedQuantityChanges = [],
+  limitedPurchaseQuantityConflicts = [],
   onConfirm,
   onCancel,
 }) => {
+  const [applyPurchasedQuantityChanges, setApplyPurchasedQuantityChanges] =
+    useState(false);
   const hasProtectedItems = protectedFromDelete > 0 || protectedFromUpdate > 0;
+
+  useEffect(() => {
+    setApplyPurchasedQuantityChanges(false);
+  }, [pendingPurchasedQuantityChanges.length]);
 
   return (
     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
@@ -103,6 +122,101 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
                 </p>
               </div>
             )}
+
+            {quantityWarnings.length > 0 && (
+              <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-200 dark:border-red-700">
+                <h3 className="text-sm font-semibold text-red-700 dark:text-red-300 mb-1">
+                  数量を反映できなかった行: {quantityWarnings.length}件
+                </h3>
+                <p className="text-sm text-red-600 dark:text-red-300 mb-2">
+                  数量は1～20の整数で入力してください。既存品目の数量は変更せず、
+                  新規品目は追加していません。
+                </p>
+                <ul className="text-sm text-red-600 dark:text-red-300 space-y-1">
+                  {quantityWarnings.slice(0, 5).map((warning, index) => (
+                    <li
+                      key={`${warning.eventDate}-${warning.block}-${warning.number}-${index}`}
+                    >
+                      • {warning.circle} - {warning.title || "（タイトルなし）"}
+                      ：「{warning.receivedValue}」
+                      {warning.kind === "new-item-skipped"
+                        ? "（品目を追加しません）"
+                        : "（現在の数量を維持します）"}
+                    </li>
+                  ))}
+                  {quantityWarnings.length > 5 && (
+                    <li>...他 {quantityWarnings.length - 5}件</li>
+                  )}
+                </ul>
+              </div>
+            )}
+
+            {limitedPurchaseQuantityConflicts.length > 0 && (
+              <div className="mt-4 p-3 bg-red-50 dark:bg-red-900/20 rounded-md border border-red-200 dark:border-red-700">
+                <h3 className="text-sm font-semibold text-red-700 dark:text-red-300 mb-1">
+                  限数購入の予定数量を反映できない品目:{" "}
+                  {limitedPurchaseQuantityConflicts.length}件
+                </h3>
+                <p className="text-sm text-red-600 dark:text-red-300 mb-2">
+                  予定数量は実購入数より多い必要があります。購入状態と実購入数を保護し、
+                  現在の予定数量を維持します。
+                </p>
+                <ul className="text-sm text-red-600 dark:text-red-300 space-y-1">
+                  {limitedPurchaseQuantityConflicts
+                    .slice(0, 5)
+                    .map((conflict) => (
+                      <li key={conflict.itemId}>
+                        • {conflict.circle} -{" "}
+                        {conflict.title || "（タイトルなし）"}：実購入
+                        {conflict.actualPurchasedQuantity}、予定
+                        {conflict.currentQuantity} → {conflict.nextQuantity}
+                      </li>
+                    ))}
+                  {limitedPurchaseQuantityConflicts.length > 5 && (
+                    <li>
+                      ...他 {limitedPurchaseQuantityConflicts.length - 5}件
+                    </li>
+                  )}
+                </ul>
+              </div>
+            )}
+
+            {pendingPurchasedQuantityChanges.length > 0 && (
+              <div className="mt-4 p-3 bg-amber-50 dark:bg-amber-900/20 rounded-md border border-amber-300 dark:border-amber-700">
+                <h3 className="text-sm font-semibold text-amber-800 dark:text-amber-300 mb-1">
+                  購入済み品目の予定数量変更:{" "}
+                  {pendingPurchasedQuantityChanges.length}件
+                </h3>
+                <p className="text-sm text-amber-700 dark:text-amber-300 mb-2">
+                  誤って購入記録を変えないよう、予定数量は確認するまで変更しません。
+                  実際に購入した数量は、この確認にかかわらず維持されます。
+                </p>
+                <ul className="text-sm text-amber-700 dark:text-amber-300 space-y-1 mb-3">
+                  {pendingPurchasedQuantityChanges.slice(0, 5).map((change) => (
+                    <li key={change.itemId}>
+                      • {change.circle} - {change.title || "（タイトルなし）"}：
+                      {change.currentQuantity} → {change.nextQuantity}
+                    </li>
+                  ))}
+                  {pendingPurchasedQuantityChanges.length > 5 && (
+                    <li>
+                      ...他 {pendingPurchasedQuantityChanges.length - 5}件
+                    </li>
+                  )}
+                </ul>
+                <label className="flex items-start gap-2 text-sm font-medium text-amber-900 dark:text-amber-200 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={applyPurchasedQuantityChanges}
+                    onChange={(event) =>
+                      setApplyPurchasedQuantityChanges(event.target.checked)
+                    }
+                  />
+                  内容を確認し、スプレッドシートの予定数量へ変更する
+                </label>
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end space-x-3">
@@ -113,7 +227,11 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
               キャンセル
             </button>
             <button
-              onClick={onConfirm}
+              onClick={() =>
+                onConfirm({
+                  applyPurchasedQuantityChanges,
+                })
+              }
               className="px-4 py-2 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors"
             >
               更新を実行

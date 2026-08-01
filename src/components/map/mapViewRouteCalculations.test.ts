@@ -11,22 +11,17 @@ vi.mock("../../utils/pathfinding", async (importOriginal) => {
     await importOriginal<typeof import("../../utils/pathfinding")>();
   return {
     ...actual,
-    generateRouteSegments: vi.fn(),
     generateRouteSegmentsStrict: vi.fn(),
   };
 });
 
-import {
-  generateRouteSegments,
-  generateRouteSegmentsStrict,
-} from "../../utils/pathfinding";
+import { generateRouteSegmentsStrict } from "../../utils/pathfinding";
 import {
   calculateRouteSegmentsPair,
   createRouteInsertMapSnapshots,
   haveEquivalentRouteGeneratorPoints,
 } from "./mapViewRouteCalculations";
 
-const mockedGenerateRouteSegments = vi.mocked(generateRouteSegments);
 const mockedGenerateRouteSegmentsStrict = vi.mocked(
   generateRouteSegmentsStrict,
 );
@@ -126,7 +121,6 @@ const generatedSegment: RouteSegment = {
 
 describe("map view route segment calculation", () => {
   beforeEach(() => {
-    mockedGenerateRouteSegments.mockReset();
     mockedGenerateRouteSegmentsStrict.mockReset();
   });
 
@@ -145,8 +139,8 @@ describe("map view route segment calculation", () => {
     });
 
     expect(mockedGenerateRouteSegmentsStrict).toHaveBeenCalledTimes(1);
-    expect(mockedGenerateRouteSegments).not.toHaveBeenCalled();
     expect(result.displayRouteSegments).toEqual(result.mapInsertRouteSegments);
+    expect(result.displayRouteState).toBe("normal");
     expect(result.displayRouteSegments[0].path).toEqual([
       { row: 1, col: 1 },
       { row: 1, col: 3 },
@@ -167,9 +161,6 @@ describe("map view route segment calculation", () => {
     const actualPathfinding = await vi.importActual<
       typeof import("../../utils/pathfinding")
     >("../../utils/pathfinding");
-    mockedGenerateRouteSegments.mockImplementation(
-      actualPathfinding.generateRouteSegments,
-    );
     mockedGenerateRouteSegmentsStrict.mockImplementation(
       actualPathfinding.generateRouteSegmentsStrict,
     );
@@ -182,24 +173,28 @@ describe("map view route segment calculation", () => {
       mapInsertRoutePoints: routePoints.map((point) => ({ ...point })),
       mapInsertPathConstraint: undefined,
     });
-    const expectedDisplay = actualPathfinding
-      .generateRouteSegments(reachableMapData, routePoints)
-      .map((segment) => ({
-        ...segment,
-        path: actualPathfinding.simplifyPath(segment.path),
-      }));
+    const expectedDisplay = actualPathfinding.generateRouteSegmentsStrict(
+      reachableMapData,
+      routePoints,
+    );
+    expect(expectedDisplay.ok).toBe(true);
+    const expectedSegments = (
+      expectedDisplay.ok ? expectedDisplay.segments : []
+    ).map((segment) => ({
+      ...segment,
+      path: actualPathfinding.simplifyPath(segment.path),
+    }));
 
     expect(mockedGenerateRouteSegmentsStrict).toHaveBeenCalledTimes(1);
-    expect(mockedGenerateRouteSegments).not.toHaveBeenCalled();
-    expect(result.displayRouteSegments).toEqual(expectedDisplay);
-    expect(result.mapInsertRouteSegments).toEqual(expectedDisplay);
+    expect(result.displayRouteSegments).toEqual(expectedSegments);
+    expect(result.mapInsertRouteSegments).toEqual(expectedSegments);
+    expect(result.displayRouteState).toBe("normal");
   });
 
-  it("falls back to the normal display calculation when shared strict calculation fails", () => {
-    mockedGenerateRouteSegments.mockReturnValue([generatedSegment]);
+  it("discards all display and insert segments when shared strict calculation fails", () => {
     mockedGenerateRouteSegmentsStrict.mockReturnValue({
       ok: false,
-      segments: [],
+      segments: [generatedSegment],
       failedSegment: {
         from: routePoints[0],
         to: routePoints[1],
@@ -216,18 +211,13 @@ describe("map view route segment calculation", () => {
     });
 
     expect(mockedGenerateRouteSegmentsStrict).toHaveBeenCalledTimes(1);
-    expect(mockedGenerateRouteSegments).toHaveBeenCalledTimes(1);
-    expect(result.displayRouteSegments).toHaveLength(1);
-    expect(result.displayRouteSegments[0].path).toEqual([
-      { row: 1, col: 1 },
-      { row: 1, col: 3 },
-    ]);
+    expect(result.displayRouteSegments).toEqual([]);
     expect(result.mapInsertRouteSegments).toEqual([]);
+    expect(result.displayRouteState).toBe("unreachable");
   });
 
   it("keeps separate calculations when map references differ", () => {
     const otherMapData = { ...mapData };
-    mockedGenerateRouteSegments.mockReturnValue([generatedSegment]);
     mockedGenerateRouteSegmentsStrict.mockReturnValue({
       ok: true,
       segments: [generatedSegment],
@@ -241,15 +231,13 @@ describe("map view route segment calculation", () => {
       mapInsertPathConstraint: undefined,
     });
 
-    expect(mockedGenerateRouteSegments).toHaveBeenCalledTimes(1);
-    expect(mockedGenerateRouteSegmentsStrict).toHaveBeenCalledTimes(1);
+    expect(mockedGenerateRouteSegmentsStrict).toHaveBeenCalledTimes(2);
   });
 
   it("keeps separate calculations when a path constraint exists", () => {
     const constraint: RoutePathConstraint = {
       isPathAllowed: () => true,
     };
-    mockedGenerateRouteSegments.mockReturnValue([generatedSegment]);
     mockedGenerateRouteSegmentsStrict.mockReturnValue({
       ok: true,
       segments: [generatedSegment],
@@ -263,8 +251,7 @@ describe("map view route segment calculation", () => {
       mapInsertPathConstraint: constraint,
     });
 
-    expect(mockedGenerateRouteSegments).toHaveBeenCalledTimes(1);
-    expect(mockedGenerateRouteSegmentsStrict).toHaveBeenCalledTimes(1);
+    expect(mockedGenerateRouteSegmentsStrict).toHaveBeenCalledTimes(2);
     expect(mockedGenerateRouteSegmentsStrict).toHaveBeenCalledWith(
       mapData,
       routePoints,
@@ -277,40 +264,39 @@ describe("map view route segment calculation", () => {
       label: "neither route is needed",
       includeDisplayRoute: false,
       includeMapInsertRoute: false,
-      normalCalls: 0,
       strictCalls: 0,
       displayCount: 0,
       insertCount: 0,
+      displayState: "idle" as const,
     },
     {
       label: "only the visible display route is needed",
       includeDisplayRoute: true,
       includeMapInsertRoute: false,
-      normalCalls: 1,
-      strictCalls: 0,
+      strictCalls: 1,
       displayCount: 1,
       insertCount: 0,
+      displayState: "normal" as const,
     },
     {
       label: "only map-insert validation is needed",
       includeDisplayRoute: false,
       includeMapInsertRoute: true,
-      normalCalls: 0,
       strictCalls: 1,
       displayCount: 0,
       insertCount: 1,
+      displayState: "idle" as const,
     },
   ])(
     "skips unused A* work when $label",
     ({
       includeDisplayRoute,
       includeMapInsertRoute,
-      normalCalls,
       strictCalls,
       displayCount,
       insertCount,
+      displayState,
     }) => {
-      mockedGenerateRouteSegments.mockReturnValue([generatedSegment]);
       mockedGenerateRouteSegmentsStrict.mockReturnValue({
         ok: true,
         segments: [generatedSegment],
@@ -326,14 +312,29 @@ describe("map view route segment calculation", () => {
         includeMapInsertRoute,
       });
 
-      expect(mockedGenerateRouteSegments).toHaveBeenCalledTimes(normalCalls);
       expect(mockedGenerateRouteSegmentsStrict).toHaveBeenCalledTimes(
         strictCalls,
       );
       expect(result.displayRouteSegments).toHaveLength(displayCount);
       expect(result.mapInsertRouteSegments).toHaveLength(insertCount);
+      expect(result.displayRouteState).toBe(displayState);
     },
   );
+
+  it("does not report unreachable when fewer than two display points are valid", () => {
+    const result = calculateRouteSegmentsPair({
+      displayMapData: mapData,
+      displayRoutePoints: routePoints.slice(0, 1),
+      mapInsertMapData: null,
+      mapInsertRoutePoints: [],
+      includeDisplayRoute: true,
+      includeMapInsertRoute: false,
+    });
+
+    expect(mockedGenerateRouteSegmentsStrict).not.toHaveBeenCalled();
+    expect(result.displayRouteSegments).toEqual([]);
+    expect(result.displayRouteState).toBe("normal");
+  });
 
   it.each([
     ["row", { row: 2 }],
@@ -345,7 +346,6 @@ describe("map view route segment calculation", () => {
     const changedPoints = routePoints.map((point, index) =>
       index === 1 ? { ...point, ...override } : { ...point },
     );
-    mockedGenerateRouteSegments.mockReturnValue([generatedSegment]);
     mockedGenerateRouteSegmentsStrict.mockReturnValue({
       ok: true,
       segments: [generatedSegment],
@@ -359,8 +359,7 @@ describe("map view route segment calculation", () => {
       mapInsertPathConstraint: undefined,
     });
 
-    expect(mockedGenerateRouteSegments).toHaveBeenCalledTimes(1);
-    expect(mockedGenerateRouteSegmentsStrict).toHaveBeenCalledTimes(1);
+    expect(mockedGenerateRouteSegmentsStrict).toHaveBeenCalledTimes(2);
   });
 
   it("ignores route point fields that generators do not read", () => {

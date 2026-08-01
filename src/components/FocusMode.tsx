@@ -69,7 +69,11 @@ import {
   findRouteLookupNumberCell,
 } from "../utils/mapRoutingSignature";
 import { buildHallDefinitionsRoutingSignature } from "../utils/hallRoutingSignature";
-import { generateRouteSegments, simplifyPath } from "../utils/pathfinding";
+import {
+  calculateStrictFocusRoute,
+  type FocusRouteCalculation,
+} from "../utils/focusRouteCalculation";
+import { buildRouteDiagnostics } from "../utils/routeDiagnostics";
 import {
   applyLimitedPurchase,
   applyPurchasedFromLimitedInput,
@@ -1283,50 +1287,25 @@ const FocusMode: React.FC<FocusModeProps> = ({
     () => JSON.stringify([currentRouteMapDataSignature, routeCoordsSignature]),
     [currentRouteMapDataSignature, routeCoordsSignature],
   );
-  const precomputedRouteSegmentsRef = useRef<{
+  const precomputedRouteCalculationRef = useRef<{
     signature: string;
-    segments: { path: { row: number; col: number }[]; segmentIndex: number }[];
+    result: FocusRouteCalculation;
   } | null>(null);
-  const precomputedRouteSegments = useMemo(() => {
+  const precomputedRouteCalculation = useMemo(() => {
     if (
-      precomputedRouteSegmentsRef.current?.signature === routeSegmentsSignature
+      precomputedRouteCalculationRef.current?.signature ===
+      routeSegmentsSignature
     ) {
-      return precomputedRouteSegmentsRef.current.segments;
+      return precomputedRouteCalculationRef.current.result;
     }
-    if (!currentRouteMapData || allVisitKeys.length < 2) return [];
-    const result: {
-      path: { row: number; col: number }[];
-      segmentIndex: number;
-    }[] = [];
-    let contiguousCoords: { row: number; col: number; key: string }[] = [];
-    let contiguousStartIndex = 0;
-    const flushContiguousRoute = () => {
-      if (contiguousCoords.length >= 2) {
-        generateRouteSegments(currentRouteMapData, contiguousCoords).forEach(
-          (segment, index) => {
-            result.push({
-              path: simplifyPath(segment.path),
-              segmentIndex: contiguousStartIndex + index,
-            });
-          },
-        );
-      }
-      contiguousCoords = [];
-    };
-
-    allVisitKeys.forEach((visitKey, index) => {
-      const coord = visitKeyCellMap.get(visitKey);
-      if (!coord) {
-        flushContiguousRoute();
-        return;
-      }
-      if (contiguousCoords.length === 0) contiguousStartIndex = index;
-      contiguousCoords.push(coord);
-    });
-    flushContiguousRoute();
-    precomputedRouteSegmentsRef.current = {
+    const result = calculateStrictFocusRoute(
+      currentRouteMapData,
+      allVisitKeys,
+      visitKeyCellMap,
+    );
+    precomputedRouteCalculationRef.current = {
       signature: routeSegmentsSignature,
-      segments: result,
+      result,
     };
     return result;
   }, [
@@ -1335,6 +1314,28 @@ const FocusMode: React.FC<FocusModeProps> = ({
     routeSegmentsSignature,
     visitKeyCellMap,
   ]);
+  const precomputedRouteSegments = precomputedRouteCalculation.segments;
+  const missingRouteVisitKeys = useMemo(
+    () => new Set(precomputedRouteCalculation.missingVisitKeys),
+    [precomputedRouteCalculation.missingVisitKeys],
+  );
+  const missingRouteItemIds = useMemo(
+    () =>
+      routePositionItems
+        .filter((item) => missingRouteVisitKeys.has(getVisitKey(item)))
+        .map((item) => item.id),
+    [missingRouteVisitKeys, routePositionItems],
+  );
+  const routeDiagnostics = useMemo(
+    () =>
+      buildRouteDiagnostics({
+        missingItemIds: missingRouteItemIds,
+        items: routePositionItems,
+        validLocationCount: precomputedRouteCalculation.validLocationCount,
+        routeUnreachable: precomputedRouteCalculation.unreachable,
+      }),
+    [missingRouteItemIds, precomputedRouteCalculation, routePositionItems],
+  );
   const followHall = useMemo(() => {
     if (
       !hallDefinitions ||
@@ -3134,6 +3135,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               precomputedVisitKeyCellMap={visitKeyCellMap}
               precomputedAllVisitCellCoords={precomputedAllVisitCellCoords}
               precomputedRouteSegments={precomputedRouteSegments}
+              routeDiagnostics={routeDiagnostics}
             />
           </div>
         </div>
@@ -3287,6 +3289,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
               precomputedVisitKeyCellMap={visitKeyCellMap}
               precomputedAllVisitCellCoords={precomputedAllVisitCellCoords}
               precomputedRouteSegments={precomputedRouteSegments}
+              routeDiagnostics={routeDiagnostics}
             />
           </div>
         </div>

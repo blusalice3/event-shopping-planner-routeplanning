@@ -1,4 +1,5 @@
 import type { SheetItem } from "./updateDiff";
+import { normalizeImportedUrl } from "./pasteColumns";
 
 const SPREADSHEET_ID_REGEX = /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/;
 
@@ -31,14 +32,6 @@ function parseCsvLine(line: string): string[] {
 function toPrice(value: string): number | null {
   if (value === "") return null;
   return parseInt(value.replace(/[^0-9]/g, ""), 10) || 0;
-}
-
-function toQuantity(value: string): number {
-  if (value === "") return 1;
-  return Math.max(
-    1,
-    Math.min(10, parseInt(value.replace(/[^0-9]/g, ""), 10) || 1),
-  );
 }
 
 export function buildGoogleSheetCsvUrl(
@@ -75,8 +68,8 @@ export function parseEventItemsFromCsv(csvText: string): SheetItem[] {
     const title = cells[16]?.trim() || "";
     const price = toPrice(cells[17]?.trim() || "");
     const remarks = cells[22]?.trim() || "";
-    const url = cells[24]?.trim() || "";
-    const quantity = toQuantity(cells[26]?.trim() || "");
+    const url = normalizeImportedUrl(cells[24]?.trim() || "");
+    const rawQuantity = cells[26]?.trim() ?? "";
 
     items.push({
       circle,
@@ -85,8 +78,13 @@ export function parseEventItemsFromCsv(csvText: string): SheetItem[] {
       number,
       title,
       price,
-      quantity,
+      catalogPrice: price,
+      // 判定は、既存品目か新規品目かが分かる差分作成時に行う。
+      // SheetItem の既存 API 互換のため quantity 自体には仮値を置く。
+      quantity: 1,
+      rawQuantity,
       remarks,
+      sheetRemarks: remarks,
       ...(url ? { url } : {}),
     });
   }

@@ -7,15 +7,17 @@ vi.mock("../utils/pathfinding", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../utils/pathfinding")>();
   return {
     ...actual,
-    generateRouteSegments: vi.fn(() => []),
+    generateRouteSegmentsStrict: vi.fn(() => ({ ok: true, segments: [] })),
   };
 });
 
 import FocusMode from "./FocusMode";
-import { generateRouteSegments } from "../utils/pathfinding";
+import { generateRouteSegmentsStrict } from "../utils/pathfinding";
 import { minimalProps } from "./FocusMode.fixtures";
 
-const mockedGenerateRouteSegments = vi.mocked(generateRouteSegments);
+const mockedGenerateRouteSegmentsStrict = vi.mocked(
+  generateRouteSegmentsStrict,
+);
 
 const makeItem = (overrides: Partial<ShoppingItem> = {}): ShoppingItem => ({
   id: "item-1",
@@ -124,7 +126,7 @@ const renderFocusMode = (params: {
 
 describe("FocusMode route recalculation cache", () => {
   beforeEach(() => {
-    mockedGenerateRouteSegments.mockClear();
+    mockedGenerateRouteSegmentsStrict.mockClear();
   });
 
   it.each([
@@ -137,7 +139,7 @@ describe("FocusMode route recalculation cache", () => {
       const item1 = makeItem({ id: "item-1", number: "01a" });
       const item2 = makeItem({ id: "item-2", number: "02a" });
       const { rerender } = renderFocusMode({ items: [item1, item2] });
-      const callsBefore = mockedGenerateRouteSegments.mock.calls.length;
+      const callsBefore = mockedGenerateRouteSegmentsStrict.mock.calls.length;
 
       rerender(
         <FocusMode
@@ -151,7 +153,9 @@ describe("FocusMode route recalculation cache", () => {
         />,
       );
 
-      expect(mockedGenerateRouteSegments.mock.calls.length).toBe(callsBefore);
+      expect(mockedGenerateRouteSegmentsStrict.mock.calls.length).toBe(
+        callsBefore,
+      );
     },
   );
 
@@ -159,7 +163,7 @@ describe("FocusMode route recalculation cache", () => {
     const item1 = makeItem({ id: "item-1", number: "01a" });
     const item2 = makeItem({ id: "item-2", number: "02a" });
     const { rerender } = renderFocusMode({ items: [item1, item2] });
-    const callsBefore = mockedGenerateRouteSegments.mock.calls.length;
+    const callsBefore = mockedGenerateRouteSegmentsStrict.mock.calls.length;
 
     rerender(
       <FocusMode
@@ -173,14 +177,14 @@ describe("FocusMode route recalculation cache", () => {
       />,
     );
 
-    expect(mockedGenerateRouteSegments.mock.calls.length).toBeGreaterThan(
+    expect(mockedGenerateRouteSegmentsStrict.mock.calls.length).toBeGreaterThan(
       callsBefore,
     );
   });
 
   it("regenerates route segments when pathfinding map input changes even if visit coords stay the same", () => {
     const { rerender } = renderFocusMode({});
-    const callsBefore = mockedGenerateRouteSegments.mock.calls.length;
+    const callsBefore = mockedGenerateRouteSegmentsStrict.mock.calls.length;
     const changedMap = makeMap({
       cells: makeMap().cells.map((cell, index) =>
         index === 0 ? { ...cell, value: "wall-b" } : cell,
@@ -202,14 +206,14 @@ describe("FocusMode route recalculation cache", () => {
       />,
     );
 
-    expect(mockedGenerateRouteSegments.mock.calls.length).toBeGreaterThan(
+    expect(mockedGenerateRouteSegmentsStrict.mock.calls.length).toBeGreaterThan(
       callsBefore,
     );
   });
 
   it("does not regenerate route segments when map display fields change for the active route day", () => {
     const { rerender } = renderFocusMode({});
-    const callsBefore = mockedGenerateRouteSegments.mock.calls.length;
+    const callsBefore = mockedGenerateRouteSegmentsStrict.mock.calls.length;
     const displayOnlyMap = makeMap({
       sheetName: "Other",
       rows: 99,
@@ -241,12 +245,14 @@ describe("FocusMode route recalculation cache", () => {
       />,
     );
 
-    expect(mockedGenerateRouteSegments.mock.calls.length).toBe(callsBefore);
+    expect(mockedGenerateRouteSegmentsStrict.mock.calls.length).toBe(
+      callsBefore,
+    );
   });
 
   it("does not regenerate route segments when hall name color or vertices change but coords and pathfinding input stay the same", () => {
     const { rerender } = renderFocusMode({});
-    const callsBefore = mockedGenerateRouteSegments.mock.calls.length;
+    const callsBefore = mockedGenerateRouteSegmentsStrict.mock.calls.length;
 
     rerender(
       <FocusMode
@@ -275,6 +281,8 @@ describe("FocusMode route recalculation cache", () => {
       />,
     );
 
-    expect(mockedGenerateRouteSegments.mock.calls.length).toBe(callsBefore);
+    expect(mockedGenerateRouteSegmentsStrict.mock.calls.length).toBe(
+      callsBefore,
+    );
   });
 });

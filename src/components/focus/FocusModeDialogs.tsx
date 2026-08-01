@@ -4,6 +4,7 @@ import { createPortal } from "react-dom";
 import type { FocusPhase } from "../../types/focus";
 import type { ShoppingItem } from "../../types/item";
 import { acquireBodyScrollLock } from "../../utils/bodyScrollLock";
+import { buildQuantityOptions } from "../quantityOptions";
 import type { PhaseChangeDialogState } from "./hooks/useFocusSessionState";
 
 type VisitGroup = {
@@ -624,7 +625,7 @@ export function AddItemDialogView({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
             <div className="relative">
-              <label className={labelClass}>頒布価格</label>
+              <label className={labelClass}>購入金額</label>
               <input
                 type="text"
                 value={form.price}
@@ -665,7 +666,7 @@ export function AddItemDialogView({
               onChange={(value) =>
                 setForm((prev) => ({ ...prev, quantity: value }))
               }
-              options={Array.from({ length: 10 }, (_, i) => String(i + 1))}
+              options={buildQuantityOptions(form.quantity).map(String)}
             />
             <SelectField
               label="購入状態"
@@ -683,7 +684,7 @@ export function AddItemDialogView({
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <TextField
-              label="備考"
+              label="利用者メモ"
               value={form.remarks}
               onChange={(value) =>
                 setForm((prev) => ({ ...prev, remarks: value }))
@@ -785,6 +786,7 @@ function SelectField({
       <label className={labelClass}>{label}</label>
       <select
         value={value}
+        aria-label={label}
         onChange={(e) => onChange(e.target.value)}
         className={formInputClass}
       >

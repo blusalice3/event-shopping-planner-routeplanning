@@ -18,7 +18,6 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
     includeItems: true,
     includeLayoutInfo: true,
     includeMapData: hasMapData,
-    includeBlockDefinitions: hasMapData,
     includeRouteInfo: hasMapData,
     format: "full",
   });
@@ -29,7 +28,6 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
         includeItems: true,
         includeLayoutInfo: false,
         includeMapData: false,
-        includeBlockDefinitions: false,
         includeRouteInfo: false,
         format: "simple",
       });
@@ -38,7 +36,6 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
         includeItems: true,
         includeLayoutInfo: true,
         includeMapData: hasMapData,
-        includeBlockDefinitions: hasMapData,
         includeRouteInfo: hasMapData,
         format: "full",
       });
@@ -134,26 +131,6 @@ const ExportOptionsDialog: React.FC<ExportOptionsDialogProps> = ({
                 className={`text-sm ${!hasMapData || options.format === "simple" ? "text-slate-400" : "text-slate-700 dark:text-slate-300"}`}
               >
                 マップデータ {!hasMapData && "（データなし）"}
-              </span>
-            </label>
-
-            <label className="flex items-center gap-3">
-              <input
-                type="checkbox"
-                checked={options.includeBlockDefinitions}
-                onChange={(e) =>
-                  setOptions({
-                    ...options,
-                    includeBlockDefinitions: e.target.checked,
-                  })
-                }
-                disabled={!hasMapData || options.format === "simple"}
-                className="w-4 h-4 rounded border-slate-300 text-blue-600 focus:ring-blue-500 disabled:opacity-50"
-              />
-              <span
-                className={`text-sm ${!hasMapData || options.format === "simple" ? "text-slate-400" : "text-slate-700 dark:text-slate-300"}`}
-              >
-                ブロック定義 {!hasMapData && "（データなし）"}
               </span>
             </label>
 

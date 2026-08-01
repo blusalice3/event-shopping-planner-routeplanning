@@ -389,6 +389,13 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
           itemsToAdd={updateData.itemsToAdd}
           protectedFromDelete={updateData.protectedFromDelete}
           protectedFromUpdate={updateData.protectedFromUpdate}
+          quantityWarnings={updateData.quantityWarnings}
+          pendingPurchasedQuantityChanges={
+            updateData.pendingPurchasedQuantityChanges
+          }
+          limitedPurchaseQuantityConflicts={
+            updateData.limitedPurchaseQuantityConflicts
+          }
           onConfirm={handleConfirmUpdate}
           onCancel={() => {
             setShowUpdateConfirmation(false);

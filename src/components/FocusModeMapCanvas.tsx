@@ -35,6 +35,8 @@ import {
   BatchedPathRenderer,
   PixelEdge,
 } from "../utils/routeRendering";
+import type { RouteDiagnostics } from "../utils/routeDiagnostics";
+import RouteDiagnosticsOverlay from "./map/RouteDiagnosticsOverlay";
 
 interface FocusModeMapCanvasProps {
   mapData: DayMapData;
@@ -88,6 +90,7 @@ interface FocusModeMapCanvasProps {
     path: { row: number; col: number }[];
     segmentIndex: number;
   }[];
+  routeDiagnostics?: RouteDiagnostics;
 }
 
 const BASE_CELL_SIZE = 28;
@@ -274,6 +277,7 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
   precomputedVisitKeyCellMap,
   precomputedAllVisitCellCoords,
   precomputedRouteSegments,
+  routeDiagnostics,
 }) => {
   const positionKeys = useMemo(
     () =>
@@ -2463,6 +2467,9 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
           touchAction: "none",
         }}
       />
+      {routeDiagnostics && (
+        <RouteDiagnosticsOverlay diagnostics={routeDiagnostics} />
+      )}
     </div>
   );
 };

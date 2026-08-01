@@ -2,7 +2,10 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { useIndexedDbPersistence } from "./useIndexedDbPersistence";
+import {
+  normalizePersistenceFailure,
+  useIndexedDbPersistence,
+} from "./useIndexedDbPersistence";
 
 const dbMock = vi.hoisted(() => ({
   migrateFromLocalStorage: vi.fn(),
@@ -67,6 +70,64 @@ const flushMicrotasks = async () => {
     await Promise.resolve();
   }
 };
+
+const createDeferred = <T,>() => {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+};
+
+const isBeforeUnloadPrevented = () => {
+  const event = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+};
+
+describe("normalizePersistenceFailure", () => {
+  it.each([
+    ["QuotaExceededError", "quota", "保存容量が不足", "JSONバックアップ"],
+    ["SecurityError", "permission", "データ保存を許可", "サイトデータ"],
+    ["NotAllowedError", "permission", "データ保存を許可", "サイトデータ"],
+    ["DataCloneError", "data-clone", "保存できない形式", "問題のデータ"],
+    ["InvalidStateError", "database", "保存領域に異常", "再読み込み"],
+  ] as const)(
+    "%s を利用者向けの原因分類へ変換する",
+    (errorName, category, messagePart, actionPart) => {
+      const error = Object.assign(new Error("browser detail"), {
+        name: errorName,
+      });
+
+      const detail = normalizePersistenceFailure("mapData", error);
+
+      expect(detail).toMatchObject({
+        storeName: "mapData",
+        category,
+        errorCode: errorName,
+        technicalMessage: "browser detail",
+      });
+      expect(detail.userMessage).toContain(messagePart);
+      expect(detail.userMessage).toContain(actionPart);
+    },
+  );
+
+  it("unknown例外の原因コードと技術メッセージを一行・上限内にする", () => {
+    const detail = normalizePersistenceFailure("eventLists", {
+      name: "Odd\nError!",
+      message: `first line\r\nsecond line ${"x".repeat(300)}`,
+    });
+
+    expect(detail.category).toBe("unknown");
+    expect(detail.errorCode).toBe("OddError");
+    expect(detail.userMessage).toContain("予期しない問題");
+    expect(detail.technicalMessage).not.toMatch(/[\r\n]/);
+    expect(detail.technicalMessage?.length).toBeLessThanOrEqual(160);
+    expect(detail.technicalMessage).toMatch(/…$/);
+  });
+});
 
 describe("useIndexedDbPersistence", () => {
   beforeEach(() => {
@@ -135,6 +196,7 @@ describe("useIndexedDbPersistence", () => {
 
     await act(flushMicrotasks);
     expect(result.current.isInitialized).toBe(true);
+    expect(result.current.persistenceStatus).toBe("saved");
 
     const changedEventLists: PersistedValues["eventLists"] = {
       テストイベント: [
@@ -150,6 +212,7 @@ describe("useIndexedDbPersistence", () => {
         eventLists: changedEventLists,
       },
     });
+    expect(result.current.persistenceStatus).toBe("unsaved");
 
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
@@ -157,9 +220,11 @@ describe("useIndexedDbPersistence", () => {
 
     expect(dbMock.saveEventLists).toHaveBeenCalledTimes(1);
     expect(dbMock.saveEventLists).toHaveBeenCalledWith(changedEventLists);
+    expect(result.current.persistenceStatus).toBe("saved");
+    expect(result.current.failedStores).toEqual([]);
   });
 
-  it("logs a mapData save failure without alerting and retries that store on the next save", async () => {
+  it("reports a mapData failure and retrySave immediately persists its latest value", async () => {
     const alertSpy = vi
       .spyOn(window, "alert")
       .mockImplementation(() => undefined);
@@ -212,25 +277,335 @@ describe("useIndexedDbPersistence", () => {
       [{ label: "mapData", error: saveError }],
     );
     expect(alertSpy).not.toHaveBeenCalled();
+    expect(result.current.persistenceStatus).toBe("failed");
+    expect(result.current.failedStores).toEqual(["mapData"]);
+    expect(result.current.failureDetails).toEqual([
+      expect.objectContaining({
+        storeName: "mapData",
+        category: "unknown",
+        errorCode: "Error",
+        technicalMessage: "mapData write failed",
+      }),
+    ]);
+    const eventListSaveCountAfterFailure =
+      dbMock.saveEventLists.mock.calls.length;
 
-    const valuesAtNextSave: PersistedValues = {
-      ...valuesAfterImport,
-      eventLists: { importedEvent: [] },
+    const latestMapData: PersistedValues["mapData"] = {
+      importedEvent: {
+        "1日目": {
+          maxRow: 0,
+          maxCol: 0,
+          cells: [],
+          mergedCells: [],
+          blocks: [],
+        },
+      },
     };
-    rerender({ values: valuesAtNextSave });
+    const valuesAtRetry: PersistedValues = {
+      ...valuesAfterImport,
+      mapData: latestMapData,
+    };
+    rerender({ values: valuesAtRetry });
+    expect(result.current.persistenceStatus).toBe("unsaved");
 
     await act(async () => {
-      await vi.runOnlyPendingTimersAsync();
+      result.current.retrySave();
+      await flushMicrotasks();
     });
 
     expect(dbMock.saveMapDataChanges).toHaveBeenCalledTimes(2);
     expect(dbMock.saveMapDataChanges).toHaveBeenLastCalledWith(
       {},
-      changedMapData,
+      latestMapData,
     );
-    expect(dbMock.saveEventLists).toHaveBeenCalledWith(
-      valuesAtNextSave.eventLists,
+    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(
+      eventListSaveCountAfterFailure,
     );
     expect(alertSpy).not.toHaveBeenCalled();
+    expect(result.current.persistenceStatus).toBe("saved");
+    expect(result.current.failedStores).toEqual([]);
+    expect(result.current.failureDetails).toEqual([]);
+  });
+
+  it("keeps quota details through a failed retry and a failed restore", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const setters = createSetters();
+    const initialValues = createValues();
+    const quotaError = Object.assign(
+      new Error("quota exceeded\r\nwhile writing map data"),
+      { name: "QuotaExceededError" },
+    );
+    dbMock.saveMapDataChanges.mockRejectedValue(quotaError);
+
+    const { result, rerender } = renderHook(
+      ({ values }: { values: PersistedValues }) =>
+        useIndexedDbPersistence({ values, setters, saveDelayMs: 1 }),
+      { initialProps: { values: initialValues } },
+    );
+
+    await act(flushMicrotasks);
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    const changedValues: PersistedValues = {
+      ...initialValues,
+      mapData: { 容量超過イベント: {} },
+    };
+    rerender({ values: changedValues });
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    expect(result.current.persistenceStatus).toBe("failed");
+    expect(result.current.failedStores).toEqual(["mapData"]);
+    expect(result.current.failureDetails).toEqual([
+      expect.objectContaining({
+        storeName: "mapData",
+        category: "quota",
+        errorCode: "QuotaExceededError",
+        technicalMessage: "quota exceeded while writing map data",
+      }),
+    ]);
+
+    await act(async () => {
+      result.current.retrySave();
+      await flushMicrotasks();
+    });
+
+    expect(dbMock.saveMapDataChanges).toHaveBeenCalledTimes(2);
+    expect(result.current.persistenceStatus).toBe("failed");
+    const detailsBeforeRestore = result.current.failureDetails;
+
+    const restoreError = new Error("restore failed");
+    let caughtRestoreError: unknown;
+    await act(async () => {
+      try {
+        await result.current.runExclusiveRestore(initialValues, async () => {
+          throw restoreError;
+        });
+      } catch (error) {
+        caughtRestoreError = error;
+      }
+    });
+
+    expect(caughtRestoreError).toBe(restoreError);
+    expect(result.current.persistenceStatus).toBe("failed");
+    expect(result.current.failedStores).toEqual(["mapData"]);
+    expect(result.current.failureDetails).toEqual(detailsBeforeRestore);
+  });
+
+  it("warns before unload while unsaved, saving, or failed, then removes the warning after retry succeeds", async () => {
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const setters = createSetters();
+    const initialValues = createValues();
+    const firstSave = createDeferred<void>();
+    dbMock.saveEventLists
+      .mockImplementationOnce(() => firstSave.promise)
+      .mockResolvedValueOnce(undefined);
+
+    const { result, rerender } = renderHook(
+      ({ values }: { values: PersistedValues }) =>
+        useIndexedDbPersistence({ values, setters, saveDelayMs: 1 }),
+      { initialProps: { values: initialValues } },
+    );
+
+    await act(flushMicrotasks);
+    expect(result.current.persistenceStatus).toBe("saved");
+    expect(isBeforeUnloadPrevented()).toBe(false);
+
+    const changedValues: PersistedValues = {
+      ...initialValues,
+      eventLists: { テストイベント: [] },
+    };
+    rerender({ values: changedValues });
+
+    expect(result.current.persistenceStatus).toBe("unsaved");
+    expect(isBeforeUnloadPrevented()).toBe(true);
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    await act(flushMicrotasks);
+
+    expect(result.current.persistenceStatus).toBe("saving");
+    expect(isBeforeUnloadPrevented()).toBe(true);
+
+    const saveError = new Error("eventLists write failed");
+    await act(async () => {
+      firstSave.reject(saveError);
+      await flushMicrotasks();
+    });
+
+    expect(result.current.persistenceStatus).toBe("failed");
+    expect(result.current.failedStores).toEqual(["eventLists"]);
+    expect(isBeforeUnloadPrevented()).toBe(true);
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "Failed to save data to IndexedDB:",
+      [{ label: "eventLists", error: saveError }],
+    );
+
+    await act(async () => {
+      result.current.retrySave();
+      await flushMicrotasks();
+    });
+
+    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(2);
+    expect(result.current.persistenceStatus).toBe("saved");
+    expect(result.current.failedStores).toEqual([]);
+    expect(isBeforeUnloadPrevented()).toBe(false);
+  });
+
+  it("serializes saves and drains the newest snapshot after a slow save", async () => {
+    const setters = createSetters();
+    const initialValues = createValues();
+    const firstSave = createDeferred<void>();
+    dbMock.saveEventLists
+      .mockImplementationOnce(() => firstSave.promise)
+      .mockResolvedValueOnce(undefined);
+
+    const { result, rerender } = renderHook(
+      ({ values }: { values: PersistedValues }) =>
+        useIndexedDbPersistence({ values, setters, saveDelayMs: 1 }),
+      { initialProps: { values: initialValues } },
+    );
+
+    await act(flushMicrotasks);
+    expect(result.current.isInitialized).toBe(true);
+    expect(result.current.persistenceStatus).toBe("saved");
+
+    const unchangedEvent = [
+      {
+        id: "unchanged",
+        circle: "変更なし",
+        eventDate: "1日目",
+        block: "B",
+        number: "02",
+        title: "対象外",
+        price: 500,
+        purchaseStatus: "None" as const,
+        quantity: 1,
+        remarks: "",
+      },
+    ];
+    const firstEventLists: PersistedValues["eventLists"] = {
+      対象イベント: [
+        {
+          ...unchangedEvent[0],
+          id: "target",
+          circle: "対象",
+          number: "01",
+          title: "保存1",
+        },
+      ],
+      変更しないイベント: unchangedEvent,
+    };
+    rerender({
+      values: {
+        ...initialValues,
+        eventLists: firstEventLists,
+      },
+    });
+    expect(result.current.persistenceStatus).toBe("unsaved");
+
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    await act(flushMicrotasks);
+    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(1);
+    expect(dbMock.saveEventLists).toHaveBeenLastCalledWith(firstEventLists);
+    expect(result.current.persistenceStatus).toBe("saving");
+
+    const newestEventLists: PersistedValues["eventLists"] = {
+      ...firstEventLists,
+      対象イベント: [
+        {
+          ...firstEventLists.対象イベント[0],
+          title: "保存2",
+          remarks: "保存中に編集",
+        },
+      ],
+    };
+    rerender({
+      values: {
+        ...initialValues,
+        eventLists: newestEventLists,
+      },
+    });
+    expect(result.current.persistenceStatus).toBe("unsaved");
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    await act(flushMicrotasks);
+
+    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(1);
+
+    firstSave.resolve();
+    await act(flushMicrotasks);
+
+    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(2);
+    expect(dbMock.saveEventLists).toHaveBeenLastCalledWith(newestEventLists);
+    expect(dbMock.saveEventLists.mock.calls[1][0].変更しないイベント).toEqual(
+      unchangedEvent,
+    );
+    expect(result.current.persistenceStatus).toBe("saved");
+  });
+
+  it("waits for an active save before restore and adopts the restored snapshot as the new baseline", async () => {
+    const setters = createSetters();
+    const initialValues = createValues();
+    const activeSave = createDeferred<void>();
+    dbMock.saveEventLists.mockImplementationOnce(() => activeSave.promise);
+
+    const { result, rerender } = renderHook(
+      ({ values }: { values: PersistedValues }) =>
+        useIndexedDbPersistence({ values, setters, saveDelayMs: 1 }),
+      { initialProps: { values: initialValues } },
+    );
+
+    await act(flushMicrotasks);
+
+    const valuesBeingSaved: PersistedValues = {
+      ...initialValues,
+      eventLists: { 保存中イベント: [] },
+    };
+    rerender({ values: valuesBeingSaved });
+    act(() => {
+      vi.advanceTimersByTime(1);
+    });
+    await act(flushMicrotasks);
+    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(1);
+
+    const restoredValues: PersistedValues = {
+      ...initialValues,
+      eventLists: { 復元イベント: [] },
+    };
+    const restoreOperation = vi.fn().mockResolvedValue(undefined);
+    let restorePromise!: Promise<void>;
+    act(() => {
+      restorePromise = result.current.runExclusiveRestore(
+        restoredValues,
+        restoreOperation,
+      );
+    });
+    await act(flushMicrotasks);
+    expect(restoreOperation).not.toHaveBeenCalled();
+
+    await act(async () => {
+      activeSave.resolve();
+      await restorePromise;
+    });
+    expect(restoreOperation).toHaveBeenCalledTimes(1);
+
+    rerender({ values: restoredValues });
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(1);
+    expect(result.current.persistenceStatus).toBe("saved");
+    expect(result.current.failedStores).toEqual([]);
   });
 });

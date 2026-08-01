@@ -164,9 +164,9 @@ const clickStatusButtonForTitle = (title: string) => {
 const getRemarksInputForTitle = (title: string): HTMLInputElement => {
   const card = screen.getByText(title).closest("[data-item-id]");
   if (!card) throw new Error(`card not found: ${title}`);
-  return within(card as HTMLElement).getByPlaceholderText(
-    "備考",
-  ) as HTMLInputElement;
+  return within(card as HTMLElement).getByRole("textbox", {
+    name: "利用者メモ",
+  }) as HTMLInputElement;
 };
 
 describe("ShoppingList purchase status control mode", () => {

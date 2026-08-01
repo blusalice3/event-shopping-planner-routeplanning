@@ -104,7 +104,7 @@ type AppMainContentProps = {
     eventName: string,
     items: Omit<ShoppingItem, "id" | "purchaseStatus">[],
     metadata?: BulkAddMetadata,
-  ) => void;
+  ) => boolean;
   handleBulkStatusChange: NonNullable<ShoppingListProps["onBulkStatusChange"]>;
   handleCandidateNumberSort: () => void;
   handleClearBlockFilters: () => void;
@@ -114,6 +114,10 @@ type AppMainContentProps = {
     ShoppingListProps["onCollapseAndOpenNext"]
   >;
   handleDeleteEvent: EventListScreenProps["onDelete"];
+  handleBackupExport: NonNullable<EventListScreenProps["onExportBackup"]>;
+  handleBackupRestoreRequest: NonNullable<
+    EventListScreenProps["onRestoreBackup"]
+  >;
   handleDeleteItemFromMap: NonNullable<MapViewProps["onDeleteItem"]>;
   handleDeleteRequest: ShoppingListProps["onDeleteRequest"];
   handleDoneEditing: () => void;
@@ -268,6 +272,8 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
     handleClearNewItemDefaults,
     handleClearRangeSelection,
     handleCollapseAndOpenNext,
+    handleBackupExport,
+    handleBackupRestoreRequest,
     handleDeleteEvent,
     handleDeleteItemFromMap,
     handleDeleteRequest,
@@ -378,6 +384,8 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
           onRename={(oldName) => handleRenameEvent(oldName)}
           onImportMap={handleImportMapData}
           onImportExportFile={() => exportFileInputRef.current?.click()}
+          onExportBackup={handleBackupExport}
+          onRestoreBackup={handleBackupRestoreRequest}
         />
       )}
       {activeTab === "import" && (

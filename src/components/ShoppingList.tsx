@@ -64,6 +64,7 @@ import {
   type ExecutionNavigationGuardFeedback,
 } from "../features/space-navigation/hooks/useExecutionSpaceNavigator";
 import { acquireBodyScrollLock } from "../utils/bodyScrollLock";
+import { buildQuantityOptions } from "./quantityOptions";
 import {
   buildRangePresentation,
   resolveRangeSelection,
@@ -3550,7 +3551,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                     <div className="relative">
-                      <label className={labelClass}>頒布価格</label>
+                      <label className={labelClass}>購入金額</label>
                       <input
                         type="text"
                         value={newItemForm.price}
@@ -3600,6 +3601,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       <label className={labelClass}>数量</label>
                       <select
                         value={newItemForm.quantity}
+                        aria-label="数量"
                         onChange={(e) =>
                           setNewItemForm((prev) => ({
                             ...prev,
@@ -3608,7 +3610,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         }
                         className={formInputClass}
                       >
-                        {Array.from({ length: 10 }, (_, i) => i + 1).map(
+                        {buildQuantityOptions(newItemForm.quantity).map(
                           (num) => (
                             <option key={num} value={num}>
                               {num}
@@ -3639,7 +3641,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className={labelClass}>備考</label>
+                      <label className={labelClass}>利用者メモ</label>
                       <input
                         type="text"
                         value={newItemForm.remarks}

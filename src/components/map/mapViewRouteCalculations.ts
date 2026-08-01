@@ -5,7 +5,6 @@ import type {
 } from "../../types/map";
 import type { MapRoutePoint } from "../../utils/mapRoutePoints";
 import {
-  generateRouteSegments,
   generateRouteSegmentsStrict,
   simplifyPath,
 } from "../../utils/pathfinding";
@@ -23,15 +22,8 @@ type RouteSegmentsPairParams = {
 export type RouteSegmentsPair = {
   displayRouteSegments: RouteSegment[];
   mapInsertRouteSegments: RouteSegment[];
+  displayRouteState: "idle" | "normal" | "unreachable";
 };
-
-const simplifyDisplayRouteSegments = (
-  segments: RouteSegment[],
-): RouteSegment[] =>
-  segments.map((segment) => ({
-    ...segment,
-    path: simplifyPath(segment.path),
-  }));
 
 const simplifyStrictRouteSegments = (
   segments: RouteSegment[],
@@ -84,11 +76,30 @@ export const calculateRouteSegmentsPair = ({
   includeDisplayRoute = true,
   includeMapInsertRoute = true,
 }: RouteSegmentsPairParams): RouteSegmentsPair => {
-  const calculateDisplayRouteSegments = (): RouteSegment[] => {
-    if (!includeDisplayRoute || displayRoutePoints.length < 2) return [];
-    return simplifyDisplayRouteSegments(
-      generateRouteSegments(displayMapData, displayRoutePoints),
+  const calculateDisplayRoute = (): Pick<
+    RouteSegmentsPair,
+    "displayRouteSegments" | "displayRouteState"
+  > => {
+    if (!includeDisplayRoute) {
+      return { displayRouteSegments: [], displayRouteState: "idle" };
+    }
+    if (displayRoutePoints.length < 2) {
+      return { displayRouteSegments: [], displayRouteState: "normal" };
+    }
+    const result = generateRouteSegmentsStrict(
+      displayMapData,
+      displayRoutePoints,
     );
+    if (!result.ok) {
+      return {
+        displayRouteSegments: [],
+        displayRouteState: "unreachable",
+      };
+    }
+    return {
+      displayRouteSegments: simplifyStrictRouteSegments(result.segments) ?? [],
+      displayRouteState: "normal",
+    };
   };
 
   const calculateMapInsertRouteSegments = (): RouteSegment[] => {
@@ -125,11 +136,12 @@ export const calculateRouteSegmentsPair = ({
       mapInsertRoutePoints,
     );
 
-  // 到達可能な同一入力では通常版とstrict版のA*結果が同じになるため、
-  // strict版だけを実行する。fallback時は従来どおり通常版を再計算する。
+  // 同一入力ではstrict版を1回だけ実行し、表示と挿入検証で共有する。
+  // 失敗時は部分経路を含めて双方とも描画しない。
   if (!canReuseStrictResult) {
+    const displayRoute = calculateDisplayRoute();
     return {
-      displayRouteSegments: calculateDisplayRouteSegments(),
+      ...displayRoute,
       mapInsertRouteSegments: calculateMapInsertRouteSegments(),
     };
   }
@@ -141,8 +153,9 @@ export const calculateRouteSegmentsPair = ({
   );
   if (!sharedStrictResult.ok) {
     return {
-      displayRouteSegments: calculateDisplayRouteSegments(),
+      displayRouteSegments: [],
       mapInsertRouteSegments: [],
+      displayRouteState: "unreachable",
     };
   }
 
@@ -150,10 +163,10 @@ export const calculateRouteSegmentsPair = ({
     simplifyStrictRouteSegments(sharedStrictResult.segments) ?? [];
 
   return {
-    displayRouteSegments: simplifyDisplayRouteSegments(
-      sharedStrictResult.segments,
-    ),
+    displayRouteSegments:
+      simplifyStrictRouteSegments(sharedStrictResult.segments) ?? [],
     mapInsertRouteSegments,
+    displayRouteState: "normal",
   };
 };
 

@@ -28,10 +28,12 @@ export interface ShoppingItem {
   number: string;
   title: string;
   price: number | null;
+  catalogPrice?: number | null;
   purchaseStatus: PurchaseStatus;
   quantity: number;
   limitedPurchasedQuantity?: number;
   remarks: string;
+  sheetRemarks?: string;
   url?: string;
   priorityLevel?: "none" | "priority" | "highest";
   protectionLevel?: ProtectionLevel;

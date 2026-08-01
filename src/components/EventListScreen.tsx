@@ -48,6 +48,8 @@ interface EventListScreenProps {
   onRename?: (oldName: string) => void;
   onImportMap?: (name: string) => void;
   onImportExportFile?: () => void;
+  onExportBackup?: () => void;
+  onRestoreBackup?: () => void;
 }
 
 const EventListScreen: React.FC<EventListScreenProps> = ({
@@ -59,6 +61,8 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
   onRename,
   onImportMap,
   onImportExportFile,
+  onExportBackup,
+  onRestoreBackup,
 }) => {
   const [menuVisibleFor, setMenuVisibleFor] = useState<string | null>(null);
 
@@ -101,15 +105,35 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
         <p className="text-slate-500 dark:text-slate-400 mb-6">
           「新規リスト作成」から新しいイベントの巡回表を作成してください。
         </p>
-        {onImportExportFile && (
-          <button
-            onClick={onImportExportFile}
-            className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-          >
-            <DocumentArrowUpIcon className="w-5 h-5" />
-            エクスポートファイルをインポート
-          </button>
-        )}
+        <div className="flex flex-wrap justify-center gap-2">
+          {onImportExportFile && (
+            <button
+              onClick={onImportExportFile}
+              className="inline-flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            >
+              <DocumentArrowUpIcon className="w-5 h-5" />
+              Excelファイルを取り込み
+            </button>
+          )}
+          {onExportBackup && (
+            <button
+              onClick={onExportBackup}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-white transition-colors hover:bg-blue-700"
+            >
+              <DocumentArrowDownIcon className="h-5 w-5" />
+              JSONバックアップ保存
+            </button>
+          )}
+          {onRestoreBackup && (
+            <button
+              onClick={onRestoreBackup}
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-500 px-4 py-2 text-blue-700 transition-colors hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+            >
+              <DocumentArrowUpIcon className="h-5 w-5" />
+              JSONバックアップ復元
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -120,15 +144,35 @@ const EventListScreen: React.FC<EventListScreenProps> = ({
         <h2 className="text-lg font-semibold text-slate-900 dark:text-white">
           保存済みの即売会リスト
         </h2>
-        {onImportExportFile && (
-          <button
-            onClick={onImportExportFile}
-            className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
-          >
-            <DocumentArrowUpIcon className="w-4 h-4" />
-            インポート
-          </button>
-        )}
+        <div className="flex flex-wrap justify-end gap-2">
+          {onImportExportFile && (
+            <button
+              onClick={onImportExportFile}
+              className="inline-flex items-center gap-2 px-3 py-1.5 text-sm bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+            >
+              <DocumentArrowUpIcon className="w-4 h-4" />
+              Excel取り込み
+            </button>
+          )}
+          {onExportBackup && (
+            <button
+              onClick={onExportBackup}
+              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-3 py-1.5 text-sm text-white transition-colors hover:bg-blue-700"
+            >
+              <DocumentArrowDownIcon className="h-4 w-4" />
+              JSONバックアップ保存
+            </button>
+          )}
+          {onRestoreBackup && (
+            <button
+              onClick={onRestoreBackup}
+              className="inline-flex items-center gap-2 rounded-lg border border-blue-500 px-3 py-1.5 text-sm text-blue-700 transition-colors hover:bg-blue-50 dark:text-blue-300 dark:hover:bg-blue-950/40"
+            >
+              <DocumentArrowUpIcon className="h-4 w-4" />
+              JSONバックアップ復元
+            </button>
+          )}
+        </div>
       </div>
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow overflow-hidden">
         <ul className="divide-y divide-slate-200 dark:divide-slate-700">

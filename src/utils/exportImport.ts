@@ -35,7 +35,6 @@ export interface ExportData {
     dayModes: Record<string, string>;
   };
   mapData?: Record<string, unknown>;
-  blockDefinitions?: Record<string, unknown[]>;
   routeSettings?: Record<string, unknown>;
   hallDefinitions?: Record<string, unknown[]>;
   hallRouteSettings?: Record<string, unknown>;

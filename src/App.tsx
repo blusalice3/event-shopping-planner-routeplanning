@@ -36,7 +36,15 @@ import {
   findHallsByBlockName,
 } from "./utils/hallFallback";
 import { buildMergedHallRouteSettings } from "./utils/mergedHallRouteSettings";
-import { isPointInPolygon, saveBlockDetectionSettings } from "./components/map";
+import {
+  BlockDetectionSettingsRollbackError,
+  isPointInPolygon,
+  readBlockDetectionSettingsStoreForBackup,
+  removeBlockDetectionSettingsForEvent,
+  renameBlockDetectionSettingsForEvent,
+  runWithBlockDetectionSettingsRestore,
+  saveBlockDetectionSettings,
+} from "./components/map";
 import { extractEventDates } from "./utils/eventDates";
 import { getSpaceKey } from "./utils/spaceGrouping";
 import {
@@ -58,6 +66,7 @@ import { type EventUpdateDiff } from "./features/events/updateDiff";
 import {
   applyEventUpdateToItems,
   removeDeletedIdsFromExecuteModeItems,
+  type EventUpdateApplyOptions,
 } from "./features/events/updateApply";
 import {
   buildEventUpdateDiffFromSpreadsheet,
@@ -116,6 +125,31 @@ import {
 import AppHeaderShell from "./features/app-shell/components/AppHeaderShell";
 import AppMainContent from "./features/app-shell/components/AppMainContent";
 import AppOverlayLayer from "./features/app-shell/components/AppOverlayLayer";
+import BackupRestoreDialog from "./components/BackupRestoreDialog";
+import PersistenceStatusIndicator from "./components/PersistenceStatusIndicator";
+import MapReimportConfirmationDialog from "./components/map/MapReimportConfirmationDialog";
+import DuplicateEventDialog from "./components/DuplicateEventDialog";
+import { buildEventRestoreData } from "./features/events/backupRestore";
+import {
+  analyzeDuplicateEventImport,
+  type DifferentSourceEventAnalysis,
+  type DuplicateEventResolution,
+  type SameSourceEventAnalysis,
+} from "./features/events/duplicateEvent";
+import { settleEventUpdatePreviewIfCurrent } from "./features/events/sourceSwitchPreview";
+import {
+  applyMapReimportPlan,
+  buildMapReimportPlan,
+  type MapReimportOptions,
+  type MapReimportPlan,
+} from "./features/map/domain/mapReimport";
+import {
+  createAppBackup,
+  parseAppBackup,
+  serializeAppBackup,
+  type AppBackupV1,
+} from "./utils/appBackup";
+import { db, type AppData } from "./utils/indexedDB";
 import { useThemeMode } from "./hooks/useThemeMode";
 import {
   DEFAULT_UI_VISIBILITY,
@@ -132,7 +166,10 @@ import {
 } from "./hooks/useSkipLimitedPurchaseForSingleQuantity";
 import { usePurchaseStatusControlMode } from "./hooks/usePurchaseStatusControlMode";
 import { usePostEventDistributionCheck } from "./hooks/usePostEventDistributionCheck";
-import { useIndexedDbPersistence } from "./hooks/useIndexedDbPersistence";
+import {
+  useIndexedDbPersistence,
+  type PersistedStateValues,
+} from "./hooks/useIndexedDbPersistence";
 import type { SmartInsertMode, SortState } from "./features/app-shell/types";
 import { normalizeSmartInsertMode } from "./utils/smartInsertMode";
 import {
@@ -262,18 +299,18 @@ const normalizeMapDayToken = (value: string): string =>
     .replace(/[ \u3000]/g, "")
     .replace(/マップ$/, "");
 
-const resolveImportMapTabName = (
-  mapName: string,
-  eventDates: string[],
-): string | null => {
-  const normalizedMapDay = normalizeMapDayToken(mapName);
-  const matchedEventDate = eventDates.find(
-    (eventDate) => normalizeMapDayToken(eventDate) === normalizedMapDay,
-  );
-  return matchedEventDate ? `${matchedEventDate}マップ` : null;
+type RotationScreenType = "mapTab" | "focusMode";
+
+type PendingMapReimportConfirmation = {
+  plan: MapReimportPlan;
+  settings: BlockDetectionSettings;
+  skippedDays: string[];
 };
 
-type RotationScreenType = "mapTab" | "focusMode";
+type PendingDuplicateEventImport = {
+  analysis: SameSourceEventAnalysis | DifferentSourceEventAnalysis;
+  metadata?: BulkAddMetadata;
+};
 
 const resolveDayMapRotationState = (
   state:
@@ -294,6 +331,8 @@ const App: React.FC = () => {
   const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>(
     {},
   );
+  const latestEventListsRef = useRef(eventLists);
+  latestEventListsRef.current = eventLists;
   const [eventMetadata, setEventMetadata] = useState<
     Record<string, EventMetadata>
   >({});
@@ -404,6 +443,16 @@ const App: React.FC = () => {
   >(null);
   const [showRenameDialog, setShowRenameDialog] = useState(false);
   const [eventToRename, setEventToRename] = useState<string | null>(null);
+  const [pendingDuplicateEvent, setPendingDuplicateEvent] =
+    useState<PendingDuplicateEventImport | null>(null);
+  const eventUpdatePreviewEpochRef = useRef(0);
+
+  useEffect(
+    () => () => {
+      eventUpdatePreviewEpochRef.current += 1;
+    },
+    [],
+  );
 
   const [searchKeyword, setSearchKeyword] = useState("");
   const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
@@ -481,6 +530,8 @@ const App: React.FC = () => {
   const [exportEventName, setExportEventName] = useState<string | null>(null);
   const mapFileInputRef = useRef<HTMLInputElement>(null);
   const exportFileInputRef = useRef<HTMLInputElement>(null);
+  const backupFileInputRef = useRef<HTMLInputElement>(null);
+  const [pendingBackup, setPendingBackup] = useState<AppBackupV1 | null>(null);
 
   const [mapImportDialogOpen, setMapImportDialogOpen] = useState(false);
   const [mapImportPendingFile, setMapImportPendingFile] = useState<File | null>(
@@ -488,7 +539,16 @@ const App: React.FC = () => {
   );
   const [mapImportPendingEventName, setMapImportPendingEventName] =
     useState<string>("");
-  const { isInitialized } = useIndexedDbPersistence({
+  const [pendingMapReimport, setPendingMapReimport] =
+    useState<PendingMapReimportConfirmation | null>(null);
+  const {
+    isInitialized,
+    persistenceStatus,
+    failedStores,
+    failureDetails,
+    retrySave,
+    runExclusiveRestore,
+  } = useIndexedDbPersistence({
     values: {
       eventLists,
       eventMetadata,
@@ -1023,7 +1083,7 @@ const App: React.FC = () => {
     uiVisibilitySettings,
   ]);
 
-  const handleBulkAdd = useCallback(
+  const applyBulkAdd = useCallback(
     (
       eventName: string,
       newItemsData: Omit<ShoppingItem, "id" | "purchaseStatus">[],
@@ -1096,6 +1156,48 @@ const App: React.FC = () => {
       }
     },
     [eventLists],
+  );
+
+  const handleBulkAdd = useCallback(
+    (
+      eventName: string,
+      newItemsData: Omit<ShoppingItem, "id" | "purchaseStatus">[],
+      metadata?: BulkAddMetadata,
+    ): boolean => {
+      eventUpdatePreviewEpochRef.current += 1;
+      const normalizedEventName = eventName.trim();
+      const isExplicitAddToOpenEvent =
+        metadata?.source === "app" &&
+        activeEventName === normalizedEventName &&
+        Object.prototype.hasOwnProperty.call(eventLists, normalizedEventName);
+
+      if (isExplicitAddToOpenEvent) {
+        applyBulkAdd(normalizedEventName, newItemsData, metadata);
+        return true;
+      }
+
+      const analysis = analyzeDuplicateEventImport({
+        eventName: normalizedEventName,
+        incomingItems: newItemsData,
+        incomingSource: metadata?.url
+          ? {
+              url: metadata.url,
+              sheetName: metadata.sheetName || "",
+            }
+          : null,
+        eventLists,
+        eventMetadata,
+      });
+
+      if (analysis.kind === "create") {
+        applyBulkAdd(analysis.eventName, analysis.incomingItems, metadata);
+        return true;
+      }
+
+      setPendingDuplicateEvent({ analysis, metadata });
+      return false;
+    },
+    [activeEventName, applyBulkAdd, eventLists, eventMetadata],
   );
 
   const handleUpdateItem = useCallback(
@@ -1569,6 +1671,8 @@ const App: React.FC = () => {
       setRouteSettings((prev) => removeRecordKey(prev, eventName));
       setHallDefinitions((prev) => removeRecordKey(prev, eventName));
       setHallRouteSettings((prev) => removeRecordKey(prev, eventName));
+      setMapViewportSettings((prev) => removeRecordKey(prev, eventName));
+      removeBlockDetectionSettingsForEvent(eventName);
       setFocusModeSessions((prev) =>
         removeFocusModeSessionByEvent(prev, eventName),
       );
@@ -1624,6 +1728,10 @@ const App: React.FC = () => {
       setHallRouteSettings((prev) =>
         renameRecordKey(prev, eventToRename, newName),
       );
+      setMapViewportSettings((prev) =>
+        renameRecordKey(prev, eventToRename, newName),
+      );
+      renameBlockDetectionSettingsForEvent(eventToRename, newName);
       setFocusModeSessions((prev) =>
         renameFocusModeSessionKeys(prev, eventToRename, newName),
       );
@@ -2379,6 +2487,171 @@ const App: React.FC = () => {
     [eventLists],
   );
 
+  const buildCurrentAppData = useCallback(
+    (): AppData => ({
+      eventLists,
+      eventMetadata,
+      executeModeItems,
+      dayModes,
+      mapData,
+      mapRotationSettings,
+      routeSettings,
+      hallDefinitions,
+      hallRouteSettings,
+      mapViewportSettings,
+    }),
+    [
+      dayModes,
+      eventLists,
+      eventMetadata,
+      executeModeItems,
+      hallDefinitions,
+      hallRouteSettings,
+      mapData,
+      mapRotationSettings,
+      mapViewportSettings,
+      routeSettings,
+    ],
+  );
+
+  const handleBackupExport = useCallback(() => {
+    try {
+      const currentData = buildCurrentAppData();
+      const backup = createAppBackup(currentData, new Date(), {
+        blockDetectionSettings: readBlockDetectionSettingsStoreForBackup(
+          Object.keys(currentData.eventLists),
+        ),
+      });
+      const blob = new Blob([serializeAppBackup(backup)], {
+        type: "application/json;charset=utf-8",
+      });
+      const timestamp = backup.exportedAt.replace(/[:.]/g, "-");
+      downloadBlob(blob, `event-shopping-planner-backup-${timestamp}.json`);
+    } catch (error) {
+      console.error("Backup export error:", error);
+      alert(
+        `バックアップを完全に保存できなかったため、ファイルを作成しませんでした。現在のデータは変更されていません。${
+          error instanceof Error ? `\n理由: ${error.message}` : ""
+        }`,
+      );
+    }
+  }, [buildCurrentAppData]);
+
+  const handleBackupRestoreRequest = useCallback(() => {
+    backupFileInputRef.current?.click();
+  }, []);
+
+  const handleBackupFileImport = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      event.target.value = "";
+      if (!file) return;
+
+      try {
+        const result = parseAppBackup(await file.text());
+        if (!result.ok) {
+          alert(
+            `バックアップを読み込めませんでした。\n${result.errors.join("\n")}`,
+          );
+          return;
+        }
+        if (Object.keys(result.data.eventLists).length === 0) {
+          alert("このバックアップには復元できるイベントがありません。");
+          return;
+        }
+        setPendingBackup(result.backup);
+      } catch (error) {
+        console.error("Backup import error:", error);
+        alert(
+          "バックアップを読み込めませんでした。JSONバックアップファイルを選び直してください。",
+        );
+      }
+    },
+    [],
+  );
+
+  const handleBackupRestore = useCallback(
+    async (sourceEventName: string, targetEventName: string) => {
+      if (!pendingBackup) {
+        throw new Error("復元するバックアップをもう一度選んでください。");
+      }
+
+      const nextData = buildEventRestoreData(
+        buildCurrentAppData(),
+        pendingBackup.data,
+        sourceEventName,
+        targetEventName,
+      );
+      const restoredValues: PersistedStateValues = {
+        eventLists: nextData.eventLists as Record<string, ShoppingItem[]>,
+        eventMetadata: nextData.eventMetadata as Record<string, EventMetadata>,
+        executeModeItems: nextData.executeModeItems as Record<
+          string,
+          ExecuteModeItems
+        >,
+        dayModes: nextData.dayModes as Record<string, DayModeState>,
+        mapData: nextData.mapData as MapDataStore,
+        mapRotationSettings:
+          nextData.mapRotationSettings as MapRotationSettingsStore,
+        routeSettings: nextData.routeSettings as RouteSettingsStore,
+        hallDefinitions: nextData.hallDefinitions as HallDefinitionsStore,
+        hallRouteSettings: nextData.hallRouteSettings as HallRouteSettingsStore,
+        mapViewportSettings:
+          nextData.mapViewportSettings as MapViewportSettingsStore,
+      };
+
+      try {
+        const restoredBlockDetectionSettings =
+          pendingBackup.eventSettings.blockDetectionSettings[sourceEventName] ??
+          null;
+        await runExclusiveRestore(restoredValues, () =>
+          runWithBlockDetectionSettingsRestore(
+            targetEventName,
+            restoredBlockDetectionSettings,
+            () => db.restoreAppDataAtomically(nextData),
+          ),
+        );
+      } catch (error) {
+        console.error("Atomic backup restore error:", error);
+        if (error instanceof BlockDetectionSettingsRollbackError) {
+          throw new Error(
+            "イベント本体は復元前のままですが、マップのブロック検出設定だけ元に戻せなかった可能性があります。次回のマップ取り込み前に検出設定を確認してください。",
+          );
+        }
+        throw new Error(
+          "復元を完了できませんでした。現在のデータは変更されていません。",
+        );
+      }
+
+      setEventLists(restoredValues.eventLists);
+      setEventMetadata(restoredValues.eventMetadata);
+      setExecuteModeItemsCommitted(restoredValues.executeModeItems);
+      setDayModes(restoredValues.dayModes);
+      setMapData(restoredValues.mapData);
+      setMapRotationSettings(restoredValues.mapRotationSettings);
+      setRouteSettings(restoredValues.routeSettings);
+      setHallDefinitions(restoredValues.hallDefinitions);
+      setHallRouteSettings(restoredValues.hallRouteSettings);
+      setMapViewportSettings(restoredValues.mapViewportSettings);
+
+      const restoredItems = nextData.eventLists[
+        targetEventName
+      ] as ShoppingItem[];
+      setActiveEventName(targetEventName);
+      setActiveTab(resolveEventListTab(restoredItems) ?? "eventList");
+      setMapViewActive(false);
+      clearSelection();
+      setPendingBackup(null);
+    },
+    [
+      buildCurrentAppData,
+      clearSelection,
+      pendingBackup,
+      runExclusiveRestore,
+      setExecuteModeItemsCommitted,
+    ],
+  );
+
   const handleConfirmExport = useCallback(
     async (options: ExportOptions) => {
       if (!exportEventName) return;
@@ -2609,6 +2882,7 @@ const App: React.FC = () => {
     ) => {
       const metadata = eventMetadata[eventName];
       const source = resolveSpreadsheetSource(metadata, urlOverride);
+      eventUpdatePreviewEpochRef.current += 1;
 
       if (!source) {
         setPendingUpdateEventName(eventName);
@@ -2616,36 +2890,127 @@ const App: React.FC = () => {
         return;
       }
 
-      try {
-        const currentItems = eventLists[eventName] || [];
-        const updateDiff = await buildEventUpdateDiffFromSpreadsheet(
-          currentItems,
-          source,
-        );
-        setUpdateData(updateDiff);
-        setUpdateEventName(eventName);
-        setShowUpdateConfirmation(true);
-      } catch (error) {
-        console.error("Update error:", error);
-        setPendingUpdateEventName(eventName);
-        setShowUrlUpdateDialog(true);
-      }
+      const currentItems = eventLists[eventName];
+      if (!currentItems) return;
+      const requestEpoch = eventUpdatePreviewEpochRef.current;
+      const isCurrentRequest = () =>
+        eventUpdatePreviewEpochRef.current === requestEpoch &&
+        latestEventListsRef.current[eventName] === currentItems;
+
+      await settleEventUpdatePreviewIfCurrent({
+        loadPreview: () =>
+          buildEventUpdateDiffFromSpreadsheet(currentItems, source),
+        isCurrent: isCurrentRequest,
+        commit: (updateDiff) => {
+          setUpdateData(updateDiff);
+          setUpdateEventName(eventName);
+          setShowUpdateConfirmation(true);
+        },
+        onError: (error) => {
+          console.error("Update error:", error);
+          setPendingUpdateEventName(eventName);
+          setShowUrlUpdateDialog(true);
+        },
+      });
     },
     [eventLists, eventMetadata],
   );
 
-  const handleConfirmUpdate = () => {
+  const handleDuplicateEventResolution = useCallback(
+    async (resolution: DuplicateEventResolution) => {
+      const pending = pendingDuplicateEvent;
+      if (!pending) return;
+      const requestEpoch = eventUpdatePreviewEpochRef.current + 1;
+      eventUpdatePreviewEpochRef.current = requestEpoch;
+      setPendingDuplicateEvent(null);
+
+      if (resolution.action === "create-alias") {
+        const nextMetadata: BulkAddMetadata | undefined = resolution.source
+          ? {
+              ...pending.metadata,
+              url: resolution.source.url,
+              sheetName: resolution.source.sheetName,
+              source: "spreadsheet",
+            }
+          : pending.metadata;
+        applyBulkAdd(resolution.eventName, resolution.items, nextMetadata);
+        return;
+      }
+
+      if (resolution.action === "append-fixed-items") {
+        if (resolution.items.length === 0) {
+          alert(
+            `追加できる新しい品目はありません。完全一致の${resolution.duplicateItemCount}件は追加対象から除かれました。`,
+          );
+        } else {
+          applyBulkAdd(resolution.eventName, resolution.items, {
+            source: "app",
+          });
+        }
+        return;
+      }
+
+      if (resolution.action === "open-update") {
+        await handleUpdateEvent(resolution.eventName, {
+          url: resolution.source.url,
+          sheetName: resolution.source.sheetName,
+        });
+        return;
+      }
+
+      const currentItems = eventLists[resolution.eventName];
+      if (!currentItems) return;
+      const isCurrentRequest = () =>
+        eventUpdatePreviewEpochRef.current === requestEpoch &&
+        latestEventListsRef.current[resolution.eventName] === currentItems;
+
+      await settleEventUpdatePreviewIfCurrent({
+        loadPreview: () =>
+          buildEventUpdateDiffFromSpreadsheet(currentItems, {
+            url: resolution.source.url,
+            sheetName: resolution.source.sheetName,
+          }),
+        isCurrent: isCurrentRequest,
+        commit: (updateDiff) => {
+          setEventMetadata((prev) =>
+            upsertRecordKey(prev, resolution.eventName, {
+              spreadsheetUrl: resolution.source.url,
+              spreadsheetSheetName: resolution.source.sheetName,
+              lastImportDate: prev[resolution.eventName]?.lastImportDate || "",
+            }),
+          );
+          setUpdateData(updateDiff);
+          setUpdateEventName(resolution.eventName);
+          setShowUpdateConfirmation(true);
+        },
+        onError: (error) => {
+          console.error("Source switch preview error:", error);
+          alert(
+            "新しい更新元の内容を確認できなかったため、更新元も品目も変更していません。",
+          );
+        },
+      });
+    },
+    [applyBulkAdd, eventLists, handleUpdateEvent, pendingDuplicateEvent],
+  );
+
+  const handleDuplicateEventCancel = useCallback(() => {
+    eventUpdatePreviewEpochRef.current += 1;
+    setPendingDuplicateEvent(null);
+  }, []);
+
+  const handleConfirmUpdate = (options: EventUpdateApplyOptions) => {
     if (!updateData || !updateEventName) return;
 
-    const { itemsToDelete, itemsToUpdate, itemsToAdd } = updateData;
+    const { itemsToDelete } = updateData;
     const eventName = updateEventName;
 
     setEventLists((prev) => {
-      const newItems = applyEventUpdateToItems(prev[eventName] || [], {
-        itemsToDelete,
-        itemsToUpdate,
-        itemsToAdd,
-      });
+      const newItems = applyEventUpdateToItems(
+        prev[eventName] || [],
+        updateData,
+        options,
+      );
       return { ...prev, [eventName]: newItems };
     });
 
@@ -2730,85 +3095,162 @@ const App: React.FC = () => {
       const eventName = mapImportPendingEventName;
       if (!eventName) return;
 
-      saveBlockDetectionSettings(eventName, settings);
-
       const eventDatesForTargetEvent = extractEventDates(
         eventLists[eventName] || [],
       );
       const skippedDays = new Set<string>();
-      const normalizedParsedData: Record<string, DayMapData> = {};
-      const normalizedInitialAngles: Record<string, number> = {};
+      const targets: {
+        eventDate: string;
+        mapTabName: string;
+        mapData: DayMapData;
+        initialAngle: number;
+      }[] = [];
 
       Object.entries(parsedData).forEach(([mapName, dayMapData]) => {
-        const mapTabName = resolveImportMapTabName(
-          mapName,
-          eventDatesForTargetEvent,
+        const normalizedMapDay = normalizeMapDayToken(mapName);
+        const eventDate = eventDatesForTargetEvent.find(
+          (candidate) => normalizeMapDayToken(candidate) === normalizedMapDay,
         );
-        if (!mapTabName) {
-          skippedDays.add(normalizeMapDayToken(mapName) || mapName);
+        if (!eventDate) {
+          skippedDays.add(normalizedMapDay || mapName);
           return;
         }
 
-        normalizedParsedData[mapTabName] = dayMapData;
-        normalizedInitialAngles[mapTabName] = initialAngles[mapName] ?? 0;
-      });
-
-      setMapData((prev) => ({
-        ...prev,
-        [eventName]: {
-          ...(prev[eventName] || {}),
-          ...normalizedParsedData,
-        },
-      }));
-
-      setMapRotationSettings((prev) => {
-        const currentEventSettings = prev[eventName] || {};
-        const nextEventSettings = { ...currentEventSettings };
-
-        Object.keys(normalizedParsedData).forEach((dayMapName) => {
-          const importedInitialAngle = normalizeRotationAngle(
-            normalizedInitialAngles[dayMapName] ?? 0,
-          );
-          nextEventSettings[dayMapName] = {
-            initialAngle: importedInitialAngle,
-            mapTabAngle: importedInitialAngle,
-            focusModeAngle: importedInitialAngle,
-          };
+        targets.push({
+          eventDate,
+          mapTabName: `${eventDate}マップ`,
+          mapData: dayMapData,
+          initialAngle: initialAngles[mapName] ?? 0,
         });
-
-        return {
-          ...prev,
-          [eventName]: nextEventSettings,
-        };
       });
 
-      const mapCount = Object.keys(normalizedParsedData).length;
-
-      const firstMapName = Object.keys(normalizedParsedData)[0];
-      if (firstMapName) {
-        setActiveTab(firstMapName);
+      if (targets.length === 0) {
+        const skippedMessages = Array.from(skippedDays)
+          .sort((a, b) => a.localeCompare(b, "ja"))
+          .map((dayName) => `${dayName}はないので取り込みしませんでした`);
+        alert(
+          skippedMessages.length > 0
+            ? skippedMessages.join("\n")
+            : "取り込める対象日のマップがありません。",
+        );
+        setMapImportDialogOpen(false);
+        setMapImportPendingFile(null);
+        setMapImportPendingEventName("");
+        return;
       }
 
-      setMapImportDialogOpen(false);
-      setMapImportPendingFile(null);
-      setMapImportPendingEventName("");
-
-      const skippedMessages = Array.from(skippedDays)
-        .sort((a, b) => a.localeCompare(b, "ja"))
-        .map((dayName) => `${dayName}はないので取り込みしませんでした`);
-
-      const messages: string[] = [];
-      if (mapCount > 0) {
-        messages.push(`${mapCount}件のマップタブを取り込みました。`);
-      }
-      messages.push(...skippedMessages);
-
-      if (messages.length > 0) {
-        alert(messages.join("\n"));
+      try {
+        const plan = buildMapReimportPlan({
+          state: {
+            eventLists,
+            executeModeItems,
+            mapData,
+            mapRotationSettings,
+            routeSettings,
+            hallDefinitions,
+            hallRouteSettings,
+            mapViewportSettings,
+          },
+          eventName,
+          targets,
+        });
+        setPendingMapReimport({
+          plan,
+          settings,
+          skippedDays: Array.from(skippedDays),
+        });
+        setMapImportDialogOpen(false);
+        setMapImportPendingFile(null);
+      } catch (error) {
+        console.error("Map reimport planning error:", error);
+        alert(
+          error instanceof Error
+            ? error.message
+            : "マップを取り込む準備に失敗しました。",
+        );
       }
     },
-    [eventLists, mapImportPendingEventName],
+    [
+      eventLists,
+      executeModeItems,
+      hallDefinitions,
+      hallRouteSettings,
+      mapData,
+      mapImportPendingEventName,
+      mapRotationSettings,
+      mapViewportSettings,
+      routeSettings,
+    ],
   );
+
+  const handleMapReimportConfirm = useCallback(
+    (options: MapReimportOptions) => {
+      if (!pendingMapReimport) return;
+
+      const nextState = applyMapReimportPlan(
+        {
+          eventLists,
+          executeModeItems,
+          mapData,
+          mapRotationSettings,
+          routeSettings,
+          hallDefinitions,
+          hallRouteSettings,
+          mapViewportSettings,
+        },
+        pendingMapReimport.plan,
+        options,
+      );
+
+      if (nextState.eventLists !== eventLists) {
+        setEventLists(nextState.eventLists);
+      }
+      setMapData(nextState.mapData);
+      setMapRotationSettings(nextState.mapRotationSettings);
+      setRouteSettings(nextState.routeSettings);
+      setHallDefinitions(nextState.hallDefinitions);
+      setHallRouteSettings(nextState.hallRouteSettings);
+      setMapViewportSettings(nextState.mapViewportSettings);
+
+      saveBlockDetectionSettings(
+        pendingMapReimport.plan.eventName,
+        pendingMapReimport.settings,
+      );
+
+      const firstTarget = pendingMapReimport.plan.targets[0];
+      if (firstTarget) {
+        setActiveEventName(pendingMapReimport.plan.eventName);
+        setActiveTab(firstTarget.mapTabName);
+      }
+
+      const messages = [
+        `${pendingMapReimport.plan.targets.length}件のマップタブを取り込みました。`,
+        ...pendingMapReimport.skippedDays
+          .sort((a, b) => a.localeCompare(b, "ja"))
+          .map((dayName) => `${dayName}はないので取り込みしませんでした`),
+      ];
+      setPendingMapReimport(null);
+      setMapImportPendingEventName("");
+      alert(messages.join("\n"));
+    },
+    [
+      eventLists,
+      executeModeItems,
+      hallDefinitions,
+      hallRouteSettings,
+      mapData,
+      mapRotationSettings,
+      mapViewportSettings,
+      pendingMapReimport,
+      routeSettings,
+    ],
+  );
+
+  const handleMapReimportCancel = useCallback(() => {
+    setPendingMapReimport(null);
+    setMapImportPendingFile(null);
+    setMapImportPendingEventName("");
+  }, []);
 
   const handleMapImportClose = useCallback(() => {
     setMapImportDialogOpen(false);
@@ -5015,6 +5457,8 @@ const App: React.FC = () => {
         handleClearNewItemDefaults={handleClearNewItemDefaults}
         handleClearRangeSelection={clearRangeSelection}
         handleCollapseAndOpenNext={handleCollapseAndOpenNext}
+        handleBackupExport={handleBackupExport}
+        handleBackupRestoreRequest={handleBackupRestoreRequest}
         handleDeleteEvent={handleDeleteEvent}
         handleDeleteItemFromMap={handleDeleteItemFromMap}
         handleDeleteRequest={handleDeleteRequest}
@@ -5219,6 +5663,46 @@ const App: React.FC = () => {
         handleRemoveFromExecuteColumn={handleRemoveFromExecuteColumn}
         smartInsertToast={smartInsertToast}
         smartInsertToastType={smartInsertToastType}
+      />
+      <input
+        ref={backupFileInputRef}
+        type="file"
+        accept=".json,application/json"
+        className="hidden"
+        onChange={handleBackupFileImport}
+        aria-label="バックアップファイルを選択"
+      />
+      <BackupRestoreDialog
+        isOpen={pendingBackup !== null}
+        backupEventNames={
+          pendingBackup ? Object.keys(pendingBackup.data.eventLists).sort() : []
+        }
+        currentEventNames={Object.keys(eventLists)}
+        onClose={() => setPendingBackup(null)}
+        onRestore={handleBackupRestore}
+      />
+      <MapReimportConfirmationDialog
+        isOpen={pendingMapReimport !== null}
+        plan={pendingMapReimport?.plan ?? null}
+        onCancel={handleMapReimportCancel}
+        onConfirm={handleMapReimportConfirm}
+      />
+      {pendingDuplicateEvent && (
+        <DuplicateEventDialog
+          analysis={pendingDuplicateEvent.analysis}
+          existingEventNames={Object.keys(eventLists)}
+          onResolve={(resolution) => {
+            void handleDuplicateEventResolution(resolution);
+          }}
+          onCancel={handleDuplicateEventCancel}
+        />
+      )}
+      <PersistenceStatusIndicator
+        status={persistenceStatus}
+        failedStores={failedStores}
+        failureDetails={failureDetails}
+        onRetry={retrySave}
+        onExportBackup={handleBackupExport}
       />
     </div>
   );

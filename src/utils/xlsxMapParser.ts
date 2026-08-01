@@ -1668,6 +1668,17 @@ export type ParseMapFileResult = {
   error: string | null;
 };
 
+export function findZeroBlockMapSheets(
+  data: Record<string, DayMapData>,
+): string[] {
+  return Object.entries(data)
+    .filter(([, mapData]) => mapData.blocks.length === 0)
+    .map(
+      ([mapName, mapData]) =>
+        mapData.sheetName?.trim() || mapName.replace(/マップ$/, ""),
+    );
+}
+
 export async function parseMapFile(
   file: File,
   settings: BlockDetectionSettings = DEFAULT_BLOCK_DETECTION_SETTINGS,
@@ -1679,6 +1690,7 @@ export async function parseMapFile(
 
     const result: Record<string, DayMapData> = {};
     const skippedSheets: string[] = [];
+    const sheetErrors: string[] = [];
 
     const dayPattern = /^([0-9０-９]+日目)$/;
 
@@ -1697,12 +1709,30 @@ export async function parseMapFile(
             result[mapName] = mapData;
           } else {
             skippedSheets.push(sheetName);
+            sheetErrors.push(`シート「${sheetName}」: 解析できませんでした。`);
           }
         } catch (error) {
           console.error(`Error parsing map sheet ${sheetName}:`, error);
           skippedSheets.push(sheetName);
+          sheetErrors.push(
+            `シート「${sheetName}」: 解析中にエラーが発生しました。`,
+          );
         }
       }
+    }
+
+    findZeroBlockMapSheets(result).forEach((sheetName) => {
+      sheetErrors.push(
+        `シート「${sheetName}」: 有効なブロックが0件です。検出設定または元ファイルを確認してください。`,
+      );
+    });
+
+    if (sheetErrors.length > 0) {
+      return {
+        data: null,
+        skippedSheets,
+        error: sheetErrors.join("\n"),
+      };
     }
 
     return {

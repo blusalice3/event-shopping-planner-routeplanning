@@ -4,13 +4,12 @@ import type {
   ExecuteModeItems,
   ShoppingItem,
 } from "./item";
-import type { BlockDefinition, DayMapData, RouteSettings } from "./map";
+import type { DayMapData, RouteSettings } from "./map";
 
 export interface ExportOptions {
   includeItems: boolean;
   includeLayoutInfo: boolean;
   includeMapData: boolean;
-  includeBlockDefinitions: boolean;
   includeRouteInfo: boolean;
   format: "full" | "simple";
 }
@@ -25,9 +24,6 @@ export interface ExportData {
   executeModeItems: ExecuteModeItems;
   mapData?: {
     [dayMapName: string]: DayMapData;
-  };
-  blockDefinitions?: {
-    [dayMapName: string]: BlockDefinition[];
   };
   routeSettings?: {
     [dayMapName: string]: RouteSettings;

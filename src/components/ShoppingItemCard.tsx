@@ -27,6 +27,10 @@ import ChevronDownIcon from "./icons/ChevronDownIcon";
 import { areSameItemSnapshot } from "./itemSnapshot";
 import LimitedPurchaseDialog from "./LimitedPurchaseDialog";
 import SingleQuantityLimitedPurchaseChoiceDialog from "./SingleQuantityLimitedPurchaseChoiceDialog";
+import {
+  buildQuantityOptions,
+  isStandardQuantityOption,
+} from "./quantityOptions";
 import type { LimitedPurchaseDialogResult } from "../types/limitedPurchase";
 import {
   applyLimitedPurchase,
@@ -190,6 +194,9 @@ const ITEM_NOT_FOUND_MESSAGE =
   "\u5bfe\u8c61\u306e\u30a2\u30a4\u30c6\u30e0\u304c\u898b\u3064\u304b\u308a\u307e\u305b\u3093";
 const ITEM_ALREADY_CHANGED_MESSAGE =
   "\u5bfe\u8c61\u306e\u30a2\u30a4\u30c6\u30e0\u306f\u3059\u3067\u306b\u5225\u306e\u8cfc\u5165\u72b6\u614b\u306b\u5909\u66f4\u3055\u308c\u3066\u3044\u307e\u3059";
+
+const formatCatalogPrice = (price: number | null): string =>
+  price === null ? "未定" : `${price.toLocaleString()}円`;
 
 type LimitedDialogSource = "current" | "singleQuantityChoice";
 
@@ -981,6 +988,28 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
       return a - b;
     });
   }, [item.price]);
+  const quantityOptions = useMemo(
+    () => buildQuantityOptions(item.quantity),
+    [item.quantity],
+  );
+  const sheetReferenceDetails =
+    item.catalogPrice !== undefined || item.sheetRemarks?.trim() ? (
+      <div
+        aria-label="シート情報"
+        className="flex min-w-0 flex-wrap gap-x-3 gap-y-0.5 text-xs text-slate-500 dark:text-slate-400"
+      >
+        {item.catalogPrice !== undefined && (
+          <span className="whitespace-nowrap">
+            カタログ価格: {formatCatalogPrice(item.catalogPrice)}
+          </span>
+        )}
+        {item.sheetRemarks?.trim() && (
+          <span className="min-w-0 truncate" title={item.sheetRemarks}>
+            シート備考: {item.sheetRemarks}
+          </span>
+        )}
+      </div>
+    ) : null;
 
   const currentStatus = statusConfig[item.purchaseStatus];
   const locationString = `${item.block}-${item.number}`;
@@ -988,19 +1017,22 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
 
   const warningTags = useMemo(() => {
     const tags: string[] = [];
+    const warningText = [item.sheetRemarks, item.remarks]
+      .filter(Boolean)
+      .join("\n");
     if (isDuplicateCircle) {
       tags.push("複数種");
     }
-    if (item.remarks) {
-      if (item.remarks.includes("優先")) {
+    if (warningText) {
+      if (warningText.includes("優先")) {
         tags.push("優先");
       }
-      if (item.remarks.includes("委託無")) {
+      if (warningText.includes("委託無")) {
         tags.push("委託無");
       }
     }
     return tags;
-  }, [isDuplicateCircle, item.remarks]);
+  }, [isDuplicateCircle, item.remarks, item.sheetRemarks]);
 
   // 警告タグが表示されるかどうか
   const hasWarningTags = warningTags.length > 0;
@@ -1147,11 +1179,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           value={item.quantity}
           disabled={readOnly}
           onChange={handleQuantityChange}
+          aria-label="購入予定数量"
           className="text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-10"
         >
-          {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+          {quantityOptions.map((num) => (
             <option key={num} value={num}>
-              {num}
+              {isStandardQuantityOption(num) ? num : `${num}（現在値）`}
             </option>
           ))}
         </select>
@@ -1168,6 +1201,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           value={item.price === null ? "" : item.price}
           disabled={readOnly}
           onChange={handlePriceChange}
+          aria-label="購入金額"
           className={`text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-16 ${
             item.price === null ? "text-red-600 dark:text-red-400" : ""
           } ${highlightPrice && item.price === null ? "ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse" : ""}`}
@@ -1301,13 +1335,15 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                     </a>
                   </div>
                 )}
+                {sheetReferenceDetails}
                 <input
                   type="text"
                   value={item.remarks}
                   readOnly={readOnly}
                   aria-readonly={readOnly}
+                  aria-label="利用者メモ"
                   onChange={handleRemarksChange}
-                  placeholder="備考"
+                  placeholder="利用者メモ"
                   className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
                 />
                 <div className="flex items-center justify-between">
@@ -1483,17 +1519,17 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             </div>
 
             <div className="p-1.5 pt-0.5 flex flex-col gap-1 border-t border-slate-200/50 dark:border-slate-700/50">
-              {item.remarks && (
-                <input
-                  type="text"
-                  value={item.remarks}
-                  readOnly={readOnly}
-                  aria-readonly={readOnly}
-                  onChange={handleRemarksChange}
-                  placeholder="備考"
-                  className="text-xs bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-1.5 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
-                />
-              )}
+              {sheetReferenceDetails}
+              <input
+                type="text"
+                value={item.remarks}
+                readOnly={readOnly}
+                aria-readonly={readOnly}
+                aria-label="利用者メモ"
+                onChange={handleRemarksChange}
+                placeholder="利用者メモ"
+                className="text-xs bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-1.5 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+              />
               <div className="flex items-center justify-end gap-1">
                 {compactQuantityControl}
                 {compactPriceControl}
@@ -1742,31 +1778,35 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           </button>
         </div>
 
-        {/* Row 3: 備考入力 + リンクアイコン（常に備考の右に統一） */}
-        <div className="relative z-10 flex items-center gap-2 min-w-0">
-          <input
-            type="text"
-            value={item.remarks}
-            readOnly={readOnly}
-            aria-readonly={readOnly}
-            onChange={handleRemarksChange}
-            placeholder="備考"
-            className="flex-1 min-w-0 text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
-          />
-          {itemUrlHref && (
-            <a
-              href={itemUrlHref}
-              target="_blank"
-              rel="noopener noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              data-no-long-press
-              className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center flex-shrink-0"
-              aria-label="URLを開く"
-              title="URLを開く"
-            >
-              <ExternalLinkIcon className="w-5 h-5" />
-            </a>
-          )}
+        {/* Row 3: シート情報 + 利用者メモ + リンク */}
+        <div className="relative z-10 flex min-w-0 flex-col gap-1">
+          {sheetReferenceDetails}
+          <div className="flex min-w-0 items-center gap-2">
+            <input
+              type="text"
+              value={item.remarks}
+              readOnly={readOnly}
+              aria-readonly={readOnly}
+              aria-label="利用者メモ"
+              onChange={handleRemarksChange}
+              placeholder="利用者メモ"
+              className="flex-1 min-w-0 text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+            />
+            {itemUrlHref && (
+              <a
+                href={itemUrlHref}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => e.stopPropagation()}
+                data-no-long-press
+                className="p-1.5 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center flex-shrink-0"
+                aria-label="URLを開く"
+                title="URLを開く"
+              >
+                <ExternalLinkIcon className="w-5 h-5" />
+              </a>
+            )}
+          </div>
         </div>
       </div>
 
@@ -1824,11 +1864,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
               value={item.quantity}
               disabled={readOnly}
               onChange={handleQuantityChange}
+              aria-label="購入予定数量"
               className="flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums"
             >
-              {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+              {quantityOptions.map((num) => (
                 <option key={num} value={num}>
-                  {num}
+                  {isStandardQuantityOption(num) ? num : `${num}（現在値）`}
                 </option>
               ))}
             </select>
@@ -1836,7 +1877,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
         </div>
         <div className="flex items-center gap-1 relative z-10">
           <span className="text-sm text-slate-600 dark:text-slate-400 whitespace-nowrap">
-            価格
+            購入金額
           </span>
           {item.price !== null && (
             <span className="text-slate-500 dark:text-slate-400 text-sm">
@@ -1847,6 +1888,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             value={item.price === null ? "" : item.price}
             disabled={readOnly}
             onChange={handlePriceChange}
+            aria-label="購入金額"
             className={`flex-1 text-base font-semibold bg-slate-100 dark:bg-slate-700 rounded-md py-1 pl-2 pr-8 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none tabular-nums ${
               item.price === null ? "text-red-600 dark:text-red-400" : ""
             } ${highlightPrice && item.price === null ? "ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse" : ""}`}

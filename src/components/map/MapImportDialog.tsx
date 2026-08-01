@@ -13,6 +13,10 @@ import {
   CellData,
 } from "../../types/map";
 import { parseMapFile } from "../../utils/xlsxMapParser";
+export {
+  loadBlockDetectionSettings,
+  saveBlockDetectionSettings,
+} from "../../utils/blockDetectionSettingsStorage";
 
 interface MapImportDialogProps {
   isOpen: boolean;
@@ -27,43 +31,58 @@ interface MapImportDialogProps {
   onClose: () => void;
 }
 
-// 設定のlocalStorageキー
-const SETTINGS_STORAGE_KEY = "blockDetectionSettings";
-
 const normalizeRotationAngle = (angle: number): number => {
   const normalized = Math.round(angle) % 360;
   return normalized < 0 ? normalized + 360 : normalized;
 };
 
-// 設定をlocalStorageから読み込む
-export function loadBlockDetectionSettings(
-  eventName: string,
-): BlockDetectionSettings | null {
-  try {
-    const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    if (!stored) return null;
-    const all = JSON.parse(stored) as Record<string, BlockDetectionSettings>;
-    return all[eventName] || null;
-  } catch {
-    return null;
-  }
+const mapImportFileIds = new WeakMap<File, number>();
+let nextMapImportFileId = 1;
+
+function cloneBlockDetectionSettings(
+  settings: BlockDetectionSettings,
+): BlockDetectionSettings {
+  return {
+    ...settings,
+    allowedCharTypes: { ...settings.allowedCharTypes },
+  };
 }
 
-// 設定をlocalStorageに保存
-export function saveBlockDetectionSettings(
-  eventName: string,
+function getBlockDetectionSettingsSignature(
   settings: BlockDetectionSettings,
-): void {
-  try {
-    const stored = localStorage.getItem(SETTINGS_STORAGE_KEY);
-    const all = stored
-      ? (JSON.parse(stored) as Record<string, BlockDetectionSettings>)
-      : {};
-    all[eventName] = settings;
-    localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(all));
-  } catch (e) {
-    console.error("Failed to save block detection settings:", e);
+): string {
+  return JSON.stringify({
+    maxBlockNameLength: settings.maxBlockNameLength,
+    allowedCharTypes: {
+      katakana: settings.allowedCharTypes.katakana,
+      hiragana: settings.allowedCharTypes.hiragana,
+      alphabet: settings.allowedCharTypes.alphabet,
+      kanji: settings.allowedCharTypes.kanji,
+      digit: settings.allowedCharTypes.digit,
+      symbol: settings.allowedCharTypes.symbol,
+    },
+    allowDigitSymbolOnly: settings.allowDigitSymbolOnly,
+    minNumberCellsPerBlock: settings.minNumberCellsPerBlock,
+    minMergedCellCount: settings.minMergedCellCount,
+    numberCellMin: settings.numberCellMin,
+    numberCellMax: settings.numberCellMax,
+    maxRegionSize: settings.maxRegionSize,
+    polygonThreshold: settings.polygonThreshold,
+  });
+}
+
+function getParseInputSignature(
+  file: File,
+  settings: BlockDetectionSettings,
+): string {
+  let fileId = mapImportFileIds.get(file);
+  if (fileId === undefined) {
+    fileId = nextMapImportFileId;
+    nextMapImportFileId += 1;
+    mapImportFileIds.set(file, fileId);
   }
+
+  return `${fileId}:${file.name}:${file.size}:${file.lastModified}:${file.type}:${getBlockDetectionSettingsSignature(settings)}`;
 }
 
 // ===== ブロック名カスタムソート =====
@@ -298,7 +317,9 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
   onClose,
 }) => {
   const [settings, setSettings] = useState<BlockDetectionSettings>(
-    savedSettings || { ...DEFAULT_BLOCK_DETECTION_SETTINGS },
+    cloneBlockDetectionSettings(
+      savedSettings || DEFAULT_BLOCK_DETECTION_SETTINGS,
+    ),
   );
   const [isAccordionOpen, setIsAccordionOpen] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
@@ -310,24 +331,73 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
   const [previewSkippedSheets, setPreviewSkippedSheets] = useState<string[]>(
     [],
   );
+  const [previewSignature, setPreviewSignature] = useState<string | null>(null);
   const [highlightBlock, setHighlightBlock] = useState<string | null>(null);
   const [activePreviewSheet, setActivePreviewSheet] = useState<string>("");
   const [initialAngles, setInitialAngles] = useState<Record<string, number>>(
     {},
   );
+  const parseRequestTokenRef = useRef(0);
+  const currentParseSignature = useMemo(
+    () => (file ? getParseInputSignature(file, settings) : null),
+    [file, settings],
+  );
+  const currentParseSignatureRef = useRef(currentParseSignature);
+  currentParseSignatureRef.current = currentParseSignature;
+  const latestSavedSettingsRef = useRef(savedSettings);
+  latestSavedSettingsRef.current = savedSettings;
+  const savedSettingsSignature = useMemo(
+    () =>
+      getBlockDetectionSettingsSignature(
+        savedSettings || DEFAULT_BLOCK_DETECTION_SETTINGS,
+      ),
+    [savedSettings],
+  );
 
-  // ダイアログが開くときに設定をリセット
+  useEffect(
+    () => () => {
+      parseRequestTokenRef.current += 1;
+    },
+    [],
+  );
+
+  const invalidatePreviewForInputChange = useCallback(() => {
+    parseRequestTokenRef.current += 1;
+    setIsPreviewing(false);
+    setIsLoading(false);
+    setPreviewData(null);
+    setPreviewSkippedSheets([]);
+    setPreviewSignature(null);
+  }, []);
+
+  // ダイアログを開いたとき、または保存設定の内容が変わったときだけ初期化
   useEffect(() => {
+    invalidatePreviewForInputChange();
     if (isOpen) {
-      setSettings(savedSettings || { ...DEFAULT_BLOCK_DETECTION_SETTINGS });
-      setPreviewData(null);
-      setPreviewSkippedSheets([]);
+      setSettings(
+        cloneBlockDetectionSettings(
+          latestSavedSettingsRef.current || DEFAULT_BLOCK_DETECTION_SETTINGS,
+        ),
+      );
       setIsAccordionOpen(false);
       setHighlightBlock(null);
       setActivePreviewSheet("");
       setInitialAngles({});
     }
-  }, [isOpen, savedSettings]);
+  }, [
+    eventName,
+    invalidatePreviewForInputChange,
+    isOpen,
+    savedSettingsSignature,
+  ]);
+
+  // ファイル差し替えではユーザーが調整した検出設定を維持し、解析結果だけ失効
+  useEffect(() => {
+    invalidatePreviewForInputChange();
+    setHighlightBlock(null);
+    setActivePreviewSheet("");
+    setInitialAngles({});
+  }, [file, invalidatePreviewForInputChange]);
 
   const notifySkippedSheets = useCallback((skippedSheets: string[]) => {
     if (skippedSheets.length === 0) return;
@@ -359,19 +429,30 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
 
   // プレビュー実行
   const handlePreview = useCallback(async () => {
-    if (!file) return;
+    if (!file || !currentParseSignature) return;
+    const requestToken = parseRequestTokenRef.current + 1;
+    parseRequestTokenRef.current = requestToken;
+    const requestSignature = currentParseSignature;
+    const isCurrentRequest = () =>
+      parseRequestTokenRef.current === requestToken &&
+      currentParseSignatureRef.current === requestSignature;
+
     setIsPreviewing(true);
     try {
       const parsedResult = await parseMapFile(file, settings);
+      if (!isCurrentRequest()) return;
+
       if (parsedResult.error) {
         setPreviewData(null);
         setPreviewSkippedSheets([]);
+        setPreviewSignature(null);
         alert(`プレビューに失敗しました: ${parsedResult.error}`);
         return;
       }
 
       setPreviewData(parsedResult.data);
       setPreviewSkippedSheets(parsedResult.skippedSheets);
+      setPreviewSignature(parsedResult.data ? requestSignature : null);
       notifySkippedSheets(parsedResult.skippedSheets);
 
       if (parsedResult.data) {
@@ -382,23 +463,41 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
         alert("マップデータの解析に失敗しました。");
       }
     } catch (error) {
+      if (!isCurrentRequest()) return;
       console.error("Preview error:", error);
+      setPreviewData(null);
+      setPreviewSkippedSheets([]);
+      setPreviewSignature(null);
       alert("プレビューに失敗しました。");
     } finally {
-      setIsPreviewing(false);
+      if (parseRequestTokenRef.current === requestToken) {
+        setIsPreviewing(false);
+      }
     }
-  }, [file, settings, notifySkippedSheets]);
+  }, [currentParseSignature, file, settings, notifySkippedSheets]);
 
   // インポート実行
   const handleImport = useCallback(async () => {
-    if (!file) return;
+    if (!file || !currentParseSignature) return;
+    const requestToken = parseRequestTokenRef.current + 1;
+    parseRequestTokenRef.current = requestToken;
+    const requestSignature = currentParseSignature;
+    const isCurrentRequest = () =>
+      parseRequestTokenRef.current === requestToken &&
+      currentParseSignatureRef.current === requestSignature;
+
+    setIsPreviewing(false);
     setIsLoading(true);
     try {
-      // プレビュー済みのデータがあればそれを使う、なければ新たにパース
-      let data = previewData;
-      let skippedSheets = previewSkippedSheets;
+      // 現在のファイルと設定で生成したプレビューだけを再利用する
+      const canReusePreview =
+        previewData !== null && previewSignature === requestSignature;
+      let data = canReusePreview ? previewData : null;
+      let skippedSheets = canReusePreview ? previewSkippedSheets : [];
       if (!data) {
         const parsedResult = await parseMapFile(file, settings);
+        if (!isCurrentRequest()) return;
+
         if (parsedResult.error) {
           alert(`マップデータの取り込みに失敗しました: ${parsedResult.error}`);
           return;
@@ -407,6 +506,7 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
         skippedSheets = parsedResult.skippedSheets;
       }
 
+      if (!isCurrentRequest()) return;
       notifySkippedSheets(skippedSheets);
 
       if (!data) {
@@ -425,17 +525,22 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
       });
       onImport(data, settings, angleMap);
     } catch (error) {
+      if (!isCurrentRequest()) return;
       console.error("Import error:", error);
       alert(
         `マップデータの取り込みに失敗しました: ${error instanceof Error ? error.message : "不明なエラー"}`,
       );
     } finally {
-      setIsLoading(false);
+      if (parseRequestTokenRef.current === requestToken) {
+        setIsLoading(false);
+      }
     }
   }, [
+    currentParseSignature,
     file,
     settings,
     previewData,
+    previewSignature,
     previewSkippedSheets,
     onImport,
     initialAngles,
@@ -445,9 +550,8 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
   // 初期値にリセット
   const handleResetSettings = useCallback(() => {
     setSettings({ ...DEFAULT_BLOCK_DETECTION_SETTINGS });
-    setPreviewData(null); // 設定変更したらプレビューをクリア
-    setPreviewSkippedSheets([]);
-  }, []);
+    invalidatePreviewForInputChange();
+  }, [invalidatePreviewForInputChange]);
 
   // 設定更新ヘルパー
   const updateSetting = useCallback(
@@ -456,10 +560,9 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
       value: BlockDetectionSettings[K],
     ) => {
       setSettings((prev) => ({ ...prev, [key]: value }));
-      setPreviewData(null); // 設定変更したらプレビューをクリア
-      setPreviewSkippedSheets([]);
+      invalidatePreviewForInputChange();
     },
-    [],
+    [invalidatePreviewForInputChange],
   );
 
   const updateCharType = useCallback(
@@ -471,10 +574,9 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
         ...prev,
         allowedCharTypes: { ...prev.allowedCharTypes, [charType]: value },
       }));
-      setPreviewData(null);
-      setPreviewSkippedSheets([]);
+      invalidatePreviewForInputChange();
     },
-    [],
+    [invalidatePreviewForInputChange],
   );
 
   // プレビュー中のシートデータ

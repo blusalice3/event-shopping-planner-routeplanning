@@ -1,5 +1,5 @@
 import "fake-indexeddb/auto";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ShoppingItem } from "../types/item";
 import type { CellBorders, DayMapData, MapDataStore } from "../types/map";
 import { toImportedEventData } from "../features/events/fileImport";
@@ -41,6 +41,70 @@ async function loadStoredMapData(): Promise<MapDataStore> {
   return result.data ?? {};
 }
 
+async function openRawDatabase(): Promise<IDBDatabase> {
+  return await new Promise((resolve, reject) => {
+    const request = indexedDB.open("EventShoppingPlannerDB", 5);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+  });
+}
+
+async function writeRawMapEntry(key: string, value: unknown): Promise<void> {
+  const database = await openRawDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(db.STORES.MAP_DATA, "readwrite");
+      const request = transaction
+        .objectStore(db.STORES.MAP_DATA)
+        .put(value, key);
+      request.onerror = () => reject(request.error);
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () => reject(transaction.error ?? request.error);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+async function readRawMapEntry(key: string): Promise<unknown> {
+  const database = await openRawDatabase();
+  try {
+    return await new Promise((resolve, reject) => {
+      const transaction = database.transaction(db.STORES.MAP_DATA, "readonly");
+      const request = transaction.objectStore(db.STORES.MAP_DATA).get(key);
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve(request.result);
+    });
+  } finally {
+    database.close();
+  }
+}
+
+function mockMapReadFailures(errors: readonly Error[]) {
+  const originalTransaction = IDBDatabase.prototype.transaction;
+  let failureIndex = 0;
+
+  return vi
+    .spyOn(IDBDatabase.prototype, "transaction")
+    .mockImplementation(function (
+      this: IDBDatabase,
+      storeNames: string | Iterable<string>,
+      mode?: IDBTransactionMode,
+      options?: IDBTransactionOptions,
+    ) {
+      const requestedStores =
+        typeof storeNames === "string" ? [storeNames] : Array.from(storeNames);
+      if (
+        mode === "readonly" &&
+        requestedStores.includes(db.STORES.MAP_DATA) &&
+        failureIndex < errors.length
+      ) {
+        throw errors[failureIndex++];
+      }
+      return originalTransaction.call(this, storeNames, mode, options);
+    });
+}
+
 async function readBlobAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
   return await new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -49,6 +113,11 @@ async function readBlobAsArrayBuffer(blob: Blob): Promise<ArrayBuffer> {
     reader.readAsArrayBuffer(blob);
   });
 }
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  localStorage.removeItem("mapData");
+});
 
 // 各テストは同じDBを共有するため、イベント名はテストごとに固有にする
 describe("db.saveMapDataChanges", () => {
@@ -133,6 +202,99 @@ describe("db.saveMapDataChanges", () => {
     expect(stored["再取込イベント"]["1日目マップ"].cells[0].value).toBe("a1");
   });
 
+  it("keeps a committed map save successful when fallback cleanup is unavailable", async () => {
+    const cleanupError = new DOMException(
+      "localStorage is unavailable",
+      "SecurityError",
+    );
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
+      throw cleanupError;
+    });
+    const next: MapDataStore = {
+      後片付け失敗イベント: {
+        "1日目マップ": makeDayMap("committed"),
+      },
+    };
+
+    await expect(db.saveMapDataChanges({}, next)).resolves.toBeUndefined();
+
+    const stored = await loadStoredMapData();
+    expect(stored["後片付け失敗イベント"]["1日目マップ"].cells[0].value).toBe(
+      "committed",
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      "Failed to clear localStorage fallback after saving mapData:",
+      cleanupError,
+    );
+  });
+
+  it("aborts queued map deletes when a later put throws synchronously", async () => {
+    const original: MapDataStore = {
+      同期例外元イベント: {
+        "1日目マップ": makeDayMap("must-remain"),
+      },
+    };
+    await db.saveMapDataChanges({}, original);
+
+    const uncloneableDayMap = {
+      ...makeDayMap("uncloneable"),
+      uncloneable: () => "DataCloneError",
+    } as DayMapData;
+    const invalidNext: MapDataStore = {
+      同期例外先イベント: {
+        "1日目マップ": uncloneableDayMap,
+      },
+    };
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.spyOn(console, "error").mockImplementation(() => {});
+
+    await expect(
+      db.saveMapDataChanges(original, invalidNext),
+    ).rejects.toMatchObject({
+      name: "DataCloneError",
+    });
+
+    const stored = await loadStoredMapData();
+    expect(stored["同期例外元イベント"]["1日目マップ"].cells[0].value).toBe(
+      "must-remain",
+    );
+    expect(stored["同期例外先イベント"]).toBeUndefined();
+  });
+
+  it("migrates every unchanged day map before deleting the legacy map entry", async () => {
+    const eventName = "旧DB形式移行イベント";
+    const legacy: MapDataStore = {
+      [eventName]: {
+        "1日目マップ": makeDayMap("legacy-old-1"),
+        "2日目マップ": makeDayMap("legacy-keep-2"),
+      },
+    };
+    await writeRawMapEntry("data", legacy);
+
+    const next: MapDataStore = {
+      [eventName]: {
+        "1日目マップ": makeDayMap("legacy-new-1"),
+        "2日目マップ": legacy[eventName]["2日目マップ"],
+      },
+    };
+    await db.saveMapDataChanges(legacy, next);
+
+    const stored = await loadStoredMapData();
+    expect(stored[eventName]["1日目マップ"].cells[0].value).toBe(
+      "legacy-new-1",
+    );
+    expect(stored[eventName]["2日目マップ"].cells[0].value).toBe(
+      "legacy-keep-2",
+    );
+    expect(await readRawMapEntry("data")).toBeUndefined();
+    expect(
+      await readRawMapEntry(
+        `mapData:${JSON.stringify([eventName, "2日目マップ"])}`,
+      ),
+    ).toBeDefined();
+  });
+
   it("normalizes and saves map data imported from an older full export", async () => {
     const eventName = "旧形式エクスポートイベント";
     const item: ShoppingItem = {
@@ -160,7 +322,6 @@ describe("db.saveMapDataChanges", () => {
         includeItems: true,
         includeLayoutInfo: false,
         includeMapData: true,
-        includeBlockDefinitions: false,
         includeRouteInfo: false,
         format: "full",
       },
@@ -216,7 +377,20 @@ describe("db.saveMapDataChanges", () => {
 
   it("keeps the current full export-import-save roundtrip compatible", async () => {
     const eventName = "現行形式ラウンドトリップイベント";
-    const dayMap = makeDayMap("current-format");
+    const dayMap: DayMapData = {
+      ...makeDayMap("current-format"),
+      blocks: [
+        {
+          id: "block-a",
+          name: "A",
+          startRow: 1,
+          startCol: 1,
+          endRow: 2,
+          endCol: 2,
+          numberCells: [{ value: 1, row: 1, col: 1 }],
+        },
+      ],
+    };
     const item: ShoppingItem = {
       id: "current-export-item",
       circle: "現行形式サークル",
@@ -236,7 +410,6 @@ describe("db.saveMapDataChanges", () => {
         includeItems: true,
         includeLayoutInfo: false,
         includeMapData: true,
-        includeBlockDefinitions: false,
         includeRouteInfo: false,
         format: "full",
       },
@@ -269,5 +442,47 @@ describe("db.saveMapDataChanges", () => {
 
     const stored = await loadStoredMapData();
     expect(stored[eventName]["1日目マップ"]).toEqual(dayMap);
+  });
+});
+
+describe("db.loadMapData", () => {
+  it("reports an error after both IndexedDB reads fail without a legacy fallback", async () => {
+    localStorage.removeItem("mapData");
+    const firstError = new DOMException("first read failed", "UnknownError");
+    const retryError = new DOMException("retry read failed", "UnknownError");
+    const transactionSpy = mockMapReadFailures([firstError, retryError]);
+
+    const result = await db.loadMapData();
+
+    expect(transactionSpy).toHaveBeenCalledTimes(2);
+    expect(result).toEqual({
+      status: "error",
+      data: null,
+      error: retryError,
+    });
+  });
+
+  it("keeps the legacy localStorage fallback after both IndexedDB reads fail", async () => {
+    const eventName = "旧localStorage読込イベント";
+    localStorage.setItem(
+      "mapData",
+      JSON.stringify({
+        [eventName]: {
+          "1日目マップ": makeDayMap("legacy-local"),
+        },
+      } satisfies MapDataStore),
+    );
+    const transactionSpy = mockMapReadFailures([
+      new DOMException("first read failed", "UnknownError"),
+      new DOMException("retry read failed", "UnknownError"),
+    ]);
+
+    const result = await db.loadMapData();
+
+    expect(transactionSpy).toHaveBeenCalledTimes(2);
+    expect(result.status).toBe("ok");
+    expect(result.data?.[eventName]["1日目マップ"].cells[0].value).toBe(
+      "legacy-local",
+    );
   });
 });

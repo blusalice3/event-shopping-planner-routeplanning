@@ -21,6 +21,10 @@ import {
   validateLimitedPurchasePlannedQuantity,
   type LimitedPurchaseValidationError,
 } from "../../utils/purchaseQuantity";
+import {
+  buildQuantityOptions,
+  isStandardQuantityOption,
+} from "../quantityOptions";
 
 interface SpaceGroup {
   baseNumber: string;
@@ -192,21 +196,6 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     }
     return options;
   }, []);
-
-  const getMapQuantityOptions = useCallback(
-    (currentQuantity: number): number[] => {
-      const baseOptions = Array.from({ length: 10 }, (_, i) => i + 1);
-      if (
-        Number.isInteger(currentQuantity) &&
-        currentQuantity > 10 &&
-        !baseOptions.includes(currentQuantity)
-      ) {
-        return [...baseOptions, currentQuantity];
-      }
-      return baseOptions;
-    },
-    [],
-  );
 
   const toPlannedQuantityMessage = (
     error: LimitedPurchaseValidationError,
@@ -663,14 +652,28 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                       <p className="text-sm text-slate-600 dark:text-slate-400 mt-1">
                         {item.title}
                       </p>
-                      {item.price !== null && (
+                      {item.catalogPrice !== undefined && (
                         <p className="text-sm text-slate-500 dark:text-slate-500 mt-1">
-                          頒布価格: ¥{item.price.toLocaleString()}
+                          カタログ価格:{" "}
+                          {item.catalogPrice === null
+                            ? "未定"
+                            : `¥${item.catalogPrice.toLocaleString()}`}
+                        </p>
+                      )}
+                      <p className="text-sm text-slate-500 dark:text-slate-500 mt-1">
+                        購入金額:{" "}
+                        {item.price === null
+                          ? "未定"
+                          : `¥${item.price.toLocaleString()}`}
+                      </p>
+                      {item.sheetRemarks?.trim() && (
+                        <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
+                          シート備考: {item.sheetRemarks}
                         </p>
                       )}
                       {item.remarks && (
                         <p className="text-xs text-slate-400 dark:text-slate-500 mt-1">
-                          備考: {item.remarks}
+                          利用者メモ: {item.remarks}
                         </p>
                       )}
                       {item.purchaseStatus !== "None" && (
@@ -878,10 +881,22 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                       className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
                     />
                   </div>
-                  {/* 頒布価格: ドロップダウン + 直接入力 */}
+                  {editingItem.catalogPrice !== undefined && (
+                    <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-600 dark:bg-slate-800">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        カタログ価格（シート・読み取り専用）
+                      </p>
+                      <p className="font-medium text-slate-800 dark:text-slate-100">
+                        {editingItem.catalogPrice === null
+                          ? "未定"
+                          : `${editingItem.catalogPrice.toLocaleString()}円`}
+                      </p>
+                    </div>
+                  )}
+                  {/* 購入金額: ドロップダウン + 直接入力 */}
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      頒布価格
+                      購入金額（利用者が編集）
                     </label>
                     <div className="grid grid-cols-2 gap-2">
                       <select
@@ -957,17 +972,20 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                       </label>
                       <select
                         value={editingQuantityText}
+                        aria-label="数量"
                         onChange={(e) => {
                           setQuantityError(null);
                           setEditingQuantityText(e.target.value);
                         }}
                         className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white"
                       >
-                        {getMapQuantityOptions(
+                        {buildQuantityOptions(
                           getPlannedQuantity(editingItem),
                         ).map((num) => (
                           <option key={num} value={num}>
-                            {num}
+                            {isStandardQuantityOption(num)
+                              ? num
+                              : `${num}（現在値）`}
                           </option>
                         ))}
                       </select>
@@ -1040,9 +1058,19 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                       )}
                     </div>
                   )}
+                  {editingItem.sheetRemarks?.trim() && (
+                    <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 dark:border-slate-600 dark:bg-slate-800">
+                      <p className="text-xs text-slate-500 dark:text-slate-400">
+                        シート備考（読み取り専用）
+                      </p>
+                      <p className="whitespace-pre-wrap text-sm text-slate-800 dark:text-slate-100">
+                        {editingItem.sheetRemarks}
+                      </p>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
-                      備考
+                      利用者メモ
                     </label>
                     <textarea
                       value={editingItem.remarks}
@@ -1205,7 +1233,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                 <div className="relative">
-                  <label className={labelClass}>頒布価格</label>
+                  <label className={labelClass}>購入金額</label>
                   <input
                     type="text"
                     value={newItemForm.price}
@@ -1245,6 +1273,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   <label className={labelClass}>数量</label>
                   <select
                     value={newItemForm.quantity}
+                    aria-label="数量"
                     onChange={(e) => {
                       setAddQuantityError(null);
                       setNewItemForm((prev) => ({
@@ -1254,10 +1283,10 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                     }}
                     className={formInputClass}
                   >
-                    {Array.from({ length: 10 }, (_, i) => String(i + 1)).map(
-                      (value) => (
-                        <option key={value} value={value}>
-                          {value}
+                    {buildQuantityOptions(newItemForm.quantity).map(
+                      (quantity) => (
+                        <option key={quantity} value={quantity}>
+                          {quantity}
                         </option>
                       ),
                     )}
@@ -1290,7 +1319,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>備考</label>
+                  <label className={labelClass}>利用者メモ</label>
                   <input
                     type="text"
                     value={newItemForm.remarks}

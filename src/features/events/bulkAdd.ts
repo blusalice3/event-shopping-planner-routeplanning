@@ -48,6 +48,12 @@ export function buildBulkAddItems(
   return newItemsData.map((itemData) => ({
     id: crypto.randomUUID(),
     ...itemData,
+    ...(itemSource === "spreadsheet"
+      ? {
+          catalogPrice: itemData.catalogPrice ?? itemData.price,
+          sheetRemarks: itemData.sheetRemarks ?? itemData.remarks,
+        }
+      : {}),
     quantity: itemData.quantity ?? 1,
     purchaseStatus: "None",
     source: itemSource,

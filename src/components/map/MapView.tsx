@@ -54,6 +54,11 @@ import {
 import { validateMapSmartInsert } from "../../utils/mapSmartInsert";
 import type { MapRouteHitResult } from "../../utils/mapRouteHitTest";
 import { expandSameSpacePriorityItemIds } from "../../features/events/itemOps";
+import {
+  buildRouteDiagnostics,
+  hasRouteDiagnosticIssue,
+} from "../../utils/routeDiagnostics";
+import RouteDiagnosticsOverlay from "./RouteDiagnosticsOverlay";
 
 const normalizeDisplayText = (value: string | null | undefined): string => {
   return (value || "").replace(/\u3000/g, " ").trim();
@@ -701,7 +706,7 @@ const MapView: React.FC<MapViewProps> = ({
     mapName,
   ]);
 
-  const displayRoutePoints = useMemo(
+  const displayRoutePointsResult = useMemo(
     () =>
       resolveMapRoutePoints({
         itemIds: displayRouteExecuteModeItemIds,
@@ -712,7 +717,7 @@ const MapView: React.FC<MapViewProps> = ({
         selectedHallId,
         requireCellInMap: false,
         respectManualHallMismatch: false,
-      }).routePoints,
+      }),
     [
       displayRouteExecuteModeItemIds,
       filteredItems,
@@ -723,6 +728,7 @@ const MapView: React.FC<MapViewProps> = ({
       selectedHallId,
     ],
   );
+  const displayRoutePoints = displayRoutePointsResult.routePoints;
 
   const mapInsertRoutePointsResult = useMemo(() => {
     if (!routeResolutionMapData) {
@@ -765,25 +771,41 @@ const MapView: React.FC<MapViewProps> = ({
   const includeDisplayRoute =
     isRouteVisible && (halls.length === 0 || selectedHallId !== "all");
   const includeMapInsertRoute = smartInsertEnabled && smartInsertMode === "map";
-  const { displayRouteSegments, mapInsertRouteSegments } = useMemo(
-    () =>
-      calculateRouteSegmentsPair({
-        displayMapData: displayRoutePathfindingMapData,
+  const { displayRouteSegments, mapInsertRouteSegments, displayRouteState } =
+    useMemo(
+      () =>
+        calculateRouteSegmentsPair({
+          displayMapData: displayRoutePathfindingMapData,
+          displayRoutePoints,
+          mapInsertMapData: mapInsertRoutePathfindingMapData,
+          mapInsertRoutePoints,
+          mapInsertPathConstraint: mapInsertRoutePathConstraint,
+          includeDisplayRoute,
+          includeMapInsertRoute,
+        }),
+      [
+        displayRoutePathfindingMapData,
         displayRoutePoints,
-        mapInsertMapData: mapInsertRoutePathfindingMapData,
+        mapInsertRoutePathfindingMapData,
         mapInsertRoutePoints,
-        mapInsertPathConstraint: mapInsertRoutePathConstraint,
+        mapInsertRoutePathConstraint,
         includeDisplayRoute,
         includeMapInsertRoute,
+      ],
+    );
+  const routeDiagnostics = useMemo(
+    () =>
+      buildRouteDiagnostics({
+        missingItemIds: displayRoutePointsResult.missingItemIds,
+        items: filteredItems,
+        validLocationCount: displayRoutePoints.length,
+        routeUnreachable: displayRouteState === "unreachable",
       }),
     [
-      displayRoutePathfindingMapData,
-      displayRoutePoints,
-      mapInsertRoutePathfindingMapData,
-      mapInsertRoutePoints,
-      mapInsertRoutePathConstraint,
-      includeDisplayRoute,
-      includeMapInsertRoute,
+      displayRoutePoints.length,
+      displayRoutePointsResult.missingItemIds,
+      displayRouteState,
+      filteredItems,
     ],
   );
 
@@ -1949,6 +1971,9 @@ const MapView: React.FC<MapViewProps> = ({
             ))}
           </div>
         )}
+      {hasRouteDiagnosticIssue(routeDiagnostics) && (
+        <RouteDiagnosticsOverlay diagnostics={routeDiagnostics} />
+      )}
       {/* Map canvas */}
       <MapCanvas
         mapData={mapDataForCanvas}

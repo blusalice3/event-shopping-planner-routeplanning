@@ -5,13 +5,20 @@ import type {
   BulkAddLayoutInfo,
   BulkAddMetadata,
 } from "../features/events/bulkAdd";
+import {
+  SPREADSHEET_PASTE_COLUMN_GUIDE,
+  SPREADSHEET_PASTE_COLUMN_LABELS,
+  normalizeImportedUrl,
+  parseSpreadsheetPaste,
+} from "../features/events/pasteColumns";
+import { decideSheetQuantity } from "../features/events/quantitySync";
 
 interface ImportScreenProps {
   onBulkAdd: (
     eventName: string,
     items: Omit<ShoppingItem, "id" | "purchaseStatus">[],
     metadata?: BulkAddMetadata,
-  ) => void;
+  ) => boolean | void;
   activeEventName: string | null;
   itemToEdit: ShoppingItem | null;
   onUpdateItem: (item: ShoppingItem) => void;
@@ -92,37 +99,19 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
 
   const handlePaste = (e: React.ClipboardEvent<HTMLTextAreaElement>) => {
     e.preventDefault();
-    const pasteData = e.clipboardData.getData("text");
-    const rows = pasteData.split("\n").filter((row) => row.trim() !== "");
+    const result = parseSpreadsheetPaste(e.clipboardData.getData("text"));
+    if (!result.ok) {
+      window.alert(result.message);
+      return;
+    }
 
-    const cols: { [key: string]: string[] } = {
-      circles: [],
-      eventDates: [],
-      blocks: [],
-      numbers: [],
-      titles: [],
-      prices: [],
-      urls: [],
-    };
-
-    rows.forEach((row) => {
-      const cells = row.split("\t");
-      cols.circles.push(cells[0] || "");
-      cols.eventDates.push(cells[1] || "");
-      cols.blocks.push(cells[2] || "");
-      cols.numbers.push(cells[3] || "");
-      cols.titles.push(cells[4] || "");
-      cols.prices.push(cells[5] || "");
-      cols.urls.push(cells[6] || "");
-    });
-
-    setCircles(cols.circles.join("\n"));
-    setEventDates(cols.eventDates.join("\n"));
-    setBlocks(cols.blocks.join("\n"));
-    setNumbers(cols.numbers.join("\n"));
-    setTitles(cols.titles.join("\n"));
-    setPrices(cols.prices.join("\n"));
-    setUrls(cols.urls.join("\n"));
+    setCircles(result.columns.circles);
+    setEventDates(result.columns.eventDates);
+    setBlocks(result.columns.blocks);
+    setNumbers(result.columns.numbers);
+    setTitles(result.columns.titles);
+    setPrices(result.columns.prices);
+    setRemarks(result.columns.remarks);
   };
 
   const parseCSVLine = (line: string): string[] => {
@@ -157,10 +146,15 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
     items: Omit<ShoppingItem, "id" | "purchaseStatus">[];
     spreadsheetUrl?: string;
     layoutInfo?: BulkAddLayoutInfo[];
+    invalidQuantityRows: Array<{ lineNumber: number; value: string }>;
   } => {
     const newItems: Omit<ShoppingItem, "id" | "purchaseStatus">[] = [];
     let spreadsheetUrl: string | undefined;
     const layoutInfo: BulkAddLayoutInfo[] = [];
+    const invalidQuantityRows: Array<{
+      lineNumber: number;
+      value: string;
+    }> = [];
 
     // ヘッダー行とメタデータ行をスキップ
     let startIndex = 0;
@@ -254,17 +248,17 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
         priceStr === ""
           ? null
           : parseInt(priceStr.replace(/[^0-9]/g, ""), 10) || 0;
-      // 数量: 空欄時は1、それ以外は数値を反映（1-10の範囲に制限）
+      const quantityDecision = decideSheetQuantity(quantityStr, "new");
+      if (quantityDecision.kind === "invalid") {
+        invalidQuantityRows.push({
+          lineNumber: i + 1,
+          value: quantityStr,
+        });
+        continue;
+      }
       const quantity =
-        quantityStr === ""
-          ? 1
-          : Math.max(
-              1,
-              Math.min(
-                10,
-                parseInt(quantityStr.replace(/[^0-9]/g, ""), 10) || 1,
-              ),
-            );
+        quantityDecision.kind === "apply" ? quantityDecision.quantity : 1;
+      const normalizedUrl = normalizeImportedUrl(url);
 
       const item: Omit<ShoppingItem, "id" | "purchaseStatus"> = {
         circle,
@@ -275,7 +269,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
         price,
         quantity,
         remarks,
-        ...(url ? { url } : {}),
+        ...(normalizedUrl ? { url: normalizedUrl } : {}),
       };
 
       newItems.push(item);
@@ -341,8 +335,19 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
       items: newItems,
       spreadsheetUrl,
       layoutInfo: layoutInfo.length > 0 ? layoutInfo : undefined,
+      invalidQuantityRows,
     };
   };
+
+  const buildInvalidQuantityImportMessage = (
+    invalidRows: Array<{ lineNumber: number; value: string }>,
+  ): string =>
+    invalidRows.length === 0
+      ? ""
+      : `数量が1～20の整数ではない${invalidRows.length}行は取り込みませんでした（${invalidRows
+          .slice(0, 5)
+          .map(({ lineNumber, value }) => `${lineNumber}行目「${value}」`)
+          .join("、")}${invalidRows.length > 5 ? "、ほか" : ""}）。`;
 
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -361,14 +366,17 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
         metadata.layoutInfo = importResult.layoutInfo;
       }
 
-      onBulkAdd(
-        eventName || "インポートリスト",
-        importResult.items,
-        Object.keys(metadata).length > 0 ? metadata : undefined,
-      );
+      const accepted =
+        onBulkAdd(
+          eventName || "インポートリスト",
+          importResult.items,
+          Object.keys(metadata).length > 0 ? metadata : undefined,
+        ) !== false;
       if (fileInputRef.current) {
         fileInputRef.current.value = "";
       }
+      if (!accepted) return;
+
       const urlMessage = importResult.spreadsheetUrl
         ? `スプレッドシートURLも保存されました。`
         : "";
@@ -376,12 +384,17 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
         importResult.layoutInfo && importResult.layoutInfo.length > 0
           ? `配置情報も復元されました。`
           : "";
+      const quantityMessage = buildInvalidQuantityImportMessage(
+        importResult.invalidQuantityRows,
+      );
       alert(
-        `${importResult.items.length}件のアイテムをインポートしました。${urlMessage}${layoutMessage}`,
+        `${importResult.items.length}件のアイテムをインポートしました。${urlMessage}${layoutMessage}${quantityMessage}`,
       );
     } else {
       alert(
-        "インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。",
+        importResult.invalidQuantityRows.length > 0
+          ? `インポートできる品目がありませんでした。${buildInvalidQuantityImportMessage(importResult.invalidQuantityRows)}`
+          : "インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。",
       );
     }
   };
@@ -418,15 +431,22 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
       const importResult = processImportData(lines);
 
       if (importResult.items.length > 0) {
-        onBulkAdd(eventName.trim(), importResult.items, {
-          url: spreadsheetUrl,
-          sheetName,
-        });
+        const accepted =
+          onBulkAdd(eventName.trim(), importResult.items, {
+            url: spreadsheetUrl,
+            sheetName,
+          }) !== false;
+        if (!accepted) return;
+
         setSpreadsheetUrl("");
-        alert(`${importResult.items.length}件のアイテムをインポートしました。`);
+        alert(
+          `${importResult.items.length}件のアイテムをインポートしました。${buildInvalidQuantityImportMessage(importResult.invalidQuantityRows)}`,
+        );
       } else {
         alert(
-          "インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。",
+          importResult.invalidQuantityRows.length > 0
+            ? `インポートできる品目がありませんでした。${buildInvalidQuantityImportMessage(importResult.invalidQuantityRows)}`
+            : "インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。",
         );
       }
     } catch (error) {
@@ -496,8 +516,10 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
           : parseInt(priceStr.replace(/[^0-9]/g, ""), 10) || 0;
       const quantity = Math.max(
         1,
-        Math.min(10, parseInt(singleQuantity.replace(/[^0-9]/g, ""), 10) || 1),
+        Math.min(20, parseInt(singleQuantity.replace(/[^0-9]/g, ""), 10) || 1),
       );
+      const parsedQuantity =
+        parseInt(singleQuantity.replace(/[^0-9]/g, ""), 10) || 1;
       const updatedItem: ShoppingItem = {
         ...itemToEdit,
         circle: singleCircle.trim(),
@@ -506,7 +528,10 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
         number: singleNumber.trim(),
         title: singleTitle.trim(),
         price: price,
-        quantity: quantity,
+        quantity:
+          parsedQuantity === itemToEdit.quantity && parsedQuantity > 20
+            ? parsedQuantity
+            : quantity,
         remarks: singleRemarks.trim(),
         url: singleUrl.trim() || undefined,
       };
@@ -619,7 +644,9 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
       });
 
       if (newItems.length > 0) {
-        onBulkAdd(finalEventName, newItems);
+        const accepted = onBulkAdd(finalEventName, newItems) !== false;
+        if (!accepted) return;
+
         setEventName("");
         setCircles("");
         setEventDates("");
@@ -648,7 +675,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
           : parseInt(priceStr.replace(/[^0-9]/g, ""), 10) || 0;
       const quantity = Math.max(
         1,
-        Math.min(10, parseInt(singleQuantity.replace(/[^0-9]/g, ""), 10) || 1),
+        Math.min(20, parseInt(singleQuantity.replace(/[^0-9]/g, ""), 10) || 1),
       );
       const newItem: Omit<ShoppingItem, "id" | "purchaseStatus"> = {
         circle: singleCircle.trim(),
@@ -661,8 +688,9 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
         remarks: singleRemarks.trim(),
         url: singleUrl.trim() || undefined,
       };
-      onBulkAdd(activeEventName, [newItem], { source: "app" });
-      resetSingleForm();
+      const accepted =
+        onBulkAdd(activeEventName, [newItem], { source: "app" }) !== false;
+      if (accepted) resetSingleForm();
     }
   };
 
@@ -704,7 +732,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
       </h2>
       <p className="text-center text-slate-600 dark:text-slate-400 mb-6">
         {isCreatingNew
-          ? "スプレッドシートのM列からR列とW列をコピーし、下の「サークル名」の欄に貼り付けてください。データが自動で振り分けられます。"
+          ? `スプレッドシートの${SPREADSHEET_PASTE_COLUMN_GUIDE}をこの順番でコピーし、下の「${SPREADSHEET_PASTE_COLUMN_LABELS.circles}」欄に貼り付けてください。データが自動で振り分けられます。`
           : isEditing
             ? "アイテムの情報を編集してください。"
             : "追加するアイテムのデータを入力してください。"}
@@ -787,7 +815,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
               <div className="md:col-span-1">
                 <label htmlFor="circles" className={labelClass}>
-                  サークル名{" "}
+                  {SPREADSHEET_PASTE_COLUMN_LABELS.circles}{" "}
                 </label>
                 <textarea
                   id="circles"
@@ -800,7 +828,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
               </div>
               <div className="md:col-span-1">
                 <label htmlFor="event-dates" className={labelClass}>
-                  参加日{" "}
+                  {SPREADSHEET_PASTE_COLUMN_LABELS.eventDates}{" "}
                 </label>
                 <textarea
                   id="event-dates"
@@ -812,7 +840,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
               </div>
               <div className="md:col-span-1">
                 <label htmlFor="blocks" className={labelClass}>
-                  ブロック{" "}
+                  {SPREADSHEET_PASTE_COLUMN_LABELS.blocks}{" "}
                 </label>
                 <textarea
                   id="blocks"
@@ -824,7 +852,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
               </div>
               <div className="md:col-span-1">
                 <label htmlFor="numbers" className={labelClass}>
-                  ナンバー{" "}
+                  {SPREADSHEET_PASTE_COLUMN_LABELS.numbers}{" "}
                 </label>
                 <textarea
                   id="numbers"
@@ -836,7 +864,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
               </div>
               <div className="md:col-span-1">
                 <label htmlFor="titles" className={labelClass}>
-                  タイトル{" "}
+                  {SPREADSHEET_PASTE_COLUMN_LABELS.titles}{" "}
                 </label>
                 <textarea
                   id="titles"
@@ -848,7 +876,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
               </div>
               <div className="md:col-span-1">
                 <label htmlFor="prices" className={labelClass}>
-                  頒布価格{" "}
+                  {SPREADSHEET_PASTE_COLUMN_LABELS.prices}{" "}
                 </label>
                 <textarea
                   id="prices"
@@ -862,7 +890,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
                 <label htmlFor="remarks" className={labelClass}>
-                  備考{" "}
+                  {SPREADSHEET_PASTE_COLUMN_LABELS.remarks}{" "}
                 </label>
                 <textarea
                   id="remarks"
@@ -874,7 +902,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
               </div>
               <div>
                 <label htmlFor="urls" className={labelClass}>
-                  URL{" "}
+                  URL（7列貼り付け対象外）{" "}
                 </label>
                 <textarea
                   id="urls"
@@ -1030,7 +1058,12 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
                   onChange={(e) => setSingleQuantity(e.target.value)}
                   className={formInputClass}
                 >
-                  {Array.from({ length: 10 }, (_, i) => i + 1).map((num) => (
+                  {Number(singleQuantity) > 20 && (
+                    <option value={singleQuantity}>
+                      {singleQuantity}（現在の値）
+                    </option>
+                  )}
+                  {Array.from({ length: 20 }, (_, i) => i + 1).map((num) => (
                     <option key={num} value={num}>
                       {num}
                     </option>

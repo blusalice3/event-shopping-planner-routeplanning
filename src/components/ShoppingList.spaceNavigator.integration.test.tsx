@@ -591,9 +591,12 @@ describe("ShoppingList execution space navigator integration", () => {
       within(card).getByRole("link", { name: "URLを開く" }),
     ).toHaveAttribute("href", "https://example.com/item");
 
-    fireEvent.change(within(card).getByPlaceholderText("備考"), {
-      target: { value: "変更されない" },
-    });
+    fireEvent.change(
+      within(card).getByRole("textbox", { name: "利用者メモ" }),
+      {
+        target: { value: "変更されない" },
+      },
+    );
     expect(onUpdateItem).not.toHaveBeenCalled();
     expect(onSelectItem).not.toHaveBeenCalled();
     expect(onMoveItem).not.toHaveBeenCalled();
