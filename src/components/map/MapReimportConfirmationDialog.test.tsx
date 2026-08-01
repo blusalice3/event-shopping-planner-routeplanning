@@ -31,6 +31,7 @@ const plan: MapReimportPlan = {
       maplessKey: "__mapless__:1日目",
       oldMapHallIds: ["map-hall"],
       oldMaplessHallIds: ["mapless-hall"],
+      requiresConfirmation: true,
     },
   ],
   impact: {
@@ -45,6 +46,7 @@ const plan: MapReimportPlan = {
     maplessManualAssignmentCount: 2,
     maplessHallRouteDayCount: 1,
   },
+  requiresConfirmation: true,
 };
 
 describe("MapReimportConfirmationDialog", () => {

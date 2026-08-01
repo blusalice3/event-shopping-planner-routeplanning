@@ -46,12 +46,14 @@ interface PlannedMapReimportTarget extends MapReimportTarget {
   maplessKey: string;
   oldMapHallIds: string[];
   oldMaplessHallIds: string[];
+  requiresConfirmation: boolean;
 }
 
 export interface MapReimportPlan {
   eventName: string;
   targets: PlannedMapReimportTarget[];
   impact: MapReimportImpact;
+  requiresConfirmation: boolean;
 }
 
 export interface MapReimportOptions {
@@ -74,6 +76,13 @@ const clonePlainValue = <T>(value: T): T => {
 
 const unique = (values: readonly string[]): string[] =>
   Array.from(new Set(values));
+
+const hasOwnDayKey = <T>(
+  store: { [eventName: string]: { [dayKey: string]: T } },
+  eventName: string,
+  dayKey: string,
+): boolean =>
+  Object.prototype.hasOwnProperty.call(store[eventName] || {}, dayKey);
 
 const countManualAssignments = ({
   items,
@@ -151,22 +160,37 @@ export const buildMapReimportPlan = ({
     const eventDate = target.eventDate.trim();
     const mapTabName = target.mapTabName.trim();
     const maplessKey = getMaplessKey(eventDate);
+    const oldMapHallIds = unique(
+      (state.hallDefinitions[eventName]?.[mapTabName] || []).map(
+        (hall) => hall.id,
+      ),
+    );
+    const oldMaplessHallIds = unique(
+      (state.hallDefinitions[eventName]?.[maplessKey] || []).map(
+        (hall) => hall.id,
+      ),
+    );
+    const removableManualAssignmentCount = countManualAssignments({
+      items: eventItems,
+      eventDate,
+      retainedHallIds: new Set(oldMaplessHallIds),
+    });
     return {
       eventDate,
       mapTabName,
       mapData: clonePlainValue(target.mapData),
       initialAngle: normalizeRotationAngle(target.initialAngle),
       maplessKey,
-      oldMapHallIds: unique(
-        (state.hallDefinitions[eventName]?.[mapTabName] || []).map(
-          (hall) => hall.id,
-        ),
-      ),
-      oldMaplessHallIds: unique(
-        (state.hallDefinitions[eventName]?.[maplessKey] || []).map(
-          (hall) => hall.id,
-        ),
-      ),
+      oldMapHallIds,
+      oldMaplessHallIds,
+      requiresConfirmation:
+        hasOwnDayKey(state.mapData, eventName, mapTabName) ||
+        hasOwnDayKey(state.mapRotationSettings, eventName, mapTabName) ||
+        hasOwnDayKey(state.routeSettings, eventName, mapTabName) ||
+        hasOwnDayKey(state.hallDefinitions, eventName, mapTabName) ||
+        hasOwnDayKey(state.hallRouteSettings, eventName, mapTabName) ||
+        hasOwnDayKey(state.mapViewportSettings, eventName, mapTabName) ||
+        removableManualAssignmentCount > 0,
     };
   });
 
@@ -188,17 +212,27 @@ export const buildMapReimportPlan = ({
       summary.visitPointCount += currentRoute?.visitOrder?.length || 0;
       summary.mapHallDefinitionCount += target.oldMapHallIds.length;
       summary.manualAssignmentCount += baseManualCount;
-      summary.hallRouteDayCount += state.hallRouteSettings[eventName]?.[
-        target.mapTabName
-      ]
+      summary.hallRouteDayCount += hasOwnDayKey(
+        state.hallRouteSettings,
+        eventName,
+        target.mapTabName,
+      )
         ? 1
         : 0;
-      summary.viewportDayCount += state.mapViewportSettings[eventName]?.[
-        target.mapTabName
-      ]
+      summary.viewportDayCount += hasOwnDayKey(
+        state.mapViewportSettings,
+        eventName,
+        target.mapTabName,
+      )
         ? 1
         : 0;
-      summary.rotationDayCount += 1;
+      summary.rotationDayCount += hasOwnDayKey(
+        state.mapRotationSettings,
+        eventName,
+        target.mapTabName,
+      )
+        ? 1
+        : 0;
       summary.maplessHallDefinitionCount += target.oldMaplessHallIds.length;
       summary.maplessManualAssignmentCount += allManualCount - baseManualCount;
       summary.maplessHallRouteDayCount += state.hallRouteSettings[eventName]?.[
@@ -226,6 +260,9 @@ export const buildMapReimportPlan = ({
     eventName,
     targets: plannedTargets,
     impact,
+    requiresConfirmation: plannedTargets.some(
+      (target) => target.requiresConfirmation,
+    ),
   };
 };
 

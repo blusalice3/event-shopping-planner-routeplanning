@@ -137,11 +137,15 @@ import {
 } from "./features/events/duplicateEvent";
 import { settleEventUpdatePreviewIfCurrent } from "./features/events/sourceSwitchPreview";
 import {
-  applyMapReimportPlan,
   buildMapReimportPlan,
   type MapReimportOptions,
-  type MapReimportPlan,
 } from "./features/map/domain/mapReimport";
+import {
+  cancelPendingMapImport,
+  commitPreparedMapImport as commitPreparedMapImportFlow,
+  dispatchPreparedMapImport,
+  type PreparedMapImport,
+} from "./features/map/domain/mapImportFlow";
 import {
   createAppBackup,
   parseAppBackup,
@@ -299,12 +303,6 @@ const normalizeMapDayToken = (value: string): string =>
     .replace(/マップ$/, "");
 
 type RotationScreenType = "mapTab" | "focusMode";
-
-type PendingMapReimportConfirmation = {
-  plan: MapReimportPlan;
-  settings: BlockDetectionSettings;
-  skippedDays: string[];
-};
 
 type PendingDuplicateEventImport = {
   analysis: SameSourceEventAnalysis | DifferentSourceEventAnalysis;
@@ -581,7 +579,7 @@ const App: React.FC = () => {
   const [mapImportPendingEventName, setMapImportPendingEventName] =
     useState<string>("");
   const [pendingMapReimport, setPendingMapReimport] =
-    useState<PendingMapReimportConfirmation | null>(null);
+    useState<PreparedMapImport | null>(null);
   const {
     isInitialized,
     persistenceStatus,
@@ -3168,6 +3166,57 @@ const App: React.FC = () => {
     [],
   );
 
+  const commitPreparedMapImport = useCallback(
+    (preparedImport: PreparedMapImport, options: MapReimportOptions) => {
+      commitPreparedMapImportFlow({
+        state: {
+          eventLists,
+          executeModeItems,
+          mapData,
+          mapRotationSettings,
+          routeSettings,
+          hallDefinitions,
+          hallRouteSettings,
+          mapViewportSettings,
+        },
+        preparedImport,
+        options,
+        effects: {
+          setEventLists,
+          setMapData,
+          setMapRotationSettings,
+          setRouteSettings,
+          setHallDefinitions,
+          setHallRouteSettings,
+          setMapViewportSettings,
+          saveBlockDetectionSettings,
+          activateTarget: (eventName, mapTabName) => {
+            setActiveEventName(eventName);
+            setActiveTab(mapTabName);
+          },
+          finishImport: () => {
+            setPendingMapReimport(null);
+            setMapImportDialogOpen(false);
+            setMapImportPendingFile(null);
+            setMapImportPendingEventName("");
+          },
+          notify: (message) => alert(message),
+        },
+      });
+    },
+    [
+      eventLists,
+      executeModeItems,
+      hallDefinitions,
+      hallRouteSettings,
+      mapData,
+      mapRotationSettings,
+      mapViewportSettings,
+      routeSettings,
+      setEventLists,
+    ],
+  );
+
   const handleMapImportConfirm = useCallback(
     (
       parsedData: Record<string, DayMapData>,
@@ -3236,13 +3285,19 @@ const App: React.FC = () => {
           eventName,
           targets,
         });
-        setPendingMapReimport({
+        const preparedImport = {
           plan,
           settings,
           skippedDays: Array.from(skippedDays),
+        };
+        dispatchPreparedMapImport(preparedImport, {
+          requestConfirmation: (pendingImport) => {
+            setPendingMapReimport(pendingImport);
+            setMapImportDialogOpen(false);
+            setMapImportPendingFile(null);
+          },
+          commit: commitPreparedMapImport,
         });
-        setMapImportDialogOpen(false);
-        setMapImportPendingFile(null);
       } catch (error) {
         console.error("Map reimport planning error:", error);
         alert(
@@ -3253,6 +3308,7 @@ const App: React.FC = () => {
       }
     },
     [
+      commitPreparedMapImport,
       eventLists,
       executeModeItems,
       hallDefinitions,
@@ -3268,70 +3324,17 @@ const App: React.FC = () => {
   const handleMapReimportConfirm = useCallback(
     (options: MapReimportOptions) => {
       if (!pendingMapReimport) return;
-
-      const nextState = applyMapReimportPlan(
-        {
-          eventLists,
-          executeModeItems,
-          mapData,
-          mapRotationSettings,
-          routeSettings,
-          hallDefinitions,
-          hallRouteSettings,
-          mapViewportSettings,
-        },
-        pendingMapReimport.plan,
-        options,
-      );
-
-      if (nextState.eventLists !== eventLists) {
-        setEventLists(nextState.eventLists);
-      }
-      setMapData(nextState.mapData);
-      setMapRotationSettings(nextState.mapRotationSettings);
-      setRouteSettings(nextState.routeSettings);
-      setHallDefinitions(nextState.hallDefinitions);
-      setHallRouteSettings(nextState.hallRouteSettings);
-      setMapViewportSettings(nextState.mapViewportSettings);
-
-      saveBlockDetectionSettings(
-        pendingMapReimport.plan.eventName,
-        pendingMapReimport.settings,
-      );
-
-      const firstTarget = pendingMapReimport.plan.targets[0];
-      if (firstTarget) {
-        setActiveEventName(pendingMapReimport.plan.eventName);
-        setActiveTab(firstTarget.mapTabName);
-      }
-
-      const messages = [
-        `${pendingMapReimport.plan.targets.length}件のマップタブを取り込みました。`,
-        ...pendingMapReimport.skippedDays
-          .sort((a, b) => a.localeCompare(b, "ja"))
-          .map((dayName) => `${dayName}はないので取り込みしませんでした`),
-      ];
-      setPendingMapReimport(null);
-      setMapImportPendingEventName("");
-      alert(messages.join("\n"));
+      commitPreparedMapImport(pendingMapReimport, options);
     },
-    [
-      eventLists,
-      executeModeItems,
-      hallDefinitions,
-      hallRouteSettings,
-      mapData,
-      mapRotationSettings,
-      mapViewportSettings,
-      pendingMapReimport,
-      routeSettings,
-    ],
+    [commitPreparedMapImport, pendingMapReimport],
   );
 
   const handleMapReimportCancel = useCallback(() => {
-    setPendingMapReimport(null);
-    setMapImportPendingFile(null);
-    setMapImportPendingEventName("");
+    cancelPendingMapImport({
+      clearPendingImport: () => setPendingMapReimport(null),
+      clearPendingFile: () => setMapImportPendingFile(null),
+      clearPendingEventName: () => setMapImportPendingEventName(""),
+    });
   }, []);
 
   const handleMapImportClose = useCallback(() => {

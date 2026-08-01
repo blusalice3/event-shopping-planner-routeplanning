@@ -183,6 +183,30 @@ const createState = (): MapReimportState & {
   unrelatedUiSetting: { mode: "そのまま" },
 });
 
+const createEmptyMapState = (
+  eventDates: string[] = ["1日目"],
+): MapReimportState => ({
+  eventLists: {
+    対象イベント: eventDates.map((eventDate, index) =>
+      item(`target-${index + 1}`, eventDate),
+    ),
+  },
+  executeModeItems: {},
+  mapData: {},
+  mapRotationSettings: {},
+  routeSettings: {},
+  hallDefinitions: {},
+  hallRouteSettings: {},
+  mapViewportSettings: {},
+});
+
+const target = (eventDate = "1日目") => ({
+  eventDate,
+  mapTabName: `${eventDate}マップ`,
+  mapData: dayMap(`新しい${eventDate}`, "NEW"),
+  initialAngle: 0,
+});
+
 describe("map reimport", () => {
   it("replaces only the target map and resets only map-dependent state", () => {
     const state = createState();
@@ -206,6 +230,8 @@ describe("map reimport", () => {
     });
 
     expect(state).toEqual(before);
+    expect(plan.requiresConfirmation).toBe(true);
+    expect(plan.targets[0].requiresConfirmation).toBe(true);
     expect(plan.impact).toEqual({
       targetDayCount: 1,
       visitPointCount: 2,
@@ -365,6 +391,182 @@ describe("map reimport", () => {
       "mapless-hall",
     );
     expect(next.eventLists["対象イベント"][2].manualHallId).toBe("day2-hall");
+  });
+
+  it("requires no confirmation when all map-dependent stores are empty", () => {
+    const plan = buildMapReimportPlan({
+      state: createEmptyMapState(),
+      eventName: "対象イベント",
+      targets: [target()],
+    });
+
+    expect(plan.targets[0].requiresConfirmation).toBe(false);
+    expect(plan.requiresConfirmation).toBe(false);
+    expect(plan.impact.rotationDayCount).toBe(0);
+  });
+
+  it.each([
+    [
+      "mapData",
+      (state: MapReimportState) => {
+        state.mapData = {
+          対象イベント: { "1日目マップ": dayMap("既存", "OLD") },
+        };
+      },
+    ],
+    [
+      "mapRotationSettings",
+      (state: MapReimportState) => {
+        state.mapRotationSettings = {
+          対象イベント: {
+            "1日目マップ": {
+              initialAngle: 0,
+              mapTabAngle: 0,
+              focusModeAngle: 0,
+            },
+          },
+        };
+      },
+    ],
+    [
+      "routeSettings",
+      (state: MapReimportState) => {
+        state.routeSettings = {
+          対象イベント: {
+            "1日目マップ": { isRouteVisible: false, visitOrder: [] },
+          },
+        };
+      },
+    ],
+    [
+      "hallDefinitions",
+      (state: MapReimportState) => {
+        state.hallDefinitions = {
+          対象イベント: { "1日目マップ": [] },
+        };
+      },
+    ],
+    [
+      "hallRouteSettings",
+      (state: MapReimportState) => {
+        state.hallRouteSettings = {
+          対象イベント: {
+            "1日目マップ": { hallOrder: [], hallVisitLists: [] },
+          },
+        };
+      },
+    ],
+    [
+      "mapViewportSettings",
+      (state: MapReimportState) => {
+        state.mapViewportSettings = {
+          対象イベント: {
+            "1日目マップ": { zoomLevel: 100, offsetX: 0, offsetY: 0 },
+          },
+        };
+      },
+    ],
+  ] as const)(
+    "requires confirmation when only %s has the target key",
+    (storeName, seedState) => {
+      const state = createEmptyMapState();
+      seedState(state);
+
+      const plan = buildMapReimportPlan({
+        state,
+        eventName: "対象イベント",
+        targets: [target()],
+      });
+
+      expect(plan.targets[0].requiresConfirmation).toBe(true);
+      expect(plan.requiresConfirmation).toBe(true);
+      expect(plan.impact.rotationDayCount).toBe(
+        storeName === "mapRotationSettings" ? 1 : 0,
+      );
+    },
+  );
+
+  it("does not require confirmation for mapless state that will be preserved", () => {
+    const state = createEmptyMapState();
+    state.hallDefinitions = {
+      対象イベント: {
+        "__mapless__:1日目": [
+          { ...hall("mapless-hall"), vertices: [], blockNames: ["手動"] },
+        ],
+      },
+    };
+    state.hallRouteSettings = {
+      対象イベント: {
+        "__mapless__:1日目": {
+          hallOrder: ["mapless-hall"],
+          hallVisitLists: [{ hallId: "mapless-hall", itemIds: ["target-1"] }],
+        },
+      },
+    };
+    state.eventLists["対象イベント"][0].manualHallId = "mapless-hall";
+
+    const plan = buildMapReimportPlan({
+      state,
+      eventName: "対象イベント",
+      targets: [target()],
+    });
+
+    expect(plan.requiresConfirmation).toBe(false);
+    expect(plan.impact.manualAssignmentCount).toBe(0);
+  });
+
+  it("requires confirmation when an orphaned manual assignment will be removed", () => {
+    const state = createEmptyMapState();
+    state.eventLists["対象イベント"][0].manualHallId = "missing-hall";
+
+    const plan = buildMapReimportPlan({
+      state,
+      eventName: "対象イベント",
+      targets: [target()],
+    });
+
+    expect(plan.requiresConfirmation).toBe(true);
+    expect(plan.impact.manualAssignmentCount).toBe(1);
+  });
+
+  it("ignores map state belonging only to another day or event", () => {
+    const state = createEmptyMapState();
+    state.mapData = {
+      対象イベント: {
+        "2日目マップ": dayMap("別日", "DAY2"),
+      },
+      別イベント: {
+        "1日目マップ": dayMap("別イベント", "OTHER"),
+      },
+    };
+
+    const plan = buildMapReimportPlan({
+      state,
+      eventName: "対象イベント",
+      targets: [target()],
+    });
+
+    expect(plan.requiresConfirmation).toBe(false);
+  });
+
+  it("requires one confirmation when any target day has existing state", () => {
+    const state = createEmptyMapState(["1日目", "2日目"]);
+    state.mapData = {
+      対象イベント: {
+        "2日目マップ": dayMap("既存2日目", "DAY2"),
+      },
+    };
+
+    const plan = buildMapReimportPlan({
+      state,
+      eventName: "対象イベント",
+      targets: [target("1日目"), target("2日目")],
+    });
+
+    expect(
+      plan.targets.map(({ requiresConfirmation }) => requiresConfirmation),
+    ).toEqual([false, true]);
+    expect(plan.requiresConfirmation).toBe(true);
   });
 
   it("rejects an invalid plan before any state can be applied", () => {
