@@ -37,3 +37,18 @@ export function buildImportCompletionMessage(
   }
   return `${params.eventName}を作成しました。\n${params.itemCount}件`;
 }
+
+export function buildLegacySheetFieldFallbackMessage({
+  fallbacks,
+  skippedItemIds,
+}: {
+  fallbacks: readonly { itemId: string }[];
+  skippedItemIds: ReadonlySet<string>;
+}): string | null {
+  const appliedCount = fallbacks.filter(
+    ({ itemId }) => !skippedItemIds.has(itemId),
+  ).length;
+  if (appliedCount === 0) return null;
+
+  return `旧形式のため、${appliedCount}件のシート品目でカタログ価格とシート備考を現在の価格・備考から推定して補完しました。`;
+}

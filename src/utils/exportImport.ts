@@ -56,6 +56,7 @@ export interface ImportResult {
   hallRouteSettings?: Record<string, unknown>;
   errors: string[];
   itemFallbackWarnings?: ItemFallbackWarning[];
+  legacySheetFieldFallbacks?: LegacySheetFieldFallback[];
 }
 
 export interface ItemFallbackWarning {
@@ -64,9 +65,19 @@ export interface ItemFallbackWarning {
   reasons: string[];
 }
 
-const EXPORT_VERSION = "2.1";
+export interface LegacySheetFieldFallback {
+  itemId: string;
+  rowNumber: number;
+}
+
+const EXPORT_VERSION = "2.2";
 
 type StrictPositiveIntegerCellParseResult =
+  | { kind: "empty" }
+  | { kind: "value"; value: number }
+  | { kind: "invalid"; raw: string };
+
+type FiniteNumberCellParseResult =
   | { kind: "empty" }
   | { kind: "value"; value: number }
   | { kind: "invalid"; raw: string };
@@ -117,6 +128,43 @@ const parseStrictPositiveIntegerCell = (
   return { kind: "invalid", raw: "非対応セル形式" };
 };
 
+const parseFiniteNumberScalar = (
+  rawValue: number | string,
+): FiniteNumberCellParseResult => {
+  if (typeof rawValue === "number") {
+    return Number.isFinite(rawValue)
+      ? { kind: "value", value: rawValue }
+      : { kind: "invalid", raw: String(rawValue) };
+  }
+
+  const rawText = rawValue.trim();
+  if (rawText === "") return { kind: "empty" };
+  const value = Number(rawText);
+  return Number.isFinite(value)
+    ? { kind: "value", value }
+    : { kind: "invalid", raw: rawText };
+};
+
+const parseFiniteNumberCell = (
+  rawValue: ExcelJS.CellValue,
+): FiniteNumberCellParseResult => {
+  if (rawValue === null || rawValue === undefined) return { kind: "empty" };
+
+  if (typeof rawValue === "number" || typeof rawValue === "string") {
+    return parseFiniteNumberScalar(rawValue);
+  }
+
+  if (isFormulaCellValue(rawValue)) {
+    const result = rawValue.result;
+    if (typeof result === "number" || typeof result === "string") {
+      return parseFiniteNumberScalar(result);
+    }
+    return { kind: "invalid", raw: "数式結果なし" };
+  }
+
+  return { kind: "invalid", raw: "非対応セル形式" };
+};
+
 /**
  * データをxlsxファイルにエクスポート
  */
@@ -159,6 +207,8 @@ export async function exportToXlsx(
     { header: "追加元", key: "source", width: 12 },
     { header: "手動ホール", key: "manualHallId", width: 20 },
     { header: "限数実購入数", key: "limitedPurchasedQuantity", width: 14 },
+    { header: "カタログ価格", key: "catalogPrice", width: 14 },
+    { header: "シート備考", key: "sheetRemarks", width: 30 },
   ];
 
   // データ
@@ -183,6 +233,18 @@ export async function exportToXlsx(
         item.purchaseStatus === "LimitedPurchase"
           ? (item.limitedPurchasedQuantity ?? "")
           : "",
+      catalogPrice:
+        item.catalogPrice !== undefined
+          ? (item.catalogPrice ?? "")
+          : item.source === "spreadsheet"
+            ? (item.price ?? "")
+            : "",
+      sheetRemarks:
+        item.sheetRemarks !== undefined
+          ? item.sheetRemarks
+          : item.source === "spreadsheet"
+            ? item.remarks
+            : "",
     });
   });
 
@@ -350,6 +412,17 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(arrayBuffer);
 
+    const metaSheet = workbook.getWorksheet("メタデータ");
+    const metaMap = new Map<string, string>();
+    if (metaSheet) {
+      metaSheet.eachRow((row, rowNumber) => {
+        if (rowNumber === 1) return;
+        const key = String(row.getCell(1).value || "");
+        const value = String(row.getCell(2).value || "");
+        if (key) metaMap.set(key, value);
+      });
+    }
+
     // 1. アイテムデータシートを読み込み
     const itemsSheet = workbook.getWorksheet("アイテムデータ");
     if (!itemsSheet) {
@@ -357,8 +430,35 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
       return result;
     }
 
+    const itemHeaderColumns = new Map<string, number>();
+    itemsSheet.getRow(1).eachCell({ includeEmpty: false }, (cell, column) => {
+      const header = String(cell.value ?? "").trim();
+      if (header && !itemHeaderColumns.has(header)) {
+        itemHeaderColumns.set(header, column);
+      }
+    });
+    const catalogPriceColumn = itemHeaderColumns.get("カタログ価格");
+    const sheetRemarksColumn = itemHeaderColumns.get("シート備考");
+    const hasCatalogPriceColumn = catalogPriceColumn !== undefined;
+    const hasSheetRemarksColumn = sheetRemarksColumn !== undefined;
+    if (hasCatalogPriceColumn !== hasSheetRemarksColumn) {
+      result.errors.push(
+        "アイテムデータの「カタログ価格」と「シート備考」は両方の列が必要です。ファイルが破損している可能性があります。",
+      );
+      return result;
+    }
+    const hasSheetDerivedColumns =
+      hasCatalogPriceColumn && hasSheetRemarksColumn;
+    if (!hasSheetDerivedColumns && metaMap.get("version") === EXPORT_VERSION) {
+      result.errors.push(
+        `バージョン${EXPORT_VERSION}の完全版に「カタログ価格」または「シート備考」がありません。ファイルが破損している可能性があります。`,
+      );
+      return result;
+    }
+
     const items: ShoppingItem[] = [];
     const itemFallbackWarnings: ItemFallbackWarning[] = [];
+    const legacySheetFieldFallbacks: LegacySheetFieldFallback[] = [];
     const validPurchaseStatuses = new Set<string>(
       PurchaseStatuses as readonly string[],
     );
@@ -477,6 +577,38 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         }
       }
 
+      let catalogPrice: number | null | undefined;
+      let sheetRemarks: string | undefined;
+      let usedLegacySheetFieldFallback = false;
+      if (hasSheetDerivedColumns) {
+        const parsedCatalogPrice = parseFiniteNumberCell(
+          row.getCell(catalogPriceColumn!).value,
+        );
+        if (parsedCatalogPrice.kind === "value") {
+          catalogPrice = parsedCatalogPrice.value;
+        } else if (parsedCatalogPrice.kind === "empty") {
+          if (source === "spreadsheet") {
+            catalogPrice = null;
+          }
+        } else {
+          rowReasons.push(
+            `カタログ価格「${parsedCatalogPrice.raw}」は不正のため空値で補完しました`,
+          );
+          if (source === "spreadsheet") {
+            catalogPrice = null;
+          }
+        }
+
+        const parsedSheetRemarks = row.getCell(sheetRemarksColumn!).text;
+        if (source === "spreadsheet" || parsedSheetRemarks !== "") {
+          sheetRemarks = parsedSheetRemarks;
+        }
+      } else if (source === "spreadsheet") {
+        catalogPrice = price;
+        sheetRemarks = remarks;
+        usedLegacySheetFieldFallback = true;
+      }
+
       // 手動ホールIDを取得（列15、後方互換: 古いファイルは空）
       const manualHallValue = String(row.getCell(15).value ?? "").trim();
       const manualHallId = manualHallValue || undefined;
@@ -525,9 +657,11 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         number,
         title,
         price,
+        ...(catalogPrice !== undefined ? { catalogPrice } : {}),
         quantity,
         purchaseStatus,
         remarks,
+        ...(sheetRemarks !== undefined ? { sheetRemarks } : {}),
         url,
         priorityLevel,
         protectionLevel,
@@ -540,6 +674,12 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
 
       if (item.circle || item.title) {
         items.push(item);
+        if (usedLegacySheetFieldFallback) {
+          legacySheetFieldFallbacks.push({
+            itemId: item.id,
+            rowNumber,
+          });
+        }
         if (rowReasons.length > 0) {
           itemFallbackWarnings.push({
             itemId: item.id,
@@ -554,18 +694,12 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
     if (itemFallbackWarnings.length > 0) {
       result.itemFallbackWarnings = itemFallbackWarnings;
     }
+    if (legacySheetFieldFallbacks.length > 0) {
+      result.legacySheetFieldFallbacks = legacySheetFieldFallbacks;
+    }
 
     // 2. メタデータシートを読み込み
-    const metaSheet = workbook.getWorksheet("メタデータ");
     if (metaSheet) {
-      const metaMap = new Map<string, string>();
-      metaSheet.eachRow((row, rowNumber) => {
-        if (rowNumber === 1) return;
-        const key = String(row.getCell(1).value || "");
-        const value = String(row.getCell(2).value || "");
-        if (key) metaMap.set(key, value);
-      });
-
       result.eventName = metaMap.get("eventName") || "";
 
       if (metaMap.has("spreadsheetUrl")) {

@@ -97,6 +97,7 @@ import {
 } from "./features/events/itemOps";
 import {
   buildImportCompletionMessage,
+  buildLegacySheetFieldFallbackMessage,
   resolveEventListTab,
 } from "./features/events/uiOrchestration";
 import {
@@ -2824,6 +2825,14 @@ const App: React.FC = () => {
               `不正データ${skippedCount}件をスキップしました。`,
             );
           }
+        }
+        const legacySheetFieldFallbackMessage =
+          buildLegacySheetFieldFallbackMessage({
+            fallbacks: result.legacySheetFieldFallbacks || [],
+            skippedItemIds,
+          });
+        if (legacySheetFieldFallbackMessage) {
+          fallbackResolutionMessages.push(legacySheetFieldFallbackMessage);
         }
 
         const resolvedResult = {

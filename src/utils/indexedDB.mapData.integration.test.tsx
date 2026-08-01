@@ -399,9 +399,12 @@ describe("db.saveMapDataChanges", () => {
       number: "01a",
       title: "現行形式頒布物",
       price: 700,
+      catalogPrice: 900,
       purchaseStatus: "Purchased",
       quantity: 1,
-      remarks: "",
+      remarks: "利用者メモ",
+      sheetRemarks: "シート備考",
+      source: "spreadsheet",
     };
     const blob = await exportToXlsx(
       eventName,
@@ -431,6 +434,12 @@ describe("db.saveMapDataChanges", () => {
     const imported = toImportedEventData(importResult);
 
     expect(importResult.success).toBe(true);
+    expect(imported.items[0]).toMatchObject({
+      price: 700,
+      catalogPrice: 900,
+      remarks: "利用者メモ",
+      sheetRemarks: "シート備考",
+    });
     expect(imported.mapData?.["1日目マップ"]).toEqual(dayMap);
 
     await db.saveMapDataChanges(
