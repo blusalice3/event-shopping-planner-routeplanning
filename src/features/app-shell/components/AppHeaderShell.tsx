@@ -12,7 +12,10 @@ import {
 } from "../../lists/domain/movePlan";
 import { acquireBodyScrollLock } from "../../../utils/bodyScrollLock";
 import type { ThemeMode } from "../../../hooks/useThemeMode";
-import type { UIVisibilitySettings } from "../../../hooks/useUIVisibilitySettings";
+import type {
+  UIVisibilityModeKey,
+  UIVisibilitySettings,
+} from "../../../hooks/useUIVisibilitySettings";
 import type {
   DayMapData,
   DayMapRotationState,
@@ -281,7 +284,7 @@ type AppHeaderShellProps = {
   uiSettingsPanelOpen: boolean;
   uiVisibilitySettings: UIVisibilitySettings;
   updateUIVisibilityConfig: (
-    key: keyof UIVisibilitySettings,
+    key: UIVisibilityModeKey,
     field: "header" | "tabBar",
     value: boolean,
   ) => void;
@@ -865,6 +868,33 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                             </select>
                           </div>
 
+                          <div className="mb-3 border-b border-slate-200 pb-3 dark:border-slate-700">
+                            <label className="flex cursor-pointer items-start gap-2 text-xs">
+                              <input
+                                type="checkbox"
+                                checked={
+                                  uiVisibilitySettings.showPersistenceStatus
+                                }
+                                onChange={(event) => {
+                                  const { checked } = event.target;
+                                  setUiVisibilitySettings((previous) => ({
+                                    ...previous,
+                                    showPersistenceStatus: checked,
+                                  }));
+                                }}
+                                className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-blue-600 focus:ring-blue-500 dark:border-slate-600"
+                              />
+                              <span className="flex-1">
+                                <span className="block font-semibold text-slate-700 dark:text-slate-300">
+                                  保存状態を表示
+                                </span>
+                                <span className="mt-0.5 block text-[10px] text-slate-500 dark:text-slate-400">
+                                  右下に「未保存」「保存中」「保存済み」を表示します（保存失敗は常に表示）
+                                </span>
+                              </span>
+                            </label>
+                          </div>
+
                           <h3 className="text-sm font-bold text-slate-700 dark:text-slate-300 mb-3">
                             ヘッダー/タブバー表示設定
                           </h3>
@@ -881,10 +911,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                   ["focus_sp_mapOff", "スマホ・マップ非表示"],
                                   ["focus_pc_mapOn", "パソコン・マップ表示"],
                                   ["focus_pc_mapOff", "パソコン・マップ非表示"],
-                                ] as [
-                                  keyof typeof uiVisibilitySettings,
-                                  string,
-                                ][]
+                                ] as [UIVisibilityModeKey, string][]
                               ).map(([key, label]) => (
                                 <div
                                   key={String(key)}
@@ -948,10 +975,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                 [
                                   ["execute_sp", "スマートフォン"],
                                   ["execute_pc", "パソコン / タブレット"],
-                                ] as [
-                                  keyof typeof uiVisibilitySettings,
-                                  string,
-                                ][]
+                                ] as [UIVisibilityModeKey, string][]
                               ).map(([key, label]) => (
                                 <div
                                   key={String(key)}

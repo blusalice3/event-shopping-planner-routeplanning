@@ -205,6 +205,9 @@ describe("PurchaseStatusControlModeSettings", () => {
       false,
     );
     expect(props.setZoomLevel).toHaveBeenCalledWith(100);
+    expect(props.setUiVisibilitySettings).toHaveBeenCalledWith(
+      expect.objectContaining({ showPersistenceStatus: true }),
+    );
   });
 });
 
@@ -230,6 +233,22 @@ describe("AppHeaderShell purchase status settings integration", () => {
     fireEvent.change(zoomSelect, { target: { value: "125" } });
 
     expect(props.handleZoomChange).toHaveBeenCalledWith(125);
+  });
+
+  it("changes the persistence status visibility in the draft settings", () => {
+    const props = minimalAppHeaderShellProps();
+    render(<AppHeaderShell {...props} />);
+
+    fireEvent.click(screen.getByRole("checkbox", { name: /保存状態を表示/ }));
+
+    expect(props.setUiVisibilitySettings).toHaveBeenCalledOnce();
+    const update = vi.mocked(props.setUiVisibilitySettings).mock.calls[0][0];
+    expect(typeof update).toBe("function");
+    if (typeof update === "function") {
+      expect(update(DEFAULT_UI_VISIBILITY)).toEqual(
+        expect.objectContaining({ showPersistenceStatus: false }),
+      );
+    }
   });
 
   it("keeps visibility edits in the draft until the panel close callback", () => {

@@ -12,13 +12,19 @@ export type UIVisibilityConfig = {
   tabBar: boolean;
 };
 
-export type UIVisibilitySettings = {
-  focus_sp_mapOn: UIVisibilityConfig;
-  focus_sp_mapOff: UIVisibilityConfig;
-  focus_pc_mapOn: UIVisibilityConfig;
-  focus_pc_mapOff: UIVisibilityConfig;
-  execute_sp: UIVisibilityConfig;
-  execute_pc: UIVisibilityConfig;
+export type UIVisibilityModeKey =
+  | "focus_sp_mapOn"
+  | "focus_sp_mapOff"
+  | "focus_pc_mapOn"
+  | "focus_pc_mapOff"
+  | "execute_sp"
+  | "execute_pc";
+
+export type UIVisibilitySettings = Record<
+  UIVisibilityModeKey,
+  UIVisibilityConfig
+> & {
+  showPersistenceStatus: boolean;
 };
 
 export const DEFAULT_UI_VISIBILITY: UIVisibilitySettings = {
@@ -28,6 +34,7 @@ export const DEFAULT_UI_VISIBILITY: UIVisibilitySettings = {
   focus_pc_mapOff: { header: true, tabBar: true },
   execute_sp: { header: true, tabBar: true },
   execute_pc: { header: true, tabBar: true },
+  showPersistenceStatus: true,
 };
 
 type CloseUIVisibilityPanelOptions = {
@@ -120,7 +127,7 @@ export function useDeferredUIVisibilitySettings({
 
   const updateDraftConfig = useCallback(
     (
-      key: keyof UIVisibilitySettings,
+      key: UIVisibilityModeKey,
       field: keyof UIVisibilityConfig,
       value: boolean,
     ) => {

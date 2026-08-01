@@ -6,6 +6,7 @@ import type {
 
 interface PersistenceStatusIndicatorProps {
   status: PersistenceStatus;
+  showRoutineStatus: boolean;
   failedStores: readonly string[];
   failureDetails?: readonly PersistenceFailureDetail[];
   onRetry: () => void;
@@ -27,6 +28,7 @@ const STORE_LABELS: Record<string, string> = {
 
 const PersistenceStatusIndicator: React.FC<PersistenceStatusIndicatorProps> = ({
   status,
+  showRoutineStatus,
   failedStores,
   failureDetails = [],
   onRetry,
@@ -98,6 +100,10 @@ const PersistenceStatusIndicator: React.FC<PersistenceStatusIndicatorProps> = ({
         </div>
       </aside>
     );
+  }
+
+  if (!showRoutineStatus) {
+    return null;
   }
 
   const presentation = {

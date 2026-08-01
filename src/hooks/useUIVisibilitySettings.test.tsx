@@ -1,15 +1,51 @@
 // @vitest-environment jsdom
 
 import { act, renderHook } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   DEFAULT_UI_VISIBILITY,
   type UIVisibilitySettings,
   useDeferredUIVisibilitySettings,
+  useUIVisibilitySettings,
 } from "./useUIVisibilitySettings";
 
 const cloneSettings = (settings: UIVisibilitySettings): UIVisibilitySettings =>
   structuredClone(settings);
+
+describe("useUIVisibilitySettings", () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
+  it("既存の保存値には保存状態表示の既定値を補完する", () => {
+    localStorage.setItem(
+      "uiVisibilitySettings",
+      JSON.stringify({
+        execute_pc: { header: false, tabBar: true },
+      }),
+    );
+
+    const { result } = renderHook(() => useUIVisibilitySettings());
+
+    expect(result.current.uiVisibilitySettings.execute_pc.header).toBe(false);
+    expect(result.current.uiVisibilitySettings.showPersistenceStatus).toBe(
+      true,
+    );
+  });
+
+  it("保存状態表示をオフにした設定を復元する", () => {
+    localStorage.setItem(
+      "uiVisibilitySettings",
+      JSON.stringify({ showPersistenceStatus: false }),
+    );
+
+    const { result } = renderHook(() => useUIVisibilitySettings());
+
+    expect(result.current.uiVisibilitySettings.showPersistenceStatus).toBe(
+      false,
+    );
+  });
+});
 
 describe("useDeferredUIVisibilitySettings", () => {
   it("commits checkbox changes only when the settings panel closes", () => {

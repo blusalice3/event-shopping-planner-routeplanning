@@ -14,6 +14,7 @@ describe("PersistenceStatusIndicator", () => {
     render(
       <PersistenceStatusIndicator
         status={status}
+        showRoutineStatus
         failedStores={[]}
         onRetry={vi.fn()}
         onExportBackup={vi.fn()}
@@ -23,12 +24,30 @@ describe("PersistenceStatusIndicator", () => {
     expect(screen.getByRole("status")).toHaveTextContent(label);
   });
 
+  it.each(["unsaved", "saving", "saved"] as const)(
+    "設定がオフなら %s 状態を表示しない",
+    (status) => {
+      render(
+        <PersistenceStatusIndicator
+          status={status}
+          showRoutineStatus={false}
+          failedStores={[]}
+          onRetry={vi.fn()}
+          onExportBackup={vi.fn()}
+        />,
+      );
+
+      expect(screen.queryByRole("status")).not.toBeInTheDocument();
+    },
+  );
+
   it("失敗箇所と、再試行・バックアップ操作を表示する", () => {
     const onRetry = vi.fn();
     const onExportBackup = vi.fn();
     render(
       <PersistenceStatusIndicator
         status="failed"
+        showRoutineStatus={false}
         failedStores={["eventLists", "mapData"]}
         onRetry={onRetry}
         onExportBackup={onExportBackup}
@@ -81,6 +100,7 @@ describe("PersistenceStatusIndicator", () => {
     render(
       <PersistenceStatusIndicator
         status="failed"
+        showRoutineStatus
         failedStores={failureDetails.map(({ storeName }) => storeName)}
         failureDetails={failureDetails}
         onRetry={vi.fn()}

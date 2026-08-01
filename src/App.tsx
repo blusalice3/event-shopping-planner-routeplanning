@@ -158,7 +158,7 @@ import {
   DEFAULT_UI_VISIBILITY,
   useDeferredUIVisibilitySettings,
   useUIVisibilitySettings,
-  type UIVisibilitySettings,
+  type UIVisibilityModeKey,
 } from "./hooks/useUIVisibilitySettings";
 import { useNumberCellOutlineStyle } from "./hooks/useNumberCellOutlineStyle";
 import { useDisablePriceUndefinedCheck } from "./hooks/useDisablePriceUndefinedCheck";
@@ -1086,12 +1086,12 @@ const App: React.FC = () => {
 
     if (currentMode === "focus") {
       const key =
-        `focus_${layout}_${focusModeMapVisible ? "mapOn" : "mapOff"}` as keyof UIVisibilitySettings;
+        `focus_${layout}_${focusModeMapVisible ? "mapOn" : "mapOff"}` as UIVisibilityModeKey;
       const config = uiVisibilitySettings[key];
       rawHeader = config.header;
       rawTabBar = config.tabBar;
     } else if (currentMode === "execute") {
-      const key = `execute_${layout}` as keyof UIVisibilitySettings;
+      const key = `execute_${layout}` as UIVisibilityModeKey;
       const config = uiVisibilitySettings[key];
       rawHeader = config.header;
       rawTabBar = config.tabBar;
@@ -5780,6 +5780,7 @@ const App: React.FC = () => {
       )}
       <PersistenceStatusIndicator
         status={persistenceStatus}
+        showRoutineStatus={uiVisibilitySettings.showPersistenceStatus}
         failedStores={failedStores}
         failureDetails={failureDetails}
         onRetry={retrySave}
