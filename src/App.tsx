@@ -62,15 +62,13 @@ import {
   hasBulkAddLayoutInfo,
   type BulkAddMetadata,
 } from "./features/events/bulkAdd";
-import { type EventUpdateDiff } from "./features/events/updateDiff";
+import { type EventUpdateApplyOptions } from "./features/events/updateApply";
 import {
-  applyEventUpdateToItems,
-  removeDeletedIdsFromExecuteModeItems,
-  type EventUpdateApplyOptions,
-} from "./features/events/updateApply";
-import {
+  applyPendingEventUpdate,
   buildEventUpdateDiffFromSpreadsheet,
   resolveSpreadsheetSource,
+  type PendingEventUpdate,
+  type SpreadsheetSource,
 } from "./features/events/updateFlow";
 import {
   buildEventExportFile,
@@ -328,14 +326,56 @@ const resolveDayMapRotationState = (
 };
 
 const App: React.FC = () => {
-  const [eventLists, setEventLists] = useState<Record<string, ShoppingItem[]>>(
-    {},
+  const [eventLists, setEventListsState] = useState<
+    Record<string, ShoppingItem[]>
+  >({});
+  const eventListsRef = useRef<Record<string, ShoppingItem[]>>({});
+  const commitEventLists = useCallback(
+    (nextAllEvents: Record<string, ShoppingItem[]>) => {
+      eventListsRef.current = nextAllEvents;
+      setEventListsState(nextAllEvents);
+    },
+    [],
   );
-  const latestEventListsRef = useRef(eventLists);
-  latestEventListsRef.current = eventLists;
-  const [eventMetadata, setEventMetadata] = useState<
+  const setEventLists = useCallback(
+    (next: React.SetStateAction<Record<string, ShoppingItem[]>>) => {
+      const nextAllEvents =
+        typeof next === "function"
+          ? (
+              next as (
+                current: Record<string, ShoppingItem[]>,
+              ) => Record<string, ShoppingItem[]>
+            )(eventListsRef.current)
+          : next;
+      commitEventLists(nextAllEvents);
+    },
+    [commitEventLists],
+  );
+  const [eventMetadata, setEventMetadataState] = useState<
     Record<string, EventMetadata>
   >({});
+  const eventMetadataRef = useRef<Record<string, EventMetadata>>({});
+  const commitEventMetadata = useCallback(
+    (nextAllEvents: Record<string, EventMetadata>) => {
+      eventMetadataRef.current = nextAllEvents;
+      setEventMetadataState(nextAllEvents);
+    },
+    [],
+  );
+  const setEventMetadata = useCallback(
+    (next: React.SetStateAction<Record<string, EventMetadata>>) => {
+      const nextAllEvents =
+        typeof next === "function"
+          ? (
+              next as (
+                current: Record<string, EventMetadata>,
+              ) => Record<string, EventMetadata>
+            )(eventMetadataRef.current)
+          : next;
+      commitEventMetadata(nextAllEvents);
+    },
+    [commitEventMetadata],
+  );
   const [executeModeItems, setExecuteModeItems] = useState<
     Record<string, ExecuteModeItems>
   >({});
@@ -434,9 +474,9 @@ const App: React.FC = () => {
     number: string;
   } | null>(null);
 
-  const [showUpdateConfirmation, setShowUpdateConfirmation] = useState(false);
-  const [updateData, setUpdateData] = useState<EventUpdateDiff | null>(null);
-  const [updateEventName, setUpdateEventName] = useState<string | null>(null);
+  const [pendingEventUpdate, setPendingEventUpdate] =
+    useState<PendingEventUpdate | null>(null);
+  const pendingEventUpdateBaseItemsRef = useRef<ShoppingItem[] | null>(null);
   const [showUrlUpdateDialog, setShowUrlUpdateDialog] = useState(false);
   const [pendingUpdateEventName, setPendingUpdateEventName] = useState<
     string | null
@@ -1662,6 +1702,10 @@ const App: React.FC = () => {
 
   const handleDeleteEvent = useCallback(
     (eventName: string) => {
+      eventUpdatePreviewEpochRef.current += 1;
+      setPendingEventUpdate((pending) =>
+        pending?.eventName === eventName ? null : pending,
+      );
       setEventLists((prev) => removeRecordKey(prev, eventName));
       setEventMetadata((prev) => removeRecordKey(prev, eventName));
       updateExecuteModeItems((prev) => removeRecordKey(prev, eventName));
@@ -2875,37 +2919,70 @@ const App: React.FC = () => {
     [eventLists],
   );
 
-  const handleUpdateEvent = useCallback(
-    async (
-      eventName: string,
-      urlOverride?: { url: string; sheetName: string },
-    ) => {
-      const metadata = eventMetadata[eventName];
-      const source = resolveSpreadsheetSource(metadata, urlOverride);
+  const previewEventUpdate = useCallback(
+    async ({
+      kind,
+      eventName,
+      source,
+      onError,
+    }: {
+      kind: PendingEventUpdate["kind"];
+      eventName: string;
+      source: SpreadsheetSource;
+      onError: (error: unknown) => void;
+    }) => {
       eventUpdatePreviewEpochRef.current += 1;
-
-      if (!source) {
-        setPendingUpdateEventName(eventName);
-        setShowUrlUpdateDialog(true);
-        return;
-      }
+      setPendingEventUpdate(null);
+      pendingEventUpdateBaseItemsRef.current = null;
 
       const currentItems = eventLists[eventName];
       if (!currentItems) return;
       const requestEpoch = eventUpdatePreviewEpochRef.current;
       const isCurrentRequest = () =>
         eventUpdatePreviewEpochRef.current === requestEpoch &&
-        latestEventListsRef.current[eventName] === currentItems;
+        eventListsRef.current[eventName] === currentItems;
 
       await settleEventUpdatePreviewIfCurrent({
         loadPreview: () =>
           buildEventUpdateDiffFromSpreadsheet(currentItems, source),
         isCurrent: isCurrentRequest,
         commit: (updateDiff) => {
-          setUpdateData(updateDiff);
-          setUpdateEventName(eventName);
-          setShowUpdateConfirmation(true);
+          pendingEventUpdateBaseItemsRef.current = currentItems;
+          setPendingEventUpdate(
+            kind === "source-switch"
+              ? {
+                  kind,
+                  eventName,
+                  diff: updateDiff,
+                  nextSource: source,
+                }
+              : {
+                  kind,
+                  eventName,
+                  diff: updateDiff,
+                },
+          );
         },
+        onError,
+      });
+    },
+    [eventLists],
+  );
+
+  const handleUpdateEvent = useCallback(
+    async (eventName: string) => {
+      const source = resolveSpreadsheetSource(eventMetadata[eventName]);
+      if (!source) {
+        eventUpdatePreviewEpochRef.current += 1;
+        setPendingUpdateEventName(eventName);
+        setShowUrlUpdateDialog(true);
+        return;
+      }
+
+      await previewEventUpdate({
+        kind: "items-only",
+        eventName,
+        source,
         onError: (error) => {
           console.error("Update error:", error);
           setPendingUpdateEventName(eventName);
@@ -2913,15 +2990,14 @@ const App: React.FC = () => {
         },
       });
     },
-    [eventLists, eventMetadata],
+    [eventMetadata, previewEventUpdate],
   );
 
   const handleDuplicateEventResolution = useCallback(
     async (resolution: DuplicateEventResolution) => {
       const pending = pendingDuplicateEvent;
       if (!pending) return;
-      const requestEpoch = eventUpdatePreviewEpochRef.current + 1;
-      eventUpdatePreviewEpochRef.current = requestEpoch;
+      eventUpdatePreviewEpochRef.current += 1;
       setPendingDuplicateEvent(null);
 
       if (resolution.action === "create-alias") {
@@ -2951,37 +3027,28 @@ const App: React.FC = () => {
       }
 
       if (resolution.action === "open-update") {
-        await handleUpdateEvent(resolution.eventName, {
-          url: resolution.source.url,
-          sheetName: resolution.source.sheetName,
+        await previewEventUpdate({
+          kind: "items-only",
+          eventName: resolution.eventName,
+          source: {
+            url: resolution.source.url,
+            sheetName: resolution.source.sheetName,
+          },
+          onError: (error) => {
+            console.error("Update error:", error);
+            setPendingUpdateEventName(resolution.eventName);
+            setShowUrlUpdateDialog(true);
+          },
         });
         return;
       }
 
-      const currentItems = eventLists[resolution.eventName];
-      if (!currentItems) return;
-      const isCurrentRequest = () =>
-        eventUpdatePreviewEpochRef.current === requestEpoch &&
-        latestEventListsRef.current[resolution.eventName] === currentItems;
-
-      await settleEventUpdatePreviewIfCurrent({
-        loadPreview: () =>
-          buildEventUpdateDiffFromSpreadsheet(currentItems, {
-            url: resolution.source.url,
-            sheetName: resolution.source.sheetName,
-          }),
-        isCurrent: isCurrentRequest,
-        commit: (updateDiff) => {
-          setEventMetadata((prev) =>
-            upsertRecordKey(prev, resolution.eventName, {
-              spreadsheetUrl: resolution.source.url,
-              spreadsheetSheetName: resolution.source.sheetName,
-              lastImportDate: prev[resolution.eventName]?.lastImportDate || "",
-            }),
-          );
-          setUpdateData(updateDiff);
-          setUpdateEventName(resolution.eventName);
-          setShowUpdateConfirmation(true);
+      await previewEventUpdate({
+        kind: "source-switch",
+        eventName: resolution.eventName,
+        source: {
+          url: resolution.source.url,
+          sheetName: resolution.source.sheetName,
         },
         onError: (error) => {
           console.error("Source switch preview error:", error);
@@ -2991,7 +3058,7 @@ const App: React.FC = () => {
         },
       });
     },
-    [applyBulkAdd, eventLists, handleUpdateEvent, pendingDuplicateEvent],
+    [applyBulkAdd, pendingDuplicateEvent, previewEventUpdate],
   );
 
   const handleDuplicateEventCancel = useCallback(() => {
@@ -2999,45 +3066,50 @@ const App: React.FC = () => {
     setPendingDuplicateEvent(null);
   }, []);
 
-  const handleConfirmUpdate = (options: EventUpdateApplyOptions) => {
-    if (!updateData || !updateEventName) return;
+  const handleCancelUpdate = useCallback(() => {
+    setPendingEventUpdate(null);
+  }, []);
 
-    const { itemsToDelete } = updateData;
-    const eventName = updateEventName;
+  const handleConfirmUpdate = useCallback(
+    (options: EventUpdateApplyOptions) => {
+      if (!pendingEventUpdate) return;
 
-    setEventLists((prev) => {
-      const newItems = applyEventUpdateToItems(
-        prev[eventName] || [],
-        updateData,
+      const nextState = applyPendingEventUpdate({
+        state: {
+          eventLists: eventListsRef.current,
+          eventMetadata: eventMetadataRef.current,
+          executeModeItems: executeModeItemsRef.current,
+        },
+        pending: pendingEventUpdate,
+        baseItems: pendingEventUpdateBaseItemsRef.current,
         options,
-      );
-      return { ...prev, [eventName]: newItems };
-    });
+      });
+      if (!nextState) {
+        setPendingEventUpdate(null);
+        alert(
+          "確認中にイベントの品目が変更または削除されたため、更新元も品目も変更していません。もう一度更新してください。",
+        );
+        return;
+      }
 
-    updateExecuteModeItems((prev) => {
-      const eventItems = prev[eventName];
-      if (!eventItems) return prev;
+      commitEventLists(nextState.eventLists);
+      commitEventMetadata(nextState.eventMetadata);
+      commitExecuteModeItems(nextState.executeModeItems);
 
-      const deleteIds = new Set(itemsToDelete.map((item) => item.id));
-      const updatedEventItems = removeDeletedIdsFromExecuteModeItems(
-        eventItems,
-        deleteIds,
-      );
-
-      return {
-        ...prev,
-        [eventName]: updatedEventItems,
-      };
-    });
-
-    setShowUpdateConfirmation(false);
-    setUpdateData(null);
-    setUpdateEventName(null);
-    alert("アイテムを更新しました。");
-  };
+      pendingEventUpdateBaseItemsRef.current = null;
+      setPendingEventUpdate(null);
+      alert("アイテムを更新しました。");
+    },
+    [
+      commitEventLists,
+      commitEventMetadata,
+      commitExecuteModeItems,
+      pendingEventUpdate,
+    ],
+  );
 
   const handleUrlUpdate = useCallback(
-    (newUrl: string, sheetName: string) => {
+    async (newUrl: string, sheetName: string) => {
       setShowUrlUpdateDialog(false);
       if (!pendingUpdateEventName) return;
 
@@ -3046,21 +3118,22 @@ const App: React.FC = () => {
       const normalizedSheetName =
         sheetName || currentMetadata?.spreadsheetSheetName || "";
 
-      setEventMetadata((prev) =>
-        upsertRecordKey(prev, eventName, {
-          spreadsheetUrl: newUrl,
-          spreadsheetSheetName: normalizedSheetName,
-          lastImportDate: currentMetadata?.lastImportDate || "",
-        }),
-      );
-
       setPendingUpdateEventName(null);
-      handleUpdateEvent(eventName, {
-        url: newUrl,
-        sheetName: normalizedSheetName,
+      await previewEventUpdate({
+        kind: "source-switch",
+        eventName,
+        source: {
+          url: newUrl,
+          sheetName: normalizedSheetName,
+        },
+        onError: (error) => {
+          console.error("Update error:", error);
+          setPendingUpdateEventName(eventName);
+          setShowUrlUpdateDialog(true);
+        },
       });
     },
-    [pendingUpdateEventName, eventMetadata, handleUpdateEvent],
+    [pendingUpdateEventName, eventMetadata, previewEventUpdate],
   );
 
   const handleImportMapData = useCallback(async (eventName: string) => {
@@ -5550,12 +5623,9 @@ const App: React.FC = () => {
         itemToDelete={itemToDelete}
         handleConfirmDelete={handleConfirmDelete}
         setItemToDelete={setItemToDelete}
-        showUpdateConfirmation={showUpdateConfirmation}
-        updateData={updateData}
+        pendingEventUpdate={pendingEventUpdate}
         handleConfirmUpdate={handleConfirmUpdate}
-        setShowUpdateConfirmation={setShowUpdateConfirmation}
-        setUpdateData={setUpdateData}
-        setUpdateEventName={setUpdateEventName}
+        handleCancelUpdate={handleCancelUpdate}
         showUrlUpdateDialog={showUrlUpdateDialog}
         pendingUpdateEventName={pendingUpdateEventName}
         eventMetadata={eventMetadata}

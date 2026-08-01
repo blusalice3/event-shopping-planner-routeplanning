@@ -12,6 +12,24 @@ const commonProps = {
 };
 
 describe("UpdateConfirmationModal quantity confirmation", () => {
+  it("通常更新では更新元の案内を表示せずキャンセルできる", () => {
+    const onCancel = vi.fn();
+    render(
+      <UpdateConfirmationModal
+        {...commonProps}
+        onCancel={onCancel}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText("更新元を切り替えます")).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "更新元を切り替えて更新" }),
+    ).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "キャンセル" }));
+    expect(onCancel).toHaveBeenCalledOnce();
+  });
+
   it("不正数量を利用者向けに説明する", () => {
     render(
       <UpdateConfirmationModal
@@ -106,5 +124,30 @@ describe("UpdateConfirmationModal quantity confirmation", () => {
       screen.getByText(/予定数量は実購入数より多い必要があります/),
     ).toBeInTheDocument();
     expect(screen.getByText(/実購入3、予定5 → 2/)).toBeInTheDocument();
+  });
+
+  it("更新元切替では新しい接続先とキャンセル時の扱いを表示する", () => {
+    render(
+      <UpdateConfirmationModal
+        {...commonProps}
+        nextSource={{
+          url: "https://docs.google.com/spreadsheets/d/new-source",
+          sheetName: "新刊一覧",
+        }}
+        onConfirm={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("更新元を切り替えます")).toBeInTheDocument();
+    expect(
+      screen.getByText("https://docs.google.com/spreadsheets/d/new-source"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("新刊一覧")).toBeInTheDocument();
+    expect(
+      screen.getByText("キャンセルすると、品目も更新元も変更されません。"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "更新元を切り替えて更新" }),
+    ).toBeInTheDocument();
   });
 });

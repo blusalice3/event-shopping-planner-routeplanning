@@ -16,7 +16,7 @@ import {
   MapImportDialog,
   loadBlockDetectionSettings,
 } from "../../../components/map";
-import type { EventUpdateDiff } from "../../../features/events/updateDiff";
+import type { PendingEventUpdate } from "../../../features/events/updateFlow";
 import {
   formatMovePlanCount,
   type MovePlan,
@@ -82,12 +82,9 @@ type AppOverlayLayerProps = {
   itemToDelete: ShoppingItem | null;
   handleConfirmDelete: DeleteConfirmationModalProps["onConfirm"];
   setItemToDelete: React.Dispatch<React.SetStateAction<ShoppingItem | null>>;
-  showUpdateConfirmation: boolean;
-  updateData: EventUpdateDiff | null;
+  pendingEventUpdate: PendingEventUpdate | null;
   handleConfirmUpdate: UpdateConfirmationModalProps["onConfirm"];
-  setShowUpdateConfirmation: React.Dispatch<React.SetStateAction<boolean>>;
-  setUpdateData: React.Dispatch<React.SetStateAction<EventUpdateDiff | null>>;
-  setUpdateEventName: React.Dispatch<React.SetStateAction<string | null>>;
+  handleCancelUpdate: UpdateConfirmationModalProps["onCancel"];
   showUrlUpdateDialog: boolean;
   pendingUpdateEventName: string | null;
   eventMetadata: Record<string, EventMetadata>;
@@ -223,12 +220,9 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
   itemToDelete,
   handleConfirmDelete,
   setItemToDelete,
-  showUpdateConfirmation,
-  updateData,
+  pendingEventUpdate,
   handleConfirmUpdate,
-  setShowUpdateConfirmation,
-  setUpdateData,
-  setUpdateEventName,
+  handleCancelUpdate,
   showUrlUpdateDialog,
   pendingUpdateEventName,
   eventMetadata,
@@ -382,26 +376,27 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         />
       )}
 
-      {showUpdateConfirmation && updateData && (
+      {pendingEventUpdate && (
         <UpdateConfirmationModal
-          itemsToDelete={updateData.itemsToDelete}
-          itemsToUpdate={updateData.itemsToUpdate}
-          itemsToAdd={updateData.itemsToAdd}
-          protectedFromDelete={updateData.protectedFromDelete}
-          protectedFromUpdate={updateData.protectedFromUpdate}
-          quantityWarnings={updateData.quantityWarnings}
+          itemsToDelete={pendingEventUpdate.diff.itemsToDelete}
+          itemsToUpdate={pendingEventUpdate.diff.itemsToUpdate}
+          itemsToAdd={pendingEventUpdate.diff.itemsToAdd}
+          protectedFromDelete={pendingEventUpdate.diff.protectedFromDelete}
+          protectedFromUpdate={pendingEventUpdate.diff.protectedFromUpdate}
+          quantityWarnings={pendingEventUpdate.diff.quantityWarnings}
           pendingPurchasedQuantityChanges={
-            updateData.pendingPurchasedQuantityChanges
+            pendingEventUpdate.diff.pendingPurchasedQuantityChanges
           }
           limitedPurchaseQuantityConflicts={
-            updateData.limitedPurchaseQuantityConflicts
+            pendingEventUpdate.diff.limitedPurchaseQuantityConflicts
+          }
+          nextSource={
+            pendingEventUpdate.kind === "source-switch"
+              ? pendingEventUpdate.nextSource
+              : undefined
           }
           onConfirm={handleConfirmUpdate}
-          onCancel={() => {
-            setShowUpdateConfirmation(false);
-            setUpdateData(null);
-            setUpdateEventName(null);
-          }}
+          onCancel={handleCancelUpdate}
         />
       )}
 

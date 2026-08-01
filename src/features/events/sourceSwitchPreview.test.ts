@@ -30,6 +30,27 @@ describe("settleEventUpdatePreviewIfCurrent", () => {
     expect(onError).not.toHaveBeenCalled();
   });
 
+  it("reports a current preview failure without committing", async () => {
+    const commit = vi.fn();
+    const onError = vi.fn();
+    const error = new Error("preview failed");
+
+    await expect(
+      settleEventUpdatePreviewIfCurrent({
+        loadPreview: async () => {
+          throw error;
+        },
+        isCurrent: () => true,
+        commit,
+        onError,
+      }),
+    ).resolves.toBe("failed");
+
+    expect(commit).not.toHaveBeenCalled();
+    expect(onError).toHaveBeenCalledOnce();
+    expect(onError).toHaveBeenCalledWith(error);
+  });
+
   it("does not let an older response overwrite a newer update preview", async () => {
     const first = createDeferred<string>();
     const second = createDeferred<string>();

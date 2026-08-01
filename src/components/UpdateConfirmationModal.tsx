@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import type { EventUpdateApplyOptions } from "../features/events/updateApply";
+import type { SpreadsheetSource } from "../features/events/updateFlow";
 import type {
   LimitedPurchaseQuantityConflict,
   PendingPurchasedQuantityChange,
@@ -17,6 +18,7 @@ interface UpdateConfirmationModalProps {
   quantityWarnings?: QuantitySyncWarning[];
   pendingPurchasedQuantityChanges?: PendingPurchasedQuantityChange[];
   limitedPurchaseQuantityConflicts?: LimitedPurchaseQuantityConflict[];
+  nextSource?: SpreadsheetSource;
   onConfirm: (options: EventUpdateApplyOptions) => void;
   onCancel: () => void;
 }
@@ -30,6 +32,7 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
   quantityWarnings = [],
   pendingPurchasedQuantityChanges = [],
   limitedPurchaseQuantityConflicts = [],
+  nextSource,
   onConfirm,
   onCancel,
 }) => {
@@ -50,6 +53,27 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
           </h2>
 
           <div className="space-y-4 mb-6">
+            {nextSource && (
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-md border border-blue-200 dark:border-blue-700">
+                <h3 className="text-sm font-semibold text-blue-800 dark:text-blue-300 mb-2">
+                  更新元を切り替えます
+                </h3>
+                <dl className="text-sm text-blue-700 dark:text-blue-300 space-y-1">
+                  <div>
+                    <dt className="font-medium">新しいURL</dt>
+                    <dd className="break-all">{nextSource.url}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium">新しいシート名</dt>
+                    <dd>{nextSource.sheetName || "（指定なし）"}</dd>
+                  </div>
+                </dl>
+                <p className="mt-2 text-sm text-blue-700 dark:text-blue-300">
+                  キャンセルすると、品目も更新元も変更されません。
+                </p>
+              </div>
+            )}
+
             {itemsToDelete.length > 0 && (
               <div>
                 <h3 className="text-sm font-semibold text-red-600 dark:text-red-400 mb-2">
@@ -234,7 +258,7 @@ const UpdateConfirmationModal: React.FC<UpdateConfirmationModalProps> = ({
               }
               className="px-4 py-2 text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 transition-colors"
             >
-              更新を実行
+              {nextSource ? "更新元を切り替えて更新" : "更新を実行"}
             </button>
           </div>
         </div>
