@@ -1701,7 +1701,6 @@ const App: React.FC = () => {
 
   const handleDeleteEvent = useCallback(
     (eventName: string) => {
-      eventUpdatePreviewEpochRef.current += 1;
       setPendingEventUpdate((pending) =>
         pending?.eventName === eventName ? null : pending,
       );

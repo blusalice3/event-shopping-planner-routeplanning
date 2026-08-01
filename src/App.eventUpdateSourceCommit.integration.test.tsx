@@ -185,6 +185,23 @@ describe("App event update source commit integration", () => {
     expect(previewHandler).not.toContain("updateExecuteModeItems(");
   });
 
+  it("does not invalidate another event preview when deleting an unrelated event", () => {
+    const source = appSource();
+    const deleteHandler = sliceBetween(
+      source,
+      "const handleDeleteEvent = useCallback",
+      "const handleRenameEvent = useCallback",
+    );
+
+    expect(deleteHandler).not.toContain(
+      "eventUpdatePreviewEpochRef.current += 1",
+    );
+    expect(deleteHandler).toContain(
+      "pending?.eventName === eventName ? null : pending",
+    );
+    expect(deleteHandler).toContain("removeRecordKey(prev, eventName)");
+  });
+
   it("makes callers explicitly distinguish same-source and source-switch previews", () => {
     const source = appSource();
     const duplicateHandler = sliceBetween(
