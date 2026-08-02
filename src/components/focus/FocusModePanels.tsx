@@ -5,8 +5,7 @@ import {
   ShoppingItem,
 } from "../../types/item";
 import type { FocusMapCenteringMode, FocusPhase } from "../../types/focus";
-import { buildStatusSegments } from "../../features/space-navigation/domain/statusSegments";
-import { NAVIGATOR_STATUS_COLORS } from "../../features/space-navigation/components/SpaceNavigatorLegend";
+import { hasMissingLimitedQuantity } from "../../features/space-navigation/domain/statusSegments";
 import ShoppingItemCard from "../ShoppingItemCard";
 import MapRotationControls from "../map/MapRotationControls";
 
@@ -77,23 +76,67 @@ const phaseDisplayNames: Record<FocusPhase, string> = {
   late: "遅参",
 };
 
+const HEADER_STATUS_ORDER = [
+  "unvisited",
+  "postponed",
+  "late",
+  "limited",
+  "purchased",
+  "soldOut",
+  "absent",
+] as const;
+type HeaderStatusKind = (typeof HEADER_STATUS_ORDER)[number];
+
+const HEADER_STATUS_COLORS: Record<HeaderStatusKind, string> = {
+  unvisited: "#94a3b8",
+  postponed: "#8b5cf6",
+  late: "#3b82f6",
+  limited: "#f97316",
+  purchased: "#22c55e",
+  soldOut: "#ef4444",
+  absent: "#eab308",
+};
+
+const getHeaderStatusKind = (item: ShoppingItem): HeaderStatusKind => {
+  switch (item.purchaseStatus) {
+    case "None":
+      return "unvisited";
+    case "Postpone":
+      return "postponed";
+    case "Late":
+      return "late";
+    case "LimitedPurchase":
+      return hasMissingLimitedQuantity(item) ? "limited" : "purchased";
+    case "Purchased":
+      return "purchased";
+    case "SoldOut":
+      return "soldOut";
+    case "Absent":
+      return "absent";
+  }
+};
+
 const headerDarkOverlay =
   "linear-gradient(rgba(15, 23, 42, 0.28), rgba(15, 23, 42, 0.28))";
 const fallbackHeaderGradient =
   "linear-gradient(to right, #6366f1 0%, #6366f1 50%, #9333ea 50%, #9333ea 100%)";
 
 const buildHeaderBackgroundImage = (items: readonly ShoppingItem[]): string => {
-  const segments = buildStatusSegments(items);
-  if (segments.length === 0) {
+  const presentKinds = new Set(items.map(getHeaderStatusKind));
+  const orderedKinds = HEADER_STATUS_ORDER.filter((kind) =>
+    presentKinds.has(kind),
+  );
+  if (orderedKinds.length === 0) {
     return `${headerDarkOverlay}, ${fallbackHeaderGradient}`;
   }
 
-  const stops = segments.flatMap((segment) => {
-    const color = NAVIGATOR_STATUS_COLORS[segment.kind];
-    return [
-      `${color} ${segment.startRatio * 100}%`,
-      `${color} ${segment.endRatio * 100}%`,
-    ];
+  const widthRatio = 1 / orderedKinds.length;
+  const stops = orderedKinds.flatMap((kind, index) => {
+    const color = HEADER_STATUS_COLORS[kind];
+    const startRatio = index * widthRatio;
+    const endRatio =
+      index === orderedKinds.length - 1 ? 1 : (index + 1) * widthRatio;
+    return [`${color} ${startRatio * 100}%`, `${color} ${endRatio * 100}%`];
   });
   return `${headerDarkOverlay}, linear-gradient(to right, ${stops.join(", ")})`;
 };

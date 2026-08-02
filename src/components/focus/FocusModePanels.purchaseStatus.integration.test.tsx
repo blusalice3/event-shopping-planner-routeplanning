@@ -323,13 +323,15 @@ describe("FocusModeHeader purchase-aware background", () => {
     expect(backgroundImage).toContain("rgba(15, 23, 42, 0.28)");
   });
 
-  it("keeps the fixed unvisited, postponed, late, limited, completed order", () => {
+  it("keeps the fixed status color order", () => {
     renderHeader({
       currentVisitItems: [
-        makeItem("completed", "Purchased"),
+        makeItem("absent", "Absent"),
         makeItem("late", "Late"),
+        makeItem("sold-out", "SoldOut"),
         makeItem("limited", "LimitedPurchase", { quantity: 3 }),
         makeItem("unvisited", "None"),
+        makeItem("purchased", "Purchased"),
         makeItem("postponed", "Postpone"),
       ],
     });
@@ -341,18 +343,18 @@ describe("FocusModeHeader purchase-aware background", () => {
       "#3b82f6",
       "#f97316",
       "#22c55e",
+      "#ef4444",
+      "#eab308",
     ].map((color) => backgroundImage.indexOf(color));
 
     expect(colorPositions.every((position) => position >= 0)).toBe(true);
     expect(colorPositions).toEqual([...colorPositions].sort((a, b) => a - b));
   });
 
-  it("uses a full green background when every item is complete", () => {
+  it("keeps purchased and completed limited quantities green", () => {
     renderHeader({
       currentVisitItems: [
         makeItem("purchased", "Purchased"),
-        makeItem("sold-out", "SoldOut"),
-        makeItem("absent", "Absent"),
         makeItem("limited-complete", "LimitedPurchase", {
           quantity: 3,
           limitedPurchasedQuantity: 2,
@@ -365,6 +367,38 @@ describe("FocusModeHeader purchase-aware background", () => {
     expect(backgroundImage).toContain("#22c55e 100%");
     expect(backgroundImage).not.toContain("#94a3b8");
     expect(backgroundImage).not.toContain("#f97316");
+    expect(backgroundImage).not.toContain("#ef4444");
+    expect(backgroundImage).not.toContain("#eab308");
+  });
+
+  it("uses a full red background when every item is sold out", () => {
+    renderHeader({
+      currentVisitItems: [
+        makeItem("sold-out-1", "SoldOut"),
+        makeItem("sold-out-2", "SoldOut"),
+      ],
+    });
+
+    const backgroundImage = getBackgroundImage();
+    expect(backgroundImage).toContain("#ef4444 0%");
+    expect(backgroundImage).toContain("#ef4444 100%");
+    expect(backgroundImage).not.toContain("#22c55e");
+    expect(backgroundImage).not.toContain("#eab308");
+  });
+
+  it("uses a full yellow background when every item is absent", () => {
+    renderHeader({
+      currentVisitItems: [
+        makeItem("absent-1", "Absent"),
+        makeItem("absent-2", "Absent"),
+      ],
+    });
+
+    const backgroundImage = getBackgroundImage();
+    expect(backgroundImage).toContain("#eab308 0%");
+    expect(backgroundImage).toContain("#eab308 100%");
+    expect(backgroundImage).not.toContain("#22c55e");
+    expect(backgroundImage).not.toContain("#ef4444");
   });
 
   it("separates missing and entered limited quantities into orange and green", () => {
