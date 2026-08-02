@@ -98,7 +98,7 @@ describe("App executeModeItems commit integration", () => {
     );
   });
 
-  it("keeps event delete, rename, and import execute-list writes on the ref-backed updater", () => {
+  it("keeps event mutations and atomic XLSX restores on committed helpers", () => {
     const source = appSource();
 
     const deleteHandler = sliceBetween(
@@ -114,7 +114,12 @@ describe("App executeModeItems commit integration", () => {
     const importHandler = sliceBetween(
       source,
       "const handleExportFileImport = useCallback",
-      "const handleImportMapData = useCallback",
+      "const previewEventUpdate = useCallback",
+    );
+    const restoreHandler = sliceBetween(
+      source,
+      "const handleBackupRestore = useCallback",
+      "const handleConfirmExport = useCallback",
     );
 
     expect(deleteHandler).toContain(
@@ -123,8 +128,13 @@ describe("App executeModeItems commit integration", () => {
     expect(renameHandler).toMatch(
       /updateExecuteModeItems\(\(prev\) =>\s*renameRecordKey\(prev, eventToRename, newName\),?\s*\)/,
     );
-    expect(importHandler).toMatch(
-      /updateExecuteModeItems\(\(prev\) =>\s*upsertRecordKey\(prev, eventName, executeItems\),?\s*\)/,
+    expect(importHandler).toContain(
+      "buildXlsxEventRestoreSource(importedData)",
+    );
+    expect(importHandler).toContain("setPendingBackup(validation.backup)");
+    expect(importHandler).not.toContain("updateExecuteModeItems((prev)");
+    expect(restoreHandler).toContain(
+      "setExecuteModeItemsCommitted(restoredValues.executeModeItems)",
     );
   });
 

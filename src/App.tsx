@@ -74,12 +74,11 @@ import {
   buildEventExportFile,
   hasExportableItems,
 } from "./features/events/exportFlow";
-import { toImportedEventData } from "./features/events/fileImport";
 import {
-  removeRecordKey,
-  renameRecordKey,
-  upsertRecordKey,
-} from "./features/events/recordOps";
+  buildXlsxEventRestoreSource,
+  toImportedEventData,
+} from "./features/events/fileImport";
+import { removeRecordKey, renameRecordKey } from "./features/events/recordOps";
 import {
   computeUpdateItem,
   computeDeleteItem,
@@ -307,6 +306,11 @@ type RotationScreenType = "mapTab" | "focusMode";
 type PendingDuplicateEventImport = {
   analysis: SameSourceEventAnalysis | DifferentSourceEventAnalysis;
   metadata?: BulkAddMetadata;
+};
+
+type PendingXlsxRestoreCompletion = {
+  errors: string[];
+  itemCount: number;
 };
 
 const resolveDayMapRotationState = (
@@ -571,6 +575,8 @@ const App: React.FC = () => {
   const exportFileInputRef = useRef<HTMLInputElement>(null);
   const backupFileInputRef = useRef<HTMLInputElement>(null);
   const [pendingBackup, setPendingBackup] = useState<AppBackupV1 | null>(null);
+  const [pendingXlsxRestoreCompletion, setPendingXlsxRestoreCompletion] =
+    useState<PendingXlsxRestoreCompletion | null>(null);
 
   const [mapImportDialogOpen, setMapImportDialogOpen] = useState(false);
   const [mapImportPendingFile, setMapImportPendingFile] = useState<File | null>(
@@ -2588,6 +2594,7 @@ const App: React.FC = () => {
       const file = event.target.files?.[0];
       event.target.value = "";
       if (!file) return;
+      setPendingXlsxRestoreCompletion(null);
 
       try {
         const result = parseAppBackup(await file.text());
@@ -2618,8 +2625,13 @@ const App: React.FC = () => {
         throw new Error("復元するバックアップをもう一度選んでください。");
       }
 
+      const currentData = buildCurrentAppData();
+      const isUpdate = Object.prototype.hasOwnProperty.call(
+        currentData.eventLists,
+        targetEventName,
+      );
       const nextData = buildEventRestoreData(
-        buildCurrentAppData(),
+        currentData,
         pendingBackup.data,
         sourceEventName,
         targetEventName,
@@ -2684,11 +2696,24 @@ const App: React.FC = () => {
       setMapViewActive(false);
       clearSelection();
       setPendingBackup(null);
+      setPendingXlsxRestoreCompletion(null);
+
+      if (pendingXlsxRestoreCompletion) {
+        alert(
+          buildImportCompletionMessage({
+            errors: pendingXlsxRestoreCompletion.errors,
+            eventName: targetEventName,
+            isUpdate,
+            itemCount: pendingXlsxRestoreCompletion.itemCount,
+          }),
+        );
+      }
     },
     [
       buildCurrentAppData,
       clearSelection,
       pendingBackup,
+      pendingXlsxRestoreCompletion,
       runExclusiveRestore,
       setExecuteModeItemsCommitted,
     ],
@@ -2713,9 +2738,15 @@ const App: React.FC = () => {
             executeModeItems,
             dayModes,
             mapData,
+            mapRotationSettings,
+            mapViewportSettings,
             routeSettings,
             hallDefinitions,
             hallRouteSettings,
+            blockDetectionSettings:
+              options.format === "full" && options.includeMapData
+                ? readBlockDetectionSettingsStoreForBackup([exportEventName])
+                : {},
           },
         );
 
@@ -2733,6 +2764,8 @@ const App: React.FC = () => {
       eventMetadata,
       dayModes,
       mapData,
+      mapRotationSettings,
+      mapViewportSettings,
       routeSettings,
       hallDefinitions,
       hallRouteSettings,
@@ -2746,6 +2779,7 @@ const App: React.FC = () => {
       if (!file) return;
 
       e.target.value = "";
+      setPendingXlsxRestoreCompletion(null);
 
       try {
         const result = await importFromXlsx(file);
@@ -2844,77 +2878,24 @@ const App: React.FC = () => {
         }
 
         const importedData = toImportedEventData(resolvedResult);
-        const eventName = importedData.eventName;
-        const isUpdate = !!eventLists[eventName];
-
-        setEventLists((prev) =>
-          upsertRecordKey(prev, eventName, importedData.items),
-        );
-
-        if (importedData.metadata) {
-          const metadata = importedData.metadata;
-          setEventMetadata((prev) =>
-            upsertRecordKey(prev, eventName, metadata),
-          );
-        }
-
-        if (importedData.executeModeItems) {
-          const executeItems = importedData.executeModeItems;
-          updateExecuteModeItems((prev) =>
-            upsertRecordKey(prev, eventName, executeItems),
-          );
-        }
-        if (importedData.dayModes) {
-          const importedDayModes = importedData.dayModes;
-          setDayModes((prev) =>
-            upsertRecordKey(prev, eventName, importedDayModes),
-          );
-        }
-
-        if (importedData.mapData) {
-          const importedMapData = importedData.mapData;
-          setMapData((prev) =>
-            upsertRecordKey(prev, eventName, importedMapData),
-          );
-        }
-
-        if (importedData.routeSettings) {
-          const importedRouteSettings = importedData.routeSettings;
-          setRouteSettings((prev) =>
-            upsertRecordKey(prev, eventName, importedRouteSettings),
-          );
-        }
-
-        if (importedData.hallDefinitions) {
-          const importedHallDefinitions = importedData.hallDefinitions;
-          setHallDefinitions((prev) =>
-            upsertRecordKey(prev, eventName, importedHallDefinitions),
-          );
-        }
-
-        if (importedData.hallRouteSettings) {
-          const importedHallRouteSettings = importedData.hallRouteSettings;
-          setHallRouteSettings((prev) =>
-            upsertRecordKey(prev, eventName, importedHallRouteSettings),
-          );
-        }
-
-        alert(
-          buildImportCompletionMessage({
-            errors: importedData.errors,
-            eventName,
-            isUpdate,
-            itemCount: importedData.items.length,
+        const restoreSource = buildXlsxEventRestoreSource(importedData);
+        const validation = parseAppBackup(
+          createAppBackup(restoreSource.data, new Date(), {
+            blockDetectionSettings: restoreSource.blockDetectionSettings,
           }),
         );
-
-        const nextTab = resolveEventListTab(importedData.items);
-        if (!nextTab) {
-          alert("参加日がないため処理を停止しました。");
+        if (!validation.ok) {
+          alert(
+            `Excel復元データを検証できませんでした。\n${validation.errors.join("\n")}`,
+          );
           return;
         }
-        setActiveEventName(eventName);
-        setActiveTab(nextTab);
+
+        setPendingXlsxRestoreCompletion({
+          errors: importedData.errors,
+          itemCount: importedData.items.length,
+        });
+        setPendingBackup(validation.backup);
       } catch (error) {
         console.error("Import error:", error);
         alert(
@@ -2922,7 +2903,7 @@ const App: React.FC = () => {
         );
       }
     },
-    [eventLists],
+    [],
   );
 
   const previewEventUpdate = useCallback(
@@ -5759,7 +5740,10 @@ const App: React.FC = () => {
           pendingBackup ? Object.keys(pendingBackup.data.eventLists).sort() : []
         }
         currentEventNames={Object.keys(eventLists)}
-        onClose={() => setPendingBackup(null)}
+        onClose={() => {
+          setPendingBackup(null);
+          setPendingXlsxRestoreCompletion(null);
+        }}
         onRestore={handleBackupRestore}
       />
       <MapReimportConfirmationDialog

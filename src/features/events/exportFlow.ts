@@ -6,9 +6,12 @@ import type {
 } from "../../types/item";
 import type { ExportOptions } from "../../types/export";
 import type {
+  BlockDetectionSettingsStore,
   HallDefinitionsStore,
   HallRouteSettingsStore,
   MapDataStore,
+  MapRotationSettingsStore,
+  MapViewportSettingsStore,
   RouteSettingsStore,
 } from "../../types/map";
 import { exportToXlsx } from "../../utils/exportImport";
@@ -17,9 +20,12 @@ type ExportStores = {
   executeModeItems: Record<string, ExecuteModeItems>;
   dayModes: Record<string, DayModeState>;
   mapData: MapDataStore;
+  mapRotationSettings: MapRotationSettingsStore;
+  mapViewportSettings: MapViewportSettingsStore;
   routeSettings: RouteSettingsStore;
   hallDefinitions: HallDefinitionsStore;
   hallRouteSettings: HallRouteSettingsStore;
+  blockDetectionSettings: BlockDetectionSettingsStore;
 };
 
 export function hasExportableItems(
@@ -49,9 +55,12 @@ export async function buildEventExportFile(
     executeModeItems: stores.executeModeItems,
     dayModes: stores.dayModes,
     mapData: stores.mapData,
+    mapRotationSettings: stores.mapRotationSettings,
+    mapViewportSettings: stores.mapViewportSettings,
     routeSettings: stores.routeSettings,
     hallDefinitions: stores.hallDefinitions,
     hallRouteSettings: stores.hallRouteSettings,
+    blockDetectionSettings: stores.blockDetectionSettings,
   });
 
   return {

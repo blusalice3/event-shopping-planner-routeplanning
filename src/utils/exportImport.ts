@@ -12,12 +12,17 @@ import {
   PurchaseStatuses,
 } from "../types/item";
 import {
+  BlockDetectionSettings,
+  BlockDetectionSettingsStore,
   MapDataStore,
+  MapRotationSettingsStore,
+  MapViewportSettingsStore,
   RouteSettingsStore,
   HallDefinitionsStore,
   HallRouteSettingsStore,
 } from "../types/map";
 import { ExportOptions } from "../types/export";
+import { isBlockDetectionSettings } from "./blockDetectionSettingsStorage";
 import {
   normalizeLimitedPurchaseFields,
   validateLimitedPurchaseQuantities,
@@ -35,9 +40,12 @@ export interface ExportData {
     dayModes: Record<string, string>;
   };
   mapData?: Record<string, unknown>;
+  mapRotationSettings?: MapRotationSettingsStore[string];
+  mapViewportSettings?: MapViewportSettingsStore[string];
   routeSettings?: Record<string, unknown>;
   hallDefinitions?: Record<string, unknown[]>;
   hallRouteSettings?: Record<string, unknown>;
+  blockDetectionSettings?: BlockDetectionSettings;
 }
 
 // インポート結果の型
@@ -51,9 +59,12 @@ export interface ImportResult {
     dayModes: Record<string, string>;
   };
   mapData?: Record<string, unknown>;
+  mapRotationSettings?: MapRotationSettingsStore[string];
+  mapViewportSettings?: MapViewportSettingsStore[string];
   routeSettings?: Record<string, unknown>;
   hallDefinitions?: Record<string, unknown[]>;
   hallRouteSettings?: Record<string, unknown>;
+  blockDetectionSettings?: BlockDetectionSettings;
   errors: string[];
   itemFallbackWarnings?: ItemFallbackWarning[];
   legacySheetFieldFallbacks?: LegacySheetFieldFallback[];
@@ -71,6 +82,10 @@ export interface LegacySheetFieldFallback {
 }
 
 const EXPORT_VERSION = "2.2";
+const WORKBOOK_CREATOR = "Event Shopping Planner";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === "object" && value !== null && !Array.isArray(value);
 
 type StrictPositiveIntegerCellParseResult =
   | { kind: "empty" }
@@ -177,13 +192,16 @@ export async function exportToXlsx(
     executeModeItems?: Record<string, ExecuteModeItems>;
     dayModes?: Record<string, DayModeState>;
     mapData?: MapDataStore;
+    mapRotationSettings?: MapRotationSettingsStore;
+    mapViewportSettings?: MapViewportSettingsStore;
     routeSettings?: RouteSettingsStore;
     hallDefinitions?: HallDefinitionsStore;
     hallRouteSettings?: HallRouteSettingsStore;
+    blockDetectionSettings?: BlockDetectionSettingsStore;
   },
 ): Promise<Blob> {
   const workbook = new ExcelJS.Workbook();
-  workbook.creator = "Event Shopping Planner";
+  workbook.creator = WORKBOOK_CREATOR;
   workbook.created = new Date();
 
   // 1. アイテムデータシート（必須）
@@ -280,6 +298,28 @@ export async function exportToXlsx(
       metaSheet.addRow({
         key: "lastImportDate",
         value: additionalData.metadata.lastImportDate || "",
+      });
+    }
+
+    if (options.includeMapData) {
+      const eventSettings = [
+        [
+          "mapRotationSettings",
+          additionalData.mapRotationSettings?.[eventName],
+        ],
+        [
+          "mapViewportSettings",
+          additionalData.mapViewportSettings?.[eventName],
+        ],
+        [
+          "blockDetectionSettings",
+          additionalData.blockDetectionSettings?.[eventName],
+        ],
+      ] as const;
+
+      eventSettings.forEach(([key, value]) => {
+        if (value === undefined) return;
+        metaSheet.addRow({ key, value: JSON.stringify(value) });
       });
     }
 
@@ -663,10 +703,10 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
         remarks,
         ...(sheetRemarks !== undefined ? { sheetRemarks } : {}),
         url,
-        priorityLevel,
-        protectionLevel,
-        source,
-        manualHallId,
+        ...(priorityLevel !== undefined ? { priorityLevel } : {}),
+        ...(protectionLevel !== undefined ? { protectionLevel } : {}),
+        ...(source !== undefined ? { source } : {}),
+        ...(manualHallId !== undefined ? { manualHallId } : {}),
         ...(limitedPurchasedQuantity !== undefined
           ? { limitedPurchasedQuantity }
           : {}),
@@ -709,11 +749,70 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
           lastImportDate: metaMap.get("lastImportDate") || "",
         };
       }
+
+      const parseJsonMetadata = (key: string, label: string): unknown => {
+        const serialized = metaMap.get(key);
+        if (serialized === undefined || serialized === "") return undefined;
+        try {
+          return JSON.parse(serialized) as unknown;
+        } catch {
+          throw new Error(`${label}をJSONとして解析できません。`);
+        }
+      };
+
+      try {
+        const mapRotationSettings = parseJsonMetadata(
+          "mapRotationSettings",
+          "マップ回転設定",
+        );
+        if (mapRotationSettings !== undefined) {
+          if (!isRecord(mapRotationSettings)) {
+            throw new Error("マップ回転設定の形式が不正です。");
+          }
+          result.mapRotationSettings =
+            mapRotationSettings as MapRotationSettingsStore[string];
+        }
+
+        const mapViewportSettings = parseJsonMetadata(
+          "mapViewportSettings",
+          "マップ表示位置",
+        );
+        if (mapViewportSettings !== undefined) {
+          if (!isRecord(mapViewportSettings)) {
+            throw new Error("マップ表示位置の形式が不正です。");
+          }
+          result.mapViewportSettings =
+            mapViewportSettings as MapViewportSettingsStore[string];
+        }
+
+        const blockDetectionSettings = parseJsonMetadata(
+          "blockDetectionSettings",
+          "ブロック検出設定",
+        );
+        if (blockDetectionSettings !== undefined) {
+          if (!isBlockDetectionSettings(blockDetectionSettings)) {
+            throw new Error("ブロック検出設定の形式が不正です。");
+          }
+          result.blockDetectionSettings = blockDetectionSettings;
+        }
+      } catch (error) {
+        result.errors.push(
+          error instanceof Error
+            ? error.message
+            : "イベント設定の解析に失敗しました。",
+        );
+        return result;
+      }
     }
 
     // イベント名がない場合はファイル名から推測
     if (!result.eventName) {
-      result.eventName = file.name.replace(/\.xlsx$/i, "");
+      const baseName = file.name.replace(/\.xlsx$/i, "");
+      const generatedSimpleName =
+        workbook.creator === WORKBOOK_CREATOR
+          ? baseName.match(/^(.+)_\d{4}-\d{2}-\d{2}T\d{4}_simple$/)
+          : null;
+      result.eventName = generatedSimpleName?.[1] ?? baseName;
     }
 
     // 3. 配置情報シートを読み込み
