@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act, renderHook } from "@testing-library/react";
+import { StrictMode, type PropsWithChildren } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   normalizePersistenceFailure,
@@ -93,6 +94,7 @@ describe("normalizePersistenceFailure", () => {
     ["SecurityError", "permission", "データ保存を許可", "サイトデータ"],
     ["NotAllowedError", "permission", "データ保存を許可", "サイトデータ"],
     ["DataCloneError", "data-clone", "保存できない形式", "問題のデータ"],
+    ["PersistenceConflict", "conflict", "競合を検出", "他のタブを閉じ"],
     ["InvalidStateError", "database", "保存領域に異常", "再読み込み"],
   ] as const)(
     "%s を利用者向けの原因分類へ変換する",
@@ -135,7 +137,9 @@ describe("useIndexedDbPersistence", () => {
     vi.clearAllMocks();
 
     const missing = { status: "missing" as const, data: null };
-    dbMock.migrateFromLocalStorage.mockResolvedValue(false);
+    dbMock.migrateFromLocalStorage.mockResolvedValue({
+      status: "not-needed",
+    });
     dbMock.loadEventLists.mockResolvedValue(missing);
     dbMock.loadEventMetadata.mockResolvedValue(missing);
     dbMock.loadExecuteModeItems.mockResolvedValue(missing);
@@ -162,6 +166,245 @@ describe("useIndexedDbPersistence", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("StrictModeのeffect再実行でも初期化をsingle-flightに保つ", async () => {
+    const migration = createDeferred<{ status: "not-needed" }>();
+    dbMock.migrateFromLocalStorage.mockReturnValueOnce(migration.promise);
+    const setters = createSetters();
+    const wrapper = ({ children }: PropsWithChildren) => (
+      <StrictMode>{children}</StrictMode>
+    );
+    const { result } = renderHook(
+      () =>
+        useIndexedDbPersistence({
+          values: createValues(),
+          setters,
+          saveDelayMs: 1,
+        }),
+      { wrapper },
+    );
+
+    expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(1);
+    migration.resolve({ status: "not-needed" });
+    await act(flushMicrotasks);
+
+    expect(result.current.startupState.status).toBe("ready");
+    expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(1);
+    Object.values(setters).forEach((setter) => {
+      expect(setter).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("初期化中にunmountした場合は後続のstate反映と自動保存を行わない", async () => {
+    const migration = createDeferred<{ status: "not-needed" }>();
+    dbMock.migrateFromLocalStorage.mockReturnValueOnce(migration.promise);
+    const setters = createSetters();
+    const { unmount } = renderHook(() =>
+      useIndexedDbPersistence({
+        values: createValues(),
+        setters,
+        saveDelayMs: 1,
+      }),
+    );
+
+    unmount();
+    migration.resolve({ status: "not-needed" });
+    await act(flushMicrotasks);
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    Object.values(setters).forEach((setter) => {
+      expect(setter).not.toHaveBeenCalled();
+    });
+    expect(dbMock.saveEventLists).not.toHaveBeenCalled();
+  });
+
+  it("keeps setters and autosave disabled until a migration recovery is retried successfully", async () => {
+    const recoveryBundle = {
+      kind: "event-shopping-planner-persistence-recovery" as const,
+      version: 1 as const,
+      capturedAt: "2026-08-03T00:00:00.000Z",
+      issues: [
+        {
+          stage: "migration",
+          code: "LegacyConflict",
+          message: "旧データとIndexedDBの内容が競合しています。",
+        },
+      ],
+      candidates: [
+        {
+          id: "legacy-event-metadata",
+          source: "legacy-localStorage" as const,
+          storeName: "eventMetadata",
+          key: "eventMetadata",
+          rawValue: '{"イベント":{"source":"legacy"}}',
+        },
+      ],
+    };
+    dbMock.migrateFromLocalStorage
+      .mockResolvedValueOnce({
+        status: "recovery-required",
+        recoveryBundle,
+      })
+      .mockResolvedValue({ status: "not-needed" });
+
+    const setters = createSetters();
+    const initialValues = createValues();
+    const { result, rerender } = renderHook(
+      ({ values }: { values: PersistedValues }) =>
+        useIndexedDbPersistence({ values, setters, saveDelayMs: 1 }),
+      { initialProps: { values: initialValues } },
+    );
+
+    await act(flushMicrotasks);
+
+    expect(result.current.isInitialized).toBe(false);
+    expect(result.current.startupState).toMatchObject({
+      status: "recovery-required",
+      recoveryBundle,
+      isRetrying: false,
+    });
+    expect(dbMock.loadEventLists).not.toHaveBeenCalled();
+    Object.values(setters).forEach((setter) => {
+      expect(setter).not.toHaveBeenCalled();
+    });
+
+    rerender({
+      values: {
+        ...initialValues,
+        eventLists: { 操作禁止中の変更: [] },
+      },
+    });
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+    expect(dbMock.saveEventLists).not.toHaveBeenCalled();
+
+    await act(async () => {
+      result.current.retryInitialization();
+      await flushMicrotasks();
+    });
+
+    expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(2);
+    expect(result.current.startupState.status).toBe("ready");
+    expect(result.current.isInitialized).toBe(true);
+    Object.values(setters).forEach((setter) => {
+      expect(setter).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("does not hydrate any store when one load needs recovery", async () => {
+    const loadError = Object.assign(new Error("metadata read failed"), {
+      name: "UnknownError",
+    });
+    dbMock.loadEventMetadata.mockResolvedValue({
+      status: "error",
+      data: null,
+      error: loadError,
+    });
+    dbMock.loadEventLists.mockResolvedValue({
+      status: "ok",
+      data: { 保持対象イベント: [] },
+    });
+
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const setters = createSetters();
+    const { result, rerender } = renderHook(
+      ({ values }: { values: PersistedValues }) =>
+        useIndexedDbPersistence({ values, setters, saveDelayMs: 1 }),
+      { initialProps: { values: createValues() } },
+    );
+
+    await act(flushMicrotasks);
+
+    expect(result.current.isInitialized).toBe(false);
+    expect(result.current.startupState).toMatchObject({
+      status: "recovery-required",
+      message: "保存データを安全に読み込めませんでした。",
+    });
+    Object.values(setters).forEach((setter) => {
+      expect(setter).not.toHaveBeenCalled();
+    });
+
+    rerender({
+      values: {
+        ...createValues(),
+        eventLists: { 読込失敗後の変更: [] },
+      },
+    });
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+    expect(dbMock.saveEventLists).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).not.toHaveBeenCalledWith(
+      "Failed to save data to IndexedDB:",
+      expect.anything(),
+    );
+  });
+
+  it("複数storeのload競合候補を上書きせず1つの回復bundleへ統合する", async () => {
+    const makeConflictResult = (storeName: string, rawValue: string) => ({
+      status: "conflict" as const,
+      data: null,
+      error: Object.assign(new Error(`${storeName} conflict`), {
+        name: "PersistenceConflict",
+      }),
+      recoveryBundle: {
+        kind: "event-shopping-planner-persistence-recovery" as const,
+        version: 1 as const,
+        capturedAt: "2026-08-03T00:00:00.000Z",
+        issues: [
+          {
+            stage: "load",
+            code: "PersistenceConflict",
+            message: `${storeName} conflict`,
+            storeName,
+          },
+        ],
+        candidates: [
+          {
+            id: "same-diagnostic-id",
+            source: "runtime-fallback" as const,
+            storeName,
+            key: "data",
+            rawValue,
+          },
+        ],
+      },
+    });
+    dbMock.loadEventLists.mockResolvedValue(
+      makeConflictResult("eventLists", "event-lists-raw"),
+    );
+    dbMock.loadEventMetadata.mockResolvedValue(
+      makeConflictResult("eventMetadata", "event-metadata-raw"),
+    );
+    const setters = createSetters();
+
+    const { result } = renderHook(() =>
+      useIndexedDbPersistence({
+        values: createValues(),
+        setters,
+        saveDelayMs: 1,
+      }),
+    );
+    await act(flushMicrotasks);
+
+    expect(result.current.startupState.status).toBe("recovery-required");
+    if (result.current.startupState.status !== "recovery-required") {
+      throw new Error("Expected a recovery-required startup state.");
+    }
+    expect(
+      result.current.startupState.recoveryBundle?.candidates.map(
+        ({ rawValue }) => rawValue,
+      ),
+    ).toEqual(["event-lists-raw", "event-metadata-raw"]);
+    Object.values(setters).forEach((setter) => {
+      expect(setter).not.toHaveBeenCalled();
+    });
   });
 
   it("persists a purchase status changed immediately after initialization", async () => {

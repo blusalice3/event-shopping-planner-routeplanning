@@ -66,6 +66,29 @@ async function writeRawMapEntry(key: string, value: unknown): Promise<void> {
   }
 }
 
+async function replaceWithLegacyMapData(value: unknown): Promise<void> {
+  const database = await openRawDatabase();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const transaction = database.transaction(
+        [db.STORES.MAP_DATA, db.STORES.SYNC_QUEUE],
+        "readwrite",
+      );
+      const mapStore = transaction.objectStore(db.STORES.MAP_DATA);
+      mapStore.clear();
+      mapStore.put(value, "data");
+      transaction
+        .objectStore(db.STORES.SYNC_QUEUE)
+        .delete("__esp_internal__:meta:v1:mapData:data");
+      transaction.oncomplete = () => resolve();
+      transaction.onabort = () =>
+        reject(transaction.error ?? new Error("Raw map replacement failed."));
+    });
+  } finally {
+    database.close();
+  }
+}
+
 async function readRawMapEntry(key: string): Promise<unknown> {
   const database = await openRawDatabase();
   try {
@@ -202,15 +225,17 @@ describe("db.saveMapDataChanges", () => {
     expect(stored["再取込イベント"]["1日目マップ"].cells[0].value).toBe("a1");
   });
 
-  it("keeps a committed map save successful when fallback cleanup is unavailable", async () => {
+  it("keeps legacy raw localStorage untouched after a committed map save", async () => {
     const cleanupError = new DOMException(
       "localStorage is unavailable",
       "SecurityError",
     );
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(Storage.prototype, "removeItem").mockImplementation(() => {
-      throw cleanupError;
-    });
+    localStorage.setItem("mapData", "legacy-map-source");
+    const removeSpy = vi
+      .spyOn(Storage.prototype, "removeItem")
+      .mockImplementation(() => {
+        throw cleanupError;
+      });
     const next: MapDataStore = {
       後片付け失敗イベント: {
         "1日目マップ": makeDayMap("committed"),
@@ -223,10 +248,8 @@ describe("db.saveMapDataChanges", () => {
     expect(stored["後片付け失敗イベント"]["1日目マップ"].cells[0].value).toBe(
       "committed",
     );
-    expect(warnSpy).toHaveBeenCalledWith(
-      "Failed to clear localStorage fallback after saving mapData:",
-      cleanupError,
-    );
+    expect(localStorage.getItem("mapData")).toBe("legacy-map-source");
+    expect(removeSpy).not.toHaveBeenCalled();
   });
 
   it("aborts queued map deletes when a later put throws synchronously", async () => {
@@ -270,7 +293,11 @@ describe("db.saveMapDataChanges", () => {
         "2日目マップ": makeDayMap("legacy-keep-2"),
       },
     };
-    await writeRawMapEntry("data", legacy);
+    await replaceWithLegacyMapData(legacy);
+    await expect(db.loadMapData()).resolves.toMatchObject({
+      status: "ok",
+      data: legacy,
+    });
 
     const next: MapDataStore = {
       [eventName]: {
@@ -464,14 +491,15 @@ describe("db.loadMapData", () => {
     const result = await db.loadMapData();
 
     expect(transactionSpy).toHaveBeenCalledTimes(2);
-    expect(result).toEqual({
+    expect(result).toMatchObject({
       status: "error",
       data: null,
       error: retryError,
     });
+    expect(result.recoveryBundle).toBeDefined();
   });
 
-  it("keeps the legacy localStorage fallback after both IndexedDB reads fail", async () => {
+  it("does not use the legacy localStorage key after both IndexedDB reads fail", async () => {
     const eventName = "旧localStorage読込イベント";
     localStorage.setItem(
       "mapData",
@@ -489,9 +517,8 @@ describe("db.loadMapData", () => {
     const result = await db.loadMapData();
 
     expect(transactionSpy).toHaveBeenCalledTimes(2);
-    expect(result.status).toBe("ok");
-    expect(result.data?.[eventName]["1日目マップ"].cells[0].value).toBe(
-      "legacy-local",
-    );
+    expect(result.status).toBe("error");
+    expect(result.data).toBeNull();
+    expect(localStorage.getItem("mapData")).toContain("legacy-local");
   });
 });

@@ -22,6 +22,12 @@ import {
   RouteSettingsStore,
 } from "../types/map";
 import { db, type LoadResult } from "../utils/indexedDB";
+import {
+  createStartupRecoveryBundle,
+  mergeStartupRecoveryBundles,
+  type StartupRecoveryBundle,
+  type StartupRecoveryIssue,
+} from "../utils/persistenceResilience";
 
 export type PersistedStateValues = {
   eventLists: Record<string, ShoppingItem[]>;
@@ -44,6 +50,7 @@ export type PersistenceFailureCategory =
   | "quota"
   | "permission"
   | "data-clone"
+  | "conflict"
   | "database"
   | "unknown";
 
@@ -54,6 +61,21 @@ export interface PersistenceFailureDetail {
   userMessage: string;
   technicalMessage: string | null;
 }
+
+export type PersistenceStartupState =
+  | {
+      status: "loading";
+    }
+  | {
+      status: "ready";
+    }
+  | {
+      status: "recovery-required";
+      message: string;
+      details: string[];
+      recoveryBundle: StartupRecoveryBundle | null;
+      isRetrying: boolean;
+    };
 
 const MAX_ERROR_CODE_LENGTH = 64;
 const MAX_TECHNICAL_MESSAGE_LENGTH = 160;
@@ -79,11 +101,25 @@ const FAILURE_MESSAGES: Record<PersistenceFailureCategory, string> = {
     "ブラウザーがこのサイトのデータ保存を許可していません。サイトデータの保存を許可してから再試行してください。",
   "data-clone":
     "保存できない形式のデータが含まれています。JSONバックアップを保存し、問題のデータを確認してください。",
+  conflict:
+    "別のタブまたは退避データとの競合を検出しました。他のタブを閉じ、JSONバックアップを保存してから再試行してください。",
   database:
     "ブラウザーの保存領域に異常があります。ページを再読み込みして再試行し、改善しない場合はサイトデータを確認してください。",
   unknown:
     "保存中に予期しない問題が発生しました。再試行し、改善しない場合はJSONバックアップを保存してください。",
 };
+
+const createRecoveryBundle = (
+  issues: StartupRecoveryIssue[],
+  bundles: readonly (StartupRecoveryBundle | null | undefined)[] = [],
+): StartupRecoveryBundle =>
+  mergeStartupRecoveryBundles([
+    createStartupRecoveryBundle({ issues }),
+    ...bundles.filter(
+      (bundle): bundle is StartupRecoveryBundle =>
+        bundle !== null && bundle !== undefined,
+    ),
+  ]);
 
 const readErrorField = (
   error: unknown,
@@ -168,6 +204,11 @@ export const normalizePersistenceFailure = (
     classificationText.includes("dataclone")
   ) {
     category = "data-clone";
+  } else if (
+    errorNames.has("PersistenceConflict") ||
+    classificationText.includes("persistence conflict")
+  ) {
+    category = "conflict";
   } else if (
     Array.from(errorNames).some((name) => DATABASE_ERROR_NAMES.has(name)) ||
     /\b(indexeddb|database|object store|transaction)\b/.test(classificationText)
@@ -296,7 +337,9 @@ export function useIndexedDbPersistence({
   setters,
   saveDelayMs = 500,
 }: UseIndexedDbPersistenceParams) {
-  const [isInitialized, setIsInitialized] = useState(false);
+  const [startupState, setStartupState] = useState<PersistenceStartupState>({
+    status: "loading",
+  });
   const [persistenceStatus, setPersistenceStatus] =
     useState<PersistenceStatus>("saved");
   const [failedStores, setFailedStores] = useState<PersistedStoreName[]>([]);
@@ -306,10 +349,11 @@ export function useIndexedDbPersistence({
   const isSavingRef = useRef(false);
   const saveRequestedRef = useRef(false);
   const latestValuesRef = useRef<PersistedStateValues>(values);
-  const hasShownLoadErrorRef = useRef(false);
   const previousSavedValuesRef = useRef<PersistedStateValues>(values);
   const hasObservedHydratedValuesRef = useRef(false);
   const restoreInProgressRef = useRef(false);
+  const isMountedRef = useRef(false);
+  const initializationPromiseRef = useRef<Promise<void> | null>(null);
   const saveIdleWaitersRef = useRef<Array<() => void>>([]);
   const persistenceStatusRef = useRef<PersistenceStatus>(persistenceStatus);
   const failedStoresRef = useRef<PersistedStoreName[]>(failedStores);
@@ -318,6 +362,7 @@ export function useIndexedDbPersistence({
   persistenceStatusRef.current = persistenceStatus;
   failedStoresRef.current = failedStores;
   failureDetailsRef.current = failureDetails;
+  const isInitialized = startupState.status === "ready";
   const {
     eventLists,
     eventMetadata,
@@ -545,156 +590,190 @@ export function useIndexedDbPersistence({
     ],
   );
 
-  useEffect(() => {
-    let isCancelled = false;
-
-    const loadData = async () => {
-      try {
-        await db.migrateFromLocalStorage();
-
-        const [
-          loadedEventLists,
-          loadedMetadata,
-          loadedExecuteItems,
-          loadedDayModes,
-          loadedMapData,
-          loadedMapRotationSettings,
-          loadedRouteSettings,
-          loadedHallDefinitions,
-          loadedHallRouteSettings,
-          loadedMapViewportSettings,
-        ] = await Promise.all([
-          db.loadEventLists(),
-          db.loadEventMetadata(),
-          db.loadExecuteModeItems(),
-          db.loadDayModes(),
-          db.loadMapData(),
-          db.loadMapRotationSettings(),
-          db.loadRouteSettings(),
-          db.loadHallDefinitions(),
-          db.loadHallRouteSettings(),
-          db.loadMapViewportSettings(),
-        ]);
-
-        const loadErrorStores: string[] = [];
-        const resolveLoadResult = <T extends Record<string, unknown>>(
-          storeLabel: string,
-          result: LoadResult<T>,
-        ): T => {
-          if (result.status === "ok" && result.data) {
-            return result.data;
-          }
-          if (result.status === "error") {
-            console.error(
-              `Failed to load ${storeLabel} from IndexedDB:`,
-              result.error,
-            );
-            loadErrorStores.push(storeLabel);
-          }
-          return {} as T;
-        };
-
-        const resolvedEventLists = resolveLoadResult(
-          "eventLists",
-          loadedEventLists,
-        );
-        const resolvedMetadata = resolveLoadResult(
-          "eventMetadata",
-          loadedMetadata,
-        );
-        const resolvedExecuteItems = resolveLoadResult(
-          "executeModeItems",
-          loadedExecuteItems,
-        );
-        const resolvedDayModes = resolveLoadResult("dayModes", loadedDayModes);
-        const resolvedMapData = resolveLoadResult("mapData", loadedMapData);
-        const resolvedMapRotationSettings = resolveLoadResult(
-          "mapRotationSettings",
-          loadedMapRotationSettings,
-        );
-        const resolvedRouteSettings = resolveLoadResult(
-          "routeSettings",
-          loadedRouteSettings,
-        );
-        const resolvedHallDefinitions = resolveLoadResult(
-          "hallDefinitions",
-          loadedHallDefinitions,
-        );
-        const resolvedHallRouteSettings = resolveLoadResult(
-          "hallRouteSettings",
-          loadedHallRouteSettings,
-        );
-        const resolvedMapViewportSettings = resolveLoadResult(
-          "mapViewportSettings",
-          loadedMapViewportSettings,
-        );
-
-        const migratedLists: Record<string, ShoppingItem[]> = {};
-        Object.keys(resolvedEventLists).forEach((eventName) => {
-          migratedLists[eventName] = (
-            resolvedEventLists[eventName] as ShoppingItem[]
-          ).map((item: ShoppingItem) =>
-            normalizeLimitedPurchaseFields({
-              ...item,
-              quantity: item.quantity ?? 1,
-            }),
-          );
+  const initializePersistence = useCallback(async (): Promise<void> => {
+    try {
+      const migrationResult = await db.migrateFromLocalStorage();
+      if (migrationResult.status === "recovery-required") {
+        const recoveryBundle = migrationResult.recoveryBundle;
+        if (!isMountedRef.current) return;
+        setStartupState({
+          status: "recovery-required",
+          message: "旧データを安全に移行できませんでした。",
+          details: recoveryBundle?.issues.map((issue) => issue.message) ?? [
+            "移行元データと保存済みデータの状態を確認できませんでした。",
+          ],
+          recoveryBundle,
+          isRetrying: false,
         });
-
-        if (isCancelled) return;
-
-        const hydratedValues: PersistedStateValues = {
-          eventLists: migratedLists,
-          eventMetadata: resolvedMetadata as Record<string, EventMetadata>,
-          executeModeItems: resolvedExecuteItems as Record<
-            string,
-            ExecuteModeItems
-          >,
-          dayModes: resolvedDayModes as Record<string, DayModeState>,
-          mapData: resolvedMapData as MapDataStore,
-          mapRotationSettings:
-            resolvedMapRotationSettings as MapRotationSettingsStore,
-          routeSettings: resolvedRouteSettings as RouteSettingsStore,
-          hallDefinitions: resolvedHallDefinitions as HallDefinitionsStore,
-          hallRouteSettings:
-            resolvedHallRouteSettings as HallRouteSettingsStore,
-          mapViewportSettings:
-            resolvedMapViewportSettings as MapViewportSettingsStore,
-        };
-
-        // 画面を操作可能にする前に復元値を保存済み基準として確定する。
-        // 初回の保存タイマーより先に変更されても、その変更を差分として保存できる。
-        previousSavedValuesRef.current = hydratedValues;
-
-        setEventLists(hydratedValues.eventLists);
-        setEventMetadata(hydratedValues.eventMetadata);
-        setExecuteModeItems(hydratedValues.executeModeItems);
-        setDayModes(hydratedValues.dayModes);
-        setMapData(hydratedValues.mapData);
-        setMapRotationSettings(hydratedValues.mapRotationSettings);
-        setRouteSettings(hydratedValues.routeSettings);
-        setHallDefinitions(hydratedValues.hallDefinitions);
-        setHallRouteSettings(hydratedValues.hallRouteSettings);
-        setMapViewportSettings(hydratedValues.mapViewportSettings);
-
-        if (loadErrorStores.length > 0 && !hasShownLoadErrorRef.current) {
-          hasShownLoadErrorRef.current = true;
-          alert(
-            `一部の保存データの読み込みに失敗したため、初期値で起動しました。\n${loadErrorStores.join("\n")}`,
-          );
-        }
-      } catch (error) {
-        if (isCancelled) return;
-        console.error("Failed to load data from IndexedDB:", error);
+        return;
       }
-      setIsInitialized(true);
-    };
 
-    void loadData();
+      const [
+        loadedEventLists,
+        loadedMetadata,
+        loadedExecuteItems,
+        loadedDayModes,
+        loadedMapData,
+        loadedMapRotationSettings,
+        loadedRouteSettings,
+        loadedHallDefinitions,
+        loadedHallRouteSettings,
+        loadedMapViewportSettings,
+      ] = await Promise.all([
+        db.loadEventLists(),
+        db.loadEventMetadata(),
+        db.loadExecuteModeItems(),
+        db.loadDayModes(),
+        db.loadMapData(),
+        db.loadMapRotationSettings(),
+        db.loadRouteSettings(),
+        db.loadHallDefinitions(),
+        db.loadHallRouteSettings(),
+        db.loadMapViewportSettings(),
+      ]);
 
-    return () => {
-      isCancelled = true;
-    };
+      const loadedStores = [
+        ["eventLists", loadedEventLists],
+        ["eventMetadata", loadedMetadata],
+        ["executeModeItems", loadedExecuteItems],
+        ["dayModes", loadedDayModes],
+        ["mapData", loadedMapData],
+        ["mapRotationSettings", loadedMapRotationSettings],
+        ["routeSettings", loadedRouteSettings],
+        ["hallDefinitions", loadedHallDefinitions],
+        ["hallRouteSettings", loadedHallRouteSettings],
+        ["mapViewportSettings", loadedMapViewportSettings],
+      ] as const;
+
+      const failedLoads = loadedStores.filter(
+        ([, result]) =>
+          result.status === "error" || result.status === "conflict",
+      );
+      if (failedLoads.length > 0) {
+        const issues: StartupRecoveryIssue[] = failedLoads.map(
+          ([storeName, result]) => ({
+            stage: "load",
+            code:
+              result.status === "conflict"
+                ? "PersistenceConflict"
+                : sanitizeErrorCode(
+                    readErrorField(result.error, "name") || "LoadError",
+                  ),
+            message:
+              result.status === "conflict"
+                ? `${storeName} に複数の保存候補があり、安全に選択できません。`
+                : `${storeName} の保存データを読み込めませんでした。`,
+            storeName,
+            key: "data",
+          }),
+        );
+        const bundles = failedLoads.map(([, result]) =>
+          "recoveryBundle" in result
+            ? (result.recoveryBundle as StartupRecoveryBundle)
+            : null,
+        );
+        const recoveryBundle = createRecoveryBundle(issues, bundles);
+        if (!isMountedRef.current) return;
+        setStartupState({
+          status: "recovery-required",
+          message: "保存データを安全に読み込めませんでした。",
+          details: recoveryBundle.issues.map((issue) => issue.message),
+          recoveryBundle,
+          isRetrying: false,
+        });
+        return;
+      }
+
+      const resolveLoadResult = <T extends Record<string, unknown>>(
+        result: LoadResult<T>,
+      ): T => (result.status === "ok" && result.data ? result.data : ({} as T));
+
+      const resolvedEventLists = resolveLoadResult(loadedEventLists);
+      const resolvedMetadata = resolveLoadResult(loadedMetadata);
+      const resolvedExecuteItems = resolveLoadResult(loadedExecuteItems);
+      const resolvedDayModes = resolveLoadResult(loadedDayModes);
+      const resolvedMapData = resolveLoadResult(loadedMapData);
+      const resolvedMapRotationSettings = resolveLoadResult(
+        loadedMapRotationSettings,
+      );
+      const resolvedRouteSettings = resolveLoadResult(loadedRouteSettings);
+      const resolvedHallDefinitions = resolveLoadResult(loadedHallDefinitions);
+      const resolvedHallRouteSettings = resolveLoadResult(
+        loadedHallRouteSettings,
+      );
+      const resolvedMapViewportSettings = resolveLoadResult(
+        loadedMapViewportSettings,
+      );
+
+      const migratedLists: Record<string, ShoppingItem[]> = {};
+      Object.keys(resolvedEventLists).forEach((eventName) => {
+        migratedLists[eventName] = (
+          resolvedEventLists[eventName] as ShoppingItem[]
+        ).map((item: ShoppingItem) =>
+          normalizeLimitedPurchaseFields({
+            ...item,
+            quantity: item.quantity ?? 1,
+          }),
+        );
+      });
+
+      if (!isMountedRef.current) return;
+
+      const hydratedValues: PersistedStateValues = {
+        eventLists: migratedLists,
+        eventMetadata: resolvedMetadata as Record<string, EventMetadata>,
+        executeModeItems: resolvedExecuteItems as Record<
+          string,
+          ExecuteModeItems
+        >,
+        dayModes: resolvedDayModes as Record<string, DayModeState>,
+        mapData: resolvedMapData as MapDataStore,
+        mapRotationSettings:
+          resolvedMapRotationSettings as MapRotationSettingsStore,
+        routeSettings: resolvedRouteSettings as RouteSettingsStore,
+        hallDefinitions: resolvedHallDefinitions as HallDefinitionsStore,
+        hallRouteSettings: resolvedHallRouteSettings as HallRouteSettingsStore,
+        mapViewportSettings:
+          resolvedMapViewportSettings as MapViewportSettingsStore,
+      };
+
+      // 画面を操作可能にする前に復元値を保存済み基準として確定する。
+      // 初回の保存タイマーより先に変更されても、その変更を差分として保存できる。
+      previousSavedValuesRef.current = hydratedValues;
+      latestValuesRef.current = hydratedValues;
+      hasObservedHydratedValuesRef.current = false;
+
+      setEventLists(hydratedValues.eventLists);
+      setEventMetadata(hydratedValues.eventMetadata);
+      setExecuteModeItems(hydratedValues.executeModeItems);
+      setDayModes(hydratedValues.dayModes);
+      setMapData(hydratedValues.mapData);
+      setMapRotationSettings(hydratedValues.mapRotationSettings);
+      setRouteSettings(hydratedValues.routeSettings);
+      setHallDefinitions(hydratedValues.hallDefinitions);
+      setHallRouteSettings(hydratedValues.hallRouteSettings);
+      setMapViewportSettings(hydratedValues.mapViewportSettings);
+      setStartupState({ status: "ready" });
+    } catch (error) {
+      console.error("Failed to initialize IndexedDB persistence:", error);
+      if (!isMountedRef.current) return;
+      const issue: StartupRecoveryIssue = {
+        stage: "initialization",
+        code: sanitizeErrorCode(
+          readErrorField(error, "name") || "InitializationError",
+        ),
+        message:
+          "保存データの初期化中にエラーが発生しました。通常画面には反映していません。",
+      };
+      const recoveryBundle = createRecoveryBundle([issue]);
+      setStartupState({
+        status: "recovery-required",
+        message: "保存データを安全に読み込めませんでした。",
+        details: [issue.message],
+        recoveryBundle,
+        isRetrying: false,
+      });
+    }
   }, [
     setDayModes,
     setEventLists,
@@ -707,6 +786,34 @@ export function useIndexedDbPersistence({
     setMapViewportSettings,
     setRouteSettings,
   ]);
+
+  const startInitialization = useCallback((): void => {
+    if (initializationPromiseRef.current) return;
+    const pending = initializePersistence().finally(() => {
+      if (initializationPromiseRef.current === pending) {
+        initializationPromiseRef.current = null;
+      }
+    });
+    initializationPromiseRef.current = pending;
+  }, [initializePersistence]);
+
+  const retryInitialization = useCallback((): void => {
+    if (initializationPromiseRef.current) return;
+    setStartupState((current) =>
+      current.status === "recovery-required"
+        ? { ...current, isRetrying: true }
+        : current,
+    );
+    startInitialization();
+  }, [startInitialization]);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    startInitialization();
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, [startInitialization]);
 
   useEffect(() => {
     if (!isInitialized) return;
@@ -756,9 +863,11 @@ export function useIndexedDbPersistence({
 
   return {
     isInitialized,
+    startupState,
     persistenceStatus,
     failedStores,
     failureDetails,
+    retryInitialization,
     retrySave,
     runExclusiveRestore,
   } as const;

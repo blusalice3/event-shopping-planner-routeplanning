@@ -125,6 +125,7 @@ import AppMainContent from "./features/app-shell/components/AppMainContent";
 import AppOverlayLayer from "./features/app-shell/components/AppOverlayLayer";
 import BackupRestoreDialog from "./components/BackupRestoreDialog";
 import PersistenceStatusIndicator from "./components/PersistenceStatusIndicator";
+import PersistenceRecoveryScreen from "./components/PersistenceRecoveryScreen";
 import MapReimportConfirmationDialog from "./components/map/MapReimportConfirmationDialog";
 import DuplicateEventDialog from "./components/DuplicateEventDialog";
 import { buildEventRestoreData } from "./features/events/backupRestore";
@@ -152,6 +153,7 @@ import {
   type AppBackupV1,
 } from "./utils/appBackup";
 import { db, type AppData } from "./utils/indexedDB";
+import { serializeStartupRecoveryBundle } from "./utils/persistenceResilience";
 import { useThemeMode } from "./hooks/useThemeMode";
 import {
   DEFAULT_UI_VISIBILITY,
@@ -588,9 +590,11 @@ const App: React.FC = () => {
     useState<PreparedMapImport | null>(null);
   const {
     isInitialized,
+    startupState,
     persistenceStatus,
     failedStores,
     failureDetails,
+    retryInitialization,
     retrySave,
     runExclusiveRestore,
   } = useIndexedDbPersistence({
@@ -2584,6 +2588,36 @@ const App: React.FC = () => {
       );
     }
   }, [buildCurrentAppData]);
+
+  const handlePersistenceRecoveryExport = useCallback(() => {
+    if (
+      startupState.status !== "recovery-required" ||
+      !startupState.recoveryBundle
+    ) {
+      return;
+    }
+
+    try {
+      const exportedAt = new Date().toISOString();
+      const blob = new Blob(
+        [serializeStartupRecoveryBundle(startupState.recoveryBundle)],
+        {
+          type: "application/json;charset=utf-8",
+        },
+      );
+      downloadBlob(
+        blob,
+        `event-shopping-planner-recovery-${exportedAt.replace(/[:.]/g, "-")}.json`,
+      );
+    } catch (error) {
+      console.error("Persistence recovery export error:", error);
+      alert(
+        `退避用JSONを作成できませんでした。保存候補は変更されていません。${
+          error instanceof Error ? `\n理由: ${error.message}` : ""
+        }`,
+      );
+    }
+  }, [startupState]);
 
   const handleBackupRestoreRequest = useCallback(() => {
     backupFileInputRef.current?.click();
@@ -5262,7 +5296,27 @@ const App: React.FC = () => {
     (hasExecuteSelection && !hasCandidateSelection);
 
   if (!isInitialized) {
-    return null;
+    if (startupState.status === "recovery-required") {
+      return (
+        <PersistenceRecoveryScreen
+          message={startupState.message}
+          details={startupState.details}
+          canExport={(startupState.recoveryBundle?.candidates.length ?? 0) > 0}
+          isRetrying={startupState.isRetrying}
+          onRetry={retryInitialization}
+          onExport={handlePersistenceRecoveryExport}
+        />
+      );
+    }
+
+    return (
+      <main
+        className="flex min-h-screen items-center justify-center bg-slate-50 px-6 text-slate-800 dark:bg-slate-900 dark:text-slate-100"
+        aria-live="polite"
+      >
+        <p className="text-sm font-medium">保存データを確認しています…</p>
+      </main>
+    );
   }
 
   const mainContentVisible = eventDates.includes(activeTab);

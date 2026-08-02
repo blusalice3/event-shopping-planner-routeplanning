@@ -123,12 +123,6 @@ function expectFallbackMarkers(marker: string): void {
   });
 }
 
-function expectFallbacksCleared(): void {
-  FALLBACK_KEYS.forEach((key) => {
-    expect(localStorage.getItem(key)).toBeNull();
-  });
-}
-
 describe("db.restoreAppDataAtomically", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -160,7 +154,7 @@ describe("db.restoreAppDataAtomically", () => {
       status: "ok",
       data: syncQueue,
     });
-    expectFallbacksCleared();
+    expectFallbackMarkers("成功前");
   });
 
   it("rolls back a mid-restore DataCloneError and succeeds on retry", async () => {
@@ -207,10 +201,10 @@ describe("db.restoreAppDataAtomically", () => {
       status: "ok",
       data: syncQueue,
     });
-    expectFallbacksCleared();
+    expectFallbackMarkers("失敗前");
   });
 
-  it("keeps a committed restore successful when fallback cleanup is unavailable", async () => {
+  it("does not touch legacy sources while restoring", async () => {
     const restoredData = makeAppData("後片付け失敗");
     localStorage.clear();
     setFallbackMarkers("削除前");
@@ -218,18 +212,13 @@ describe("db.restoreAppDataAtomically", () => {
     vi.spyOn(Storage.prototype, "removeItem").mockImplementationOnce(() => {
       throw cleanupError;
     });
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
 
     await expect(
       db.restoreAppDataAtomically(restoredData),
     ).resolves.toBeUndefined();
 
     expect(await db.getAllAppData()).toEqual(restoredData);
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining(
-        "Failed to clear localStorage fallback after restoring",
-      ),
-      cleanupError,
-    );
+    expectFallbackMarkers("削除前");
+    expect(Storage.prototype.removeItem).not.toHaveBeenCalled();
   });
 });
