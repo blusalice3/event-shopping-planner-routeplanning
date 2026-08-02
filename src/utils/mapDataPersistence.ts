@@ -114,7 +114,9 @@ function expandCellFromStorage(cell: PersistedCellData): CellData {
     fontColor: cell.fontColor ?? null,
     borders: normalizeBorders(cell.borders ?? EMPTY_BORDERS),
     isMerged: cell.isMerged ?? false,
-    mergeParent: cell.mergeParent,
+    ...(cell.mergeParent !== undefined
+      ? { mergeParent: cell.mergeParent }
+      : {}),
     isVerticalText: cell.isVerticalText ?? false,
   };
 }

@@ -25,7 +25,7 @@ const item: ShoppingItem = {
   remarks: "",
 };
 
-describe("simple XLSX event restore", () => {
+describe("XLSX event restore", () => {
   it("round-trips omitted item fields into a valid restore backup", async () => {
     const blob = await exportToXlsx(
       EVENT_NAME,
@@ -67,6 +67,70 @@ describe("simple XLSX event restore", () => {
       ),
     );
 
+    expect(validation.ok).toBe(true);
+  });
+
+  it("round-trips full map cells without an optional merge parent", async () => {
+    const blob = await exportToXlsx(
+      EVENT_NAME,
+      [item],
+      {
+        includeItems: true,
+        includeLayoutInfo: false,
+        includeMapData: true,
+        includeRouteInfo: false,
+        format: "full",
+      },
+      {
+        mapData: {
+          [EVENT_NAME]: {
+            "1日目マップ": {
+              maxRow: 1,
+              maxCol: 1,
+              cells: [
+                {
+                  row: 1,
+                  col: 1,
+                  value: "A",
+                  backgroundColor: null,
+                  fontColor: null,
+                  borders: {
+                    top: null,
+                    right: null,
+                    bottom: null,
+                    left: null,
+                  },
+                  isMerged: false,
+                  isVerticalText: false,
+                },
+              ],
+              mergedCells: [],
+              blocks: [],
+            },
+          },
+        },
+      },
+    );
+    const file = new File([await blob.arrayBuffer()], "full-map.xlsx", {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+
+    const result = await importFromXlsx(file);
+    const importedData = toImportedEventData(result);
+    const importedCell = importedData.mapData?.["1日目マップ"].cells[0] ?? null;
+    const restoreSource = buildXlsxEventRestoreSource(importedData);
+    const validation = parseAppBackup(
+      createAppBackup(
+        restoreSource.data,
+        new Date("2026-08-02T00:00:00.000Z"),
+        {
+          blockDetectionSettings: restoreSource.blockDetectionSettings,
+        },
+      ),
+    );
+
+    expect(result.success).toBe(true);
+    expect(importedCell).not.toHaveProperty("mergeParent");
     expect(validation.ok).toBe(true);
   });
 });
