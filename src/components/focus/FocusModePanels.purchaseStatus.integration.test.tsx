@@ -121,6 +121,31 @@ describe("FocusModeHeader responsive layout", () => {
     );
   });
 
+  it("uses compact vertical spacing for the smartphone header and bulk buttons", () => {
+    renderHeader({ layoutMode: "smartphone" });
+
+    expect(screen.getByTestId("focus-mode-header")).toHaveClass("px-2", "py-1");
+    expect(screen.getByTestId("focus-header-bulk-scroll")).toHaveClass("mt-px");
+    expect(screen.getByTestId("focus-header-smartphone-payment")).toHaveClass(
+      "mt-1",
+      "pt-0.5",
+    );
+    expect(screen.getByRole("button", { name: "全購入" })).toHaveClass(
+      "h-auto",
+      "min-h-0",
+      "py-px",
+      "leading-none",
+    );
+    expect(screen.getByRole("button", { name: "全購入" })).not.toHaveClass(
+      "h-6",
+    );
+    expect(
+      within(screen.getByTestId("focus-header-smartphone-payment")).getByText(
+        "¥1,000",
+      ),
+    ).toHaveClass("leading-none");
+  });
+
   it("keeps desktop layout without smartphone-only scroll containers on pc", () => {
     renderHeader({ layoutMode: "pc" });
 
@@ -134,6 +159,25 @@ describe("FocusModeHeader responsive layout", () => {
       screen.queryByTestId("focus-header-bulk-scroll"),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "phase" })).toBeInTheDocument();
+  });
+
+  it("uses compact vertical spacing for the desktop header and bulk buttons", () => {
+    renderHeader({ layoutMode: "pc" });
+
+    expect(screen.getByTestId("focus-mode-header")).toHaveClass("px-3", "py-1");
+    expect(screen.getByTestId("focus-header-desktop-bulk-row")).toHaveClass(
+      "mt-0.5",
+      "gap-y-0.5",
+    );
+    expect(screen.getByRole("button", { name: "全購入" })).toHaveClass(
+      "h-auto",
+      "min-h-0",
+      "py-px",
+      "leading-none",
+    );
+    expect(screen.getByRole("button", { name: "全購入" })).not.toHaveClass(
+      "h-[18px]",
+    );
   });
 
   it("uses dash fallback for empty next visit info on smartphone", () => {

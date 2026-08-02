@@ -295,7 +295,7 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
     const rootClassName = containerClassName
       ? `text-white rounded-lg shadow-lg ${containerClassName}`
       : `text-white rounded-lg shadow-lg ${
-          isSmartphone ? `p-2 ${isMapVisible ? "mx-2" : ""}` : "p-3"
+          isSmartphone ? `px-2 py-1 ${isMapVisible ? "mx-2" : ""}` : "px-3 py-1"
         }`;
     const headerBackgroundImage = buildHeaderBackgroundImage(currentVisitItems);
     const labelClassName =
@@ -324,9 +324,9 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
     const smartphoneSelectClassName =
       "h-8 w-full max-w-[6.75rem] rounded-md bg-white/20 py-0.5 pl-2 pr-6 text-sm font-bold text-white appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/50 transition-colors";
     const bulkStatusButtonClassName =
-      "flex-shrink-0 whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium transition-colors";
+      "inline-flex h-auto min-h-0 flex-shrink-0 items-center whitespace-nowrap rounded px-2 py-px text-xs font-medium leading-none transition-colors";
     const smartphoneBulkStatusButtonClassName =
-      "min-h-7 flex-shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70";
+      "inline-flex h-auto min-h-0 flex-shrink-0 items-center whitespace-nowrap rounded px-1.5 py-px text-[10px] font-medium leading-none transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70";
 
     const renderPhaseSelect = (className: string) => (
       <select
@@ -447,20 +447,20 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
         </div>
 
         <div
-          className="mt-1.5 flex min-h-7 flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-white/20 pt-1"
+          className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-white/20 pt-0.5"
           data-testid="focus-header-smartphone-payment"
         >
-          <span className="text-[10px] opacity-80">支払額</span>
-          <span className="text-lg font-bold tabular-nums">
+          <span className="text-[10px] leading-none opacity-80">支払額</span>
+          <span className="text-lg font-bold leading-none tabular-nums">
             ¥{currentVisitPriceInfo.chargeableTotal.toLocaleString()}
           </span>
           {hasPlannedDiff && (
-            <span className="text-[10px] font-semibold opacity-85">
+            <span className="text-[10px] font-semibold leading-none opacity-85">
               予定額 ¥{currentVisitPriceInfo.plannedTotal.toLocaleString()}
             </span>
           )}
           {currentVisitPriceInfo.priceMissingItemCount > 0 && (
-            <span className="text-[10px] font-semibold text-red-200">
+            <span className="text-[10px] font-semibold leading-none text-red-200">
               価格未定 {currentVisitPriceInfo.priceMissingItemCount}件
             </span>
           )}
@@ -468,7 +468,7 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
 
         {currentVisitItems.length > 0 && (
           <div
-            className="-mx-1 mt-1 overflow-x-auto overflow-y-hidden px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="-mx-1 mt-px overflow-x-auto overflow-y-hidden px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             data-testid="focus-header-bulk-scroll"
           >
             <div
@@ -528,7 +528,10 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
           </div>
         </div>
         {currentVisitItems.length > 0 && (
-          <div className="mt-3 flex flex-wrap justify-end gap-1.5">
+          <div
+            className="mt-0.5 flex flex-wrap justify-end gap-x-1.5 gap-y-0.5"
+            data-testid="focus-header-desktop-bulk-row"
+          >
             {renderBulkStatusButtons(bulkStatusButtonClassName)}
           </div>
         )}

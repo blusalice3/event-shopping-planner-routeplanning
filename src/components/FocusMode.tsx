@@ -331,7 +331,10 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return mapData && Object.keys(mapData).length > 0;
   }, [mapData]);
   const headerContainerClass = useMemo(
-    () => (layoutMode === "smartphone" ? "p-2 mb-2 mx-2" : "p-4 mb-4 mx-16"),
+    () =>
+      layoutMode === "smartphone"
+        ? "px-2 py-1 mb-1 mx-2"
+        : "px-4 py-1 mb-1 mx-16",
     [layoutMode],
   );
   const itemListContainerClass = useMemo(
