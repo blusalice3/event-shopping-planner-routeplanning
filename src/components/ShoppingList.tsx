@@ -3053,7 +3053,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
                   {/* グループ内アイテム（展開時のみ表示） */}
                   {!group.isCollapsed && (
-                    <div className="space-y-4 mt-1">
+                    <div
+                      className={`mt-1 ${
+                        layoutMode === "smartphone" ? "space-y-2" : "space-y-4"
+                      }`}
+                    >
                       {group.items.map((item, spaceItemIndex) => {
                         const globalIndex = items.findIndex(
                           (i) => i.id === item.id,
@@ -3744,7 +3748,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               </div>
 
               {/* グループ内アイテム */}
-              <div className="space-y-4 mt-2">
+              <div
+                className={`mt-2 ${
+                  layoutMode === "smartphone" ? "space-y-2" : "space-y-4"
+                }`}
+              >
                 {group.items.map((item, hallIndex) => {
                   const globalIndex = items.findIndex((i) => i.id === item.id);
 
@@ -4041,7 +4049,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   return (
     <div
       ref={containerRef}
-      className="space-y-4 relative"
+      className={`relative ${
+        layoutMode === "smartphone" ? "space-y-2" : "space-y-4"
+      }`}
       style={{ paddingBottom: "var(--footer-height, 96px)" }}
       onDragLeave={() => setActiveDropTarget(null)}
     >

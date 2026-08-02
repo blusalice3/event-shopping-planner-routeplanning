@@ -671,4 +671,48 @@ describe("ShoppingItemCard purchase status control", () => {
     });
     expect(getStatusButton()).toHaveAttribute("aria-haspopup", "dialog");
   });
+
+  it("uses the dense smartphone focus card without inactive selection controls", () => {
+    renderCard({
+      layoutMode: "smartphone",
+      viewMode: "focus",
+      item: {
+        ...baseItem,
+        url: "https://example.com/item",
+        remarks: "memo",
+      },
+    });
+
+    const card = screen.getByTestId("shopping-item-card-smartphone-compact");
+    expect(card.querySelector("[data-drag-handle]")).toBeNull();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("textbox", { name: "利用者メモ" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "購入予定数量" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "購入金額" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "URLを開く" })).toBeInTheDocument();
+    expect(getStatusButton()).toBeInTheDocument();
+  });
+
+  it("uses the dense smartphone execute card without selection controls", () => {
+    renderCard({
+      layoutMode: "smartphone",
+      viewMode: "execute",
+      hallIndex: 0,
+    });
+
+    const card = screen.getByTestId("shopping-item-card-smartphone-compact");
+    expect(card.querySelector("[data-drag-handle]")).toBeNull();
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "購入予定数量" }),
+    ).toBeEnabled();
+    expect(screen.getByRole("combobox", { name: "購入金額" })).toBeEnabled();
+    expect(getStatusButton()).toBeEnabled();
+  });
 });

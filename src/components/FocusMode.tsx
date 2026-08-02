@@ -331,11 +331,14 @@ const FocusMode: React.FC<FocusModeProps> = ({
     return mapData && Object.keys(mapData).length > 0;
   }, [mapData]);
   const headerContainerClass = useMemo(
-    () => (layoutMode === "smartphone" ? "p-4 mb-4 mx-2" : "p-4 mb-4 mx-16"),
+    () => (layoutMode === "smartphone" ? "p-2 mb-2 mx-2" : "p-4 mb-4 mx-16"),
     [layoutMode],
   );
   const itemListContainerClass = useMemo(
-    () => `space-y-4 pb-24 ${layoutMode === "smartphone" ? "mx-2" : "mx-16"}`,
+    () =>
+      `${layoutMode === "smartphone" ? "space-y-2" : "space-y-4"} pb-24 ${
+        layoutMode === "smartphone" ? "mx-2" : "mx-16"
+      }`,
     [layoutMode],
   );
   useEffect(() => {
@@ -3092,6 +3095,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
           className="relative flex flex-col min-h-0"
         >
           <FocusModeMapControls
+            compact
             mapZoomLevel={mapZoomLevel}
             mapRotationAngle={mapRotationAngle}
             mapInitialRotationAngle={mapInitialRotationAngle}

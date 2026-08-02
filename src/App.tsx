@@ -5409,12 +5409,21 @@ const App: React.FC = () => {
               closeUiSettingsPanel({ resetVisibilityOverride: false });
               setUiVisibilityOverride((prev) => !prev);
             }}
-            className={`fixed left-3 top-3 z-[110] w-10 h-10 rounded-full shadow-lg flex items-center justify-center transition-all touch-manipulation select-none ${
+            className={`fixed z-[110] flex h-10 w-10 touch-manipulation select-none items-center justify-center rounded-full shadow-lg transition-all ${
+              layoutMode === "smartphone" &&
+              currentMode === "focus" &&
+              focusModeMapVisible
+                ? "left-3 top-[4.25rem]"
+                : "left-3 top-3"
+            } ${
               uiVisibilityOverride
                 ? "bg-blue-600 text-white hover:bg-blue-700"
                 : "bg-white/80 dark:bg-slate-700/80 text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-600 backdrop-blur-sm border border-slate-200 dark:border-slate-600"
             }`}
             title={
+              uiVisibilityOverride ? "自動表示に戻す" : "画面要素をすべて表示"
+            }
+            aria-label={
               uiVisibilityOverride ? "自動表示に戻す" : "画面要素をすべて表示"
             }
             style={{ WebkitTapHighlightColor: "transparent" }}

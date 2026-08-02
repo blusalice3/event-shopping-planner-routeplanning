@@ -1,7 +1,11 @@
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
-import { FocusModeHeader, FocusModeItemList } from "./FocusModePanels";
+import {
+  FocusModeHeader,
+  FocusModeItemList,
+  FocusModeMapControls,
+} from "./FocusModePanels";
 import type { ShoppingItem } from "../../types/item";
 import type { FocusPhase } from "../../types/focus";
 
@@ -91,7 +95,7 @@ describe("FocusModeHeader responsive layout", () => {
     );
     expect(screen.getByTestId("focus-header-smartphone-payment")).toHaveClass(
       "border-t",
-      "items-baseline",
+      "items-center",
     );
     expect(screen.getByTestId("focus-header-bulk-scroll")).toHaveClass(
       "overflow-x-auto",
@@ -107,12 +111,13 @@ describe("FocusModeHeader responsive layout", () => {
     expect(screen.getByRole("combobox", { name: "phase" })).toBeInTheDocument();
   });
 
-  it("applies w-full and max-w-[7.5rem] to the smartphone phase select", () => {
+  it("keeps the smartphone phase select compact", () => {
     renderHeader({ layoutMode: "smartphone" });
 
     expect(screen.getByRole("combobox", { name: "phase" })).toHaveClass(
+      "h-8",
       "w-full",
-      "max-w-[7.5rem]",
+      "max-w-[6.75rem]",
     );
   });
 
@@ -200,6 +205,99 @@ describe("FocusModeHeader responsive layout", () => {
     });
 
     expect(onPhaseChangeRequest).toHaveBeenCalledWith("late");
+  });
+});
+
+describe("FocusModeMapControls responsive layout", () => {
+  const renderControls = (
+    overrides: Partial<ComponentProps<typeof FocusModeMapControls>> = {},
+  ) => {
+    const onMapCenteringModeChange = vi.fn();
+    const onMapRotationAngleChange = vi.fn();
+    render(
+      <FocusModeMapControls
+        mapZoomLevel={84}
+        mapRotationAngle={0}
+        mapInitialRotationAngle={30}
+        onMapRotationAngleChange={onMapRotationAngleChange}
+        mapCenteringMode="prevToCurrent"
+        onMapCenteringModeChange={onMapCenteringModeChange}
+        {...overrides}
+      />,
+    );
+    return { onMapCenteringModeChange, onMapRotationAngleChange };
+  };
+
+  it("keeps compact smartphone controls in a single non-wrapping row", () => {
+    renderControls({ compact: true });
+
+    const controls = screen.getByTestId("focus-map-controls");
+    const routeButton = screen.getByRole("button", {
+      name: "前の訪問先から現在地までのルートを表示",
+    });
+    const zoomLevel = screen.getByLabelText("マップ倍率 84パーセント");
+    const rotationControls = screen.getByTestId("map-rotation-compact");
+
+    expect(controls).toHaveClass("flex-nowrap", "py-0");
+    expect(controls).not.toHaveClass("flex-wrap");
+    expect(routeButton).toHaveClass("h-full", "leading-none");
+    expect(routeButton).toHaveTextContent("前→現");
+    expect(zoomLevel).toHaveClass("h-7", "leading-none");
+    expect(zoomLevel).toHaveTextContent("84%");
+    expect(rotationControls).toHaveClass("h-7");
+  });
+
+  it("exposes selected centering state and invokes the compact switch", () => {
+    const { onMapCenteringModeChange } = renderControls({ compact: true });
+    const routeButton = screen.getByRole("button", {
+      name: "前の訪問先から現在地までのルートを表示",
+    });
+    const currentButton = screen.getByRole("button", {
+      name: "現在地だけを中央表示",
+    });
+
+    expect(routeButton).toHaveAttribute("aria-pressed", "true");
+    expect(currentButton).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(currentButton);
+
+    expect(onMapCenteringModeChange).toHaveBeenCalledWith("currentOnly");
+  });
+
+  it("opens compact rotation controls as an overlay without changing the toolbar structure", () => {
+    const { onMapRotationAngleChange } = renderControls({ compact: true });
+    const rotationButton = screen.getByRole("button", { name: "回転 0°" });
+
+    expect(
+      screen.queryByTestId("map-rotation-popover"),
+    ).not.toBeInTheDocument();
+    fireEvent.click(rotationButton);
+
+    expect(screen.getByTestId("map-rotation-popover")).toBeInTheDocument();
+    fireEvent.change(screen.getByRole("slider", { name: "マップの回転角度" }), {
+      target: { value: "120" },
+    });
+    fireEvent.click(screen.getByTitle("+15° (時計回り)"));
+    fireEvent.click(screen.getByTitle("初期角度(30°)に戻す"));
+
+    expect(onMapRotationAngleChange).toHaveBeenNthCalledWith(1, 120);
+    expect(onMapRotationAngleChange).toHaveBeenNthCalledWith(2, 15);
+    expect(onMapRotationAngleChange).toHaveBeenNthCalledWith(3, 30);
+
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(
+      screen.queryByTestId("map-rotation-popover"),
+    ).not.toBeInTheDocument();
+    expect(rotationButton).toHaveFocus();
+  });
+
+  it("preserves the full inline labels outside compact mode", () => {
+    renderControls();
+
+    expect(screen.getByTestId("focus-map-controls")).toHaveClass("flex-wrap");
+    expect(screen.getByText("前→現ルート")).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("map-rotation-compact"),
+    ).not.toBeInTheDocument();
   });
 });
 

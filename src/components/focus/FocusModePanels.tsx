@@ -59,6 +59,7 @@ interface FocusModeHeaderProps {
 }
 
 interface FocusModeMapControlsProps {
+  compact?: boolean;
   mapZoomLevel: number;
   mapRotationAngle: number;
   mapInitialRotationAngle: number;
@@ -166,7 +167,7 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(
       ref={itemListRef}
       className={
         containerClassName ||
-        `space-y-4 pb-24 ${
+        `${layoutMode === "smartphone" ? "space-y-2" : "space-y-4"} pb-24 ${
           layoutMode === "smartphone" && isMapVisible
             ? "px-2"
             : layoutMode === "smartphone"
@@ -247,10 +248,11 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
     movementBasisPhase = null,
     nextVisitInfo,
   }) => {
+    const isSmartphone = layoutMode === "smartphone";
     const rootClassName = containerClassName
       ? `text-white rounded-lg shadow-lg ${containerClassName}`
-      : `text-white p-3 rounded-lg shadow-lg ${
-          layoutMode === "smartphone" && isMapVisible ? "mx-2" : ""
+      : `text-white rounded-lg shadow-lg ${
+          isSmartphone ? `p-2 ${isMapVisible ? "mx-2" : ""}` : "p-3"
         }`;
     const headerBackgroundImage = buildHeaderBackgroundImage(currentVisitItems);
     const labelClassName =
@@ -268,7 +270,6 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
       size === "expanded"
         ? "text-sm opacity-80 mt-1"
         : "text-xs opacity-80 mt-1";
-    const isSmartphone = layoutMode === "smartphone";
     const hasPlannedDiff =
       currentVisitPriceInfo.plannedTotal !==
       currentVisitPriceInfo.chargeableTotal;
@@ -278,11 +279,11 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
       .join(" ");
     const nextVisitDisplayText = nextVisitText || "-";
     const smartphoneSelectClassName =
-      "w-full max-w-[7.5rem] rounded-md bg-white/20 py-1 pl-2 pr-6 text-base font-bold text-white appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/50 transition-colors";
+      "h-8 w-full max-w-[6.75rem] rounded-md bg-white/20 py-0.5 pl-2 pr-6 text-sm font-bold text-white appearance-none cursor-pointer focus:outline-none focus:ring-2 focus:ring-white/50 transition-colors";
     const bulkStatusButtonClassName =
       "flex-shrink-0 whitespace-nowrap rounded px-2 py-0.5 text-xs font-medium transition-colors";
     const smartphoneBulkStatusButtonClassName =
-      "flex-shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors";
+      "min-h-7 flex-shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/70";
 
     const renderPhaseSelect = (className: string) => (
       <select
@@ -361,30 +362,38 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
     const headerContent = isSmartphone ? (
       <>
         <div
-          className="grid grid-cols-[minmax(0,1fr)_auto] gap-3"
+          className="grid grid-cols-[minmax(0,1fr)_auto] gap-2"
           data-testid="focus-header-smartphone-main"
         >
           <div className="min-w-0">
-            <div className="text-xl font-bold leading-tight break-words">
+            <div
+              className="truncate text-lg font-bold leading-tight"
+              title={spaceInfo}
+            >
               {spaceInfo}
             </div>
-            <div className="mt-1 text-sm leading-snug break-words">
-              {circleName}
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5">
+              <span
+                className="min-w-0 flex-1 truncate text-xs leading-snug"
+                title={circleName}
+              >
+                {circleName}
+              </span>
+              <span className="inline-flex flex-shrink-0 rounded bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums">
+                {currentVisitCheckedCount}/{currentVisitTotalCount}
+              </span>
             </div>
-            <span className="mt-1 inline-block rounded bg-white/20 px-2 py-0.5 text-xs font-semibold">
-              {currentVisitCheckedCount}/{currentVisitTotalCount}
-            </span>
           </div>
 
           <div
             className={`text-right ${
-              isSpaceAggregate ? "min-w-[9.25rem]" : "min-w-[7.5rem]"
+              isSpaceAggregate ? "min-w-[8.5rem]" : "min-w-[6.75rem]"
             }`}
           >
             {renderPhaseControl(smartphoneSelectClassName)}
             {!isSpaceAggregate && (
               <div
-                className="mt-1 max-w-[8.5rem] truncate text-xs opacity-80"
+                className="mt-0.5 max-w-[8rem] truncate text-[10px] opacity-80"
                 title={nextVisitDisplayText}
                 data-testid="focus-header-next-visit"
               >
@@ -395,20 +404,20 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
         </div>
 
         <div
-          className="mt-3 flex flex-wrap items-baseline gap-x-3 gap-y-1 border-t border-white/20 pt-2"
+          className="mt-1.5 flex min-h-7 flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-white/20 pt-1"
           data-testid="focus-header-smartphone-payment"
         >
-          <span className="text-xs opacity-80">支払額</span>
-          <span className="text-xl font-bold">
+          <span className="text-[10px] opacity-80">支払額</span>
+          <span className="text-lg font-bold tabular-nums">
             ¥{currentVisitPriceInfo.chargeableTotal.toLocaleString()}
           </span>
           {hasPlannedDiff && (
-            <span className="text-xs font-semibold opacity-85">
+            <span className="text-[10px] font-semibold opacity-85">
               予定額 ¥{currentVisitPriceInfo.plannedTotal.toLocaleString()}
             </span>
           )}
           {currentVisitPriceInfo.priceMissingItemCount > 0 && (
-            <span className="text-xs font-semibold text-red-300">
+            <span className="text-[10px] font-semibold text-red-200">
               価格未定 {currentVisitPriceInfo.priceMissingItemCount}件
             </span>
           )}
@@ -416,7 +425,7 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
 
         {currentVisitItems.length > 0 && (
           <div
-            className="-mx-1 mt-3 overflow-x-auto overflow-y-hidden px-1 pb-1"
+            className="-mx-1 mt-1 overflow-x-auto overflow-y-hidden px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
             data-testid="focus-header-bulk-scroll"
           >
             <div
@@ -504,39 +513,67 @@ export const FocusModeMapControls: React.FC<FocusModeMapControlsProps> =
       onMapRotationAngleChange,
       mapCenteringMode,
       onMapCenteringModeChange,
+      compact = false,
     }) => (
-      <div className="flex items-center gap-2 p-2 bg-white/90 dark:bg-slate-800/90 border-b border-slate-200 dark:border-slate-700 flex-wrap">
-        <div className="flex rounded-md overflow-hidden border border-slate-300 dark:border-slate-600">
+      <div
+        className={
+          compact
+            ? "relative z-20 flex flex-nowrap items-center gap-1 overflow-visible border-b border-slate-200 bg-white/90 px-0.5 py-0 dark:border-slate-700 dark:bg-slate-800/90"
+            : "flex flex-wrap items-center gap-2 border-b border-slate-200 bg-white/90 p-2 dark:border-slate-700 dark:bg-slate-800/90"
+        }
+        data-testid="focus-map-controls"
+      >
+        <div
+          className={`flex overflow-hidden rounded-md border border-slate-300 dark:border-slate-600 ${
+            compact ? "h-7 min-w-0 flex-1" : ""
+          }`}
+          role="group"
+          aria-label="マップの表示範囲"
+        >
           <button
+            type="button"
             onClick={() => onMapCenteringModeChange("prevToCurrent")}
-            className={`text-xs px-2 py-1 ${
+            className={`${compact ? "h-full min-w-0 flex-1 px-1 text-[11px] leading-none" : "px-2 py-1 text-xs"} whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-300 ${
               mapCenteringMode === "prevToCurrent"
-                ? "bg-blue-500 text-white"
+                ? "bg-blue-600 text-white"
                 : "bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300"
             }`}
+            aria-label="前の訪問先から現在地までのルートを表示"
+            aria-pressed={mapCenteringMode === "prevToCurrent"}
           >
-            前→現ルート
+            {compact ? "前→現" : "前→現ルート"}
           </button>
           <button
+            type="button"
             onClick={() => onMapCenteringModeChange("currentOnly")}
-            className={`text-xs px-2 py-1 ${
+            className={`${compact ? "h-full min-w-0 flex-1 px-1 text-[11px] leading-none" : "px-2 py-1 text-xs"} whitespace-nowrap focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-300 ${
               mapCenteringMode === "currentOnly"
-                ? "bg-blue-500 text-white"
+                ? "bg-blue-600 text-white"
                 : "bg-slate-100 dark:bg-slate-700 text-slate-700 dark:text-slate-300"
             }`}
+            aria-label="現在地だけを中央表示"
+            aria-pressed={mapCenteringMode === "currentOnly"}
           >
             現在地
           </button>
         </div>
 
-        <div className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-3 text-slate-700 dark:text-slate-300">
+        <div
+          className={`flex flex-none items-center justify-center rounded-md bg-slate-100 font-semibold tabular-nums text-slate-700 dark:bg-slate-700 dark:text-slate-300 ${
+            compact
+              ? "h-7 min-w-[3.25rem] px-1.5 text-xs leading-none"
+              : "px-3 py-1 text-sm"
+          }`}
+          aria-label={`マップ倍率 ${Math.round(mapZoomLevel)}パーセント`}
+        >
           {Math.round(mapZoomLevel)}%
         </div>
         <MapRotationControls
           angle={mapRotationAngle}
           initialAngle={mapInitialRotationAngle}
           onAngleChange={onMapRotationAngleChange}
-          showHint={true}
+          showHint={!compact}
+          compact={compact}
         />
       </div>
     ),

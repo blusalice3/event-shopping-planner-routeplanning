@@ -1166,7 +1166,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             setLimitedDialogSource("current");
             setLimitedDialogOpen(true);
           }}
-          className={`text-xs font-semibold rounded py-0.5 px-1.5 text-center bg-orange-50 text-orange-700 dark:bg-orange-900/30 dark:text-orange-200 ${
+          className={`h-8 min-w-10 rounded bg-orange-50 px-1.5 text-center text-xs font-semibold text-orange-700 dark:bg-orange-900/30 dark:text-orange-200 ${
             highlightLimitedMissing
               ? "ring-2 ring-orange-500 animate-pulse"
               : ""
@@ -1180,7 +1180,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           disabled={readOnly}
           onChange={handleQuantityChange}
           aria-label="購入予定数量"
-          className="text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-center focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-10"
+          className="h-8 w-10 appearance-none rounded bg-slate-100 px-0.5 text-center text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-700"
         >
           {quantityOptions.map((num) => (
             <option key={num} value={num}>
@@ -1202,7 +1202,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           disabled={readOnly}
           onChange={handlePriceChange}
           aria-label="購入金額"
-          className={`text-xs font-semibold bg-slate-100 dark:bg-slate-700 rounded py-0.5 px-0.5 text-right focus:ring-2 focus:ring-blue-500 focus:outline-none appearance-none w-16 ${
+          className={`h-8 w-16 appearance-none rounded bg-slate-100 px-0.5 text-right text-xs font-semibold focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-700 ${
             item.price === null ? "text-red-600 dark:text-red-400" : ""
           } ${highlightPrice && item.price === null ? "ring-2 ring-red-500 ring-offset-1 bg-red-50 dark:bg-red-900/30 animate-pulse" : ""}`}
         >
@@ -1229,13 +1229,37 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
             ? purchaseStatusMenuOpen
             : undefined
         }
-        className="p-1 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
+        className="flex h-8 min-w-8 items-center justify-center gap-0.5 rounded-md bg-slate-100 px-1 transition-colors hover:bg-slate-200 dark:bg-slate-700 dark:hover:bg-slate-600"
         aria-label={`Current status: ${currentStatus.label}. Click to change.`}
         title={currentStatus.label}
       >
         <IconComponent className={`w-4 h-4 ${currentStatus.color}`} />
+        <span
+          className={`hidden whitespace-nowrap text-[10px] font-semibold min-[360px]:inline ${currentStatus.color}`}
+        >
+          {currentStatus.label}
+        </span>
       </button>
     );
+
+    const compactSheetReferenceDetails =
+      item.catalogPrice !== undefined || item.sheetRemarks?.trim() ? (
+        <div
+          aria-label="シート情報"
+          className="flex min-w-0 items-center gap-2 overflow-hidden text-[10px] leading-tight text-slate-500 dark:text-slate-400"
+        >
+          {item.catalogPrice !== undefined && (
+            <span className="flex-shrink-0 whitespace-nowrap">
+              定価 {formatCatalogPrice(item.catalogPrice)}
+            </span>
+          )}
+          {item.sheetRemarks?.trim() && (
+            <span className="min-w-0 truncate" title={item.sheetRemarks}>
+              {item.sheetRemarks}
+            </span>
+          )}
+        </div>
+      ) : null;
 
     if (viewMode !== "edit") {
       return (
@@ -1247,6 +1271,7 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           onPointerLeave={handlePointerLeave}
           onTouchMove={handlePointerLeave}
           data-search-match={isSearchMatch ? "true" : undefined}
+          data-testid="shopping-item-card-smartphone-compact"
           aria-readonly={readOnly}
         >
           {isSelected && (
@@ -1255,87 +1280,55 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
           {statusBgOverlay && <div className={statusBgOverlay} />}
           {warningStripe}
 
-          <div className="flex">
-            <div
-              data-drag-handle
-              className="relative p-2 flex flex-col items-center justify-start cursor-grab text-slate-400 dark:text-slate-500 border-r border-slate-200/80 dark:border-slate-700/80 space-y-1 z-10"
-            >
-              {hallIndex !== undefined && (
-                <div
-                  className={`w-7 h-7 flex items-center justify-center text-white rounded-full text-xs font-bold flex-shrink-0 ${
-                    priorityLevel === "highest"
-                      ? "bg-red-600"
-                      : priorityLevel === "priority"
-                        ? "bg-orange-500"
-                        : "bg-blue-600"
-                  }`}
-                >
-                  {hallIndex + 1}
-                </div>
-              )}
-              <input
-                type="checkbox"
-                checked={isSelected}
-                disabled={readOnly}
-                onChange={() => onSelectItem(item.id)}
-                onClick={(e) => e.stopPropagation()}
-                data-no-long-press
-                className="w-5 h-5 rounded text-blue-600 focus:ring-blue-500"
-                aria-label={`Select item ${item.circle} - ${item.title}`}
-              />
-              <GripVerticalIcon className="w-5 h-5" />
-            </div>
-
-            <div className="flex-grow flex flex-col min-w-0 relative z-10">
-              <div className={`p-2 pb-1 ${focusInfoAreaClassName}`}>
-                <div className="flex justify-between items-start gap-2">
-                  <div className="flex-grow min-w-0">
-                    <p className="font-bold text-sm text-slate-900 dark:text-slate-100">{`${item.eventDate} ${locationString}`}</p>
-                    <div className="flex items-center gap-1 flex-wrap mt-0.5">
-                      <p
-                        className="text-sm text-slate-600 dark:text-slate-300 truncate"
-                        title={item.circle}
-                      >
-                        {item.circle}
-                      </p>
-                      {warningTags.map((tag, index) => (
-                        <img
-                          key={index}
-                          src={`/${tag}.png`}
-                          alt={tag}
-                          className="h-8 w-auto object-contain"
-                        />
-                      ))}
-                    </div>
-                  </div>
-                </div>
-                <p
-                  className={`text-sm font-semibold text-slate-700 dark:text-slate-200 truncate mt-1 ${currentStatus.dim ? "line-through" : ""}`}
-                  title={item.title}
-                >
-                  {item.title || "（タイトルなし）"}
+          <div className="flex min-w-0">
+            <div className="relative z-10 min-w-0 flex-1 px-2 py-1.5">
+              <div className="flex min-w-0 items-center gap-1">
+                <p className="max-w-[48%] flex-shrink-0 truncate text-xs font-bold text-slate-900 dark:text-slate-100">
+                  {item.eventDate} {locationString}
                 </p>
-              </div>
-
-              <div className="p-2 pt-1 flex flex-col gap-1.5 border-t border-slate-200/50 dark:border-slate-700/50">
+                <p
+                  className="min-w-0 flex-1 truncate text-xs text-slate-600 dark:text-slate-300"
+                  title={item.circle}
+                >
+                  {item.circle}
+                </p>
+                {warningTags.map((tag, index) => (
+                  <img
+                    key={index}
+                    src={`/${tag}.png`}
+                    alt={tag}
+                    className="h-5 w-auto flex-shrink-0 object-contain"
+                  />
+                ))}
                 {itemUrlHref && (
-                  <div className="flex justify-end">
-                    <a
-                      href={itemUrlHref}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      data-no-long-press
-                      className="p-1 rounded-md hover:bg-slate-200 dark:hover:bg-slate-700 text-blue-500 dark:text-blue-400 transition-colors flex items-center gap-1"
-                      aria-label="URLを開く"
-                      title="URLを開く"
-                    >
-                      <ExternalLinkIcon className="w-4 h-4" />
-                      <span className="text-xs">リンク</span>
-                    </a>
-                  </div>
+                  <a
+                    href={itemUrlHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(e) => e.stopPropagation()}
+                    data-no-long-press
+                    className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md text-blue-500 transition-colors hover:bg-slate-200 dark:text-blue-400 dark:hover:bg-slate-700"
+                    aria-label="URLを開く"
+                    title="URLを開く"
+                  >
+                    <ExternalLinkIcon className="h-4 w-4" />
+                  </a>
                 )}
-                {sheetReferenceDetails}
+              </div>
+              <p
+                className={`mt-0.5 truncate text-xs font-semibold text-slate-700 dark:text-slate-200 ${
+                  currentStatus.dim ? "line-through" : ""
+                }`}
+                title={item.title}
+              >
+                {item.title || "（タイトルなし）"}
+              </p>
+
+              {compactSheetReferenceDetails && (
+                <div className="mt-0.5">{compactSheetReferenceDetails}</div>
+              )}
+
+              <div className="mt-1 flex min-w-0 items-center gap-1 border-t border-slate-200/60 pt-1 dark:border-slate-700/60">
                 <input
                   type="text"
                   value={item.remarks}
@@ -1344,48 +1337,12 @@ const ShoppingItemCard: React.FC<ShoppingItemCardProps> = ({
                   aria-label="利用者メモ"
                   onChange={handleRemarksChange}
                   placeholder="利用者メモ"
-                  className="text-sm bg-slate-100 dark:bg-slate-700 rounded-md py-1 px-2 w-full focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+                  className="h-8 min-w-0 flex-1 rounded bg-slate-100 px-1.5 text-xs transition focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-700"
                 />
-                <div className="flex items-center justify-between">
-                  <div className="flex-1" />
-                  <div className="flex items-center gap-1">
-                    <span className="text-xs text-slate-600 dark:text-slate-400">
-                      数量
-                    </span>
-                    {compactQuantityControl}
-                  </div>
-                  <div className="flex-1" />
-                  <div className="flex items-center gap-2">
-                    {compactPriceControl}
-                    <button
-                      ref={purchaseStatusButtonRef}
-                      disabled={readOnly}
-                      onClick={handlePurchaseStatusButtonClick}
-                      data-no-long-press
-                      aria-haspopup={
-                        purchaseStatusControlMode === "radial"
-                          ? "dialog"
-                          : undefined
-                      }
-                      aria-expanded={
-                        purchaseStatusControlMode === "radial"
-                          ? purchaseStatusMenuOpen
-                          : undefined
-                      }
-                      className="flex items-center space-x-1 p-1.5 rounded-md bg-slate-100 dark:bg-slate-700 hover:bg-slate-200 dark:hover:bg-slate-600 transition-colors"
-                      aria-label={`Current status: ${currentStatus.label}. Click to change.`}
-                    >
-                      <IconComponent
-                        className={`w-5 h-5 ${currentStatus.color}`}
-                      />
-                      <span
-                        className={`text-xs font-semibold ${currentStatus.color}`}
-                      >
-                        {currentStatus.label}
-                      </span>
-                    </button>
-                  </div>
-                </div>
+                <span className="sr-only">数量</span>
+                {compactQuantityControl}
+                {compactPriceControl}
+                {compactStatusButton}
               </div>
             </div>
           </div>
