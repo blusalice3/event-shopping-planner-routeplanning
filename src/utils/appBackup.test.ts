@@ -697,7 +697,83 @@ describe("appBackup", () => {
     });
   });
 
-  it("rejects map-scoped settings that point to missing related data", () => {
+  it("normalizes orphaned display settings and accepts hall routes without definitions when they only use unassigned groups", () => {
+    const backup = clone(createAppBackup(makeAppData()));
+    const missingMapName = "削除済みマップ";
+    const maplessName = "__mapless__:2日目";
+    backup.data.mapRotationSettings[EVENT_NAME][missingMapName] = clone(
+      backup.data.mapRotationSettings[EVENT_NAME][MAP_NAME],
+    );
+    backup.data.mapViewportSettings[EVENT_NAME][missingMapName] = clone(
+      backup.data.mapViewportSettings[EVENT_NAME][MAP_NAME],
+    );
+    backup.data.hallRouteSettings[EVENT_NAME][maplessName] = {
+      hallOrder: ["undefined", "undefined:priority", "undefined:highest"],
+      hallVisitLists: [],
+    };
+
+    const result = parseAppBackup(backup);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.errors.join("\n"));
+    expect(
+      result.data.mapRotationSettings[EVENT_NAME][missingMapName],
+    ).toBeUndefined();
+    expect(
+      result.data.mapViewportSettings[EVENT_NAME][missingMapName],
+    ).toBeUndefined();
+    expect(result.data.hallRouteSettings[EVENT_NAME][maplessName]).toEqual(
+      backup.data.hallRouteSettings[EVENT_NAME][maplessName],
+    );
+    expect(
+      backup.data.mapRotationSettings[EVENT_NAME][missingMapName],
+    ).toBeDefined();
+    expect(
+      backup.data.mapViewportSettings[EVENT_NAME][missingMapName],
+    ).toBeDefined();
+  });
+
+  it("removes orphaned display settings when creating a backup without mutating the current app data", () => {
+    const data = makeAppData();
+    const missingMapName = "削除済みマップ";
+    data.mapRotationSettings[EVENT_NAME][missingMapName] = clone(
+      data.mapRotationSettings[EVENT_NAME][MAP_NAME],
+    );
+    data.mapViewportSettings[EVENT_NAME][missingMapName] = clone(
+      data.mapViewportSettings[EVENT_NAME][MAP_NAME],
+    );
+
+    const backup = createAppBackup(data);
+
+    expect(
+      backup.data.mapRotationSettings[EVENT_NAME][missingMapName],
+    ).toBeUndefined();
+    expect(
+      backup.data.mapViewportSettings[EVENT_NAME][missingMapName],
+    ).toBeUndefined();
+    expect(data.mapRotationSettings[EVENT_NAME][missingMapName]).toBeDefined();
+    expect(data.mapViewportSettings[EVENT_NAME][missingMapName]).toBeDefined();
+  });
+
+  it("rejects malformed orphaned display settings before normalization", () => {
+    const backup = clone(createAppBackup(makeAppData()));
+    const missingMapName = "壊れた削除済みマップ";
+    backup.data.mapRotationSettings[EVENT_NAME][missingMapName] = {
+      initialAngle: "invalid",
+      mapTabAngle: 0,
+      focusModeAngle: 0,
+    } as never;
+
+    const result = parseAppBackup(backup);
+
+    expect(result.ok).toBe(false);
+    if (result.ok) throw new Error("invalid backup was accepted");
+    expect(result.errors.join("\n")).toContain(
+      `data.mapRotationSettings.${EVENT_NAME}.${missingMapName}.initialAngle`,
+    );
+  });
+
+  it("rejects data-bearing settings that point to missing related data", () => {
     const backup = clone(createAppBackup(makeAppData()));
     const missingMapName = "存在しないマップ";
     backup.data.mapRotationSettings[EVENT_NAME][missingMapName] = clone(
@@ -713,7 +789,7 @@ describe("appBackup", () => {
       backup.data.hallDefinitions[EVENT_NAME][MAP_NAME],
     );
     backup.data.hallRouteSettings[EVENT_NAME]["会場定義なし"] = {
-      hallOrder: [],
+      hallOrder: ["missing-hall"],
       hallVisitLists: [],
     };
 
@@ -723,19 +799,13 @@ describe("appBackup", () => {
     if (result.ok) throw new Error("invalid backup was accepted");
     const errors = result.errors.join("\n");
     expect(errors).toContain(
-      `data.mapRotationSettings.${EVENT_NAME}.${missingMapName}`,
-    );
-    expect(errors).toContain(
       `data.routeSettings.${EVENT_NAME}.${missingMapName}`,
-    );
-    expect(errors).toContain(
-      `data.mapViewportSettings.${EVENT_NAME}.${missingMapName}`,
     );
     expect(errors).toContain(
       `data.hallDefinitions.${EVENT_NAME}.${missingMapName}`,
     );
     expect(errors).toContain(
-      `data.hallRouteSettings.${EVENT_NAME}.会場定義なし`,
+      `data.hallRouteSettings.${EVENT_NAME}.会場定義なし.hallOrder[0]`,
     );
   });
 

@@ -612,11 +612,7 @@ const validateKnownEvent = (
 };
 
 const validateKnownMap = (
-  sectionName:
-    | "mapRotationSettings"
-    | "routeSettings"
-    | "hallDefinitions"
-    | "mapViewportSettings",
+  sectionName: "routeSettings" | "hallDefinitions",
   eventName: string,
   mapName: string,
   mapNamesByEvent: Map<string, Set<string>>,
@@ -1244,13 +1240,6 @@ const validateAppData = (data: UnknownRecord, errors: string[]): void => {
         );
         if (!settingsByMap) return;
         Object.entries(settingsByMap).forEach(([mapName, rawSettings]) => {
-          validateKnownMap(
-            "mapRotationSettings",
-            eventName,
-            mapName,
-            mapNamesByEvent,
-            errors,
-          );
           validateMapRotationState(
             rawSettings,
             `${eventPath}.${mapName}`,
@@ -1278,13 +1267,6 @@ const validateAppData = (data: UnknownRecord, errors: string[]): void => {
         );
         if (!settingsByMap) return;
         Object.entries(settingsByMap).forEach(([mapName, rawSettings]) => {
-          validateKnownMap(
-            "mapViewportSettings",
-            eventName,
-            mapName,
-            mapNamesByEvent,
-            errors,
-          );
           validateMapViewportState(
             rawSettings,
             `${eventPath}.${mapName}`,
@@ -1482,16 +1464,9 @@ const validateAppData = (data: UnknownRecord, errors: string[]): void => {
           const settingPath = `${eventPath}.${mapName}`;
           const settings = requireRecord(rawSettings, settingPath, errors);
           if (!settings) return;
-          const knownHallIds = hallIdsByEventAndMap
-            .get(eventName)
-            ?.get(mapName);
-          if (!knownHallIds) {
-            addError(
-              errors,
-              settingPath,
-              "hallDefinitionsに存在しない会場設定を参照しています",
-            );
-          }
+          const knownHallIds =
+            hallIdsByEventAndMap.get(eventName)?.get(mapName) ??
+            new Set<string>();
 
           validateStringArray(
             settings.hallOrder,
@@ -1499,10 +1474,7 @@ const validateAppData = (data: UnknownRecord, errors: string[]): void => {
             errors,
             (groupId, groupPath) => {
               const hallId = parseHallGroupId(groupId);
-              if (
-                hallId !== null &&
-                (!knownHallIds || !knownHallIds.has(hallId))
-              ) {
+              if (hallId !== null && !knownHallIds.has(hallId)) {
                 addError(
                   errors,
                   groupPath,
@@ -1533,10 +1505,7 @@ const validateAppData = (data: UnknownRecord, errors: string[]): void => {
               errors,
               true,
             );
-            if (
-              hallId !== undefined &&
-              (!knownHallIds || !knownHallIds.has(hallId))
-            ) {
+            if (hallId !== undefined && !knownHallIds.has(hallId)) {
               addError(
                 errors,
                 `${visitListPath}.hallId`,
@@ -1610,6 +1579,52 @@ const validateAppData = (data: UnknownRecord, errors: string[]): void => {
   });
 };
 
+type MapScopedSettingsStore<T> = Record<string, Record<string, T>>;
+
+const pruneOrphanedMapSettings = <T>(
+  settings: MapScopedSettingsStore<T>,
+  mapData: AppData["mapData"],
+): MapScopedSettingsStore<T> => {
+  let normalized = settings;
+
+  Object.entries(settings).forEach(([eventName, settingsByMap]) => {
+    const knownMapNames = new Set(Object.keys(mapData[eventName] ?? {}));
+    const retainedEntries = Object.entries(settingsByMap).filter(([mapName]) =>
+      knownMapNames.has(mapName),
+    );
+    if (retainedEntries.length === Object.keys(settingsByMap).length) return;
+
+    if (normalized === settings) normalized = { ...settings };
+    normalized[eventName] = Object.fromEntries(retainedEntries);
+  });
+
+  return normalized;
+};
+
+const normalizeAppDataForBackup = (data: AppData): AppData => {
+  const mapRotationSettings = pruneOrphanedMapSettings(
+    data.mapRotationSettings,
+    data.mapData,
+  );
+  const mapViewportSettings = pruneOrphanedMapSettings(
+    data.mapViewportSettings,
+    data.mapData,
+  );
+
+  if (
+    mapRotationSettings === data.mapRotationSettings &&
+    mapViewportSettings === data.mapViewportSettings
+  ) {
+    return data;
+  }
+
+  return {
+    ...data,
+    mapRotationSettings,
+    mapViewportSettings,
+  };
+};
+
 export function createAppBackup(
   data: AppData,
   exportedAt: Date = new Date(),
@@ -1622,7 +1637,7 @@ export function createAppBackup(
     version: APP_BACKUP_VERSION,
     exportedAt: exportedAt.toISOString(),
     eventSettings,
-    data,
+    data: normalizeAppDataForBackup(data),
   };
 }
 
@@ -1670,7 +1685,15 @@ export function parseAppBackup(source: unknown): AppBackupParseResult {
 
   if (errors.length > 0) return { ok: false, data: null, errors };
 
-  const backup = root as unknown as AppBackupV1;
+  const rawBackup = root as unknown as AppBackupV1;
+  const normalizedData = normalizeAppDataForBackup(rawBackup.data);
+  const backup =
+    normalizedData === rawBackup.data
+      ? rawBackup
+      : {
+          ...rawBackup,
+          data: normalizedData,
+        };
   return {
     ok: true,
     backup,
