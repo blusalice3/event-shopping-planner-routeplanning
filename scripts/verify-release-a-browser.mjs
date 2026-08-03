@@ -1031,9 +1031,10 @@ try {
     await waitForExpression(
       primary.client,
       `[...document.scripts].some(
-        (script) => new URL(script.src).pathname === ${JSON.stringify(
-          EXPECTED_MAIN_ASSET,
-        )},
+        (script) =>
+          script.src &&
+          new URL(script.src, document.baseURI).pathname ===
+            ${JSON.stringify(EXPECTED_MAIN_ASSET)},
       )`,
       "expected rollback main asset",
     );
@@ -1247,9 +1248,10 @@ try {
     await waitForExpression(
       primary.client,
       `[...document.scripts].some(
-        (script) => new URL(script.src).pathname === ${JSON.stringify(
-          EXPECTED_MAIN_ASSET,
-        )},
+        (script) =>
+          script.src &&
+          new URL(script.src, document.baseURI).pathname ===
+            ${JSON.stringify(EXPECTED_MAIN_ASSET)},
       )`,
       "forward Release A main asset",
     );
