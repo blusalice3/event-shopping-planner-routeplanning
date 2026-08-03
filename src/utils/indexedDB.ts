@@ -3551,6 +3551,28 @@ class LegacyMigrationConflictError extends PersistenceConflictError {
   }
 }
 
+class LegacyMigrationArchiveConflictError extends PersistenceConflictError {
+  readonly recoveryCandidates: StartupRecoveryCandidate[];
+
+  constructor(message: string, archiveKey: string, rawArchive: unknown) {
+    super(message);
+    this.recoveryCandidates =
+      rawArchive === undefined
+        ? []
+        : [
+            createRecoveryCandidate(
+              "migration-journal",
+              STORES.SYNC_QUEUE,
+              archiveKey,
+              null,
+              rawArchive,
+              undefined,
+              { role: "invalid-source", adoptable: false },
+            ),
+          ];
+  }
+}
+
 function validatedMigrationRecoveryCandidate(
   storeName: StoreName,
   validated: ValidatedPersistenceSnapshot<unknown>,
@@ -4347,14 +4369,15 @@ function parseLegacyMigrationPayload(
   ) {
     throw new Error(`${target.legacyKey} contains a non-array event list.`);
   }
-  if (
-    target.storeName === STORES.MAP_DATA &&
-    Object.values(parsed).some((value) => !isPlainRecord(value))
-  ) {
-    throw new Error(`${target.legacyKey} contains an invalid event map.`);
-  }
-
   if (target.storeName === STORES.MAP_DATA) {
+    for (const eventMap of Object.values(parsed)) {
+      if (!isPlainRecord(eventMap)) {
+        throw new Error(`${target.legacyKey} contains an invalid event map.`);
+      }
+      if (Object.values(eventMap).some((dayMap) => !isPlainRecord(dayMap))) {
+        throw new Error(`${target.legacyKey} contains an invalid day map.`);
+      }
+    }
     return expandMapDataFromStorage(
       compactMapDataForStorage(parsed as MapDataStore),
     ) as Record<string, unknown>;
@@ -4634,22 +4657,31 @@ async function validateLegacyMigrationArchive(
   journal: LegacyMigrationJournal,
   expected?: LegacyMigrationArchive,
 ): Promise<LegacyMigrationArchive> {
+  const conflict = (message: string) =>
+    new LegacyMigrationArchiveConflictError(message, journal.archiveKey, value);
   if (
     !isLegacyMigrationArchive(value) ||
     value.sessionId !== journal.sessionId ||
     (expected !== undefined && !fingerprintsEqual(value, expected))
   ) {
-    throw new PersistenceConflictError(
-      "Migration recovery archive is missing or was replaced.",
-    );
+    throw conflict("Migration recovery archive is missing or was replaced.");
   }
 
   const entriesByKey = new Map(
     value.entries.map((entry) => [entry.legacyKey, entry]),
   );
   for (const entry of value.entries) {
-    if (!(await verifyPersistenceDigest(entry.rawValue, entry.rawDigest))) {
-      throw new PersistenceConflictError(
+    let digestValid = false;
+    try {
+      digestValid = await verifyPersistenceDigest(
+        entry.rawValue,
+        entry.rawDigest,
+      );
+    } catch {
+      // Unsupported or malformed digests remain available for recovery export.
+    }
+    if (!digestValid) {
+      throw conflict(
         `Migration recovery archive digest is invalid for ${entry.legacyKey}.`,
       );
     }
@@ -4663,7 +4695,7 @@ async function validateLegacyMigrationArchive(
       archived.rawValue !== journalEntry.rawValue ||
       !fingerprintsEqual(archived.rawDigest, journalEntry.expectedRawDigest)
     ) {
-      throw new PersistenceConflictError(
+      throw conflict(
         `Migration recovery archive does not match ${journalEntry.legacyKey}.`,
       );
     }
@@ -4794,15 +4826,16 @@ async function upgradeLegacyMigrationJournalV1Atomically(
         }
         if (
           currentArchive !== undefined &&
-          currentArchive !== null &&
           (!isLegacyMigrationArchive(currentArchive) ||
             !fingerprintsEqual(currentArchive, archive))
         ) {
-          throw new PersistenceConflictError(
+          throw new LegacyMigrationArchiveConflictError(
             "A different immutable migration archive already exists.",
+            upgraded.archiveKey,
+            currentArchive,
           );
         }
-        if (currentArchive === undefined || currentArchive === null) {
+        if (currentArchive === undefined) {
           const archivePut = store.put(archive, upgraded.archiveKey);
           archivePut.onerror = () => {
             failure = failure ?? archivePut.error;
@@ -5389,12 +5422,13 @@ async function copyLegacyMigrationAtomically(
           }
           if (
             currentArchive !== undefined &&
-            currentArchive !== null &&
             (!isLegacyMigrationArchive(currentArchive) ||
               !fingerprintsEqual(currentArchive, archive))
           ) {
-            throw new PersistenceConflictError(
+            throw new LegacyMigrationArchiveConflictError(
               "A different immutable migration archive already exists.",
+              journal.archiveKey,
+              currentArchive,
             );
           }
 
@@ -5457,7 +5491,7 @@ async function copyLegacyMigrationAtomically(
               ),
             );
           });
-          if (currentArchive === undefined || currentArchive === null) {
+          if (currentArchive === undefined) {
             track(controlStore.put(archive, journal.archiveKey));
           }
           track(controlStore.put(copiedJournal, LEGACY_MIGRATION_JOURNAL_KEY));
@@ -6470,6 +6504,14 @@ function migrationArchiveRecoveryCandidates(
   ];
 }
 
+function migrationArchiveConflictRecoveryCandidates(
+  error: unknown,
+): StartupRecoveryCandidate[] {
+  return error instanceof LegacyMigrationArchiveConflictError
+    ? error.recoveryCandidates
+    : [];
+}
+
 function assertPreservedLegacySyncQueueUnchanged(
   archive: LegacyMigrationArchive,
   currentRawValue: string | null,
@@ -6595,7 +6637,7 @@ async function migrateFromLocalStorage(
         const rawArchive = await readInternalControlRecord(
           existingJournal.archiveKey,
         );
-        if (rawArchive !== undefined && rawArchive !== null) {
+        if (rawArchive !== undefined) {
           migrationArchive = await validateLegacyMigrationArchive(
             rawArchive,
             existingJournal,
@@ -6685,7 +6727,10 @@ async function migrateFromLocalStorage(
             error instanceof LegacySourceChangedError
               ? error.currentSources
               : undefined,
-            migrationArchiveRecoveryCandidates(migrationArchive),
+            [
+              ...migrationArchiveRecoveryCandidates(migrationArchive),
+              ...migrationArchiveConflictRecoveryCandidates(error),
+            ],
             captureLegacySyncQueueSourceForRecovery(
               capturedLegacySyncQueueRawValue,
             ),
@@ -6708,6 +6753,7 @@ async function migrateFromLocalStorage(
         : undefined,
       [
         ...migrationArchiveRecoveryCandidates(migrationArchive),
+        ...migrationArchiveConflictRecoveryCandidates(error),
         ...(error instanceof LegacyMigrationConflictError
           ? error.recoveryCandidates
           : []),
@@ -6771,6 +6817,7 @@ async function migrateFromLocalStorage(
       undefined,
       [
         ...migrationArchiveRecoveryCandidates(migrationArchive),
+        ...migrationArchiveConflictRecoveryCandidates(error),
         ...(error instanceof LegacyMigrationConflictError
           ? error.recoveryCandidates
           : []),
@@ -6793,7 +6840,7 @@ async function migrateFromLocalStorage(
     }
     if (!migrationArchive) {
       const rawArchive = await readInternalControlRecord(journal.archiveKey);
-      if (rawArchive !== undefined && rawArchive !== null) {
+      if (rawArchive !== undefined) {
         migrationArchive = await validateLegacyMigrationArchive(
           rawArchive,
           journal,
@@ -6861,7 +6908,8 @@ async function migrateFromLocalStorage(
   } catch (error) {
     if (
       prepared.entries.length === 0 &&
-      capturedLegacySyncQueueRawValue !== null
+      capturedLegacySyncQueueRawValue !== null &&
+      !(error instanceof LegacyMigrationArchiveConflictError)
     ) {
       return {
         status: "cleanup-pending",
@@ -6879,7 +6927,10 @@ async function migrateFromLocalStorage(
       error instanceof LegacySourceChangedError
         ? error.currentSources
         : undefined,
-      migrationArchiveRecoveryCandidates(migrationArchive),
+      [
+        ...migrationArchiveRecoveryCandidates(migrationArchive),
+        ...migrationArchiveConflictRecoveryCandidates(error),
+      ],
       captureLegacySyncQueueSourceForRecovery(capturedLegacySyncQueueRawValue),
     );
   }
