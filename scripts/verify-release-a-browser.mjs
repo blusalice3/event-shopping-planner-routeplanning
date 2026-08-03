@@ -186,11 +186,23 @@ class CdpClient {
     const id = this.nextId;
     this.nextId += 1;
     return new Promise((resolve, reject) => {
-      this.pending.set(id, { resolve, reject });
+      const timeout = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new Error(`CDP ${method} timed out after 30000ms.`));
+      }, 30_000);
+      const settle = (callback) => (value) => {
+        clearTimeout(timeout);
+        callback(value);
+      };
+      this.pending.set(id, {
+        resolve: settle(resolve),
+        reject: settle(reject),
+      });
       this.socket.send(JSON.stringify({ id, method, params }), (error) => {
         if (!error) return;
+        const pending = this.pending.get(id);
         this.pending.delete(id);
-        reject(error);
+        pending?.reject(error);
       });
     });
   }
