@@ -7,6 +7,10 @@ import {
   normalizePersistenceFailure,
   useIndexedDbPersistence,
 } from "./useIndexedDbPersistence";
+import {
+  getPersistenceReleaseAMetricsSnapshot,
+  resetPersistenceReleaseAMetrics,
+} from "../utils/persistenceReleaseAMetrics";
 
 const dbMock = vi.hoisted(() => ({
   adoptRecoveryCandidate: vi.fn(),
@@ -133,6 +137,13 @@ describe("normalizePersistenceFailure", () => {
       "保存領域に異常",
       "再読み込み",
     ],
+    [
+      "IndexedDBOpenBlocked",
+      "database",
+      "indexeddb-operation-failed",
+      "保存領域に異常",
+      "再読み込み",
+    ],
   ] as const)(
     "%s を利用者向けの原因分類へ変換する",
     (errorName, category, errorCode, messagePart, actionPart) => {
@@ -170,6 +181,7 @@ describe("useIndexedDbPersistence", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.resetAllMocks();
+    resetPersistenceReleaseAMetrics();
 
     const missing = { status: "missing" as const, data: null };
     dbMock.migrateFromLocalStorage.mockResolvedValue({
@@ -229,8 +241,60 @@ describe("useIndexedDbPersistence", () => {
 
     expect(result.current.startupState.status).toBe("ready");
     expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(1);
+    expect(getPersistenceReleaseAMetricsSnapshot().counters.startup.ready).toBe(
+      1,
+    );
     Object.values(setters).forEach((setter) => {
       expect(setter).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("IDB open blocked timeoutをdatabase分類し、recovery表示はprivacy-safeな固定文言に保つ", async () => {
+    dbMock.migrateFromLocalStorage.mockRejectedValueOnce(
+      Object.assign(new Error("秘密のdatabase path"), {
+        name: "IndexedDBOpenBlocked",
+      }),
+    );
+    const consoleErrorSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+    const setters = createSetters();
+    const { result } = renderHook(() =>
+      useIndexedDbPersistence({
+        values: createValues(),
+        setters,
+        saveDelayMs: 1,
+      }),
+    );
+
+    await act(flushMicrotasks);
+
+    expect(result.current.startupState).toMatchObject({
+      status: "recovery-required",
+      message: "保存データを安全に読み込めませんでした。",
+      details: [
+        "保存データの初期化中にエラーが発生しました。通常画面には反映していません。",
+      ],
+    });
+    expect(consoleErrorSpy).toHaveBeenCalledWith(
+      "IndexedDB persistence initialization failed.",
+      {
+        storeName: "eventLists",
+        category: "database",
+        errorCode: "indexeddb-operation-failed",
+      },
+    );
+    if (result.current.startupState.status !== "recovery-required") {
+      throw new Error("Expected a recovery-required startup state.");
+    }
+    expect(result.current.startupState.message).not.toContain(
+      "IndexedDBOpenBlocked",
+    );
+    expect(result.current.startupState.details.join(" ")).not.toContain(
+      "秘密のdatabase path",
+    );
+    Object.values(setters).forEach((setter) => {
+      expect(setter).not.toHaveBeenCalled();
     });
   });
 
@@ -390,6 +454,14 @@ describe("useIndexedDbPersistence", () => {
       payload: { 明示採用イベント: { generation: "selected" } },
       rawValue: "runtime-envelope",
     };
+    const sameIdDifferentCandidate = {
+      ...candidate,
+      sourceKey: "esp:idb-fallback:v1:eventMetadata:data:revision-1",
+      revision: "revision-1",
+      digest: "c".repeat(64),
+      payload: { 明示採用イベント: { generation: "not-selected" } },
+      rawValue: "different-runtime-envelope",
+    };
     const recoveryBundle = {
       kind: "event-shopping-planner-persistence-recovery" as const,
       version: 1 as const,
@@ -401,7 +473,7 @@ describe("useIndexedDbPersistence", () => {
           message: "複数の候補があります。",
         },
       ],
-      candidates: [candidate],
+      candidates: [sameIdDifferentCandidate, candidate],
     };
     dbMock.migrateFromLocalStorage
       .mockResolvedValueOnce({
@@ -424,10 +496,13 @@ describe("useIndexedDbPersistence", () => {
     await act(flushMicrotasks);
 
     await act(async () => {
-      await result.current.adoptRecoveryCandidate(candidate.id);
+      await result.current.adoptRecoveryCandidate(candidate);
     });
 
     expect(dbMock.adoptRecoveryCandidate).toHaveBeenCalledWith(candidate);
+    expect(dbMock.adoptRecoveryCandidate).not.toHaveBeenCalledWith(
+      sameIdDifferentCandidate,
+    );
     expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(2);
     expect(result.current.startupState.status).toBe("ready");
     expect(result.current.isInitialized).toBe(true);
@@ -482,7 +557,7 @@ describe("useIndexedDbPersistence", () => {
 
     let adoptionPromise!: Promise<void>;
     act(() => {
-      adoptionPromise = result.current.adoptRecoveryCandidate(candidate.id);
+      adoptionPromise = result.current.adoptRecoveryCandidate(candidate);
     });
     expect(dbMock.adoptRecoveryCandidate).toHaveBeenCalledTimes(1);
     expect(result.current.isAdoptingRecoveryCandidate).toBe(true);
@@ -498,6 +573,9 @@ describe("useIndexedDbPersistence", () => {
 
     expect(result.current.isInitialized).toBe(false);
     expect(result.current.startupState.status).toBe("recovery-required");
+    expect(
+      getPersistenceReleaseAMetricsSnapshot().counters.startup.recoveryRequired,
+    ).toBe(1);
     expect(result.current.recoveryAdoptionError).toContain(
       "開始後に変更されたため",
     );
@@ -679,6 +757,9 @@ describe("useIndexedDbPersistence", () => {
     expect(dbMock.saveEventLists).toHaveBeenCalledWith(changedEventLists);
     expect(result.current.persistenceStatus).toBe("saved");
     expect(result.current.failedStores).toEqual([]);
+    expect(
+      getPersistenceReleaseAMetricsSnapshot().counters.save.succeeded,
+    ).toBe(1);
   });
 
   it("reports a mapData failure and retrySave immediately persists its latest value", async () => {

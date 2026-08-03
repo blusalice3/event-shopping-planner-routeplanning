@@ -216,9 +216,10 @@ metricsへ記録できるのは`legacy_sync_queue_present=true/false`、archive�
 ```powershell
 npm run test:run
 npm run typecheck
-npm run build
+npm run build:release-a
 npm run format:check
 git diff --check
+npm run test:release-a-rollback
 ```
 
 `npm run lint`はESLint設定がrepositoryへ追加され、同じrelease sourceで再現可能になった後にgateへ含めます。設定がない状態の失敗を無視してPASS扱いにはしません。
@@ -279,6 +280,18 @@ sampleが20件未満のrepairやcleanupは率だけで判断せず、全件を�
 - userが保存した退避file名やlocal path
 
 digestはclient内の整合確認と制限されたincident evidenceにだけ使い、中央metricsへ送信しません。可観測性backendがないreleaseでは、Release Aのsynthetic/manual evidenceだけを残し、Release Bは開始しません。
+
+Release Aのclient内観測は`src/utils/persistenceReleaseAMetrics.ts`へ集約します。eventはversion付きの閉じたunionで、checkpoint採用、fallback repair、load conflict、save成否、startup結果と時間bucketだけを受け付けます。任意field、payload、raw error、store/key、revision、digestはruntimeで除去します。sinkまたはsessionStorageが失敗しても保存・移行・復旧処理へ影響させません。
+
+集計snapshotはsessionStorageの`__esp_internal__:release-a-metrics:v1`へ保存し、`event-shopping-planner:persistence-release-a-metric` CustomEventでも同じsanitized eventを通知します。率は次の分母で計算します。
+
+- checkpoint採用率: `(adopted + already-absorbed) / (adopted + already-absorbed + failed + conflict)`
+- repair成功率: `succeeded / (succeeded + failed + conflict)`
+- conflict率: `load conflict / 全load結果`
+- 保存失敗率: `save failed / 全save結果`
+- recovery-required率: `startup recovery-required / 全startup結果`
+
+`not-needed`はcheckpoint採用率の分母へ含めません。startup時間は`<250ms`、`250–999ms`、`1–2999ms`、`3–9999ms`、`10s以上`のbucketだけを保持します。backend未構成のcanaryではsynthetic profileごとにsnapshotを退避し、raw sessionStorage全体ではなくこの固定schemaだけを証跡へ転記します。
 
 実装済みcleanup eventは閉じたenumのみを受け付けます。gateのattempted/deferred/blocked/completedに加え、物理処理は`persistence-cleanup-key-confirmed-removed`、`persistence-cleanup-physical-deferred`、`persistence-cleanup-physical-blocked`を通知します。eventへlegacy key、raw値、digest、revision、client ID、例外messageを追加してはいけません。sinkの失敗はcleanupの安全判断へ影響させません。
 
@@ -385,6 +398,8 @@ runtime switchが機能しない場合はRelease Bの設計違反です。provid
 - DBの破壊的down migrationを行わない
 - rollback後に既存checkpoint、journal、fallback候補を読取確認する
 
+standalone legacy `syncQueue`は公開migration結果では`dataMigrationStatus=not-needed`ですが、永続journal v2は既存Release A readerとのwire互換を保つため`entries=[]`、`dataMigrationStatus=verified`の従来shapeを維持します。archive内の`sourceKind=preserved-legacy-sync-queue`でapp migrationと区別します。公開状態だけを見てjournalを新形式へ書き換えてはいけません。
+
 ### 13.2 cleanup開始後
 
 - 旧localStorage原本へ依存する版へのrollbackは禁止
@@ -393,7 +408,28 @@ runtime switchが機能しない場合はRelease Bの設計違反です。provid
 - 欠損があればarchiveから自動復元せず、復旧UIで明示判断する
 - rollback後のautosaveが未解決候補を上書きしないことを確認する
 
-### 13.3 rehearsal記録
+### 13.3 自動rollback rehearsal
+
+cleanなworktreeで、port 4173を使用するpreviewを停止してから実行します。
+
+```powershell
+npm run test:release-a-rollback
+```
+
+このコマンドは次を同一origin・同一Chrome profileで順に実行します。
+
+1. `build:release-a`でcleanなfull SHAとcleanup forced-offを検証する
+2. syntheticな旧`eventMetadata` / `syncQueue`原本を保持したままRelease Aを起動する
+3. 既知の互換baseline `e5f26b76b1318d70b5d2373c8808cda20c7bb5c3`へ配信物を切り替える
+4. 実`controllerchange`、active workerソースSHA-256、baselineのindex/main assetを照合する
+5. checkpoint、journal v2、archiveを読取り、rollback版UIから新規リストを通常保存してreload後も保持する
+6. 同じprofileのstandalone app-window相当でもrollback後データを読めることを確認する
+7. 最終Release Aへforward updateし、version付きcapabilityをactive controllerからoffline取得する
+8. 全段階で旧原本hash不変と対象`localStorage.removeItem`呼出し0件を確認する
+
+演習用profile、baseline source、junction、preview processは`finally`で検証済み一時pathから削除します。途中失敗はPASS扱いにせずnon-zeroで終了します。app-window相当は実installed PWAの代替ではないため、Windows/Android実機試験は別途必要です。
+
+### 13.4 rehearsal記録
 
 ```text
 rehearsal_id:
@@ -433,6 +469,17 @@ archiveはbrowser profile内では暗号化されない前提です。exportし�
 
 開発serverではSWが有効にならないため、PWA試験はproduction buildをHTTPSのcanary URLで配信して行います。
 
+ローカルpreflightは次の順で実行します。
+
+```powershell
+npm run build:release-a
+npm run preview -- --host 127.0.0.1 --port 4173 --strictPort
+# 別のPowerShellで
+npm run test:release-a-browser
+```
+
+`build:release-a`はcleanなsource SHA、Release A mode、cleanup forced-off、内容が一致するstable/version付きcapability manifest、app metaとSW precache内の同一build ID、PWA生成物、`/sw.js` header設定を検証します。browser試験は隔離Chrome profileで通常tab、second tab、同一profileのstandalone app-window相当、installability、active worker実ソース、offlineのversion付きbuild identity、offline reload、online復帰、旧原本hash不変、対象キーの削除呼出し0件を検証します。`sourceState=dirty|unknown|provider-mismatch`は、開発者が`ESP_ALLOW_DIRTY_BUILD=true`を明示した場合以外は拒否します。通常結果の`PREFLIGHT_PASS`はinstalled PWAや実SW版切替の完了を意味しないため、SW往復は13.3、Windows/Androidの実installed PWAは手動で確認します。
+
 ### 15.2 基本試験
 
 1. fresh profileで起動、保存、reload、offline起動
@@ -462,6 +509,8 @@ archiveはbrowser profile内では暗号化されない前提です。exportし�
 4. 全clientを終了し、PWAを再起動してapp/SW version一致を確認する
 5. offlineで旧cacheから起動しても原本を削除しないことを確認する
 6. online復帰後、重複migrationや巻き戻りがないことを確認する
+
+`release-capabilities.json`の`buildId`、indexの`event-shopping-planner-build-id` meta、active `sw.js`がprecacheするversion付きcapability filenameはすべて同じfull commit SHAでなければなりません。`sourceState`が`dirty`または`unknown`のartifactはRelease A証跡として使用しません。
 
 ### 15.5 証跡
 

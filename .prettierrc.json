@@ -1,0 +1,13 @@
+{
+  "overrides": [
+    {
+      "files": [
+        "AGENTS.md",
+        "docs/Resilient Persistence & Safe Migration Plan.md"
+      ],
+      "options": {
+        "endOfLine": "crlf"
+      }
+    }
+  ]
+}

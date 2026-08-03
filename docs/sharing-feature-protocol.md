@@ -19,17 +19,17 @@
 
 ## 2. 命名と共通型
 
-| 名前 | 型 | 規則 |
-| --- | --- | --- |
-| room ID | UUID | serverで発行 |
-| member ID | UUID | serverで発行 |
-| item ID | UUID | serverで発行 |
-| `source_item_id` | text | room内で一意。既存local item IDを保持 |
-| operation ID | UUID | clientでoperation作成時に一度だけ発行 |
-| revision | bigint | server transactionで単調増加 |
-| row version | bigint | 対象rowの確定変更ごとに増加 |
-| timestamp | `timestamptz` | UTCのserver時刻 |
-| protocol version | text | room作成時に固定 |
+| 名前             | 型            | 規則                                  |
+| ---------------- | ------------- | ------------------------------------- |
+| room ID          | UUID          | serverで発行                          |
+| member ID        | UUID          | serverで発行                          |
+| item ID          | UUID          | serverで発行                          |
+| `source_item_id` | text          | room内で一意。既存local item IDを保持 |
+| operation ID     | UUID          | clientでoperation作成時に一度だけ発行 |
+| revision         | bigint        | server transactionで単調増加          |
+| row version      | bigint        | 対象rowの確定変更ごとに増加           |
+| timestamp        | `timestamptz` | UTCのserver時刻                       |
+| protocol version | text          | room作成時に固定                      |
 
 nickname、event label、商品文字列はUnicode正規化、最大長、制御文字、空白だけの値をserverで
 検査する。最大長はM0でUIと既存import dataを調査して固定する。
@@ -433,29 +433,29 @@ type SharingError = {
 
 安定code:
 
-| code | retry | outbox |
-| --- | --- | --- |
-| `not_authenticated` | session refresh後のみ | blocked |
-| `not_authorized` | no | blocked |
-| `sharing_disabled` | gate再開までno | blocked |
-| `room_not_found` | no | blocked |
-| `room_initializing` | yes | queued |
-| `room_closing` | no | blocked |
-| `room_closed` | no | blocked |
-| `room_expired` | no | blocked |
-| `room_full` | no | 対象外 |
-| `invite_invalid` | no | 対象外 |
-| `invite_expired` | no | 対象外 |
-| `invite_revoked` | no | 対象外 |
-| `rate_limited` | `retry_after`後 | queued |
-| `payload_too_large` | no | failed |
-| `invalid_request` | no | failed |
-| `idempotency_conflict` | no | failed |
-| `revision_conflict` | 利用者確認後 | conflict |
-| `member_inactive` | no | blocked |
-| `host_must_close_room` | no。終了導線へ移動 | 対象外 |
-| `protocol_mismatch` | update後のみ | blocked |
-| `operation_in_progress` | yes | sending |
+| code                    | retry                 | outbox   |
+| ----------------------- | --------------------- | -------- |
+| `not_authenticated`     | session refresh後のみ | blocked  |
+| `not_authorized`        | no                    | blocked  |
+| `sharing_disabled`      | gate再開までno        | blocked  |
+| `room_not_found`        | no                    | blocked  |
+| `room_initializing`     | yes                   | queued   |
+| `room_closing`          | no                    | blocked  |
+| `room_closed`           | no                    | blocked  |
+| `room_expired`          | no                    | blocked  |
+| `room_full`             | no                    | 対象外   |
+| `invite_invalid`        | no                    | 対象外   |
+| `invite_expired`        | no                    | 対象外   |
+| `invite_revoked`        | no                    | 対象外   |
+| `rate_limited`          | `retry_after`後       | queued   |
+| `payload_too_large`     | no                    | failed   |
+| `invalid_request`       | no                    | failed   |
+| `idempotency_conflict`  | no                    | failed   |
+| `revision_conflict`     | 利用者確認後          | conflict |
+| `member_inactive`       | no                    | blocked  |
+| `host_must_close_room`  | no。終了導線へ移動    | 対象外   |
+| `protocol_mismatch`     | update後のみ          | blocked  |
+| `operation_in_progress` | yes                   | sending  |
 
 予期しないDB messageや内部table名をclientへ返さない。server logにも招待秘密と業務payloadを記録しない。
 

@@ -1,6 +1,9 @@
 export const PERSISTENCE_LEGACY_CLEANUP_BUILD_FLAG =
   "VITE_PERSISTENCE_LEGACY_CLEANUP" as const;
 export const PERSISTENCE_LEGACY_CLEANUP_ENABLED_VALUE = "true" as const;
+export const PERSISTENCE_RELEASE_CHANNEL_BUILD_FLAG =
+  "VITE_PERSISTENCE_RELEASE_CHANNEL" as const;
+export const PERSISTENCE_RELEASE_B_CHANNEL = "release-b" as const;
 export const PERSISTENCE_LEGACY_CLEANUP_LOCK_NAME =
   "event-shopping-planner:persistence-legacy-cleanup" as const;
 export const MANUAL_PERSISTENCE_CLEANUP_CONFIRMATION =
@@ -249,7 +252,10 @@ type SafetyCheckResult<T> =
   | { status: "timed-out" };
 
 const readPersistenceLegacyCleanupBuildFlag = (): unknown =>
-  import.meta.env.VITE_PERSISTENCE_LEGACY_CLEANUP;
+  import.meta.env.VITE_PERSISTENCE_RELEASE_CHANNEL ===
+  PERSISTENCE_RELEASE_B_CHANNEL
+    ? import.meta.env.VITE_PERSISTENCE_LEGACY_CLEANUP
+    : undefined;
 
 export const isPersistenceLegacyCleanupBuildEnabled = (
   testOverride?: unknown,

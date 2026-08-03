@@ -595,27 +595,34 @@ npm run dev
 
 開発サーバーは既定で `http://localhost:3000` を開きます。
 
-現在のアプリ機能に必須の環境変数やバックエンドはありません。Vite開発サーバーではService Workerを有効にしていないため、PWAを確認する場合は `npm run build` の後に `npm run preview` を実行してください。
+現在のアプリ機能に必須の環境変数やバックエンドはありません。Vite開発サーバーではService Workerを有効にしていないため、Release AのPWAを確認する場合は `npm run build:release-a` の後に `npm run preview` を実行してください。
 
 ### 主なコマンド
 
-| コマンド                 | 内容                         |
-| ------------------------ | ---------------------------- |
-| `npm run dev`            | Vite開発サーバーを起動       |
-| `npm run typecheck`      | TypeScriptの型チェック       |
-| `npm test`               | Vitestを監視モードで起動     |
-| `npm run test:run`       | Vitestを1回実行              |
-| `npm run build`          | 型チェック後に本番ビルド     |
-| `npm run preview`        | ビルド結果をローカル確認     |
-| `npm run format`         | Prettierで対象ファイルを整形 |
-| `npm run format:check`   | Prettierの整形状態を確認     |
-| `npm run generate-icons` | PWA用アイコンを生成          |
+| コマンド                          | 内容                                             |
+| --------------------------------- | ------------------------------------------------ |
+| `npm run dev`                     | Vite開発サーバーを起動                           |
+| `npm run typecheck`               | TypeScriptの型チェック                           |
+| `npm test`                        | Vitestを監視モードで起動                         |
+| `npm run test:run`                | Vitestを1回実行                                  |
+| `npm run build`                   | cleanup強制OFFのRelease A build                  |
+| `npm run build:release-a`         | build後にsource SHA・capability・PWA生成物を検証 |
+| `npm run preview`                 | ビルド結果をローカル確認                         |
+| `npm run test:release-a-browser`  | 隔離Chromeで複数tab・SW・offlineをpreflight      |
+| `npm run test:release-a-rollback` | 同一origin/profileで旧版rollbackと復帰を演習     |
+| `npm run format`                  | Prettierで対象ファイルを整形                     |
+| `npm run format:check`            | Prettierの整形状態を確認                         |
+| `npm run generate-icons`          | PWA用アイコンを生成                              |
 
 `npm run lint` と `npm run lint:fix` のスクリプトはありますが、このスナップショットにはESLint設定ファイルが含まれていないため、現状のままでは実行に失敗します。利用する場合は、先にプロジェクト方針に合う設定を追加してください。
 
 本番ビルドは `dist` に出力されます。PWAを有効にするにはHTTPSで配信し、アプリはドメインのルートへ配置してください。`vercel.json` にはSPA用フォールバック、セキュリティヘッダー、および生成物 `/sw.js` 向けの再検証ヘッダーがあります。配布時は実レスポンスでも `Cache-Control: public, max-age=0, must-revalidate` が適用されることを確認してください。
 
-旧localStorage原本の物理cleanupはRelease Aでは既定OFFで、通常起動・migration・autosave・復旧UIから実行されません。Release B用の静的gateは `VITE_PERSISTENCE_LEGACY_CLEANUP=true` の完全一致でのみ有効になりますが、これだけでは実行されません。runtime kill switch、対応clientとService Workerのversion証明、全clientのquiescence、およびWeb Lockの排他を同時に証明できない場合はfail closedで延期します。production proof providerとoperator UIが未構成のため、Release Bは運用禁止です。運用条件と禁止事項は [永続化復旧runbook](docs/persistence-recovery-runbook.md) を参照してください。
+`npm run test:release-a-browser`を実行する前に、`npm run build:release-a`と`npm run preview -- --host 127.0.0.1 --port 4173 --strictPort`を実行してください。この試験は一時Chrome profileだけを使用し、通常tab、second tab、同一profileのstandalone app-window相当、install可能性、active Service Workerの実ソースhashとoffline build identity、offline reload、online復帰、およびsyntheticな旧原本への物理削除呼出しが0件であることを確認します。結果名は`PREFLIGHT_PASS`であり、desktop/Androidの実installed PWA試験やHTTPS canary観測の代替ではありません。
+
+cleanなworktreeでpreviewを停止した後、`npm run test:release-a-rollback`を実行すると、検証済みRelease A成果物から既知の互換baselineへ戻し、同じorigin・同じChrome profileのまま再びRelease Aへ進める往復演習を自動実行します。実際のService Worker `controllerchange`とソースhash、checkpoint/journal/archive読取、rollback版UIからの通常autosaveとreload保持、旧原本hash不変・削除呼出し0件を確認し、一時source・profile・processを終了時に削除します。
+
+旧localStorage原本の物理cleanupはRelease Aでは強制OFFで、通常起動・migration・autosave・復旧UIから実行されません。Release B用の静的gateは`VITE_PERSISTENCE_RELEASE_CHANNEL=release-b`と`VITE_PERSISTENCE_LEGACY_CLEANUP=true`の二重一致が必要ですが、これだけでは実行されません。runtime kill switch、対応clientとService Workerのversion証明、全clientのquiescence、およびWeb Lockの排他を同時に証明できない場合はfail closedで延期します。production proof providerとoperator UIが未構成のため、Release Bは運用禁止です。運用条件と禁止事項は[永続化復旧runbook](docs/persistence-recovery-runbook.md)を参照してください。
 
 ### 技術構成
 

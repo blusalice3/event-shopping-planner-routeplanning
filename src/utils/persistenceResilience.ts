@@ -1163,6 +1163,38 @@ export function snapshotStartupRecoveryValue(value: unknown): unknown {
   return snapshotRecoveryValue(value, "$", new WeakMap<object, string>(), 0);
 }
 
+function createStartupRecoveryCandidateSelectionDescriptor(
+  candidate: StartupRecoveryCandidate,
+): string {
+  return canonicalStringifyPersistencePayload(
+    snapshotStartupRecoveryValue(candidate),
+  );
+}
+
+export function createStartupRecoveryCandidateSelectionKey(
+  candidate: StartupRecoveryCandidate,
+): string {
+  const fingerprint = createSynchronousFingerprint(
+    snapshotStartupRecoveryValue(candidate),
+  );
+  return [
+    "esp-recovery-selection",
+    fingerprint.algorithm,
+    fingerprint.value,
+    fingerprint.canonicalLength,
+  ].join(":");
+}
+
+export function startupRecoveryCandidatesHaveSameSelectionDescriptor(
+  left: StartupRecoveryCandidate,
+  right: StartupRecoveryCandidate,
+): boolean {
+  return (
+    createStartupRecoveryCandidateSelectionDescriptor(left) ===
+    createStartupRecoveryCandidateSelectionDescriptor(right)
+  );
+}
+
 export function createStartupRecoveryBundle({
   issues,
   candidates = [],

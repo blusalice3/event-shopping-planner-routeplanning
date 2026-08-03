@@ -153,7 +153,10 @@ import {
   type AppBackupV1,
 } from "./utils/appBackup";
 import { db, type AppData } from "./utils/indexedDB";
-import { serializeStartupRecoveryBundle } from "./utils/persistenceResilience";
+import {
+  exportStartupRecoveryBundle,
+  type PersistenceRecoveryExportResult,
+} from "./utils/persistenceRecoveryExport";
 import { useThemeMode } from "./hooks/useThemeMode";
 import {
   DEFAULT_UI_VISIBILITY,
@@ -2591,33 +2594,26 @@ const App: React.FC = () => {
     }
   }, [buildCurrentAppData]);
 
-  const handlePersistenceRecoveryExport = useCallback(() => {
-    if (
-      startupState.status !== "recovery-required" ||
-      !startupState.recoveryBundle
-    ) {
-      return;
-    }
+  const handlePersistenceRecoveryExport =
+    useCallback((): PersistenceRecoveryExportResult => {
+      if (
+        startupState.status !== "recovery-required" ||
+        !startupState.recoveryBundle
+      ) {
+        return { status: "failed" };
+      }
 
-    try {
-      const exportedAt = new Date().toISOString();
-      const blob = new Blob(
-        [serializeStartupRecoveryBundle(startupState.recoveryBundle)],
-        {
-          type: "application/json;charset=utf-8",
-        },
-      );
-      downloadBlob(
-        blob,
-        `event-shopping-planner-recovery-${exportedAt.replace(/[:.]/g, "-")}.json`,
-      );
-    } catch {
-      console.error(
-        "Persistence recovery export failed (recovery-export-failed).",
-      );
-      alert("退避用JSONを作成できませんでした。保存候補は変更されていません。");
-    }
-  }, [startupState]);
+      const result = exportStartupRecoveryBundle(startupState.recoveryBundle);
+      if (result.status === "failed") {
+        console.error(
+          "Persistence recovery export failed (recovery-export-failed).",
+        );
+        alert(
+          "退避用JSONを作成できませんでした。保存候補は変更されていません。",
+        );
+      }
+      return result;
+    }, [startupState]);
 
   const handleBackupRestoreRequest = useCallback(() => {
     backupFileInputRef.current?.click();
@@ -5311,8 +5307,8 @@ const App: React.FC = () => {
           adoptionError={recoveryAdoptionError}
           onRetry={retryInitialization}
           onExport={handlePersistenceRecoveryExport}
-          onAdopt={(candidateId) => {
-            void adoptRecoveryCandidate(candidateId);
+          onAdopt={(candidate) => {
+            void adoptRecoveryCandidate(candidate);
           }}
         />
       );

@@ -29,10 +29,15 @@ import {
 import {
   createStartupRecoveryBundle,
   mergeStartupRecoveryBundles,
+  startupRecoveryCandidatesHaveSameSelectionDescriptor,
   type StartupRecoveryBundle,
   type StartupRecoveryCandidate,
   type StartupRecoveryIssue,
 } from "../utils/persistenceResilience";
+import {
+  bucketPersistenceStartupDuration,
+  recordPersistenceReleaseAMetric,
+} from "../utils/persistenceReleaseAMetrics";
 
 export type PersistedStateValues = {
   eventLists: Record<string, ShoppingItem[]>;
@@ -99,6 +104,7 @@ const DATABASE_ERROR_NAMES = new Set([
   "ConstraintError",
   "InvalidAccessError",
   "InvalidStateError",
+  "IndexedDBOpenBlocked",
   "NotFoundError",
   "OperationError",
   "ReadOnlyError",
@@ -486,6 +492,11 @@ export function useIndexedDbPersistence({
         previousSavedValuesRef.current = nextSavedValues;
 
         if (failed.length > 0) {
+          recordPersistenceReleaseAMetric({
+            version: 1,
+            name: "save",
+            outcome: "failed",
+          });
           const normalizedFailures = failed.map(({ label, error }) =>
             normalizePersistenceFailure(label, error),
           );
@@ -499,6 +510,11 @@ export function useIndexedDbPersistence({
             updatePersistenceStatus("failed");
           }
         } else {
+          recordPersistenceReleaseAMetric({
+            version: 1,
+            name: "save",
+            outcome: "succeeded",
+          });
           updateFailedStores([]);
           updateFailureDetails([]);
           if (!saveRequestedRef.current) {
@@ -507,6 +523,11 @@ export function useIndexedDbPersistence({
         }
       }
     } catch (error) {
+      recordPersistenceReleaseAMetric({
+        version: 1,
+        name: "save",
+        outcome: "failed",
+      });
       const pendingStores = createSaveTasks(
         previousSavedValuesRef.current,
         latestValuesRef.current,
@@ -620,6 +641,23 @@ export function useIndexedDbPersistence({
   );
 
   const initializePersistence = useCallback(async (): Promise<void> => {
+    const startupStartedAt =
+      typeof performance !== "undefined" ? performance.now() : Date.now();
+    const recordStartupOutcome = (
+      outcome: "ready" | "recovery-required",
+    ): void => {
+      const completedAt =
+        typeof performance !== "undefined" ? performance.now() : Date.now();
+      recordPersistenceReleaseAMetric({
+        version: 1,
+        name: "startup",
+        outcome,
+        durationBucket: bucketPersistenceStartupDuration(
+          Math.max(0, completedAt - startupStartedAt),
+        ),
+      });
+    };
+
     try {
       const migrationResult = await db.migrateFromLocalStorage();
       if (migrationResult.status === "recovery-required") {
@@ -634,6 +672,7 @@ export function useIndexedDbPersistence({
           recoveryBundle,
           isRetrying: false,
         });
+        recordStartupOutcome("recovery-required");
         return;
       }
       const nextLegacyCleanupStatus: LegacyCleanupStatus =
@@ -717,6 +756,7 @@ export function useIndexedDbPersistence({
           recoveryBundle,
           isRetrying: false,
         });
+        recordStartupOutcome("recovery-required");
         return;
       }
 
@@ -792,6 +832,7 @@ export function useIndexedDbPersistence({
       setLegacyCleanupStatus(nextLegacyCleanupStatus);
       setRecoveryAdoptionError(null);
       setStartupState({ status: "ready" });
+      recordStartupOutcome("ready");
     } catch (error) {
       const initializationFailure = normalizePersistenceFailure(
         "eventLists",
@@ -818,6 +859,7 @@ export function useIndexedDbPersistence({
         recoveryBundle,
         isRetrying: false,
       });
+      recordStartupOutcome("recovery-required");
     }
   }, [
     setDayModes,
@@ -862,7 +904,7 @@ export function useIndexedDbPersistence({
   }, [startInitialization]);
 
   const adoptRecoveryCandidate = useCallback(
-    async (candidateId: string): Promise<void> => {
+    async (requestedCandidate: StartupRecoveryCandidate): Promise<void> => {
       if (
         recoveryAdoptionInProgressRef.current ||
         initializationPromiseRef.current ||
@@ -872,7 +914,12 @@ export function useIndexedDbPersistence({
       }
       const candidate: StartupRecoveryCandidate | undefined =
         startupState.recoveryBundle?.candidates.find(
-          ({ id, adoptable }) => id === candidateId && adoptable === true,
+          (currentCandidate) =>
+            currentCandidate.adoptable === true &&
+            startupRecoveryCandidatesHaveSameSelectionDescriptor(
+              currentCandidate,
+              requestedCandidate,
+            ),
         );
       if (!candidate) {
         setRecoveryAdoptionError(

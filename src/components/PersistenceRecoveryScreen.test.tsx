@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { StartupRecoveryCandidate } from "../utils/persistenceResilience";
 import PersistenceRecoveryScreen from "./PersistenceRecoveryScreen";
@@ -14,7 +14,11 @@ const defaultProps = {
   canExport: true,
   isRetrying: false,
   onRetry: vi.fn(),
-  onExport: vi.fn(),
+  onExport: vi.fn(() => ({
+    status: "completed" as const,
+    fileName: "recovery-default.json",
+    byteSize: 1,
+  })),
 };
 
 const recoveryCandidates = [
@@ -65,9 +69,13 @@ describe("PersistenceRecoveryScreen", () => {
     ).toHaveTextContent(defaultProps.details.join(""));
   });
 
-  it("再試行と保存候補のJSON退避を実行できる", () => {
+  it("再試行と保存候補のJSON退避を実行し、ファイル名とbyte数を完了表示する", async () => {
     const onRetry = vi.fn();
-    const onExport = vi.fn();
+    const onExport = vi.fn(() => ({
+      status: "completed" as const,
+      fileName: "event-shopping-planner-recovery-test.json",
+      byteSize: 12_345,
+    }));
     render(
       <PersistenceRecoveryScreen
         {...defaultProps}
@@ -83,6 +91,97 @@ describe("PersistenceRecoveryScreen", () => {
 
     expect(onRetry).toHaveBeenCalledTimes(1);
     expect(onExport).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.getByRole("status")).toHaveTextContent(
+        "event-shopping-planner-recovery-test.json",
+      );
+    });
+    expect(screen.getByRole("status")).toHaveTextContent("12,345 bytes");
+  });
+
+  it("0 byteの退避結果を完了扱いせず、固定文言で失敗を通知する", async () => {
+    const onExport = vi.fn(() => ({
+      status: "completed" as const,
+      fileName: "empty-recovery.json",
+      byteSize: 0,
+    }));
+    render(<PersistenceRecoveryScreen {...defaultProps} onExport={onExport} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "保存候補をJSONで退避" }),
+    );
+
+    const failure = await screen.findByText(
+      "退避用JSONのダウンロードを開始できませんでした。保存候補は変更されていません。",
+    );
+    expect(failure).toHaveAttribute("role", "alert");
+    expect(screen.queryByText("empty-recovery.json")).not.toBeInTheDocument();
+  });
+
+  it("再試行で候補bundleが更新されたら以前の選択と退避完了表示を破棄する", async () => {
+    const onExport = vi.fn(() => ({
+      status: "completed" as const,
+      fileName: "first-recovery.json",
+      byteSize: 321,
+    }));
+    const { rerender } = render(
+      <PersistenceRecoveryScreen
+        {...defaultProps}
+        candidates={recoveryCandidates}
+        onExport={onExport}
+        onAdopt={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getAllByRole("radio")[0]);
+    fireEvent.click(
+      screen.getByRole("button", { name: "保存候補をJSONで退避" }),
+    );
+    expect(await screen.findByText("first-recovery.json")).toBeVisible();
+
+    const nextCandidates = recoveryCandidates.map((candidate) => ({
+      ...candidate,
+    }));
+    rerender(
+      <PersistenceRecoveryScreen
+        {...defaultProps}
+        message="再試行後も候補を一意に確定できません。"
+        details={["再試行後の候補です。"]}
+        candidates={nextCandidates}
+        onExport={onExport}
+        onAdopt={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByText("first-recovery.json")).not.toBeInTheDocument();
+    });
+    screen.getAllByRole("radio").forEach((radio) => {
+      expect(radio).not.toBeChecked();
+    });
+    expect(
+      screen.getByRole("button", { name: "選択候補を明示的に採用" }),
+    ).toBeDisabled();
+  });
+
+  it("退避処理の例外詳細を画面に出さず、固定文言で失敗を通知する", async () => {
+    const onExport = vi
+      .fn()
+      .mockRejectedValue(new Error("非公開候補の秘密を表示してはいけない"));
+    render(<PersistenceRecoveryScreen {...defaultProps} onExport={onExport} />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "保存候補をJSONで退避" }),
+    );
+
+    expect(
+      await screen.findByText(
+        "退避用JSONのダウンロードを開始できませんでした。保存候補は変更されていません。",
+      ),
+    ).toHaveAttribute("role", "alert");
+    expect(
+      screen.queryByText("非公開候補の秘密を表示してはいけない"),
+    ).not.toBeInTheDocument();
   });
 
   it("退避用データがない場合はJSON退避を無効化して理由を示す", () => {
@@ -146,7 +245,7 @@ describe("PersistenceRecoveryScreen", () => {
     ).toBeVisible();
   });
 
-  it("候補ごとの識別情報と自動採用しない理由だけを表示する", () => {
+  it("候補ごとの識別情報、採用理由、自動採用しない理由、保持対象を分けて表示する", () => {
     render(
       <PersistenceRecoveryScreen
         {...defaultProps}
@@ -165,11 +264,21 @@ describe("PersistenceRecoveryScreen", () => {
     expect(screen.getByText("revision-12")).toBeVisible();
     expect(screen.getByText("sha256:runtime-candidate")).toBeVisible();
     expect(screen.getByText("legacy-localStorage")).toBeVisible();
+    expect(screen.getByText("採用理由:")).toBeVisible();
+    expect(
+      screen.getByText(
+        /実行時フォールバックのapp payload候補であり、採用時に保存元・rawValue・revision・digestを実データと再照合/,
+      ),
+    ).toBeVisible();
     expect(screen.getAllByText("なぜ自動採用しないか:")).toHaveLength(2);
     expect(
       screen.getByText(
         "実行時フォールバックが確定済みrootから連続する保存か安全に証明できないためです。",
       ),
+    ).toBeVisible();
+    expect(screen.getByText("採用後も削除しない対象:")).toBeVisible();
+    expect(
+      screen.getByText("旧localStorage原本・未選択の保存候補"),
     ).toBeVisible();
     expect(
       screen.queryByText("画面に表示してはいけない極秘イベント"),
@@ -220,11 +329,53 @@ describe("PersistenceRecoveryScreen", () => {
     fireEvent.click(adoptButton);
 
     expect(onAdopt).toHaveBeenCalledTimes(1);
-    expect(onAdopt).toHaveBeenCalledWith("runtime-candidate");
+    expect(onAdopt).toHaveBeenCalledWith(recoveryCandidates[0]);
     expect(
       screen.getByRole("button", { name: "選択候補を採用中…" }),
     ).toBeDisabled();
     expect(screen.getByRole("main")).toHaveAttribute("aria-busy", "true");
+  });
+
+  it("同一idでもdescriptorが異なる候補を別々に選択し、選んだ候補そのものを渡す", () => {
+    const firstCandidate: StartupRecoveryCandidate = {
+      ...recoveryCandidates[0],
+      id: "shared-candidate-id",
+      sourceKey: "runtime-envelope-first",
+      revision: "revision-first",
+      digest: "a".repeat(64),
+      rawValue: "first-runtime-envelope",
+    };
+    const secondCandidate: StartupRecoveryCandidate = {
+      ...recoveryCandidates[0],
+      id: "shared-candidate-id",
+      sourceKey: "runtime-envelope-second",
+      revision: "revision-second",
+      digest: "b".repeat(64),
+      rawValue: "second-runtime-envelope",
+    };
+    const onAdopt = vi.fn();
+    render(
+      <PersistenceRecoveryScreen
+        {...defaultProps}
+        candidates={[firstCandidate, secondCandidate]}
+        onAdopt={onAdopt}
+      />,
+    );
+
+    const [firstRadio, secondRadio] = screen.getAllByRole("radio");
+    fireEvent.click(secondRadio);
+
+    expect(firstRadio).not.toBeChecked();
+    expect(secondRadio).toBeChecked();
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "選択候補を明示的に採用",
+      }),
+    );
+
+    expect(onAdopt).toHaveBeenCalledTimes(1);
+    expect(onAdopt).toHaveBeenCalledWith(secondCandidate);
+    expect(onAdopt).not.toHaveBeenCalledWith(firstCandidate);
   });
 
   it("採用中は候補選択とほかの回復操作を無効化し、失敗理由を通知する", () => {

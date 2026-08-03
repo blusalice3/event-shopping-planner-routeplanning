@@ -10,6 +10,7 @@ import {
   createRuntimeFallbackCandidate,
   createRuntimeFallbackKey,
   createStartupRecoveryBundle,
+  createStartupRecoveryCandidateSelectionKey,
   createSynchronousFingerprint,
   isPersistenceCheckpoint,
   isPersistenceDigestDescriptor,
@@ -19,9 +20,11 @@ import {
   reconcileRuntimeFallbackCandidates,
   serializeRuntimeFallbackCandidate,
   serializeStartupRecoveryBundle,
+  startupRecoveryCandidatesHaveSameSelectionDescriptor,
   verifyPersistenceDigest,
   type PersistenceCheckpoint,
   type RuntimeFallbackCandidate,
+  type StartupRecoveryCandidate,
 } from "./persistenceResilience";
 
 const CREATED_AT = "2026-08-03T00:00:00.000Z";
@@ -850,6 +853,48 @@ describe("reconcileRuntimeFallbackCandidates", () => {
 });
 
 describe("startup recovery bundle", () => {
+  it("同一idでもraw/source descriptorが異なる候補へ別の選択keyを割り当てる", () => {
+    const first: StartupRecoveryCandidate = {
+      id: "same-id",
+      source: "runtime-fallback",
+      role: "app-payload",
+      adoptable: true,
+      storeName: STORE_NAME,
+      key: RECORD_KEY,
+      sourceKey: "runtime-source-first",
+      targetKey: RECORD_KEY,
+      revision: "revision-1",
+      digest: "a".repeat(64),
+      payload: { event: "first" },
+      rawValue: "private-first-envelope",
+    };
+    const exactClone: StartupRecoveryCandidate = {
+      ...first,
+      payload: { event: "first" },
+    };
+    const second: StartupRecoveryCandidate = {
+      ...first,
+      sourceKey: "runtime-source-second",
+      rawValue: "private-second-envelope",
+    };
+
+    const firstKey = createStartupRecoveryCandidateSelectionKey(first);
+
+    expect(createStartupRecoveryCandidateSelectionKey(exactClone)).toBe(
+      firstKey,
+    );
+    expect(
+      startupRecoveryCandidatesHaveSameSelectionDescriptor(first, exactClone),
+    ).toBe(true);
+    expect(createStartupRecoveryCandidateSelectionKey(second)).not.toBe(
+      firstKey,
+    );
+    expect(
+      startupRecoveryCandidatesHaveSameSelectionDescriptor(first, second),
+    ).toBe(false);
+    expect(firstKey).not.toContain("private-first-envelope");
+  });
+
   it("破損rawValueを変更せずpretty JSONへ保持し、末尾改行を1つにする", () => {
     const rawValue = '{\r\n  "壊れた値": "\\u0000 trailing  "\r\n';
     const bundle = createStartupRecoveryBundle({

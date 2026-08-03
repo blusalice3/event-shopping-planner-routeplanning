@@ -54,10 +54,12 @@ import {
   type PersistenceCleanupPhysicalDeferredReason,
   type PersistenceCleanupTaskContext,
 } from "./persistenceCleanupCoordinator";
+import { recordPersistenceReleaseAMetric } from "./persistenceReleaseAMetrics";
 
 const DB_NAME = "EventShoppingPlannerDB";
 const DB_VERSION = 5;
 const MAX_FORWARD_COMPATIBLE_DB_VERSION = 7;
+const DATABASE_OPEN_BLOCKED_TIMEOUT_MS = 5_000;
 const DATA_KEY = "data";
 const MAP_DATA_LEGACY_KEY = "data";
 const MAP_DATA_KEY_PREFIX = "mapData:";
@@ -145,7 +147,7 @@ export type PersistenceMigrationResult =
       migratedKeys: [];
       dataMigrationStatus: "not-needed";
       cleanupStatus: "deferred";
-      cleanupDeferredReason: PersistenceMigrationCleanupDeferredReason;
+      cleanupDeferredReason?: PersistenceMigrationCleanupDeferredReason;
     }
   | {
       status: "recovery-required";
@@ -300,6 +302,15 @@ class PersistenceConflictError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "PersistenceConflict";
+  }
+}
+
+class IndexedDBOpenBlockedError extends Error {
+  constructor(timeoutMs: number) {
+    super(
+      `IndexedDB open request remained blocked for ${timeoutMs} milliseconds.`,
+    );
+    this.name = "IndexedDBOpenBlocked";
   }
 }
 
@@ -531,21 +542,48 @@ function requestDatabaseOpen(
       version === undefined
         ? indexedDB.open(DB_NAME)
         : indexedDB.open(DB_NAME, version);
+    let settled = false;
+    let blockedTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    const clearBlockedTimeout = () => {
+      if (blockedTimeout === null) return;
+      clearTimeout(blockedTimeout);
+      blockedTimeout = null;
+    };
+
+    const rejectOnce = (error: unknown) => {
+      if (settled) return;
+      settled = true;
+      clearBlockedTimeout();
+      reject(error);
+    };
 
     request.onerror = () => {
-      reject(request.error ?? new Error("Failed to open IndexedDB."));
+      rejectOnce(request.error ?? new Error("Failed to open IndexedDB."));
     };
 
     request.onsuccess = () => {
+      if (settled) {
+        request.result.close();
+        return;
+      }
+      settled = true;
+      clearBlockedTimeout();
       resolve(request.result);
     };
 
     request.onblocked = () => {
       console.warn("IndexedDB open request is blocked by another tab.");
+      if (settled || blockedTimeout !== null) return;
+      blockedTimeout = setTimeout(() => {
+        rejectOnce(
+          new IndexedDBOpenBlockedError(DATABASE_OPEN_BLOCKED_TIMEOUT_MS),
+        );
+      }, DATABASE_OPEN_BLOCKED_TIMEOUT_MS);
     };
 
     request.onupgradeneeded = () => {
-      if (!allowUpgrade) {
+      if (settled || !allowUpgrade) {
         request.transaction?.abort();
         return;
       }
@@ -932,7 +970,11 @@ async function validatePersistenceSnapshot<T>(
   key: string,
   snapshot: RawPersistenceSnapshot,
 ): Promise<
-  { validated: ValidatedPersistenceSnapshot<T> } | { conflict: LoadResult<T> }
+  | { validated: ValidatedPersistenceSnapshot<T> }
+  | {
+      conflict: LoadResult<T>;
+      checkpointConflict?: true;
+    }
 > {
   const payloadMissing =
     snapshot.payload === undefined || snapshot.payload === null;
@@ -957,6 +999,7 @@ async function validatePersistenceSnapshot<T>(
             ),
           ],
         ),
+        checkpointConflict: true,
       };
     }
     const root = await createSyntheticRoot(storeName, key, null, true);
@@ -1013,6 +1056,7 @@ async function validatePersistenceSnapshot<T>(
             ),
           ],
         ),
+        checkpointConflict: true,
       };
     }
     try {
@@ -1138,6 +1182,7 @@ async function validatePersistenceSnapshot<T>(
           ),
         ],
       ),
+      checkpointConflict: true,
     };
   }
 
@@ -3027,7 +3072,7 @@ async function resolveFallbackRepairConflict<T>(
   };
 }
 
-async function loadData<T>(
+async function loadDataUnobserved<T>(
   storeName: StoreName,
   key: string,
 ): Promise<LoadResult<T>> {
@@ -3044,6 +3089,13 @@ async function loadData<T>(
     snapshot,
   );
   if ("conflict" in validation) {
+    if (validation.checkpointConflict) {
+      recordPersistenceReleaseAMetric({
+        version: 1,
+        name: "checkpoint-adoption",
+        outcome: "conflict",
+      });
+    }
     return validation.conflict;
   }
 
@@ -3079,6 +3131,11 @@ async function loadData<T>(
     };
   }
   if (candidateScan.status === "conflict") {
+    recordPersistenceReleaseAMetric({
+      version: 1,
+      name: "checkpoint-adoption",
+      outcome: "conflict",
+    });
     return candidateScan.result;
   }
   const partitioned = partitionRuntimeCandidateSnapshots(
@@ -3099,6 +3156,11 @@ async function loadData<T>(
     partitioned.active.map(({ candidate }) => candidate),
   );
   if (reconciliation.status === "conflict") {
+    recordPersistenceReleaseAMetric({
+      version: 1,
+      name: "checkpoint-adoption",
+      outcome: "conflict",
+    });
     const candidates: StartupRecoveryCandidate[] = [
       createRecoveryCandidate(
         "indexedDB",
@@ -3126,6 +3188,12 @@ async function loadData<T>(
   }
 
   if (!reconciliation.head) {
+    recordPersistenceReleaseAMetric({
+      version: 1,
+      name: "checkpoint-adoption",
+      outcome:
+        partitioned.absorbed.length > 0 ? "already-absorbed" : "not-needed",
+    });
     cleanupRuntimeCandidateSnapshots(partitioned.absorbed);
     expectedRevisionRoots.set(observedKey, validated.root);
     expectedPersistenceCheckpoints.set(observedKey, validated.checkpoint);
@@ -3171,6 +3239,16 @@ async function loadData<T>(
       break;
     } catch (error) {
       if (isPersistenceConflict(error)) {
+        recordPersistenceReleaseAMetric({
+          version: 1,
+          name: "fallback-repair",
+          outcome: "conflict",
+        });
+        recordPersistenceReleaseAMetric({
+          version: 1,
+          name: "checkpoint-adoption",
+          outcome: "conflict",
+        });
         return resolveFallbackRepairConflict(
           storeName,
           key,
@@ -3180,6 +3258,16 @@ async function loadData<T>(
         );
       }
       if (!canUseRuntimeFallback(storeName, error)) {
+        recordPersistenceReleaseAMetric({
+          version: 1,
+          name: "fallback-repair",
+          outcome: "failed",
+        });
+        recordPersistenceReleaseAMetric({
+          version: 1,
+          name: "checkpoint-adoption",
+          outcome: "failed",
+        });
         return {
           status: "error",
           data: null,
@@ -3207,6 +3295,16 @@ async function loadData<T>(
   }
 
   if (repairFailure !== null) {
+    recordPersistenceReleaseAMetric({
+      version: 1,
+      name: "fallback-repair",
+      outcome: "failed",
+    });
+    recordPersistenceReleaseAMetric({
+      version: 1,
+      name: "checkpoint-adoption",
+      outcome: "failed",
+    });
     console.warn(
       `Failed to repair runtime fallback for ${storeName}; using the verified candidate.`,
     );
@@ -3224,10 +3322,44 @@ async function loadData<T>(
   expectedRevisionRoots.set(observedKey, repairedMetadata);
   expectedPersistenceCheckpoints.set(observedKey, repairedCheckpoint);
   cleanupRuntimeCandidateSnapshots(candidateScan.snapshots);
+  recordPersistenceReleaseAMetric({
+    version: 1,
+    name: "fallback-repair",
+    outcome: "succeeded",
+  });
+  recordPersistenceReleaseAMetric({
+    version: 1,
+    name: "checkpoint-adoption",
+    outcome: "adopted",
+  });
   return {
     status: "ok",
     data: head.payload,
   };
+}
+
+async function loadData<T>(
+  storeName: StoreName,
+  key: string,
+): Promise<LoadResult<T>> {
+  const result = await loadDataUnobserved<T>(storeName, key);
+  return recordPersistenceLoadOutcome(result);
+}
+
+function recordPersistenceLoadOutcome<T>(result: LoadResult<T>): LoadResult<T> {
+  recordPersistenceReleaseAMetric({
+    version: 1,
+    name: "load",
+    outcome:
+      result.status === "ok"
+        ? "succeeded"
+        : result.status === "missing"
+          ? "missing"
+          : result.status === "error"
+            ? "failed"
+            : "conflict",
+  });
+  return result;
 }
 
 /**
@@ -3389,13 +3521,35 @@ class LegacySourceChangedError extends PersistenceConflictError {
   }
 }
 
-class LegacyMigrationRuntimeConflictError extends PersistenceConflictError {
+class LegacyMigrationConflictError extends PersistenceConflictError {
   readonly recoveryCandidates: StartupRecoveryCandidate[];
 
   constructor(message: string, recoveryCandidates: StartupRecoveryCandidate[]) {
     super(message);
     this.recoveryCandidates = recoveryCandidates;
   }
+}
+
+function validatedMigrationRecoveryCandidate(
+  storeName: StoreName,
+  validated: ValidatedPersistenceSnapshot<unknown>,
+): StartupRecoveryCandidate | null {
+  if (
+    validated.status !== "ok" ||
+    validated.data === null ||
+    validated.root.synthetic
+  ) {
+    return null;
+  }
+  return createRecoveryCandidate(
+    "indexedDB",
+    storeName,
+    DATA_KEY,
+    validated.root.revision,
+    validated.data,
+    undefined,
+    { digest: validated.root.payloadDigest },
+  );
 }
 
 function captureLegacySourceStates(): LegacySourceState[] {
@@ -4199,24 +4353,31 @@ async function prepareLegacyMigrationEntries(
       const rawMapSnapshot = await readRawMapSnapshotWithRetry();
       const validation = await validateMapSnapshot(rawMapSnapshot);
       if ("conflict" in validation) {
-        throw (
-          validation.conflict.error ??
-          new PersistenceConflictError("Existing mapData is inconsistent.")
+        throw new LegacyMigrationConflictError(
+          "Existing mapData is inconsistent.",
+          validation.conflict.recoveryBundle?.candidates ?? [],
         );
       }
       validated = validation.validated;
+      const currentCandidate = validatedMigrationRecoveryCandidate(
+        snapshot.target.storeName,
+        validated,
+      );
+      const currentCandidates = currentCandidate ? [currentCandidate] : [];
       const existingMap = validated.data ?? {};
       for (const [eventName, eventMapData] of Object.entries(existingMap)) {
         const targetEventMap = payload[eventName];
         if (!isPlainRecord(targetEventMap)) {
-          throw new PersistenceConflictError(
+          throw new LegacyMigrationConflictError(
             `Existing mapData event ${eventName} is absent from the legacy source.`,
+            currentCandidates,
           );
         }
         for (const [dayMapName, dayMapData] of Object.entries(eventMapData)) {
           if (!(dayMapName in targetEventMap)) {
-            throw new PersistenceConflictError(
+            throw new LegacyMigrationConflictError(
               `Existing mapData entry ${eventName}/${dayMapName} is absent from the legacy source.`,
+              currentCandidates,
             );
           }
           const existingDigest = await createPersistenceDigest(dayMapData);
@@ -4224,8 +4385,9 @@ async function prepareLegacyMigrationEntries(
             targetEventMap[dayMapName],
           );
           if (existingDigest.value !== targetDigest.value) {
-            throw new PersistenceConflictError(
+            throw new LegacyMigrationConflictError(
               `Existing mapData entry ${eventName}/${dayMapName} conflicts with the legacy source.`,
+              currentCandidates,
             );
           }
         }
@@ -4241,21 +4403,27 @@ async function prepareLegacyMigrationEntries(
         rawSnapshot,
       );
       if ("conflict" in validation) {
-        throw (
-          validation.conflict.error ??
-          new PersistenceConflictError(
-            `${snapshot.target.storeName} is inconsistent.`,
-          )
+        throw new LegacyMigrationConflictError(
+          `${snapshot.target.storeName} is inconsistent.`,
+          validation.conflict.recoveryBundle?.candidates ?? [],
         );
       }
       validated = validation.validated;
+      const currentCandidate = validatedMigrationRecoveryCandidate(
+        snapshot.target.storeName,
+        validated,
+      );
+      const currentCandidates = currentCandidate ? [currentCandidate] : [];
       const candidateScan = await readRuntimeCandidateSnapshots<
         Record<string, unknown>
       >(snapshot.target.storeName, DATA_KEY);
       if (candidateScan.status === "conflict") {
-        throw new LegacyMigrationRuntimeConflictError(
+        throw new LegacyMigrationConflictError(
           `${snapshot.target.storeName} has an invalid runtime fallback candidate.`,
-          candidateScan.result.recoveryBundle?.candidates ?? [],
+          [
+            ...currentCandidates,
+            ...(candidateScan.result.recoveryBundle?.candidates ?? []),
+          ],
         );
       }
       const partitioned = partitionRuntimeCandidateSnapshots(
@@ -4284,20 +4452,24 @@ async function prepareLegacyMigrationEntries(
         reconciliation.status === "conflict" ||
         reconciliation.head !== null
       ) {
-        throw new LegacyMigrationRuntimeConflictError(
+        throw new LegacyMigrationConflictError(
           `${snapshot.target.storeName} has an active runtime fallback branch.`,
-          runtimeSnapshotsToRecoveryCandidates(
-            snapshot.target.storeName,
-            DATA_KEY,
-            candidateScan.snapshots,
-          ),
+          [
+            ...currentCandidates,
+            ...runtimeSnapshotsToRecoveryCandidates(
+              snapshot.target.storeName,
+              DATA_KEY,
+              candidateScan.snapshots,
+            ),
+          ],
         );
       }
       if (validated.status === "ok") {
         const existingDigest = await createPersistenceDigest(validated.data);
         if (existingDigest.value !== payloadDigest.value) {
-          throw new PersistenceConflictError(
+          throw new LegacyMigrationConflictError(
             `${snapshot.target.storeName} conflicts with the legacy source.`,
+            currentCandidates,
           );
         }
       }
@@ -4877,9 +5049,26 @@ function assertPreparedEntriesMatchJournal(
   });
 }
 
+interface LegacyCleanupDeferralResult {
+  journal: LegacyMigrationJournal;
+  journalWriteFailed: boolean;
+}
+
+async function tryWriteLegacyCleanupJournalWithCas(
+  expected: LegacyMigrationJournal,
+  next: LegacyMigrationJournal,
+): Promise<boolean> {
+  try {
+    await writeMigrationJournalWithCas(expected, next);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function deferLegacyCleanupFromJournal(
   journal: LegacyMigrationJournal,
-): Promise<LegacyMigrationJournal> {
+): Promise<LegacyCleanupDeferralResult> {
   assertJournalSourcesResumable(journal, captureLegacySourceStates());
   if (
     journal.phase === "cleanup-in-progress" &&
@@ -4891,13 +5080,13 @@ async function deferLegacyCleanupFromJournal(
       completedJournal,
       captureLegacySourceStates(),
     );
-    return completedJournal;
+    return { journal: completedJournal, journalWriteFailed: false };
   }
   if (
     journal.phase !== "cleanup-ready" ||
     journal.cleanupStatus === "deferred"
   ) {
-    return journal;
+    return { journal, journalWriteFailed: false };
   }
 
   // Release A keeps physical cleanup disabled. Verification and deferred
@@ -4912,9 +5101,34 @@ async function deferLegacyCleanupFromJournal(
         : entry,
     ),
   };
-  await writeMigrationJournalWithCas(journal, deferredJournal);
+  if (!(await tryWriteLegacyCleanupJournalWithCas(journal, deferredJournal))) {
+    return { journal, journalWriteFailed: true };
+  }
   assertJournalSourcesResumable(deferredJournal, captureLegacySourceStates());
-  return deferredJournal;
+  return { journal: deferredJournal, journalWriteFailed: false };
+}
+
+function successfulMigrationResult(
+  journal: LegacyMigrationJournal,
+  cleanupStatus: Exclude<
+    PersistenceCleanupStatus,
+    "not-needed" | "recovery-required"
+  > = journal.cleanupStatus,
+): PersistenceMigrationResult {
+  if (journal.entries.length === 0) {
+    return {
+      status: "cleanup-pending",
+      dataMigrationStatus: "not-needed",
+      cleanupStatus: "deferred",
+      migratedKeys: [],
+    };
+  }
+  return {
+    status: journal.phase === "completed" ? "completed" : "cleanup-pending",
+    dataMigrationStatus: "verified",
+    cleanupStatus,
+    migratedKeys: journal.entries.map(({ legacyKey }) => legacyKey),
+  };
 }
 
 function removedLegacyMigrationKeys(
@@ -5618,10 +5832,12 @@ async function migrateFromLocalStorage(
 
       if (
         existingJournal.phase === "completed" ||
+        existingJournal.phase === "verified" ||
         existingJournal.phase === "cleanup-ready" ||
         existingJournal.phase === "cleanup-in-progress"
       ) {
         let terminalJournal = existingJournal;
+        let reportedCleanupStatus = terminalJournal.cleanupStatus;
         try {
           if (!migrationArchive) {
             throw new PersistenceConflictError(
@@ -5634,12 +5850,32 @@ async function migrateFromLocalStorage(
           );
           const committedState =
             await verifyCommittedMigrationTargets(terminalJournal);
+          if (terminalJournal.phase === "verified") {
+            const cleanupReadyJournal = withJournalPhase(
+              terminalJournal,
+              "cleanup-ready",
+            );
+            if (
+              await tryWriteLegacyCleanupJournalWithCas(
+                terminalJournal,
+                cleanupReadyJournal,
+              )
+            ) {
+              terminalJournal = cleanupReadyJournal;
+            } else {
+              reportedCleanupStatus = "deferred";
+            }
+          }
           if (
             terminalJournal.phase === "cleanup-ready" ||
             terminalJournal.phase === "cleanup-in-progress"
           ) {
-            terminalJournal =
+            const deferral =
               await deferLegacyCleanupFromJournal(terminalJournal);
+            terminalJournal = deferral.journal;
+            reportedCleanupStatus = deferral.journalWriteFailed
+              ? "deferred"
+              : terminalJournal.cleanupStatus;
           }
           assertJournalSourcesResumable(
             terminalJournal,
@@ -5665,17 +5901,10 @@ async function migrateFromLocalStorage(
             ),
           );
         }
-        return {
-          status:
-            terminalJournal.phase === "completed"
-              ? "completed"
-              : "cleanup-pending",
-          dataMigrationStatus: "verified",
-          cleanupStatus: terminalJournal.cleanupStatus,
-          migratedKeys: terminalJournal.entries.map(
-            ({ legacyKey }) => legacyKey,
-          ),
-        };
+        return successfulMigrationResult(
+          terminalJournal,
+          reportedCleanupStatus,
+        );
       }
     }
   } catch (error) {
@@ -5709,11 +5938,14 @@ async function migrateFromLocalStorage(
       "旧データの解析・検証、または既存IndexedDBとの比較に失敗しました。",
       error,
       snapshots,
+      existingJournal ?? rawJournalForRecovery,
       undefined,
-      undefined,
-      error instanceof LegacyMigrationRuntimeConflictError
-        ? error.recoveryCandidates
-        : [],
+      [
+        ...migrationArchiveRecoveryCandidates(migrationArchive),
+        ...(error instanceof LegacyMigrationConflictError
+          ? error.recoveryCandidates
+          : []),
+      ],
       capturedLegacySyncQueueRawValue,
     );
   }
@@ -5780,20 +6012,23 @@ async function migrateFromLocalStorage(
     );
 
     const cleanupReadyJournal = withJournalPhase(journal, "cleanup-ready");
-    await writeMigrationJournalWithCas(journal, cleanupReadyJournal);
+    if (
+      !(await tryWriteLegacyCleanupJournalWithCas(journal, cleanupReadyJournal))
+    ) {
+      return successfulMigrationResult(journal, "deferred");
+    }
     journal = cleanupReadyJournal;
     assertLegacySourcesUnchanged(capturedForCopy);
     assertPreservedLegacySyncQueueUnchanged(
       migrationArchive,
       captureLegacySyncQueueSource(),
     );
-    journal = await deferLegacyCleanupFromJournal(journal);
-    return {
-      status: "cleanup-pending",
-      dataMigrationStatus: "verified",
-      cleanupStatus: journal.cleanupStatus,
-      migratedKeys: journal.entries.map(({ legacyKey }) => legacyKey),
-    };
+    const deferral = await deferLegacyCleanupFromJournal(journal);
+    journal = deferral.journal;
+    return successfulMigrationResult(
+      journal,
+      deferral.journalWriteFailed ? "deferred" : journal.cleanupStatus,
+    );
   } catch (error) {
     if (
       prepared.entries.length === 0 &&
@@ -7137,7 +7372,7 @@ export const db = {
     await writeMapData(nextData);
   },
   async loadMapData(): Promise<LoadResult<MapDataStore>> {
-    return loadMapDataInternal();
+    return recordPersistenceLoadOutcome(await loadMapDataInternal());
   },
 
   // マップ回転設定

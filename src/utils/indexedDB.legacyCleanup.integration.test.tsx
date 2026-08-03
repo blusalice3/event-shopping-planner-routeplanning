@@ -182,7 +182,8 @@ async function prepareMigration({
   const db = await importFreshDb();
   await expect(db.migrateFromLocalStorage()).resolves.toMatchObject({
     status: "cleanup-pending",
-    dataMigrationStatus: "verified",
+    dataMigrationStatus:
+      eventLists || eventMetadata ? "verified" : "not-needed",
     cleanupStatus: "deferred",
   });
   return db;
@@ -193,6 +194,7 @@ beforeEach(() => {
   vi.stubGlobal("indexedDB", databaseFactory);
   vi.resetModules();
   vi.stubEnv("VITE_PERSISTENCE_LEGACY_CLEANUP", "true");
+  vi.stubEnv("VITE_PERSISTENCE_RELEASE_CHANNEL", "release-b");
   localStorage.clear();
 });
 
@@ -205,6 +207,26 @@ afterEach(() => {
 });
 
 describe("db.cleanupLegacyPersistenceSources Release B", () => {
+  it("keeps physical cleanup forced OFF in a Release A artifact", async () => {
+    vi.stubEnv("VITE_PERSISTENCE_RELEASE_CHANNEL", "release-a");
+    vi.stubEnv("VITE_PERSISTENCE_LEGACY_CLEANUP", "true");
+    const db = await prepareMigration();
+
+    const result = await db.cleanupLegacyPersistenceSources(
+      createManualSafetyRequest(),
+    );
+
+    expect(result).toEqual({
+      status: "cleanup-blocked",
+      mode: "manual",
+      reason: "feature-flag-disabled",
+      removedKeys: [],
+    });
+    expect(localStorage.getItem(EVENT_METADATA_KEY)).toBe(
+      EVENT_METADATA_SOURCE,
+    );
+  });
+
   it("keeps the production build flag OFF despite a runtime override attempt", async () => {
     vi.stubEnv("VITE_PERSISTENCE_LEGACY_CLEANUP", "false");
     const db = await prepareMigration();

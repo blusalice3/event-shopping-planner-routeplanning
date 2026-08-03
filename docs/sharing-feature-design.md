@@ -160,12 +160,12 @@ migration規則:
 
 名称は実装時に確定するが、最低限次を分離する。
 
-| store | key | 内容 |
-| --- | --- | --- |
-| `sharingRoomLinks` | `localEventId` | room ID、member ID、非秘密のsession metadata |
-| `sharingReplicas` | `roomId:sourceItemId` | 最後にserverで確定したitem rowとversion |
-| `sharingRoomState` | `roomId` | room、member、revision、最終同期情報 |
-| `sharingOutbox` | `operationId` | command、request hash、状態、attempt metadata |
+| store              | key                   | 内容                                          |
+| ------------------ | --------------------- | --------------------------------------------- |
+| `sharingRoomLinks` | `localEventId`        | room ID、member ID、非秘密のsession metadata  |
+| `sharingReplicas`  | `roomId:sourceItemId` | 最後にserverで確定したitem rowとversion       |
+| `sharingRoomState` | `roomId`              | room、member、revision、最終同期情報          |
+| `sharingOutbox`    | `operationId`         | command、request hash、状態、attempt metadata |
 
 共有専用storeの禁止事項:
 
@@ -206,17 +206,17 @@ outbox状態:
 初期MVPの最小候補は次のとおりである。列、index、constraintの規範は
 [protocol](./sharing-feature-protocol.md)で確定する。
 
-| table | 役割 |
-| --- | --- |
-| `sharing_rooms` | lifecycle、host、期限、protocol、全体revision |
-| `sharing_invites` | 招待秘密のhash／HMAC、期限、失効、試行制御 |
-| `sharing_members` | member ID、nickname、role、status、last seen。生Auth user IDは公開しない |
-| `sharing_items` | 共有projection、source item ID、row version、tombstone |
-| `sharing_item_events` | 購入状態変更と取消のappend-only記録 |
-| `sharing_operation_receipts` | 冪等operationのrequest hashと最小結果 |
-| `sharing_runtime_control` | 作成、参加、業務writeのserver gate |
-| `sharing_creator_grants` | pilotのroom作成を許可する一回限りcodeのHMAC、期限、使用状態 |
-| `sharing_member_auth_bindings` | privateなAuth userとroom memberの対応 |
+| table                          | 役割                                                                     |
+| ------------------------------ | ------------------------------------------------------------------------ |
+| `sharing_rooms`                | lifecycle、host、期限、protocol、全体revision                            |
+| `sharing_invites`              | 招待秘密のhash／HMAC、期限、失効、試行制御                               |
+| `sharing_members`              | member ID、nickname、role、status、last seen。生Auth user IDは公開しない |
+| `sharing_items`                | 共有projection、source item ID、row version、tombstone                   |
+| `sharing_item_events`          | 購入状態変更と取消のappend-only記録                                      |
+| `sharing_operation_receipts`   | 冪等operationのrequest hashと最小結果                                    |
+| `sharing_runtime_control`      | 作成、参加、業務writeのserver gate                                       |
+| `sharing_creator_grants`       | pilotのroom作成を許可する一回限りcodeのHMAC、期限、使用状態              |
+| `sharing_member_auth_bindings` | privateなAuth userとroom memberの対応                                    |
 
 将来機能用のassignment、route、delegation、budget、host takeover tableや列は追加しない。
 
@@ -432,12 +432,12 @@ UIで分岐が必要なerrorは、message文字列ではなく安定codeで返�
 
 ## 16. 主要な採用判断
 
-| 判断 | 採用理由 | 再検討条件 |
-| --- | --- | --- |
-| local stateとserver replicaを分離 | 既存local機能とoffline dataを守るため | 共有専用appへ全面移行する場合 |
-| Realtimeはinvalidateだけ | 欠落、重複、順序逆転へ耐えるため | 別transportで完全順序と再送が保証される場合 |
-| RPC経由mutation | 認可、冪等性、不変条件をtransactionへ集約するため | 同等のserver command層を採用する場合 |
-| eventへ安定UUIDを追加 | rename可能な表示名をidentityにしないため | event store全体をID keyへ移行する場合 |
-| 既存item IDをtextで保持 | 破壊的なID一括変換を避けるため | 全import形式と参照を安全にmigrationできる場合 |
-| offline operationを限定 | 誤再送と構造競合を抑えるため | pilot実測と追加競合設計が完了した場合 |
-| assignment等を対象外 | 現行の`assignedTo`が安定member IDではないため | member identityと権限設計を別途追加した場合 |
+| 判断                              | 採用理由                                          | 再検討条件                                    |
+| --------------------------------- | ------------------------------------------------- | --------------------------------------------- |
+| local stateとserver replicaを分離 | 既存local機能とoffline dataを守るため             | 共有専用appへ全面移行する場合                 |
+| Realtimeはinvalidateだけ          | 欠落、重複、順序逆転へ耐えるため                  | 別transportで完全順序と再送が保証される場合   |
+| RPC経由mutation                   | 認可、冪等性、不変条件をtransactionへ集約するため | 同等のserver command層を採用する場合          |
+| eventへ安定UUIDを追加             | rename可能な表示名をidentityにしないため          | event store全体をID keyへ移行する場合         |
+| 既存item IDをtextで保持           | 破壊的なID一括変換を避けるため                    | 全import形式と参照を安全にmigrationできる場合 |
+| offline operationを限定           | 誤再送と構造競合を抑えるため                      | pilot実測と追加競合設計が完了した場合         |
+| assignment等を対象外              | 現行の`assignedTo`が安定member IDではないため     | member identityと権限設計を別途追加した場合   |

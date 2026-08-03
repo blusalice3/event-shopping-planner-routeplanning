@@ -1,5 +1,8 @@
 import React from "react";
 import type { StartupRecoveryCandidate } from "../utils/persistenceResilience";
+import type { PersistenceRecoveryExportResult } from "../utils/persistenceRecoveryExport";
+
+export type { PersistenceRecoveryExportResult } from "../utils/persistenceRecoveryExport";
 
 export interface PersistenceRecoveryScreenProps {
   message: string;
@@ -7,11 +10,13 @@ export interface PersistenceRecoveryScreenProps {
   canExport: boolean;
   isRetrying: boolean;
   onRetry: () => void;
-  onExport: () => void;
+  onExport: () =>
+    | PersistenceRecoveryExportResult
+    | Promise<PersistenceRecoveryExportResult>;
   candidates?: readonly StartupRecoveryCandidate[];
   isAdopting?: boolean;
   adoptionError?: string | null;
-  onAdopt?: (candidateId: string) => void;
+  onAdopt?: (candidate: StartupRecoveryCandidate) => void;
 }
 
 const EXPORT_UNAVAILABLE_REASON_ID =
@@ -21,6 +26,8 @@ const ADOPTION_SELECTION_REASON_ID =
   "persistence-recovery-adoption-selection-reason";
 const ADOPTION_UNAVAILABLE_REASON_ID =
   "persistence-recovery-adoption-unavailable-reason";
+const EMPTY_RECOVERY_DETAILS: readonly string[] = [];
+const EMPTY_RECOVERY_CANDIDATES: readonly StartupRecoveryCandidate[] = [];
 
 function getAutomaticAdoptionRejectionReason(
   candidate: StartupRecoveryCandidate,
@@ -56,32 +63,50 @@ function getAutomaticAdoptionRejectionReason(
   }
 }
 
+function getAdoptionReason(candidate: StartupRecoveryCandidate): string {
+  switch (candidate.source) {
+    case "indexedDB":
+      return "IndexedDBのapp payload候補であり、採用時に保存元・revision・digestを実データと再照合したうえで、原子的な確定と読戻し検証を行えるためです。";
+    case "runtime-fallback":
+      return "実行時フォールバックのapp payload候補であり、採用時に保存元・rawValue・revision・digestを実データと再照合したうえで、原子的な確定と読戻し検証を行えるためです。";
+    case "legacy-localStorage":
+      return "採用可能なapp payload候補として検証済みであり、採用時に旧原本・revision・digestを再照合したうえで、原子的な確定と読戻し検証を行えるためです。";
+    case "migration-journal":
+      return "採用可能なapp payload候補として検証済みであり、採用時に移行記録・revision・digestを再照合したうえで、原子的な確定と読戻し検証を行えるためです。";
+  }
+}
+
 function displayCandidateValue(value: string | undefined): string {
   return value ?? "情報なし";
 }
 
 const PersistenceRecoveryScreen: React.FC<PersistenceRecoveryScreenProps> = ({
   message,
-  details = [],
+  details = EMPTY_RECOVERY_DETAILS,
   canExport,
   isRetrying,
   onRetry,
   onExport,
-  candidates = [],
+  candidates = EMPTY_RECOVERY_CANDIDATES,
   isAdopting = false,
   adoptionError,
   onAdopt,
 }) => {
-  const [selectedCandidateId, setSelectedCandidateId] = React.useState<
-    string | null
-  >(null);
+  const [selectedCandidateReference, setSelectedCandidateReference] =
+    React.useState<StartupRecoveryCandidate | null>(null);
   const [hasSafelyExited, setHasSafelyExited] = React.useState(false);
   const [isAdoptionRequested, setIsAdoptionRequested] = React.useState(false);
+  const [isExporting, setIsExporting] = React.useState(false);
+  const [exportResult, setExportResult] =
+    React.useState<PersistenceRecoveryExportResult | null>(null);
   const safeExitTitleRef = React.useRef<HTMLHeadingElement>(null);
   const wasAdoptingRef = React.useRef(isAdopting);
-  const isBusy = isRetrying || isAdopting || isAdoptionRequested;
+  const exportInProgressRef = React.useRef(false);
+  const exportRequestIdRef = React.useRef(0);
+  const isBusy = isRetrying || isAdopting || isAdoptionRequested || isExporting;
   const selectedCandidate = candidates.find(
-    ({ id, adoptable }) => id === selectedCandidateId && adoptable === true,
+    (candidate) =>
+      candidate === selectedCandidateReference && candidate.adoptable === true,
   );
 
   React.useEffect(() => {
@@ -97,10 +122,51 @@ const PersistenceRecoveryScreen: React.FC<PersistenceRecoveryScreenProps> = ({
     wasAdoptingRef.current = isAdopting;
   }, [adoptionError, isAdopting]);
 
+  React.useEffect(() => {
+    setSelectedCandidateReference(null);
+    setIsAdoptionRequested(false);
+    setExportResult(null);
+    exportRequestIdRef.current += 1;
+    exportInProgressRef.current = false;
+    setIsExporting(false);
+  }, [candidates, canExport, details, message]);
+
   const handleAdopt = () => {
     if (isBusy || !selectedCandidate || !onAdopt) return;
     setIsAdoptionRequested(true);
-    onAdopt(selectedCandidate.id);
+    onAdopt(selectedCandidate);
+  };
+
+  const handleExport = async () => {
+    if (!canExport || isBusy || exportInProgressRef.current) return;
+    const requestId = exportRequestIdRef.current + 1;
+    exportRequestIdRef.current = requestId;
+    exportInProgressRef.current = true;
+    setIsExporting(true);
+    setExportResult(null);
+    try {
+      const result = await onExport();
+      if (requestId !== exportRequestIdRef.current) return;
+      if (
+        result.status !== "completed" ||
+        result.fileName.trim().length === 0 ||
+        !Number.isSafeInteger(result.byteSize) ||
+        result.byteSize <= 0
+      ) {
+        setExportResult({ status: "failed" });
+        return;
+      }
+      setExportResult(result);
+    } catch {
+      if (requestId === exportRequestIdRef.current) {
+        setExportResult({ status: "failed" });
+      }
+    } finally {
+      if (requestId === exportRequestIdRef.current) {
+        exportInProgressRef.current = false;
+        setIsExporting(false);
+      }
+    }
   };
 
   if (hasSafelyExited) {
@@ -219,7 +285,9 @@ const PersistenceRecoveryScreen: React.FC<PersistenceRecoveryScreenProps> = ({
                 {candidates.map((candidate, index) => {
                   const inputId = `persistence-recovery-candidate-${index}`;
                   const detailsId = `${inputId}-details`;
-                  const reasonId = `${inputId}-reason`;
+                  const adoptionReasonId = `${inputId}-adoption-reason`;
+                  const automaticReasonId = `${inputId}-automatic-reason`;
+                  const retainedTargetsId = `${inputId}-retained-targets`;
                   return (
                     <div
                       key={`${candidate.id}-${index}`}
@@ -234,13 +302,24 @@ const PersistenceRecoveryScreen: React.FC<PersistenceRecoveryScreenProps> = ({
                           type="radio"
                           name="persistence-recovery-candidate"
                           value={`candidate-${index}`}
-                          checked={selectedCandidateId === candidate.id}
+                          checked={selectedCandidateReference === candidate}
                           onChange={() => {
-                            setSelectedCandidateId(candidate.id);
+                            setSelectedCandidateReference(candidate);
                             setIsAdoptionRequested(false);
                           }}
                           disabled={candidate.adoptable !== true}
-                          aria-describedby={`${detailsId} ${reasonId}`}
+                          aria-describedby={[
+                            detailsId,
+                            candidate.adoptable === true
+                              ? adoptionReasonId
+                              : null,
+                            automaticReasonId,
+                            candidate.adoptable === true
+                              ? retainedTargetsId
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join(" ")}
                           className="mt-1 size-4 shrink-0 accent-blue-700"
                         />
                         <span>
@@ -281,8 +360,17 @@ const PersistenceRecoveryScreen: React.FC<PersistenceRecoveryScreenProps> = ({
                           {displayCandidateValue(candidate.digest)}
                         </dd>
                       </dl>
+                      {candidate.adoptable === true && (
+                        <p
+                          id={adoptionReasonId}
+                          className="mt-3 pl-7 leading-6 text-emerald-800 dark:text-emerald-200"
+                        >
+                          <span className="font-semibold">採用理由:</span>{" "}
+                          {getAdoptionReason(candidate)}
+                        </p>
+                      )}
                       <p
-                        id={reasonId}
+                        id={automaticReasonId}
                         className="mt-3 pl-7 leading-6 text-amber-800 dark:text-amber-200"
                       >
                         <span className="font-semibold">
@@ -290,6 +378,17 @@ const PersistenceRecoveryScreen: React.FC<PersistenceRecoveryScreenProps> = ({
                         </span>{" "}
                         {getAutomaticAdoptionRejectionReason(candidate)}
                       </p>
+                      {candidate.adoptable === true && (
+                        <p
+                          id={retainedTargetsId}
+                          className="mt-3 pl-7 leading-6 text-slate-700 dark:text-slate-300"
+                        >
+                          <span className="font-semibold">
+                            採用後も削除しない対象:
+                          </span>{" "}
+                          旧localStorage原本・未選択の保存候補
+                        </p>
+                      )}
                     </div>
                   );
                 })}
@@ -353,13 +452,15 @@ const PersistenceRecoveryScreen: React.FC<PersistenceRecoveryScreenProps> = ({
             <button
               type="button"
               className="inline-flex min-h-11 items-center justify-center rounded-lg border border-slate-400 bg-white px-4 py-2.5 font-semibold text-slate-800 hover:bg-slate-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700 dark:focus-visible:ring-offset-slate-900"
-              onClick={onExport}
+              onClick={() => {
+                void handleExport();
+              }}
               disabled={!canExport || isBusy}
               aria-describedby={
                 !canExport ? EXPORT_UNAVAILABLE_REASON_ID : undefined
               }
             >
-              保存候補をJSONで退避
+              {isExporting ? "保存候補をJSONで退避中…" : "保存候補をJSONで退避"}
             </button>
             <button
               type="button"
@@ -377,6 +478,28 @@ const PersistenceRecoveryScreen: React.FC<PersistenceRecoveryScreenProps> = ({
               className="mt-2 text-sm text-slate-600 dark:text-slate-400"
             >
               退避できる保存候補を準備できていないため、JSONで退避できません。
+            </p>
+          )}
+          {exportResult?.status === "completed" && (
+            <p
+              className="mt-3 rounded-lg border border-emerald-300 bg-emerald-50 p-3 text-sm leading-6 text-emerald-900 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-100"
+              role="status"
+              aria-live="polite"
+            >
+              退避用JSONのダウンロードを開始しました。ファイル名:{" "}
+              <span className="break-all font-semibold">
+                {exportResult.fileName}
+              </span>{" "}
+              / {exportResult.byteSize.toLocaleString("ja-JP")} bytes
+            </p>
+          )}
+          {exportResult?.status === "failed" && (
+            <p
+              className="mt-3 rounded-lg border border-red-300 bg-red-50 p-3 text-sm leading-6 text-red-900 dark:border-red-800 dark:bg-red-950/50 dark:text-red-100"
+              role="alert"
+              aria-live="assertive"
+            >
+              退避用JSONのダウンロードを開始できませんでした。保存候補は変更されていません。
             </p>
           )}
         </section>

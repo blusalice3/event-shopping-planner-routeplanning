@@ -428,7 +428,12 @@ function mockNthTransactionFailure({
   };
 }
 
-function mockJournalPhasePutFailure(phase: string, error: Error) {
+function mockJournalPhasePutFailure(
+  phase: string,
+  error: Error,
+  cleanupStatus?: string,
+  failureCount = 1,
+) {
   const originalPut = FakeIDBObjectStore.prototype.put;
   let injectionCount = 0;
 
@@ -441,13 +446,15 @@ function mockJournalPhasePutFailure(phase: string, error: Error) {
     ) {
       const candidate =
         typeof value === "object" && value !== null
-          ? (value as { phase?: unknown })
+          ? (value as { phase?: unknown; cleanupStatus?: unknown })
           : null;
       if (
-        injectionCount === 0 &&
+        injectionCount < failureCount &&
         this.name === "syncQueue" &&
         requestKey === LEGACY_MIGRATION_JOURNAL_KEY &&
-        candidate?.phase === phase
+        candidate?.phase === phase &&
+        (cleanupStatus === undefined ||
+          candidate.cleanupStatus === cleanupStatus)
       ) {
         injectionCount += 1;
         throw error;
@@ -671,10 +678,70 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
   vi.resetModules();
   localStorage.clear();
+});
+
+describe("db open resilience", () => {
+  it("times out a blocked open with a dedicated recovery error and permits retry", async () => {
+    vi.useFakeTimers();
+    const pendingOpenRequest = {} as IDBOpenDBRequest;
+    const openSpy = vi
+      .spyOn(databaseFactory, "open")
+      .mockReturnValue(pendingOpenRequest);
+    const warningSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const db = await importFreshDb();
+
+    const migrationPromise = db.migrateFromLocalStorage();
+    expect(openSpy).toHaveBeenCalledTimes(1);
+    if (typeof pendingOpenRequest.onblocked !== "function") {
+      throw new Error("Expected the blocked-open handler to be installed.");
+    }
+    pendingOpenRequest.onblocked.call(
+      pendingOpenRequest,
+      new Event("blocked") as IDBVersionChangeEvent,
+    );
+    let settled = false;
+    void migrationPromise.then(() => {
+      settled = true;
+    });
+
+    await vi.advanceTimersByTimeAsync(4_999);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    const migration = await migrationPromise;
+
+    expect(migration).toMatchObject({
+      status: "recovery-required",
+      dataMigrationStatus: "recovery-required",
+      cleanupStatus: "recovery-required",
+    });
+    if (migration.status !== "recovery-required") {
+      throw new Error("Expected blocked-open recovery.");
+    }
+    expect(migration.recoveryBundle.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stage: "migration",
+          code: "IndexedDBOpenBlocked",
+        }),
+      ]),
+    );
+    expect(warningSpy).toHaveBeenCalledWith(
+      "IndexedDB open request is blocked by another tab.",
+    );
+
+    openSpy.mockRestore();
+    vi.useRealTimers();
+    await expect(db.migrateFromLocalStorage()).resolves.toEqual({
+      status: "not-needed",
+      dataMigrationStatus: "not-needed",
+      cleanupStatus: "not-needed",
+    });
+  });
 });
 
 describe("db payload compatibility", () => {
@@ -738,6 +805,113 @@ describe("db payload compatibility", () => {
         "url",
       ),
     ).toBe(true);
+  });
+});
+
+describe("Release A persistence metric integration", () => {
+  it("records every public mapData load outcome exactly once", async () => {
+    const eventName = "metricsマップイベント";
+    const dayMapName = "1日目";
+    const mapData = {
+      [eventName]: {
+        [dayMapName]: makeDayMap("metrics"),
+      },
+    };
+    const db = await importFreshDb();
+    const metrics = await import("./persistenceReleaseAMetrics");
+    metrics.resetPersistenceReleaseAMetrics();
+
+    await expect(db.loadMapData()).resolves.toMatchObject({
+      status: "missing",
+    });
+    await db.saveMapData(mapData);
+    await expect(db.loadMapData()).resolves.toMatchObject({
+      status: "ok",
+      data: mapData,
+    });
+
+    await writeRawRecordAtExistingVersion(
+      "mapData",
+      createSplitMapKey(eventName, dayMapName),
+      makeDayMap("metrics-conflict"),
+    );
+    await expect(db.loadMapData()).resolves.toMatchObject({
+      status: "conflict",
+    });
+
+    const readFailure = mockNthTransactionFailure({
+      requiredStores: ["mapData", "syncQueue"],
+      mode: "readonly",
+      occurrence: 1,
+      failureCount: 2,
+      exactStores: true,
+      error: new DOMException(
+        "forced map metrics read failure",
+        "UnknownError",
+      ),
+    });
+    await expect(db.loadMapData()).resolves.toMatchObject({
+      status: "error",
+    });
+
+    expect(readFailure.getInjectionCount()).toBe(2);
+    const snapshot = metrics.getPersistenceReleaseAMetricsSnapshot();
+    expect(snapshot.counters.load).toEqual({
+      succeeded: 1,
+      missing: 1,
+      failed: 1,
+      conflict: 1,
+    });
+    expect(
+      metrics.calculatePersistenceReleaseARates(snapshot).conflictRate,
+    ).toBe(0.25);
+  });
+
+  it("records an early checkpoint validation conflict without classifying payload conflicts as checkpoint conflicts", async () => {
+    const metadata = {
+      metricsCheckpointイベント: { generation: "committed" },
+    };
+    const db = await importFreshDb();
+    await db.saveEventMetadata(metadata);
+    const metrics = await import("./persistenceReleaseAMetrics");
+    metrics.resetPersistenceReleaseAMetrics();
+    const checkpointKey = createPersistenceCheckpointKey(
+      "eventMetadata",
+      DATA_KEY,
+    );
+    const checkpoint = await readRawRecord("syncQueue", checkpointKey);
+    await writeRawRecordAtExistingVersion("syncQueue", checkpointKey, {
+      corrupted: true,
+    });
+
+    await expect(db.loadEventMetadata()).resolves.toMatchObject({
+      status: "conflict",
+    });
+    expect(
+      metrics.getPersistenceReleaseAMetricsSnapshot().counters,
+    ).toMatchObject({
+      checkpointAdoption: { conflict: 1 },
+      load: { conflict: 1 },
+    });
+
+    await writeRawRecordAtExistingVersion(
+      "syncQueue",
+      checkpointKey,
+      checkpoint,
+    );
+    await writeRawRecordAtExistingVersion("eventMetadata", DATA_KEY, {
+      metricsCheckpointイベント: { generation: "payload-conflict" },
+    });
+    await expect(db.loadEventMetadata()).resolves.toMatchObject({
+      status: "conflict",
+    });
+
+    expect(
+      metrics.getPersistenceReleaseAMetricsSnapshot().counters,
+    ).toMatchObject({
+      checkpointAdoption: { conflict: 1 },
+      load: { conflict: 2 },
+    });
   });
 });
 
@@ -994,35 +1168,133 @@ describe("db.migrateFromLocalStorage resilience", () => {
     });
   });
 
-  it("resumes idempotently from a verified migration journal", async () => {
-    const metadata = {
+  it("keeps a newer normal save available while cleanup-ready journal writes keep failing", async () => {
+    const migratedMetadata = {
       verified再開イベント: { phase: "verified" },
     };
-    const legacySource = JSON.stringify(metadata);
+    const newerMetadata = {
+      verified再開イベント: { phase: "newer-normal-save" },
+    };
+    const legacySource = JSON.stringify(migratedMetadata);
     localStorage.setItem("eventMetadata", legacySource);
     const cleanupReadyFailure = mockJournalPhasePutFailure(
       "cleanup-ready",
       new DOMException("forced cleanup-ready journal failure", "UnknownError"),
+      undefined,
+      Number.POSITIVE_INFINITY,
     );
     const db = await importFreshDb();
 
-    const failedMigration = await db.migrateFromLocalStorage();
+    const migration = await db.migrateFromLocalStorage();
 
-    expect(failedMigration).toMatchObject({ status: "recovery-required" });
+    expect(migration).toEqual({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+      migratedKeys: ["eventMetadata"],
+    });
     expect(cleanupReadyFailure.getInjectionCount()).toBe(1);
     expect(
       await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
     ).toMatchObject({ phase: "verified" });
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      migratedMetadata,
+    );
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+
+    await db.saveEventMetadata(newerMetadata);
+    const newerRevision = await readCurrentRevision("eventMetadata");
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      newerMetadata,
+    );
+
+    vi.resetModules();
+    const resumedDb = await importFreshDb();
+    await expect(resumedDb.migrateFromLocalStorage()).resolves.toEqual({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+      migratedKeys: ["eventMetadata"],
+    });
+    expect(cleanupReadyFailure.getInjectionCount()).toBe(2);
+    expect(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ).toMatchObject({ phase: "verified" });
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      newerMetadata,
+    );
+    expect(await readCurrentRevision("eventMetadata")).toBe(newerRevision);
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+
+    vi.resetModules();
+    const retriedDb = await importFreshDb();
+    await expect(retriedDb.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(cleanupReadyFailure.getInjectionCount()).toBe(3);
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      newerMetadata,
+    );
+    expect(await readCurrentRevision("eventMetadata")).toBe(newerRevision);
+  });
+
+  it("keeps fresh and resumed verified data available when deferred journal writes fail", async () => {
+    const metadata = {
+      deferred書込失敗イベント: { phase: "cleanup-ready" },
+    };
+    const legacySource = JSON.stringify(metadata);
+    localStorage.setItem("eventMetadata", legacySource);
+    const deferredFailure = mockJournalPhasePutFailure(
+      "cleanup-ready",
+      new DOMException("forced deferred journal failure", "UnknownError"),
+      "deferred",
+    );
+    const db = await importFreshDb();
+
+    const migration = await db.migrateFromLocalStorage();
+
+    expect(migration).toEqual({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+      migratedKeys: ["eventMetadata"],
+    });
+    expect(deferredFailure.getInjectionCount()).toBe(1);
+    expect(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ).toMatchObject({
+      phase: "cleanup-ready",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "ready",
+    });
     expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(metadata);
     const verifiedRevision = await readCurrentRevision("eventMetadata");
-    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
-    cleanupReadyFailure.spy.mockRestore();
+    deferredFailure.spy.mockRestore();
 
-    await resumeEventMetadataMigrationAndAssertStable({
-      expectedPayload: metadata,
-      legacySource,
-      expectedExistingRevision: verifiedRevision,
+    vi.resetModules();
+    const resumedFailure = mockJournalPhasePutFailure(
+      "cleanup-ready",
+      new DOMException(
+        "forced resumed deferred journal failure",
+        "UnknownError",
+      ),
+      "deferred",
+    );
+    const resumedDb = await importFreshDb();
+    const resumed = await resumedDb.migrateFromLocalStorage();
+
+    expect(resumed).toEqual({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+      migratedKeys: ["eventMetadata"],
     });
+    expect(resumedFailure.getInjectionCount()).toBe(1);
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(metadata);
+    expect(await readCurrentRevision("eventMetadata")).toBe(verifiedRevision);
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
   });
 
   it("retains every verified legacy source when explicit cleanup is requested", async () => {
@@ -1385,6 +1657,7 @@ describe("db.migrateFromLocalStorage resilience", () => {
     };
     const db = await importFreshDb();
     await db.saveMapData(idbMap);
+    const idbRevision = await readCurrentRevision("mapData");
     const conflictingKey = createSplitMapKey(eventName, conflictingDayName);
     const missingKey = createSplitMapKey(eventName, missingDayName);
     const idbSource = await readRawRecord("mapData", conflictingKey);
@@ -1402,9 +1675,137 @@ describe("db.migrateFromLocalStorage resilience", () => {
     expect(await readRawRecord("syncQueue", metadataKey)).toEqual(
       metadataSource,
     );
+    if (migration.status !== "recovery-required") {
+      throw new Error("Expected map migration recovery.");
+    }
+    const idbCandidate = migration.recoveryBundle.candidates.find(
+      ({ source, role, storeName }) =>
+        source === "indexedDB" &&
+        role === "app-payload" &&
+        storeName === "mapData",
+    );
+    expect(idbCandidate).toMatchObject({
+      adoptable: true,
+      revision: idbRevision,
+      payload: idbMap,
+    });
     const loadedMap = await db.loadMapData();
     expect(loadedMap.status).toBe("ok");
     expect(loadedMap.data).toEqual(idbMap);
+  });
+
+  it("offers the current committed IndexedDB payload for explicit adoption when legacy data conflicts", async () => {
+    const idbMetadata = {
+      明示採用移行イベント: { generation: "indexed-db" },
+    };
+    const legacyMetadata = {
+      明示採用移行イベント: { generation: "legacy" },
+    };
+    const db = await importFreshDb();
+    await db.saveEventMetadata(idbMetadata);
+    const idbRevision = await readCurrentRevision("eventMetadata");
+    const legacySource = JSON.stringify(legacyMetadata);
+    localStorage.setItem("eventMetadata", legacySource);
+
+    const migration = await db.migrateFromLocalStorage();
+
+    expect(migration.status).toBe("recovery-required");
+    if (migration.status !== "recovery-required") {
+      throw new Error("Expected metadata migration recovery.");
+    }
+    const idbCandidate = migration.recoveryBundle.candidates.find(
+      ({ source, role, storeName }) =>
+        source === "indexedDB" &&
+        role === "app-payload" &&
+        storeName === "eventMetadata",
+    );
+    if (!idbCandidate) {
+      throw new Error("Missing current IndexedDB migration candidate.");
+    }
+    expect(idbCandidate).toMatchObject({
+      adoptable: true,
+      revision: idbRevision,
+      payload: idbMetadata,
+      targetKey: DATA_KEY,
+    });
+    expect(migration.recoveryBundle.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "legacy-localStorage",
+          storeName: "eventMetadata",
+          rawValue: legacySource,
+          adoptable: false,
+        }),
+      ]),
+    );
+
+    await expect(
+      db.adoptRecoveryCandidate(idbCandidate),
+    ).resolves.toMatchObject({
+      status: "adopted",
+      storeName: "eventMetadata",
+      key: DATA_KEY,
+    });
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(idbMetadata);
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+  });
+
+  it("preserves validation recovery candidates through a legacy migration failure", async () => {
+    const metadata = {
+      checkpoint候補伝搬イベント: { generation: "committed" },
+    };
+    const db = await importFreshDb();
+    await db.saveEventMetadata(metadata);
+    const revision = await readCurrentRevision("eventMetadata");
+    const checkpointKey = createPersistenceCheckpointKey(
+      "eventMetadata",
+      DATA_KEY,
+    );
+    await writeRawRecordAtExistingVersion("syncQueue", checkpointKey, {
+      corrupted: true,
+    });
+    const legacySource = JSON.stringify(metadata);
+    localStorage.setItem("eventMetadata", legacySource);
+
+    const migration = await db.migrateFromLocalStorage();
+
+    expect(migration.status).toBe("recovery-required");
+    if (migration.status !== "recovery-required") {
+      throw new Error("Expected checkpoint migration recovery.");
+    }
+    const payloadCandidate = migration.recoveryBundle.candidates.find(
+      ({ source, role, storeName }) =>
+        source === "indexedDB" &&
+        role === "app-payload" &&
+        storeName === "eventMetadata",
+    );
+    if (!payloadCandidate) {
+      throw new Error("Missing propagated IndexedDB payload candidate.");
+    }
+    expect(payloadCandidate).toMatchObject({
+      adoptable: true,
+      revision,
+      payload: metadata,
+    });
+    expect(migration.recoveryBundle.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "indexedDB",
+          role: "persistence-checkpoint",
+          sourceKey: checkpointKey,
+          adoptable: false,
+          payload: { corrupted: true },
+        }),
+      ]),
+    );
+
+    await db.adoptRecoveryCandidate(payloadCandidate);
+    await expect(db.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+    });
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(metadata);
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
   });
 
   it("defaults a verified migration to cleanup-pending and retains its exact sources", async () => {
@@ -1701,14 +2102,14 @@ describe("db.migrateFromLocalStorage resilience", () => {
     expect(localStorage.getItem("eventMetadata")).toBe(source);
   });
 
-  it("archives a standalone legacy syncQueue source without migrating or deleting it", async () => {
+  it("reports syncQueue-only as not-needed while retaining the rollback-compatible v2 journal shape", async () => {
     const legacySyncQueueSource = '{"standalone":["legacy-operation"]}';
     localStorage.setItem("syncQueue", legacySyncQueueSource);
     const db = await importFreshDb();
 
     expect(await db.migrateFromLocalStorage()).toEqual({
       status: "cleanup-pending",
-      dataMigrationStatus: "verified",
+      dataMigrationStatus: "not-needed",
       cleanupStatus: "deferred",
       migratedKeys: [],
     });
@@ -1744,7 +2145,7 @@ describe("db.migrateFromLocalStorage resilience", () => {
 
       expect(await db.migrateFromLocalStorage()).toEqual({
         status: "cleanup-pending",
-        dataMigrationStatus: "verified",
+        dataMigrationStatus: "not-needed",
         cleanupStatus: "deferred",
         migratedKeys: [],
       });
@@ -1782,7 +2183,7 @@ describe("db.migrateFromLocalStorage resilience", () => {
 
     expect(await db.migrateFromLocalStorage()).toMatchObject({
       status: "cleanup-pending",
-      dataMigrationStatus: "verified",
+      dataMigrationStatus: "not-needed",
       cleanupStatus: "deferred",
     });
 
@@ -1958,7 +2359,10 @@ describe("db.migrateFromLocalStorage resilience", () => {
       const initialMigration = await db.migrateFromLocalStorage();
 
       expect(initialMigration).toMatchObject({
-        status: failurePhase === null ? "cleanup-pending" : "recovery-required",
+        status:
+          failurePhase === null || failurePhase === "cleanup-ready"
+            ? "cleanup-pending"
+            : "recovery-required",
       });
       expect(await readMigrationJournalV2()).toMatchObject({
         phase: initialV2Phase,
@@ -2955,14 +3359,12 @@ describe("db runtime fallback resilience", () => {
     const db = await importFreshDb();
     vi.spyOn(console, "warn").mockImplementation(() => {});
     vi.spyOn(console, "error").mockImplementation(() => {});
-    const setItemSpy = vi.spyOn(Storage.prototype, "setItem");
-
     await expect(
       db.saveEventMetadata({
         将来DBイベント: { mustNotFallback: true },
       }),
     ).rejects.toMatchObject({ name: "VersionError" });
-    expect(setItemSpy).not.toHaveBeenCalled();
+    expect(localStorage.length).toBe(0);
     expect(localStorage.getItem("eventMetadata")).toBeNull();
     expect(
       await readRawRecordAtExistingVersion("eventMetadata", DATA_KEY),

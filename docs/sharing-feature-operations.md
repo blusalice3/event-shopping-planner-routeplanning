@@ -50,12 +50,12 @@ client gateを閉じても旧clientが動く可能性があるため、incident�
 
 ## 3. 環境
 
-| 環境 | 用途 | data |
-| --- | --- | --- |
-| local | migration、RLS、RPC、破壊試験 | fixtureだけ |
-| staging | browser、PWA、rollout rehearsal | synthetic dataだけ |
-| pilot | 限定利用と上限実測 | 同意したpilot data |
-| production | 正式利用 | retentionと監視を適用 |
+| 環境       | 用途                            | data                  |
+| ---------- | ------------------------------- | --------------------- |
+| local      | migration、RLS、RPC、破壊試験   | fixtureだけ           |
+| staging    | browser、PWA、rollout rehearsal | synthetic dataだけ    |
+| pilot      | 限定利用と上限実測              | 同意したpilot data    |
+| production | 正式利用                        | retentionと監視を適用 |
 
 要件:
 

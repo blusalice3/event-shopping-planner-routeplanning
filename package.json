@@ -5,7 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "tsc && vite build --mode release-a",
+    "build:release-a": "npm run build && node scripts/verify-release-a-build.mjs",
+    "test:release-a-browser": "node scripts/verify-release-a-browser.mjs",
+    "test:release-a-rollback": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rehearse-release-a-rollback.ps1",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "generate-icons": "pwa-assets-generator",
@@ -45,6 +48,7 @@
     "vite": "^5.4.2",
     "vite-plugin-pwa": "^0.20.1",
     "vitest": "^2.1.8",
-    "workbox-window": "^7.1.0"
+    "workbox-window": "^7.1.0",
+    "ws": "^8.20.0"
   }
 }

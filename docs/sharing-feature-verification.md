@@ -7,13 +7,13 @@
 
 ## 1. 判定語
 
-| 状態 | 意味 |
-| --- | --- |
-| `PASS` | 対象commitと環境を特定でき、期待結果を満たす証跡がある |
-| `FAIL` | 実行したが期待結果を満たさない |
-| `NOT RUN` | 実行可能だが、このrelease候補では未実行 |
-| `NOT AVAILABLE` | 実装またはtest基盤がまだ存在しない |
-| `N/A` | 対象外で、理由が記録されている |
+| 状態            | 意味                                                   |
+| --------------- | ------------------------------------------------------ |
+| `PASS`          | 対象commitと環境を特定でき、期待結果を満たす証跡がある |
+| `FAIL`          | 実行したが期待結果を満たさない                         |
+| `NOT RUN`       | 実行可能だが、このrelease候補では未実行                |
+| `NOT AVAILABLE` | 実装またはtest基盤がまだ存在しない                     |
+| `N/A`           | 対象外で、理由が記録されている                         |
 
 共有機能のrelease判定では、古いcommit、別環境、旧版repoの`PASS`を流用しない。
 
@@ -30,13 +30,13 @@
 
 ## 3. 現行command
 
-| Gate | command | 初期状態 |
-| --- | --- | --- |
-| type | `npm run typecheck` | `NOT RUN` |
-| lint | `npm run lint` | `NOT RUN` |
-| unit／integration | `npm run test:run` | `NOT RUN` |
-| format | `npm run format:check` | `NOT RUN` |
-| production build | `npm run build` | `NOT RUN` |
+| Gate              | command                | 初期状態  |
+| ----------------- | ---------------------- | --------- |
+| type              | `npm run typecheck`    | `NOT RUN` |
+| lint              | `npm run lint`         | `NOT RUN` |
+| unit／integration | `npm run test:run`     | `NOT RUN` |
+| format            | `npm run format:check` | `NOT RUN` |
+| production build  | `npm run build`        | `NOT RUN` |
 
 現在存在しないもの:
 
@@ -49,33 +49,33 @@
 
 ## 4. release gate
 
-| Gate | 内容 | 初期状態 |
-| --- | --- | --- |
-| G0 | 要件、未決事項、脅威、上限、対応browserの確定 | `NOT RUN` |
-| G1 | local ID、IndexedDB migration、feature OFF回帰 | `NOT AVAILABLE` |
-| G2 | schema、RPC、RLS、冪等性、競合のDB contract | `NOT AVAILABLE` |
-| G3 | room作成、参加、snapshot、online同期 | `NOT AVAILABLE` |
-| G4 | offline、複数tab、lifecycle、fallback | `NOT AVAILABLE` |
-| G5 | browser、PWA、accessibility、security | `NOT AVAILABLE` |
-| G6 | staging、kill switch、rollback、限定pilot | `NOT AVAILABLE` |
+| Gate | 内容                                           | 初期状態        |
+| ---- | ---------------------------------------------- | --------------- |
+| G0   | 要件、未決事項、脅威、上限、対応browserの確定  | `NOT RUN`       |
+| G1   | local ID、IndexedDB migration、feature OFF回帰 | `NOT AVAILABLE` |
+| G2   | schema、RPC、RLS、冪等性、競合のDB contract    | `NOT AVAILABLE` |
+| G3   | room作成、参加、snapshot、online同期           | `NOT AVAILABLE` |
+| G4   | offline、複数tab、lifecycle、fallback          | `NOT AVAILABLE` |
+| G5   | browser、PWA、accessibility、security          | `NOT AVAILABLE` |
+| G6   | staging、kill switch、rollback、限定pilot      | `NOT AVAILABLE` |
 
 G0から順に満たす。後続gateの一部が動いても、前段のdata lossやsecurity gateを省略しない。
 
 ## 5. 要件trace
 
-| 要件領域 | 主な要件ID | 自動試験 | 手動試験 |
-| --- | --- | --- | --- |
-| feature gate | `SHR-FLG-*`、`SHR-LOC-001` | unit、existing regression、build | gate OFF smoke |
-| stable ID | `SHR-ID-*` | unit、IDB migration、export／import | rename／duplicate確認 |
-| room作成 | `SHR-ROOM-*` | RPC、RLS、payload、integration | 作成dialog |
-| 招待／参加 | `SHR-JOIN-*` | token／code、rate、expiry、E2E | URL／QR／code |
-| 共有data | `SHR-DATA-*` | projection、validation、permission | 共有前preview |
-| 同期／競合 | `SHR-SYNC-*` | multi-client、idempotency、race | conflict dialog |
-| offline | `SHR-OFF-*` | IDB、reload、timeout、multi-tab | sleep／PWA復帰 |
-| lifecycle | `SHR-LIFE-*` | state、permission、expiry | leave／close／fallback |
-| UX／a11y | `SHR-UX-*` | component、axe導入後 | keyboard、reader、zoom |
-| security | `SHR-SEC-*` | RLS negative、bundle scan、CSP | devtools／network確認 |
-| non-functional | `SHR-NFR-*` | performance、migration、monitoring | mobile回線、incident rehearsal |
+| 要件領域       | 主な要件ID                 | 自動試験                            | 手動試験                       |
+| -------------- | -------------------------- | ----------------------------------- | ------------------------------ |
+| feature gate   | `SHR-FLG-*`、`SHR-LOC-001` | unit、existing regression、build    | gate OFF smoke                 |
+| stable ID      | `SHR-ID-*`                 | unit、IDB migration、export／import | rename／duplicate確認          |
+| room作成       | `SHR-ROOM-*`               | RPC、RLS、payload、integration      | 作成dialog                     |
+| 招待／参加     | `SHR-JOIN-*`               | token／code、rate、expiry、E2E      | URL／QR／code                  |
+| 共有data       | `SHR-DATA-*`               | projection、validation、permission  | 共有前preview                  |
+| 同期／競合     | `SHR-SYNC-*`               | multi-client、idempotency、race     | conflict dialog                |
+| offline        | `SHR-OFF-*`                | IDB、reload、timeout、multi-tab     | sleep／PWA復帰                 |
+| lifecycle      | `SHR-LIFE-*`               | state、permission、expiry           | leave／close／fallback         |
+| UX／a11y       | `SHR-UX-*`                 | component、axe導入後                | keyboard、reader、zoom         |
+| security       | `SHR-SEC-*`                | RLS negative、bundle scan、CSP      | devtools／network確認          |
+| non-functional | `SHR-NFR-*`                | performance、migration、monitoring  | mobile回線、incident rehearsal |
 
 この表は計画段階のroutingであり、prefix単位の`PASS`を許可しない。M0で全要件IDを1行ずつ、
 自動／手動test case ID、owner、状態へ対応させるtrace matrixを追加する。release候補では要件IDごとに
@@ -207,21 +207,21 @@ local Supabase基盤を追加後、少なくとも次を自動化する。
 
 各caseで、local表示、outbox状態、server副作用、復旧後の収束、利用者表示を確認する。
 
-| case | 必須確認 |
-| --- | --- |
-| 操作前offline | allowlist以外をqueueしない |
-| RPC送信前切断 | operationをqueuedで保持 |
-| RPC処理中切断 | outcome unknownと冪等再送 |
-| RPC成功、Realtime断 | RPC結果とrevisionで確定 |
-| Realtimeだけ切断 | polling／再取得で収束 |
-| tab reload | operation IDとpayloadを維持 |
-| device sleep／PWA background | 復帰後に重複送信しない |
-| Auth token expiry | refresh後に同じoperationを再送 |
-| room close中 | 通常outboxを送信しない |
-| member退出後 | outboxをblockedにする |
-| protocol mismatch | update／local利用を案内 |
-| server write gate OFF | 自動retryを停止 |
-| storage quota | local dataを削除しない |
+| case                         | 必須確認                       |
+| ---------------------------- | ------------------------------ |
+| 操作前offline                | allowlist以外をqueueしない     |
+| RPC送信前切断                | operationをqueuedで保持        |
+| RPC処理中切断                | outcome unknownと冪等再送      |
+| RPC成功、Realtime断          | RPC結果とrevisionで確定        |
+| Realtimeだけ切断             | polling／再取得で収束          |
+| tab reload                   | operation IDとpayloadを維持    |
+| device sleep／PWA background | 復帰後に重複送信しない         |
+| Auth token expiry            | refresh後に同じoperationを再送 |
+| room close中                 | 通常outboxを送信しない         |
+| member退出後                 | outboxをblockedにする          |
+| protocol mismatch            | update／local利用を案内        |
+| server write gate OFF        | 自動retryを停止                |
+| storage quota                | local dataを削除しない         |
 
 ## 11. 複数tab
 

@@ -88,6 +88,19 @@ describe("isPersistenceLegacyCleanupBuildEnabled", () => {
 
     expect(isPersistenceLegacyCleanupBuildEnabled("true")).toBe(false);
   });
+
+  it("productionではRelease B channelとの二重一致がなければ常にOFFにする", () => {
+    vi.stubEnv("MODE", "production");
+    vi.stubEnv("VITE_PERSISTENCE_LEGACY_CLEANUP", "true");
+    vi.stubEnv("VITE_PERSISTENCE_RELEASE_CHANNEL", "release-a");
+    expect(isPersistenceLegacyCleanupBuildEnabled()).toBe(false);
+
+    vi.stubEnv("VITE_PERSISTENCE_RELEASE_CHANNEL", "release-b");
+    expect(isPersistenceLegacyCleanupBuildEnabled()).toBe(true);
+
+    vi.stubEnv("VITE_PERSISTENCE_LEGACY_CLEANUP", "TRUE");
+    expect(isPersistenceLegacyCleanupBuildEnabled()).toBe(false);
+  });
 });
 
 describe("coordinatePersistenceLegacyCleanup auto mode", () => {

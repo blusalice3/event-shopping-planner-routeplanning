@@ -25,17 +25,17 @@ release記録など、対象commitと環境を特定できる場所に分離す�
 
 2026-07-31時点のソース監査で確認できた事実は次のとおりである。
 
-| 領域 | 現在の状態 |
-| --- | --- |
-| フロントエンド | React 18、TypeScript、Vite、PWA。主状態は`src/App.tsx`の`useState`にある |
+| 領域           | 現在の状態                                                                                            |
+| -------------- | ----------------------------------------------------------------------------------------------------- |
+| フロントエンド | React 18、TypeScript、Vite、PWA。主状態は`src/App.tsx`の`useState`にある                              |
 | ローカル永続化 | `src/utils/indexedDB.ts`の`EventShoppingPlannerDB` version 5。通常10 storeと未接続の`syncQueue`がある |
-| Supabase | SDK依存と`src/lib/supabase.ts`の任意client初期化だけがある。業務コードからの利用はない |
-| DB型 | `src/lib/database.types.ts`はmigrationで裏付けられていない簡易型であり、実装契約として使用できない |
-| 共有機能 | `src/features/sharing/`、共有UI、Auth、RPC、Realtime、同期処理は存在しない |
-| backend資材 | `supabase/`、migration、DB試験、共有用scriptは存在しない |
-| QR | `qrcode`は依存済みだが、現行ソースからは未使用 |
-| テスト | Vitestの既存unit／integration試験はあるが、共有、Auth、RLS、複数client、offline同期の試験はない |
-| 識別子 | eventは変更可能な`eventName`をkeyにする。item IDの発番方式は複数あり、eventの安定IDはない |
+| Supabase       | SDK依存と`src/lib/supabase.ts`の任意client初期化だけがある。業務コードからの利用はない                |
+| DB型           | `src/lib/database.types.ts`はmigrationで裏付けられていない簡易型であり、実装契約として使用できない    |
+| 共有機能       | `src/features/sharing/`、共有UI、Auth、RPC、Realtime、同期処理は存在しない                            |
+| backend資材    | `supabase/`、migration、DB試験、共有用scriptは存在しない                                              |
+| QR             | `qrcode`は依存済みだが、現行ソースからは未使用                                                        |
+| テスト         | Vitestの既存unit／integration試験はあるが、共有、Auth、RLS、複数client、offline同期の試験はない       |
+| 識別子         | eventは変更可能な`eventName`をkeyにする。item IDの発番方式は複数あり、eventの安定IDはない             |
 
 したがって、共有機能の実装状態は「一部完了」ではなく「未着手」とする。既存のSupabase client、
 DB型、`syncQueue`は参考資材であり、検証なしに旧設計の続きとして実装しない。
@@ -97,15 +97,15 @@ DB型、`syncQueue`は参考資材であり、検証なしに旧設計の続き�
 すべて未着手から開始する。後続milestoneの作業は、直前の完了条件を満たすまでrelease対象に
 含めない。
 
-| ID | 状態 | 内容 | 主な完了条件 |
-| --- | --- | --- | --- |
-| M0 | 未着手 | 要件と制約の確定 | 未決事項を決定し、要件IDと設計・試験の参照が一致する |
-| M1 | 未着手 | local基盤 | 安定event ID、IDB migration、feature gate、共有module骨格が既存データを壊さず動く |
-| M2 | 未着手 | backend contract | local Supabaseでschema、RPC、RLS、冪等性、negative testが合格する |
-| M3 | 未着手 | room作成・参加 | 作成、招待、参加、初期snapshot、roomとlocal eventの紐付けが動く |
-| M4 | 未着手 | online同期 | 商品・購入状態のmutation、Realtime invalidation、差分再取得、競合表示が動く |
-| M5 | 未着手 | offline・lifecycle | outbox、再接続、退出、終了、期限切れ、fallback、PWA更新を安全に扱う |
-| M6 | 未着手 | pilot準備 | 自動試験、実browser、accessibility、kill switch、rollback rehearsalが完了する |
+| ID  | 状態   | 内容               | 主な完了条件                                                                      |
+| --- | ------ | ------------------ | --------------------------------------------------------------------------------- |
+| M0  | 未着手 | 要件と制約の確定   | 未決事項を決定し、要件IDと設計・試験の参照が一致する                              |
+| M1  | 未着手 | local基盤          | 安定event ID、IDB migration、feature gate、共有module骨格が既存データを壊さず動く |
+| M2  | 未着手 | backend contract   | local Supabaseでschema、RPC、RLS、冪等性、negative testが合格する                 |
+| M3  | 未着手 | room作成・参加     | 作成、招待、参加、初期snapshot、roomとlocal eventの紐付けが動く                   |
+| M4  | 未着手 | online同期         | 商品・購入状態のmutation、Realtime invalidation、差分再取得、競合表示が動く       |
+| M5  | 未着手 | offline・lifecycle | outbox、再接続、退出、終了、期限切れ、fallback、PWA更新を安全に扱う               |
+| M6  | 未着手 | pilot準備          | 自動試験、実browser、accessibility、kill switch、rollback rehearsalが完了する     |
 
 最初のend-to-end sliceは、feature gate OFF回帰、URL／QR参加、read-only初期snapshot、
 online購入状態同期までとする。手入力codeとhostの商品内容編集は、この基本経路とsecurity contractが
@@ -246,27 +246,27 @@ online購入状態同期までとする。手入力codeとhostの商品内容編
 
 ## 6. 主な変更予定箇所
 
-| 現行path | 予定する変更 |
-| --- | --- |
-| `src/App.tsx` | 共有sessionと既存event stateを接続する最小adapter |
-| `src/components/EventListScreen.tsx` | room作成／参加の入口 |
-| `src/features/app-shell/components/AppMainContent.tsx` | 共有入口のprops接続 |
-| `src/features/app-shell/components/AppHeaderShell.tsx` | 共有中・offline・未送信状態 |
-| `src/features/app-shell/components/AppOverlayLayer.tsx` | 作成、参加、競合、終了dialog |
-| `src/features/sharing/` | domain、Supabase adapter、sync coordinator、hooks、UI |
-| `src/types/item.ts` | `localEventId`を含むevent metadataと共有projectionの型 |
-| `src/utils/indexedDB.ts` | version migrationと共有専用store |
-| `src/hooks/useIndexedDbPersistence.ts` | event ID migrationの接続。共有replicaの正本にはしない |
-| `src/features/events/recordOps.ts` | rename／delete時の安定event ID維持 |
-| `src/features/events/bulkAdd.ts` | 手動event作成時のmetadata／安定ID |
-| `src/features/events/exportFlow.ts` | version付きXLSXへのevent ID出力 |
-| `src/features/events/fileImport.ts` | legacy／restore／別copy importの判定 |
-| `src/utils/exportImport.ts` | format versionと`localEventId`のcodec |
-| `src/lib/supabase.ts` | feature gate、Auth開始、接続状態の明確化 |
-| `src/lib/database.types.ts` | local migrationから再生成 |
-| `supabase/migrations/` | schema、RPC、RLS、server gate |
-| `supabase/tests/` | RLS、RPC、競合、冪等性、保持のDB試験 |
-| `vite.config.ts`／`vercel.json` | Supabase通信とCSPを必要最小限に制限 |
+| 現行path                                                | 予定する変更                                           |
+| ------------------------------------------------------- | ------------------------------------------------------ |
+| `src/App.tsx`                                           | 共有sessionと既存event stateを接続する最小adapter      |
+| `src/components/EventListScreen.tsx`                    | room作成／参加の入口                                   |
+| `src/features/app-shell/components/AppMainContent.tsx`  | 共有入口のprops接続                                    |
+| `src/features/app-shell/components/AppHeaderShell.tsx`  | 共有中・offline・未送信状態                            |
+| `src/features/app-shell/components/AppOverlayLayer.tsx` | 作成、参加、競合、終了dialog                           |
+| `src/features/sharing/`                                 | domain、Supabase adapter、sync coordinator、hooks、UI  |
+| `src/types/item.ts`                                     | `localEventId`を含むevent metadataと共有projectionの型 |
+| `src/utils/indexedDB.ts`                                | version migrationと共有専用store                       |
+| `src/hooks/useIndexedDbPersistence.ts`                  | event ID migrationの接続。共有replicaの正本にはしない  |
+| `src/features/events/recordOps.ts`                      | rename／delete時の安定event ID維持                     |
+| `src/features/events/bulkAdd.ts`                        | 手動event作成時のmetadata／安定ID                      |
+| `src/features/events/exportFlow.ts`                     | version付きXLSXへのevent ID出力                        |
+| `src/features/events/fileImport.ts`                     | legacy／restore／別copy importの判定                   |
+| `src/utils/exportImport.ts`                             | format versionと`localEventId`のcodec                  |
+| `src/lib/supabase.ts`                                   | feature gate、Auth開始、接続状態の明確化               |
+| `src/lib/database.types.ts`                             | local migrationから再生成                              |
+| `supabase/migrations/`                                  | schema、RPC、RLS、server gate                          |
+| `supabase/tests/`                                       | RLS、RPC、競合、冪等性、保持のDB試験                   |
+| `vite.config.ts`／`vercel.json`                         | Supabase通信とCSPを必要最小限に制限                    |
 
 ## 7. 共通quality gate
 
@@ -288,19 +288,19 @@ online購入状態同期までとする。手入力codeとhostの商品内容編
 
 次は旧版の数値を確定値として継承せず、M0で確認する。括弧内は設計を進めるための仮置きである。
 
-| 項目 | 仮置き | 確定に必要な確認 |
-| --- | --- | --- |
-| member上限 | hostを含め4人 | UI、同時操作、費用、rateの実測 |
-| 商品上限 | 300件 | 初期upload、snapshot、IDB、低速回線の実測 |
-| room期限 | 既定24時間、最大7日 | cleanup、利用シナリオ、保持方針 |
-| 同時room | local eventごとに1つ | UXと状態管理の複雑性 |
-| 商品内容の編集 | hostのみ | 参加者の実運用 |
-| offline queue | 購入状態変更のみ | 競合と誤再送リスク |
-| 正式browser | PC Chrome／Edge、Android Chrome | PWAと実機試験 |
-| iOS | MVP対象外 | 保存、PWA、deep linkの実測 |
-| room作成制限 | server gateとoperator発行の一回限りcreator code | 公開範囲とabuse対策 |
-| 保持期間 | 未確定 | privacy、復旧、費用、cleanup実測 |
-| Auth session保存 | Supabase SDK管理の永続session | reload回復、logout、XSS、共有端末risk |
+| 項目             | 仮置き                                          | 確定に必要な確認                          |
+| ---------------- | ----------------------------------------------- | ----------------------------------------- |
+| member上限       | hostを含め4人                                   | UI、同時操作、費用、rateの実測            |
+| 商品上限         | 300件                                           | 初期upload、snapshot、IDB、低速回線の実測 |
+| room期限         | 既定24時間、最大7日                             | cleanup、利用シナリオ、保持方針           |
+| 同時room         | local eventごとに1つ                            | UXと状態管理の複雑性                      |
+| 商品内容の編集   | hostのみ                                        | 参加者の実運用                            |
+| offline queue    | 購入状態変更のみ                                | 競合と誤再送リスク                        |
+| 正式browser      | PC Chrome／Edge、Android Chrome                 | PWAと実機試験                             |
+| iOS              | MVP対象外                                       | 保存、PWA、deep linkの実測                |
+| room作成制限     | server gateとoperator発行の一回限りcreator code | 公開範囲とabuse対策                       |
+| 保持期間         | 未確定                                          | privacy、復旧、費用、cleanup実測          |
+| Auth session保存 | Supabase SDK管理の永続session                   | reload回復、logout、XSS、共有端末risk     |
 
 これらの変更がMVPのscope、data model、運用費用を大きく変える場合は、M1以降へ進む前に本書、
 要件、protocol、検証計画を更新する。
