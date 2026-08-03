@@ -1429,10 +1429,10 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         const startRow = cell.row - 1;
         const endRow = startRow + 1;
 
-        let topBorder = cell.borders.top;
+        const topBorder = cell.borders.top;
         let rightBorder = cell.borders.right;
         let bottomBorder = cell.borders.bottom;
-        let leftBorder = cell.borders.left;
+        const leftBorder = cell.borders.left;
 
         // Excel merged cells keep edge data distributed across member cells.
         // For the merge parent, right/bottom are often internal edges, so skip them.

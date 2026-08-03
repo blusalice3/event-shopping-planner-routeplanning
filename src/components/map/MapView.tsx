@@ -981,7 +981,7 @@ const MapView: React.FC<MapViewProps> = ({
 
   const batchAddToHallVisitList = useCallback(
     (itemIds: string[]) => {
-      let updatedHallVisitLists = [...hallRouteSettings.hallVisitLists];
+      const updatedHallVisitLists = [...hallRouteSettings.hallVisitLists];
       for (const itemId of itemIds) {
         const item = itemsById.get(itemId);
         if (!item) continue;
@@ -1020,7 +1020,7 @@ const MapView: React.FC<MapViewProps> = ({
   const applyPendingHallVisitEntries = useCallback(
     (entries: PendingHallVisitEntry[]) => {
       const latestHallRouteSettings = hallRouteSettingsRef.current;
-      let updatedHallVisitLists = [...latestHallRouteSettings.hallVisitLists];
+      const updatedHallVisitLists = [...latestHallRouteSettings.hallVisitLists];
 
       for (const { itemId, hallId } of entries) {
         if (!hallId) continue;

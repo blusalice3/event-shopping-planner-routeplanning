@@ -214,6 +214,7 @@ metricsへ記録できるのは`legacy_sync_queue_present=true/false`、archive�
 標準の自動確認:
 
 ```powershell
+npm run lint
 npm run test:run
 npm run typecheck
 npm run build:release-a
@@ -222,7 +223,7 @@ git diff --check
 npm run test:release-a-rollback
 ```
 
-`npm run lint`はESLint設定がrepositoryへ追加され、同じrelease sourceで再現可能になった後にgateへ含めます。設定がない状態の失敗を無視してPASS扱いにはしません。
+`npm run lint`は`.eslintrc.cjs`を使用してTypeScript/Reactソースを検査します。errorが残る場合はA12をPASS扱いにしません。warningもcommand logへ記録し、release前に内容と許容理由を確認します。
 
 Release Aは、別canary URLまたは限定cohortで24時間以上観測してから段階拡大します。Release A中に旧localStorageの削除件数が1件でも観測された場合は即時停止します。
 

@@ -1684,10 +1684,10 @@ const FocusModeMapCanvas: React.FC<FocusModeMapCanvasProps> = ({
         const startRow = cell.row - 1;
         const endRow = startRow + 1;
 
-        let topBorder = cell.borders.top;
+        const topBorder = cell.borders.top;
         let rightBorder = cell.borders.right;
         let bottomBorder = cell.borders.bottom;
-        let leftBorder = cell.borders.left;
+        const leftBorder = cell.borders.left;
 
         if (merge) {
           if (merge.endCol > merge.startCol) {

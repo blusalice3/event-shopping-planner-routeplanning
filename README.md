@@ -610,11 +610,13 @@ npm run dev
 | `npm run preview`                 | ビルド結果をローカル確認                         |
 | `npm run test:release-a-browser`  | 隔離Chromeで複数tab・SW・offlineをpreflight      |
 | `npm run test:release-a-rollback` | 同一origin/profileで旧版rollbackと復帰を演習     |
+| `npm run lint`                    | ESLintでTypeScript/Reactソースを検査             |
+| `npm run lint:fix`                | ESLintで安全に自動修正できる違反を修正           |
 | `npm run format`                  | Prettierで対象ファイルを整形                     |
 | `npm run format:check`            | Prettierの整形状態を確認                         |
 | `npm run generate-icons`          | PWA用アイコンを生成                              |
 
-`npm run lint` と `npm run lint:fix` のスクリプトはありますが、このスナップショットにはESLint設定ファイルが含まれていないため、現状のままでは実行に失敗します。利用する場合は、先にプロジェクト方針に合う設定を追加してください。
+依存関係を`npm ci`で導入した後、`npm run lint`を実行してください。既存コードへ段階的に導入できるよう、未使用コードなどの既存違反はwarning、React Hooksの呼び出し規則違反などはerrorとして扱います。`npm run lint:fix`は自動修正できる違反だけを変更するため、実行後に差分を確認し、残った違反は手動で修正してください。
 
 本番ビルドは `dist` に出力されます。PWAを有効にするにはHTTPSで配信し、アプリはドメインのルートへ配置してください。`vercel.json` にはSPA用フォールバック、セキュリティヘッダー、および生成物 `/sw.js` 向けの再検証ヘッダーがあります。配布時は実レスポンスでも `Cache-Control: public, max-age=0, must-revalidate` が適用されることを確認してください。
 
