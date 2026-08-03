@@ -849,7 +849,7 @@ const chromium = spawn(
     `--remote-debugging-port=${debugPort}`,
     "--remote-allow-origins=*",
     `--user-data-dir=${profileDirectory}`,
-    `--app=${new URL("/manifest.webmanifest", PREVIEW_URL).href}`,
+    "--app=about:blank",
   ],
   {
     stdio: "ignore",
