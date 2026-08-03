@@ -948,6 +948,7 @@ const chromium = spawn(
 const targets = [];
 let standaloneDebugPort = null;
 let standaloneTarget = null;
+let browserClient = null;
 
 try {
   const previewResponse = await fetch(PREVIEW_URL);
@@ -987,6 +988,11 @@ try {
     );
   }
   const devToolsVersion = await waitForDevTools(debugPort);
+  assert(
+    typeof devToolsVersion.webSocketDebuggerUrl === "string",
+    "Chromium browser DevTools target is missing.",
+  );
+  browserClient = await CdpClient.connect(devToolsVersion.webSocketDebuggerUrl);
   const startupTargets = await fetchJson(
     `http://127.0.0.1:${debugPort}/json/list`,
   );
@@ -1596,18 +1602,33 @@ try {
   await Promise.all(
     targets.map((target) => closeTarget(debugPort, target)),
   ).catch(() => undefined);
-  chromium.kill();
-  await withTimeout(
-    new Promise((resolve) => {
-      if (chromium.exitCode !== null) {
-        resolve();
-        return;
-      }
-      chromium.once("exit", resolve);
-    }),
-    5_000,
-    "Chromium shutdown",
-  ).catch(() => undefined);
+  if (browserClient) {
+    await withTimeout(
+      browserClient.send("Browser.close"),
+      2_000,
+      "Graceful Chromium shutdown request",
+    ).catch(() => undefined);
+    browserClient.close();
+  }
+  const waitForChromiumExit = async (timeoutMs) =>
+    await withTimeout(
+      new Promise((resolve) => {
+        if (chromium.exitCode !== null || chromium.signalCode !== null) {
+          resolve();
+          return;
+        }
+        chromium.once("exit", resolve);
+      }),
+      timeoutMs,
+      "Chromium shutdown",
+    ).then(
+      () => true,
+      () => false,
+    );
+  if (!(await waitForChromiumExit(5_000))) {
+    chromium.kill();
+    await waitForChromiumExit(5_000);
+  }
 
   const expectedPrefix = path.join(tmpdir(), "esp-release-a-browser-");
   if (
