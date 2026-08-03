@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { CellData, MapDataStore } from "../types/map";
 import {
+  InvalidMapPayloadError,
   compactMapDataForStorage,
   expandMapDataFromStorage,
   normalizeMapDataForPersistence,
@@ -23,6 +24,17 @@ function makeCell(overrides: Partial<CellData> = {}): CellData {
     borders: emptyBorders,
     isMerged: false,
     isVerticalText: false,
+    ...overrides,
+  };
+}
+
+function makePersistedDayMap(overrides: Record<string, unknown> = {}) {
+  return {
+    maxRow: 1,
+    maxCol: 1,
+    cells: [],
+    mergedCells: [],
+    blocks: [],
     ...overrides,
   };
 }
@@ -194,5 +206,149 @@ describe("mapDataPersistence", () => {
     expect(normalized.Event["1日目マップ"].cells[0]).not.toHaveProperty(
       "mergeParent",
     );
+  });
+
+  it.each([
+    ["primitive root", 42],
+    ["array root", []],
+    ["Date root", new Date("2026-08-04T00:00:00.000Z")],
+    ["primitive event", { Event: 42 }],
+    ["array event", { Event: [] }],
+    [
+      "unknown cell field",
+      {
+        Event: {
+          Day: makePersistedDayMap({
+            cells: [{ row: 1, col: 1, futureField: "raw" }],
+          }),
+        },
+      },
+    ],
+    [
+      "unknown borders field",
+      {
+        Event: {
+          Day: makePersistedDayMap({
+            cells: [
+              {
+                row: 1,
+                col: 1,
+                borders: { futureField: "raw" },
+              },
+            ],
+          }),
+        },
+      },
+    ],
+    [
+      "invalid merge parent",
+      {
+        Event: {
+          Day: makePersistedDayMap({
+            cells: [
+              {
+                row: 1,
+                col: 1,
+                mergeParent: { row: 1, col: "1" },
+              },
+            ],
+          }),
+        },
+      },
+    ],
+    [
+      "invalid merged cell",
+      {
+        Event: {
+          Day: makePersistedDayMap({
+            mergedCells: [
+              {
+                startRow: 1,
+                startCol: 1,
+                endRow: 1,
+                endCol: 1,
+                value: Number.NaN,
+              },
+            ],
+          }),
+        },
+      },
+    ],
+    [
+      "invalid block nested cell",
+      {
+        Event: {
+          Day: makePersistedDayMap({
+            blocks: [
+              {
+                name: "A",
+                startRow: 1,
+                startCol: 1,
+                endRow: 1,
+                endCol: 1,
+                numberCells: [{ row: 1, col: 1, value: "1" }],
+              },
+            ],
+          }),
+        },
+      },
+    ],
+    [
+      "unknown day field",
+      {
+        Event: {
+          Day: makePersistedDayMap({ futureField: "raw" }),
+        },
+      },
+    ],
+  ])("rejects a %s before lossy normalization", (_label, invalidMapData) => {
+    expect(() =>
+      normalizeMapDataForPersistence(invalidMapData as MapDataStore),
+    ).toThrow(InvalidMapPayloadError);
+  });
+
+  it("rejects sparse arrays and arrays with extra own properties", () => {
+    const sparseCells = new Array(2);
+    sparseCells[1] = { row: 1, col: 1, value: "raw" };
+    const cellsWithExtraProperty = [{ row: 1, col: 1, value: "raw" }];
+    Object.defineProperty(cellsWithExtraProperty, "futureField", {
+      value: "raw",
+      enumerable: true,
+    });
+
+    [sparseCells, cellsWithExtraProperty].forEach((cells) => {
+      expect(() =>
+        normalizeMapDataForPersistence({
+          Event: {
+            Day: makePersistedDayMap({ cells }),
+          },
+        } as MapDataStore),
+      ).toThrow(InvalidMapPayloadError);
+    });
+  });
+
+  it("preserves __proto__ as an own event and day name", () => {
+    const mapData = JSON.parse(
+      `{"__proto__":{"__proto__":${JSON.stringify(makePersistedDayMap())}}}`,
+    ) as MapDataStore;
+
+    const normalized = normalizeMapDataForPersistence(mapData);
+    const compacted = compactMapDataForStorage(mapData);
+
+    expect(Object.prototype.hasOwnProperty.call(normalized, "__proto__")).toBe(
+      true,
+    );
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        normalized["__proto__"],
+        "__proto__",
+      ),
+    ).toBe(true);
+    expect(Object.prototype.hasOwnProperty.call(compacted, "__proto__")).toBe(
+      true,
+    );
+    expect(
+      Object.prototype.hasOwnProperty.call(compacted["__proto__"], "__proto__"),
+    ).toBe(true);
   });
 });

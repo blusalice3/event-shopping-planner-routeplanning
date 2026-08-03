@@ -64,6 +64,17 @@ function makeDayMap(marker: string) {
   };
 }
 
+function makePersistedDayMap(overrides: Record<string, unknown>) {
+  return {
+    maxRow: 1,
+    maxCol: 1,
+    cells: [],
+    mergedCells: [],
+    blocks: [],
+    ...overrides,
+  };
+}
+
 function createSplitMapKey(eventName: string, dayMapName: string): string {
   return `mapData:${JSON.stringify([eventName, dayMapName])}`;
 }
@@ -922,6 +933,447 @@ describe("db payload compatibility", () => {
       ),
     ).toBe(true);
   });
+
+  it.each([
+    ["number root", 42],
+    ["string root", "invalid-map-root"],
+    ["invalid event", { 不正旧DBイベント: 42 }],
+    ["invalid nested day", { 不正旧DBイベント: { "1日目マップ": 42 } }],
+    [
+      "invalid cells collection",
+      {
+        不正旧DBイベント: {
+          "1日目マップ": makePersistedDayMap({ cells: 42 }),
+        },
+      },
+    ],
+    [
+      "invalid cell entry",
+      {
+        不正旧DBイベント: {
+          "1日目マップ": makePersistedDayMap({ cells: [42] }),
+        },
+      },
+    ],
+    [
+      "unknown cell field",
+      {
+        不正旧DBイベント: {
+          "1日目マップ": makePersistedDayMap({
+            cells: [{ row: 1, col: 1, futureField: "raw" }],
+          }),
+        },
+      },
+    ],
+    [
+      "unknown border field",
+      {
+        不正旧DBイベント: {
+          "1日目マップ": makePersistedDayMap({
+            cells: [
+              {
+                row: 1,
+                col: 1,
+                borders: { futureField: "raw" },
+              },
+            ],
+          }),
+        },
+      },
+    ],
+    [
+      "invalid merge parent",
+      {
+        不正旧DBイベント: {
+          "1日目マップ": makePersistedDayMap({
+            cells: [
+              {
+                row: 1,
+                col: 1,
+                mergeParent: { row: 1, col: "1" },
+              },
+            ],
+          }),
+        },
+      },
+    ],
+    [
+      "invalid merged cell entry",
+      {
+        不正旧DBイベント: {
+          "1日目マップ": makePersistedDayMap({ mergedCells: [42] }),
+        },
+      },
+    ],
+    [
+      "invalid mergedCells collection",
+      {
+        不正旧DBイベント: {
+          "1日目マップ": makePersistedDayMap({ mergedCells: 42 }),
+        },
+      },
+    ],
+    [
+      "invalid block entry",
+      {
+        不正旧DBイベント: {
+          "1日目マップ": makePersistedDayMap({ blocks: [42] }),
+        },
+      },
+    ],
+    [
+      "invalid blocks collection",
+      {
+        不正旧DBイベント: {
+          "1日目マップ": makePersistedDayMap({ blocks: 42 }),
+        },
+      },
+    ],
+    [
+      "invalid block numberCells",
+      {
+        不正旧DBイベント: {
+          "1日目マップ": makePersistedDayMap({
+            blocks: [{ numberCells: 42 }],
+          }),
+        },
+      },
+    ],
+    [
+      "invalid block nameCells",
+      {
+        不正旧DBイベント: {
+          "1日目マップ": makePersistedDayMap({
+            blocks: [{ numberCells: [], nameCells: 42 }],
+          }),
+        },
+      },
+    ],
+    [
+      "unknown day field",
+      {
+        不正旧DBイベント: {
+          "1日目マップ": makePersistedDayMap({ futureField: "raw" }),
+        },
+      },
+    ],
+  ])(
+    "preserves a metadata-less legacy mapData source with a %s",
+    async (_label, invalidLegacyMap) => {
+      await seedDatabase(CURRENT_DATABASE_VERSION);
+      await writeRawRecordAtExistingVersion(
+        "mapData",
+        DATA_KEY,
+        invalidLegacyMap,
+      );
+      const db = await importFreshDb();
+
+      const loaded = await db.loadMapData();
+
+      expect(loaded).toMatchObject({
+        status: "conflict",
+        data: null,
+        error: { name: "InvalidMapPayload" },
+        recoveryBundle: {
+          issues: expect.arrayContaining([
+            expect.objectContaining({
+              stage: "load",
+              code: "InvalidMapPayload",
+              storeName: "mapData",
+            }),
+          ]),
+          candidates: expect.arrayContaining([
+            expect.objectContaining({
+              source: "indexedDB",
+              role: "invalid-source",
+              adoptable: false,
+              storeName: "mapData",
+              sourceKey: DATA_KEY,
+              payload: { [DATA_KEY]: invalidLegacyMap },
+            }),
+          ]),
+        },
+      });
+      expect(await readRawRecord("mapData", DATA_KEY)).toEqual(
+        invalidLegacyMap,
+      );
+      if (!loaded.recoveryBundle) {
+        throw new Error("Expected an invalid mapData recovery bundle.");
+      }
+      expect(
+        JSON.parse(serializeStartupRecoveryBundle(loaded.recoveryBundle)),
+      ).toMatchObject({
+        candidates: expect.arrayContaining([
+          expect.objectContaining({
+            role: "invalid-source",
+            adoptable: false,
+            payload: { [DATA_KEY]: invalidLegacyMap },
+          }),
+        ]),
+      });
+
+      const replacement: MapDataStore = {
+        復旧保全確認イベント: {
+          "1日目マップ": makeDayMap("replacement"),
+        },
+      };
+      const replacementKey = createSplitMapKey(
+        "復旧保全確認イベント",
+        "1日目マップ",
+      );
+      await expect(db.saveMapData(replacement)).rejects.toMatchObject({
+        name: "InvalidMapPayload",
+      });
+
+      expect(await readRawRecord("mapData", DATA_KEY)).toEqual(
+        invalidLegacyMap,
+      );
+      expect(await readRawRecord("mapData", replacementKey)).toBeUndefined();
+      expect(
+        await readRawRecord(
+          "syncQueue",
+          createPersistenceMetadataKey("mapData", DATA_KEY),
+        ),
+      ).toBeUndefined();
+      expect(
+        await readRawRecord(
+          "syncQueue",
+          createPersistenceCheckpointKey("mapData", DATA_KEY),
+        ),
+      ).toBeUndefined();
+      expect(getRuntimeFallbackKeys("mapData")).toEqual([]);
+    },
+  );
+
+  it("preserves a sparse legacy mapData source and blocks replacement", async () => {
+    const sparseCells = new Array(2);
+    sparseCells[1] = { row: 1, col: 1, value: "raw" };
+    const invalidLegacyMap = {
+      不正旧DBイベント: {
+        "1日目マップ": makePersistedDayMap({ cells: sparseCells }),
+      },
+    };
+    await seedDatabase(CURRENT_DATABASE_VERSION);
+    await writeRawRecordAtExistingVersion(
+      "mapData",
+      DATA_KEY,
+      invalidLegacyMap,
+    );
+    const db = await importFreshDb();
+
+    const loaded = await db.loadMapData();
+
+    expect(loaded).toMatchObject({
+      status: "conflict",
+      data: null,
+      error: { name: "InvalidMapPayload" },
+      recoveryBundle: {
+        candidates: expect.arrayContaining([
+          expect.objectContaining({
+            source: "indexedDB",
+            role: "invalid-source",
+            adoptable: false,
+            storeName: "mapData",
+            sourceKey: DATA_KEY,
+          }),
+        ]),
+      },
+    });
+    expect(await readRawRecord("mapData", DATA_KEY)).toEqual(invalidLegacyMap);
+    if (!loaded.recoveryBundle) {
+      throw new Error("Expected a sparse mapData recovery bundle.");
+    }
+    expect(serializeStartupRecoveryBundle(loaded.recoveryBundle)).toContain(
+      '"__espRecoveryValue": "array"',
+    );
+
+    await expect(
+      db.saveMapData({
+        復旧保全確認イベント: {
+          "1日目マップ": makeDayMap("replacement"),
+        },
+      }),
+    ).rejects.toMatchObject({ name: "InvalidMapPayload" });
+    expect(await readRawRecord("mapData", DATA_KEY)).toEqual(invalidLegacyMap);
+    expect(
+      await readRawRecord(
+        "syncQueue",
+        createPersistenceMetadataKey("mapData", DATA_KEY),
+      ),
+    ).toBeUndefined();
+    expect(
+      await readRawRecord(
+        "syncQueue",
+        createPersistenceCheckpointKey("mapData", DATA_KEY),
+      ),
+    ).toBeUndefined();
+    expect(getRuntimeFallbackKeys("mapData")).toEqual([]);
+  });
+
+  it.each([
+    ["primitive root", 42],
+    ["array root", []],
+    ["Date root", new Date("2026-08-04T00:00:00.000Z")],
+    ["primitive event", { 不正保存イベント: 42 }],
+    ["array event", { 不正保存イベント: [] }],
+  ])(
+    "rejects a %s save payload before replacing valid mapData",
+    async (_label, invalidPayload) => {
+      await seedDatabase(CURRENT_DATABASE_VERSION);
+      const db = await importFreshDb();
+      const original: MapDataStore = {
+        保存前原本イベント: {
+          "1日目マップ": makeDayMap("original"),
+        },
+      };
+      const originalKey = createSplitMapKey(
+        "保存前原本イベント",
+        "1日目マップ",
+      );
+      await db.saveMapData(original);
+      const rawBefore = await readRawRecord("mapData", originalKey);
+      const metadataBefore = await readRawRecord(
+        "syncQueue",
+        createPersistenceMetadataKey("mapData", DATA_KEY),
+      );
+      const checkpointBefore = await readRawRecord(
+        "syncQueue",
+        createPersistenceCheckpointKey("mapData", DATA_KEY),
+      );
+
+      await expect(
+        db.saveMapData(invalidPayload as unknown as MapDataStore),
+      ).rejects.toMatchObject({ name: "InvalidMapPayload" });
+
+      expect(await readRawRecord("mapData", originalKey)).toEqual(rawBefore);
+      expect(
+        await readRawRecord(
+          "syncQueue",
+          createPersistenceMetadataKey("mapData", DATA_KEY),
+        ),
+      ).toEqual(metadataBefore);
+      expect(
+        await readRawRecord(
+          "syncQueue",
+          createPersistenceCheckpointKey("mapData", DATA_KEY),
+        ),
+      ).toEqual(checkpointBefore);
+      await expect(db.loadMapData()).resolves.toMatchObject({
+        status: "ok",
+        data: original,
+      });
+      expect(getRuntimeFallbackKeys("mapData")).toEqual([]);
+    },
+  );
+
+  it("preserves __proto__ event and day names through legacy conversion", async () => {
+    const legacy = JSON.parse(
+      `{"__proto__":{"__proto__":${JSON.stringify(
+        makePersistedDayMap({ sheetName: "prototype-safe" }),
+      )}}}`,
+    ) as MapDataStore;
+    await seedDatabase(CURRENT_DATABASE_VERSION);
+    await writeRawRecordAtExistingVersion("mapData", DATA_KEY, legacy);
+    const db = await importFreshDb();
+
+    const loaded = await db.loadMapData();
+
+    expect(loaded.status).toBe("ok");
+    expect(Object.prototype.hasOwnProperty.call(loaded.data, "__proto__")).toBe(
+      true,
+    );
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        loaded.data?.["__proto__"],
+        "__proto__",
+      ),
+    ).toBe(true);
+    await db.saveMapData(loaded.data!);
+
+    const splitKey = createSplitMapKey("__proto__", "__proto__");
+    expect(await readRawRecord("mapData", splitKey)).toMatchObject({
+      sheetName: "prototype-safe",
+    });
+    const reloaded = await db.loadMapData();
+    expect(reloaded.status).toBe("ok");
+    expect(
+      Object.prototype.hasOwnProperty.call(reloaded.data, "__proto__"),
+    ).toBe(true);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        reloaded.data?.["__proto__"],
+        "__proto__",
+      ),
+    ).toBe(true);
+  });
+
+  it.each([
+    ["primitive", 42],
+    ["invalid nested collection", makePersistedDayMap({ cells: 42 })],
+  ])(
+    "preserves an invalid metadata-less split mapData record with a %s",
+    async (_label, invalidSplitValue) => {
+      const invalidSplitKey = createSplitMapKey(
+        "不正splitイベント",
+        "1日目マップ",
+      );
+      await seedDatabase(CURRENT_DATABASE_VERSION);
+      await writeRawRecordAtExistingVersion(
+        "mapData",
+        invalidSplitKey,
+        invalidSplitValue,
+      );
+      const db = await importFreshDb();
+
+      const loaded = await db.loadMapData();
+
+      expect(loaded).toMatchObject({
+        status: "conflict",
+        data: null,
+        error: { name: "InvalidMapPayload" },
+        recoveryBundle: {
+          candidates: expect.arrayContaining([
+            expect.objectContaining({
+              source: "indexedDB",
+              role: "invalid-source",
+              adoptable: false,
+              payload: { [invalidSplitKey]: invalidSplitValue },
+            }),
+          ]),
+        },
+      });
+      await expect(
+        db.saveMapData({
+          split復旧保全確認イベント: {
+            "1日目マップ": makeDayMap("split-replacement"),
+          },
+        }),
+      ).rejects.toMatchObject({ name: "InvalidMapPayload" });
+
+      expect(await readRawRecord("mapData", invalidSplitKey)).toEqual(
+        invalidSplitValue,
+      );
+      expect(
+        await readRawRecord(
+          "mapData",
+          createSplitMapKey("split復旧保全確認イベント", "1日目マップ"),
+        ),
+      ).toBeUndefined();
+      expect(
+        await readRawRecord(
+          "syncQueue",
+          createPersistenceMetadataKey("mapData", DATA_KEY),
+        ),
+      ).toBeUndefined();
+      expect(
+        await readRawRecord(
+          "syncQueue",
+          createPersistenceCheckpointKey("mapData", DATA_KEY),
+        ),
+      ).toBeUndefined();
+      expect(getRuntimeFallbackKeys("mapData")).toEqual([]);
+    },
+  );
 });
 
 describe("Release A persistence metric integration", () => {

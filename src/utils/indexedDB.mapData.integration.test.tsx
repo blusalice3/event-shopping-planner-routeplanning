@@ -405,7 +405,7 @@ describe("db.saveMapDataChanges", () => {
     expect(removeSpy).not.toHaveBeenCalled();
   });
 
-  it("aborts queued map deletes when a later put throws synchronously", async () => {
+  it("rejects an uncloneable map before queued map deletes", async () => {
     const original: MapDataStore = {
       同期例外元イベント: {
         "1日目マップ": makeDayMap("must-remain"),
@@ -428,7 +428,7 @@ describe("db.saveMapDataChanges", () => {
     await expect(
       db.saveMapDataChanges(original, invalidNext),
     ).rejects.toMatchObject({
-      name: "DataCloneError",
+      name: "InvalidMapPayload",
     });
 
     const stored = await loadStoredMapData();

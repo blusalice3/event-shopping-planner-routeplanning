@@ -5,6 +5,7 @@
 
 import type { MapDataStore } from "../types/map";
 import {
+  InvalidMapPayloadError,
   compactDayMapForStorage,
   compactMapDataForStorage,
   expandDayMapFromStorage,
@@ -364,10 +365,8 @@ function isInternalRecordKey(key: IDBValidKey): boolean {
 function isPersistenceConflict(error: unknown): boolean {
   return (
     error instanceof PersistenceConflictError ||
-    (typeof error === "object" &&
-      error !== null &&
-      "name" in error &&
-      (error as { name?: unknown }).name === "PersistenceConflict")
+    error instanceof InvalidMapPayloadError ||
+    ["PersistenceConflict", "InvalidMapPayload"].includes(readErrorName(error))
   );
 }
 
@@ -1965,11 +1964,14 @@ function materializeMapData(entries: Record<string, unknown>): {
 
   if (Object.prototype.hasOwnProperty.call(entries, MAP_DATA_LEGACY_KEY)) {
     knownKeys.push(MAP_DATA_LEGACY_KEY);
-    const legacy = expandMapDataFromStorage(
-      entries[MAP_DATA_LEGACY_KEY] as Record<string, Record<string, unknown>>,
-    );
+    const legacy = expandMapDataFromStorage(entries[MAP_DATA_LEGACY_KEY]);
     Object.entries(legacy).forEach(([eventName, eventMapData]) => {
-      data[eventName] = { ...eventMapData };
+      Object.defineProperty(data, eventName, {
+        value: { ...eventMapData },
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
     });
   }
 
@@ -1978,10 +1980,13 @@ function materializeMapData(entries: Record<string, unknown>): {
     if (!parsed) return;
     knownKeys.push(storageKey);
     const [eventName, dayMapName] = parsed;
-    const expandedDayMap = expandDayMapFromStorage(
-      value as Parameters<typeof expandDayMapFromStorage>[0],
-    );
-    const existingEventMap = data[eventName];
+    const expandedDayMap = expandDayMapFromStorage(value);
+    const existingEventMap = Object.prototype.hasOwnProperty.call(
+      data,
+      eventName,
+    )
+      ? data[eventName]
+      : undefined;
     if (
       existingEventMap &&
       Object.prototype.hasOwnProperty.call(existingEventMap, dayMapName) &&
@@ -1994,10 +1999,15 @@ function materializeMapData(entries: Record<string, unknown>): {
         `mapData contains conflicting legacy and split entries for ${eventName}/${dayMapName}.`,
       );
     }
-    data[eventName] = {
-      ...(existingEventMap ?? {}),
-      [dayMapName]: expandedDayMap,
-    };
+    Object.defineProperty(data, eventName, {
+      value: {
+        ...(existingEventMap ?? {}),
+        [dayMapName]: expandedDayMap,
+      },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
   });
 
   return { data, knownKeys };
@@ -2488,7 +2498,7 @@ async function writeMapDataWithMetadataOnce(
 }
 
 async function writeMapData(data: MapDataStore): Promise<void> {
-  const stableData = normalizeMapDataForPersistence(structuredClone(data));
+  const stableData = structuredClone(normalizeMapDataForPersistence(data));
   const observedKey = getObservedRootKey(STORES.MAP_DATA, DATA_KEY);
   let expected = expectedRevisionRoots.get(observedKey);
   if (!expected) {
@@ -7058,10 +7068,11 @@ async function observeAppDataRestoreState(): Promise<AppDataRestoreObservation> 
 }
 
 async function restoreAppDataAtomically(data: AppData): Promise<void> {
-  const stableData = structuredClone(data);
-  const stableMapData = normalizeMapDataForPersistence(
-    stableData.mapData as MapDataStore,
+  const stableMapData = structuredClone(
+    normalizeMapDataForPersistence(data.mapData as MapDataStore),
   );
+  const stableData = structuredClone(data);
+  stableData.mapData = stableMapData;
   const observation = await observeAppDataRestoreState();
   const database = await openDB();
   APP_DATA_RESTORE_STORE_NAMES.forEach((storeName) => {
@@ -7599,25 +7610,15 @@ function normalizeRecoveryAdoptionPayload(
       `${storeName} recovery payload must be a JSON-compatible object.`,
     );
   }
+  if (storeName === STORES.MAP_DATA) {
+    return structuredClone(
+      normalizeMapDataForPersistence(payload as MapDataStore),
+    );
+  }
+
   const stablePayload = structuredClone(payload);
   createSynchronousFingerprint(stablePayload);
-  if (storeName !== STORES.MAP_DATA) return stablePayload;
-
-  Object.values(stablePayload).forEach((eventMapData) => {
-    if (!isPlainRecord(eventMapData)) {
-      throw new PersistenceConflictError(
-        "mapData recovery payload contains an invalid event map.",
-      );
-    }
-    Object.values(eventMapData).forEach((dayMapData) => {
-      if (!isPlainRecord(dayMapData)) {
-        throw new PersistenceConflictError(
-          "mapData recovery payload contains an invalid day map.",
-        );
-      }
-    });
-  });
-  return normalizeMapDataForPersistence(stablePayload as MapDataStore);
+  return stablePayload;
 }
 
 function createRecoveryAdoptionArchiveKey(): string {
