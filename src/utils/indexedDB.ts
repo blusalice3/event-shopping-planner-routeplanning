@@ -9,6 +9,7 @@ import {
   compactMapDataForStorage,
   expandDayMapFromStorage,
   expandMapDataFromStorage,
+  normalizeMapDataForPersistence,
 } from "./mapDataPersistence";
 import {
   createPersistenceDigest,
@@ -1047,14 +1048,64 @@ function observedRootsMatch(
   );
 }
 
-function isRuntimeFallbackPhysicalPredecessor(
-  current: ObservedRevisionRoot,
-  runtimeRoot: ObservedRevisionRoot,
-): boolean {
-  if (!runtimeRoot.runtimeFallback) return false;
-  return runtimeRoot.baseRevision === null
-    ? Boolean(current.missing)
-    : !current.missing && current.revision === runtimeRoot.baseRevision;
+async function assertPhysicalRootMatchesLogicalFallback(
+  storeName: StoreName,
+  key: string,
+  physicalRoot: ObservedRevisionRoot,
+  logicalExpected: ObservedRevisionRoot,
+): Promise<void> {
+  if (!logicalExpected.runtimeFallback) {
+    if (observedRootsMatch(physicalRoot, logicalExpected)) {
+      return;
+    }
+    throw new PersistenceConflictError(
+      `${storeName}:${key} is not backed by a runtime fallback.`,
+    );
+  }
+
+  const candidateScan = await readRuntimeCandidateSnapshots<unknown>(
+    storeName,
+    key,
+  );
+  if (candidateScan.status === "conflict") {
+    throw (
+      candidateScan.result.error ??
+      new PersistenceConflictError(
+        `${storeName}:${key} has an invalid runtime fallback lineage.`,
+      )
+    );
+  }
+
+  const reconciliation = reconcileRuntimeFallbackCandidates(
+    {
+      revision: physicalRoot.missing ? null : physicalRoot.revision,
+      baseRevision: physicalRoot.missing ? null : physicalRoot.baseRevision,
+      digest: physicalRoot.missing ? undefined : physicalRoot.payloadDigest,
+      writerId: physicalRoot.missing ? undefined : physicalRoot.writerId,
+      createdAt: physicalRoot.missing ? undefined : physicalRoot.committedAt,
+    },
+    candidateScan.snapshots.map(({ candidate }) => candidate),
+  );
+  if (reconciliation.status === "conflict") {
+    throw new PersistenceConflictError(
+      `${storeName}:${key} has a conflicting runtime fallback lineage.`,
+    );
+  }
+
+  if (reconciliation.head) {
+    const reconciledHead = createObservedRootFromRuntimeCandidate(
+      reconciliation.head,
+    );
+    if (observedRootsMatch(reconciledHead, logicalExpected)) {
+      return;
+    }
+  } else if (observedRootsMatch(physicalRoot, logicalExpected)) {
+    return;
+  }
+
+  throw new PersistenceConflictError(
+    `${storeName}:${key} no longer matches the fallback lineage.`,
+  );
 }
 
 async function cleanupCommittedRuntimeCandidates(
@@ -1566,7 +1617,10 @@ async function writeMapDataWithMetadataOnce(
   const database = await openDB();
   ensureStoreExists(database, STORES.MAP_DATA);
   ensureStoreExists(database, STORES.SYNC_QUEUE);
-  const puts = buildMapDataPuts(data);
+  const desiredPuts = buildMapDataPuts(data);
+  const desiredByStorageKey = new Map(
+    desiredPuts.map(({ key: storageKey, value }) => [storageKey, value]),
+  );
 
   await new Promise<void>((resolve, reject) => {
     let transaction: IDBTransaction;
@@ -1611,19 +1665,29 @@ async function writeMapDataWithMetadataOnce(
     const commitIfReady = () => {
       if (committed || entries === null || !metadataLoaded) return;
       committed = true;
+      const observedEntries = entries;
       try {
         const deletes = assertCurrentMapMatchesExpected(
-          entries,
+          observedEntries,
           currentMetadata,
           expected,
-        );
+        ).filter((storageKey) => !desiredByStorageKey.has(storageKey));
         deletes.forEach((storageKey) => {
           const request = mapStore.delete(storageKey);
           request.onerror = () => {
             failure = failure ?? request.error;
           };
         });
-        puts.forEach(({ key: storageKey, value }) => {
+        desiredPuts.forEach(({ key: storageKey, value }) => {
+          if (
+            Object.prototype.hasOwnProperty.call(observedEntries, storageKey) &&
+            fingerprintsEqual(
+              createSynchronousFingerprint(observedEntries[storageKey]),
+              createSynchronousFingerprint(value),
+            )
+          ) {
+            return;
+          }
           const request = mapStore.put(value, storageKey);
           request.onerror = () => {
             failure = failure ?? request.error;
@@ -1674,7 +1738,7 @@ async function writeMapDataWithMetadataOnce(
 }
 
 async function writeMapData(data: MapDataStore): Promise<void> {
-  const stableData = structuredClone(data);
+  const stableData = normalizeMapDataForPersistence(structuredClone(data));
   const observedKey = getObservedRootKey(STORES.MAP_DATA, DATA_KEY);
   let expected = expectedRevisionRoots.get(observedKey);
   if (!expected) {
@@ -1791,14 +1855,12 @@ async function saveData<T>(
         );
       }
       const physicalRoot = physicalValidation.validated.root;
-      if (
-        !observedRootsMatch(physicalRoot, logicalExpected) &&
-        !isRuntimeFallbackPhysicalPredecessor(physicalRoot, logicalExpected)
-      ) {
-        throw new PersistenceConflictError(
-          `${storeName}:${key} no longer matches the fallback lineage.`,
-        );
-      }
+      await assertPhysicalRootMatchesLogicalFallback(
+        storeName,
+        key,
+        physicalRoot,
+        logicalExpected,
+      );
       writeExpected = physicalRoot;
     } catch (error) {
       if (
@@ -1881,17 +1943,12 @@ async function saveData<T>(
           );
         }
         const physicalCurrent = currentValidation.validated.root;
-        if (
-          !observedRootsMatch(physicalCurrent, logicalExpected) &&
-          !isRuntimeFallbackPhysicalPredecessor(
-            physicalCurrent,
-            logicalExpected,
-          )
-        ) {
-          throw new PersistenceConflictError(
-            `${storeName}:${key} changed before the fallback candidate was appended.`,
-          );
-        }
+        await assertPhysicalRootMatchesLogicalFallback(
+          storeName,
+          key,
+          physicalCurrent,
+          logicalExpected,
+        );
         current = logicalExpected;
       } catch (readError) {
         if (
@@ -1930,10 +1987,6 @@ async function saveData<T>(
           `${storeName}:${key} has another uncommitted persistence branch.`,
         );
       }
-      const staleRevisions = new Set(
-        reconciliation.staleCandidates.map(({ revision }) => revision),
-      );
-
       const candidate = await createRuntimeFallbackCandidate({
         storeName,
         key,
@@ -1966,11 +2019,6 @@ async function saveData<T>(
       expectedRevisionRoots.set(
         observedKey,
         createObservedRootFromRuntimeCandidate(candidate),
-      );
-      cleanupRuntimeCandidateSnapshots(
-        candidateScan.snapshots.filter(({ candidate }) =>
-          staleRevisions.has(candidate.revision),
-        ),
       );
     }
   }
@@ -3439,117 +3487,59 @@ function assertPreparedEntriesMatchJournal(
   });
 }
 
-async function cleanupLegacySourcesFromJournal(
+async function retainLegacySourcesFromJournal(
   journal: LegacyMigrationJournal,
 ): Promise<LegacyMigrationJournal> {
-  let working = journal;
-  assertJournalSourcesResumable(working, captureLegacySourceStates());
-
-  for (const legacyKey of journal.entries.map(({ legacyKey }) => legacyKey)) {
-    const entry = working.entries.find(
-      (candidate) => candidate.legacyKey === legacyKey,
-    );
-    if (!entry || entry.cleanupStatus === "removed") continue;
-
-    let current: string | null;
-    try {
-      current = localStorage.getItem(entry.legacyKey);
-    } catch (error) {
-      console.warn(
-        `Failed to inspect legacy source ${entry.legacyKey} during cleanup:`,
-        error,
-      );
-      continue;
-    }
-    if (
-      current === null &&
-      working.phase === "cleanupPending" &&
-      entry.cleanupStatus === "pending"
-    ) {
-      const inferredJournal: LegacyMigrationJournal = {
-        ...working,
-        updatedAt: new Date().toISOString(),
-        entries: working.entries.map((candidate) =>
-          candidate.legacyKey === entry.legacyKey
-            ? { ...candidate, cleanupStatus: "removed" as const }
-            : candidate,
-        ),
-      };
-      await writeMigrationJournalWithCas(working, inferredJournal);
-      working = inferredJournal;
-      continue;
-    }
-    if (
-      current === null &&
-      working.phase === "cleanupPending" &&
-      entry.cleanupStatus === "retained"
-    ) {
-      continue;
-    }
-    if (current !== entry.rawValue) {
-      throw new LegacySourceChangedError(
-        `Legacy source ${entry.legacyKey} changed before cleanup.`,
-        captureLegacySourceStates(),
-      );
-    }
-
-    let removed = false;
-    try {
-      localStorage.removeItem(entry.legacyKey);
-      removed = localStorage.getItem(entry.legacyKey) === null;
-    } catch (error) {
-      console.warn(
-        `Failed to remove legacy source ${entry.legacyKey}; cleanup remains pending:`,
-        error,
-      );
-    }
-    if (!removed) continue;
-
-    const nextJournal: LegacyMigrationJournal = {
-      ...working,
-      updatedAt: new Date().toISOString(),
-      entries: working.entries.map((candidate) =>
-        candidate.legacyKey === entry.legacyKey
-          ? { ...candidate, cleanupStatus: "removed" as const }
-          : candidate,
-      ),
-    };
-    await writeMigrationJournalWithCas(working, nextJournal);
-    working = nextJournal;
-  }
-
-  let finalSources: LegacySourceState[];
-  try {
-    finalSources = captureLegacySourceStates();
-    assertJournalSourcesResumable(working, finalSources);
-  } catch (error) {
-    if (error instanceof LegacySourceChangedError) throw error;
-    console.warn(
-      "Failed to verify legacy cleanup; cleanup remains pending:",
-      error,
-    );
-    return working;
-  }
-
+  assertJournalSourcesResumable(journal, captureLegacySourceStates());
   if (
-    working.entries.every(({ cleanupStatus }) => cleanupStatus === "removed")
+    journal.phase === "cleanupPending" &&
+    journal.entries.every(({ cleanupStatus }) => cleanupStatus === "removed")
   ) {
-    const completedJournal: LegacyMigrationJournal = {
-      ...working,
-      phase: "completed",
-      updatedAt: new Date().toISOString(),
-    };
-    await writeMigrationJournalWithCas(working, completedJournal);
-    working = completedJournal;
+    const completedJournal = withJournalPhase(journal, "completed");
+    await writeMigrationJournalWithCas(journal, completedJournal);
+    assertJournalSourcesResumable(
+      completedJournal,
+      captureLegacySourceStates(),
+    );
+    return completedJournal;
   }
-  return working;
+  if (
+    journal.phase !== "cleanupPending" ||
+    !journal.entries.some(({ cleanupStatus }) => cleanupStatus === "pending")
+  ) {
+    return journal;
+  }
+
+  // Web Storage has no compare-and-remove primitive. A getItem/removeItem pair
+  // can erase a newer value written by another tab, so verified legacy sources
+  // remain as a recovery copy instead of being deleted automatically.
+  const retainedJournal: LegacyMigrationJournal = {
+    ...journal,
+    updatedAt: new Date().toISOString(),
+    entries: journal.entries.map((entry) =>
+      entry.cleanupStatus === "pending"
+        ? { ...entry, cleanupStatus: "retained" as const }
+        : entry,
+    ),
+  };
+  await writeMigrationJournalWithCas(journal, retainedJournal);
+  assertJournalSourcesResumable(retainedJournal, captureLegacySourceStates());
+  return retainedJournal;
 }
 
 async function migrateFromLocalStorage(
   options: {
+    /**
+     * @deprecated Legacy sources are retained because Web Storage cannot
+     * atomically compare and remove a value written by another tab.
+     */
     cleanupLegacySources?: boolean;
   } = {},
 ): Promise<PersistenceMigrationResult> {
+  // Kept for API compatibility. Automatic removal is intentionally disabled
+  // because localStorage cannot atomically prove that a value is still the
+  // verified migration source at deletion time.
+  void options.cleanupLegacySources;
   let capturedSources: LegacySourceState[];
   try {
     capturedSources = captureLegacySourceStates();
@@ -3598,15 +3588,14 @@ async function migrateFromLocalStorage(
         let terminalJournal = rawJournal;
         try {
           await verifyCommittedMigrationTargets(terminalJournal);
-          if (
-            terminalJournal.phase === "cleanupPending" &&
-            terminalJournal.entries.some(
-              ({ cleanupStatus }) => cleanupStatus === "pending",
-            )
-          ) {
+          if (terminalJournal.phase === "cleanupPending") {
             terminalJournal =
-              await cleanupLegacySourcesFromJournal(terminalJournal);
+              await retainLegacySourcesFromJournal(terminalJournal);
           }
+          assertJournalSourcesResumable(
+            terminalJournal,
+            captureLegacySourceStates(),
+          );
         } catch (error) {
           return migrationRecoveryResult(
             "移行済みデータのcommitted rootが欠損または不整合です。",
@@ -3618,43 +3607,15 @@ async function migrateFromLocalStorage(
               : undefined,
           );
         }
-        if (
-          terminalJournal.phase === "completed" ||
-          !options.cleanupLegacySources
-        ) {
-          return {
-            status:
-              terminalJournal.phase === "completed"
-                ? "completed"
-                : "cleanup-pending",
-            migratedKeys: terminalJournal.entries.map(
-              ({ legacyKey }) => legacyKey,
-            ),
-          };
-        }
-        try {
-          const cleanedJournal =
-            await cleanupLegacySourcesFromJournal(terminalJournal);
-          return {
-            status:
-              cleanedJournal.phase === "completed"
-                ? "completed"
-                : "cleanup-pending",
-            migratedKeys: cleanedJournal.entries.map(
-              ({ legacyKey }) => legacyKey,
-            ),
-          };
-        } catch (error) {
-          return migrationRecoveryResult(
-            "旧データの安全な削除を完了できませんでした。",
-            error,
-            snapshots,
-            terminalJournal,
-            error instanceof LegacySourceChangedError
-              ? error.currentSources
-              : undefined,
-          );
-        }
+        return {
+          status:
+            terminalJournal.phase === "completed"
+              ? "completed"
+              : "cleanup-pending",
+          migratedKeys: terminalJournal.entries.map(
+            ({ legacyKey }) => legacyKey,
+          ),
+        };
       }
     }
   } catch (error) {
@@ -3715,21 +3676,6 @@ async function migrateFromLocalStorage(
       journal = verifiedJournal;
     }
     assertLegacySourcesUnchanged(capturedForCopy);
-
-    if (options.cleanupLegacySources) {
-      const cleanupPendingJournal = withJournalPhase(journal, "cleanupPending");
-      await writeMigrationJournalWithCas(journal, cleanupPendingJournal);
-      journal = cleanupPendingJournal;
-      assertLegacySourcesUnchanged(capturedForCopy);
-      const cleanedJournal = await cleanupLegacySourcesFromJournal(journal);
-      return {
-        status:
-          cleanedJournal.phase === "completed"
-            ? "completed"
-            : "cleanup-pending",
-        migratedKeys: cleanedJournal.entries.map(({ legacyKey }) => legacyKey),
-      };
-    }
 
     const cleanupPendingJournal = withJournalPhase(
       journal,
@@ -3851,6 +3797,9 @@ async function observeAppDataRestoreState(): Promise<AppDataRestoreObservation> 
 
 async function restoreAppDataAtomically(data: AppData): Promise<void> {
   const stableData = structuredClone(data);
+  const stableMapData = normalizeMapDataForPersistence(
+    stableData.mapData as MapDataStore,
+  );
   const observation = await observeAppDataRestoreState();
   const database = await openDB();
   APP_DATA_RESTORE_STORE_NAMES.forEach((storeName) => {
@@ -3863,7 +3812,7 @@ async function restoreAppDataAtomically(data: AppData): Promise<void> {
     [STORES.EVENT_METADATA, stableData.eventMetadata],
     [STORES.EXECUTE_MODE_ITEMS, stableData.executeModeItems],
     [STORES.DAY_MODES, stableData.dayModes],
-    [STORES.MAP_DATA, stableData.mapData],
+    [STORES.MAP_DATA, stableMapData],
     [STORES.MAP_ROTATION_SETTINGS, stableData.mapRotationSettings],
     [STORES.ROUTE_SETTINGS, stableData.routeSettings],
     [STORES.HALL_DEFINITIONS, stableData.hallDefinitions],
@@ -3888,7 +3837,7 @@ async function restoreAppDataAtomically(data: AppData): Promise<void> {
       );
     }),
   );
-  const mapPuts = buildMapDataPuts(stableData.mapData as MapDataStore);
+  const mapPuts = buildMapDataPuts(stableMapData);
 
   await new Promise<void>((resolve, reject) => {
     let transaction: IDBTransaction;
@@ -4057,7 +4006,7 @@ async function restoreAppDataAtomically(data: AppData): Promise<void> {
       storeName === STORES.MAP_DATA
         ? {
             ...metadata,
-            missing: Object.keys(stableData.mapData).length === 0,
+            missing: Object.keys(stableMapData).length === 0,
           }
         : metadata,
     );

@@ -11,6 +11,7 @@ import {
   createRuntimeFallbackCandidate,
   createRuntimeFallbackKey,
   createRuntimeFallbackPrefix,
+  createSynchronousFingerprint,
   serializeRuntimeFallbackCandidate,
 } from "./persistenceResilience";
 
@@ -524,6 +525,70 @@ afterEach(() => {
   localStorage.clear();
 });
 
+describe("db payload compatibility", () => {
+  it("round-trips optional object properties whose value is undefined", async () => {
+    const eventLists = {
+      undefined互換イベント: [
+        {
+          id: "optional-url-item",
+          title: "URL未設定",
+          url: undefined,
+        },
+      ],
+    };
+    const db = await importFreshDb();
+
+    await db.saveEventLists(eventLists);
+    const loaded = await db.loadEventLists();
+
+    expect(loaded).toMatchObject({ status: "ok", data: eventLists });
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        loaded.data?.undefined互換イベント?.[0],
+        "url",
+      ),
+    ).toBe(true);
+    expect(
+      await readRawRecord(
+        "syncQueue",
+        createPersistenceMetadataKey("eventLists", DATA_KEY),
+      ),
+    ).toMatchObject({
+      storeName: "eventLists",
+      key: DATA_KEY,
+    });
+  });
+
+  it("loads metadata-less IndexedDB data containing an undefined property", async () => {
+    const legacyEventLists = {
+      旧undefined互換イベント: [
+        {
+          id: "legacy-optional-url-item",
+          title: "旧URL未設定",
+          url: undefined,
+        },
+      ],
+    };
+    await seedDatabase(CURRENT_DATABASE_VERSION);
+    await writeRawRecordAtExistingVersion(
+      "eventLists",
+      DATA_KEY,
+      legacyEventLists,
+    );
+    const db = await importFreshDb();
+
+    const loaded = await db.loadEventLists();
+
+    expect(loaded).toMatchObject({ status: "ok", data: legacyEventLists });
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        loaded.data?.旧undefined互換イベント?.[0],
+        "url",
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("db.migrateFromLocalStorage resilience", () => {
   it("migrates metadata and viewport settings when eventShoppingLists is absent", async () => {
     const metadata = {
@@ -793,42 +858,28 @@ describe("db.migrateFromLocalStorage resilience", () => {
     });
   });
 
-  it("resumes partial explicit cleanup without rewriting committed revisions", async () => {
+  it("retains every verified legacy source when explicit cleanup is requested", async () => {
     const eventLists = {
-      cleanup再開イベント: [{ id: "cleanup-item", title: "削除済み原本" }],
+      cleanup保持イベント: [{ id: "cleanup-item", title: "保持する原本" }],
     };
     const metadata = {
-      cleanup再開イベント: { title: "再開時に削除する原本" },
+      cleanup保持イベント: { title: "別タブ更新を誤削除しない原本" },
     };
     const listSource = JSON.stringify(eventLists);
     const metadataSource = JSON.stringify(metadata);
     localStorage.setItem("eventShoppingLists", listSource);
     localStorage.setItem("eventMetadata", metadataSource);
-    const cleanupError = new DOMException(
-      "forced legacy cleanup failure",
-      "SecurityError",
-    );
-    const originalRemoveItem = Storage.prototype.removeItem;
-    let failedCleanupAttempts = 0;
-    const removeItemSpy = vi
-      .spyOn(Storage.prototype, "removeItem")
-      .mockImplementation(function (this: Storage, storageKey: string) {
-        if (storageKey === "eventMetadata") {
-          failedCleanupAttempts += 1;
-          throw cleanupError;
-        }
-        return originalRemoveItem.call(this, storageKey);
-      });
-    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem");
     const db = await importFreshDb();
 
-    const partialCleanup = await db.migrateFromLocalStorage({
+    const retainedMigration = await db.migrateFromLocalStorage({
       cleanupLegacySources: true,
     });
 
-    expect(partialCleanup).toMatchObject({ status: "cleanup-pending" });
-    expect(failedCleanupAttempts).toBeGreaterThan(0);
-    expect(localStorage.getItem("eventShoppingLists")).toBeNull();
+    expect(retainedMigration).toMatchObject({ status: "cleanup-pending" });
+    expect(removeItemSpy).not.toHaveBeenCalledWith("eventShoppingLists");
+    expect(removeItemSpy).not.toHaveBeenCalledWith("eventMetadata");
+    expect(localStorage.getItem("eventShoppingLists")).toBe(listSource);
     expect(localStorage.getItem("eventMetadata")).toBe(metadataSource);
     expect(await readRawRecord("eventLists", DATA_KEY)).toEqual(eventLists);
     expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(metadata);
@@ -841,25 +892,24 @@ describe("db.migrateFromLocalStorage resilience", () => {
       entries: expect.arrayContaining([
         expect.objectContaining({
           legacyKey: "eventShoppingLists",
-          cleanupStatus: "removed",
+          cleanupStatus: "retained",
         }),
         expect.objectContaining({
           legacyKey: "eventMetadata",
-          cleanupStatus: "pending",
+          cleanupStatus: "retained",
         }),
       ]),
     });
-    removeItemSpy.mockRestore();
 
     vi.resetModules();
     const resumedDb = await importFreshDb();
-    const completedCleanup = await resumedDb.migrateFromLocalStorage({
+    const resumedMigration = await resumedDb.migrateFromLocalStorage({
       cleanupLegacySources: true,
     });
 
-    expect(completedCleanup).toMatchObject({ status: "completed" });
-    expect(localStorage.getItem("eventShoppingLists")).toBeNull();
-    expect(localStorage.getItem("eventMetadata")).toBeNull();
+    expect(resumedMigration).toMatchObject({ status: "cleanup-pending" });
+    expect(localStorage.getItem("eventShoppingLists")).toBe(listSource);
+    expect(localStorage.getItem("eventMetadata")).toBe(metadataSource);
     expect(await readRawRecord("eventLists", DATA_KEY)).toEqual(eventLists);
     expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(metadata);
     expect(await readCurrentRevision("eventLists")).toBe(listRevision);
@@ -871,9 +921,175 @@ describe("db.migrateFromLocalStorage resilience", () => {
       await idempotencyDb.migrateFromLocalStorage({
         cleanupLegacySources: true,
       }),
-    ).toMatchObject({ status: "completed" });
+    ).toMatchObject({ status: "cleanup-pending" });
+    expect(removeItemSpy).not.toHaveBeenCalledWith("eventShoppingLists");
+    expect(removeItemSpy).not.toHaveBeenCalledWith("eventMetadata");
     expect(await readCurrentRevision("eventLists")).toBe(listRevision);
     expect(await readCurrentRevision("eventMetadata")).toBe(metadataRevision);
+  });
+
+  it("safely resumes journals left by an older partial-cleanup implementation", async () => {
+    const eventLists = {
+      旧cleanup再開イベント: [{ id: "older-cleanup-item" }],
+    };
+    const metadata = {
+      旧cleanup再開イベント: { generation: "verified-source" },
+    };
+    const listSource = JSON.stringify(eventLists);
+    const metadataSource = JSON.stringify(metadata);
+    localStorage.setItem("eventShoppingLists", listSource);
+    localStorage.setItem("eventMetadata", metadataSource);
+    const db = await importFreshDb();
+    expect(await db.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+    });
+    const listRevision = await readCurrentRevision("eventLists");
+    const metadataRevision = await readCurrentRevision("eventMetadata");
+    const retainedJournal = structuredClone(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ) as {
+      phase: string;
+      updatedAt: string;
+      entries: Array<{
+        legacyKey: string;
+        cleanupStatus: "pending" | "retained" | "removed";
+      }>;
+    };
+    retainedJournal.entries = retainedJournal.entries.map((entry) => ({
+      ...entry,
+      cleanupStatus:
+        entry.legacyKey === "eventShoppingLists" ? "removed" : "pending",
+    }));
+    localStorage.removeItem("eventShoppingLists");
+    await writeRawRecordAtExistingVersion(
+      "syncQueue",
+      LEGACY_MIGRATION_JOURNAL_KEY,
+      retainedJournal,
+    );
+    const removeItemSpy = vi.spyOn(Storage.prototype, "removeItem");
+
+    vi.resetModules();
+    const resumedDb = await importFreshDb();
+    expect(
+      await resumedDb.migrateFromLocalStorage({
+        cleanupLegacySources: true,
+      }),
+    ).toMatchObject({ status: "cleanup-pending" });
+
+    expect(removeItemSpy).not.toHaveBeenCalledWith("eventMetadata");
+    expect(localStorage.getItem("eventShoppingLists")).toBeNull();
+    expect(localStorage.getItem("eventMetadata")).toBe(metadataSource);
+    expect(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ).toMatchObject({
+      phase: "cleanupPending",
+      entries: expect.arrayContaining([
+        expect.objectContaining({
+          legacyKey: "eventShoppingLists",
+          cleanupStatus: "removed",
+        }),
+        expect.objectContaining({
+          legacyKey: "eventMetadata",
+          cleanupStatus: "retained",
+        }),
+      ]),
+    });
+    expect(await readCurrentRevision("eventLists")).toBe(listRevision);
+    expect(await readCurrentRevision("eventMetadata")).toBe(metadataRevision);
+    removeItemSpy.mockRestore();
+
+    const partiallyRetainedJournal = structuredClone(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ) as typeof retainedJournal;
+    partiallyRetainedJournal.entries = partiallyRetainedJournal.entries.map(
+      (entry) => ({ ...entry, cleanupStatus: "removed" }),
+    );
+    localStorage.removeItem("eventMetadata");
+    await writeRawRecordAtExistingVersion(
+      "syncQueue",
+      LEGACY_MIGRATION_JOURNAL_KEY,
+      partiallyRetainedJournal,
+    );
+
+    vi.resetModules();
+    const compatibilityDb = await importFreshDb();
+    expect(await compatibilityDb.migrateFromLocalStorage()).toMatchObject({
+      status: "completed",
+    });
+    expect(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ).toMatchObject({ phase: "completed" });
+    expect(await readCurrentRevision("eventLists")).toBe(listRevision);
+    expect(await readCurrentRevision("eventMetadata")).toBe(metadataRevision);
+  });
+
+  it("detects a source update during pending-to-retained journal recovery", async () => {
+    const capturedMetadata = {
+      旧journal競合イベント: { generation: "captured-source" },
+    };
+    const currentMetadata = {
+      旧journal競合イベント: { generation: "concurrent-current-source" },
+    };
+    const capturedSource = JSON.stringify(capturedMetadata);
+    const currentSource = JSON.stringify(currentMetadata);
+    localStorage.setItem("eventMetadata", capturedSource);
+    const db = await importFreshDb();
+    expect(await db.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+    });
+    const pendingJournal = structuredClone(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ) as {
+      entries: Array<{
+        cleanupStatus: "pending" | "retained" | "removed";
+      }>;
+    };
+    pendingJournal.entries = pendingJournal.entries.map((entry) => ({
+      ...entry,
+      cleanupStatus: "pending",
+    }));
+    await writeRawRecordAtExistingVersion(
+      "syncQueue",
+      LEGACY_MIGRATION_JOURNAL_KEY,
+      pendingJournal,
+    );
+    const sourceChange = mockJournalPhasePutSideEffect("cleanupPending", () => {
+      localStorage.setItem("eventMetadata", currentSource);
+    });
+
+    vi.resetModules();
+    const resumedDb = await importFreshDb();
+    const migration = await resumedDb.migrateFromLocalStorage();
+
+    expect(sourceChange.getInjectionCount()).toBe(1);
+    expect(migration).toMatchObject({ status: "recovery-required" });
+    if (migration.status !== "recovery-required") {
+      throw new Error(
+        "Expected pending journal recovery to detect the update.",
+      );
+    }
+    expect(migration.recoveryBundle).toMatchObject({
+      candidates: expect.arrayContaining([
+        expect.objectContaining({
+          source: "legacy-localStorage",
+          rawValue: capturedSource,
+        }),
+        expect.objectContaining({
+          source: "legacy-localStorage",
+          rawValue: currentSource,
+        }),
+      ]),
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(currentSource);
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      capturedMetadata,
+    );
+    expect(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ).toMatchObject({
+      phase: "cleanupPending",
+      entries: [expect.objectContaining({ cleanupStatus: "retained" })],
+    });
   });
 
   it("detects a legacy source change during cleanup-pending CAS and preserves the current raw value", async () => {
@@ -1302,6 +1518,127 @@ describe("db.restoreAppDataAtomically resilience", () => {
 });
 
 describe("db runtime fallback resilience", () => {
+  it("chains consecutive fallback saves and repairs IndexedDB to the latest value", async () => {
+    const idbValue = {
+      連続退避イベント: { generation: "indexed-db-base" },
+    };
+    const fallbackValues = [
+      { 連続退避イベント: { generation: "fallback-1" } },
+      { 連続退避イベント: { generation: "fallback-2" } },
+      { 連続退避イベント: { generation: "fallback-3" } },
+    ];
+    const db = await importFreshDb();
+    await db.saveEventMetadata(idbValue);
+    const baseRevision = await readCurrentRevision("eventMetadata");
+    const writeFailure = mockStoreWriteFailures(
+      "eventMetadata",
+      new DOMException("forced consecutive write failure", "UnknownError"),
+    );
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    for (const [index, fallbackValue] of fallbackValues.entries()) {
+      await db.saveEventMetadata(fallbackValue);
+      expect(getRuntimeFallbackKeys("eventMetadata")).toHaveLength(index + 1);
+      expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(idbValue);
+      expect(await readCurrentRevision("eventMetadata")).toBe(baseRevision);
+    }
+
+    writeFailure.spy.mockRestore();
+    vi.resetModules();
+    const recoveryDb = await importFreshDb();
+    const latestValue = fallbackValues.at(-1);
+    const loaded = await recoveryDb.loadEventMetadata();
+
+    expect(loaded).toMatchObject({ status: "ok", data: latestValue });
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(latestValue);
+    expect(await readCurrentRevision("eventMetadata")).not.toBe(baseRevision);
+    expect(getRuntimeFallbackKeys("eventMetadata")).toEqual([]);
+  });
+
+  it("rejects a sibling commit when a child fallback appears after observation", async () => {
+    const baseValue = {
+      子候補競合イベント: { generation: "base" },
+    };
+    const observedFallbackValue = {
+      子候補競合イベント: { generation: "observed-fallback" },
+    };
+    const concurrentChildValue = {
+      子候補競合イベント: { generation: "concurrent-child" },
+    };
+    const rejectedSiblingValue = {
+      子候補競合イベント: { generation: "must-not-commit-sibling" },
+    };
+    const db = await importFreshDb();
+    await db.saveEventMetadata(baseValue);
+    const baseRevision = await readCurrentRevision("eventMetadata");
+    const observedFallback = await installRuntimeFallbackCandidate({
+      storeName: "eventMetadata",
+      revision: "observed-fallback-revision",
+      baseRevision,
+      payload: observedFallbackValue,
+    });
+    const repairFailure = mockStoreWriteFailures(
+      "eventMetadata",
+      new DOMException("forced repair failure", "UnknownError"),
+    );
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    expect(await db.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: observedFallbackValue,
+    });
+    repairFailure.spy.mockRestore();
+
+    await writeRawRecordAtExistingVersion(
+      "eventMetadata",
+      DATA_KEY,
+      observedFallback.candidate.payload,
+    );
+    await writeRawRecordAtExistingVersion(
+      "syncQueue",
+      createPersistenceMetadataKey("eventMetadata", DATA_KEY),
+      {
+        kind: "event-shopping-planner-persistence-metadata",
+        version: 1,
+        storeName: "eventMetadata",
+        key: DATA_KEY,
+        revision: observedFallback.candidate.revision,
+        baseRevision: observedFallback.candidate.baseRevision,
+        payloadDigest: observedFallback.candidate.digest,
+        payloadFingerprint: createSynchronousFingerprint(
+          observedFallback.candidate.payload,
+        ),
+        writerId: observedFallback.candidate.writerId,
+        committedAt: observedFallback.candidate.createdAt,
+      },
+    );
+    const concurrentChild = await installRuntimeFallbackCandidate({
+      storeName: "eventMetadata",
+      revision: "concurrent-child-revision",
+      baseRevision: observedFallback.candidate.revision,
+      payload: concurrentChildValue,
+    });
+
+    await expect(
+      db.saveEventMetadata(rejectedSiblingValue),
+    ).rejects.toMatchObject({
+      name: "PersistenceConflict",
+    });
+
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      observedFallbackValue,
+    );
+    expect(await readCurrentRevision("eventMetadata")).toBe(
+      observedFallback.candidate.revision,
+    );
+    expect(getRuntimeFallbackKeys("eventMetadata")).toEqual(
+      expect.arrayContaining([
+        observedFallback.storageKey,
+        concurrentChild.storageKey,
+      ]),
+    );
+    expect(getRuntimeFallbackKeys("eventMetadata")).toHaveLength(2);
+  });
+
   it("loads a newer runtime candidate, repairs the older IDB value, and removes the committed candidate", async () => {
     const idbValue = {
       フォールバック復旧イベント: { generation: "older-idb" },
@@ -1626,10 +1963,13 @@ describe("db runtime fallback resilience", () => {
       候補追記イベント: { generation: "older-idb" },
     };
     const candidateAValue = {
-      候補追記イベント: { generation: "latest-candidate-a" },
+      候補追記イベント: { generation: "candidate-a" },
     };
     const candidateBValue = {
-      候補追記イベント: { generation: "uncommitted-candidate-b" },
+      候補追記イベント: { generation: "latest-accepted-candidate-b" },
+    };
+    const candidateCValue = {
+      候補追記イベント: { generation: "uncommitted-candidate-c" },
     };
     const db = await importFreshDb();
     await db.saveEventMetadata(idbValue);
@@ -1656,8 +1996,12 @@ describe("db runtime fallback resilience", () => {
     expect(localStorage.getItem(candidateA.storageKey)).toBe(
       candidateA.serialized,
     );
+    await db.saveEventMetadata(candidateBValue);
+    const acceptedFallbackKeys = getRuntimeFallbackKeys("eventMetadata");
+    expect(acceptedFallbackKeys).toHaveLength(2);
+    expect(acceptedFallbackKeys).toContain(candidateA.storageKey);
     const quotaError = new DOMException(
-      "candidate B quota exceeded",
+      "candidate C quota exceeded",
       "QuotaExceededError",
     );
     const attemptedStorageKeys: string[] = [];
@@ -1668,7 +2012,7 @@ describe("db runtime fallback resilience", () => {
         throw quotaError;
       });
 
-    await expect(db.saveEventMetadata(candidateBValue)).rejects.toMatchObject({
+    await expect(db.saveEventMetadata(candidateCValue)).rejects.toMatchObject({
       name: "QuotaExceededError",
     });
 
@@ -1681,7 +2025,7 @@ describe("db runtime fallback resilience", () => {
       attemptedStorageKeys.some(
         (storageKey) =>
           storageKey.startsWith(runtimePrefix) &&
-          storageKey !== candidateA.storageKey,
+          !acceptedFallbackKeys.includes(storageKey),
       ),
     ).toBe(true);
     expect(localStorage.getItem(candidateA.storageKey)).toBe(
@@ -1689,16 +2033,18 @@ describe("db runtime fallback resilience", () => {
     );
     expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(idbValue);
     expect(await readCurrentRevision("eventMetadata")).toBe(baseRevision);
-    expect(getRuntimeFallbackKeys("eventMetadata")).toEqual([
-      candidateA.storageKey,
-    ]);
+    expect(getRuntimeFallbackKeys("eventMetadata")).toEqual(
+      expect.arrayContaining(acceptedFallbackKeys),
+    );
+    expect(getRuntimeFallbackKeys("eventMetadata")).toHaveLength(2);
 
     writeFailure.spy.mockRestore();
     appendSpy.mockRestore();
     expect(await db.loadEventMetadata()).toMatchObject({
       status: "ok",
-      data: candidateAValue,
+      data: candidateBValue,
     });
+    expect(getRuntimeFallbackKeys("eventMetadata")).toEqual([]);
   });
 
   it("does not silently overwrite a commit from another module instance with a stale observed root", async () => {

@@ -59,8 +59,28 @@ describe("canonicalStringifyPersistencePayload", () => {
     );
   });
 
+  it("plain objectのown enumerable undefinedをJSON互換で省略する", () => {
+    const nullPrototype = Object.create(null) as Record<string, unknown>;
+    nullPrototype.kept = "保持";
+    nullPrototype.omitted = undefined;
+
+    expect(
+      canonicalStringifyPersistencePayload({
+        z: undefined,
+        nested: { url: undefined, name: "商品" },
+        nullPrototype,
+        a: true,
+      }),
+    ).toBe(
+      '{"a":true,"nested":{"name":"商品"},"nullPrototype":{"kept":"保持"}}',
+    );
+    expect(canonicalStringifyPersistencePayload({ value: undefined })).toBe(
+      "{}",
+    );
+  });
+
   it.each([
-    ["undefined", { value: undefined }],
+    ["top-level undefined", undefined],
     ["function", { value: () => undefined }],
     ["symbol", { value: Symbol("unsupported") }],
     ["bigint", { value: 1n }],
@@ -71,6 +91,12 @@ describe("canonicalStringifyPersistencePayload", () => {
     expect(() => canonicalStringifyPersistencePayload(value)).toThrow(
       PersistenceSerializationError,
     );
+  });
+
+  it("arrayのundefined要素をnullへ暗黙変換せず拒否する", () => {
+    expect(() =>
+      canonicalStringifyPersistencePayload(["before", undefined, "after"]),
+    ).toThrow(/undefined values are not supported/);
   });
 
   it("循環参照とsparse arrayを拒否する", () => {
@@ -221,6 +247,24 @@ describe("persistence digest and synchronous fingerprint", () => {
     expect(changed.value).not.toBe(first.value);
   });
 
+  it("省略可能なundefinedの有無でdigest・fingerprintが変化しない", async () => {
+    const withUndefined = {
+      item: { name: "商品", url: undefined },
+      options: [{ label: "必須", note: undefined }],
+    };
+    const omitted = {
+      item: { name: "商品" },
+      options: [{ label: "必須" }],
+    };
+
+    await expect(createPersistenceDigest(withUndefined)).resolves.toEqual(
+      await createPersistenceDigest(omitted),
+    );
+    expect(createSynchronousFingerprint(withUndefined)).toEqual(
+      createSynchronousFingerprint(omitted),
+    );
+  });
+
   it("digest・fingerprint descriptorの余分なfieldを拒否する", async () => {
     const digest = await createPersistenceDigest({ value: "digest" });
     const fingerprint = createSynchronousFingerprint({
@@ -265,6 +309,31 @@ describe("runtime fallback candidate", () => {
     expect(Object.isFrozen(candidate.payload)).toBe(true);
     expect(Object.isFrozen((candidate.payload as { a: unknown }).a)).toBe(true);
     expect(Object.isFrozen(parsed)).toBe(true);
+    await expect(
+      verifyPersistenceDigest(parsed.payload, parsed.digest),
+    ).resolves.toBe(true);
+  });
+
+  it("payloadのundefined propertyをclone前に省略し、安定して再serializeする", async () => {
+    const candidate = await createCandidate("revision:2", "revision:1", {
+      name: "商品",
+      url: undefined,
+      nested: { memo: undefined, enabled: true },
+    });
+    const payload = candidate.payload as {
+      name: string;
+      nested: { enabled: boolean };
+    };
+    const serialized = serializeRuntimeFallbackCandidate(candidate);
+    const parsed = parseRuntimeFallbackCandidate(serialized);
+
+    expect(payload).toEqual({
+      name: "商品",
+      nested: { enabled: true },
+    });
+    expect(Object.prototype.hasOwnProperty.call(payload, "url")).toBe(false);
+    expect(parsed.payload).toEqual(payload);
+    expect(serializeRuntimeFallbackCandidate(parsed)).toBe(serialized);
     await expect(
       verifyPersistenceDigest(parsed.payload, parsed.digest),
     ).resolves.toBe(true);

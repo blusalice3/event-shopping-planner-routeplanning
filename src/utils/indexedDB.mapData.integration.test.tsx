@@ -162,6 +162,120 @@ describe("db.saveMapDataChanges", () => {
     expect(stored["新規イベント"]["1日目マップ"].cells[0].value).toBe("a1");
   });
 
+  it("immediately reloads a normalized rectangular XLSX map without a metadata conflict", async () => {
+    const eventName = "矩形XLSX正規化イベント";
+    const rectangularDayMap: DayMapData = {
+      sheetName: "1日目",
+      rows: 2,
+      cols: 2,
+      maxRow: 2,
+      maxCol: 2,
+      cells: [
+        {
+          row: 1,
+          col: 1,
+          value: "A",
+          backgroundColor: "#FFFFFF",
+          fontColor: null,
+          borders: emptyBorders,
+          isMerged: false,
+          mergeParent: undefined,
+          isVerticalText: false,
+        },
+        {
+          row: 1,
+          col: 2,
+          value: null,
+          backgroundColor: "#ffffff",
+          fontColor: null,
+          borders: emptyBorders,
+          isMerged: false,
+          mergeParent: undefined,
+          isVerticalText: false,
+        },
+        {
+          row: 2,
+          col: 1,
+          value: 1,
+          backgroundColor: "#FFFFFF",
+          fontColor: null,
+          borders: emptyBorders,
+          isMerged: false,
+          mergeParent: undefined,
+          isVerticalText: false,
+        },
+        {
+          row: 2,
+          col: 2,
+          value: null,
+          backgroundColor: "#FFFFFF",
+          fontColor: null,
+          borders: emptyBorders,
+          isMerged: false,
+          mergeParent: undefined,
+          isVerticalText: false,
+        },
+      ],
+      mergedCells: [],
+      blocks: [
+        {
+          name: "A",
+          startRow: 1,
+          startCol: 1,
+          endRow: 2,
+          endCol: 2,
+          numberCells: [{ row: 2, col: 1, value: 1 }],
+          nameCells: [{ row: 1, col: 1 }],
+        },
+      ],
+    };
+    const next: MapDataStore = {
+      [eventName]: {
+        "1日目マップ": rectangularDayMap,
+      },
+    };
+
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        rectangularDayMap.cells[0],
+        "mergeParent",
+      ),
+    ).toBe(true);
+    await db.saveMapDataChanges({}, next);
+
+    const result = await db.loadMapData();
+
+    expect(result.status).toBe("ok");
+    expect(result.data?.[eventName]["1日目マップ"]).toEqual({
+      ...rectangularDayMap,
+      cells: [
+        {
+          row: 1,
+          col: 1,
+          value: "A",
+          backgroundColor: null,
+          fontColor: null,
+          borders: emptyBorders,
+          isMerged: false,
+          isVerticalText: false,
+        },
+        {
+          row: 2,
+          col: 1,
+          value: 1,
+          backgroundColor: null,
+          fontColor: null,
+          borders: emptyBorders,
+          isMerged: false,
+          isVerticalText: false,
+        },
+      ],
+    });
+    expect(result.data?.[eventName]["1日目マップ"].cells[0]).not.toHaveProperty(
+      "mergeParent",
+    );
+  });
+
   it("deletes removed event maps and keeps other events", async () => {
     const initial: MapDataStore = {
       削除イベント: { "1日目マップ": makeDayMap("a1") },
@@ -188,6 +302,8 @@ describe("db.saveMapDataChanges", () => {
     };
     await db.saveMapDataChanges({}, initial);
 
+    const putSpy = vi.spyOn(IDBObjectStore.prototype, "put");
+    const deleteSpy = vi.spyOn(IDBObjectStore.prototype, "delete");
     const next: MapDataStore = {
       上書きイベント: {
         "1日目マップ": makeDayMap("new-1"),
@@ -195,6 +311,19 @@ describe("db.saveMapDataChanges", () => {
       },
     };
     await db.saveMapDataChanges(initial, next);
+
+    const mapPutKeys = putSpy.mock.calls.flatMap((call, index) => {
+      const store = putSpy.mock.contexts[index] as IDBObjectStore;
+      return store.name === db.STORES.MAP_DATA ? [call[1]] : [];
+    });
+    const mapDeleteKeys = deleteSpy.mock.calls.flatMap((call, index) => {
+      const store = deleteSpy.mock.contexts[index] as IDBObjectStore;
+      return store.name === db.STORES.MAP_DATA ? [call[0]] : [];
+    });
+    expect(mapPutKeys).toEqual([
+      `mapData:${JSON.stringify(["上書きイベント", "1日目マップ"])}`,
+    ]);
+    expect(mapDeleteKeys).toEqual([]);
 
     const stored = await loadStoredMapData();
     expect(stored["上書きイベント"]["1日目マップ"].cells[0].value).toBe(

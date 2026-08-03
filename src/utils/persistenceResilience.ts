@@ -220,7 +220,8 @@ const serializeCanonicalValue = (
 
     const record = value as Record<string, unknown>;
     const propertyNames = Object.getOwnPropertyNames(record).sort();
-    const serializedEntries = propertyNames.map((key) => {
+    const serializedEntries: string[] = [];
+    propertyNames.forEach((key) => {
       const descriptor = Object.getOwnPropertyDescriptor(record, key);
       if (!descriptor?.enumerable || !("value" in descriptor)) {
         return failSerialization(
@@ -228,11 +229,16 @@ const serializeCanonicalValue = (
           "non-enumerable and accessor properties are not supported",
         );
       }
-      return `${JSON.stringify(key)}:${serializeCanonicalValue(
-        descriptor.value,
-        `${path}.${key}`,
-        ancestors,
-      )}`;
+      if (descriptor.value === undefined) {
+        return;
+      }
+      serializedEntries.push(
+        `${JSON.stringify(key)}:${serializeCanonicalValue(
+          descriptor.value,
+          `${path}.${key}`,
+          ancestors,
+        )}`,
+      );
     });
     return `{${serializedEntries.join(",")}}`;
   } finally {

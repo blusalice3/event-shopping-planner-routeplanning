@@ -3,6 +3,7 @@ import type { CellData, MapDataStore } from "../types/map";
 import {
   compactMapDataForStorage,
   expandMapDataFromStorage,
+  normalizeMapDataForPersistence,
 } from "./mapDataPersistence";
 
 const emptyBorders = {
@@ -96,5 +97,91 @@ describe("mapDataPersistence", () => {
         },
       },
     });
+  });
+
+  it("normalizes XLSX-shaped cells to one stable persistence representation", () => {
+    const xlsxShapedMapData: MapDataStore = {
+      Event: {
+        "1日目マップ": {
+          sheetName: "1日目",
+          rows: 2,
+          cols: 2,
+          maxRow: 2,
+          maxCol: 2,
+          cells: [
+            makeCell({
+              backgroundColor: "#FFFFFF",
+              mergeParent: undefined,
+            }),
+            makeCell({
+              row: 1,
+              col: 2,
+              value: "A-01",
+              backgroundColor: "#ffffff",
+              mergeParent: undefined,
+            }),
+            makeCell({
+              row: 2,
+              col: 1,
+              backgroundColor: "#FFFFFF",
+              mergeParent: undefined,
+            }),
+            makeCell({
+              row: 2,
+              col: 2,
+              backgroundColor: "#FFFFFF",
+              mergeParent: undefined,
+            }),
+          ],
+          mergedCells: [],
+          blocks: [
+            {
+              name: "A",
+              startRow: 1,
+              startCol: 1,
+              endRow: 2,
+              endCol: 2,
+              numberCells: [{ row: 2, col: 1, value: 1 }],
+            },
+          ],
+        },
+      },
+    };
+    const alreadyNormalizedMapData: MapDataStore = {
+      Event: {
+        "1日目マップ": {
+          sheetName: "1日目",
+          rows: 2,
+          cols: 2,
+          maxRow: 2,
+          maxCol: 2,
+          cells: [
+            makeCell({
+              row: 1,
+              col: 2,
+              value: "A-01",
+            }),
+            makeCell({
+              row: 2,
+              col: 1,
+            }),
+          ],
+          mergedCells: [],
+          blocks: xlsxShapedMapData.Event["1日目マップ"].blocks,
+        },
+      },
+    };
+
+    const normalized = normalizeMapDataForPersistence(xlsxShapedMapData);
+
+    expect(normalized).toEqual(alreadyNormalizedMapData);
+    expect(normalized).toEqual(
+      normalizeMapDataForPersistence(alreadyNormalizedMapData),
+    );
+    expect(normalizeMapDataForPersistence(normalized)).toEqual(normalized);
+    expect(normalized.Event["1日目マップ"].cells).toHaveLength(2);
+    expect(normalized.Event["1日目マップ"].cells[0]).not.toHaveProperty(
+      "mergeParent",
+    );
   });
 });

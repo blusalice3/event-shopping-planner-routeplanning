@@ -208,3 +208,9 @@ export function expandMapDataFromStorage(
 
   return expanded;
 }
+
+export function normalizeMapDataForPersistence(
+  data: MapDataStore,
+): MapDataStore {
+  return expandMapDataFromStorage(compactMapDataForStorage(data));
+}
