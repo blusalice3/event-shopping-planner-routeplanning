@@ -639,7 +639,7 @@ const collectRollbackDatabaseEvidence = async (client) =>
           ? await read("syncQueue", journal.archiveKey)
           : null;
         const eventMetadataCheckpoint = await read(
-          "eventMetadata",
+          "syncQueue",
           "__esp_internal__:checkpoint:v1:eventMetadata:data",
         );
         const eventLists = await read("eventLists", "data");
