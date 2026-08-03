@@ -110,6 +110,25 @@ function Stop-ArtifactPreview {
   $Process.WaitForExit(5000) | Out-Null
 }
 
+function Get-Sha256File {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path
+  )
+
+  $hashAlgorithm = [Security.Cryptography.SHA256]::Create()
+  $stream = [IO.File]::OpenRead($Path)
+  try {
+    return (
+      $hashAlgorithm.ComputeHash($stream) |
+        ForEach-Object { $_.ToString("x2") }
+    ) -join ""
+  } finally {
+    $stream.Dispose()
+    $hashAlgorithm.Dispose()
+  }
+}
+
 function Get-ArtifactEvidence {
   param(
     [Parameter(Mandatory = $true)]
@@ -127,12 +146,8 @@ function Get-ArtifactEvidence {
     throw "Main application asset was not found in $indexPath."
   }
   return @{
-    IndexSha256 = (
-      Get-FileHash -LiteralPath $indexPath -Algorithm SHA256
-    ).Hash.ToLowerInvariant()
-    ServiceWorkerSha256 = (
-      Get-FileHash -LiteralPath $serviceWorkerPath -Algorithm SHA256
-    ).Hash.ToLowerInvariant()
+    IndexSha256 = Get-Sha256File -Path $indexPath
+    ServiceWorkerSha256 = Get-Sha256File -Path $serviceWorkerPath
     MainAsset = $assetMatch.Groups["asset"].Value
   }
 }
