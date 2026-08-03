@@ -21,6 +21,7 @@ import d2389a0OrphanFixture from "../test/fixtures/d2389a0-orphan-runtime-fallba
 const DATABASE_NAME = "EventShoppingPlannerDB";
 const DATA_KEY = "data";
 const RECOVERY_ARCHIVE_PREFIX = "__esp_internal__:recovery-adoption:v1:";
+const LEGACY_RESOLUTION_PREFIX = "__esp_internal__:migration-resolution:v1:";
 
 type DbApi = (typeof import("./indexedDB"))["db"];
 
@@ -363,6 +364,98 @@ describe("explicit recovery candidate adoption", () => {
         key.startsWith(RECOVERY_ARCHIVE_PREFIX),
       ),
     ).toBe(false);
+    expect(
+      Object.keys(controlRecords).some((key) =>
+        key.startsWith(LEGACY_RESOLUTION_PREFIX),
+      ),
+    ).toBe(false);
+  });
+
+  it("rolls back the adopted root and archive when the legacy resolution write fails", async () => {
+    const committed = {
+      原子的競合解決イベント: { generation: "indexed-db" },
+    };
+    const legacy = {
+      原子的競合解決イベント: { generation: "legacy" },
+    };
+    const legacySource = JSON.stringify(legacy);
+    const initialDb = await importFreshDb();
+    await initialDb.saveEventMetadata(committed);
+    const originalRevision = await readCurrentRevision("eventMetadata");
+    const metadataKey = createPersistenceMetadataKey("eventMetadata", DATA_KEY);
+    const checkpointKey = createPersistenceCheckpointKey(
+      "eventMetadata",
+      DATA_KEY,
+    );
+    const originalMetadata = await readRawRecord("syncQueue", metadataKey);
+    const originalCheckpoint = await readRawRecord("syncQueue", checkpointKey);
+    localStorage.setItem("eventMetadata", legacySource);
+    const migration = await initialDb.migrateFromLocalStorage();
+    expect(migration.status).toBe("recovery-required");
+    if (migration.status !== "recovery-required") {
+      throw new Error("Expected a legacy migration conflict.");
+    }
+    const candidate = migration.recoveryBundle.candidates.find(
+      ({ source, role, storeName }) =>
+        source === "indexedDB" &&
+        role === "app-payload" &&
+        storeName === "eventMetadata",
+    );
+    if (!candidate) {
+      throw new Error("Missing IndexedDB legacy conflict candidate.");
+    }
+
+    const originalPut = FakeIDBObjectStore.prototype.put;
+    let injectionCount = 0;
+    vi.spyOn(FakeIDBObjectStore.prototype, "put").mockImplementation(function (
+      this: IDBObjectStore,
+      value: unknown,
+      key?: IDBValidKey,
+    ) {
+      if (
+        this.name === "syncQueue" &&
+        typeof value === "object" &&
+        value !== null &&
+        "kind" in value &&
+        value.kind ===
+          "event-shopping-planner-legacy-migration-conflict-resolution"
+      ) {
+        injectionCount += 1;
+        throw new DOMException("resolution write failed", "QuotaExceededError");
+      }
+      return key === undefined
+        ? originalPut.call(this, value)
+        : originalPut.call(this, value, key);
+    });
+
+    await expect(
+      initialDb.adoptRecoveryCandidate(candidate),
+    ).rejects.toMatchObject({ name: "QuotaExceededError" });
+
+    expect(injectionCount).toBe(1);
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(committed);
+    expect(await readCurrentRevision("eventMetadata")).toBe(originalRevision);
+    expect(await readRawRecord("syncQueue", metadataKey)).toEqual(
+      originalMetadata,
+    );
+    expect(await readRawRecord("syncQueue", checkpointKey)).toEqual(
+      originalCheckpoint,
+    );
+    const controlRecords = await readAllRawRecords("syncQueue");
+    expect(
+      Object.keys(controlRecords).some((key) =>
+        key.startsWith(RECOVERY_ARCHIVE_PREFIX),
+      ),
+    ).toBe(false);
+    expect(
+      Object.keys(controlRecords).some((key) =>
+        key.startsWith(LEGACY_RESOLUTION_PREFIX),
+      ),
+    ).toBe(false);
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+    await expect(initialDb.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "recovery-required",
+    });
   });
 
   it("adopts a live IndexedDB app payload but rejects its control-record candidate", async () => {

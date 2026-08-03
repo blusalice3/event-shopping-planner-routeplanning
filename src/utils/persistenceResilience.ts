@@ -106,6 +106,14 @@ export type StartupRecoveryCandidateRole =
   | "migration-archive"
   | "invalid-source";
 
+export interface StartupRecoveryLegacyMigrationConflict {
+  kind: "event-shopping-planner-legacy-migration-conflict";
+  version: 1;
+  legacyKey: string;
+  targetKey: string;
+  expectedRawDigest: PersistenceDigestDescriptor;
+}
+
 export interface StartupRecoveryCandidate {
   id: string;
   source: StartupRecoveryCandidateSource;
@@ -122,6 +130,7 @@ export interface StartupRecoveryCandidate {
   digestCanonicalLength?: number;
   payload?: unknown;
   rawValue?: string;
+  migrationConflict?: StartupRecoveryLegacyMigrationConflict;
 }
 
 export type StartupRecoveryCandidateIdentity = Pick<
@@ -136,6 +145,7 @@ export type StartupRecoveryCandidateIdentity = Pick<
   | "digestAlgorithm"
   | "digestCanonicalization"
   | "digestCanonicalLength"
+  | "migrationConflict"
 >;
 
 export interface StartupRecoveryBundle {

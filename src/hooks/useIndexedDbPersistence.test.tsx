@@ -440,27 +440,24 @@ describe("useIndexedDbPersistence", () => {
   it("revalidates and adopts an explicitly selectable payload before restarting initialization", async () => {
     const candidate = {
       id: "esp-recovery-candidate:FNV-1A-64:0123456789abcdef:42",
-      source: "runtime-fallback" as const,
+      source: "indexedDB" as const,
       role: "app-payload" as const,
       adoptable: true,
       storeName: "eventMetadata",
       key: "data",
-      sourceKey: "esp:idb-fallback:v1:eventMetadata:data:revision-2",
+      sourceKey: "data",
       targetKey: "data",
       revision: "revision-2",
       digest: "a".repeat(64),
       digestAlgorithm: "SHA-256" as const,
       digestCanonicalization: "esp-json-v1" as const,
       payload: { 明示採用イベント: { generation: "selected" } },
-      rawValue: "runtime-envelope",
     };
     const sameIdDifferentCandidate = {
       ...candidate,
-      sourceKey: "esp:idb-fallback:v1:eventMetadata:data:revision-1",
       revision: "revision-1",
       digest: "c".repeat(64),
       payload: { 明示採用イベント: { generation: "not-selected" } },
-      rawValue: "different-runtime-envelope",
     };
     const recoveryBundle = {
       kind: "event-shopping-planner-persistence-recovery" as const,
@@ -468,7 +465,7 @@ describe("useIndexedDbPersistence", () => {
       capturedAt: "2026-08-03T00:00:00.000Z",
       issues: [
         {
-          stage: "load",
+          stage: "migration",
           code: "PersistenceConflict",
           message: "複数の候補があります。",
         },
@@ -481,10 +478,15 @@ describe("useIndexedDbPersistence", () => {
         recoveryBundle,
       })
       .mockResolvedValue({
-        status: "not-needed",
-        dataMigrationStatus: "not-needed",
-        cleanupStatus: "not-needed",
+        status: "cleanup-pending",
+        migratedKeys: ["eventMetadata"],
+        dataMigrationStatus: "verified",
+        cleanupStatus: "deferred",
       });
+    dbMock.loadEventMetadata.mockResolvedValue({
+      status: "ok",
+      data: candidate.payload,
+    });
     const setters = createSetters();
     const { result } = renderHook(() =>
       useIndexedDbPersistence({
@@ -506,6 +508,8 @@ describe("useIndexedDbPersistence", () => {
     expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(2);
     expect(result.current.startupState.status).toBe("ready");
     expect(result.current.isInitialized).toBe(true);
+    expect(result.current.legacyCleanupStatus).toBe("deferred");
+    expect(setters.setEventMetadata).toHaveBeenCalledWith(candidate.payload);
     expect(result.current.isAdoptingRecoveryCandidate).toBe(false);
     expect(result.current.recoveryAdoptionError).toBeNull();
   });

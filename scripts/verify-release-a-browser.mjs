@@ -1608,6 +1608,13 @@ try {
     );
     await reload(primary.client);
     await waitForReleaseAStartupMetric(primary.client);
+    await waitForExpression(
+      primary.client,
+      `Boolean(document.querySelector(
+        '[aria-label="保存済み・旧データ保全中"]',
+      ))`,
+      "online resume legacy source protection status",
+    );
     const finalProbe = await collectOnlineProbe(primary.client);
     assertOnlineProbe(finalProbe);
     const finalFixture = await collectFixtureEvidence(primary.client);

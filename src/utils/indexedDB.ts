@@ -33,6 +33,7 @@ import {
   verifyPersistenceDigest,
   type PersistenceCheckpoint,
   type PersistenceCheckpointAbsorbedCandidate,
+  type PersistenceCheckpointCommittedRoot,
   type PersistenceDigestDescriptor,
   type PersistenceSynchronousFingerprint,
   type RuntimeFallbackCandidate,
@@ -41,6 +42,7 @@ import {
   type StartupRecoveryCandidateRole,
   type StartupRecoveryCandidateSource,
   type StartupRecoveryIssue,
+  type StartupRecoveryLegacyMigrationConflict,
 } from "./persistenceResilience";
 import {
   coordinatePersistenceLegacyCleanup,
@@ -77,6 +79,9 @@ const RECOVERY_ADOPTION_ARCHIVE_KEY_PREFIX =
   "__esp_internal__:recovery-adoption:v1:";
 const RECOVERY_ADOPTION_RETENTION_KEY_PREFIX =
   "__esp_internal__:recovery-retain:v1:";
+const LEGACY_MIGRATION_CONFLICT_RESOLUTION_KEY_PREFIX =
+  "__esp_internal__:migration-resolution:v1:";
+const LEGACY_MIGRATION_CONFLICT_RESOLUTION_SCHEMA_VERSION = 1;
 const LEGACY_SYNC_QUEUE_LOCAL_STORAGE_KEY = "syncQueue";
 
 // ストア名
@@ -299,6 +304,28 @@ interface LegacyMigrationArchive {
   sessionId: string;
   createdAt: string;
   entries: LegacyMigrationArchiveEntry[];
+}
+
+interface LegacyMigrationConflictResolution {
+  kind: "event-shopping-planner-legacy-migration-conflict-resolution";
+  schemaVersion: typeof LEGACY_MIGRATION_CONFLICT_RESOLUTION_SCHEMA_VERSION;
+  decision: "retain-explicitly-adopted-root";
+  decisionId: string;
+  legacyKey: string;
+  storeName: Exclude<StoreName, "syncQueue">;
+  targetKey: typeof DATA_KEY;
+  expectedLegacyRawDigest: PersistenceDigestDescriptor;
+  selectedCandidate: {
+    id: string;
+    source: "indexedDB" | "runtime-fallback";
+    sourceKey: string;
+    revision: string;
+    digest: PersistenceDigestDescriptor;
+  };
+  selectedRoot: PersistenceCheckpointCommittedRoot;
+  committedRoot: PersistenceCheckpointCommittedRoot;
+  adoptionArchiveKey: string;
+  createdAt: string;
 }
 
 class PersistenceConflictError extends Error {
@@ -778,6 +805,7 @@ interface RecoveryCandidateOptions {
   targetKey?: string;
   digest?: RecoveryCandidateDigest;
   adoptable?: boolean;
+  migrationConflict?: StartupRecoveryLegacyMigrationConflict;
 }
 
 function inferRecoveryCandidateRole(
@@ -847,6 +875,9 @@ function createRecoveryCandidate(
     targetKey,
     ...(revision === null ? {} : { revision }),
     ...digestFields,
+    ...(options.migrationConflict
+      ? { migrationConflict: options.migrationConflict }
+      : {}),
   };
   return {
     id: createStartupRecoveryCandidateId(identity),
@@ -861,6 +892,9 @@ function createRecoveryCandidate(
     ...digestFields,
     payload: safePayload,
     ...(rawValue === undefined ? {} : { rawValue }),
+    ...(options.migrationConflict
+      ? { migrationConflict: options.migrationConflict }
+      : {}),
   };
 }
 
@@ -1451,6 +1485,7 @@ function runtimeSnapshotsToRecoveryCandidates(
   storeName: StoreName,
   key: string,
   snapshots: readonly RuntimeCandidateSnapshot<unknown>[],
+  migrationConflict?: StartupRecoveryLegacyMigrationConflict,
 ): StartupRecoveryCandidate[] {
   return snapshots.map(({ storageKey, candidate, rawValue }) =>
     createRecoveryCandidate(
@@ -1463,6 +1498,7 @@ function runtimeSnapshotsToRecoveryCandidates(
       {
         sourceKey: storageKey,
         digest: candidate.digest,
+        ...(migrationConflict ? { migrationConflict } : {}),
       },
     ),
   );
@@ -3500,15 +3536,25 @@ class LegacySourceChangedError extends PersistenceConflictError {
 class LegacyMigrationConflictError extends PersistenceConflictError {
   readonly recoveryCandidates: StartupRecoveryCandidate[];
 
-  constructor(message: string, recoveryCandidates: StartupRecoveryCandidate[]) {
+  constructor(
+    message: string,
+    migrationConflict: StartupRecoveryLegacyMigrationConflict,
+    recoveryCandidates: StartupRecoveryCandidate[],
+  ) {
     super(message);
-    this.recoveryCandidates = recoveryCandidates;
+    this.recoveryCandidates = recoveryCandidates.map((candidate) =>
+      candidate.adoptable === true &&
+      !fingerprintsEqual(candidate.migrationConflict, migrationConflict)
+        ? { ...candidate, adoptable: false }
+        : candidate,
+    );
   }
 }
 
 function validatedMigrationRecoveryCandidate(
   storeName: StoreName,
   validated: ValidatedPersistenceSnapshot<unknown>,
+  migrationConflict: StartupRecoveryLegacyMigrationConflict,
 ): StartupRecoveryCandidate | null {
   if (
     validated.status !== "ok" ||
@@ -3524,8 +3570,110 @@ function validatedMigrationRecoveryCandidate(
     validated.root.revision,
     validated.data,
     undefined,
-    { digest: validated.root.payloadDigest },
+    {
+      digest: validated.root.payloadDigest,
+      migrationConflict,
+    },
   );
+}
+
+async function trustedMigrationRecoveryCandidate(
+  storeName: RecoveryAdoptionStoreName,
+  evidence: RecoveryAdoptionCurrentEvidence,
+  migrationConflict: StartupRecoveryLegacyMigrationConflict,
+): Promise<StartupRecoveryCandidate | null> {
+  const trusted = await getTrustedRecoveryAdoptionRoot(storeName, evidence);
+  if (!trusted) return null;
+  const payload = materializeRecoveryAdoptionCurrentPayload(
+    storeName,
+    evidence,
+  );
+  return createRecoveryCandidate(
+    "indexedDB",
+    storeName,
+    DATA_KEY,
+    trusted.root.revision,
+    payload,
+    undefined,
+    {
+      digest: trusted.root.payloadDigest,
+      migrationConflict,
+    },
+  );
+}
+
+async function collectMigrationConflictRecoveryCandidates(
+  target: LegacyMigrationTarget,
+  migrationConflict: StartupRecoveryLegacyMigrationConflict,
+): Promise<StartupRecoveryCandidate[]> {
+  const candidates: StartupRecoveryCandidate[] = [];
+  try {
+    if (target.storeName === STORES.MAP_DATA) {
+      const snapshot = await readRawMapSnapshotWithRetry();
+      const trusted = await trustedMigrationRecoveryCandidate(
+        target.storeName,
+        {
+          mapEntries: snapshot.entries,
+          metadata: snapshot.metadata,
+          checkpoint: snapshot.checkpoint,
+        },
+        migrationConflict,
+      );
+      if (trusted) candidates.push(trusted);
+      const validation = await validateMapSnapshot(snapshot);
+      if ("conflict" in validation) {
+        candidates.push(
+          ...(validation.conflict.recoveryBundle?.candidates ?? []),
+        );
+      }
+      return candidates;
+    }
+
+    const snapshot = await readPersistenceSnapshotWithRetry(
+      target.storeName,
+      DATA_KEY,
+    );
+    const trusted = await trustedMigrationRecoveryCandidate(
+      target.storeName,
+      {
+        payload: snapshot.payload,
+        metadata: snapshot.metadata,
+        checkpoint: snapshot.checkpoint,
+      },
+      migrationConflict,
+    );
+    if (trusted) candidates.push(trusted);
+    const validation = await validatePersistenceSnapshot(
+      target.storeName,
+      DATA_KEY,
+      snapshot,
+    );
+    if ("conflict" in validation) {
+      candidates.push(
+        ...(validation.conflict.recoveryBundle?.candidates ?? []),
+      );
+    }
+    const candidateScan = await readRuntimeCandidateSnapshots<
+      Record<string, unknown>
+    >(target.storeName, DATA_KEY);
+    if (candidateScan.status === "ok") {
+      candidates.push(
+        ...runtimeSnapshotsToRecoveryCandidates(
+          target.storeName,
+          DATA_KEY,
+          candidateScan.snapshots,
+          migrationConflict,
+        ),
+      );
+    } else {
+      candidates.push(
+        ...(candidateScan.result.recoveryBundle?.candidates ?? []),
+      );
+    }
+  } catch {
+    // Recovery stays fail-closed when no current candidate can be verified.
+  }
+  return candidates;
 }
 
 function captureLegacySourceStates(): LegacySourceState[] {
@@ -3623,6 +3771,565 @@ interface PreparedLegacyMigrationEntry {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function hasExactRecordKeys(
+  value: Record<string, unknown>,
+  expectedKeys: readonly string[],
+): boolean {
+  const actualKeys = Object.keys(value).sort();
+  const sortedExpectedKeys = [...expectedKeys].sort();
+  return (
+    actualKeys.length === sortedExpectedKeys.length &&
+    actualKeys.every(
+      (actualKey, index) => actualKey === sortedExpectedKeys[index],
+    )
+  );
+}
+
+function createLegacyMigrationConflictResolutionKey(legacyKey: string): string {
+  return `${LEGACY_MIGRATION_CONFLICT_RESOLUTION_KEY_PREFIX}${encodeURIComponent(
+    legacyKey,
+  )}`;
+}
+
+function committedRootFromObservedRoot(
+  root: ObservedRevisionRoot,
+): PersistenceCheckpointCommittedRoot {
+  return {
+    revision: root.revision,
+    baseRevision: root.baseRevision,
+    digest: root.payloadDigest,
+    writerId: root.writerId,
+    committedAt: root.committedAt,
+  };
+}
+
+function committedRootFromMetadata(
+  metadata: StoredPersistenceMetadata,
+): PersistenceCheckpointCommittedRoot {
+  return committedRootFromObservedRoot(metadata);
+}
+
+function isPersistenceCheckpointCommittedRootValue(
+  value: unknown,
+): value is PersistenceCheckpointCommittedRoot {
+  if (
+    !isPlainRecord(value) ||
+    !hasExactRecordKeys(value, [
+      "revision",
+      "baseRevision",
+      "digest",
+      "writerId",
+      "committedAt",
+    ])
+  ) {
+    return false;
+  }
+  return (
+    typeof value.revision === "string" &&
+    value.revision.length > 0 &&
+    (value.baseRevision === null ||
+      (typeof value.baseRevision === "string" &&
+        value.baseRevision.length > 0)) &&
+    isPersistenceDigestDescriptor(value.digest) &&
+    typeof value.writerId === "string" &&
+    value.writerId.length > 0 &&
+    typeof value.committedAt === "string" &&
+    Number.isFinite(Date.parse(value.committedAt))
+  );
+}
+
+function legacyMigrationTargetForConflictContext(
+  context: StartupRecoveryLegacyMigrationConflict,
+  storeName: RecoveryAdoptionStoreName,
+): LegacyMigrationTarget | null {
+  return (
+    LEGACY_MIGRATION_TARGETS.find(
+      (target) =>
+        target.legacyKey === context.legacyKey &&
+        target.storeName === storeName,
+    ) ?? null
+  );
+}
+
+function isLegacyMigrationConflictContext(
+  value: unknown,
+  storeName: RecoveryAdoptionStoreName,
+): value is StartupRecoveryLegacyMigrationConflict {
+  if (
+    !isPlainRecord(value) ||
+    !hasExactRecordKeys(value, [
+      "kind",
+      "version",
+      "legacyKey",
+      "targetKey",
+      "expectedRawDigest",
+    ]) ||
+    value.kind !== "event-shopping-planner-legacy-migration-conflict" ||
+    value.version !== 1 ||
+    typeof value.legacyKey !== "string" ||
+    value.legacyKey.length === 0 ||
+    value.targetKey !== DATA_KEY ||
+    !isPersistenceDigestDescriptor(value.expectedRawDigest)
+  ) {
+    return false;
+  }
+  return (
+    legacyMigrationTargetForConflictContext(
+      value as unknown as StartupRecoveryLegacyMigrationConflict,
+      storeName,
+    ) !== null
+  );
+}
+
+function isLegacyMigrationConflictResolution(
+  value: unknown,
+  target: LegacyMigrationTarget,
+): value is LegacyMigrationConflictResolution {
+  if (
+    !isPlainRecord(value) ||
+    !hasExactRecordKeys(value, [
+      "kind",
+      "schemaVersion",
+      "decision",
+      "decisionId",
+      "legacyKey",
+      "storeName",
+      "targetKey",
+      "expectedLegacyRawDigest",
+      "selectedCandidate",
+      "selectedRoot",
+      "committedRoot",
+      "adoptionArchiveKey",
+      "createdAt",
+    ]) ||
+    value.kind !==
+      "event-shopping-planner-legacy-migration-conflict-resolution" ||
+    value.schemaVersion !==
+      LEGACY_MIGRATION_CONFLICT_RESOLUTION_SCHEMA_VERSION ||
+    value.decision !== "retain-explicitly-adopted-root" ||
+    typeof value.decisionId !== "string" ||
+    value.decisionId.length === 0 ||
+    value.legacyKey !== target.legacyKey ||
+    value.storeName !== target.storeName ||
+    value.targetKey !== DATA_KEY ||
+    !isPersistenceDigestDescriptor(value.expectedLegacyRawDigest) ||
+    !isPlainRecord(value.selectedCandidate) ||
+    !hasExactRecordKeys(value.selectedCandidate, [
+      "id",
+      "source",
+      "sourceKey",
+      "revision",
+      "digest",
+    ]) ||
+    typeof value.selectedCandidate.id !== "string" ||
+    value.selectedCandidate.id.length === 0 ||
+    (value.selectedCandidate.source !== "indexedDB" &&
+      value.selectedCandidate.source !== "runtime-fallback") ||
+    typeof value.selectedCandidate.sourceKey !== "string" ||
+    value.selectedCandidate.sourceKey.length === 0 ||
+    typeof value.selectedCandidate.revision !== "string" ||
+    value.selectedCandidate.revision.length === 0 ||
+    !isPersistenceDigestDescriptor(value.selectedCandidate.digest) ||
+    !isPersistenceCheckpointCommittedRootValue(value.selectedRoot) ||
+    !isPersistenceCheckpointCommittedRootValue(value.committedRoot) ||
+    typeof value.adoptionArchiveKey !== "string" ||
+    !value.adoptionArchiveKey.startsWith(
+      RECOVERY_ADOPTION_ARCHIVE_KEY_PREFIX,
+    ) ||
+    value.adoptionArchiveKey.slice(
+      RECOVERY_ADOPTION_ARCHIVE_KEY_PREFIX.length,
+    ) !== value.decisionId ||
+    typeof value.createdAt !== "string" ||
+    !Number.isFinite(Date.parse(value.createdAt))
+  ) {
+    return false;
+  }
+  return (
+    value.selectedCandidate.revision === value.selectedRoot.revision &&
+    fingerprintsEqual(
+      value.selectedCandidate.digest,
+      value.selectedRoot.digest,
+    ) &&
+    value.committedRoot.baseRevision === value.selectedRoot.revision
+  );
+}
+
+async function selectedRootFromRecoveryAdoptionArchive(
+  archive: Record<string, unknown>,
+  resolution: LegacyMigrationConflictResolution,
+): Promise<{
+  root: PersistenceCheckpointCommittedRoot;
+  payload: unknown;
+  rawValue?: string;
+} | null> {
+  if (resolution.selectedCandidate.source === "indexedDB") {
+    if (!isPlainRecord(archive.currentEvidence)) return null;
+    const metadata = archive.currentEvidence.metadata;
+    if (
+      !isStoredPersistenceMetadata(metadata, resolution.storeName, DATA_KEY)
+    ) {
+      return null;
+    }
+    let payload: unknown;
+    try {
+      if (resolution.storeName === STORES.MAP_DATA) {
+        if (!isPlainRecord(archive.currentEvidence.mapEntries)) return null;
+        payload = materializeMapData(archive.currentEvidence.mapEntries).data;
+      } else {
+        if (
+          !Object.prototype.hasOwnProperty.call(
+            archive.currentEvidence,
+            "payload",
+          )
+        ) {
+          return null;
+        }
+        payload = archive.currentEvidence.payload;
+      }
+      if (
+        !(await verifyPersistenceDigest(payload, metadata.payloadDigest)) ||
+        !fingerprintsEqual(
+          createSynchronousFingerprint(payload),
+          metadata.payloadFingerprint,
+        )
+      ) {
+        return null;
+      }
+    } catch {
+      return null;
+    }
+    return { root: committedRootFromMetadata(metadata), payload };
+  }
+
+  if (!Array.isArray(archive.observedRuntimeCandidates)) return null;
+  const source = archive.observedRuntimeCandidates.find(
+    (value) =>
+      isPlainRecord(value) &&
+      value.storageKey === resolution.selectedCandidate.sourceKey,
+  );
+  if (
+    !isPlainRecord(source) ||
+    typeof source.rawValue !== "string" ||
+    !isPlainRecord(source.candidate)
+  ) {
+    return null;
+  }
+  try {
+    const parsed = parseRuntimeFallbackCandidate(source.rawValue, {
+      storeName: resolution.storeName,
+      key: DATA_KEY,
+      revision: resolution.selectedCandidate.revision,
+    });
+    if (
+      !fingerprintsEqual(parsed, source.candidate) ||
+      !(await verifyPersistenceDigest(parsed.payload, parsed.digest))
+    ) {
+      return null;
+    }
+    return {
+      root: {
+        revision: parsed.revision,
+        baseRevision: parsed.baseRevision,
+        digest: parsed.digest,
+        writerId: parsed.writerId,
+        committedAt: parsed.createdAt,
+      },
+      payload: parsed.payload,
+      rawValue: source.rawValue,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function recoveryAdoptionArchiveMatchesLegacyResolution(
+  value: unknown,
+  resolution: LegacyMigrationConflictResolution,
+): Promise<boolean> {
+  if (
+    !isPlainRecord(value) ||
+    value.kind !== "event-shopping-planner-recovery-adoption-archive" ||
+    value.schemaVersion !== 1 ||
+    value.decisionId !== resolution.decisionId ||
+    value.storeName !== resolution.storeName ||
+    value.key !== DATA_KEY ||
+    value.createdAt !== resolution.createdAt ||
+    !isPlainRecord(value.candidate) ||
+    value.candidate.id !== resolution.selectedCandidate.id ||
+    value.candidate.source !== resolution.selectedCandidate.source ||
+    value.candidate.sourceKey !== resolution.selectedCandidate.sourceKey ||
+    value.candidate.revision !== resolution.selectedCandidate.revision ||
+    value.candidate.digest !== resolution.selectedCandidate.digest.value ||
+    value.candidate.digestAlgorithm !==
+      resolution.selectedCandidate.digest.algorithm ||
+    value.candidate.digestCanonicalization !==
+      resolution.selectedCandidate.digest.canonicalization ||
+    value.candidate.digestCanonicalLength !== undefined ||
+    !recoveryEvidenceMatches(
+      value.legacyMigrationConflictResolution,
+      resolution,
+    ) ||
+    !isStoredPersistenceMetadata(
+      value.committedMetadata,
+      resolution.storeName,
+      DATA_KEY,
+    )
+  ) {
+    return false;
+  }
+  const migrationConflict: StartupRecoveryLegacyMigrationConflict = {
+    kind: "event-shopping-planner-legacy-migration-conflict",
+    version: 1,
+    legacyKey: resolution.legacyKey,
+    targetKey: DATA_KEY,
+    expectedRawDigest: resolution.expectedLegacyRawDigest,
+  };
+  if (
+    value.candidate.role !== "app-payload" ||
+    value.candidate.storeName !== resolution.storeName ||
+    value.candidate.key !== DATA_KEY ||
+    value.candidate.targetKey !== DATA_KEY ||
+    !recoveryEvidenceMatches(
+      value.candidate.migrationConflict,
+      migrationConflict,
+    ) ||
+    value.candidate.id !==
+      createStartupRecoveryCandidateId({
+        source: resolution.selectedCandidate.source,
+        role: "app-payload",
+        storeName: resolution.storeName,
+        sourceKey: resolution.selectedCandidate.sourceKey,
+        targetKey: DATA_KEY,
+        revision: resolution.selectedCandidate.revision,
+        digest: resolution.selectedCandidate.digest.value,
+        digestAlgorithm: resolution.selectedCandidate.digest.algorithm,
+        digestCanonicalization:
+          resolution.selectedCandidate.digest.canonicalization,
+        migrationConflict,
+      })
+  ) {
+    return false;
+  }
+  const selected = await selectedRootFromRecoveryAdoptionArchive(
+    value,
+    resolution,
+  );
+  if (
+    selected === null ||
+    !fingerprintsEqual(selected.root, resolution.selectedRoot) ||
+    !(await verifyPersistenceDigest(
+      selected.payload,
+      resolution.selectedCandidate.digest,
+    )) ||
+    !isPlainRecord(value.chosenSourceEvidence) ||
+    value.chosenSourceEvidence.sourceKey !==
+      resolution.selectedCandidate.sourceKey ||
+    !recoveryEvidenceMatches(
+      value.chosenSourceEvidence.payload,
+      selected.payload,
+    ) ||
+    (resolution.selectedCandidate.source === "runtime-fallback"
+      ? value.chosenSourceEvidence.rawValue !== selected.rawValue
+      : value.chosenSourceEvidence.rawValue !== undefined)
+  ) {
+    return false;
+  }
+  let committedCheckpoint: PersistenceCheckpoint | null;
+  let committedPayload: unknown;
+  try {
+    committedPayload = normalizeRecoveryAdoptionPayload(
+      resolution.storeName,
+      value.chosenSourceEvidence.payload,
+    );
+    committedCheckpoint = validateCheckpointForRoot(
+      value.committedCheckpoint,
+      resolution.storeName,
+      DATA_KEY,
+      value.committedMetadata,
+    );
+  } catch {
+    return false;
+  }
+  return (
+    committedCheckpoint !== null &&
+    (await verifyPersistenceDigest(
+      committedPayload,
+      value.committedMetadata.payloadDigest,
+    )) &&
+    fingerprintsEqual(
+      createSynchronousFingerprint(committedPayload),
+      value.committedMetadata.payloadFingerprint,
+    ) &&
+    fingerprintsEqual(
+      committedRootFromMetadata(value.committedMetadata),
+      resolution.committedRoot,
+    )
+  );
+}
+
+async function currentMigrationResolutionRootIsValid(
+  storeName: RecoveryAdoptionStoreName,
+): Promise<boolean> {
+  if (storeName === STORES.MAP_DATA) {
+    const validation = await validateMapSnapshot(
+      await readRawMapSnapshotWithRetry(),
+    );
+    return !("conflict" in validation) && !validation.validated.root.synthetic;
+  }
+  const validation = await validatePersistenceSnapshot(
+    storeName,
+    DATA_KEY,
+    await readPersistenceSnapshotWithRetry(storeName, DATA_KEY),
+  );
+  return !("conflict" in validation) && !validation.validated.root.synthetic;
+}
+
+async function legacyMigrationResolutionRepairRequired(
+  target: LegacyMigrationTarget,
+  rawValue: string,
+  message: string,
+  additionalCandidates: readonly StartupRecoveryCandidate[] = [],
+): Promise<never> {
+  const migrationConflict: StartupRecoveryLegacyMigrationConflict = {
+    kind: "event-shopping-planner-legacy-migration-conflict",
+    version: 1,
+    legacyKey: target.legacyKey,
+    targetKey: DATA_KEY,
+    expectedRawDigest: await createPersistenceDigest(rawValue),
+  };
+  throw new LegacyMigrationConflictError(message, migrationConflict, [
+    ...(await collectMigrationConflictRecoveryCandidates(
+      target,
+      migrationConflict,
+    )),
+    ...additionalCandidates,
+  ]);
+}
+
+async function resolvedLegacyMigrationKeys(
+  states: readonly LegacySourceState[],
+  journal: unknown,
+): Promise<Set<string>> {
+  const resolved = new Set<string>();
+  for (const { target, rawValue } of states) {
+    if (rawValue === null) continue;
+    const resolutionKey = createLegacyMigrationConflictResolutionKey(
+      target.legacyKey,
+    );
+    const rawResolution = await readInternalControlRecord(resolutionKey);
+    if (rawResolution === undefined || rawResolution === null) continue;
+    if (!isLegacyMigrationConflictResolution(rawResolution, target)) {
+      await legacyMigrationResolutionRepairRequired(
+        target,
+        rawValue,
+        `Legacy migration resolution must be replaced explicitly for ${target.legacyKey}.`,
+      );
+      continue;
+    }
+    if (
+      !(await verifyPersistenceDigest(
+        rawValue,
+        rawResolution.expectedLegacyRawDigest,
+      ))
+    ) {
+      continue;
+    }
+    const archive = await readInternalControlRecord(
+      rawResolution.adoptionArchiveKey,
+    );
+    const archiveIsValid = await recoveryAdoptionArchiveMatchesLegacyResolution(
+      archive,
+      rawResolution,
+    );
+    const currentRootIsValid = await currentMigrationResolutionRootIsValid(
+      target.storeName,
+    );
+    if (!archiveIsValid || !currentRootIsValid) {
+      await legacyMigrationResolutionRepairRequired(
+        target,
+        rawValue,
+        `Legacy migration resolution evidence must be replaced explicitly for ${target.legacyKey}.`,
+        archive === undefined || archive === null
+          ? []
+          : [
+              createRecoveryCandidate(
+                "migration-journal",
+                STORES.SYNC_QUEUE,
+                rawResolution.adoptionArchiveKey,
+                null,
+                archive,
+                undefined,
+                {
+                  role: archiveIsValid ? "migration-archive" : "invalid-source",
+                  sourceKey: rawResolution.adoptionArchiveKey,
+                  adoptable: false,
+                },
+              ),
+            ],
+      );
+      continue;
+    }
+    if (
+      journal !== undefined &&
+      journal !== null &&
+      (!isLegacyMigrationJournal(journal) ||
+        journal.entries.some(({ legacyKey }) => legacyKey === target.legacyKey))
+    ) {
+      const matchingEntry = isLegacyMigrationJournal(journal)
+        ? journal.entries.find(
+            ({ legacyKey }) => legacyKey === target.legacyKey,
+          )
+        : undefined;
+      if (
+        isLegacyMigrationJournal(journal) &&
+        journal.phase === "prepared" &&
+        matchingEntry?.storeName === target.storeName &&
+        matchingEntry.rawValue === rawValue &&
+        fingerprintsEqual(
+          matchingEntry.expectedRawDigest,
+          rawResolution.expectedLegacyRawDigest,
+        )
+      ) {
+        const migrationConflict: StartupRecoveryLegacyMigrationConflict = {
+          kind: "event-shopping-planner-legacy-migration-conflict",
+          version: 1,
+          legacyKey: target.legacyKey,
+          targetKey: DATA_KEY,
+          expectedRawDigest: rawResolution.expectedLegacyRawDigest,
+        };
+        throw new LegacyMigrationConflictError(
+          `A prepared migration journal must be superseded explicitly for ${target.legacyKey}.`,
+          migrationConflict,
+          await collectMigrationConflictRecoveryCandidates(
+            target,
+            migrationConflict,
+          ),
+        );
+      }
+      if (
+        matchingEntry?.storeName === target.storeName &&
+        matchingEntry.rawValue === rawValue &&
+        fingerprintsEqual(
+          matchingEntry.expectedRawDigest,
+          rawResolution.expectedLegacyRawDigest,
+        ) &&
+        fingerprintsEqual(
+          matchingEntry.payloadDigest,
+          rawResolution.selectedCandidate.digest,
+        )
+      ) {
+        continue;
+      }
+      throw new PersistenceConflictError(
+        `Legacy migration journal conflicts with the explicit resolution for ${target.legacyKey}.`,
+      );
+    }
+    resolved.add(target.legacyKey);
+  }
+  assertLegacySourcesUnchanged(states);
+  return resolved;
 }
 
 function parseLegacyMigrationPayload(
@@ -4315,12 +5022,28 @@ async function prepareLegacyMigrationEntries(
   const roots = new Map<StoreName, ObservedRevisionRoot>();
 
   for (const snapshot of snapshots) {
-    const payload = parseLegacyMigrationPayload(
-      snapshot.target,
-      snapshot.rawValue,
-    );
-    assertStructuredCloneable(payload);
     const rawDigest = await createPersistenceDigest(snapshot.rawValue);
+    const migrationConflict: StartupRecoveryLegacyMigrationConflict = {
+      kind: "event-shopping-planner-legacy-migration-conflict",
+      version: 1,
+      legacyKey: snapshot.target.legacyKey,
+      targetKey: DATA_KEY,
+      expectedRawDigest: rawDigest,
+    };
+    let payload: Record<string, unknown>;
+    try {
+      payload = parseLegacyMigrationPayload(snapshot.target, snapshot.rawValue);
+      assertStructuredCloneable(payload);
+    } catch {
+      throw new LegacyMigrationConflictError(
+        `${snapshot.target.legacyKey} cannot be parsed as a supported legacy source.`,
+        migrationConflict,
+        await collectMigrationConflictRecoveryCandidates(
+          snapshot.target,
+          migrationConflict,
+        ),
+      );
+    }
     const payloadDigest = await createPersistenceDigest(payload);
     let validated: ValidatedPersistenceSnapshot<unknown>;
     let absorbedSnapshots: RuntimeCandidateSnapshot<unknown>[] = [];
@@ -4329,15 +5052,29 @@ async function prepareLegacyMigrationEntries(
       const rawMapSnapshot = await readRawMapSnapshotWithRetry();
       const validation = await validateMapSnapshot(rawMapSnapshot);
       if ("conflict" in validation) {
+        const trustedCandidate = await trustedMigrationRecoveryCandidate(
+          snapshot.target.storeName,
+          {
+            mapEntries: rawMapSnapshot.entries,
+            metadata: rawMapSnapshot.metadata,
+            checkpoint: rawMapSnapshot.checkpoint,
+          },
+          migrationConflict,
+        );
         throw new LegacyMigrationConflictError(
           "Existing mapData is inconsistent.",
-          validation.conflict.recoveryBundle?.candidates ?? [],
+          migrationConflict,
+          [
+            ...(trustedCandidate ? [trustedCandidate] : []),
+            ...(validation.conflict.recoveryBundle?.candidates ?? []),
+          ],
         );
       }
       validated = validation.validated;
       const currentCandidate = validatedMigrationRecoveryCandidate(
         snapshot.target.storeName,
         validated,
+        migrationConflict,
       );
       const currentCandidates = currentCandidate ? [currentCandidate] : [];
       const existingMap = validated.data ?? {};
@@ -4346,6 +5083,7 @@ async function prepareLegacyMigrationEntries(
         if (!isPlainRecord(targetEventMap)) {
           throw new LegacyMigrationConflictError(
             `Existing mapData event ${eventName} is absent from the legacy source.`,
+            migrationConflict,
             currentCandidates,
           );
         }
@@ -4353,6 +5091,7 @@ async function prepareLegacyMigrationEntries(
           if (!(dayMapName in targetEventMap)) {
             throw new LegacyMigrationConflictError(
               `Existing mapData entry ${eventName}/${dayMapName} is absent from the legacy source.`,
+              migrationConflict,
               currentCandidates,
             );
           }
@@ -4363,6 +5102,7 @@ async function prepareLegacyMigrationEntries(
           if (existingDigest.value !== targetDigest.value) {
             throw new LegacyMigrationConflictError(
               `Existing mapData entry ${eventName}/${dayMapName} conflicts with the legacy source.`,
+              migrationConflict,
               currentCandidates,
             );
           }
@@ -4379,15 +5119,29 @@ async function prepareLegacyMigrationEntries(
         rawSnapshot,
       );
       if ("conflict" in validation) {
+        const trustedCandidate = await trustedMigrationRecoveryCandidate(
+          snapshot.target.storeName,
+          {
+            payload: rawSnapshot.payload,
+            metadata: rawSnapshot.metadata,
+            checkpoint: rawSnapshot.checkpoint,
+          },
+          migrationConflict,
+        );
         throw new LegacyMigrationConflictError(
           `${snapshot.target.storeName} is inconsistent.`,
-          validation.conflict.recoveryBundle?.candidates ?? [],
+          migrationConflict,
+          [
+            ...(trustedCandidate ? [trustedCandidate] : []),
+            ...(validation.conflict.recoveryBundle?.candidates ?? []),
+          ],
         );
       }
       validated = validation.validated;
       const currentCandidate = validatedMigrationRecoveryCandidate(
         snapshot.target.storeName,
         validated,
+        migrationConflict,
       );
       const currentCandidates = currentCandidate ? [currentCandidate] : [];
       const candidateScan = await readRuntimeCandidateSnapshots<
@@ -4396,6 +5150,7 @@ async function prepareLegacyMigrationEntries(
       if (candidateScan.status === "conflict") {
         throw new LegacyMigrationConflictError(
           `${snapshot.target.storeName} has an invalid runtime fallback candidate.`,
+          migrationConflict,
           [
             ...currentCandidates,
             ...(candidateScan.result.recoveryBundle?.candidates ?? []),
@@ -4431,12 +5186,14 @@ async function prepareLegacyMigrationEntries(
       ) {
         throw new LegacyMigrationConflictError(
           `${snapshot.target.storeName} has an active runtime fallback branch.`,
+          migrationConflict,
           [
             ...currentCandidates,
             ...runtimeSnapshotsToRecoveryCandidates(
               snapshot.target.storeName,
               DATA_KEY,
               candidateScan.snapshots,
+              migrationConflict,
             ),
           ],
         );
@@ -4446,6 +5203,7 @@ async function prepareLegacyMigrationEntries(
         if (existingDigest.value !== payloadDigest.value) {
           throw new LegacyMigrationConflictError(
             `${snapshot.target.storeName} conflicts with the legacy source.`,
+            migrationConflict,
             currentCandidates,
           );
         }
@@ -5046,16 +5804,31 @@ async function tryWriteLegacyCleanupJournalWithCas(
 async function deferLegacyCleanupFromJournal(
   journal: LegacyMigrationJournal,
 ): Promise<LegacyCleanupDeferralResult> {
-  assertJournalSourcesResumable(journal, captureLegacySourceStates());
+  const currentSources = captureLegacySourceStates();
+  const resolvedKeys = await resolvedLegacyMigrationKeys(
+    currentSources,
+    journal,
+  );
+  assertJournalSourcesResumable(
+    journal,
+    currentSources.filter(({ target }) => !resolvedKeys.has(target.legacyKey)),
+  );
   if (
     journal.phase === "cleanup-in-progress" &&
     journal.entries.every(({ cleanupStatus }) => cleanupStatus === "removed")
   ) {
     const completedJournal = withJournalPhase(journal, "completed", "removed");
     await writeMigrationJournalWithCas(journal, completedJournal);
+    const completedSources = captureLegacySourceStates();
+    const completedResolvedKeys = await resolvedLegacyMigrationKeys(
+      completedSources,
+      completedJournal,
+    );
     assertJournalSourcesResumable(
       completedJournal,
-      captureLegacySourceStates(),
+      completedSources.filter(
+        ({ target }) => !completedResolvedKeys.has(target.legacyKey),
+      ),
     );
     return { journal: completedJournal, journalWriteFailed: false };
   }
@@ -5081,7 +5854,17 @@ async function deferLegacyCleanupFromJournal(
   if (!(await tryWriteLegacyCleanupJournalWithCas(journal, deferredJournal))) {
     return { journal, journalWriteFailed: true };
   }
-  assertJournalSourcesResumable(deferredJournal, captureLegacySourceStates());
+  const deferredSources = captureLegacySourceStates();
+  const deferredResolvedKeys = await resolvedLegacyMigrationKeys(
+    deferredSources,
+    deferredJournal,
+  );
+  assertJournalSourcesResumable(
+    deferredJournal,
+    deferredSources.filter(
+      ({ target }) => !deferredResolvedKeys.has(target.legacyKey),
+    ),
+  );
   return { journal: deferredJournal, journalWriteFailed: false };
 }
 
@@ -5728,6 +6511,8 @@ async function migrateFromLocalStorage(
     );
   }
   let snapshots = presentLegacySourceSnapshots(capturedSources);
+  let unresolvedCapturedSources = capturedSources;
+  let explicitlyResolvedLegacyKeys = new Set<string>();
   let existingJournal: LegacyMigrationJournal | null = null;
   let rawJournalForRecovery: unknown;
   let migrationArchive: LegacyMigrationArchive | undefined;
@@ -5736,42 +6521,62 @@ async function migrateFromLocalStorage(
       LEGACY_MIGRATION_JOURNAL_KEY,
     );
     rawJournalForRecovery = rawJournal;
-    if (rawJournal !== undefined && rawJournal !== null) {
-      if (isLegacyMigrationJournalV1(rawJournal)) {
-        existingJournal = await upgradeLegacyMigrationJournalV1Atomically(
-          rawJournal,
-          capturedLegacySyncQueueRawValue,
-        );
-        migrationArchive =
-          await readAndValidateLegacyMigrationArchive(existingJournal);
-      } else if (isLegacyMigrationJournal(rawJournal)) {
-        existingJournal = rawJournal;
-      } else {
-        const unsupportedVersion =
-          isPlainRecord(rawJournal) &&
-          rawJournal.kind === "event-shopping-planner-legacy-migration" &&
-          rawJournal.schemaVersion !== 1 &&
-          rawJournal.schemaVersion !== LEGACY_MIGRATION_SCHEMA_VERSION;
-        return migrationRecoveryResult(
+    let normalizedJournal = rawJournal;
+    if (isLegacyMigrationJournalV1(rawJournal)) {
+      existingJournal = await upgradeLegacyMigrationJournalV1Atomically(
+        rawJournal,
+        capturedLegacySyncQueueRawValue,
+      );
+      migrationArchive =
+        await readAndValidateLegacyMigrationArchive(existingJournal);
+      normalizedJournal = existingJournal;
+    } else if (
+      rawJournal !== undefined &&
+      rawJournal !== null &&
+      !isLegacyMigrationJournal(rawJournal)
+    ) {
+      const unsupportedVersion =
+        isPlainRecord(rawJournal) &&
+        rawJournal.kind === "event-shopping-planner-legacy-migration" &&
+        rawJournal.schemaVersion !== 1 &&
+        rawJournal.schemaVersion !== LEGACY_MIGRATION_SCHEMA_VERSION;
+      return migrationRecoveryResult(
+        unsupportedVersion
+          ? "未対応versionの移行ジャーナルを検出したため、自動処理を停止しました。"
+          : "移行ジャーナルの形式が不正です。",
+        new PersistenceConflictError(
           unsupportedVersion
-            ? "未対応versionの移行ジャーナルを検出したため、自動処理を停止しました。"
-            : "移行ジャーナルの形式が不正です。",
-          new PersistenceConflictError(
-            unsupportedVersion
-              ? "Unsupported migration journal version."
-              : "Invalid migration journal.",
-          ),
-          snapshots,
-          rawJournal,
-          undefined,
-          [],
-          capturedLegacySyncQueueRawValue,
-        );
+            ? "Unsupported migration journal version."
+            : "Invalid migration journal.",
+        ),
+        snapshots,
+        rawJournal,
+        undefined,
+        [],
+        capturedLegacySyncQueueRawValue,
+      );
+    }
+    explicitlyResolvedLegacyKeys = await resolvedLegacyMigrationKeys(
+      capturedSources,
+      normalizedJournal,
+    );
+    unresolvedCapturedSources = capturedSources.filter(
+      ({ target }) => !explicitlyResolvedLegacyKeys.has(target.legacyKey),
+    );
+    if (normalizedJournal === undefined || normalizedJournal === null) {
+      snapshots = presentLegacySourceSnapshots(unresolvedCapturedSources);
+    }
+    if (normalizedJournal !== undefined && normalizedJournal !== null) {
+      if (existingJournal === null) {
+        existingJournal = normalizedJournal as LegacyMigrationJournal;
       }
       snapshots = legacySnapshotsFromJournal(existingJournal);
       await validateLegacyMigrationJournalDescriptors(existingJournal);
       try {
-        assertJournalSourcesResumable(existingJournal, capturedSources);
+        assertJournalSourcesResumable(
+          existingJournal,
+          unresolvedCapturedSources,
+        );
       } catch (error) {
         return migrationRecoveryResult(
           "移行待ちの原本が前回のスナップショットから変更されています。",
@@ -5855,9 +6660,16 @@ async function migrateFromLocalStorage(
               ? "deferred"
               : terminalJournal.cleanupStatus;
           }
+          const currentSources = captureLegacySourceStates();
+          const currentResolvedKeys = await resolvedLegacyMigrationKeys(
+            currentSources,
+            terminalJournal,
+          );
           assertJournalSourcesResumable(
             terminalJournal,
-            captureLegacySourceStates(),
+            currentSources.filter(
+              ({ target }) => !currentResolvedKeys.has(target.legacyKey),
+            ),
           );
           assertPreservedLegacySyncQueueUnchanged(
             migrationArchive,
@@ -5891,8 +6703,15 @@ async function migrateFromLocalStorage(
       error,
       snapshots,
       existingJournal ?? rawJournalForRecovery,
-      undefined,
-      migrationArchiveRecoveryCandidates(migrationArchive),
+      error instanceof LegacySourceChangedError
+        ? error.currentSources
+        : undefined,
+      [
+        ...migrationArchiveRecoveryCandidates(migrationArchive),
+        ...(error instanceof LegacyMigrationConflictError
+          ? error.recoveryCandidates
+          : []),
+      ],
       capturedLegacySyncQueueRawValue,
     );
   }
@@ -5901,6 +6720,38 @@ async function migrateFromLocalStorage(
     snapshots.length === 0 &&
     capturedLegacySyncQueueRawValue === null
   ) {
+    if (explicitlyResolvedLegacyKeys.size > 0) {
+      try {
+        assertLegacySourcesUnchanged(capturedSources);
+        if (
+          captureLegacySyncQueueSource() !== capturedLegacySyncQueueRawValue
+        ) {
+          throw new PersistenceConflictError(
+            "The legacy syncQueue source changed while validating explicit migration resolutions.",
+          );
+        }
+      } catch (error) {
+        return migrationRecoveryResult(
+          "競合解決の検証中に旧データ原本が変更されました。",
+          error,
+          presentLegacySourceSnapshots(capturedSources),
+          rawJournalForRecovery,
+          error instanceof LegacySourceChangedError
+            ? error.currentSources
+            : captureLegacySourceStates(),
+          [],
+          captureLegacySyncQueueSourceForRecovery(
+            capturedLegacySyncQueueRawValue,
+          ),
+        );
+      }
+      return {
+        status: "cleanup-pending",
+        migratedKeys: Array.from(explicitlyResolvedLegacyKeys).sort(),
+        dataMigrationStatus: "verified",
+        cleanupStatus: "deferred",
+      };
+    }
     return {
       status: "not-needed",
       dataMigrationStatus: "not-needed",
@@ -6448,6 +7299,7 @@ interface RecoveryAdoptionArchive {
     | "digestAlgorithm"
     | "digestCanonicalization"
     | "digestCanonicalLength"
+    | "migrationConflict"
   >;
   chosenSourceEvidence: {
     sourceKey: string;
@@ -6462,6 +7314,7 @@ interface RecoveryAdoptionArchive {
   }[];
   committedMetadata: StoredPersistenceMetadata;
   committedCheckpoint: PersistenceCheckpoint;
+  legacyMigrationConflictResolution?: LegacyMigrationConflictResolution;
 }
 
 export interface RecoveryCandidateAdoptionResult {
@@ -6497,6 +7350,9 @@ function getRecoveryCandidateIdentity(
     digestAlgorithm: candidate.digestAlgorithm,
     digestCanonicalization: candidate.digestCanonicalization,
     digestCanonicalLength: candidate.digestCanonicalLength,
+    ...(candidate.migrationConflict
+      ? { migrationConflict: candidate.migrationConflict }
+      : {}),
   };
 }
 
@@ -6571,6 +7427,20 @@ function assertAdoptableRecoveryCandidate(
   ) {
     throw new PersistenceConflictError(
       "The runtime fallback candidate does not identify an exact source record.",
+    );
+  }
+  if (
+    candidate.migrationConflict !== undefined &&
+    (!isLegacyMigrationConflictContext(
+      candidate.migrationConflict,
+      candidate.storeName,
+    ) ||
+      candidate.digestAlgorithm !== "SHA-256" ||
+      typeof candidate.revision !== "string" ||
+      candidate.revision.length === 0)
+  ) {
+    throw new PersistenceConflictError(
+      "The legacy migration conflict context is invalid or stale.",
     );
   }
   if (
@@ -6808,6 +7678,184 @@ async function getTrustedRecoveryAdoptionRoot(
   return { root: evidence.metadata, checkpoint };
 }
 
+interface PreparedLegacyMigrationConflictResolution {
+  resolutionKey: string;
+  resolution: LegacyMigrationConflictResolution;
+  expectedResolution: unknown;
+  expectedJournal: LegacyMigrationJournal | null;
+  nextJournal: LegacyMigrationJournal | null;
+  expectedRawValue: string;
+}
+
+function assertLegacyMigrationConflictRawUnchanged(
+  prepared: PreparedLegacyMigrationConflictResolution,
+): void {
+  const currentRawValue = localStorage.getItem(prepared.resolution.legacyKey);
+  if (currentRawValue !== prepared.expectedRawValue) {
+    throw new PersistenceConflictError(
+      "The legacy migration source changed during explicit adoption.",
+    );
+  }
+}
+
+async function prepareLegacyMigrationConflictResolution({
+  candidate,
+  selectedRoot,
+  committedMetadata,
+  archiveKey,
+  createdAt,
+}: {
+  candidate: StartupRecoveryCandidate & {
+    source: "indexedDB" | "runtime-fallback";
+    storeName: RecoveryAdoptionStoreName;
+    sourceKey: string;
+    targetKey: typeof DATA_KEY;
+    revision?: string;
+    digest: string;
+    digestAlgorithm: "SHA-256" | "FNV-1A-64";
+    digestCanonicalization: "esp-json-v1";
+  };
+  selectedRoot: PersistenceCheckpointCommittedRoot;
+  committedMetadata: StoredPersistenceMetadata;
+  archiveKey: string;
+  createdAt: string;
+}): Promise<PreparedLegacyMigrationConflictResolution | null> {
+  const context = candidate.migrationConflict;
+  if (context === undefined) return null;
+  if (
+    !isLegacyMigrationConflictContext(context, candidate.storeName) ||
+    candidate.digestAlgorithm !== "SHA-256" ||
+    typeof candidate.revision !== "string" ||
+    candidate.revision.length === 0
+  ) {
+    throw new PersistenceConflictError(
+      "The selected migration candidate has invalid conflict evidence.",
+    );
+  }
+  const target = legacyMigrationTargetForConflictContext(
+    context,
+    candidate.storeName,
+  );
+  if (!target) {
+    throw new PersistenceConflictError(
+      "The selected migration candidate does not match a legacy target.",
+    );
+  }
+  const expectedRawValue = localStorage.getItem(context.legacyKey);
+  if (
+    expectedRawValue === null ||
+    !(await verifyPersistenceDigest(
+      expectedRawValue,
+      context.expectedRawDigest,
+    ))
+  ) {
+    throw new PersistenceConflictError(
+      "The legacy migration source changed before explicit adoption.",
+    );
+  }
+  const selectedDigest: PersistenceDigestDescriptor = {
+    algorithm: candidate.digestAlgorithm,
+    canonicalization: candidate.digestCanonicalization,
+    value: candidate.digest,
+  };
+  const currentJournal = await readInternalControlRecord(
+    LEGACY_MIGRATION_JOURNAL_KEY,
+  );
+  let expectedJournal: LegacyMigrationJournal | null = null;
+  let nextJournal: LegacyMigrationJournal | null = null;
+  if (currentJournal !== undefined && currentJournal !== null) {
+    if (!isLegacyMigrationJournal(currentJournal)) {
+      throw new PersistenceConflictError(
+        "An invalid migration journal appeared before explicit adoption.",
+      );
+    }
+    expectedJournal = currentJournal;
+    const matchingEntry = currentJournal.entries.find(
+      ({ legacyKey }) => legacyKey === target.legacyKey,
+    );
+    if (matchingEntry) {
+      const journalSourceMatches =
+        matchingEntry.storeName === target.storeName &&
+        matchingEntry.rawValue === expectedRawValue &&
+        fingerprintsEqual(
+          matchingEntry.expectedRawDigest,
+          context.expectedRawDigest,
+        );
+      if (
+        !journalSourceMatches ||
+        (currentJournal.phase === "prepared" &&
+          matchingEntry.cleanupStatus !== "pending")
+      ) {
+        throw new PersistenceConflictError(
+          "The migration journal does not match the selected conflict.",
+        );
+      }
+      const remainingEntries = currentJournal.entries.filter(
+        ({ legacyKey }) => legacyKey !== target.legacyKey,
+      );
+      nextJournal =
+        remainingEntries.length === 0
+          ? null
+          : {
+              ...currentJournal,
+              updatedAt: createdAt,
+              entries: remainingEntries,
+            };
+    } else {
+      nextJournal = currentJournal;
+    }
+  }
+  const resolutionKey = createLegacyMigrationConflictResolutionKey(
+    target.legacyKey,
+  );
+  const expectedResolution = await readInternalControlRecord(resolutionKey);
+  if (
+    !fingerprintsEqual(selectedDigest, selectedRoot.digest) ||
+    selectedRoot.revision !== candidate.revision
+  ) {
+    throw new PersistenceConflictError(
+      "The selected migration candidate no longer matches its root.",
+    );
+  }
+  const decisionId = archiveKey.slice(
+    RECOVERY_ADOPTION_ARCHIVE_KEY_PREFIX.length,
+  );
+  const resolution: LegacyMigrationConflictResolution = {
+    kind: "event-shopping-planner-legacy-migration-conflict-resolution",
+    schemaVersion: LEGACY_MIGRATION_CONFLICT_RESOLUTION_SCHEMA_VERSION,
+    decision: "retain-explicitly-adopted-root",
+    decisionId,
+    legacyKey: target.legacyKey,
+    storeName: target.storeName,
+    targetKey: DATA_KEY,
+    expectedLegacyRawDigest: context.expectedRawDigest,
+    selectedCandidate: {
+      id: candidate.id,
+      source: candidate.source,
+      sourceKey: candidate.sourceKey,
+      revision: candidate.revision,
+      digest: selectedDigest,
+    },
+    selectedRoot,
+    committedRoot: committedRootFromMetadata(committedMetadata),
+    adoptionArchiveKey: archiveKey,
+    createdAt,
+  };
+  if (!isLegacyMigrationConflictResolution(resolution, target)) {
+    throw new PersistenceConflictError(
+      "The migration conflict resolution could not be constructed safely.",
+    );
+  }
+  return {
+    resolutionKey,
+    resolution,
+    expectedResolution,
+    expectedJournal,
+    nextJournal,
+    expectedRawValue,
+  };
+}
+
 async function commitRecoveryCandidateAdoption({
   storeName,
   payload,
@@ -6817,6 +7865,7 @@ async function commitRecoveryCandidateAdoption({
   checkpoint,
   archiveKey,
   archive,
+  preparedResolution,
 }: {
   storeName: RecoveryAdoptionStoreName;
   payload: unknown;
@@ -6829,6 +7878,7 @@ async function commitRecoveryCandidateAdoption({
   checkpoint: PersistenceCheckpoint;
   archiveKey: string;
   archive: RecoveryAdoptionArchive;
+  preparedResolution: PreparedLegacyMigrationConflictResolution | null;
 }): Promise<void> {
   const database = await openDB();
   ensureStoreExists(database, storeName);
@@ -6851,12 +7901,14 @@ async function commitRecoveryCandidateAdoption({
     }
 
     let failure: unknown = null;
-    let remainingReads = 3;
+    let remainingReads = 3 + (preparedResolution ? 2 : 0);
     let writesQueued = false;
     let currentPayload: unknown;
     let currentMapEntries: Record<string, unknown> | undefined;
     let currentMetadata: unknown;
     let currentCheckpoint: unknown;
+    let currentResolution: unknown;
+    let currentJournal: unknown;
     const payloadStore = transaction.objectStore(storeName);
     const controlStore = transaction.objectStore(STORES.SYNC_QUEUE);
 
@@ -6899,6 +7951,29 @@ async function commitRecoveryCandidateAdoption({
           );
         }
         assertRuntimeRawEvidenceUnchanged(storeName, expectedRuntimeEvidence);
+        if (preparedResolution) {
+          assertLegacyMigrationConflictRawUnchanged(preparedResolution);
+          if (
+            !recoveryEvidenceMatches(
+              currentResolution,
+              preparedResolution.expectedResolution,
+            )
+          ) {
+            throw new PersistenceConflictError(
+              "The migration resolution changed before explicit adoption.",
+            );
+          }
+          if (
+            !recoveryEvidenceMatches(
+              currentJournal ?? null,
+              preparedResolution.expectedJournal,
+            )
+          ) {
+            throw new PersistenceConflictError(
+              "The migration journal changed before explicit adoption.",
+            );
+          }
+        }
 
         if (storeName === STORES.MAP_DATA) {
           if (!currentMapEntries) {
@@ -6934,6 +8009,29 @@ async function commitRecoveryCandidateAdoption({
           ),
         );
         trackWrite(controlStore.add(archive, archiveKey));
+        if (preparedResolution) {
+          trackWrite(
+            controlStore.put(
+              preparedResolution.resolution,
+              preparedResolution.resolutionKey,
+            ),
+          );
+          if (
+            !recoveryEvidenceMatches(
+              preparedResolution.expectedJournal,
+              preparedResolution.nextJournal,
+            )
+          ) {
+            trackWrite(
+              preparedResolution.nextJournal === null
+                ? controlStore.delete(LEGACY_MIGRATION_JOURNAL_KEY)
+                : controlStore.put(
+                    preparedResolution.nextJournal,
+                    LEGACY_MIGRATION_JOURNAL_KEY,
+                  ),
+            );
+          }
+        }
       } catch (error) {
         abortWith(error);
       }
@@ -6978,6 +8076,33 @@ async function commitRecoveryCandidateAdoption({
       commitIfReady();
     };
 
+    if (preparedResolution) {
+      const resolutionRequest = controlStore.get(
+        preparedResolution.resolutionKey,
+      );
+      resolutionRequest.onerror = () => {
+        failure =
+          failure ??
+          resolutionRequest.error ??
+          new Error("Failed to read the migration resolution CAS evidence.");
+      };
+      resolutionRequest.onsuccess = () => {
+        currentResolution = resolutionRequest.result;
+        commitIfReady();
+      };
+      const journalRequest = controlStore.get(LEGACY_MIGRATION_JOURNAL_KEY);
+      journalRequest.onerror = () => {
+        failure =
+          failure ??
+          journalRequest.error ??
+          new Error("Failed to read the migration journal CAS evidence.");
+      };
+      journalRequest.onsuccess = () => {
+        currentJournal = journalRequest.result;
+        commitIfReady();
+      };
+    }
+
     if (storeName === STORES.MAP_DATA) {
       const entries: Record<string, unknown> = {};
       const cursorRequest = payloadStore.openCursor();
@@ -7021,6 +8146,7 @@ async function verifyRecoveryCandidateAdoption({
   archiveKey,
   archive,
   expectedRuntimeEvidence,
+  preparedResolution,
 }: {
   storeName: RecoveryAdoptionStoreName;
   payload: unknown;
@@ -7032,6 +8158,7 @@ async function verifyRecoveryCandidateAdoption({
     storageKey: string;
     rawValue: string;
   }[];
+  preparedResolution: PreparedLegacyMigrationConflictResolution | null;
 }): Promise<void> {
   const readback = await readRecoveryAdoptionCurrentEvidence(storeName);
   const readbackPayload = materializeRecoveryAdoptionCurrentPayload(
@@ -7078,6 +8205,41 @@ async function verifyRecoveryCandidateAdoption({
     );
   }
   assertRuntimeRawEvidenceUnchanged(storeName, expectedRuntimeEvidence);
+  if (preparedResolution) {
+    assertLegacyMigrationConflictRawUnchanged(preparedResolution);
+    const [resolutionReadback, journalReadback] = await Promise.all([
+      readInternalControlRecord(preparedResolution.resolutionKey),
+      readInternalControlRecord(LEGACY_MIGRATION_JOURNAL_KEY),
+    ]);
+    if (
+      !recoveryEvidenceMatches(
+        resolutionReadback,
+        preparedResolution.resolution,
+      ) ||
+      !(await recoveryAdoptionArchiveMatchesLegacyResolution(
+        archivedReadback,
+        preparedResolution.resolution,
+      )) ||
+      !recoveryEvidenceMatches(
+        journalReadback ?? null,
+        preparedResolution.nextJournal,
+      )
+    ) {
+      throw new PersistenceConflictError(
+        `${storeName} migration resolution direct readback failed.`,
+      );
+    }
+    if (
+      !(await verifyPersistenceDigest(
+        preparedResolution.expectedRawValue,
+        preparedResolution.resolution.expectedLegacyRawDigest,
+      ))
+    ) {
+      throw new PersistenceConflictError(
+        `${storeName} legacy source digest verification failed after adoption.`,
+      );
+    }
+  }
 }
 
 async function adoptRecoveryCandidateInternal(
@@ -7107,6 +8269,7 @@ async function adoptRecoveryCandidateInternal(
 
   let sourcePayload: unknown;
   let sourceRawValue: string | undefined;
+  let selectedRuntimeSnapshot: RuntimeCandidateSnapshot<unknown> | null = null;
   if (candidate.source === "runtime-fallback") {
     const sourceSnapshot = runtimeSnapshots.find(
       ({ storageKey }) => storageKey === candidate.sourceKey,
@@ -7124,12 +8287,14 @@ async function adoptRecoveryCandidateInternal(
       storeName,
       DATA_KEY,
       [sourceSnapshot],
+      candidate.migrationConflict,
     )[0];
     if (!observedCandidate || observedCandidate.id !== candidate.id) {
       throw new PersistenceConflictError(
         "The selected runtime fallback descriptor no longer matches its source.",
       );
     }
+    selectedRuntimeSnapshot = sourceSnapshot;
     sourcePayload = sourceSnapshot.candidate.payload;
     sourceRawValue = sourceSnapshot.rawValue;
   } else {
@@ -7164,6 +8329,25 @@ async function adoptRecoveryCandidateInternal(
     storeName,
     currentEvidence,
   );
+  const selectedRoot =
+    candidate.source === "indexedDB"
+      ? trustedCurrent && trustedCurrent.root.revision === candidate.revision
+        ? committedRootFromMetadata(trustedCurrent.root)
+        : null
+      : selectedRuntimeSnapshot
+        ? {
+            revision: selectedRuntimeSnapshot.candidate.revision,
+            baseRevision: selectedRuntimeSnapshot.candidate.baseRevision,
+            digest: selectedRuntimeSnapshot.candidate.digest,
+            writerId: selectedRuntimeSnapshot.candidate.writerId,
+            committedAt: selectedRuntimeSnapshot.candidate.createdAt,
+          }
+        : null;
+  if (candidate.migrationConflict && !selectedRoot) {
+    throw new PersistenceConflictError(
+      "The selected recovery root is no longer available.",
+    );
+  }
   const baseRevision =
     candidate.source === "runtime-fallback"
       ? (candidate.revision ?? null)
@@ -7186,6 +8370,15 @@ async function adoptRecoveryCandidateInternal(
   );
   const archiveKey = createRecoveryAdoptionArchiveKey();
   const createdAt = new Date().toISOString();
+  const preparedResolution = selectedRoot
+    ? await prepareLegacyMigrationConflictResolution({
+        candidate,
+        selectedRoot,
+        committedMetadata: metadata,
+        archiveKey,
+        createdAt,
+      })
+    : null;
   const archive: RecoveryAdoptionArchive = {
     kind: "event-shopping-planner-recovery-adoption-archive",
     schemaVersion: 1,
@@ -7206,6 +8399,9 @@ async function adoptRecoveryCandidateInternal(
       digestAlgorithm: candidate.digestAlgorithm,
       digestCanonicalization: candidate.digestCanonicalization,
       digestCanonicalLength: candidate.digestCanonicalLength,
+      ...(candidate.migrationConflict
+        ? { migrationConflict: candidate.migrationConflict }
+        : {}),
     },
     chosenSourceEvidence: {
       sourceKey: candidate.sourceKey,
@@ -7216,6 +8412,11 @@ async function adoptRecoveryCandidateInternal(
     observedRuntimeCandidates: runtimeSnapshots,
     committedMetadata: metadata,
     committedCheckpoint: checkpoint,
+    ...(preparedResolution
+      ? {
+          legacyMigrationConflictResolution: preparedResolution.resolution,
+        }
+      : {}),
   };
   assertStructuredCloneable(archive);
   retainRuntimeCandidatesForRecoveryAdoption(runtimeSnapshots);
@@ -7230,6 +8431,7 @@ async function adoptRecoveryCandidateInternal(
     checkpoint,
     archiveKey,
     archive,
+    preparedResolution,
   });
   await verifyRecoveryCandidateAdoption({
     storeName,
@@ -7239,6 +8441,7 @@ async function adoptRecoveryCandidateInternal(
     archiveKey,
     archive,
     expectedRuntimeEvidence,
+    preparedResolution,
   });
   if (
     runtimeSnapshots.some(

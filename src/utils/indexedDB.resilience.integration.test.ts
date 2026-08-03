@@ -27,6 +27,10 @@ const LEGACY_MIGRATION_JOURNAL_KEY =
   "__esp_internal__:migration:v1:legacy-local-storage";
 const LEGACY_MIGRATION_ARCHIVE_KEY_PREFIX =
   "__esp_internal__:migration-archive:v1:";
+const RECOVERY_ADOPTION_ARCHIVE_KEY_PREFIX =
+  "__esp_internal__:recovery-adoption:v1:";
+const LEGACY_MIGRATION_RESOLUTION_KEY_PREFIX =
+  "__esp_internal__:migration-resolution:v1:";
 
 const REQUIRED_STORES = [
   "eventLists",
@@ -375,6 +379,31 @@ function mockSynchronousStorePutFailure(
         : originalPut.call(this, value, requestKey);
     });
 
+  return {
+    getInjectionCount: () => injectionCount,
+    spy,
+  };
+}
+
+function mockControlRecordGetSideEffect(
+  key: IDBValidKey,
+  sideEffect: () => void,
+) {
+  const originalGet = FakeIDBObjectStore.prototype.get;
+  let injectionCount = 0;
+  const spy = vi
+    .spyOn(FakeIDBObjectStore.prototype, "get")
+    .mockImplementation(function (
+      this: IDBObjectStore,
+      query: IDBValidKey | IDBKeyRange,
+    ) {
+      const request = originalGet.call(this, query);
+      if (injectionCount === 0 && this.name === "syncQueue" && query === key) {
+        injectionCount += 1;
+        sideEffect();
+      }
+      return request;
+    });
   return {
     getInjectionCount: () => injectionCount,
     spy,
@@ -1137,7 +1166,231 @@ describe("db.migrateFromLocalStorage resilience", () => {
     expect(localStorage.getItem(runtimeCandidate.storageKey)).toBe(
       runtimeCandidate.serialized,
     );
+
+    const selectedRuntimeCandidate = migration.recoveryBundle.candidates.find(
+      ({ source, revision, storeName }) =>
+        source === "runtime-fallback" &&
+        revision === runtimeCandidate.candidate.revision &&
+        storeName === "eventMetadata",
+    );
+    if (!selectedRuntimeCandidate) {
+      throw new Error("Missing runtime migration recovery candidate.");
+    }
+    const adoption = await migratingDb.adoptRecoveryCandidate(
+      selectedRuntimeCandidate,
+    );
+    expect(adoption).toMatchObject({
+      status: "adopted",
+      storeName: "eventMetadata",
+    });
+    expect(await migratingDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await migratingDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: runtimeValue,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+    expect(localStorage.getItem(runtimeCandidate.storageKey)).toBe(
+      runtimeCandidate.serialized,
+    );
+
+    vi.resetModules();
+    const restartedDb = await importFreshDb();
+    expect(await restartedDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await restartedDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: runtimeValue,
+    });
+    expect(await readCurrentRevision("eventMetadata")).toBe(adoption.revision);
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+    expect(localStorage.getItem(runtimeCandidate.storageKey)).toBe(
+      runtimeCandidate.serialized,
+    );
   });
+
+  it.each(["indexedDB", "runtime-fallback"] as const)(
+    "supersedes a completed mixed-version journal when repairing the $selectedSource candidate",
+    async (selectedSource) => {
+      const idbAndLegacyValue = {
+        旧版混在イベント: { generation: "selected-idb-and-legacy" },
+      };
+      const newerSavedValue = {
+        旧版混在イベント: { generation: "saved-after-mixed-version-journal" },
+      };
+      const runtimeValue = {
+        旧版混在イベント: { generation: "rejected-runtime-branch" },
+      };
+      const legacySource = JSON.stringify(idbAndLegacyValue);
+      const db = await importFreshDb();
+      await db.saveEventMetadata(idbAndLegacyValue);
+      const baseRevision = await readCurrentRevision("eventMetadata");
+      localStorage.setItem("eventMetadata", legacySource);
+      const runtimeCandidate = await installRuntimeFallbackCandidate({
+        storeName: "eventMetadata",
+        revision: "mixed-version-runtime-candidate",
+        baseRevision,
+        payload: runtimeValue,
+      });
+
+      const firstMigration = await db.migrateFromLocalStorage();
+      expect(firstMigration.status).toBe("recovery-required");
+      if (firstMigration.status !== "recovery-required") {
+        throw new Error("Expected mixed-version migration recovery.");
+      }
+      const idbCandidate = firstMigration.recoveryBundle.candidates.find(
+        ({ source, role, storeName }) =>
+          source === "indexedDB" &&
+          role === "app-payload" &&
+          storeName === "eventMetadata",
+      );
+      if (!idbCandidate) {
+        throw new Error("Missing mixed-version IndexedDB candidate.");
+      }
+      const initialAdoption = await db.adoptRecoveryCandidate(idbCandidate);
+
+      const resolutionKey = `${LEGACY_MIGRATION_RESOLUTION_KEY_PREFIX}${encodeURIComponent(
+        "eventMetadata",
+      )}`;
+      const resolution = await readRawRecord("syncQueue", resolutionKey);
+      await deleteRawRecordAtExistingVersion("syncQueue", resolutionKey);
+
+      vi.resetModules();
+      const mixedVersionDb = await importFreshDb();
+      expect(await mixedVersionDb.migrateFromLocalStorage()).toMatchObject({
+        status: "cleanup-pending",
+        dataMigrationStatus: "verified",
+        cleanupStatus: "deferred",
+      });
+      expect(
+        await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+      ).toMatchObject({
+        entries: [
+          expect.objectContaining({
+            legacyKey: "eventMetadata",
+          }),
+        ],
+      });
+      await writeRawRecordAtExistingVersion(
+        "syncQueue",
+        resolutionKey,
+        resolution,
+      );
+
+      vi.resetModules();
+      const restartedDb = await importFreshDb();
+      expect(await restartedDb.migrateFromLocalStorage()).toMatchObject({
+        status: "cleanup-pending",
+        dataMigrationStatus: "verified",
+        cleanupStatus: "deferred",
+      });
+      expect(await restartedDb.loadEventMetadata()).toMatchObject({
+        status: "ok",
+        data: idbAndLegacyValue,
+      });
+      expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+      expect(localStorage.getItem(runtimeCandidate.storageKey)).toBe(
+        runtimeCandidate.serialized,
+      );
+      await restartedDb.saveEventMetadata(newerSavedValue);
+      expect(await restartedDb.loadEventMetadata()).toMatchObject({
+        status: "ok",
+        data: newerSavedValue,
+      });
+
+      const journalBeforeRepair = await readRawRecord(
+        "syncQueue",
+        LEGACY_MIGRATION_JOURNAL_KEY,
+      );
+      expect(journalBeforeRepair).toMatchObject({
+        entries: [
+          expect.objectContaining({
+            legacyKey: "eventMetadata",
+          }),
+        ],
+      });
+      await writeRawRecordAtExistingVersion(
+        "syncQueue",
+        createPersistenceCheckpointKey("eventMetadata", DATA_KEY),
+        { corrupted: true },
+      );
+
+      vi.resetModules();
+      const repairDb = await importFreshDb();
+      const repairMigration = await repairDb.migrateFromLocalStorage();
+      expect(repairMigration.status).toBe("recovery-required");
+      if (repairMigration.status !== "recovery-required") {
+        throw new Error("Expected mixed-version checkpoint repair recovery.");
+      }
+      const repairCandidates = repairMigration.recoveryBundle.candidates.filter(
+        ({ adoptable }) => adoptable === true,
+      );
+      expect(repairCandidates.map(({ source }) => source).sort()).toEqual([
+        "indexedDB",
+        "runtime-fallback",
+      ]);
+      expect(
+        repairCandidates.every(
+          ({ migrationConflict }) =>
+            migrationConflict?.legacyKey === "eventMetadata",
+        ),
+      ).toBe(true);
+      const repairCandidate = repairCandidates.find(
+        ({ source }) => source === selectedSource,
+      );
+      if (!repairCandidate) {
+        throw new Error(
+          `Missing ${selectedSource} checkpoint repair candidate.`,
+        );
+      }
+      const expectedAdoptedValue =
+        selectedSource === "indexedDB" ? newerSavedValue : runtimeValue;
+      expect(repairCandidate).toMatchObject({
+        source: selectedSource,
+        storeName: "eventMetadata",
+        payload: expectedAdoptedValue,
+        migrationConflict: {
+          legacyKey: "eventMetadata",
+        },
+      });
+
+      const repairAdoption =
+        await repairDb.adoptRecoveryCandidate(repairCandidate);
+      expect(repairAdoption.archiveKey).not.toBe(initialAdoption.archiveKey);
+      expect(
+        await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+      ).toBeUndefined();
+      expect(await repairDb.migrateFromLocalStorage()).toMatchObject({
+        status: "cleanup-pending",
+        dataMigrationStatus: "verified",
+        cleanupStatus: "deferred",
+      });
+      expect(await repairDb.loadEventMetadata()).toMatchObject({
+        status: "ok",
+        data: expectedAdoptedValue,
+      });
+      expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+
+      vi.resetModules();
+      const repairedRestartDb = await importFreshDb();
+      expect(await repairedRestartDb.migrateFromLocalStorage()).toMatchObject({
+        status: "cleanup-pending",
+        dataMigrationStatus: "verified",
+        cleanupStatus: "deferred",
+      });
+      expect(await repairedRestartDb.loadEventMetadata()).toMatchObject({
+        status: "ok",
+        data: expectedAdoptedValue,
+      });
+      expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+    },
+  );
 
   it("rolls back every payload and revision record when one atomic copy put throws synchronously", async () => {
     const legacySources = {
@@ -1214,6 +1467,121 @@ describe("db.migrateFromLocalStorage resilience", () => {
       expectedPayload: metadata,
       legacySource,
     });
+  });
+
+  it("atomically replaces a matching prepared journal entry when the newer IndexedDB root is explicitly adopted", async () => {
+    const legacyMetadata = {
+      prepared明示採用イベント: { generation: "legacy" },
+    };
+    const idbMetadata = {
+      prepared明示採用イベント: { generation: "newer-indexed-db" },
+    };
+    const legacySource = JSON.stringify(legacyMetadata);
+    localStorage.setItem("eventMetadata", legacySource);
+    const copyFailure = mockNthTransactionFailure({
+      requiredStores: ["eventMetadata", "syncQueue"],
+      mode: "readwrite",
+      occurrence: 1,
+      error: new DOMException("forced prepared adoption race", "UnknownError"),
+    });
+    const initialDb = await importFreshDb();
+    expect(await initialDb.migrateFromLocalStorage()).toMatchObject({
+      status: "recovery-required",
+    });
+    expect(copyFailure.getInjectionCount()).toBe(1);
+    const preparedJournal = await readRawRecord(
+      "syncQueue",
+      LEGACY_MIGRATION_JOURNAL_KEY,
+    );
+    expect(preparedJournal).toMatchObject({
+      phase: "prepared",
+      entries: [
+        expect.objectContaining({
+          legacyKey: "eventMetadata",
+          rawValue: legacySource,
+        }),
+      ],
+    });
+    copyFailure.spy.mockRestore();
+
+    vi.resetModules();
+    const concurrentDb = await importFreshDb();
+    await concurrentDb.saveEventMetadata(idbMetadata);
+
+    vi.resetModules();
+    const recoveryDb = await importFreshDb();
+    const recoveryMigration = await recoveryDb.migrateFromLocalStorage();
+    expect(recoveryMigration.status).toBe("recovery-required");
+    if (recoveryMigration.status !== "recovery-required") {
+      throw new Error("Expected prepared journal adoption recovery.");
+    }
+    const idbCandidate = recoveryMigration.recoveryBundle.candidates.find(
+      ({ source, role, storeName }) =>
+        source === "indexedDB" &&
+        role === "app-payload" &&
+        storeName === "eventMetadata",
+    );
+    if (!idbCandidate) {
+      throw new Error("Missing prepared journal IndexedDB candidate.");
+    }
+    expect(idbCandidate.migrationConflict).toBeDefined();
+
+    const adoption = await recoveryDb.adoptRecoveryCandidate(idbCandidate);
+    expect(adoption.status).toBe("adopted");
+    expect(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ).toBeUndefined();
+
+    await writeRawRecordAtExistingVersion(
+      "syncQueue",
+      LEGACY_MIGRATION_JOURNAL_KEY,
+      preparedJournal,
+    );
+    vi.resetModules();
+    const staleJournalDb = await importFreshDb();
+    const staleJournalMigration =
+      await staleJournalDb.migrateFromLocalStorage();
+    expect(staleJournalMigration.status).toBe("recovery-required");
+    if (staleJournalMigration.status !== "recovery-required") {
+      throw new Error("Expected stale prepared journal recovery.");
+    }
+    const replacementCandidate =
+      staleJournalMigration.recoveryBundle.candidates.find(
+        ({ source, role, storeName }) =>
+          source === "indexedDB" &&
+          role === "app-payload" &&
+          storeName === "eventMetadata",
+      );
+    if (!replacementCandidate) {
+      throw new Error("Missing stale prepared journal replacement candidate.");
+    }
+    await staleJournalDb.adoptRecoveryCandidate(replacementCandidate);
+    expect(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ).toBeUndefined();
+    expect(await staleJournalDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await staleJournalDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: idbMetadata,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+
+    vi.resetModules();
+    const restartedDb = await importFreshDb();
+    expect(await restartedDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await restartedDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: idbMetadata,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
   });
 
   it("resumes idempotently from a copied migration journal", async () => {
@@ -1930,6 +2298,9 @@ describe("db.migrateFromLocalStorage resilience", () => {
         role === "app-payload" &&
         storeName === "mapData",
     );
+    if (!idbCandidate) {
+      throw new Error("Missing current IndexedDB map migration candidate.");
+    }
     expect(idbCandidate).toMatchObject({
       adoptable: true,
       revision: idbRevision,
@@ -1938,6 +2309,32 @@ describe("db.migrateFromLocalStorage resilience", () => {
     const loadedMap = await db.loadMapData();
     expect(loadedMap.status).toBe("ok");
     expect(loadedMap.data).toEqual(idbMap);
+
+    const adoption = await db.adoptRecoveryCandidate(idbCandidate);
+    expect(await db.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await db.loadMapData()).toMatchObject({
+      status: "ok",
+      data: idbMap,
+    });
+    expect(await readCurrentRevision("mapData")).toBe(adoption.revision);
+    expect(localStorage.getItem("mapData")).toBe(legacySource);
+
+    vi.resetModules();
+    const restartedDb = await importFreshDb();
+    expect(await restartedDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await restartedDb.loadMapData()).toMatchObject({
+      status: "ok",
+      data: idbMap,
+    });
+    expect(localStorage.getItem("mapData")).toBe(legacySource);
   });
 
   it("offers the current committed IndexedDB payload for explicit adoption when legacy data conflicts", async () => {
@@ -1985,20 +2382,728 @@ describe("db.migrateFromLocalStorage resilience", () => {
       ]),
     );
 
-    await expect(
-      db.adoptRecoveryCandidate(idbCandidate),
-    ).resolves.toMatchObject({
+    const adoption = await db.adoptRecoveryCandidate(idbCandidate);
+    expect(adoption).toMatchObject({
       status: "adopted",
       storeName: "eventMetadata",
       key: DATA_KEY,
     });
     expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(idbMetadata);
     expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+    const resolutionKey = `${LEGACY_MIGRATION_RESOLUTION_KEY_PREFIX}${encodeURIComponent(
+      "eventMetadata",
+    )}`;
+    const legacyRawDigest = await createPersistenceDigest(legacySource);
+    const resolution = await readRawRecord("syncQueue", resolutionKey);
+    expect(resolution).toMatchObject({
+      kind: "event-shopping-planner-legacy-migration-conflict-resolution",
+      schemaVersion: 1,
+      decision: "retain-explicitly-adopted-root",
+      legacyKey: "eventMetadata",
+      storeName: "eventMetadata",
+      expectedLegacyRawDigest: legacyRawDigest,
+      selectedCandidate: {
+        id: idbCandidate.id,
+        source: "indexedDB",
+        revision: idbRevision,
+      },
+      selectedRoot: {
+        revision: idbRevision,
+      },
+      committedRoot: {
+        revision: adoption.revision,
+        baseRevision: idbRevision,
+      },
+      adoptionArchiveKey: adoption.archiveKey,
+    });
+    expect(adoption.archiveKey).toMatch(
+      new RegExp(`^${RECOVERY_ADOPTION_ARCHIVE_KEY_PREFIX}`),
+    );
+    expect(await readRawRecord("syncQueue", adoption.archiveKey)).toMatchObject(
+      {
+        legacyMigrationConflictResolution: resolution,
+      },
+    );
+
+    const immediateMigration = await db.migrateFromLocalStorage();
+    expect(immediateMigration).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await db.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: idbMetadata,
+    });
+    expect(await readCurrentRevision("eventMetadata")).toBe(adoption.revision);
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+
+    await resumeEventMetadataMigrationAndAssertStable({
+      expectedPayload: idbMetadata,
+      legacySource,
+      expectedExistingRevision: adoption.revision,
+    });
+
+    const updatedIdbMetadata = {
+      明示採用移行イベント: {
+        generation: "indexed-db-after-normal-save",
+      },
+    };
+    vi.resetModules();
+    const updatingDb = await importFreshDb();
+    await updatingDb.saveEventMetadata(updatedIdbMetadata);
+    vi.resetModules();
+    const updatedDb = await importFreshDb();
+    expect(await updatedDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await updatedDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: updatedIdbMetadata,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+
+    const changedLegacySource = JSON.stringify({
+      明示採用移行イベント: { generation: "legacy-changed-after-decision" },
+    });
+    localStorage.setItem("eventMetadata", changedLegacySource);
+    vi.resetModules();
+    const changedLegacyDb = await importFreshDb();
+    const changedMigration = await changedLegacyDb.migrateFromLocalStorage();
+    expect(changedMigration.status).toBe("recovery-required");
+    if (changedMigration.status !== "recovery-required") {
+      throw new Error("Expected changed legacy source recovery.");
+    }
+    expect(changedMigration.recoveryBundle.issues).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          stage: "migration",
+          code: "PersistenceConflict",
+        }),
+      ]),
+    );
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      updatedIdbMetadata,
+    );
+    expect(localStorage.getItem("eventMetadata")).toBe(changedLegacySource);
+  });
+
+  it("offers the committed IndexedDB root when the retained legacy source is malformed", async () => {
+    const idbMetadata = {
+      不正原本復旧イベント: { generation: "indexed-db" },
+    };
+    const malformedLegacySource = '{"不正原本復旧イベント":';
+    const db = await importFreshDb();
+    await db.saveEventMetadata(idbMetadata);
+    localStorage.setItem("eventMetadata", malformedLegacySource);
+
+    const firstMigration = await db.migrateFromLocalStorage();
+    expect(firstMigration.status).toBe("recovery-required");
+    if (firstMigration.status !== "recovery-required") {
+      throw new Error("Expected malformed legacy recovery.");
+    }
+    const idbCandidate = firstMigration.recoveryBundle.candidates.find(
+      ({ source, role, storeName }) =>
+        source === "indexedDB" &&
+        role === "app-payload" &&
+        storeName === "eventMetadata",
+    );
+    if (!idbCandidate) {
+      throw new Error("Missing malformed legacy IndexedDB candidate.");
+    }
+    expect(idbCandidate).toMatchObject({
+      adoptable: true,
+      migrationConflict: {
+        legacyKey: "eventMetadata",
+      },
+    });
+
+    await db.adoptRecoveryCandidate(idbCandidate);
+    expect(await db.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await db.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: idbMetadata,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(malformedLegacySource);
+
+    vi.resetModules();
+    const restartedDb = await importFreshDb();
+    expect(await restartedDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await restartedDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: idbMetadata,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(malformedLegacySource);
+  });
+
+  it("keeps the explicit resolution valid after an atomic restore commits a different root", async () => {
+    const idbMetadata = {
+      原子的復元継続イベント: { generation: "indexed-db-before-restore" },
+    };
+    const legacySource = JSON.stringify({
+      原子的復元継続イベント: { generation: "retained-legacy" },
+    });
+    const restoredData = makeAppData("競合解決後復元");
+    const db = await importFreshDb();
+    await db.saveEventMetadata(idbMetadata);
+    localStorage.setItem("eventMetadata", legacySource);
+
+    const firstMigration = await db.migrateFromLocalStorage();
+    expect(firstMigration.status).toBe("recovery-required");
+    if (firstMigration.status !== "recovery-required") {
+      throw new Error("Expected atomic restore resolution recovery.");
+    }
+    const idbCandidate = firstMigration.recoveryBundle.candidates.find(
+      ({ source, role, storeName }) =>
+        source === "indexedDB" &&
+        role === "app-payload" &&
+        storeName === "eventMetadata",
+    );
+    if (!idbCandidate) {
+      throw new Error("Missing atomic restore resolution candidate.");
+    }
+    await db.adoptRecoveryCandidate(idbCandidate);
+    await db.restoreAppDataAtomically(restoredData);
+
+    vi.resetModules();
+    const restartedDb = await importFreshDb();
+    expect(await restartedDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await restartedDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: restoredData.eventMetadata,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+  });
+
+  it("ignores a stale resolution when legacy data later converges with the adopted IndexedDB payload", async () => {
+    const idbMetadata = {
+      収束移行イベント: { generation: "indexed-db" },
+    };
+    const conflictingLegacySource = JSON.stringify({
+      収束移行イベント: { generation: "legacy-before-convergence" },
+    });
+    const convergedLegacySource = JSON.stringify(idbMetadata);
+    const db = await importFreshDb();
+    await db.saveEventMetadata(idbMetadata);
+    localStorage.setItem("eventMetadata", conflictingLegacySource);
+
+    const firstMigration = await db.migrateFromLocalStorage();
+    expect(firstMigration.status).toBe("recovery-required");
+    if (firstMigration.status !== "recovery-required") {
+      throw new Error("Expected a migration conflict before convergence.");
+    }
+    const idbCandidate = firstMigration.recoveryBundle.candidates.find(
+      ({ source, role, storeName }) =>
+        source === "indexedDB" &&
+        role === "app-payload" &&
+        storeName === "eventMetadata",
+    );
+    if (!idbCandidate) {
+      throw new Error("Missing IndexedDB convergence candidate.");
+    }
+    await db.adoptRecoveryCandidate(idbCandidate);
+
+    localStorage.setItem("eventMetadata", convergedLegacySource);
+    expect(await db.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await db.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: idbMetadata,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(convergedLegacySource);
+
+    vi.resetModules();
+    const restartedDb = await importFreshDb();
+    expect(await restartedDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await restartedDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: idbMetadata,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(convergedLegacySource);
+  });
+
+  it("requires a fresh explicit adoption when the referenced resolution archive is missing", async () => {
+    const idbMetadata = {
+      証跡再採用イベント: { generation: "indexed-db" },
+    };
+    const legacySource = JSON.stringify({
+      証跡再採用イベント: { generation: "legacy" },
+    });
+    const db = await importFreshDb();
+    await db.saveEventMetadata(idbMetadata);
+    localStorage.setItem("eventMetadata", legacySource);
+
+    const firstMigration = await db.migrateFromLocalStorage();
+    expect(firstMigration.status).toBe("recovery-required");
+    if (firstMigration.status !== "recovery-required") {
+      throw new Error("Expected an archive recovery migration conflict.");
+    }
+    const firstCandidate = firstMigration.recoveryBundle.candidates.find(
+      ({ source, role, storeName }) =>
+        source === "indexedDB" &&
+        role === "app-payload" &&
+        storeName === "eventMetadata",
+    );
+    if (!firstCandidate) {
+      throw new Error("Missing first archive recovery candidate.");
+    }
+    const firstAdoption = await db.adoptRecoveryCandidate(firstCandidate);
+    await deleteRawRecordAtExistingVersion(
+      "syncQueue",
+      firstAdoption.archiveKey,
+    );
+
+    vi.resetModules();
+    const recoveryDb = await importFreshDb();
+    const recoveryMigration = await recoveryDb.migrateFromLocalStorage();
+    expect(recoveryMigration.status).toBe("recovery-required");
+    if (recoveryMigration.status !== "recovery-required") {
+      throw new Error("Expected missing archive recovery to be required.");
+    }
+    const replacementCandidate =
+      recoveryMigration.recoveryBundle.candidates.find(
+        ({ source, role, storeName }) =>
+          source === "indexedDB" &&
+          role === "app-payload" &&
+          storeName === "eventMetadata",
+      );
+    if (!replacementCandidate) {
+      throw new Error("Missing replacement archive recovery candidate.");
+    }
+    expect(replacementCandidate.migrationConflict).toBeDefined();
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(idbMetadata);
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+
+    const replacementAdoption =
+      await recoveryDb.adoptRecoveryCandidate(replacementCandidate);
+    expect(replacementAdoption.archiveKey).not.toBe(firstAdoption.archiveKey);
+    expect(await recoveryDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await recoveryDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: idbMetadata,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+  });
+
+  it("repairs a corrupted current checkpoint after explicit migration adoption", async () => {
+    const idbMetadata = {
+      解決後checkpoint復旧イベント: { generation: "indexed-db" },
+    };
+    const legacySource = JSON.stringify({
+      解決後checkpoint復旧イベント: { generation: "legacy" },
+    });
+    const checkpointKey = createPersistenceCheckpointKey(
+      "eventMetadata",
+      DATA_KEY,
+    );
+    const db = await importFreshDb();
+    await db.saveEventMetadata(idbMetadata);
+    localStorage.setItem("eventMetadata", legacySource);
+
+    const initialConflict = await db.migrateFromLocalStorage();
+    expect(initialConflict.status).toBe("recovery-required");
+    if (initialConflict.status !== "recovery-required") {
+      throw new Error("Expected an explicit-adoption migration conflict.");
+    }
+    const initialCandidate = initialConflict.recoveryBundle.candidates.find(
+      ({ adoptable, storeName, migrationConflict }) =>
+        adoptable === true &&
+        storeName === "eventMetadata" &&
+        migrationConflict?.legacyKey === "eventMetadata",
+    );
+    if (!initialCandidate) {
+      throw new Error("Missing the initial checkpoint repair candidate.");
+    }
+    const initialAdoption = await db.adoptRecoveryCandidate(initialCandidate);
+    await writeRawRecordAtExistingVersion("syncQueue", checkpointKey, {
+      corrupted: true,
+    });
+
+    vi.resetModules();
+    const recoveryDb = await importFreshDb();
+    const repairConflict = await recoveryDb.migrateFromLocalStorage();
+
+    expect(repairConflict.status).toBe("recovery-required");
+    if (repairConflict.status !== "recovery-required") {
+      throw new Error("Expected checkpoint repair recovery.");
+    }
+    const repairCandidates = repairConflict.recoveryBundle.candidates.filter(
+      ({ adoptable }) => adoptable === true,
+    );
+    expect(repairCandidates).toHaveLength(1);
+    expect(repairCandidates[0]).toMatchObject({
+      source: "indexedDB",
+      storeName: "eventMetadata",
+      payload: idbMetadata,
+      migrationConflict: {
+        legacyKey: "eventMetadata",
+      },
+    });
+    expect(repairConflict.recoveryBundle.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "migration-journal",
+          role: "migration-archive",
+          sourceKey: initialAdoption.archiveKey,
+          adoptable: false,
+        }),
+      ]),
+    );
+
+    const repairAdoption = await recoveryDb.adoptRecoveryCandidate(
+      repairCandidates[0]!,
+    );
+    expect(repairAdoption.archiveKey).not.toBe(initialAdoption.archiveKey);
+    expect(await recoveryDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await recoveryDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: idbMetadata,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+
+    vi.resetModules();
+    const restartedDb = await importFreshDb();
+    expect(await restartedDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await restartedDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: idbMetadata,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+  });
+
+  it.each([
+    {
+      v1Phase: "copied" as const,
+      upgradedPhase: "copied",
+      upgradedCleanupStatus: "not-ready",
+    },
+    {
+      v1Phase: "cleanupPending" as const,
+      upgradedPhase: "cleanup-ready",
+      upgradedCleanupStatus: "deferred",
+    },
+  ])(
+    "repairs missing resolution evidence while preserving a disjoint upgraded v1 $v1Phase journal",
+    async ({ v1Phase, upgradedPhase, upgradedCleanupStatus }) => {
+      const idbMetadata = {
+        複合復旧イベント: { generation: "indexed-db" },
+      };
+      const legacyMetadataSource = JSON.stringify({
+        複合復旧イベント: { generation: "legacy" },
+      });
+      const legacyLists = {
+        別対象イベント: [{ id: "separate-list-item", title: "別対象の頒布物" }],
+      };
+      const legacyListsSource = JSON.stringify(legacyLists);
+      const db = await importFreshDb();
+      await db.saveEventMetadata(idbMetadata);
+      localStorage.setItem("eventMetadata", legacyMetadataSource);
+
+      const initialConflict = await db.migrateFromLocalStorage();
+      expect(initialConflict.status).toBe("recovery-required");
+      if (initialConflict.status !== "recovery-required") {
+        throw new Error("Expected the initial explicit-adoption conflict.");
+      }
+      const initialCandidate = initialConflict.recoveryBundle.candidates.find(
+        ({ adoptable, storeName, migrationConflict }) =>
+          adoptable === true &&
+          storeName === "eventMetadata" &&
+          migrationConflict?.legacyKey === "eventMetadata",
+      );
+      if (!initialCandidate) {
+        throw new Error("Missing the initial scoped recovery candidate.");
+      }
+      const initialAdoption = await db.adoptRecoveryCandidate(initialCandidate);
+
+      localStorage.setItem("eventShoppingLists", legacyListsSource);
+      expect(await db.migrateFromLocalStorage()).toMatchObject({
+        status: "cleanup-pending",
+        migratedKeys: ["eventShoppingLists"],
+      });
+      expect(await readMigrationJournalV2()).toMatchObject({
+        phase: "cleanup-ready",
+        entries: [
+          expect.objectContaining({
+            legacyKey: "eventShoppingLists",
+            rawValue: legacyListsSource,
+          }),
+        ],
+      });
+      await downgradeCurrentMigrationJournalToV1(v1Phase);
+
+      vi.resetModules();
+      const compatibleDb = await importFreshDb();
+      expect(await compatibleDb.migrateFromLocalStorage()).toMatchObject({
+        status: "cleanup-pending",
+        dataMigrationStatus: "verified",
+        cleanupStatus: "deferred",
+      });
+      expect(await readMigrationJournalV2()).toMatchObject({
+        schemaVersion: 2,
+        phase: "cleanup-ready",
+        cleanupStatus: "deferred",
+        entries: [
+          expect.objectContaining({
+            legacyKey: "eventShoppingLists",
+            rawValue: legacyListsSource,
+          }),
+        ],
+      });
+      await downgradeCurrentMigrationJournalToV1(v1Phase);
+      await deleteRawRecordAtExistingVersion(
+        "syncQueue",
+        initialAdoption.archiveKey,
+      );
+
+      vi.resetModules();
+      const recoveryDb = await importFreshDb();
+      const repairConflict = await recoveryDb.migrateFromLocalStorage();
+
+      expect(repairConflict.status).toBe("recovery-required");
+      if (repairConflict.status !== "recovery-required") {
+        throw new Error("Expected missing resolution evidence recovery.");
+      }
+      const journalAfterUpgrade = await readMigrationJournalV2();
+      expect(journalAfterUpgrade).toMatchObject({
+        schemaVersion: 2,
+        phase: upgradedPhase,
+        cleanupStatus: upgradedCleanupStatus,
+        entries: [
+          expect.objectContaining({
+            legacyKey: "eventShoppingLists",
+            rawValue: legacyListsSource,
+          }),
+        ],
+      });
+      const repairCandidate = repairConflict.recoveryBundle.candidates.find(
+        ({ adoptable, storeName, migrationConflict }) =>
+          adoptable === true &&
+          storeName === "eventMetadata" &&
+          migrationConflict?.legacyKey === "eventMetadata",
+      );
+      if (!repairCandidate) {
+        throw new Error("Missing the scoped resolution repair candidate.");
+      }
+
+      const repairAdoption =
+        await recoveryDb.adoptRecoveryCandidate(repairCandidate);
+      expect(repairAdoption.archiveKey).not.toBe(initialAdoption.archiveKey);
+      expect(
+        await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+      ).toEqual(journalAfterUpgrade);
+      expect(await recoveryDb.migrateFromLocalStorage()).toMatchObject({
+        status: "cleanup-pending",
+        dataMigrationStatus: "verified",
+        cleanupStatus: "deferred",
+      });
+      expect(await recoveryDb.loadEventMetadata()).toMatchObject({
+        status: "ok",
+        data: idbMetadata,
+      });
+      expect(await recoveryDb.loadEventLists()).toMatchObject({
+        status: "ok",
+        data: legacyLists,
+      });
+      expect(localStorage.getItem("eventMetadata")).toBe(legacyMetadataSource);
+      expect(localStorage.getItem("eventShoppingLists")).toBe(
+        legacyListsSource,
+      );
+
+      vi.resetModules();
+      const restartedDb = await importFreshDb();
+      expect(await restartedDb.migrateFromLocalStorage()).toMatchObject({
+        status: "cleanup-pending",
+        dataMigrationStatus: "verified",
+        cleanupStatus: "deferred",
+      });
+      expect(await restartedDb.loadEventMetadata()).toMatchObject({
+        status: "ok",
+        data: idbMetadata,
+      });
+      expect(await restartedDb.loadEventLists()).toMatchObject({
+        status: "ok",
+        data: legacyLists,
+      });
+      expect(localStorage.getItem("eventMetadata")).toBe(legacyMetadataSource);
+      expect(localStorage.getItem("eventShoppingLists")).toBe(
+        legacyListsSource,
+      );
+    },
+  );
+
+  it("stops startup when legacy data changes while an explicit resolution is being validated", async () => {
+    const idbMetadata = {
+      解決競合イベント: { generation: "indexed-db" },
+    };
+    const capturedLegacySource = JSON.stringify({
+      解決競合イベント: { generation: "legacy-captured" },
+    });
+    const currentLegacySource = JSON.stringify({
+      解決競合イベント: { generation: "legacy-concurrent-update" },
+    });
+    const db = await importFreshDb();
+    await db.saveEventMetadata(idbMetadata);
+    localStorage.setItem("eventMetadata", capturedLegacySource);
+
+    const firstMigration = await db.migrateFromLocalStorage();
+    expect(firstMigration.status).toBe("recovery-required");
+    if (firstMigration.status !== "recovery-required") {
+      throw new Error("Expected a resolution validation migration conflict.");
+    }
+    const idbCandidate = firstMigration.recoveryBundle.candidates.find(
+      ({ source, role, storeName }) =>
+        source === "indexedDB" &&
+        role === "app-payload" &&
+        storeName === "eventMetadata",
+    );
+    if (!idbCandidate) {
+      throw new Error("Missing resolution validation candidate.");
+    }
+    await db.adoptRecoveryCandidate(idbCandidate);
+
+    const resolutionKey = `${LEGACY_MIGRATION_RESOLUTION_KEY_PREFIX}${encodeURIComponent(
+      "eventMetadata",
+    )}`;
+    const concurrentUpdate = mockControlRecordGetSideEffect(
+      resolutionKey,
+      () => {
+        localStorage.setItem("eventMetadata", currentLegacySource);
+      },
+    );
+    const resumedMigration = await db.migrateFromLocalStorage();
+
+    expect(concurrentUpdate.getInjectionCount()).toBe(1);
+    expect(resumedMigration.status).toBe("recovery-required");
+    if (resumedMigration.status !== "recovery-required") {
+      throw new Error("Expected concurrent legacy update recovery.");
+    }
+    expect(resumedMigration.recoveryBundle.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "legacy-localStorage",
+          rawValue: capturedLegacySource,
+        }),
+        expect.objectContaining({
+          source: "legacy-localStorage",
+          rawValue: currentLegacySource,
+        }),
+      ]),
+    );
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(idbMetadata);
+    expect(localStorage.getItem("eventMetadata")).toBe(currentLegacySource);
+  });
+
+  it("migrates other legacy targets after one conflicting source is explicitly resolved", async () => {
+    const idbMetadata = {
+      複数原本競合イベント: { generation: "indexed-db" },
+    };
+    const legacyMetadata = {
+      複数原本競合イベント: { generation: "legacy" },
+    };
+    const legacyLists = {
+      複数原本競合イベント: [
+        { id: "resolved-sibling-item", title: "別対象は移行する" },
+      ],
+    };
+    const metadataSource = JSON.stringify(legacyMetadata);
+    const listSource = JSON.stringify(legacyLists);
+    const db = await importFreshDb();
+    await db.saveEventMetadata(idbMetadata);
+    localStorage.setItem("eventMetadata", metadataSource);
+    localStorage.setItem("eventShoppingLists", listSource);
+
+    const firstMigration = await db.migrateFromLocalStorage();
+    expect(firstMigration.status).toBe("recovery-required");
+    if (firstMigration.status !== "recovery-required") {
+      throw new Error("Expected a multi-target migration conflict.");
+    }
+    const idbCandidate = firstMigration.recoveryBundle.candidates.find(
+      ({ source, role, storeName }) =>
+        source === "indexedDB" &&
+        role === "app-payload" &&
+        storeName === "eventMetadata",
+    );
+    if (!idbCandidate) {
+      throw new Error("Missing multi-target IndexedDB candidate.");
+    }
+    await db.adoptRecoveryCandidate(idbCandidate);
+
+    const resumedMigration = await db.migrateFromLocalStorage();
+    expect(resumedMigration).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+      migratedKeys: ["eventShoppingLists"],
+    });
+    expect(await db.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: idbMetadata,
+    });
+    expect(await db.loadEventLists()).toMatchObject({
+      status: "ok",
+      data: legacyLists,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(metadataSource);
+    expect(localStorage.getItem("eventShoppingLists")).toBe(listSource);
+
+    vi.resetModules();
+    const restartedDb = await importFreshDb();
+    expect(await restartedDb.migrateFromLocalStorage()).toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await restartedDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: idbMetadata,
+    });
+    expect(await restartedDb.loadEventLists()).toMatchObject({
+      status: "ok",
+      data: legacyLists,
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(metadataSource);
+    expect(localStorage.getItem("eventShoppingLists")).toBe(listSource);
   });
 
   it("preserves validation recovery candidates through a legacy migration failure", async () => {
     const metadata = {
       checkpoint候補伝搬イベント: { generation: "committed" },
+    };
+    const legacyMetadata = {
+      checkpoint候補伝搬イベント: { generation: "conflicting-legacy" },
     };
     const db = await importFreshDb();
     await db.saveEventMetadata(metadata);
@@ -2010,7 +3115,7 @@ describe("db.migrateFromLocalStorage resilience", () => {
     await writeRawRecordAtExistingVersion("syncQueue", checkpointKey, {
       corrupted: true,
     });
-    const legacySource = JSON.stringify(metadata);
+    const legacySource = JSON.stringify(legacyMetadata);
     localStorage.setItem("eventMetadata", legacySource);
 
     const migration = await db.migrateFromLocalStorage();
@@ -2019,12 +3124,17 @@ describe("db.migrateFromLocalStorage resilience", () => {
     if (migration.status !== "recovery-required") {
       throw new Error("Expected checkpoint migration recovery.");
     }
-    const payloadCandidate = migration.recoveryBundle.candidates.find(
-      ({ source, role, storeName }) =>
-        source === "indexedDB" &&
-        role === "app-payload" &&
-        storeName === "eventMetadata",
+    const adoptableCandidates = migration.recoveryBundle.candidates.filter(
+      ({ adoptable }) => adoptable === true,
     );
+    expect(adoptableCandidates).toHaveLength(1);
+    expect(
+      adoptableCandidates.every(
+        ({ migrationConflict }) =>
+          migrationConflict?.legacyKey === "eventMetadata",
+      ),
+    ).toBe(true);
+    const payloadCandidate = adoptableCandidates[0];
     if (!payloadCandidate) {
       throw new Error("Missing propagated IndexedDB payload candidate.");
     }
@@ -2032,6 +3142,9 @@ describe("db.migrateFromLocalStorage resilience", () => {
       adoptable: true,
       revision,
       payload: metadata,
+      migrationConflict: {
+        legacyKey: "eventMetadata",
+      },
     });
     expect(migration.recoveryBundle.candidates).toEqual(
       expect.arrayContaining([
@@ -2044,6 +3157,19 @@ describe("db.migrateFromLocalStorage resilience", () => {
         }),
       ]),
     );
+    const unscopedPayloadCandidate = migration.recoveryBundle.candidates.find(
+      ({ source, role, storeName, migrationConflict }) =>
+        source === "indexedDB" &&
+        role === "app-payload" &&
+        storeName === "eventMetadata" &&
+        migrationConflict === undefined,
+    );
+    expect(unscopedPayloadCandidate).toMatchObject({
+      source: "indexedDB",
+      role: "app-payload",
+      storeName: "eventMetadata",
+      adoptable: false,
+    });
 
     await db.adoptRecoveryCandidate(payloadCandidate);
     await expect(db.migrateFromLocalStorage()).resolves.toMatchObject({
@@ -2051,6 +3177,19 @@ describe("db.migrateFromLocalStorage resilience", () => {
       dataMigrationStatus: "verified",
     });
     expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(metadata);
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+
+    vi.resetModules();
+    const restartedDb = await importFreshDb();
+    await expect(restartedDb.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(await restartedDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: metadata,
+    });
     expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
   });
 
