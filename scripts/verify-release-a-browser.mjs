@@ -738,6 +738,26 @@ const writeArtifactMarker = async (artifactId) => {
   return (await readArtifactMarker()) === artifactId;
 };
 
+const waitForRollbackSavedEventCommit = async (client, timeoutMs = 20_000) => {
+  const deadline = Date.now() + timeoutMs;
+  let lastEvidence = null;
+  while (Date.now() < deadline) {
+    lastEvidence = await collectRollbackDatabaseEvidence(client);
+    if (
+      lastEvidence.rollbackSavedEvent.present &&
+      lastEvidence.rollbackSavedEvent.itemCount >= 1
+    ) {
+      return;
+    }
+    await delay(100);
+  }
+  throw new Error(
+    `Rollback normal save was not committed to IndexedDB. Last evidence: ${JSON.stringify(
+      lastEvidence?.rollbackSavedEvent ?? null,
+    )}`,
+  );
+};
+
 const createRollbackSavedEventThroughUi = async (client) => {
   const eventName = JSON.stringify(ROLLBACK_SAVE_EVENT_NAME);
   const opened = await evaluate(
@@ -761,7 +781,7 @@ const createRollbackSavedEventThroughUi = async (client) => {
     `Boolean(document.querySelector("#eventName") && document.querySelector("#circles"))`,
     "rollback new-list form",
   );
-  const submitted = await evaluate(
+  const populated = await evaluate(
     client,
     `(() => {
       const setValue = (selector, value) => {
@@ -789,11 +809,64 @@ const createRollbackSavedEventThroughUi = async (client) => {
       if (!values.every(([selector, value]) => setValue(selector, value))) {
         return false;
       }
-      document.querySelector("#eventName")?.form?.requestSubmit();
       return true;
     })()`,
   );
-  assert(submitted, "Rollback UI could not submit the new-list form.");
+  assert(populated, "Rollback UI could not populate the new-list form.");
+  await evaluate(
+    client,
+    `new Promise((resolve) =>
+      setTimeout(() => setTimeout(() => resolve(true), 0), 0),
+    )`,
+  );
+  await waitForExpression(
+    client,
+    `[
+      ["#eventName", ${eventName}],
+      ["#circles", "Rollback Circle"],
+      ["#event-dates", "1日目"],
+      ["#blocks", "A"],
+      ["#numbers", "01a"],
+      ["#titles", "Rollback Saved Item"],
+      ["#prices", "100"],
+    ].every(
+      ([selector, value]) => document.querySelector(selector)?.value === value,
+    )`,
+    "rollback new-list controlled values",
+  );
+  const submission = await evaluate(
+    client,
+    `(() => {
+      const form = document.querySelector("#eventName")?.form;
+      const submitButton = form?.querySelector('button[type="submit"]');
+      if (!form || !submitButton || !form.checkValidity()) {
+        return { submitted: false, alertMessages: [] };
+      }
+      const alertMessages = [];
+      const originalAlert = window.alert;
+      window.alert = (message) => {
+        alertMessages.push(String(message));
+      };
+      try {
+        form.requestSubmit(submitButton);
+        return { submitted: true, alertMessages };
+      } finally {
+        window.alert = originalAlert;
+      }
+    })()`,
+  );
+  assert(
+    submission?.submitted,
+    "Rollback UI could not submit the new-list form.",
+  );
+  assert(
+    submission.alertMessages.some((message) =>
+      message.includes("items imported into a new event"),
+    ),
+    `Rollback UI did not reach its successful import path. Alerts: ${JSON.stringify(
+      submission.alertMessages,
+    )}`,
+  );
   await waitForExpression(
     client,
     `document.body.textContent?.includes(${eventName})`,
@@ -807,6 +880,7 @@ const createRollbackSavedEventThroughUi = async (client) => {
     )`,
     "rollback normal save completion",
   );
+  await waitForRollbackSavedEventCommit(client);
 };
 
 const assert = (condition, message) => {
