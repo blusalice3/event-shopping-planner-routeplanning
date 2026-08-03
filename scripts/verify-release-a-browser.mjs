@@ -368,12 +368,23 @@ const reload = async (client) => {
 };
 
 const evaluate = async (client, expression) => {
-  const response = await client.send("Runtime.evaluate", {
-    expression,
-    awaitPromise: true,
-    returnByValue: true,
-    userGesture: true,
-  });
+  let response;
+  try {
+    response = await client.send("Runtime.evaluate", {
+      expression,
+      awaitPromise: true,
+      returnByValue: true,
+      userGesture: true,
+    });
+  } catch (error) {
+    const expressionLabel = expression
+      .replace(/\s+/g, " ")
+      .trim()
+      .slice(0, 160);
+    throw new Error(
+      `${error instanceof Error ? error.message : "Browser evaluation failed."} Expression: ${expressionLabel}`,
+    );
+  }
   if (response.exceptionDetails) {
     throw new Error(
       response.exceptionDetails.exception?.description ??
