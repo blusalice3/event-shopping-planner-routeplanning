@@ -211,6 +211,9 @@ describe("db.cleanupLegacyPersistenceSources Release B", () => {
     vi.stubEnv("VITE_PERSISTENCE_RELEASE_CHANNEL", "release-a");
     vi.stubEnv("VITE_PERSISTENCE_LEGACY_CLEANUP", "true");
     const db = await prepareMigration();
+    const cleanupBefore = (
+      await import("./persistenceReleaseAMetrics")
+    ).getPersistenceReleaseAMetricsSnapshot().counters.cleanup;
 
     const result = await db.cleanupLegacyPersistenceSources(
       createManualSafetyRequest(),
@@ -225,6 +228,15 @@ describe("db.cleanupLegacyPersistenceSources Release B", () => {
     expect(localStorage.getItem(EVENT_METADATA_KEY)).toBe(
       EVENT_METADATA_SOURCE,
     );
+    const cleanupAfter = (
+      await import("./persistenceReleaseAMetrics")
+    ).getPersistenceReleaseAMetricsSnapshot().counters.cleanup;
+    expect(cleanupAfter.attempted - cleanupBefore.attempted).toBe(1);
+    expect(cleanupAfter.blocked - cleanupBefore.blocked).toBe(1);
+    expect(
+      cleanupAfter.keyConfirmedRemoved - cleanupBefore.keyConfirmedRemoved,
+    ).toBe(0);
+    expect(cleanupAfter.completed - cleanupBefore.completed).toBe(0);
   });
 
   it("keeps the production build flag OFF despite a runtime override attempt", async () => {
@@ -358,6 +370,31 @@ describe("db.cleanupLegacyPersistenceSources Release B", () => {
       expect(event).not.toHaveProperty("rawValue");
       expect(event).not.toHaveProperty("error");
     });
+  });
+
+  it("records a confirmed removal centrally without a caller metric sink", async () => {
+    const db = await prepareMigration();
+    const before = (
+      await import("./persistenceReleaseAMetrics")
+    ).getPersistenceReleaseAMetricsSnapshot().counters.cleanup;
+
+    const result = await db.cleanupLegacyPersistenceSources(
+      createManualSafetyRequest(),
+    );
+
+    expect(result).toEqual({
+      status: "completed",
+      mode: "manual",
+      removedKeys: [EVENT_METADATA_KEY],
+    });
+    const after = (
+      await import("./persistenceReleaseAMetrics")
+    ).getPersistenceReleaseAMetricsSnapshot().counters.cleanup;
+    expect(after.attempted - before.attempted).toBe(1);
+    expect(after.taskStarted - before.taskStarted).toBe(1);
+    expect(after.keyConfirmedRemoved - before.keyConfirmedRemoved).toBe(1);
+    expect(after.completed - before.completed).toBe(1);
+    expect(localStorage.getItem(EVENT_METADATA_KEY)).toBeNull();
   });
 
   it("completes a syncQueue-only journal while retaining its archived source", async () => {

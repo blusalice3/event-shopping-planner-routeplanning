@@ -10,9 +10,13 @@ import {
   createPersistenceMetadataKey,
   createRuntimeFallbackCandidate,
   createRuntimeFallbackKey,
+  parseRuntimeFallbackCandidate,
   serializeRuntimeFallbackCandidate,
+  serializeStartupRecoveryBundle,
   type StartupRecoveryCandidate,
 } from "./persistenceResilience";
+import { exportStartupRecoveryBundle } from "./persistenceRecoveryExport";
+import d2389a0OrphanFixture from "../test/fixtures/d2389a0-orphan-runtime-fallback.json";
 
 const DATABASE_NAME = "EventShoppingPlannerDB";
 const DATA_KEY = "data";
@@ -486,5 +490,195 @@ describe("explicit recovery candidate adoption", () => {
       });
     }
     expect(localStorage.getItem("eventMetadata")).toBeNull();
+  });
+});
+
+describe("d2389a0 orphan recovery E2E fixture", () => {
+  it("detects the orphan, exports JSON, and adopts only the explicitly selected live candidate", async () => {
+    const committed = {
+      d2389a0復旧イベント: { generation: "indexed-db-root" },
+    };
+    const orphanPayload = {
+      d2389a0復旧イベント: { generation: "orphan-child-to-adopt" },
+    };
+    const initialDb = await importFreshDb();
+    await initialDb.saveEventMetadata(committed);
+    const committedRevision = await readCurrentRevision("eventMetadata");
+    const deletedParentKey = createRuntimeFallbackKey(
+      "eventMetadata",
+      DATA_KEY,
+      d2389a0OrphanFixture.deletedParentRevision,
+    );
+    const orphanCandidate = parseRuntimeFallbackCandidate(
+      d2389a0OrphanFixture.rawValue,
+      {
+        storeName: "eventMetadata",
+        key: DATA_KEY,
+        revision: d2389a0OrphanFixture.orphanRevision,
+      },
+    );
+    const orphanSource = {
+      candidate: orphanCandidate,
+      storageKey: d2389a0OrphanFixture.orphanStorageKey,
+      rawValue: d2389a0OrphanFixture.rawValue,
+    };
+    expect(d2389a0OrphanFixture.sourceCommit).toBe(
+      "d2389a02363176ba8354c4562f1a669a0b15dab9",
+    );
+    expect(deletedParentKey).toBe(d2389a0OrphanFixture.deletedParentStorageKey);
+    expect(
+      createRuntimeFallbackKey(
+        orphanCandidate.storeName,
+        orphanCandidate.key,
+        orphanCandidate.revision,
+      ),
+    ).toBe(orphanSource.storageKey);
+    expect(orphanCandidate).toMatchObject({
+      baseRevision: d2389a0OrphanFixture.deletedParentRevision,
+      digest: { value: d2389a0OrphanFixture.orphanDigest },
+      payload: orphanPayload,
+    });
+    localStorage.setItem(orphanSource.storageKey, orphanSource.rawValue);
+    expect(localStorage.getItem(deletedParentKey)).toBeNull();
+
+    vi.resetModules();
+    const recoveryDb = await importFreshDb();
+    const loaded = await recoveryDb.loadEventMetadata();
+
+    expect(loaded).toMatchObject({
+      status: "conflict",
+      data: null,
+      recoveryBundle: {
+        candidates: expect.arrayContaining([
+          expect.objectContaining({
+            source: "runtime-fallback",
+            role: "app-payload",
+            adoptable: true,
+            sourceKey: orphanSource.storageKey,
+            revision: orphanSource.candidate.revision,
+            digest: orphanSource.candidate.digest.value,
+          }),
+        ]),
+      },
+    });
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(committed);
+    expect(await readCurrentRevision("eventMetadata")).toBe(committedRevision);
+    expect(localStorage.getItem(orphanSource.storageKey)).toBe(
+      orphanSource.rawValue,
+    );
+    if (!loaded.recoveryBundle) {
+      throw new Error("Missing d2389a0 recovery bundle.");
+    }
+    const selectedCandidate = loaded.recoveryBundle.candidates.find(
+      ({ sourceKey }) => sourceKey === orphanSource.storageKey,
+    );
+    if (!selectedCandidate) {
+      throw new Error("Missing d2389a0 orphan candidate.");
+    }
+
+    let exportedJson = "";
+    const download = vi.fn();
+    const exportResult = exportStartupRecoveryBundle(loaded.recoveryBundle, {
+      serialize: (bundle) => {
+        exportedJson = serializeStartupRecoveryBundle(bundle);
+        return exportedJson;
+      },
+      download,
+      now: () => new Date("2026-08-03T02:03:04.567Z"),
+    });
+
+    expect(exportResult).toEqual({
+      status: "completed",
+      fileName: "event-shopping-planner-recovery-2026-08-03T02-03-04-567Z.json",
+      byteSize: expect.any(Number),
+    });
+    expect(
+      exportResult.status === "completed" && exportResult.byteSize,
+    ).toBeGreaterThan(0);
+    expect(download).toHaveBeenCalledTimes(1);
+    const [exportedBlob] = download.mock.calls[0] as [Blob, string];
+    expect(exportedBlob).toBeInstanceOf(Blob);
+    expect(exportedBlob.size).toBe(
+      exportResult.status === "completed" ? exportResult.byteSize : undefined,
+    );
+    const exportedBundle = JSON.parse(exportedJson) as {
+      candidates?: StartupRecoveryCandidate[];
+    };
+    expect(exportedBundle.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          sourceKey: orphanSource.storageKey,
+          revision: orphanSource.candidate.revision,
+          rawValue: orphanSource.rawValue,
+          payload: orphanPayload,
+        }),
+      ]),
+    );
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(committed);
+    expect(localStorage.getItem(orphanSource.storageKey)).toBe(
+      orphanSource.rawValue,
+    );
+
+    const adoption = await recoveryDb.adoptRecoveryCandidate(selectedCandidate);
+
+    expect(adoption).toMatchObject({
+      status: "adopted",
+      storeName: "eventMetadata",
+      key: DATA_KEY,
+      archiveKey: expect.stringMatching(
+        /^__esp_internal__:recovery-adoption:v1:/,
+      ),
+    });
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      orphanPayload,
+    );
+    expect(await recoveryDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: orphanPayload,
+    });
+    expect(localStorage.getItem(orphanSource.storageKey)).toBe(
+      orphanSource.rawValue,
+    );
+    expect(await readRawRecord("syncQueue", adoption.archiveKey)).toMatchObject(
+      {
+        kind: "event-shopping-planner-recovery-adoption-archive",
+        candidate: {
+          sourceKey: orphanSource.storageKey,
+          revision: orphanSource.candidate.revision,
+        },
+        chosenSourceEvidence: {
+          sourceKey: orphanSource.storageKey,
+          rawValue: orphanSource.rawValue,
+          payload: orphanPayload,
+        },
+      },
+    );
+    expect(
+      await readRawRecord(
+        "syncQueue",
+        createPersistenceCheckpointKey("eventMetadata", DATA_KEY),
+      ),
+    ).toMatchObject({
+      absorbedCandidates: expect.arrayContaining([
+        expect.objectContaining({
+          revision: orphanSource.candidate.revision,
+          digest: orphanSource.candidate.digest,
+        }),
+      ]),
+    });
+
+    const savedAfterAdoption = {
+      d2389a0復旧イベント: { generation: "saved-after-adoption" },
+    };
+    await expect(
+      recoveryDb.saveEventMetadata(savedAfterAdoption),
+    ).resolves.toBeUndefined();
+    expect(await recoveryDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: savedAfterAdoption,
+    });
+    expect(localStorage.getItem(orphanSource.storageKey)).toBe(
+      orphanSource.rawValue,
+    );
   });
 });

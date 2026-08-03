@@ -158,6 +158,46 @@ describe("Release A persistence metrics", () => {
     expect(successfulSink).toHaveBeenCalledTimes(1);
   });
 
+  it("records only closed cleanup outcomes and reasons", () => {
+    const received: PersistenceReleaseAMetricEvent[] = [];
+    const recorder = createPersistenceReleaseAMetricRecorder({
+      sink: (event) => {
+        received.push(event);
+      },
+    });
+
+    expect(
+      recorder.record({
+        version: 1,
+        name: "cleanup",
+        outcome: "physical-deferred",
+        mode: "manual",
+        reason: "legacy-source-remove-failed",
+        key: "eventMetadata",
+        payload: "利用者データ",
+      } as unknown as PersistenceReleaseAMetricEvent),
+    ).toBe(true);
+    expect(received).toEqual([
+      {
+        version: 1,
+        name: "cleanup",
+        outcome: "physical-deferred",
+        mode: "manual",
+        reason: "legacy-source-remove-failed",
+      },
+    ]);
+    expect(recorder.snapshot().counters.cleanup.physicalDeferred).toBe(1);
+    expect(
+      recorder.record({
+        version: 1,
+        name: "cleanup",
+        outcome: "physical-deferred",
+        mode: "manual",
+        reason: "raw-private-reason",
+      } as unknown as PersistenceReleaseAMetricEvent),
+    ).toBe(false);
+  });
+
   it("resets the bounded aggregate without removing the durable record", () => {
     const storage = new MemoryStorage();
     const recorder = createPersistenceReleaseAMetricRecorder({ storage });

@@ -168,6 +168,7 @@ export type RuntimeFallbackReconciliation<T = unknown> =
         | "duplicate-revision"
         | "same-revision-different-payload"
         | "same-revision-different-metadata"
+        | "checkpoint-revision-mismatch"
         | "mixed-record"
         | "unknown-parent"
         | "branch"
@@ -620,6 +621,18 @@ export function isPersistenceCheckpoint(
       return false;
     }
     absorbedRevisions.add(candidate.revision);
+    if (
+      candidate.revision === value.committedRoot.revision &&
+      (candidate.baseRevision !== value.committedRoot.baseRevision ||
+        candidate.digest.algorithm !== value.committedRoot.digest.algorithm ||
+        candidate.digest.canonicalization !==
+          value.committedRoot.digest.canonicalization ||
+        candidate.digest.value !== value.committedRoot.digest.value ||
+        candidate.writerId !== value.committedRoot.writerId ||
+        candidate.createdAt !== value.committedRoot.committedAt)
+    ) {
+      return false;
+    }
   }
   return true;
 }
@@ -765,9 +778,29 @@ export function serializeRuntimeFallbackCandidate(
 const candidateIdentity = (candidate: RuntimeFallbackCandidate): string =>
   canonicalStringifyPersistencePayload(candidate);
 
+const persistenceDigestDescriptorsMatch = (
+  current: PersistenceDigestDescriptor,
+  expected: PersistenceDigestDescriptor,
+): boolean =>
+  current.algorithm === expected.algorithm &&
+  current.canonicalization === expected.canonicalization &&
+  current.value === expected.value;
+
+const checkpointDescriptorMatchesCandidate = (
+  descriptor: PersistenceCheckpointAbsorbedCandidate,
+  candidate: RuntimeFallbackCandidate,
+): boolean =>
+  descriptor.schemaVersion === candidate.schemaVersion &&
+  descriptor.revision === candidate.revision &&
+  descriptor.baseRevision === candidate.baseRevision &&
+  persistenceDigestDescriptorsMatch(descriptor.digest, candidate.digest) &&
+  descriptor.writerId === candidate.writerId &&
+  descriptor.createdAt === candidate.createdAt;
+
 export function reconcileRuntimeFallbackCandidates<T>(
   current: RuntimeFallbackCurrentRevision,
   candidates: readonly RuntimeFallbackCandidate<T>[],
+  checkpointCandidates: readonly PersistenceCheckpointAbsorbedCandidate[] = [],
 ): RuntimeFallbackReconciliation<T> {
   const recordIdentities = new Set(
     candidates.map(
@@ -801,12 +834,34 @@ export function reconcileRuntimeFallbackCandidates<T>(
   }
 
   const staleRevisions = new Set<string>();
+  const checkpointCandidatesByRevision = new Map(
+    checkpointCandidates.map((candidate) => [candidate.revision, candidate]),
+  );
+  for (const candidate of byRevision.values()) {
+    const checkpointCandidate = checkpointCandidatesByRevision.get(
+      candidate.revision,
+    );
+    if (!checkpointCandidate) continue;
+    if (!checkpointDescriptorMatchesCandidate(checkpointCandidate, candidate)) {
+      return {
+        status: "conflict",
+        reason: "checkpoint-revision-mismatch",
+        conflictingCandidates: [candidate],
+        staleCandidates: [],
+      };
+    }
+    staleRevisions.add(candidate.revision);
+  }
+
   if (current.revision && byRevision.has(current.revision)) {
     const duplicateOfCurrent = byRevision.get(current.revision);
     if (
       duplicateOfCurrent &&
       (!current.digest ||
-        duplicateOfCurrent.digest.value !== current.digest.value)
+        !persistenceDigestDescriptorsMatch(
+          duplicateOfCurrent.digest,
+          current.digest,
+        ))
     ) {
       return {
         status: "conflict",
@@ -818,10 +873,10 @@ export function reconcileRuntimeFallbackCandidates<T>(
     if (
       duplicateOfCurrent &&
       (duplicateOfCurrent.baseRevision !== current.baseRevision ||
-        (current.writerId !== undefined &&
-          duplicateOfCurrent.writerId !== current.writerId) ||
-        (current.createdAt !== undefined &&
-          duplicateOfCurrent.createdAt !== current.createdAt))
+        current.writerId === undefined ||
+        duplicateOfCurrent.writerId !== current.writerId ||
+        current.createdAt === undefined ||
+        duplicateOfCurrent.createdAt !== current.createdAt)
     ) {
       return {
         status: "conflict",

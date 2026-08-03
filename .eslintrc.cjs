@@ -51,5 +51,12 @@ module.exports = {
         node: true,
       },
     },
+    {
+      files: ["api/**/*.mjs", "scripts/**/*.mjs", "vite.config.ts"],
+      env: {
+        browser: false,
+        node: true,
+      },
+    },
   ],
 };

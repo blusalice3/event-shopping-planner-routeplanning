@@ -1,0 +1,61 @@
+{
+  "sourceCommit": "d2389a02363176ba8354c4562f1a669a0b15dab9",
+  "checkpointPresent": false,
+  "payload": {
+    "旧v1実fixtureイベント": {
+      "generation": "migrated-without-checkpoint"
+    }
+  },
+  "legacySource": "{\"旧v1実fixtureイベント\":{\"generation\":\"migrated-without-checkpoint\"}}",
+  "targetRevision": "legacy-v1-no-checkpoint-revision",
+  "metadata": {
+    "kind": "event-shopping-planner-persistence-metadata",
+    "version": 1,
+    "storeName": "eventMetadata",
+    "key": "data",
+    "revision": "legacy-v1-no-checkpoint-revision",
+    "baseRevision": null,
+    "payloadDigest": {
+      "algorithm": "SHA-256",
+      "canonicalization": "esp-json-v1",
+      "value": "e85adf761e8c5b242b19b96926dbb6b7a5c61d59dff10560496388a307805ff1"
+    },
+    "payloadFingerprint": {
+      "algorithm": "FNV-1A-64",
+      "canonicalization": "esp-json-v1",
+      "canonicalLength": 64,
+      "value": "4b644677a09ddecf"
+    },
+    "writerId": "legacy-v1-writer",
+    "committedAt": "2026-08-03T00:00:00.000Z"
+  },
+  "journal": {
+    "kind": "event-shopping-planner-legacy-migration",
+    "schemaVersion": 1,
+    "sessionId": "legacy-v1-no-checkpoint-session",
+    "ownerId": "legacy-v1-owner",
+    "phase": "cleanupPending",
+    "createdAt": "2026-08-03T00:00:00.000Z",
+    "updatedAt": "2026-08-03T00:00:00.000Z",
+    "entries": [
+      {
+        "legacyKey": "eventMetadata",
+        "storeName": "eventMetadata",
+        "rawValue": "{\"旧v1実fixtureイベント\":{\"generation\":\"migrated-without-checkpoint\"}}",
+        "rawDigest": {
+          "algorithm": "SHA-256",
+          "canonicalization": "esp-json-v1",
+          "value": "15aa94933f196ab27be7d48d07de3f2da5d75da5fbba4f5181f642b866032e42"
+        },
+        "payloadDigest": {
+          "algorithm": "SHA-256",
+          "canonicalization": "esp-json-v1",
+          "value": "e85adf761e8c5b242b19b96926dbb6b7a5c61d59dff10560496388a307805ff1"
+        },
+        "targetRevision": "legacy-v1-no-checkpoint-revision",
+        "mapKeys": [],
+        "cleanupStatus": "retained"
+      }
+    ]
+  }
+}

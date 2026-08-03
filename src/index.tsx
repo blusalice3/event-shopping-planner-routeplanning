@@ -3,6 +3,9 @@ import ReactDOM from "react-dom/client";
 import App from "./App";
 import { SpaceNavigatorProvider } from "./features/space-navigation/SpaceNavigatorContext";
 import { SpaceNavigatorHost } from "./features/space-navigation/components/SpaceNavigatorHost";
+import { installPersistenceReleaseAMetricsBackend } from "./utils/persistenceReleaseAMetricsBackend";
+
+installPersistenceReleaseAMetricsBackend();
 
 const rootElement = document.getElementById("root");
 if (!rootElement) {

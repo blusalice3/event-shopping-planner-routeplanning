@@ -1,4 +1,4 @@
-﻿import React, { Suspense } from "react";
+import React, { Suspense } from "react";
 import EventListScreen from "../../../components/EventListScreen";
 import ShoppingList from "../../../components/ShoppingList";
 import SortAscendingIcon from "../../../components/icons/SortAscendingIcon";

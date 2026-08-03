@@ -8,16 +8,19 @@
     "build": "tsc && vite build --mode release-a",
     "build:release-a": "npm run build && node scripts/verify-release-a-build.mjs",
     "test:release-a-browser": "node scripts/verify-release-a-browser.mjs",
+    "test:release-a-evidence": "node --test scripts/verify-release-a-evidence.test.mjs",
     "test:release-a-rollback": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rehearse-release-a-rollback.ps1",
+    "test:encoding": "node scripts/verify-encoding.mjs",
+    "verify:release-a-evidence": "node scripts/verify-release-a-evidence.mjs",
     "typecheck": "tsc --noEmit",
     "preview": "vite preview",
     "generate-icons": "pwa-assets-generator",
     "test": "vitest",
     "test:run": "vitest run",
-    "lint": "eslint \"src/**/*.{ts,tsx}\"",
-    "lint:fix": "eslint \"src/**/*.{ts,tsx}\" --fix",
-    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md,css}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md,css}\""
+    "lint": "eslint \"src/**/*.{ts,tsx}\" \"api/**/*.mjs\" \"scripts/**/*.mjs\" \"vite.config.ts\"",
+    "lint:fix": "eslint \"src/**/*.{ts,tsx}\" \"api/**/*.mjs\" \"scripts/**/*.mjs\" \"vite.config.ts\" --fix",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,mjs,json,md,css}\"",
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,mjs,json,md,css}\""
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.1",

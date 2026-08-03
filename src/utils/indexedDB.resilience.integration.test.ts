@@ -6,6 +6,7 @@ import {
   IDBObjectStore as FakeIDBObjectStore,
 } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { MapDataStore } from "../types/map";
 import {
   createPersistenceCheckpointKey,
   createPersistenceDigest,
@@ -16,6 +17,7 @@ import {
   createSynchronousFingerprint,
   serializeRuntimeFallbackCandidate,
 } from "./persistenceResilience";
+import legacyJournalV1NoCheckpointFixture from "../test/fixtures/legacy-journal-v1-no-checkpoint-d2389a0.json";
 
 const DATABASE_NAME = "EventShoppingPlannerDB";
 const CURRENT_DATABASE_VERSION = 5;
@@ -241,6 +243,47 @@ async function readCurrentRevision(
     throw new Error(`Missing persistence metadata for ${storeName}:${key}.`);
   }
   return metadata.revision;
+}
+
+async function readCurrentMetadata(
+  storeName: StoreName,
+  key = DATA_KEY,
+): Promise<{
+  revision: string;
+  baseRevision: string | null;
+  payloadDigest: unknown;
+  writerId: string;
+  committedAt: string;
+}> {
+  const metadata = await readRawRecord(
+    "syncQueue",
+    createPersistenceMetadataKey(storeName, key),
+  );
+  if (
+    typeof metadata !== "object" ||
+    metadata === null ||
+    !("revision" in metadata) ||
+    typeof metadata.revision !== "string" ||
+    !("baseRevision" in metadata) ||
+    !(
+      metadata.baseRevision === null ||
+      typeof metadata.baseRevision === "string"
+    ) ||
+    !("payloadDigest" in metadata) ||
+    !("writerId" in metadata) ||
+    typeof metadata.writerId !== "string" ||
+    !("committedAt" in metadata) ||
+    typeof metadata.committedAt !== "string"
+  ) {
+    throw new Error(`Missing persistence metadata for ${storeName}:${key}.`);
+  }
+  return {
+    revision: metadata.revision,
+    baseRevision: metadata.baseRevision,
+    payloadDigest: metadata.payloadDigest,
+    writerId: metadata.writerId,
+    committedAt: metadata.committedAt,
+  };
 }
 
 async function installRuntimeFallbackCandidate({
@@ -668,6 +711,49 @@ async function downgradeCurrentMigrationJournalToV1(
     archiveKey: journal.archiveKey,
     source: journal.entries[0]?.rawValue ?? "",
   };
+}
+
+async function seedActualV1EventMetadataFixtureWithoutCheckpoint(): Promise<{
+  payload: Record<string, unknown>;
+  legacySource: string;
+  targetRevision: string;
+  checkpointKey: string;
+}> {
+  const payload = structuredClone(legacyJournalV1NoCheckpointFixture.payload);
+  const legacySource = legacyJournalV1NoCheckpointFixture.legacySource;
+  const targetRevision = legacyJournalV1NoCheckpointFixture.targetRevision;
+  const checkpointKey = createPersistenceCheckpointKey(
+    "eventMetadata",
+    DATA_KEY,
+  );
+  expect(legacyJournalV1NoCheckpointFixture.sourceCommit).toBe(
+    "d2389a02363176ba8354c4562f1a669a0b15dab9",
+  );
+  expect(legacyJournalV1NoCheckpointFixture.checkpointPresent).toBe(false);
+  expect(JSON.stringify(payload)).toBe(legacySource);
+  await expect(createPersistenceDigest(payload)).resolves.toEqual(
+    legacyJournalV1NoCheckpointFixture.metadata.payloadDigest,
+  );
+  await expect(createPersistenceDigest(legacySource)).resolves.toEqual(
+    legacyJournalV1NoCheckpointFixture.journal.entries[0]?.rawDigest,
+  );
+  expect(createSynchronousFingerprint(payload)).toEqual(
+    legacyJournalV1NoCheckpointFixture.metadata.payloadFingerprint,
+  );
+  await seedDatabase(CURRENT_DATABASE_VERSION);
+  await writeRawRecordAtExistingVersion("eventMetadata", DATA_KEY, payload);
+  await writeRawRecordAtExistingVersion(
+    "syncQueue",
+    createPersistenceMetadataKey("eventMetadata", DATA_KEY),
+    structuredClone(legacyJournalV1NoCheckpointFixture.metadata),
+  );
+  await writeRawRecordAtExistingVersion(
+    "syncQueue",
+    LEGACY_MIGRATION_JOURNAL_KEY,
+    structuredClone(legacyJournalV1NoCheckpointFixture.journal),
+  );
+  localStorage.setItem("eventMetadata", legacySource);
+  return { payload, legacySource, targetRevision, checkpointKey };
 }
 
 beforeEach(() => {
@@ -1167,6 +1253,166 @@ describe("db.migrateFromLocalStorage resilience", () => {
       expectedExistingRevision: copiedRevision,
     });
   });
+
+  it("saves immediately after resuming a verified journal without a prior load", async () => {
+    const migratedMetadata = {
+      verified即時保存イベント: { phase: "verified" },
+    };
+    const savedImmediately = {
+      verified即時保存イベント: { phase: "saved-after-resume" },
+    };
+    const legacySource = JSON.stringify(migratedMetadata);
+    localStorage.setItem("eventMetadata", legacySource);
+    const cleanupReadyFailure = mockJournalPhasePutFailure(
+      "cleanup-ready",
+      new DOMException(
+        "forced verified immediate-save fixture",
+        "UnknownError",
+      ),
+      undefined,
+      Number.POSITIVE_INFINITY,
+    );
+    const initialDb = await importFreshDb();
+    await expect(initialDb.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    expect(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ).toMatchObject({ phase: "verified" });
+    const migratedRevision = await readCurrentRevision("eventMetadata");
+
+    vi.resetModules();
+    const resumedDb = await importFreshDb();
+    await expect(resumedDb.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+    });
+    await expect(
+      resumedDb.saveEventMetadata(savedImmediately),
+    ).resolves.toBeUndefined();
+
+    const savedRevision = await readCurrentRevision("eventMetadata");
+    expect(savedRevision).not.toBe(migratedRevision);
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      savedImmediately,
+    );
+    expect(
+      await readRawRecord(
+        "syncQueue",
+        createPersistenceCheckpointKey("eventMetadata", DATA_KEY),
+      ),
+    ).toMatchObject({
+      committedRoot: {
+        revision: savedRevision,
+        baseRevision: migratedRevision,
+      },
+    });
+    expect(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ).toMatchObject({ phase: "verified" });
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+    expect(cleanupReadyFailure.getInjectionCount()).toBeGreaterThanOrEqual(2);
+  });
+
+  it.each(["copied", "verified"] as const)(
+    "saves mapData immediately after resuming a %s journal without a prior load",
+    async (resumePhase) => {
+      const eventName = `map-${resumePhase}-再開イベント`;
+      const dayOne = "1日目マップ";
+      const dayTwo = "2日目マップ";
+      const legacyMapData: MapDataStore = {
+        [eventName]: {
+          [dayOne]: makeDayMap(`${resumePhase}-migrated-1`),
+          [dayTwo]: makeDayMap(`${resumePhase}-migrated-2`),
+        },
+        [`map-${resumePhase}-空イベント`]: {},
+      };
+      const normalizedMigratedMapData: MapDataStore = {
+        [eventName]: legacyMapData[eventName],
+      };
+      const savedImmediately: MapDataStore = {
+        [eventName]: {
+          [dayOne]: makeDayMap(`${resumePhase}-saved-1`),
+          [dayTwo]: legacyMapData[eventName][dayTwo],
+        },
+      };
+      const legacySource = JSON.stringify(legacyMapData);
+      localStorage.setItem("mapData", legacySource);
+      const failure =
+        resumePhase === "copied"
+          ? mockNthTransactionFailure({
+              requiredStores: ["mapData", "syncQueue"],
+              mode: "readonly",
+              occurrence: 2,
+              failureCount: 2,
+              exactStores: true,
+              error: new DOMException(
+                "forced copied map verification fixture",
+                "UnknownError",
+              ),
+            })
+          : mockJournalPhasePutFailure(
+              "cleanup-ready",
+              new DOMException(
+                "forced verified map journal fixture",
+                "UnknownError",
+              ),
+            );
+      const initialDb = await importFreshDb();
+      await expect(initialDb.migrateFromLocalStorage()).resolves.toMatchObject({
+        status:
+          resumePhase === "copied" ? "recovery-required" : "cleanup-pending",
+      });
+      expect(
+        await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+      ).toMatchObject({ phase: resumePhase });
+      failure.spy.mockRestore();
+      const migratedRevision = await readCurrentRevision("mapData");
+
+      vi.resetModules();
+      const resumedDb = await importFreshDb();
+      await expect(resumedDb.migrateFromLocalStorage()).resolves.toMatchObject({
+        status: "cleanup-pending",
+        dataMigrationStatus: "verified",
+      });
+      await expect(
+        resumedDb.saveMapDataChanges(
+          normalizedMigratedMapData,
+          savedImmediately,
+        ),
+      ).resolves.toBeUndefined();
+
+      const savedRevision = await readCurrentRevision("mapData");
+      expect(savedRevision).not.toBe(migratedRevision);
+      expect(await readRawRecord("mapData", DATA_KEY)).toBeUndefined();
+      expect(
+        await readRawRecord("mapData", createSplitMapKey(eventName, dayOne)),
+      ).toEqual(savedImmediately[eventName][dayOne]);
+      expect(
+        await readRawRecord("mapData", createSplitMapKey(eventName, dayTwo)),
+      ).toEqual(savedImmediately[eventName][dayTwo]);
+      expect(
+        await readRawRecord(
+          "syncQueue",
+          createPersistenceCheckpointKey("mapData", DATA_KEY),
+        ),
+      ).toMatchObject({
+        committedRoot: {
+          revision: savedRevision,
+          baseRevision: migratedRevision,
+        },
+      });
+      expect(await resumedDb.loadMapData()).toMatchObject({
+        status: "ok",
+        data: savedImmediately,
+      });
+      expect(getRuntimeFallbackKeys("mapData")).toEqual([]);
+      expect(localStorage.getItem("mapData")).toBe(legacySource);
+    },
+  );
 
   it("keeps a newer normal save available while cleanup-ready journal writes keep failing", async () => {
     const migratedMetadata = {
@@ -2303,6 +2549,63 @@ describe("db.migrateFromLocalStorage resilience", () => {
     expect(localStorage.getItem("syncQueue")).toBe(legacySyncQueueSource);
   });
 
+  it("upgrades an actual journal v1 fixture with no checkpoint and permits an immediate save", async () => {
+    const {
+      payload: migratedMetadata,
+      legacySource,
+      targetRevision,
+      checkpointKey,
+    } = await seedActualV1EventMetadataFixtureWithoutCheckpoint();
+    expect(await readRawRecord("syncQueue", checkpointKey)).toBeUndefined();
+    const db = await importFreshDb();
+
+    await expect(db.migrateFromLocalStorage()).resolves.toEqual({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+      migratedKeys: ["eventMetadata"],
+    });
+
+    expect(await readMigrationJournalV2()).toMatchObject({
+      schemaVersion: 2,
+      phase: "cleanup-ready",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+      entries: [
+        expect.objectContaining({
+          legacyKey: "eventMetadata",
+          targetRevision,
+          cleanupStatus: "deferred",
+        }),
+      ],
+    });
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      migratedMetadata,
+    );
+    expect(await readCurrentRevision("eventMetadata")).toBe(targetRevision);
+    expect(await readRawRecord("syncQueue", checkpointKey)).toBeUndefined();
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+
+    const savedImmediately = {
+      旧v1実fixtureイベント: { generation: "saved-immediately" },
+    };
+    await expect(
+      db.saveEventMetadata(savedImmediately),
+    ).resolves.toBeUndefined();
+    const savedRevision = await readCurrentRevision("eventMetadata");
+    expect(savedRevision).not.toBe(targetRevision);
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      savedImmediately,
+    );
+    expect(await readRawRecord("syncQueue", checkpointKey)).toMatchObject({
+      committedRoot: {
+        revision: savedRevision,
+        baseRevision: targetRevision,
+      },
+    });
+    expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+  });
+
   it.each([
     {
       v1Phase: "prepared" as const,
@@ -2643,6 +2946,153 @@ describe("db runtime fallback resilience", () => {
     expect(localStorage.getItem(candidate1.storageKey)).toBeNull();
   });
 
+  it("requires recovery when an absorbed checkpoint revision reappears with a different digest", async () => {
+    const db = await importFreshDb();
+    const baseValue = {
+      checkpoint再出現イベント: { generation: "base" },
+    };
+    const absorbedValue = {
+      checkpoint再出現イベント: { generation: "absorbed-A" },
+    };
+    const committedValue = {
+      checkpoint再出現イベント: { generation: "committed-after-A" },
+    };
+    const conflictingValue = {
+      checkpoint再出現イベント: { generation: "reappeared-B" },
+    };
+    await db.saveEventMetadata(baseValue);
+    const baseRevision = await readCurrentRevision("eventMetadata");
+    const absorbed = await installRuntimeFallbackCandidate({
+      storeName: "eventMetadata",
+      revision: "checkpoint-reappeared-revision",
+      baseRevision,
+      payload: absorbedValue,
+    });
+    const originalRemoveItem = Storage.prototype.removeItem;
+    const removeItemSpy = vi
+      .spyOn(Storage.prototype, "removeItem")
+      .mockImplementation(function (this: Storage, storageKey: string) {
+        if (storageKey === absorbed.storageKey) {
+          throw new DOMException(
+            "forced checkpoint candidate retention",
+            "SecurityError",
+          );
+        }
+        return originalRemoveItem.call(this, storageKey);
+      });
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    vi.resetModules();
+    const repairingDb = await importFreshDb();
+    expect(await repairingDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: absorbedValue,
+    });
+    await repairingDb.saveEventMetadata(committedValue);
+    const committedRevision = await readCurrentRevision("eventMetadata");
+    expect(
+      await readRawRecord(
+        "syncQueue",
+        createPersistenceCheckpointKey("eventMetadata", DATA_KEY),
+      ),
+    ).toMatchObject({
+      committedRoot: {
+        revision: committedRevision,
+        baseRevision: absorbed.candidate.revision,
+      },
+      absorbedCandidates: expect.arrayContaining([
+        expect.objectContaining({
+          revision: absorbed.candidate.revision,
+          digest: absorbed.candidate.digest,
+        }),
+      ]),
+    });
+    expect(localStorage.getItem(absorbed.storageKey)).toBe(absorbed.serialized);
+    removeItemSpy.mockRestore();
+
+    const reappeared = await createRuntimeFallbackCandidate({
+      storeName: "eventMetadata",
+      key: DATA_KEY,
+      revision: absorbed.candidate.revision,
+      baseRevision: absorbed.candidate.baseRevision,
+      writerId: absorbed.candidate.writerId,
+      createdAt: absorbed.candidate.createdAt,
+      payload: conflictingValue,
+    });
+    const reappearedSerialized = serializeRuntimeFallbackCandidate(reappeared);
+    localStorage.setItem(absorbed.storageKey, reappearedSerialized);
+
+    vi.resetModules();
+    const verificationDb = await importFreshDb();
+    const loaded = await verificationDb.loadEventMetadata();
+
+    expect(loaded).toMatchObject({
+      status: "conflict",
+      data: null,
+      recoveryBundle: {
+        candidates: expect.arrayContaining([
+          expect.objectContaining({
+            source: "runtime-fallback",
+            sourceKey: absorbed.storageKey,
+            revision: absorbed.candidate.revision,
+            digest: reappeared.digest.value,
+          }),
+        ]),
+      },
+    });
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      committedValue,
+    );
+    expect(await readCurrentRevision("eventMetadata")).toBe(committedRevision);
+    expect(localStorage.getItem(absorbed.storageKey)).toBe(
+      reappearedSerialized,
+    );
+    await expect(
+      verificationDb.saveEventMetadata({
+        checkpoint再出現イベント: { generation: "must-not-autosave" },
+      }),
+    ).rejects.toMatchObject({ name: "PersistenceConflict" });
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      committedValue,
+    );
+
+    const selectedCandidate = loaded.recoveryBundle?.candidates.find(
+      ({ source, sourceKey }) =>
+        source === "runtime-fallback" && sourceKey === absorbed.storageKey,
+    );
+    if (!selectedCandidate) {
+      throw new Error("Missing reappeared checkpoint recovery candidate.");
+    }
+    await expect(
+      verificationDb.adoptRecoveryCandidate(selectedCandidate),
+    ).resolves.toMatchObject({
+      status: "adopted",
+      storeName: "eventMetadata",
+      key: DATA_KEY,
+    });
+    expect(await verificationDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: conflictingValue,
+    });
+    expect(localStorage.getItem(absorbed.storageKey)).toBe(
+      reappearedSerialized,
+    );
+
+    const postAdoptionValue = {
+      checkpoint再出現イベント: { generation: "saved-after-adoption" },
+    };
+    await expect(
+      verificationDb.saveEventMetadata(postAdoptionValue),
+    ).resolves.toBeUndefined();
+    expect(await verificationDb.loadEventMetadata()).toMatchObject({
+      status: "ok",
+      data: postAdoptionValue,
+    });
+    expect(localStorage.getItem(absorbed.storageKey)).toBe(
+      reappearedSerialized,
+    );
+  });
+
   it("does not infer a fallback head in a fresh session when IndexedDB is unreadable", async () => {
     const seedDb = await importFreshDb();
     await seedDb.saveEventMetadata({
@@ -2683,6 +3133,107 @@ describe("db runtime fallback resilience", () => {
     );
     expect(localStorage.getItem(fallback.storageKey)).toBe(fallback.serialized);
   });
+
+  it.each(["writerId", "createdAt"] as const)(
+    "同一セッションのIDB二重読込失敗時に%sが異なる同revision候補を採用しない",
+    async (mismatchedField) => {
+      const db = await importFreshDb();
+      const baseValue = {
+        系譜検証イベント: { generation: mismatchedField },
+      };
+      await db.saveEventMetadata(baseValue);
+      expect(await db.loadEventMetadata()).toMatchObject({
+        status: "ok",
+        data: baseValue,
+      });
+
+      const metadataKey = createPersistenceMetadataKey(
+        "eventMetadata",
+        DATA_KEY,
+      );
+      const metadataBefore = await readRawRecord("syncQueue", metadataKey);
+      const metadata = await readCurrentMetadata("eventMetadata");
+      const checkpointKey = createPersistenceCheckpointKey(
+        "eventMetadata",
+        DATA_KEY,
+      );
+      const checkpointBefore = await readRawRecord("syncQueue", checkpointKey);
+      const conflictingCandidate = await createRuntimeFallbackCandidate({
+        storeName: "eventMetadata",
+        key: DATA_KEY,
+        revision: metadata.revision,
+        baseRevision: metadata.baseRevision,
+        writerId:
+          mismatchedField === "writerId"
+            ? `${metadata.writerId}-conflict`
+            : metadata.writerId,
+        createdAt:
+          mismatchedField === "createdAt"
+            ? new Date(Date.parse(metadata.committedAt) + 1).toISOString()
+            : metadata.committedAt,
+        payload: baseValue,
+      });
+      expect(conflictingCandidate.digest).toEqual(metadata.payloadDigest);
+      const storageKey = createRuntimeFallbackKey(
+        "eventMetadata",
+        DATA_KEY,
+        conflictingCandidate.revision,
+      );
+      const serialized =
+        serializeRuntimeFallbackCandidate(conflictingCandidate);
+      localStorage.setItem(storageKey, serialized);
+      const readFailure = mockNthTransactionFailure({
+        requiredStores: ["eventMetadata", "syncQueue"],
+        mode: "readonly",
+        occurrence: 1,
+        failureCount: 2,
+        exactStores: true,
+        error: new DOMException(
+          `forced cached-root ${mismatchedField} read failure`,
+          "UnknownError",
+        ),
+      });
+
+      const loaded = await db.loadEventMetadata();
+
+      expect(readFailure.getInjectionCount()).toBe(2);
+      expect(loaded).toMatchObject({
+        status: "conflict",
+        data: null,
+        recoveryBundle: {
+          candidates: expect.arrayContaining([
+            expect.objectContaining({
+              source: "runtime-fallback",
+              sourceKey: storageKey,
+              revision: metadata.revision,
+            }),
+          ]),
+        },
+      });
+      expect(localStorage.getItem(storageKey)).toBe(serialized);
+
+      readFailure.spy.mockRestore();
+      expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(baseValue);
+      expect(await readRawRecord("syncQueue", metadataKey)).toEqual(
+        metadataBefore,
+      );
+      expect(await readRawRecord("syncQueue", checkpointKey)).toEqual(
+        checkpointBefore,
+      );
+
+      localStorage.removeItem(storageKey);
+      const savedAfterConflict = {
+        系譜検証イベント: { generation: `saved-after-${mismatchedField}` },
+      };
+      await expect(
+        db.saveEventMetadata(savedAfterConflict),
+      ).resolves.toBeUndefined();
+      expect(await db.loadEventMetadata()).toMatchObject({
+        status: "ok",
+        data: savedAfterConflict,
+      });
+    },
+  );
 
   it("checks for a newly appeared runtime branch before advancing a cached IDB root", async () => {
     const db = await importFreshDb();

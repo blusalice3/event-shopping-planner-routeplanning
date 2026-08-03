@@ -54,7 +54,10 @@ import {
   type PersistenceCleanupPhysicalDeferredReason,
   type PersistenceCleanupTaskContext,
 } from "./persistenceCleanupCoordinator";
-import { recordPersistenceReleaseAMetric } from "./persistenceReleaseAMetrics";
+import {
+  recordPersistenceCleanupReleaseAMetric,
+  recordPersistenceReleaseAMetric,
+} from "./persistenceReleaseAMetrics";
 
 const DB_NAME = "EventShoppingPlannerDB";
 const DB_VERSION = 5;
@@ -1160,7 +1163,7 @@ async function validatePersistenceSnapshot<T>(
       key,
       snapshot.metadata,
     );
-  } catch (error) {
+  } catch {
     return {
       conflict: createConflictLoadResult(
         `${storeName} の吸収checkpointが確定rootと一致しません。`,
@@ -1701,6 +1704,7 @@ async function assertPhysicalRootMatchesLogicalFallback(
       createdAt: physicalRoot.missing ? undefined : physicalRoot.committedAt,
     },
     partitioned.active.map(({ candidate }) => candidate),
+    physicalCheckpoint?.absorbedCandidates ?? [],
   );
   if (reconciliation.status === "conflict") {
     throw new PersistenceConflictError(
@@ -1722,43 +1726,6 @@ async function assertPhysicalRootMatchesLogicalFallback(
   throw new PersistenceConflictError(
     `${storeName}:${key} no longer matches the fallback lineage.`,
   );
-}
-
-async function cleanupCommittedRuntimeCandidates(
-  storeName: StoreName,
-  key: string,
-  committed: ObservedRevisionRoot,
-): Promise<void> {
-  try {
-    const candidateScan = await readRuntimeCandidateSnapshots<unknown>(
-      storeName,
-      key,
-    );
-    if (candidateScan.status === "conflict") return;
-    const reconciliation = reconcileRuntimeFallbackCandidates(
-      {
-        revision: committed.missing ? null : committed.revision,
-        baseRevision: committed.missing ? null : committed.baseRevision,
-        digest: committed.missing ? undefined : committed.payloadDigest,
-        writerId: committed.missing ? undefined : committed.writerId,
-        createdAt: committed.missing ? undefined : committed.committedAt,
-      },
-      candidateScan.snapshots.map(({ candidate }) => candidate),
-    );
-    if (reconciliation.status === "conflict" || reconciliation.head) return;
-    const staleRevisions = new Set(
-      reconciliation.staleCandidates.map(({ revision }) => revision),
-    );
-    cleanupRuntimeCandidateSnapshots(
-      candidateScan.snapshots.filter(({ candidate }) =>
-        staleRevisions.has(candidate.revision),
-      ),
-    );
-  } catch {
-    console.warn(
-      `Failed to inspect committed runtime fallbacks for ${storeName}.`,
-    );
-  }
 }
 
 async function writeDataWithMetadataOnce<T>(
@@ -2681,6 +2648,7 @@ async function saveData<T>(
           : logicalExpected.committedAt,
       },
       partitioned.active.map(({ candidate }) => candidate),
+      writeExpectedCheckpoint?.absorbedCandidates ?? [],
     );
     if (reconciliation.status === "conflict" || reconciliation.head) {
       throw new PersistenceConflictError(
@@ -2817,6 +2785,7 @@ async function saveData<T>(
           createdAt: current.missing ? undefined : current.committedAt,
         },
         partitioned.active.map(({ candidate }) => candidate),
+        currentCheckpoint?.absorbedCandidates ?? [],
       );
       if (reconciliation.status === "conflict" || reconciliation.head) {
         throw new PersistenceConflictError(
@@ -2903,6 +2872,8 @@ async function loadRuntimeFallbackWithoutIndexedDb<T>(
     revision: string | null;
     baseRevision: string | null;
     digest?: PersistenceDigestDescriptor;
+    writerId?: string;
+    createdAt?: string;
   };
 
   if (expected) {
@@ -2910,6 +2881,8 @@ async function loadRuntimeFallbackWithoutIndexedDb<T>(
       revision: expected.missing ? null : expected.revision,
       baseRevision: expected.missing ? null : expected.baseRevision,
       digest: expected.missing ? undefined : expected.payloadDigest,
+      writerId: expected.missing ? undefined : expected.writerId,
+      createdAt: expected.missing ? undefined : expected.committedAt,
     };
   } else {
     return createConflictLoadResult(
@@ -2930,6 +2903,8 @@ async function loadRuntimeFallbackWithoutIndexedDb<T>(
   const reconciliation = reconcileRuntimeFallbackCandidates(
     current,
     partitioned.active.map(({ candidate }) => candidate),
+    (expectedPersistenceCheckpoints.get(observedKey) ?? null)
+      ?.absorbedCandidates ?? [],
   );
   if (reconciliation.status === "conflict") {
     return createConflictLoadResult(
@@ -2945,9 +2920,9 @@ async function loadRuntimeFallbackWithoutIndexedDb<T>(
 
   const head =
     reconciliation.head ??
-    partitioned.active.find(
-      ({ candidate }) => candidate.revision === current.revision,
-    )?.candidate ??
+    reconciliation.staleCandidates.find(
+      (candidate) => candidate.revision === current.revision,
+    ) ??
     null;
   if (!head) return makeReadError();
 
@@ -3154,6 +3129,7 @@ async function loadDataUnobserved<T>(
         : validated.root.committedAt,
     },
     partitioned.active.map(({ candidate }) => candidate),
+    validated.checkpoint?.absorbedCandidates ?? [],
   );
   if (reconciliation.status === "conflict") {
     recordPersistenceReleaseAMetric({
@@ -4447,6 +4423,7 @@ async function prepareLegacyMigrationEntries(
             : validated.root.committedAt,
         },
         partitioned.active.map(({ candidate }) => candidate),
+        validated.checkpoint?.absorbedCandidates ?? [],
       );
       if (
         reconciliation.status === "conflict" ||
@@ -5629,19 +5606,31 @@ async function cleanupLegacyPersistenceSources(
   request: PersistenceLegacyCleanupSafetyRequest,
 ): Promise<PersistenceLegacyCleanupResult> {
   let physicalOutcome: PersistenceLegacyCleanupResult | null = null;
+  const metricSink = (
+    event: Parameters<NonNullable<typeof request.metricSink>>[0],
+  ) => {
+    if (
+      event.name === "persistence-cleanup-completed" &&
+      physicalOutcome?.status !== "completed"
+    ) {
+      return;
+    }
+    recordPersistenceCleanupReleaseAMetric(event);
+    return request.metricSink?.(event);
+  };
   const cleanupTask = async (context: PersistenceCleanupTaskContext) => {
     physicalOutcome = await executePhysicalLegacyCleanup(
-      request,
+      { ...request, metricSink },
       context.revalidateSafety,
     );
     if (physicalOutcome.status === "cleanup-deferred") {
-      emitPersistenceCleanupMetric(request.metricSink, {
+      emitPersistenceCleanupMetric(metricSink, {
         name: "persistence-cleanup-physical-deferred",
         mode: request.mode,
         reason: physicalOutcome.reason,
       });
     } else if (physicalOutcome.status === "cleanup-blocked") {
-      emitPersistenceCleanupMetric(request.metricSink, {
+      emitPersistenceCleanupMetric(metricSink, {
         name: "persistence-cleanup-physical-blocked",
         mode: request.mode,
         reason: physicalOutcome.reason,
@@ -5649,17 +5638,6 @@ async function cleanupLegacyPersistenceSources(
     }
     return physicalOutcome;
   };
-  const metricSink = request.metricSink
-    ? (event: Parameters<NonNullable<typeof request.metricSink>>[0]) => {
-        if (
-          event.name === "persistence-cleanup-completed" &&
-          physicalOutcome?.status !== "completed"
-        ) {
-          return;
-        }
-        return request.metricSink?.(event);
-      }
-    : undefined;
   const coordinated =
     request.mode === "auto"
       ? await coordinatePersistenceLegacyCleanup({
@@ -6161,6 +6139,7 @@ async function observeAppDataRestoreState(): Promise<AppDataRestoreObservation> 
             : validation.validated.root.committedAt,
         },
         partitioned.active.map(({ candidate }) => candidate),
+        validation.validated.checkpoint?.absorbedCandidates ?? [],
       );
       if (reconciliation.status === "conflict" || reconciliation.head) {
         throw new PersistenceConflictError(
@@ -6726,6 +6705,32 @@ function createRecoveryAdoptionArchiveKey(): string {
   )}`;
 }
 
+function checkpointBaseForExplicitRecoveryAdoption(
+  checkpoint: PersistenceCheckpoint | null,
+  runtimeSnapshots: readonly RuntimeCandidateSnapshot<unknown>[],
+): PersistenceCheckpoint | null {
+  if (!checkpoint) return null;
+  const liveCandidatesByRevision = new Map(
+    runtimeSnapshots.map(({ candidate }) => [candidate.revision, candidate]),
+  );
+  const retainedDescriptors = checkpoint.absorbedCandidates.filter(
+    (descriptor) => {
+      const liveCandidate = liveCandidatesByRevision.get(descriptor.revision);
+      return (
+        !liveCandidate ||
+        checkpointDescriptorMatchesRuntimeCandidate(descriptor, liveCandidate)
+      );
+    },
+  );
+  if (retainedDescriptors.length === checkpoint.absorbedCandidates.length) {
+    return checkpoint;
+  }
+  return {
+    ...checkpoint,
+    absorbedCandidates: retainedDescriptors,
+  };
+}
+
 async function readRecoveryAdoptionCurrentEvidence(
   storeName: RecoveryAdoptionStoreName,
 ): Promise<RecoveryAdoptionCurrentEvidence> {
@@ -7173,7 +7178,10 @@ async function adoptRecoveryCandidateInternal(
     storeName,
     DATA_KEY,
     metadata,
-    trustedCurrent?.checkpoint ?? null,
+    checkpointBaseForExplicitRecoveryAdoption(
+      trustedCurrent?.checkpoint ?? null,
+      runtimeSnapshots,
+    ),
     runtimeSnapshots,
   );
   const archiveKey = createRecoveryAdoptionArchiveKey();

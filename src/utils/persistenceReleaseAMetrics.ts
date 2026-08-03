@@ -1,3 +1,12 @@
+import type {
+  PersistenceCleanupBlockedReason,
+  PersistenceCleanupDeferredReason,
+  PersistenceCleanupMetricEvent,
+  PersistenceCleanupMode,
+  PersistenceCleanupPhysicalBlockedReason,
+  PersistenceCleanupPhysicalDeferredReason,
+} from "./persistenceCleanupCoordinator";
+
 export const PERSISTENCE_RELEASE_A_METRICS_STORAGE_KEY =
   "__esp_internal__:release-a-metrics:v1";
 export const PERSISTENCE_RELEASE_A_METRIC_EVENT =
@@ -14,6 +23,16 @@ export type PersistenceStartupDurationBucket =
   | "1-2999ms"
   | "3-9999ms"
   | "gte-10s";
+
+export type PersistenceReleaseACleanupOutcome =
+  | "attempted"
+  | "task-started"
+  | "deferred"
+  | "blocked"
+  | "completed"
+  | "key-confirmed-removed"
+  | "physical-deferred"
+  | "physical-blocked";
 
 export type PersistenceReleaseAMetricEvent =
   | {
@@ -46,6 +65,48 @@ export type PersistenceReleaseAMetricEvent =
       readonly name: "startup";
       readonly outcome: "ready" | "recovery-required";
       readonly durationBucket: PersistenceStartupDurationBucket;
+    }
+  | {
+      readonly version: 1;
+      readonly name: "cleanup";
+      readonly outcome:
+        | "attempted"
+        | "task-started"
+        | "completed"
+        | "key-confirmed-removed";
+      readonly mode: PersistenceCleanupMode;
+    }
+  | {
+      readonly version: 1;
+      readonly name: "cleanup";
+      readonly outcome: "deferred";
+      readonly mode: PersistenceCleanupMode;
+      readonly reason: PersistenceCleanupDeferredReason;
+    }
+  | {
+      readonly version: 1;
+      readonly name: "cleanup";
+      readonly outcome: "blocked";
+      readonly mode: PersistenceCleanupMode;
+      readonly reason: PersistenceCleanupBlockedReason;
+    }
+  | {
+      readonly version: 1;
+      readonly name: "cleanup";
+      readonly outcome: "physical-deferred";
+      readonly mode: PersistenceCleanupMode;
+      readonly reason:
+        | PersistenceCleanupDeferredReason
+        | PersistenceCleanupPhysicalDeferredReason;
+    }
+  | {
+      readonly version: 1;
+      readonly name: "cleanup";
+      readonly outcome: "physical-blocked";
+      readonly mode: PersistenceCleanupMode;
+      readonly reason:
+        | PersistenceCleanupBlockedReason
+        | PersistenceCleanupPhysicalBlockedReason;
     };
 
 export type PersistenceReleaseAMetricSink = (
@@ -85,6 +146,16 @@ export interface PersistenceReleaseAMetricsSnapshot {
       readonly recoveryRequired: number;
     };
     readonly startupDuration: Record<PersistenceStartupDurationBucket, number>;
+    readonly cleanup: {
+      readonly attempted: number;
+      readonly taskStarted: number;
+      readonly deferred: number;
+      readonly blocked: number;
+      readonly completed: number;
+      readonly keyConfirmedRemoved: number;
+      readonly physicalDeferred: number;
+      readonly physicalBlocked: number;
+    };
   };
 }
 
@@ -133,11 +204,65 @@ const STARTUP_DURATION_BUCKETS = new Set<PersistenceStartupDurationBucket>([
   "3-9999ms",
   "gte-10s",
 ]);
+const CLEANUP_MODES = new Set<PersistenceCleanupMode>(["auto", "manual"]);
+const CLEANUP_NO_REASON_OUTCOMES = new Set([
+  "attempted",
+  "task-started",
+  "completed",
+  "key-confirmed-removed",
+]);
+const CLEANUP_DEFERRED_REASONS = new Set<PersistenceCleanupDeferredReason>([
+  "runtime-kill-switch-unknown",
+  "web-locks-unsupported",
+  "exclusive-lock-unavailable",
+  "exclusive-lock-not-proven",
+  "exclusive-lock-request-failed",
+  "service-worker-state-unknown",
+  "service-worker-unsupported",
+  "service-worker-registration-missing",
+  "service-worker-not-active",
+  "service-worker-update-waiting",
+  "service-worker-version-unconfigured",
+  "service-worker-version-unknown",
+  "service-worker-version-mismatch",
+  "supported-client-version-unconfigured",
+  "client-handshake-unknown",
+  "client-version-unknown",
+  "unsupported-client-version",
+  "unresponsive-client",
+  "client-quiescence-unknown",
+  "client-not-quiescent",
+]);
+const CLEANUP_BLOCKED_REASONS = new Set<PersistenceCleanupBlockedReason>([
+  "feature-flag-disabled",
+  "runtime-kill-switch-active",
+  "manual-other-tabs-not-confirmed",
+  "cleanup-task-failed",
+  "exclusive-lock-lifecycle-failed",
+]);
+const CLEANUP_PHYSICAL_DEFERRED_REASONS =
+  new Set<PersistenceCleanupPhysicalDeferredReason>([
+    "cleanup-not-ready",
+    "migration-journal-cas-failed",
+    "legacy-source-remove-failed",
+    "legacy-source-missing-after-claim",
+  ]);
+const CLEANUP_PHYSICAL_BLOCKED_REASONS =
+  new Set<PersistenceCleanupPhysicalBlockedReason>([
+    "migration-journal-invalid",
+    "migration-archive-invalid",
+    "committed-target-invalid",
+    "legacy-storage-unavailable",
+    "legacy-source-changed",
+    "legacy-source-reappeared",
+    "legacy-source-missing-before-claim",
+    "legacy-source-digest-mismatch",
+  ]);
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
-const sanitizeMetricEvent = (
+export const sanitizePersistenceReleaseAMetricEvent = (
   value: unknown,
 ): PersistenceReleaseAMetricEvent | null => {
   if (!isRecord(value) || value.version !== 1) return null;
@@ -207,6 +332,98 @@ const sanitizeMetricEvent = (
           }
         : null;
     }
+    case "cleanup": {
+      const mode = value.mode;
+      if (
+        typeof mode !== "string" ||
+        !CLEANUP_MODES.has(mode as PersistenceCleanupMode)
+      ) {
+        return null;
+      }
+      if (CLEANUP_NO_REASON_OUTCOMES.has(outcome)) {
+        return {
+          version: 1,
+          name: "cleanup",
+          outcome: outcome as Extract<
+            PersistenceReleaseAMetricEvent,
+            {
+              name: "cleanup";
+              outcome:
+                | "attempted"
+                | "task-started"
+                | "completed"
+                | "key-confirmed-removed";
+            }
+          >["outcome"],
+          mode: mode as PersistenceCleanupMode,
+        };
+      }
+      const reason = value.reason;
+      if (typeof reason !== "string") return null;
+      if (
+        outcome === "deferred" &&
+        CLEANUP_DEFERRED_REASONS.has(reason as PersistenceCleanupDeferredReason)
+      ) {
+        return {
+          version: 1,
+          name: "cleanup",
+          outcome,
+          mode: mode as PersistenceCleanupMode,
+          reason: reason as PersistenceCleanupDeferredReason,
+        };
+      }
+      if (
+        outcome === "blocked" &&
+        CLEANUP_BLOCKED_REASONS.has(reason as PersistenceCleanupBlockedReason)
+      ) {
+        return {
+          version: 1,
+          name: "cleanup",
+          outcome,
+          mode: mode as PersistenceCleanupMode,
+          reason: reason as PersistenceCleanupBlockedReason,
+        };
+      }
+      if (
+        outcome === "physical-deferred" &&
+        (CLEANUP_DEFERRED_REASONS.has(
+          reason as PersistenceCleanupDeferredReason,
+        ) ||
+          CLEANUP_PHYSICAL_DEFERRED_REASONS.has(
+            reason as PersistenceCleanupPhysicalDeferredReason,
+          ))
+      ) {
+        return {
+          version: 1,
+          name: "cleanup",
+          outcome,
+          mode: mode as PersistenceCleanupMode,
+          reason: reason as
+            | PersistenceCleanupDeferredReason
+            | PersistenceCleanupPhysicalDeferredReason,
+        };
+      }
+      if (
+        outcome === "physical-blocked" &&
+        (CLEANUP_BLOCKED_REASONS.has(
+          reason as PersistenceCleanupBlockedReason,
+        ) ||
+          CLEANUP_PHYSICAL_BLOCKED_REASONS.has(
+            reason as PersistenceCleanupPhysicalBlockedReason,
+          ))
+      ) {
+        return {
+          version: 1,
+          name: "cleanup",
+          outcome,
+          mode: mode as PersistenceCleanupMode,
+          reason: reason as
+            | PersistenceCleanupBlockedReason
+            | PersistenceCleanupPhysicalBlockedReason,
+        };
+      }
+      return null;
+    }
     default:
       return null;
   }
@@ -254,6 +471,16 @@ const createEmptySnapshot = (
         "1-2999ms": 0,
         "3-9999ms": 0,
         "gte-10s": 0,
+      },
+      cleanup: {
+        attempted: 0,
+        taskStarted: 0,
+        deferred: 0,
+        blocked: 0,
+        completed: 0,
+        keyConfirmedRemoved: 0,
+        physicalDeferred: 0,
+        physicalBlocked: 0,
       },
     },
   };
@@ -306,6 +533,9 @@ const hydrateSnapshot = (
     const duration = isRecord(parsed.counters.startupDuration)
       ? parsed.counters.startupDuration
       : {};
+    const cleanup = isRecord(parsed.counters.cleanup)
+      ? parsed.counters.cleanup
+      : {};
     return {
       kind: METRICS_KIND,
       version: METRICS_VERSION,
@@ -347,6 +577,16 @@ const hydrateSnapshot = (
           "1-2999ms": safeCounter(duration["1-2999ms"]),
           "3-9999ms": safeCounter(duration["3-9999ms"]),
           "gte-10s": safeCounter(duration["gte-10s"]),
+        },
+        cleanup: {
+          attempted: safeCounter(cleanup.attempted),
+          taskStarted: safeCounter(cleanup.taskStarted),
+          deferred: safeCounter(cleanup.deferred),
+          blocked: safeCounter(cleanup.blocked),
+          completed: safeCounter(cleanup.completed),
+          keyConfirmedRemoved: safeCounter(cleanup.keyConfirmedRemoved),
+          physicalDeferred: safeCounter(cleanup.physicalDeferred),
+          physicalBlocked: safeCounter(cleanup.physicalBlocked),
         },
       },
     };
@@ -391,6 +631,16 @@ const withIncrementedEvent = (
     save: { succeeded: number; failed: number };
     startup: { ready: number; recoveryRequired: number };
     startupDuration: Record<PersistenceStartupDurationBucket, number>;
+    cleanup: {
+      attempted: number;
+      taskStarted: number;
+      deferred: number;
+      blocked: number;
+      completed: number;
+      keyConfirmedRemoved: number;
+      physicalDeferred: number;
+      physicalBlocked: number;
+    };
   };
 
   switch (event.name) {
@@ -432,6 +682,22 @@ const withIncrementedEvent = (
       );
       mutableCounters.startupDuration[event.durationBucket] = increment(
         mutableCounters.startupDuration[event.durationBucket],
+      );
+      break;
+    }
+    case "cleanup": {
+      const cleanupOutcome =
+        event.outcome === "task-started"
+          ? "taskStarted"
+          : event.outcome === "key-confirmed-removed"
+            ? "keyConfirmedRemoved"
+            : event.outcome === "physical-deferred"
+              ? "physicalDeferred"
+              : event.outcome === "physical-blocked"
+                ? "physicalBlocked"
+                : event.outcome;
+      mutableCounters.cleanup[cleanupOutcome] = increment(
+        mutableCounters.cleanup[cleanupOutcome],
       );
       break;
     }
@@ -494,7 +760,7 @@ export const createPersistenceReleaseAMetricRecorder = ({
 
   return {
     record(event): boolean {
-      const sanitized = sanitizeMetricEvent(event);
+      const sanitized = sanitizePersistenceReleaseAMetricEvent(event);
       if (!sanitized) return false;
       aggregate = withIncrementedEvent(aggregate, sanitized, now());
       persistSnapshot(storage, aggregate);
@@ -603,3 +869,59 @@ export const resetPersistenceReleaseAMetrics =
 export const subscribePersistenceReleaseAMetrics = (
   sink: PersistenceReleaseAMetricSink,
 ): (() => void) => defaultRecorder.subscribe(sink);
+
+export const recordPersistenceCleanupReleaseAMetric = (
+  event: PersistenceCleanupMetricEvent,
+): boolean => {
+  const base = {
+    version: 1 as const,
+    name: "cleanup" as const,
+    mode: event.mode,
+  };
+  switch (event.name) {
+    case "persistence-cleanup-attempted":
+      return recordPersistenceReleaseAMetric({
+        ...base,
+        outcome: "attempted",
+      });
+    case "persistence-cleanup-task-started":
+      return recordPersistenceReleaseAMetric({
+        ...base,
+        outcome: "task-started",
+      });
+    case "persistence-cleanup-deferred":
+      return recordPersistenceReleaseAMetric({
+        ...base,
+        outcome: "deferred",
+        reason: event.reason,
+      });
+    case "persistence-cleanup-blocked":
+      return recordPersistenceReleaseAMetric({
+        ...base,
+        outcome: "blocked",
+        reason: event.reason,
+      });
+    case "persistence-cleanup-completed":
+      return recordPersistenceReleaseAMetric({
+        ...base,
+        outcome: "completed",
+      });
+    case "persistence-cleanup-key-confirmed-removed":
+      return recordPersistenceReleaseAMetric({
+        ...base,
+        outcome: "key-confirmed-removed",
+      });
+    case "persistence-cleanup-physical-deferred":
+      return recordPersistenceReleaseAMetric({
+        ...base,
+        outcome: "physical-deferred",
+        reason: event.reason,
+      });
+    case "persistence-cleanup-physical-blocked":
+      return recordPersistenceReleaseAMetric({
+        ...base,
+        outcome: "physical-blocked",
+        reason: event.reason,
+      });
+  }
+};

@@ -1,4 +1,4 @@
-﻿import React from "react";
+import React from "react";
 import BulkActionControls from "../../../components/BulkActionControls";
 import SortAscendingIcon from "../../../components/icons/SortAscendingIcon";
 import SortDescendingIcon from "../../../components/icons/SortDescendingIcon";

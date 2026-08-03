@@ -1,0 +1,497 @@
+{
+  "schemaVersion": "release-a-evidence/v1",
+  "release": {
+    "releaseId": "PENDING",
+    "commitSha": "PENDING",
+    "sourceTreeClean": "PENDING",
+    "sourceTreeCheckedAt": "PENDING",
+    "sourceTreeEvidenceRef": "PENDING",
+    "cleanupMode": "PENDING",
+    "cleanupCheckedAt": "PENDING",
+    "cleanupEvidenceRef": "PENDING"
+  },
+  "canary": {
+    "buildSha": "PENDING",
+    "baselinePolicy": "release-a-baseline-policy/v1",
+    "baseline": {
+      "definition": "previous-production-build-matched-cohort-complete-24h/v1",
+      "buildSha": "PENDING",
+      "startedAt": "PENDING",
+      "endedAt": "PENDING",
+      "declaredDurationHours": "PENDING",
+      "cohortRef": "PENDING",
+      "queryEvidenceRef": "PENDING",
+      "selectedBy": "PENDING",
+      "selectedAt": "PENDING",
+      "reviewedBy": "PENDING",
+      "reviewedAt": "PENDING",
+      "selectionApprovalRef": "PENDING",
+      "metrics": {
+        "checkpointAdoptionRate": {
+          "numerator": "PENDING",
+          "denominator": "PENDING",
+          "value": "PENDING",
+          "evidenceRef": "PENDING"
+        },
+        "fallbackRepairSuccessRate": {
+          "numerator": "PENDING",
+          "denominator": "PENDING",
+          "value": "PENDING",
+          "evidenceRef": "PENDING"
+        },
+        "conflictRate": {
+          "numerator": "PENDING",
+          "denominator": "PENDING",
+          "value": "PENDING",
+          "evidenceRef": "PENDING"
+        },
+        "saveFailureRate": {
+          "numerator": "PENDING",
+          "denominator": "PENDING",
+          "value": "PENDING",
+          "evidenceRef": "PENDING"
+        },
+        "startupP95Bucket": {
+          "counts": {
+            "lt-250ms": "PENDING",
+            "250-999ms": "PENDING",
+            "1-2999ms": "PENDING",
+            "3-9999ms": "PENDING",
+            "gte-10s": "PENDING"
+          },
+          "p95Bucket": "PENDING",
+          "evidenceRef": "PENDING"
+        }
+      }
+    },
+    "startedAt": "PENDING",
+    "endedAt": "PENDING",
+    "declaredDurationHours": "PENDING",
+    "cohortRef": "PENDING",
+    "metricsBackend": {
+      "buildSha": "PENDING",
+      "backendName": "PENDING",
+      "environment": "PENDING",
+      "probeStatus": "PENDING",
+      "probedAt": "PENDING",
+      "probeEvidenceRef": "PENDING",
+      "dashboardRef": "PENDING"
+    },
+    "buckets": [
+      {
+        "buildSha": "PENDING",
+        "baselineBuildSha": "PENDING",
+        "startedAt": "PENDING",
+        "endedAt": "PENDING",
+        "sampleCount": "PENDING",
+        "legacyPhysicalDeleteCount": "PENDING",
+        "checkpointAdoptionRate": {
+          "baselineNumerator": "PENDING",
+          "baselineDenominator": "PENDING",
+          "baselineValue": "PENDING",
+          "observedNumerator": "PENDING",
+          "observedDenominator": "PENDING",
+          "observedValue": "PENDING",
+          "sampleBasis": "PENDING",
+          "evidenceRef": "PENDING"
+        },
+        "fallbackRepairSuccessRate": {
+          "baselineNumerator": "PENDING",
+          "baselineDenominator": "PENDING",
+          "baselineValue": "PENDING",
+          "observedNumerator": "PENDING",
+          "observedDenominator": "PENDING",
+          "observedValue": "PENDING",
+          "sampleBasis": "PENDING",
+          "evidenceRef": "PENDING"
+        },
+        "conflictRate": {
+          "baselineNumerator": "PENDING",
+          "baselineDenominator": "PENDING",
+          "baselineValue": "PENDING",
+          "observedNumerator": "PENDING",
+          "observedDenominator": "PENDING",
+          "observedValue": "PENDING",
+          "sampleBasis": "PENDING",
+          "evidenceRef": "PENDING"
+        },
+        "saveFailureRate": {
+          "baselineNumerator": "PENDING",
+          "baselineDenominator": "PENDING",
+          "baselineValue": "PENDING",
+          "observedNumerator": "PENDING",
+          "observedDenominator": "PENDING",
+          "observedValue": "PENDING",
+          "sampleBasis": "PENDING",
+          "evidenceRef": "PENDING"
+        },
+        "startupP95Bucket": {
+          "baselineCounts": {
+            "lt-250ms": "PENDING",
+            "250-999ms": "PENDING",
+            "1-2999ms": "PENDING",
+            "3-9999ms": "PENDING",
+            "gte-10s": "PENDING"
+          },
+          "baselineP95Bucket": "PENDING",
+          "observedCounts": {
+            "lt-250ms": "PENDING",
+            "250-999ms": "PENDING",
+            "1-2999ms": "PENDING",
+            "3-9999ms": "PENDING",
+            "gte-10s": "PENDING"
+          },
+          "observedP95Bucket": "PENDING",
+          "sampleBasis": "PENDING",
+          "evidenceRef": "PENDING"
+        },
+        "hourlyEvidence": [
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          },
+          {
+            "buildSha": "PENDING",
+            "startedAt": "PENDING",
+            "endedAt": "PENDING",
+            "sampleCount": "PENDING",
+            "evidenceRef": "PENDING"
+          }
+        ],
+        "evidenceRef": "PENDING"
+      }
+    ]
+  },
+  "installedPwaChecks": [
+    {
+      "os": "WINDOWS_11",
+      "osVersion": "PENDING",
+      "browser": "CHROME",
+      "browserVersion": "PENDING",
+      "installMode": "PENDING",
+      "buildSha": "PENDING",
+      "serviceWorkerSha": "PENDING",
+      "onlineStatus": "PENDING",
+      "offlineStatus": "PENDING",
+      "updateStatus": "PENDING",
+      "legacyOriginalsUnchanged": "PENDING",
+      "executedBy": "PENDING",
+      "executedAt": "PENDING",
+      "reviewedBy": "PENDING",
+      "reviewedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    {
+      "os": "WINDOWS_11",
+      "osVersion": "PENDING",
+      "browser": "EDGE",
+      "browserVersion": "PENDING",
+      "installMode": "PENDING",
+      "buildSha": "PENDING",
+      "serviceWorkerSha": "PENDING",
+      "onlineStatus": "PENDING",
+      "offlineStatus": "PENDING",
+      "updateStatus": "PENDING",
+      "legacyOriginalsUnchanged": "PENDING",
+      "executedBy": "PENDING",
+      "executedAt": "PENDING",
+      "reviewedBy": "PENDING",
+      "reviewedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    {
+      "os": "ANDROID",
+      "osVersion": "PENDING",
+      "browser": "CHROME",
+      "browserVersion": "PENDING",
+      "installMode": "PENDING",
+      "buildSha": "PENDING",
+      "serviceWorkerSha": "PENDING",
+      "onlineStatus": "PENDING",
+      "offlineStatus": "PENDING",
+      "updateStatus": "PENDING",
+      "legacyOriginalsUnchanged": "PENDING",
+      "executedBy": "PENDING",
+      "executedAt": "PENDING",
+      "reviewedBy": "PENDING",
+      "reviewedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    }
+  ],
+  "automatedGates": {
+    "test": {
+      "status": "PENDING",
+      "command": "npm run test:run",
+      "commitSha": "PENDING",
+      "completedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "lint": {
+      "status": "PENDING",
+      "command": "npm run lint",
+      "commitSha": "PENDING",
+      "completedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "typecheck": {
+      "status": "PENDING",
+      "command": "npm run typecheck",
+      "commitSha": "PENDING",
+      "completedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "build": {
+      "status": "PENDING",
+      "command": "npm run build:release-a",
+      "commitSha": "PENDING",
+      "completedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "format": {
+      "status": "PENDING",
+      "command": "npm run format:check",
+      "commitSha": "PENDING",
+      "completedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "encoding": {
+      "status": "PENDING",
+      "command": "npm run test:encoding",
+      "commitSha": "PENDING",
+      "completedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "browserPreflight": {
+      "status": "PENDING",
+      "command": "npm run test:release-a-browser",
+      "commitSha": "PENDING",
+      "completedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "rollback": {
+      "status": "PENDING",
+      "command": "npm run test:release-a-rollback",
+      "commitSha": "PENDING",
+      "completedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    }
+  },
+  "historicalDeploymentAudit": {
+    "targetCommitSha": "d2389a02363176ba8354c4562f1a669a0b15dab9",
+    "gitRefs": {
+      "finding": "PENDING",
+      "checkedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "providerDeployments": {
+      "finding": "PENDING",
+      "checkedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "manualDeployments": {
+      "finding": "PENDING",
+      "checkedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "accessLogs": {
+      "finding": "PENDING",
+      "checkedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "externalRecordsComplete": "PENDING",
+    "verdict": "PENDING",
+    "safetyDisposition": "PENDING",
+    "auditedBy": "PENDING",
+    "auditedAt": "PENDING",
+    "reviewedBy": "PENDING",
+    "reviewedAt": "PENDING",
+    "reviewEvidenceRef": "PENDING",
+    "dedicatedE2e": {
+      "status": "PENDING",
+      "scenario": "DETECT_EXPORT_EXPLICIT_ADOPT",
+      "releaseCommitSha": "PENDING",
+      "completedAt": "PENDING",
+      "evidenceRef": "PENDING"
+    }
+  },
+  "approvals": {
+    "releaseOwner": {
+      "decision": "PENDING",
+      "approver": "PENDING",
+      "approvedAt": "PENDING",
+      "commitSha": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "dataSafetyReviewer": {
+      "decision": "PENDING",
+      "approver": "PENDING",
+      "approvedAt": "PENDING",
+      "commitSha": "PENDING",
+      "evidenceRef": "PENDING"
+    },
+    "operationsReviewer": {
+      "decision": "PENDING",
+      "approver": "PENDING",
+      "approvedAt": "PENDING",
+      "commitSha": "PENDING",
+      "evidenceRef": "PENDING"
+    }
+  }
+}

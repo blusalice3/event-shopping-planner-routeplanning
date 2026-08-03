@@ -23,7 +23,6 @@ import {
   startupRecoveryCandidatesHaveSameSelectionDescriptor,
   verifyPersistenceDigest,
   type PersistenceCheckpoint,
-  type RuntimeFallbackCandidate,
   type StartupRecoveryCandidate,
 } from "./persistenceResilience";
 
@@ -474,6 +473,33 @@ describe("persistence checkpoint", () => {
       }),
     ).toBe(false);
   });
+
+  it("確定rootと同じrevisionの吸収descriptorが異なるidentityなら拒否する", async () => {
+    const checkpoint = await createCheckpoint();
+    const committedDescriptor = checkpoint.absorbedCandidates.find(
+      ({ revision }) => revision === checkpoint.committedRoot.revision,
+    );
+    if (!committedDescriptor) {
+      throw new Error("Expected a committed-root checkpoint descriptor.");
+    }
+
+    expect(
+      isPersistenceCheckpoint({
+        ...checkpoint,
+        absorbedCandidates: checkpoint.absorbedCandidates.map((descriptor) =>
+          descriptor.revision === checkpoint.committedRoot.revision
+            ? {
+                ...committedDescriptor,
+                digest: {
+                  ...committedDescriptor.digest,
+                  value: "f".repeat(64),
+                },
+              }
+            : descriptor,
+        ),
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("runtime fallback candidate", () => {
@@ -649,6 +675,60 @@ describe("reconcileRuntimeFallbackCandidates", () => {
     }
   });
 
+  it("checkpoint済みancestorと同じrevisionの異なるdigestをstale扱いせずconflictにする", async () => {
+    const absorbed = await createCandidate(
+      "checkpoint-ancestor",
+      "revision-0",
+      { value: "absorbed-A" },
+    );
+    const reappeared = await createCandidate(
+      "checkpoint-ancestor",
+      "revision-0",
+      { value: "reappeared-B" },
+    );
+    const checkpointEvidence = [
+      {
+        schemaVersion: absorbed.schemaVersion,
+        revision: absorbed.revision,
+        baseRevision: absorbed.baseRevision,
+        digest: absorbed.digest,
+        writerId: absorbed.writerId,
+        createdAt: absorbed.createdAt,
+      },
+    ];
+
+    expect(
+      reconcileRuntimeFallbackCandidates(
+        {
+          revision: "revision-current",
+          baseRevision: absorbed.revision,
+        },
+        [reappeared],
+        checkpointEvidence,
+      ),
+    ).toMatchObject({
+      status: "conflict",
+      reason: "checkpoint-revision-mismatch",
+      conflictingCandidates: [{ revision: absorbed.revision }],
+      staleCandidates: [],
+    });
+
+    expect(
+      reconcileRuntimeFallbackCandidates(
+        {
+          revision: "revision-current",
+          baseRevision: absorbed.revision,
+        },
+        [absorbed],
+        checkpointEvidence,
+      ),
+    ).toMatchObject({
+      status: "resolved",
+      head: null,
+      staleCandidates: [{ revision: absorbed.revision }],
+    });
+  });
+
   it("同じrevisionの異なる内容をduplicate conflictにする", async () => {
     const first = await createCandidate("revision-2", "revision-1", {
       value: "first",
@@ -750,6 +830,8 @@ describe("reconcileRuntimeFallbackCandidates", () => {
         revision: "revision-current",
         baseRevision: "revision-parent",
         digest: currentCandidate.digest,
+        writerId: currentCandidate.writerId,
+        createdAt: currentCandidate.createdAt,
       },
       [currentCandidate],
     );
@@ -762,7 +844,7 @@ describe("reconcileRuntimeFallbackCandidates", () => {
     });
   });
 
-  it("IDBと同じrevision・digestでもparentまたはwriterが異なればconflictにする", async () => {
+  it("IDBと同じrevision・digestでもprovenanceが欠落または相違すればconflictにする", async () => {
     const currentCandidate = await createCandidate(
       "revision-current",
       "revision-parent",
@@ -777,6 +859,34 @@ describe("reconcileRuntimeFallbackCandidates", () => {
           digest: currentCandidate.digest,
           writerId: currentCandidate.writerId,
           createdAt: currentCandidate.createdAt,
+        },
+        [currentCandidate],
+      ),
+    ).toMatchObject({
+      status: "conflict",
+      reason: "same-revision-different-metadata",
+    });
+    expect(
+      reconcileRuntimeFallbackCandidates(
+        {
+          revision: currentCandidate.revision,
+          baseRevision: currentCandidate.baseRevision,
+          digest: currentCandidate.digest,
+          createdAt: currentCandidate.createdAt,
+        },
+        [currentCandidate],
+      ),
+    ).toMatchObject({
+      status: "conflict",
+      reason: "same-revision-different-metadata",
+    });
+    expect(
+      reconcileRuntimeFallbackCandidates(
+        {
+          revision: currentCandidate.revision,
+          baseRevision: currentCandidate.baseRevision,
+          digest: currentCandidate.digest,
+          writerId: currentCandidate.writerId,
         },
         [currentCandidate],
       ),

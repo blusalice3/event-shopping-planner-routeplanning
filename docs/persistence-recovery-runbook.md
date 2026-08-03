@@ -29,7 +29,9 @@
 
 APIの安全gateはruntime kill switchの明示的なinactive証明、実環境のWeb Lockのexclusive取得、対応clientのversion handshakeとquiescence、active Service Workerの対応version、waiting worker不在を検査します。自動cleanupではphase開始前、各キー、`removeItem()`直前、最終journal確定前にfull proofをlock内で再検査し、非同期検査後にもraw値を同期再読込します。欠損・timeout・不一致はfail closedで延期または停止します。public DB APIからbuild flagやlock managerを注入して迂回することはできません。
 
-productionで利用するclient/SW証明provider、通常writerを含むquiescence protocol、再配備不要のkill switch、手動cleanup UI、metrics backendはまだ構成されていません。したがってRelease Bは引き続き禁止であり、`db.cleanupLegacyPersistenceSources`をconsoleや一時コードから直接呼び出してはいけません。
+Release Aのprivacy-safeなmetrics送信、同一origin API、Supabase保存schema、24時間集計viewは実装済みです。ただし、対象providerへのmigration適用、server-only環境変数、Firewall/rate limit、canary配布、24時間の実測証跡はrepositoryだけでは完了しません。これらの証跡が本runbookのvalidatorを通るまでRelease Aのproduction gateは閉じたままです。
+
+productionで利用するclient/SW証明provider、通常writerを含むquiescence protocol、再配備不要のkill switch、手動cleanup UIはまだ構成されていません。したがってRelease Bは引き続き禁止であり、`db.cleanupLegacyPersistenceSources`をconsoleや一時コードから直接呼び出してはいけません。
 
 次の条件が未整備の間、Release Bは実施禁止です。
 
@@ -37,7 +39,7 @@ productionで利用するclient/SW証明provider、通常writerを含むquiescen
 - Web Locks等の排他、対応版間version handshake、全clientのquiesce確認
 - Service Worker（SW）更新状態の確認
 - cleanup前archiveの保存・直接読戻し検証
-- payloadを含めない観測とalert
+- payloadを含めない観測backendのproduction probeとalert
 - 実ブラウザ/PWA試験とrollback rehearsal
 
 現在のPWAビルドと`vercel.json`はいずれも`/sw.js`を対象にしています。ただし、HTTPS canaryの実レスポンスで再検証headerを確認し、active Service Workerのversion一致を証明するまでは、PWAをcleanup可能clientとして扱いません。
@@ -136,15 +138,16 @@ checkpointの実装識別子は次を基準とします。
 
 ### 5.2 2026-08-03のローカル監査結果
 
-- `d2389a0`は現HEAD `4caa984`の直親
-- `origin/main`は`36272c8`で、`d2389a0`を含まない
+- 変更着手時のHEADは`1a61531611ecc2df210c7cdd954e52e30099d79d`
+- `d2389a0`はその16 commit前の祖先であり、直親ではない
+- ローカル追跡ref `origin/main`は`36272c88bc1db623f4c8f49a71440548c5b1efb4`で、`d2389a0`を含まない
 - 対象SHAを含むremote branchとtagはローカル参照上0件
 - `origin/main` reflogに対象SHAへの更新はない
 - repository内にGitHub Actions等のdeploy workflowはない
-- `dist`は`4caa984`後に生成されているが、配布証跡ではない
+- local `dist`の有無や生成時刻は配布証跡にしない
 - 公開repositoryにはVercel URLと過去releaseがあり、配布経路自体は存在する
 
-したがってrepository内の証跡だけなら`NOT_DEPLOYED`相当ですが、Vercel deployment logとGit外手動配布記録を確認するまで正式判定は`UNKNOWN`です。Release Aでは孤立候補を自動採用・自動削除せず、Release Bは正式判定完了まで開始しません。
+したがって正式な事実判定は`UNKNOWN`です。Release Aでは安全上の処置を`TREAT_AS_DEPLOYED`に固定し、孤立候補を自動採用・自動削除しません。固定fixtureによる「検出 → recovery JSON退避 → 明示採用 → 直後保存」のE2Eを必須gateにします。`NOT_DEPLOYED`へ変更できるのは、provider、Git外手動配布、access logを同一期間で否定し、監査記録が完全な場合だけです。Release Bは正式判定完了まで開始しません。
 
 ### 5.3 配布判定記録
 
@@ -207,25 +210,28 @@ metricsへ記録できるのは`legacy_sync_queue_present=true/false`、archive�
 | A8 compatibility | DB v5/v7、既存fallback、public DB API、atomic restore、import/exportを維持 | compatibility結果          |
 | A9 syncQueue     | legacy raw保持、IDB queue非破壊                                            | 専用回帰結果               |
 | A10 PWA          | `/sw.js` header、更新、offline、通常tab/PWA混在を確認                      | browser evidence           |
-| A11 privacy      | payloadなしのmetricsとsanitized errorだけ                                  | telemetry review           |
+| A11 privacy      | payloadなしのmetrics、同一origin backend、cleanup削除件数を確認            | telemetry/API review       |
 | A12 quality      | test、typecheck、build、format、文字コード検査がPASS                       | command log                |
-| A13 operations   | 本runbookで退避、停止、rollback rehearsalを完了                            | rehearsal record           |
+| A13 operations   | production probe、24時間canary、実installed PWA、rollbackを完了            | reviewed evidence          |
+| A14 evidence     | exact SHAへ結び付いた全証跡をstrict validatorが受理                        | validator output           |
 
 標準の自動確認:
 
 ```powershell
 npm run lint
 npm run test:run
+npm run test:release-a-evidence
 npm run typecheck
 npm run build:release-a
 npm run format:check
+npm run test:encoding
 git diff --check
 npm run test:release-a-rollback
 ```
 
 `npm run lint`は`.eslintrc.cjs`を使用してTypeScript/Reactソースを検査します。errorが残る場合はA12をPASS扱いにしません。warningもcommand logへ記録し、release前に内容と許容理由を確認します。
 
-Release Aは、別canary URLまたは限定cohortで24時間以上観測してから段階拡大します。Release A中に旧localStorageの削除件数が1件でも観測された場合は即時停止します。
+Release Aは、別canary URLまたは限定cohortで24時間以上観測し、Section 9.4とSection 16の証跡validatorがPASSしてから段階拡大します。Release A中に旧localStorageの削除件数が1件でも観測された場合は即時停止します。
 
 ## 8. Release B gate
 
@@ -280,9 +286,9 @@ sampleが20件未満のrepairやcleanupは率だけで判断せず、全件を�
 - unsanitized error object、stackへ付加されたpayload
 - userが保存した退避file名やlocal path
 
-digestはclient内の整合確認と制限されたincident evidenceにだけ使い、中央metricsへ送信しません。可観測性backendがないreleaseでは、Release Aのsynthetic/manual evidenceだけを残し、Release Bは開始しません。
+digestはclient内の整合確認と制限されたincident evidenceにだけ使い、中央metricsへ送信しません。production backendをprobeできないreleaseはRelease A gateを通過させず、Release Bも開始しません。
 
-Release Aのclient内観測は`src/utils/persistenceReleaseAMetrics.ts`へ集約します。eventはversion付きの閉じたunionで、checkpoint採用、fallback repair、load conflict、save成否、startup結果と時間bucketだけを受け付けます。任意field、payload、raw error、store/key、revision、digestはruntimeで除去します。sinkまたはsessionStorageが失敗しても保存・移行・復旧処理へ影響させません。
+Release Aのclient内観測は`src/utils/persistenceReleaseAMetrics.ts`へ集約します。eventはversion付きの閉じたunionで、checkpoint採用、fallback repair、load conflict、save成否、startup結果と時間bucket、および閉じたcleanup outcome/reasonだけを受け付けます。任意field、payload、raw error、store/key、revision、digestはruntimeで除去します。sink、sessionStorage、backend送信が失敗しても保存・移行・復旧処理へ影響させません。
 
 集計snapshotはsessionStorageの`__esp_internal__:release-a-metrics:v1`へ保存し、`event-shopping-planner:persistence-release-a-metric` CustomEventでも同じsanitized eventを通知します。率は次の分母で計算します。
 
@@ -292,13 +298,13 @@ Release Aのclient内観測は`src/utils/persistenceReleaseAMetrics.ts`へ集約
 - 保存失敗率: `save failed / 全save結果`
 - recovery-required率: `startup recovery-required / 全startup結果`
 
-`not-needed`はcheckpoint採用率の分母へ含めません。startup時間は`<250ms`、`250–999ms`、`1–2999ms`、`3–9999ms`、`10s以上`のbucketだけを保持します。backend未構成のcanaryではsynthetic profileごとにsnapshotを退避し、raw sessionStorage全体ではなくこの固定schemaだけを証跡へ転記します。
+`not-needed`はcheckpoint採用率の分母へ含めません。startup時間は`<250ms`、`250–999ms`、`1–2999ms`、`3–9999ms`、`10s以上`のbucketだけを保持します。exact millisecondのp50/p95を推測せず、dashboardとrelease evidenceもbucketで判定します。
 
 実装済みcleanup eventは閉じたenumのみを受け付けます。gateのattempted/deferred/blocked/completedに加え、物理処理は`persistence-cleanup-key-confirmed-removed`、`persistence-cleanup-physical-deferred`、`persistence-cleanup-physical-blocked`を通知します。eventへlegacy key、raw値、digest、revision、client ID、例外messageを追加してはいけません。sinkの失敗はcleanupの安全判断へ影響させません。
 
 ### 9.3 最低dashboard
 
-- startup outcomeとp50/p95
+- startup outcomeとp50/p95 bucket
 - save success/failure
 - fallback detected/repaired/conflict
 - checkpoint success/failure
@@ -307,6 +313,40 @@ Release Aのclient内観測は`src/utils/persistenceReleaseAMetrics.ts`へ集約
 - cleanup attempt/success/failure/mismatch/reappearance
 - recovery screen reach/export/retry
 - app/SW version分布
+
+Release A backendが直接集計するのはcheckpoint、fallback repair、load、save、startup、およびcleanupです。migration、recovery UI操作、active SW identityは、固定fixture、自動browser試験、実installed PWAチェックの証跡と突き合わせます。backendに存在しないexact値をdashboardへ手入力しません。
+
+### 9.4 production metrics backendと24時間canary
+
+実装資材:
+
+- client transport: `src/utils/persistenceReleaseAMetricsBackend.ts`
+- same-origin API: `api/persistence-release-a-metrics.mjs`
+- DB schema/dashboard: `supabase/migrations/20260803000000_persistence_release_a_metrics.sql`
+
+配布前にmigrationを対象Supabase projectへ適用し、Vercel等のserver側だけへ次を設定します。service-role keyを`VITE_`変数、client bundle、証跡JSONへ入れてはいけません。
+
+```text
+PERSISTENCE_METRICS_ALLOWED_ORIGIN=https://<exact-canary-origin>
+PERSISTENCE_METRICS_SUPABASE_URL=https://<project>.supabase.co
+PERSISTENCE_METRICS_SUPABASE_SERVICE_ROLE_KEY=<server-only>
+```
+
+`PERSISTENCE_METRICS_ALLOWED_ORIGIN`は末尾slashなしのexact originです。productionではHTTPSだけを許可します。APIは同一origin、1 KiB以下、exact schemaだけを受理し、backend未設定時はfail closedします。browserの`Origin` headerは非browser clientへの認証ではないため、provider側でもこのpathへrate limit/WAFを設定します。
+
+canaryでは次を実施します。
+
+1. cleanなfull SHAから`build:release-a`を作成し、そのartifactだけを限定origin/cohortへ配布する
+2. 通常起動と保存を行い、`/api/persistence-release-a-metrics`が`202`を返すことを確認する
+3. `persistence_release_a_metrics_dashboard_24h`でbuild ID、観測開始時刻、24時間の総計を確認する
+4. `persistence_release_a_metrics_dashboard_hourly_24h`から、対象SHAの完了済みUTC hourを連続24個選び、各hourのsampleが1件以上あることを確認する
+5. `persistence_release_a_cleanup_dashboard_24h`で`key-confirmed-removed`が0件であることを確認する
+6. `unknown-source`や別SHAを対象buildの分母へ混ぜず、baselineと同じ定義で率を算出する
+7. raw event行ではなく集計viewのsnapshot/refだけをrelease evidenceへ残す
+
+baselineは`previous-production-build-matched-cohort-complete-24h/v1`に固定します。直前のproduction buildのfull SHA、canaryと一致するcohort/query定義、canary開始前に完了した24時間、選定者とreviewerを記録し、結果を見て別windowへ差し替えてはいけません。各production rateとstartup bucketの分母が20未満なら個別triageは行いますが、gate合格には使わず、同じ定義のまま観測を延長します。
+
+`persistence_release_a_metrics_dashboard_24h`とcleanup viewはrolling 24時間です。一方、`persistence_release_a_metrics_dashboard_hourly_24h`はpartialな現在hourを除外し、直前の完了済みUTC hourを24個返します。別queryを使う場合もpartialな先頭・末尾を含めず、時刻範囲、重複、欠落をevidence validatorで検証します。24時間未満、hour bucket欠落またはsample 0、backend probe不通、対象SHA不一致、旧原本削除1件以上のどれかがあれば不合格です。
 
 ## 10. 利用者データの手動退避と復旧
 
@@ -517,6 +557,8 @@ npm run test:release-a-browser
 
 各caseについて、release SHA、SW ID、browser version、profile種別、online状態、期待結果、実結果、実施者、時刻を記録します。screenshotや動画へ利用者payloadを映しません。
 
+app-window相当の自動試験を`installedPwaChecks`へ転記してはいけません。Windows 11 Chrome、Windows 11 Edge、Android Chromeの各caseは実際にinstallしたPWAでonline、offline、更新、旧原本不変を確認し、実施者とは別のreviewerが確認します。
+
 ## 16. 文字コードとrelease evidence
 
 対象source、README、docsは原則UTF-8 BOMなし、既存改行を維持します。release前に次を確認します。
@@ -538,6 +580,30 @@ npm run test:release-a-browser
 - flagとkill switchのsnapshot
 - dashboard期間と判定
 - rollback rehearsal
-- approver
+
+固定のpending templateを作業用証跡へcopyし、収集済みの参照だけを記入します。
+
+```powershell
+Copy-Item -LiteralPath docs\release-a-evidence.template.json -Destination <release-evidence-path>
+npm run verify:release-a-evidence -- <release-evidence-path>
+```
+
+templateは未実施を誤って合格させないため、そのままでは必ず不合格になります。validatorは少なくとも次を検証します。
+
+- canary/dashboardと全gateが同じclean full SHAに結び付いている
+- 24時間以上かつ連続hour bucketが揃い、固定された悪化上限を超えない
+- 旧localStorageの物理削除が0件
+- Windows 11 Chrome/EdgeとAndroid Chromeのactual installed PWA証跡
+- 未来時刻、未知field、重複JSON key、payload/raw/storage/revision/digest fieldがない
+- `d2389a0`の事実判定が`UNKNOWN`なら`TREAT_AS_DEPLOYED`で、専用E2EがPASS
+- release owner、data safety reviewer、operations reviewerの承認が全gate完了後である
+
+`d2389a0`専用E2Eは次でも単独確認できます。
+
+```powershell
+npm run test:run -- src/utils/indexedDB.recoveryAdoption.integration.test.ts -t "d2389a0 orphan recovery E2E fixture"
+```
+
+実測していない24時間canary、installed PWA、provider監査、承認を`PASS`として記入してはいけません。validatorのPASSはproduction配布を自動実行するものではなく、Release ownerのgo判断に必要な入力です。
 
 payload、recovery JSON、raw storageはrelease evidenceへ含めません。

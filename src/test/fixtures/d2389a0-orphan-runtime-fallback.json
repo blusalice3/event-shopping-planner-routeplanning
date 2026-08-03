@@ -1,0 +1,9 @@
+{
+  "sourceCommit": "d2389a02363176ba8354c4562f1a669a0b15dab9",
+  "deletedParentRevision": "d2389a0-deleted-parent",
+  "deletedParentStorageKey": "esp:idb-fallback:v1:eventMetadata:data:d2389a0-deleted-parent",
+  "orphanRevision": "d2389a0-orphan-child",
+  "orphanStorageKey": "esp:idb-fallback:v1:eventMetadata:data:d2389a0-orphan-child",
+  "orphanDigest": "a009ec07e31f4ceea93362cd62583149f5fb6af9b1d8e5c6454b3e4bb587dc37",
+  "rawValue": "{\"baseRevision\":\"d2389a0-deleted-parent\",\"createdAt\":\"2026-08-03T00:00:00.000Z\",\"digest\":{\"algorithm\":\"SHA-256\",\"canonicalization\":\"esp-json-v1\",\"value\":\"a009ec07e31f4ceea93362cd62583149f5fb6af9b1d8e5c6454b3e4bb587dc37\"},\"key\":\"data\",\"payload\":{\"d2389a0復旧イベント\":{\"generation\":\"orphan-child-to-adopt\"}},\"revision\":\"d2389a0-orphan-child\",\"schemaVersion\":1,\"storeName\":\"eventMetadata\",\"writerId\":\"writer-d2389a0-orphan-child\"}"
+}
