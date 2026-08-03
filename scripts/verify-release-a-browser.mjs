@@ -222,7 +222,10 @@ class CdpClient {
   }
 
   close() {
-    this.socket.close();
+    const closeError = new Error("Chromium DevTools connection closed.");
+    this.pending.forEach(({ reject }) => reject(closeError));
+    this.pending.clear();
+    this.socket.terminate();
   }
 }
 
