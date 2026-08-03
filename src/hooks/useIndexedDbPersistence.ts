@@ -21,11 +21,16 @@ import {
   MapViewportSettingsStore,
   RouteSettingsStore,
 } from "../types/map";
-import { db, type LoadResult } from "../utils/indexedDB";
+import {
+  db,
+  type LoadResult,
+  type PersistenceCleanupStatus as DbPersistenceCleanupStatus,
+} from "../utils/indexedDB";
 import {
   createStartupRecoveryBundle,
   mergeStartupRecoveryBundles,
   type StartupRecoveryBundle,
+  type StartupRecoveryCandidate,
   type StartupRecoveryIssue,
 } from "../utils/persistenceResilience";
 
@@ -46,6 +51,10 @@ export type PersistedStoreName = keyof PersistedStateValues;
 
 export type PersistenceStatus = "unsaved" | "saving" | "saved" | "failed";
 
+export type LegacyCleanupStatus =
+  | "checking"
+  | Exclude<DbPersistenceCleanupStatus, "recovery-required">;
+
 export type PersistenceFailureCategory =
   | "quota"
   | "permission"
@@ -54,10 +63,18 @@ export type PersistenceFailureCategory =
   | "database"
   | "unknown";
 
+export type PersistenceFailureCode =
+  | "storage-quota-exceeded"
+  | "storage-permission-denied"
+  | "storage-data-clone-failed"
+  | "storage-conflict"
+  | "indexeddb-operation-failed"
+  | "persistence-operation-failed";
+
 export interface PersistenceFailureDetail {
   storeName: PersistedStoreName;
   category: PersistenceFailureCategory;
-  errorCode: string;
+  errorCode: PersistenceFailureCode;
   userMessage: string;
   technicalMessage: string | null;
 }
@@ -76,9 +93,6 @@ export type PersistenceStartupState =
       recoveryBundle: StartupRecoveryBundle | null;
       isRetrying: boolean;
     };
-
-const MAX_ERROR_CODE_LENGTH = 64;
-const MAX_TECHNICAL_MESSAGE_LENGTH = 160;
 
 const DATABASE_ERROR_NAMES = new Set([
   "AbortError",
@@ -107,6 +121,18 @@ const FAILURE_MESSAGES: Record<PersistenceFailureCategory, string> = {
     "ブラウザーの保存領域に異常があります。ページを再読み込みして再試行し、改善しない場合はサイトデータを確認してください。",
   unknown:
     "保存中に予期しない問題が発生しました。再試行し、改善しない場合はJSONバックアップを保存してください。",
+};
+
+const FAILURE_ERROR_CODES: Record<
+  PersistenceFailureCategory,
+  PersistenceFailureCode
+> = {
+  quota: "storage-quota-exceeded",
+  permission: "storage-permission-denied",
+  "data-clone": "storage-data-clone-failed",
+  conflict: "storage-conflict",
+  database: "indexeddb-operation-failed",
+  unknown: "persistence-operation-failed",
 };
 
 const createRecoveryBundle = (
@@ -142,20 +168,11 @@ const readErrorField = (
   }
 };
 
-const sanitizeSingleLine = (value: string, maxLength: number): string => {
-  const singleLine = value
-    .replace(/[\r\n\u2028\u2029]+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (singleLine.length <= maxLength) return singleLine;
-  return `${singleLine.slice(0, Math.max(0, maxLength - 1))}…`;
-};
-
 const sanitizeErrorCode = (value: string): string => {
   const safeCode = value
     .replace(/[\r\n\u2028\u2029\s]+/g, "")
     .replace(/[^A-Za-z0-9._:-]/g, "")
-    .slice(0, MAX_ERROR_CODE_LENGTH);
+    .slice(0, 64);
   return safeCode || "UnknownError";
 };
 
@@ -216,22 +233,22 @@ export const normalizePersistenceFailure = (
     category = "database";
   }
 
-  const codeSource =
-    (rawName && rawName !== "Error" ? rawName : rawCode || rawName) ||
-    "UnknownError";
-  const technicalMessage = sanitizeSingleLine(
-    rawMessage,
-    MAX_TECHNICAL_MESSAGE_LENGTH,
-  );
-
   return {
     storeName,
     category,
-    errorCode: sanitizeErrorCode(codeSource),
+    errorCode: FAILURE_ERROR_CODES[category],
     userMessage: FAILURE_MESSAGES[category],
-    technicalMessage: technicalMessage || null,
+    // Raw browser messages can contain user-controlled object paths. Keep the
+    // compatibility field, but never expose those messages to UI or logging.
+    technicalMessage: null,
   };
 };
+
+const privacySafeFailureLog = ({
+  storeName,
+  category,
+  errorCode,
+}: PersistenceFailureDetail) => ({ storeName, category, errorCode });
 
 type SaveTask = {
   label: PersistedStoreName;
@@ -342,6 +359,13 @@ export function useIndexedDbPersistence({
   });
   const [persistenceStatus, setPersistenceStatus] =
     useState<PersistenceStatus>("saved");
+  const [legacyCleanupStatus, setLegacyCleanupStatus] =
+    useState<LegacyCleanupStatus>("checking");
+  const [isAdoptingRecoveryCandidate, setIsAdoptingRecoveryCandidate] =
+    useState(false);
+  const [recoveryAdoptionError, setRecoveryAdoptionError] = useState<
+    string | null
+  >(null);
   const [failedStores, setFailedStores] = useState<PersistedStoreName[]>([]);
   const [failureDetails, setFailureDetails] = useState<
     PersistenceFailureDetail[]
@@ -352,6 +376,7 @@ export function useIndexedDbPersistence({
   const previousSavedValuesRef = useRef<PersistedStateValues>(values);
   const hasObservedHydratedValuesRef = useRef(false);
   const restoreInProgressRef = useRef(false);
+  const recoveryAdoptionInProgressRef = useRef(false);
   const isMountedRef = useRef(false);
   const initializationPromiseRef = useRef<Promise<void> | null>(null);
   const saveIdleWaitersRef = useRef<Array<() => void>>([]);
@@ -461,13 +486,15 @@ export function useIndexedDbPersistence({
         previousSavedValuesRef.current = nextSavedValues;
 
         if (failed.length > 0) {
-          console.error("Failed to save data to IndexedDB:", failed);
-          updateFailedStores(failed.map(({ label }) => label));
-          updateFailureDetails(
-            failed.map(({ label, error }) =>
-              normalizePersistenceFailure(label, error),
-            ),
+          const normalizedFailures = failed.map(({ label, error }) =>
+            normalizePersistenceFailure(label, error),
           );
+          console.error(
+            "IndexedDB persistence save failed.",
+            normalizedFailures.map(privacySafeFailureLog),
+          );
+          updateFailedStores(failed.map(({ label }) => label));
+          updateFailureDetails(normalizedFailures);
           if (!saveRequestedRef.current) {
             updatePersistenceStatus("failed");
           }
@@ -484,13 +511,15 @@ export function useIndexedDbPersistence({
         previousSavedValuesRef.current,
         latestValuesRef.current,
       ).map(({ label }) => label);
-      console.error("Failed to save data to IndexedDB:", error);
-      updateFailedStores(pendingStores);
-      updateFailureDetails(
-        pendingStores.map((storeName) =>
-          normalizePersistenceFailure(storeName, error),
-        ),
+      const normalizedFailures = pendingStores.map((storeName) =>
+        normalizePersistenceFailure(storeName, error),
       );
+      console.error(
+        "IndexedDB persistence save failed.",
+        normalizedFailures.map(privacySafeFailureLog),
+      );
+      updateFailedStores(pendingStores);
+      updateFailureDetails(normalizedFailures);
       updatePersistenceStatus("failed");
     } finally {
       isSavingRef.current = false;
@@ -607,6 +636,13 @@ export function useIndexedDbPersistence({
         });
         return;
       }
+      const nextLegacyCleanupStatus: LegacyCleanupStatus =
+        migrationResult.cleanupStatus ??
+        (migrationResult.status === "cleanup-pending"
+          ? "deferred"
+          : migrationResult.status === "completed"
+            ? "completed"
+            : "not-needed");
 
       const [
         loadedEventLists,
@@ -753,9 +789,18 @@ export function useIndexedDbPersistence({
       setHallDefinitions(hydratedValues.hallDefinitions);
       setHallRouteSettings(hydratedValues.hallRouteSettings);
       setMapViewportSettings(hydratedValues.mapViewportSettings);
+      setLegacyCleanupStatus(nextLegacyCleanupStatus);
+      setRecoveryAdoptionError(null);
       setStartupState({ status: "ready" });
     } catch (error) {
-      console.error("Failed to initialize IndexedDB persistence:", error);
+      const initializationFailure = normalizePersistenceFailure(
+        "eventLists",
+        error,
+      );
+      console.error(
+        "IndexedDB persistence initialization failed.",
+        privacySafeFailureLog(initializationFailure),
+      );
       if (!isMountedRef.current) return;
       const issue: StartupRecoveryIssue = {
         stage: "initialization",
@@ -787,18 +832,27 @@ export function useIndexedDbPersistence({
     setRouteSettings,
   ]);
 
-  const startInitialization = useCallback((): void => {
-    if (initializationPromiseRef.current) return;
+  const startInitialization = useCallback((): Promise<void> => {
+    if (initializationPromiseRef.current) {
+      return initializationPromiseRef.current;
+    }
     const pending = initializePersistence().finally(() => {
       if (initializationPromiseRef.current === pending) {
         initializationPromiseRef.current = null;
       }
     });
     initializationPromiseRef.current = pending;
+    return pending;
   }, [initializePersistence]);
 
   const retryInitialization = useCallback((): void => {
-    if (initializationPromiseRef.current) return;
+    if (
+      initializationPromiseRef.current ||
+      recoveryAdoptionInProgressRef.current
+    ) {
+      return;
+    }
+    setRecoveryAdoptionError(null);
     setStartupState((current) =>
       current.status === "recovery-required"
         ? { ...current, isRetrying: true }
@@ -806,6 +860,50 @@ export function useIndexedDbPersistence({
     );
     startInitialization();
   }, [startInitialization]);
+
+  const adoptRecoveryCandidate = useCallback(
+    async (candidateId: string): Promise<void> => {
+      if (
+        recoveryAdoptionInProgressRef.current ||
+        initializationPromiseRef.current ||
+        startupState.status !== "recovery-required"
+      ) {
+        return;
+      }
+      const candidate: StartupRecoveryCandidate | undefined =
+        startupState.recoveryBundle?.candidates.find(
+          ({ id, adoptable }) => id === candidateId && adoptable === true,
+        );
+      if (!candidate) {
+        setRecoveryAdoptionError(
+          "採用可能なapp payload候補を確認できませんでした。",
+        );
+        return;
+      }
+
+      recoveryAdoptionInProgressRef.current = true;
+      setIsAdoptingRecoveryCandidate(true);
+      setRecoveryAdoptionError(null);
+      try {
+        await db.adoptRecoveryCandidate(candidate);
+        await startInitialization();
+      } catch (error) {
+        if (!isMountedRef.current) return;
+        const errorName = sanitizeErrorCode(readErrorField(error, "name"));
+        setRecoveryAdoptionError(
+          errorName === "PersistenceConflict"
+            ? "候補または保存領域が開始後に変更されたため、何も削除せず停止しました。再試行して最新の候補を確認してください。"
+            : "候補を原子的に確定して読戻し検証できなかったため、何も削除せず停止しました。",
+        );
+      } finally {
+        recoveryAdoptionInProgressRef.current = false;
+        if (isMountedRef.current) {
+          setIsAdoptingRecoveryCandidate(false);
+        }
+      }
+    },
+    [startInitialization, startupState],
+  );
 
   useEffect(() => {
     isMountedRef.current = true;
@@ -865,9 +963,13 @@ export function useIndexedDbPersistence({
     isInitialized,
     startupState,
     persistenceStatus,
+    legacyCleanupStatus,
+    isAdoptingRecoveryCandidate,
+    recoveryAdoptionError,
     failedStores,
     failureDetails,
     retryInitialization,
+    adoptRecoveryCandidate,
     retrySave,
     runExclusiveRestore,
   } as const;

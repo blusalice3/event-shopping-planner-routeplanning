@@ -1,19 +1,22 @@
 import React from "react";
 import type {
+  LegacyCleanupStatus,
   PersistenceFailureDetail,
   PersistenceStatus,
+  PersistedStoreName,
 } from "../hooks/useIndexedDbPersistence";
 
 interface PersistenceStatusIndicatorProps {
   status: PersistenceStatus;
+  legacyCleanupStatus?: LegacyCleanupStatus;
   showRoutineStatus: boolean;
-  failedStores: readonly string[];
+  failedStores: readonly PersistedStoreName[];
   failureDetails?: readonly PersistenceFailureDetail[];
   onRetry: () => void;
   onExportBackup: () => void;
 }
 
-const STORE_LABELS: Record<string, string> = {
+const STORE_LABELS: Record<PersistedStoreName, string> = {
   eventLists: "イベントリスト",
   eventMetadata: "イベント情報",
   executeModeItems: "実行リスト",
@@ -28,6 +31,7 @@ const STORE_LABELS: Record<string, string> = {
 
 const PersistenceStatusIndicator: React.FC<PersistenceStatusIndicatorProps> = ({
   status,
+  legacyCleanupStatus = "not-needed",
   showRoutineStatus,
   failedStores,
   failureDetails = [],
@@ -36,7 +40,7 @@ const PersistenceStatusIndicator: React.FC<PersistenceStatusIndicatorProps> = ({
 }) => {
   if (status === "failed") {
     const failedLabels = failedStores.map(
-      (storeName) => STORE_LABELS[storeName] ?? storeName,
+      (storeName) => STORE_LABELS[storeName],
     );
 
     return (
@@ -68,15 +72,12 @@ const PersistenceStatusIndicator: React.FC<PersistenceStatusIndicatorProps> = ({
               >
                 <p>
                   <span className="font-semibold">
-                    {STORE_LABELS[failure.storeName] ?? failure.storeName}
+                    {STORE_LABELS[failure.storeName]}
                   </span>
                   : {failure.userMessage}
                 </p>
                 <p className="mt-1 break-words text-xs text-red-600 dark:text-red-300">
                   原因コード: {failure.errorCode}
-                  {failure.technicalMessage
-                    ? ` / 詳細: ${failure.technicalMessage}`
-                    : ""}
                 </p>
               </li>
             ))}
@@ -102,7 +103,12 @@ const PersistenceStatusIndicator: React.FC<PersistenceStatusIndicatorProps> = ({
     );
   }
 
-  if (!showRoutineStatus) {
+  const isLegacyDataRetained =
+    legacyCleanupStatus === "ready" ||
+    legacyCleanupStatus === "deferred" ||
+    legacyCleanupStatus === "in-progress";
+
+  if (!showRoutineStatus && !isLegacyDataRetained) {
     return null;
   }
 
@@ -118,7 +124,7 @@ const PersistenceStatusIndicator: React.FC<PersistenceStatusIndicatorProps> = ({
         "border-blue-300 bg-blue-50 text-blue-800 dark:border-blue-800 dark:bg-blue-950 dark:text-blue-200",
     },
     saved: {
-      label: "保存済み",
+      label: isLegacyDataRetained ? "保存済み・旧データ保全中" : "保存済み",
       className:
         "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-200",
     },
@@ -129,6 +135,12 @@ const PersistenceStatusIndicator: React.FC<PersistenceStatusIndicatorProps> = ({
       className={`fixed bottom-4 right-4 z-[80] rounded-full border px-3 py-1.5 text-xs font-medium shadow ${presentation.className}`}
       role="status"
       aria-live="polite"
+      aria-label={presentation.label}
+      title={
+        isLegacyDataRetained
+          ? "旧データの削除は安全条件が揃うまで延期しています。通常の保存は継続しています。"
+          : undefined
+      }
     >
       {presentation.label}
     </div>

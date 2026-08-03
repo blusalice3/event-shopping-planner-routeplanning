@@ -106,8 +106,10 @@ export function loadBlockDetectionSettings(
       new Set([eventName]),
     );
     return all[eventName] ? cloneSettings(all[eventName]) : null;
-  } catch (error) {
-    console.warn("Failed to load block detection settings:", error);
+  } catch {
+    console.warn(
+      "Block detection settings load failed (settings-load-failed).",
+    );
     return null;
   }
 }
@@ -127,8 +129,10 @@ export function loadBlockDetectionSettingsStore(
         .filter((eventName) => hasOwn(all, eventName))
         .map((eventName) => [eventName, cloneSettings(all[eventName])]),
     );
-  } catch (error) {
-    console.warn("Failed to load block detection settings:", error);
+  } catch {
+    console.warn(
+      "Block detection settings load failed (settings-load-failed).",
+    );
     return {};
   }
 }
@@ -155,8 +159,10 @@ export function saveBlockDetectionSettings(
       BLOCK_DETECTION_SETTINGS_STORAGE_KEY,
       JSON.stringify(all),
     );
-  } catch (error) {
-    console.error("Failed to save block detection settings:", error);
+  } catch {
+    console.error(
+      "Block detection settings save failed (settings-save-failed).",
+    );
   }
 }
 
@@ -171,8 +177,10 @@ export function removeBlockDetectionSettingsForEvent(eventName: string): void {
       BLOCK_DETECTION_SETTINGS_STORAGE_KEY,
       JSON.stringify(all),
     );
-  } catch (error) {
-    console.error("Failed to remove block detection settings:", error);
+  } catch {
+    console.error(
+      "Block detection settings removal failed (settings-remove-failed).",
+    );
   }
 }
 
@@ -194,8 +202,10 @@ export function renameBlockDetectionSettingsForEvent(
       BLOCK_DETECTION_SETTINGS_STORAGE_KEY,
       JSON.stringify(all),
     );
-  } catch (error) {
-    console.error("Failed to rename block detection settings:", error);
+  } catch {
+    console.error(
+      "Block detection settings rename failed (settings-rename-failed).",
+    );
   }
 }
 
@@ -244,8 +254,7 @@ export async function runWithBlockDetectionSettingsRestore<T>(
       rollback();
     } catch (rollbackError) {
       console.error(
-        "Failed to roll back block detection settings:",
-        rollbackError,
+        "Block detection settings rollback failed (settings-rollback-failed).",
       );
       throw new BlockDetectionSettingsRollbackError(error, rollbackError);
     }

@@ -449,8 +449,8 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
             : "インポートできるデータが見つかりませんでした。A列からD列の値が全て入力されている行が必要です。",
         );
       }
-    } catch (error) {
-      console.error("Import error:", error);
+    } catch {
+      console.error("Spreadsheet import failed (spreadsheet-import-failed).");
       alert(
         "スプレッドシートのインポートに失敗しました。URLが正しいか確認してください。",
       );

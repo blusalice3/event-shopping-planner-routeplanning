@@ -1711,8 +1711,8 @@ export async function parseMapFile(
             skippedSheets.push(sheetName);
             sheetErrors.push(`シート「${sheetName}」: 解析できませんでした。`);
           }
-        } catch (error) {
-          console.error(`Error parsing map sheet ${sheetName}:`, error);
+        } catch {
+          console.error("Map sheet parsing failed (map-sheet-parse-failed).");
           skippedSheets.push(sheetName);
           sheetErrors.push(
             `シート「${sheetName}」: 解析中にエラーが発生しました。`,
@@ -1740,12 +1740,12 @@ export async function parseMapFile(
       skippedSheets,
       error: null,
     };
-  } catch (error) {
-    console.error("Error parsing map file:", error);
+  } catch {
+    console.error("Map file parsing failed (map-file-parse-failed).");
     return {
       data: null,
       skippedSheets: [],
-      error: error instanceof Error ? error.message : "不明なエラー",
+      error: "マップファイルを解析できませんでした。",
     };
   }
 }

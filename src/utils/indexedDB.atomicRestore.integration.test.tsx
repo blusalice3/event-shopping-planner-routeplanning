@@ -157,6 +157,24 @@ describe("db.restoreAppDataAtomically", () => {
     expectFallbackMarkers("成功前");
   });
 
+  it("normalizes an empty map event during atomic restore without leaving a split record", async () => {
+    const restoredData = {
+      ...makeAppData("空map復元"),
+      mapData: { 空map復元イベント: {} },
+    };
+    localStorage.clear();
+
+    await expect(
+      db.restoreAppDataAtomically(restoredData),
+    ).resolves.toBeUndefined();
+
+    expect(await db.loadMapData()).toMatchObject({
+      status: "missing",
+      data: null,
+    });
+    expect(await db.getAllKeys(db.STORES.MAP_DATA)).toEqual([]);
+  });
+
   it("rolls back a mid-restore DataCloneError and succeeds on retry", async () => {
     const initialData = makeAppData("復元前");
     const retryData = makeAppData("再成功");

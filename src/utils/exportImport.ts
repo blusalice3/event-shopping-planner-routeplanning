@@ -833,8 +833,8 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
           } else if (type === "dayModes") {
             dayModes[eventDate] = data;
           }
-        } catch (e) {
-          result.errors.push(`配置情報の解析エラー: ${eventDate}`);
+        } catch {
+          result.errors.push("配置情報の解析エラー");
         }
       });
 
@@ -860,8 +860,8 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
           if (mapName && data) {
             mapData[mapName] = JSON.parse(data);
           }
-        } catch (e) {
-          result.errors.push(`マップデータの解析エラー: ${mapName}`);
+        } catch {
+          result.errors.push("マップデータの解析エラー");
         }
       });
 
@@ -891,8 +891,8 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
           } else if (type === "hallRouteSettings" && mapName && data) {
             hallRouteSettings[mapName] = JSON.parse(data);
           }
-        } catch (e) {
-          result.errors.push(`ルート情報の解析エラー: ${type} - ${mapName}`);
+        } catch {
+          result.errors.push("ルート情報の解析エラー");
         }
       });
 
@@ -908,11 +908,9 @@ export async function importFromXlsx(file: File): Promise<ImportResult> {
     }
 
     result.success = true;
-  } catch (error) {
-    console.error("Import error:", error);
-    result.errors.push(
-      `インポートエラー: ${error instanceof Error ? error.message : "不明なエラー"}`,
-    );
+  } catch {
+    console.error("Spreadsheet import failed (spreadsheet-import-failed).");
+    result.errors.push("インポートエラー: ファイルを解析できませんでした");
   }
 
   return result;

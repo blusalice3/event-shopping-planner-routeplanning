@@ -7,11 +7,11 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["icons/*.png", "icons/*.svg"],
       manifest: {
         name: "即売会 購入巡回表",
         short_name: "巡回表",
         description: "同人誌即売会の購入リスト管理アプリ",
+        lang: "ja",
         theme_color: "#2563eb",
         background_color: "#f8fafc",
         display: "standalone",
@@ -43,6 +43,13 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg}"],
+        globIgnores: [
+          "**/#U*.png",
+          "icons/maskable-icon-512x512.png",
+          "icons/pwa-64x64.png",
+          "icons/pwa-192x192.png",
+          "icons/pwa-512x512.png",
+        ],
         cleanupOutdatedCaches: true, // 追加: 古いキャッシュを自動削除
         skipWaiting: true, // 追加: 新しいService Workerを即座にアクティブ化
         clientsClaim: true, // 追加: アクティブ化後すぐに制御を開始

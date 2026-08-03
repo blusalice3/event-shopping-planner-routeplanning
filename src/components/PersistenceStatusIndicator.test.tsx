@@ -6,6 +6,26 @@ import { normalizePersistenceFailure } from "../hooks/useIndexedDbPersistence";
 import PersistenceStatusIndicator from "./PersistenceStatusIndicator";
 
 describe("PersistenceStatusIndicator", () => {
+  it("shows that verified legacy data is retained without presenting it as a save failure", () => {
+    render(
+      <PersistenceStatusIndicator
+        status="saved"
+        legacyCleanupStatus="deferred"
+        showRoutineStatus={false}
+        failedStores={[]}
+        onRetry={vi.fn()}
+        onExportBackup={vi.fn()}
+      />,
+    );
+
+    expect(
+      screen.getByRole("status", {
+        name: "保存済み・旧データ保全中",
+      }),
+    ).toHaveAttribute("title", expect.stringContaining("通常の保存は継続"));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it.each([
     ["unsaved", "未保存"],
     ["saving", "保存中…"],
@@ -65,7 +85,7 @@ describe("PersistenceStatusIndicator", () => {
     expect(onExportBackup).toHaveBeenCalledTimes(1);
   });
 
-  it("原因別の対処案と安全化された技術情報を表示する", () => {
+  it("原因別の対処案と閉じた原因コードだけを表示する", () => {
     const failureDetails = [
       normalizePersistenceFailure(
         "mapData",
@@ -115,8 +135,7 @@ describe("PersistenceStatusIndicator", () => {
     expect(alert).toHaveTextContent("保存できない形式のデータ");
     expect(alert).toHaveTextContent("保存領域に異常");
     expect(alert).toHaveTextContent("予期しない問題");
-    expect(alert).toHaveTextContent(
-      "原因コード: OddError / 詳細: first line second line",
-    );
+    expect(alert).toHaveTextContent("原因コード: persistence-operation-failed");
+    expect(alert).not.toHaveTextContent("first line");
   });
 });

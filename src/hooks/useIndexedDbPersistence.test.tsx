@@ -9,6 +9,7 @@ import {
 } from "./useIndexedDbPersistence";
 
 const dbMock = vi.hoisted(() => ({
+  adoptRecoveryCandidate: vi.fn(),
   migrateFromLocalStorage: vi.fn(),
   loadEventLists: vi.fn(),
   loadEventMetadata: vi.fn(),
@@ -90,15 +91,51 @@ const isBeforeUnloadPrevented = () => {
 
 describe("normalizePersistenceFailure", () => {
   it.each([
-    ["QuotaExceededError", "quota", "保存容量が不足", "JSONバックアップ"],
-    ["SecurityError", "permission", "データ保存を許可", "サイトデータ"],
-    ["NotAllowedError", "permission", "データ保存を許可", "サイトデータ"],
-    ["DataCloneError", "data-clone", "保存できない形式", "問題のデータ"],
-    ["PersistenceConflict", "conflict", "競合を検出", "他のタブを閉じ"],
-    ["InvalidStateError", "database", "保存領域に異常", "再読み込み"],
+    [
+      "QuotaExceededError",
+      "quota",
+      "storage-quota-exceeded",
+      "保存容量が不足",
+      "JSONバックアップ",
+    ],
+    [
+      "SecurityError",
+      "permission",
+      "storage-permission-denied",
+      "データ保存を許可",
+      "サイトデータ",
+    ],
+    [
+      "NotAllowedError",
+      "permission",
+      "storage-permission-denied",
+      "データ保存を許可",
+      "サイトデータ",
+    ],
+    [
+      "DataCloneError",
+      "data-clone",
+      "storage-data-clone-failed",
+      "保存できない形式",
+      "問題のデータ",
+    ],
+    [
+      "PersistenceConflict",
+      "conflict",
+      "storage-conflict",
+      "競合を検出",
+      "他のタブを閉じ",
+    ],
+    [
+      "InvalidStateError",
+      "database",
+      "indexeddb-operation-failed",
+      "保存領域に異常",
+      "再読み込み",
+    ],
   ] as const)(
     "%s を利用者向けの原因分類へ変換する",
-    (errorName, category, messagePart, actionPart) => {
+    (errorName, category, errorCode, messagePart, actionPart) => {
       const error = Object.assign(new Error("browser detail"), {
         name: errorName,
       });
@@ -108,37 +145,38 @@ describe("normalizePersistenceFailure", () => {
       expect(detail).toMatchObject({
         storeName: "mapData",
         category,
-        errorCode: errorName,
-        technicalMessage: "browser detail",
+        errorCode,
+        technicalMessage: null,
       });
       expect(detail.userMessage).toContain(messagePart);
       expect(detail.userMessage).toContain(actionPart);
     },
   );
 
-  it("unknown例外の原因コードと技術メッセージを一行・上限内にする", () => {
+  it("unknown例外の利用者由来メッセージを公開せず閉じた原因コードへ変換する", () => {
     const detail = normalizePersistenceFailure("eventLists", {
       name: "Odd\nError!",
       message: `first line\r\nsecond line ${"x".repeat(300)}`,
     });
 
     expect(detail.category).toBe("unknown");
-    expect(detail.errorCode).toBe("OddError");
+    expect(detail.errorCode).toBe("persistence-operation-failed");
     expect(detail.userMessage).toContain("予期しない問題");
-    expect(detail.technicalMessage).not.toMatch(/[\r\n]/);
-    expect(detail.technicalMessage?.length).toBeLessThanOrEqual(160);
-    expect(detail.technicalMessage).toMatch(/…$/);
+    expect(detail.technicalMessage).toBeNull();
   });
 });
 
 describe("useIndexedDbPersistence", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.clearAllMocks();
+    vi.resetAllMocks();
 
     const missing = { status: "missing" as const, data: null };
     dbMock.migrateFromLocalStorage.mockResolvedValue({
       status: "not-needed",
+    });
+    dbMock.adoptRecoveryCandidate.mockResolvedValue({
+      status: "adopted",
     });
     dbMock.loadEventLists.mockResolvedValue(missing);
     dbMock.loadEventMetadata.mockResolvedValue(missing);
@@ -293,6 +331,182 @@ describe("useIndexedDbPersistence", () => {
     Object.values(setters).forEach((setter) => {
       expect(setter).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it("allows normal startup and autosave while verified legacy cleanup is deferred", async () => {
+    dbMock.migrateFromLocalStorage.mockResolvedValue({
+      status: "cleanup-pending",
+      migratedKeys: ["eventLists"],
+    });
+    const setters = createSetters();
+    const initialValues = createValues();
+    const { result, rerender } = renderHook(
+      ({ values }: { values: PersistedValues }) =>
+        useIndexedDbPersistence({ values, setters, saveDelayMs: 1 }),
+      { initialProps: { values: initialValues } },
+    );
+
+    await act(flushMicrotasks);
+
+    expect(result.current.startupState.status).toBe("ready");
+    expect(result.current.isInitialized).toBe(true);
+    expect(result.current.legacyCleanupStatus).toBe("deferred");
+
+    const changedValues: PersistedValues = {
+      ...initialValues,
+      eventMetadata: {
+        cleanup延期中: {
+          spreadsheetUrl: "",
+          spreadsheetSheetName: "1日目",
+          lastImportDate: "2026-08-03T00:00:00.000Z",
+        },
+      },
+    };
+    rerender({ values: changedValues });
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+
+    expect(dbMock.saveEventMetadata).toHaveBeenCalledWith(
+      changedValues.eventMetadata,
+    );
+    expect(result.current.persistenceStatus).toBe("saved");
+  });
+
+  it("revalidates and adopts an explicitly selectable payload before restarting initialization", async () => {
+    const candidate = {
+      id: "esp-recovery-candidate:FNV-1A-64:0123456789abcdef:42",
+      source: "runtime-fallback" as const,
+      role: "app-payload" as const,
+      adoptable: true,
+      storeName: "eventMetadata",
+      key: "data",
+      sourceKey: "esp:idb-fallback:v1:eventMetadata:data:revision-2",
+      targetKey: "data",
+      revision: "revision-2",
+      digest: "a".repeat(64),
+      digestAlgorithm: "SHA-256" as const,
+      digestCanonicalization: "esp-json-v1" as const,
+      payload: { 明示採用イベント: { generation: "selected" } },
+      rawValue: "runtime-envelope",
+    };
+    const recoveryBundle = {
+      kind: "event-shopping-planner-persistence-recovery" as const,
+      version: 1 as const,
+      capturedAt: "2026-08-03T00:00:00.000Z",
+      issues: [
+        {
+          stage: "load",
+          code: "PersistenceConflict",
+          message: "複数の候補があります。",
+        },
+      ],
+      candidates: [candidate],
+    };
+    dbMock.migrateFromLocalStorage
+      .mockResolvedValueOnce({
+        status: "recovery-required",
+        recoveryBundle,
+      })
+      .mockResolvedValue({
+        status: "not-needed",
+        dataMigrationStatus: "not-needed",
+        cleanupStatus: "not-needed",
+      });
+    const setters = createSetters();
+    const { result } = renderHook(() =>
+      useIndexedDbPersistence({
+        values: createValues(),
+        setters,
+        saveDelayMs: 1,
+      }),
+    );
+    await act(flushMicrotasks);
+
+    await act(async () => {
+      await result.current.adoptRecoveryCandidate(candidate.id);
+    });
+
+    expect(dbMock.adoptRecoveryCandidate).toHaveBeenCalledWith(candidate);
+    expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(2);
+    expect(result.current.startupState.status).toBe("ready");
+    expect(result.current.isInitialized).toBe(true);
+    expect(result.current.isAdoptingRecoveryCandidate).toBe(false);
+    expect(result.current.recoveryAdoptionError).toBeNull();
+  });
+
+  it("keeps startup blocked and hides private error details when adoption evidence changes", async () => {
+    const candidate = {
+      id: "esp-recovery-candidate:FNV-1A-64:fedcba9876543210:42",
+      source: "indexedDB" as const,
+      role: "app-payload" as const,
+      adoptable: true,
+      storeName: "eventMetadata",
+      key: "data",
+      sourceKey: "data",
+      targetKey: "data",
+      revision: "revision-stale",
+      digest: "b".repeat(64),
+      digestAlgorithm: "SHA-256" as const,
+      digestCanonicalization: "esp-json-v1" as const,
+      payload: { 非公開イベント: { secret: "do-not-display" } },
+    };
+    const recoveryBundle = {
+      kind: "event-shopping-planner-persistence-recovery" as const,
+      version: 1 as const,
+      capturedAt: "2026-08-03T00:00:00.000Z",
+      issues: [
+        {
+          stage: "load",
+          code: "PersistenceConflict",
+          message: "候補の明示選択が必要です。",
+        },
+      ],
+      candidates: [candidate],
+    };
+    dbMock.migrateFromLocalStorage.mockResolvedValue({
+      status: "recovery-required",
+      recoveryBundle,
+    });
+    const adoption = createDeferred<never>();
+    dbMock.adoptRecoveryCandidate.mockReturnValueOnce(adoption.promise);
+    const setters = createSetters();
+    const { result } = renderHook(() =>
+      useIndexedDbPersistence({
+        values: createValues(),
+        setters,
+        saveDelayMs: 1,
+      }),
+    );
+    await act(flushMicrotasks);
+
+    let adoptionPromise!: Promise<void>;
+    act(() => {
+      adoptionPromise = result.current.adoptRecoveryCandidate(candidate.id);
+    });
+    expect(dbMock.adoptRecoveryCandidate).toHaveBeenCalledTimes(1);
+    expect(result.current.isAdoptingRecoveryCandidate).toBe(true);
+    await act(async () => {
+      adoption.reject(
+        Object.assign(new Error("非公開イベント do-not-display"), {
+          name: "PersistenceConflict",
+        }),
+      );
+      await adoptionPromise;
+    });
+    await act(flushMicrotasks);
+
+    expect(result.current.isInitialized).toBe(false);
+    expect(result.current.startupState.status).toBe("recovery-required");
+    expect(result.current.recoveryAdoptionError).toContain(
+      "開始後に変更されたため",
+    );
+    expect(result.current.recoveryAdoptionError).not.toContain(
+      "非公開イベント",
+    );
+    expect(result.current.recoveryAdoptionError).not.toContain(
+      "do-not-display",
+    );
   });
 
   it("does not hydrate any store when one load needs recovery", async () => {
@@ -516,8 +730,14 @@ describe("useIndexedDbPersistence", () => {
       changedMapData,
     );
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      "Failed to save data to IndexedDB:",
-      [{ label: "mapData", error: saveError }],
+      "IndexedDB persistence save failed.",
+      [
+        {
+          storeName: "mapData",
+          category: "unknown",
+          errorCode: "persistence-operation-failed",
+        },
+      ],
     );
     expect(alertSpy).not.toHaveBeenCalled();
     expect(result.current.persistenceStatus).toBe("failed");
@@ -526,8 +746,8 @@ describe("useIndexedDbPersistence", () => {
       expect.objectContaining({
         storeName: "mapData",
         category: "unknown",
-        errorCode: "Error",
-        technicalMessage: "mapData write failed",
+        errorCode: "persistence-operation-failed",
+        technicalMessage: null,
       }),
     ]);
     const eventListSaveCountAfterFailure =
@@ -606,8 +826,8 @@ describe("useIndexedDbPersistence", () => {
       expect.objectContaining({
         storeName: "mapData",
         category: "quota",
-        errorCode: "QuotaExceededError",
-        technicalMessage: "quota exceeded while writing map data",
+        errorCode: "storage-quota-exceeded",
+        technicalMessage: null,
       }),
     ]);
 
@@ -686,8 +906,14 @@ describe("useIndexedDbPersistence", () => {
     expect(result.current.failedStores).toEqual(["eventLists"]);
     expect(isBeforeUnloadPrevented()).toBe(true);
     expect(consoleErrorSpy).toHaveBeenCalledWith(
-      "Failed to save data to IndexedDB:",
-      [{ label: "eventLists", error: saveError }],
+      "IndexedDB persistence save failed.",
+      [
+        {
+          storeName: "eventLists",
+          category: "unknown",
+          errorCode: "persistence-operation-failed",
+        },
+      ],
     );
 
     await act(async () => {

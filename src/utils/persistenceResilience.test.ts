@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
+  PERSISTENCE_CHECKPOINT_KIND,
+  PERSISTENCE_CHECKPOINT_SCHEMA_VERSION,
   PersistenceEnvelopeError,
   PersistenceSerializationError,
   canonicalStringifyPersistencePayload,
+  createPersistenceCheckpointKey,
   createPersistenceDigest,
   createRuntimeFallbackCandidate,
   createRuntimeFallbackKey,
   createStartupRecoveryBundle,
   createSynchronousFingerprint,
+  isPersistenceCheckpoint,
   isPersistenceDigestDescriptor,
   isPersistenceSynchronousFingerprint,
   mergeStartupRecoveryBundles,
@@ -16,6 +20,7 @@ import {
   serializeRuntimeFallbackCandidate,
   serializeStartupRecoveryBundle,
   verifyPersistenceDigest,
+  type PersistenceCheckpoint,
   type RuntimeFallbackCandidate,
 } from "./persistenceResilience";
 
@@ -37,6 +42,45 @@ const createCandidate = (
     createdAt: CREATED_AT,
     payload,
   });
+
+const createCheckpoint = async (): Promise<PersistenceCheckpoint> => {
+  const [committedDigest, ancestorDigest] = await Promise.all([
+    createPersistenceDigest({ revision: "revision-2" }),
+    createPersistenceDigest({ revision: "revision-1" }),
+  ]);
+  return {
+    kind: PERSISTENCE_CHECKPOINT_KIND,
+    version: PERSISTENCE_CHECKPOINT_SCHEMA_VERSION,
+    storeName: STORE_NAME,
+    key: RECORD_KEY,
+    committedRoot: {
+      revision: "revision-2",
+      baseRevision: "revision-1",
+      digest: committedDigest,
+      writerId: "writer-test",
+      committedAt: CREATED_AT,
+    },
+    absorbedCandidates: [
+      {
+        schemaVersion: 1,
+        revision: "revision-1",
+        baseRevision: null,
+        digest: ancestorDigest,
+        writerId: "writer-test",
+        createdAt: CREATED_AT,
+      },
+      {
+        schemaVersion: 1,
+        revision: "revision-2",
+        baseRevision: "revision-1",
+        digest: committedDigest,
+        writerId: "writer-test",
+        createdAt: CREATED_AT,
+      },
+    ],
+    updatedAt: "2026-08-03T00:00:01.000Z",
+  };
+};
 
 describe("canonicalStringifyPersistencePayload", () => {
   it("objectの挿入順によらず、すべての階層のkeyを昇順に正規化する", () => {
@@ -278,6 +322,152 @@ describe("persistence digest and synchronous fingerprint", () => {
       isPersistenceSynchronousFingerprint({
         ...fingerprint,
         unsupported: true,
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("persistence checkpoint", () => {
+  it("storeとkeyを予約namespace内の一意なkeyへencodeする", () => {
+    expect(
+      createPersistenceCheckpointKey("event metadata", "data/primary"),
+    ).toBe("__esp_internal__:checkpoint:v1:event%20metadata:data%2Fprimary");
+  });
+
+  it("確定rootと吸収済み候補を含むstrict schemaを検証する", async () => {
+    const checkpoint = await createCheckpoint();
+
+    expect(isPersistenceCheckpoint(checkpoint)).toBe(true);
+    expect(
+      isPersistenceCheckpoint(checkpoint, {
+        storeName: STORE_NAME,
+        key: RECORD_KEY,
+      }),
+    ).toBe(true);
+    expect(
+      isPersistenceCheckpoint(checkpoint, { storeName: "other-store" }),
+    ).toBe(false);
+    expect(isPersistenceCheckpoint(checkpoint, { key: "other-key" })).toBe(
+      false,
+    );
+  });
+
+  it("余分・欠落field、不正digest・日時・文字列・schemaを拒否する", async () => {
+    const checkpoint = await createCheckpoint();
+    const firstCandidate = checkpoint.absorbedCandidates[0];
+    const missingUpdatedAt: Partial<PersistenceCheckpoint> = {
+      ...checkpoint,
+    };
+    delete missingUpdatedAt.updatedAt;
+
+    expect(isPersistenceCheckpoint({ ...checkpoint, unsupported: true })).toBe(
+      false,
+    );
+    expect(isPersistenceCheckpoint(missingUpdatedAt)).toBe(false);
+    expect(isPersistenceCheckpoint({ ...checkpoint, version: 2 })).toBe(false);
+    expect(isPersistenceCheckpoint({ ...checkpoint, storeName: "" })).toBe(
+      false,
+    );
+    expect(
+      isPersistenceCheckpoint({
+        ...checkpoint,
+        committedRoot: {
+          ...checkpoint.committedRoot,
+          unsupported: true,
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isPersistenceCheckpoint({
+        ...checkpoint,
+        committedRoot: {
+          ...checkpoint.committedRoot,
+          digest: {
+            ...checkpoint.committedRoot.digest,
+            value: "0".repeat(63),
+          },
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isPersistenceCheckpoint({
+        ...checkpoint,
+        committedRoot: {
+          ...checkpoint.committedRoot,
+          revision: "",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isPersistenceCheckpoint({
+        ...checkpoint,
+        committedRoot: {
+          ...checkpoint.committedRoot,
+          baseRevision: "",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isPersistenceCheckpoint({
+        ...checkpoint,
+        committedRoot: {
+          ...checkpoint.committedRoot,
+          committedAt: "not-a-date",
+        },
+      }),
+    ).toBe(false);
+    expect(
+      isPersistenceCheckpoint({
+        ...checkpoint,
+        absorbedCandidates: [
+          {
+            ...firstCandidate,
+            schemaVersion: 2,
+          },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      isPersistenceCheckpoint({
+        ...checkpoint,
+        absorbedCandidates: [
+          {
+            ...firstCandidate,
+            writerId: "",
+          },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      isPersistenceCheckpoint({
+        ...checkpoint,
+        absorbedCandidates: [
+          {
+            ...firstCandidate,
+            createdAt: "invalid",
+          },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      isPersistenceCheckpoint({
+        ...checkpoint,
+        updatedAt: "",
+      }),
+    ).toBe(false);
+  });
+
+  it("吸収済み候補内の重複revisionを拒否する", async () => {
+    const checkpoint = await createCheckpoint();
+    const duplicate = {
+      ...checkpoint.absorbedCandidates[0],
+      writerId: "another-writer",
+    };
+
+    expect(
+      isPersistenceCheckpoint({
+        ...checkpoint,
+        absorbedCandidates: [...checkpoint.absorbedCandidates, duplicate],
       }),
     ).toBe(false);
   });

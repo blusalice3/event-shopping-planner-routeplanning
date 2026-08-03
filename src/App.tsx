@@ -592,9 +592,13 @@ const App: React.FC = () => {
     isInitialized,
     startupState,
     persistenceStatus,
+    legacyCleanupStatus,
+    isAdoptingRecoveryCandidate,
+    recoveryAdoptionError,
     failedStores,
     failureDetails,
     retryInitialization,
+    adoptRecoveryCandidate,
     retrySave,
     runExclusiveRestore,
   } = useIndexedDbPersistence({
@@ -2579,12 +2583,10 @@ const App: React.FC = () => {
       });
       const timestamp = backup.exportedAt.replace(/[:.]/g, "-");
       downloadBlob(blob, `event-shopping-planner-backup-${timestamp}.json`);
-    } catch (error) {
-      console.error("Backup export error:", error);
+    } catch {
+      console.error("Backup export failed (backup-export-failed).");
       alert(
-        `バックアップを完全に保存できなかったため、ファイルを作成しませんでした。現在のデータは変更されていません。${
-          error instanceof Error ? `\n理由: ${error.message}` : ""
-        }`,
+        "バックアップを完全に保存できなかったため、ファイルを作成しませんでした。現在のデータは変更されていません。",
       );
     }
   }, [buildCurrentAppData]);
@@ -2609,13 +2611,11 @@ const App: React.FC = () => {
         blob,
         `event-shopping-planner-recovery-${exportedAt.replace(/[:.]/g, "-")}.json`,
       );
-    } catch (error) {
-      console.error("Persistence recovery export error:", error);
-      alert(
-        `退避用JSONを作成できませんでした。保存候補は変更されていません。${
-          error instanceof Error ? `\n理由: ${error.message}` : ""
-        }`,
+    } catch {
+      console.error(
+        "Persistence recovery export failed (recovery-export-failed).",
       );
+      alert("退避用JSONを作成できませんでした。保存候補は変更されていません。");
     }
   }, [startupState]);
 
@@ -2643,8 +2643,8 @@ const App: React.FC = () => {
           return;
         }
         setPendingBackup(result.backup);
-      } catch (error) {
-        console.error("Backup import error:", error);
+      } catch {
+        console.error("Backup import failed (backup-import-failed).");
         alert(
           "バックアップを読み込めませんでした。JSONバックアップファイルを選び直してください。",
         );
@@ -2700,7 +2700,7 @@ const App: React.FC = () => {
           ),
         );
       } catch (error) {
-        console.error("Atomic backup restore error:", error);
+        console.error("Atomic backup restore failed (atomic-restore-failed).");
         if (error instanceof BlockDetectionSettingsRollbackError) {
           throw new Error(
             "イベント本体は復元前のままですが、マップのブロック検出設定だけ元に戻せなかった可能性があります。次回のマップ取り込み前に検出設定を確認してください。",
@@ -2785,8 +2785,8 @@ const App: React.FC = () => {
         );
 
         downloadBlob(blob, filename);
-      } catch (error) {
-        console.error("Export error:", error);
+      } catch {
+        console.error("Item export failed (item-export-failed).");
         alert("アイテムの出力に失敗しました。");
       }
 
@@ -2930,8 +2930,8 @@ const App: React.FC = () => {
           itemCount: importedData.items.length,
         });
         setPendingBackup(validation.backup);
-      } catch (error) {
-        console.error("Import error:", error);
+      } catch {
+        console.error("Item import failed (item-import-failed).");
         alert(
           "アイテムの取り込みに失敗しました。ファイル形式を確認してください。",
         );
@@ -3004,8 +3004,8 @@ const App: React.FC = () => {
         kind: "items-only",
         eventName,
         source,
-        onError: (error) => {
-          console.error("Update error:", error);
+        onError: () => {
+          console.error("Spreadsheet update preview failed (preview-failed).");
           setPendingUpdateEventName(eventName);
           setShowUrlUpdateDialog(true);
         },
@@ -3055,8 +3055,10 @@ const App: React.FC = () => {
             url: resolution.source.url,
             sheetName: resolution.source.sheetName,
           },
-          onError: (error) => {
-            console.error("Update error:", error);
+          onError: () => {
+            console.error(
+              "Spreadsheet update preview failed (preview-failed).",
+            );
             setPendingUpdateEventName(resolution.eventName);
             setShowUrlUpdateDialog(true);
           },
@@ -3071,8 +3073,10 @@ const App: React.FC = () => {
           url: resolution.source.url,
           sheetName: resolution.source.sheetName,
         },
-        onError: (error) => {
-          console.error("Source switch preview error:", error);
+        onError: () => {
+          console.error(
+            "Spreadsheet source switch preview failed (preview-failed).",
+          );
           alert(
             "新しい更新元の内容を確認できなかったため、更新元も品目も変更していません。",
           );
@@ -3147,8 +3151,8 @@ const App: React.FC = () => {
           url: newUrl,
           sheetName: normalizedSheetName,
         },
-        onError: (error) => {
-          console.error("Update error:", error);
+        onError: () => {
+          console.error("Spreadsheet update preview failed (preview-failed).");
           setPendingUpdateEventName(eventName);
           setShowUrlUpdateDialog(true);
         },
@@ -3313,12 +3317,9 @@ const App: React.FC = () => {
           commit: commitPreparedMapImport,
         });
       } catch (error) {
-        console.error("Map reimport planning error:", error);
-        alert(
-          error instanceof Error
-            ? error.message
-            : "マップを取り込む準備に失敗しました。",
-        );
+        void error;
+        console.error("Map reimport planning failed (map-plan-failed).");
+        alert("マップを取り込む準備に失敗しました。");
       }
     },
     [
@@ -3765,8 +3766,10 @@ const App: React.FC = () => {
         "mapSmartInsertEnabled",
         String(mapSmartInsertEnabled),
       );
-    } catch (error) {
-      console.error("Failed to persist mapSmartInsertEnabled:", error);
+    } catch {
+      console.error(
+        "Smart insert preference save failed (preference-save-failed).",
+      );
       showSmartInsertToast("スマート挿入設定の保存に失敗しました。", "error");
     }
   }, [mapSmartInsertEnabled, showSmartInsertToast]);
@@ -3774,8 +3777,8 @@ const App: React.FC = () => {
   React.useEffect(() => {
     try {
       localStorage.setItem("mapSmartInsertMode", mapSmartInsertMode);
-    } catch (error) {
-      console.error("Failed to persist mapSmartInsertMode:", error);
+    } catch {
+      console.error("Smart insert mode save failed (preference-save-failed).");
       showSmartInsertToast("スマート挿入モードの保存に失敗しました。", "error");
     }
   }, [mapSmartInsertMode, showSmartInsertToast]);
@@ -5303,8 +5306,14 @@ const App: React.FC = () => {
           details={startupState.details}
           canExport={(startupState.recoveryBundle?.candidates.length ?? 0) > 0}
           isRetrying={startupState.isRetrying}
+          candidates={startupState.recoveryBundle?.candidates ?? []}
+          isAdopting={isAdoptingRecoveryCandidate}
+          adoptionError={recoveryAdoptionError}
           onRetry={retryInitialization}
           onExport={handlePersistenceRecoveryExport}
+          onAdopt={(candidateId) => {
+            void adoptRecoveryCandidate(candidateId);
+          }}
         />
       );
     }
@@ -5827,6 +5836,7 @@ const App: React.FC = () => {
       )}
       <PersistenceStatusIndicator
         status={persistenceStatus}
+        legacyCleanupStatus={legacyCleanupStatus}
         showRoutineStatus={uiVisibilitySettings.showPersistenceStatus}
         failedStores={failedStores}
         failureDetails={failureDetails}

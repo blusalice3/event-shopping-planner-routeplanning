@@ -543,6 +543,8 @@ Excel内の品目は、1～16列目を固定位置で読み取ります。バー
 
 通常の個別自動保存では、IndexedDBへの書き込みが再試行後も失敗すると、マップ以外の保存領域をlocalStorageへ退避します。容量の大きいマップデータはlocalStorageへ退避されないため、保存失敗表示を放置しないでください。別端末へ移行・復元する標準手段として、全データJSONバックアップを定期保存してください。
 
+永続化障害、旧localStorage移行、段階release、復旧時の運用手順は[永続化復旧runbook](docs/persistence-recovery-runbook.md)を参照してください。
+
 PWA構成により、キャッシュ済みの画面、主要な閲覧・編集、ローカルファイル処理をオフラインで使える設計です。インストールまたはService Workerの有効化後、オンラインのまま再読み込みし、必要な画面を開いてから、実際の端末でオフライン動作を事前確認してください。次の操作には通信が必要です。
 
 - Googleスプレッドシートからの新規取込と更新
@@ -611,7 +613,9 @@ npm run dev
 
 `npm run lint` と `npm run lint:fix` のスクリプトはありますが、このスナップショットにはESLint設定ファイルが含まれていないため、現状のままでは実行に失敗します。利用する場合は、先にプロジェクト方針に合う設定を追加してください。
 
-本番ビルドは `dist` に出力されます。PWAを有効にするにはHTTPSで配信し、アプリはドメインのルートへ配置してください。`vercel.json` にはSPA用フォールバックとセキュリティヘッダーがあります。ただし、現在のVitePWAビルドは `/sw.js` を生成・登録する一方、Service Worker向け再検証ヘッダーは `/service-worker.js` に設定されているため、そのヘッダーは実ファイルへ適用されません。デプロイ前に対象パスを `/sw.js` へ合わせてください。
+本番ビルドは `dist` に出力されます。PWAを有効にするにはHTTPSで配信し、アプリはドメインのルートへ配置してください。`vercel.json` にはSPA用フォールバック、セキュリティヘッダー、および生成物 `/sw.js` 向けの再検証ヘッダーがあります。配布時は実レスポンスでも `Cache-Control: public, max-age=0, must-revalidate` が適用されることを確認してください。
+
+旧localStorage原本の物理cleanupはRelease Aでは既定OFFで、通常起動・migration・autosave・復旧UIから実行されません。Release B用の静的gateは `VITE_PERSISTENCE_LEGACY_CLEANUP=true` の完全一致でのみ有効になりますが、これだけでは実行されません。runtime kill switch、対応clientとService Workerのversion証明、全clientのquiescence、およびWeb Lockの排他を同時に証明できない場合はfail closedで延期します。production proof providerとoperator UIが未構成のため、Release Bは運用禁止です。運用条件と禁止事項は [永続化復旧runbook](docs/persistence-recovery-runbook.md) を参照してください。
 
 ### 技術構成
 

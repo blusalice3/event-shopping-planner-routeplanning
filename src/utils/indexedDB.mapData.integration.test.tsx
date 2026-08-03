@@ -80,6 +80,9 @@ async function replaceWithLegacyMapData(value: unknown): Promise<void> {
       transaction
         .objectStore(db.STORES.SYNC_QUEUE)
         .delete("__esp_internal__:meta:v1:mapData:data");
+      transaction
+        .objectStore(db.STORES.SYNC_QUEUE)
+        .delete("__esp_internal__:checkpoint:v1:mapData:data");
       transaction.oncomplete = () => resolve();
       transaction.onabort = () =>
         reject(transaction.error ?? new Error("Raw map replacement failed."));
@@ -160,6 +163,27 @@ describe("db.saveMapDataChanges", () => {
       "2日目マップ",
     ]);
     expect(stored["新規イベント"]["1日目マップ"].cells[0].value).toBe("a1");
+  });
+
+  it("prunes an empty event and keeps repeated saves metadata-consistent", async () => {
+    const emptyEventMap: MapDataStore = {
+      空イベント: {},
+    };
+
+    await db.saveMapDataChanges({}, emptyEventMap);
+
+    const firstLoad = await db.loadMapData();
+    expect(firstLoad).toEqual({ status: "missing", data: null });
+    expect(
+      await readRawMapEntry(
+        `mapData:${JSON.stringify(["空イベント", "1日目マップ"])}`,
+      ),
+    ).toBeUndefined();
+
+    await db.saveMapDataChanges({}, emptyEventMap);
+
+    const secondLoad = await db.loadMapData();
+    expect(secondLoad).toEqual({ status: "missing", data: null });
   });
 
   it("immediately reloads a normalized rectangular XLSX map without a metadata conflict", async () => {

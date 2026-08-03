@@ -1,5 +1,10 @@
 export const RUNTIME_FALLBACK_NAMESPACE = "esp:idb-fallback:v1";
 export const PERSISTENCE_METADATA_NAMESPACE = "__esp_internal__:meta:v1";
+export const PERSISTENCE_CHECKPOINT_NAMESPACE =
+  "__esp_internal__:checkpoint:v1";
+export const PERSISTENCE_CHECKPOINT_KIND =
+  "event-shopping-planner-persistence-checkpoint" as const;
+export const PERSISTENCE_CHECKPOINT_SCHEMA_VERSION = 1 as const;
 export const PERSISTENCE_RECOVERY_KIND =
   "event-shopping-planner-persistence-recovery" as const;
 
@@ -51,6 +56,33 @@ export interface RuntimeFallbackCandidate<T = unknown> {
   payload: T;
 }
 
+export interface PersistenceCheckpointCommittedRoot {
+  revision: string;
+  baseRevision: string | null;
+  digest: PersistenceDigestDescriptor;
+  writerId: string;
+  committedAt: string;
+}
+
+export interface PersistenceCheckpointAbsorbedCandidate {
+  schemaVersion: typeof FALLBACK_SCHEMA_VERSION;
+  revision: string;
+  baseRevision: string | null;
+  digest: PersistenceDigestDescriptor;
+  writerId: string;
+  createdAt: string;
+}
+
+export interface PersistenceCheckpoint {
+  kind: typeof PERSISTENCE_CHECKPOINT_KIND;
+  version: typeof PERSISTENCE_CHECKPOINT_SCHEMA_VERSION;
+  storeName: string;
+  key: string;
+  committedRoot: PersistenceCheckpointCommittedRoot;
+  absorbedCandidates: PersistenceCheckpointAbsorbedCandidate[];
+  updatedAt: string;
+}
+
 export interface StartupRecoveryIssue {
   stage: string;
   code: string;
@@ -65,16 +97,46 @@ export type StartupRecoveryCandidateSource =
   | "runtime-fallback"
   | "migration-journal";
 
+export type StartupRecoveryCandidateRole =
+  | "app-payload"
+  | "persistence-metadata"
+  | "persistence-checkpoint"
+  | "legacy-migration-source"
+  | "migration-journal"
+  | "migration-archive"
+  | "invalid-source";
+
 export interface StartupRecoveryCandidate {
   id: string;
   source: StartupRecoveryCandidateSource;
+  role?: StartupRecoveryCandidateRole;
+  adoptable?: boolean;
   storeName?: string;
   key?: string;
+  sourceKey?: string;
+  targetKey?: string;
   revision?: string;
   digest?: string;
+  digestAlgorithm?: "SHA-256" | "FNV-1A-64";
+  digestCanonicalization?: "esp-json-v1";
+  digestCanonicalLength?: number;
   payload?: unknown;
   rawValue?: string;
 }
+
+export type StartupRecoveryCandidateIdentity = Pick<
+  StartupRecoveryCandidate,
+  | "source"
+  | "role"
+  | "storeName"
+  | "sourceKey"
+  | "targetKey"
+  | "revision"
+  | "digest"
+  | "digestAlgorithm"
+  | "digestCanonicalization"
+  | "digestCanonicalLength"
+>;
 
 export interface StartupRecoveryBundle {
   kind: typeof PERSISTENCE_RECOVERY_KIND;
@@ -295,6 +357,18 @@ export function createSynchronousFingerprint(
   };
 }
 
+export function createStartupRecoveryCandidateId(
+  identity: StartupRecoveryCandidateIdentity,
+): string {
+  const fingerprint = createSynchronousFingerprint(identity);
+  return [
+    "esp-recovery-candidate",
+    fingerprint.algorithm,
+    fingerprint.value,
+    fingerprint.canonicalLength,
+  ].join(":");
+}
+
 export function isPersistenceDigestDescriptor(
   value: unknown,
 ): value is PersistenceDigestDescriptor {
@@ -426,6 +500,128 @@ export function createPersistenceMetadataKey(
   return `${PERSISTENCE_METADATA_NAMESPACE}:${encodeURIComponent(
     storeName,
   )}:${encodeURIComponent(key)}`;
+}
+
+export function createPersistenceCheckpointKey(
+  storeName: string,
+  key: string,
+): string {
+  return `${PERSISTENCE_CHECKPOINT_NAMESPACE}:${encodeURIComponent(
+    storeName,
+  )}:${encodeURIComponent(key)}`;
+}
+
+const hasExactCheckpointKeys = (
+  value: unknown,
+  expectedKeys: readonly string[],
+): value is Record<string, unknown> => {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const actualKeys = Object.keys(value).sort();
+  const sortedExpectedKeys = [...expectedKeys].sort();
+  return (
+    actualKeys.length === sortedExpectedKeys.length &&
+    actualKeys.every(
+      (actualKey, index) => actualKey === sortedExpectedKeys[index],
+    )
+  );
+};
+
+const isNonEmptyCheckpointString = (value: unknown): value is string =>
+  typeof value === "string" && value.length > 0;
+
+const isCheckpointBaseRevision = (value: unknown): value is string | null =>
+  value === null || isNonEmptyCheckpointString(value);
+
+const isCheckpointTimestamp = (value: unknown): value is string =>
+  isNonEmptyCheckpointString(value) && Number.isFinite(Date.parse(value));
+
+const isPersistenceCheckpointCommittedRoot = (
+  value: unknown,
+): value is PersistenceCheckpointCommittedRoot => {
+  if (
+    !hasExactCheckpointKeys(value, [
+      "revision",
+      "baseRevision",
+      "digest",
+      "writerId",
+      "committedAt",
+    ])
+  ) {
+    return false;
+  }
+  return (
+    isNonEmptyCheckpointString(value.revision) &&
+    isCheckpointBaseRevision(value.baseRevision) &&
+    isPersistenceDigestDescriptor(value.digest) &&
+    isNonEmptyCheckpointString(value.writerId) &&
+    isCheckpointTimestamp(value.committedAt)
+  );
+};
+
+const isPersistenceCheckpointAbsorbedCandidate = (
+  value: unknown,
+): value is PersistenceCheckpointAbsorbedCandidate => {
+  if (
+    !hasExactCheckpointKeys(value, [
+      "schemaVersion",
+      "revision",
+      "baseRevision",
+      "digest",
+      "writerId",
+      "createdAt",
+    ])
+  ) {
+    return false;
+  }
+  return (
+    value.schemaVersion === FALLBACK_SCHEMA_VERSION &&
+    isNonEmptyCheckpointString(value.revision) &&
+    isCheckpointBaseRevision(value.baseRevision) &&
+    isPersistenceDigestDescriptor(value.digest) &&
+    isNonEmptyCheckpointString(value.writerId) &&
+    isCheckpointTimestamp(value.createdAt)
+  );
+};
+
+export function isPersistenceCheckpoint(
+  value: unknown,
+  expected: { storeName?: string; key?: string } = {},
+): value is PersistenceCheckpoint {
+  if (
+    !hasExactCheckpointKeys(value, [
+      "kind",
+      "version",
+      "storeName",
+      "key",
+      "committedRoot",
+      "absorbedCandidates",
+      "updatedAt",
+    ]) ||
+    value.kind !== PERSISTENCE_CHECKPOINT_KIND ||
+    value.version !== PERSISTENCE_CHECKPOINT_SCHEMA_VERSION ||
+    !isNonEmptyCheckpointString(value.storeName) ||
+    !isNonEmptyCheckpointString(value.key) ||
+    (expected.storeName !== undefined &&
+      value.storeName !== expected.storeName) ||
+    (expected.key !== undefined && value.key !== expected.key) ||
+    !isPersistenceCheckpointCommittedRoot(value.committedRoot) ||
+    !Array.isArray(value.absorbedCandidates) ||
+    !value.absorbedCandidates.every(isPersistenceCheckpointAbsorbedCandidate) ||
+    !isCheckpointTimestamp(value.updatedAt)
+  ) {
+    return false;
+  }
+
+  const absorbedRevisions = new Set<string>();
+  for (const candidate of value.absorbedCandidates) {
+    if (absorbedRevisions.has(candidate.revision)) {
+      return false;
+    }
+    absorbedRevisions.add(candidate.revision);
+  }
+  return true;
 }
 
 const cloneCanonicalPayload = <T>(payload: T): T =>

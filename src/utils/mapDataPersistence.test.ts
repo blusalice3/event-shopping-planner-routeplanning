@@ -28,6 +28,17 @@ function makeCell(overrides: Partial<CellData> = {}): CellData {
 }
 
 describe("mapDataPersistence", () => {
+  it("prunes empty event maps to the same logical value as an empty store", () => {
+    const withEmptyEvent: MapDataStore = {
+      空イベント: {},
+    };
+
+    expect(compactMapDataForStorage(withEmptyEvent)).toEqual({});
+    expect(expandMapDataFromStorage({ 空イベント: {} })).toEqual({});
+    expect(normalizeMapDataForPersistence(withEmptyEvent)).toEqual({});
+    expect(normalizeMapDataForPersistence({})).toEqual({});
+  });
+
   it("omits empty default cells and restores persisted render cells on load", () => {
     const mapData: MapDataStore = {
       Event: {

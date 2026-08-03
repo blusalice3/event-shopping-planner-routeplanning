@@ -12,6 +12,7 @@ import {
   normalizeMapDataForPersistence,
 } from "./mapDataPersistence";
 import {
+  createPersistenceCheckpointKey,
   createPersistenceDigest,
   createPersistenceMetadataKey,
   createPersistenceRevision,
@@ -19,8 +20,10 @@ import {
   createRuntimeFallbackKey,
   createRuntimeFallbackPrefix,
   createSynchronousFingerprint,
+  createStartupRecoveryCandidateId,
   createStartupRecoveryBundle,
   getPersistenceWriterId,
+  isPersistenceCheckpoint,
   isPersistenceDigestDescriptor,
   isPersistenceSynchronousFingerprint,
   parseRuntimeFallbackCandidate,
@@ -28,14 +31,29 @@ import {
   serializeRuntimeFallbackCandidate,
   snapshotStartupRecoveryValue,
   verifyPersistenceDigest,
+  type PersistenceCheckpoint,
+  type PersistenceCheckpointAbsorbedCandidate,
   type PersistenceDigestDescriptor,
   type PersistenceSynchronousFingerprint,
   type RuntimeFallbackCandidate,
   type StartupRecoveryBundle,
   type StartupRecoveryCandidate,
+  type StartupRecoveryCandidateRole,
   type StartupRecoveryCandidateSource,
   type StartupRecoveryIssue,
 } from "./persistenceResilience";
+import {
+  coordinatePersistenceLegacyCleanup,
+  emitPersistenceCleanupMetric,
+  type AutomaticPersistenceCleanupRequest,
+  type ManualPersistenceCleanupRequest,
+  type PersistenceCleanupBlockedReason,
+  type PersistenceCleanupDeferredReason,
+  type PersistenceCleanupMode,
+  type PersistenceCleanupPhysicalBlockedReason,
+  type PersistenceCleanupPhysicalDeferredReason,
+  type PersistenceCleanupTaskContext,
+} from "./persistenceCleanupCoordinator";
 
 const DB_NAME = "EventShoppingPlannerDB";
 const DB_VERSION = 5;
@@ -46,7 +64,15 @@ const MAP_DATA_KEY_PREFIX = "mapData:";
 const INTERNAL_RECORD_PREFIX = "__esp_internal__:";
 const LEGACY_MIGRATION_JOURNAL_KEY =
   "__esp_internal__:migration:v1:legacy-local-storage";
-const LEGACY_MIGRATION_SCHEMA_VERSION = 1;
+const LEGACY_MIGRATION_SCHEMA_VERSION = 2;
+const LEGACY_MIGRATION_ARCHIVE_SCHEMA_VERSION = 1;
+const LEGACY_MIGRATION_ARCHIVE_KEY_PREFIX =
+  "__esp_internal__:migration-archive:v1:";
+const RECOVERY_ADOPTION_ARCHIVE_KEY_PREFIX =
+  "__esp_internal__:recovery-adoption:v1:";
+const RECOVERY_ADOPTION_RETENTION_KEY_PREFIX =
+  "__esp_internal__:recovery-retain:v1:";
+const LEGACY_SYNC_QUEUE_LOCAL_STORAGE_KEY = "syncQueue";
 
 // ストア名
 const STORES = {
@@ -80,17 +106,91 @@ export type PersistenceMigrationStatus =
   | "cleanup-pending"
   | "recovery-required";
 
+export type PersistenceDataMigrationStatus =
+  | "not-needed"
+  | "prepared"
+  | "copied"
+  | "verified"
+  | "recovery-required";
+
+export type PersistenceCleanupStatus =
+  | "not-needed"
+  | "not-ready"
+  | "ready"
+  | "deferred"
+  | "in-progress"
+  | "completed"
+  | "recovery-required";
+
+export type PersistenceMigrationCleanupDeferredReason =
+  "legacy-sync-queue-archive-unavailable";
+
 export type PersistenceMigrationResult =
   | {
       status: "not-needed";
+      dataMigrationStatus?: "not-needed";
+      cleanupStatus?: "not-needed";
     }
   | {
       status: "completed" | "cleanup-pending";
       migratedKeys: string[];
+      dataMigrationStatus?: "verified";
+      cleanupStatus?: Exclude<
+        PersistenceCleanupStatus,
+        "not-needed" | "recovery-required"
+      >;
+    }
+  | {
+      status: "cleanup-pending";
+      migratedKeys: [];
+      dataMigrationStatus: "not-needed";
+      cleanupStatus: "deferred";
+      cleanupDeferredReason: PersistenceMigrationCleanupDeferredReason;
     }
   | {
       status: "recovery-required";
       recoveryBundle: StartupRecoveryBundle;
+      dataMigrationStatus?: PersistenceDataMigrationStatus;
+      cleanupStatus?: PersistenceCleanupStatus;
+    };
+
+export type PersistenceLegacyCleanupSafetyRequest =
+  | Omit<
+      AutomaticPersistenceCleanupRequest<void>,
+      "buildFlagValue" | "cleanupTask" | "lockManager"
+    >
+  | Omit<
+      ManualPersistenceCleanupRequest<void>,
+      "buildFlagValue" | "cleanupTask" | "lockManager"
+    >;
+
+export type PersistenceLegacyCleanupTaskDeferredReason =
+  PersistenceCleanupPhysicalDeferredReason;
+
+export type PersistenceLegacyCleanupTaskBlockedReason =
+  PersistenceCleanupPhysicalBlockedReason;
+
+export type PersistenceLegacyCleanupResult =
+  | {
+      status: "completed";
+      mode: PersistenceCleanupMode;
+      removedKeys: string[];
+    }
+  | {
+      status: "cleanup-deferred";
+      mode: PersistenceCleanupMode;
+      reason:
+        | PersistenceCleanupDeferredReason
+        | PersistenceLegacyCleanupTaskDeferredReason;
+      removedKeys: string[];
+    }
+  | {
+      status: "cleanup-blocked";
+      mode: PersistenceCleanupMode;
+      reason:
+        | PersistenceCleanupBlockedReason
+        | PersistenceLegacyCleanupTaskBlockedReason;
+      removedKeys: string[];
     };
 
 interface ObservedRevisionRoot {
@@ -112,14 +212,52 @@ interface StoredPersistenceMetadata extends ObservedRevisionRoot {
   version: 1;
 }
 
-type LegacyMigrationPhase =
+type LegacyMigrationPhaseV1 =
   | "prepared"
   | "copied"
   | "verified"
   | "cleanupPending"
   | "completed";
 
+type LegacyMigrationPhase =
+  | "prepared"
+  | "copied"
+  | "verified"
+  | "cleanup-ready"
+  | "cleanup-in-progress"
+  | "completed";
+
 interface LegacyMigrationJournalEntry {
+  legacyKey: string;
+  storeName: Exclude<StoreName, "syncQueue">;
+  rawValue: string;
+  expectedRawDigest: PersistenceDigestDescriptor;
+  payloadDigest: PersistenceDigestDescriptor;
+  targetRevision: string;
+  mapKeys: string[];
+  cleanupStatus: "pending" | "deferred" | "in-progress" | "removed";
+}
+
+interface LegacyMigrationJournal {
+  kind: "event-shopping-planner-legacy-migration";
+  schemaVersion: typeof LEGACY_MIGRATION_SCHEMA_VERSION;
+  sessionId: string;
+  ownerId: string;
+  phase: LegacyMigrationPhase;
+  dataMigrationStatus: "prepared" | "copied" | "verified";
+  cleanupStatus:
+    | "not-ready"
+    | "ready"
+    | "deferred"
+    | "in-progress"
+    | "completed";
+  archiveKey: string;
+  createdAt: string;
+  updatedAt: string;
+  entries: LegacyMigrationJournalEntry[];
+}
+
+interface LegacyMigrationJournalEntryV1 {
   legacyKey: string;
   storeName: Exclude<StoreName, "syncQueue">;
   rawValue: string;
@@ -130,15 +268,32 @@ interface LegacyMigrationJournalEntry {
   cleanupStatus: "pending" | "retained" | "removed";
 }
 
-interface LegacyMigrationJournal {
+interface LegacyMigrationJournalV1 {
   kind: "event-shopping-planner-legacy-migration";
-  schemaVersion: typeof LEGACY_MIGRATION_SCHEMA_VERSION;
+  schemaVersion: 1;
   sessionId: string;
   ownerId: string;
-  phase: LegacyMigrationPhase;
+  phase: LegacyMigrationPhaseV1;
   createdAt: string;
   updatedAt: string;
-  entries: LegacyMigrationJournalEntry[];
+  entries: LegacyMigrationJournalEntryV1[];
+}
+
+interface LegacyMigrationArchiveEntry {
+  legacyKey: string;
+  sourceKind: "migration-source" | "preserved-legacy-sync-queue";
+  storeName: StoreName;
+  rawValue: string;
+  rawDigest: PersistenceDigestDescriptor;
+  capturedAt: string;
+}
+
+interface LegacyMigrationArchive {
+  kind: "event-shopping-planner-legacy-migration-archive";
+  schemaVersion: typeof LEGACY_MIGRATION_ARCHIVE_SCHEMA_VERSION;
+  sessionId: string;
+  createdAt: string;
+  entries: LegacyMigrationArchiveEntry[];
 }
 
 class PersistenceConflictError extends Error {
@@ -151,6 +306,10 @@ class PersistenceConflictError extends Error {
 let dbInstance: IDBDatabase | null = null;
 let dbOpenPromise: Promise<IDBDatabase> | null = null;
 const expectedRevisionRoots = new Map<string, ObservedRevisionRoot>();
+const expectedPersistenceCheckpoints = new Map<
+  string,
+  PersistenceCheckpoint | null
+>();
 const persistenceWriterId = getPersistenceWriterId();
 
 function getObservedRootKey(storeName: StoreName, key: string): string {
@@ -250,6 +409,41 @@ function isStoredPersistenceMetadata(
     typeof candidate.committedAt === "string" &&
     Number.isFinite(Date.parse(candidate.committedAt))
   );
+}
+
+function checkpointCommittedRootMatches(
+  checkpoint: PersistenceCheckpoint,
+  root: ObservedRevisionRoot,
+): boolean {
+  return (
+    checkpoint.committedRoot.revision === root.revision &&
+    checkpoint.committedRoot.baseRevision === root.baseRevision &&
+    checkpoint.committedRoot.digest.algorithm ===
+      root.payloadDigest.algorithm &&
+    checkpoint.committedRoot.digest.canonicalization ===
+      root.payloadDigest.canonicalization &&
+    checkpoint.committedRoot.digest.value === root.payloadDigest.value &&
+    checkpoint.committedRoot.writerId === root.writerId &&
+    checkpoint.committedRoot.committedAt === root.committedAt
+  );
+}
+
+function validateCheckpointForRoot(
+  value: unknown,
+  storeName: StoreName,
+  key: string,
+  root: ObservedRevisionRoot,
+): PersistenceCheckpoint | null {
+  if (value === undefined || value === null) return null;
+  if (
+    !isPersistenceCheckpoint(value, { storeName, key }) ||
+    !checkpointCommittedRootMatches(value, root)
+  ) {
+    throw new PersistenceConflictError(
+      `${storeName}:${key} has an invalid persistence checkpoint.`,
+    );
+  }
+  return value;
 }
 
 function assertStructuredCloneable(value: unknown): void {
@@ -434,7 +628,7 @@ async function deleteDataFromIndexedDb(
     const request = store.delete(key);
 
     request.onerror = () => {
-      console.error(`Failed to delete from ${storeName}:`, request.error);
+      console.error(`Failed to delete from ${storeName}.`);
       reject(request.error);
     };
 
@@ -481,7 +675,7 @@ function openDB(): Promise<IDBDatabase> {
       return registerDbInstance(await openForwardCompatibleDatabase());
     }
   })().catch((error) => {
-    console.error("IndexedDB open error:", error);
+    console.error("IndexedDB open failed.");
     throw error;
   });
 
@@ -505,12 +699,14 @@ function openDB(): Promise<IDBDatabase> {
 interface RawPersistenceSnapshot {
   payload: unknown;
   metadata: unknown;
+  checkpoint: unknown;
 }
 
 interface ValidatedPersistenceSnapshot<T> {
   status: "ok" | "missing";
   data: T | null;
   root: ObservedRevisionRoot;
+  checkpoint: PersistenceCheckpoint | null;
 }
 
 function toRecoveryPrimitive(value: unknown): unknown {
@@ -531,6 +727,37 @@ function createRecoveryIssue(
   } as StartupRecoveryIssue;
 }
 
+type RecoveryCandidateDigest =
+  | PersistenceDigestDescriptor
+  | PersistenceSynchronousFingerprint;
+
+interface RecoveryCandidateOptions {
+  role?: StartupRecoveryCandidateRole;
+  sourceKey?: string;
+  targetKey?: string;
+  digest?: RecoveryCandidateDigest;
+  adoptable?: boolean;
+}
+
+function inferRecoveryCandidateRole(
+  source: StartupRecoveryCandidateSource,
+  key: string,
+): StartupRecoveryCandidateRole {
+  if (source === "legacy-localStorage") return "legacy-migration-source";
+  if (source === "migration-journal") {
+    return key.startsWith(LEGACY_MIGRATION_ARCHIVE_KEY_PREFIX)
+      ? "migration-archive"
+      : "migration-journal";
+  }
+  if (key.startsWith("__esp_internal__:checkpoint:")) {
+    return "persistence-checkpoint";
+  }
+  if (key.startsWith("__esp_internal__:meta:")) {
+    return "persistence-metadata";
+  }
+  return "app-payload";
+}
+
 function createRecoveryCandidate(
   source: StartupRecoveryCandidateSource,
   storeName: StoreName,
@@ -538,20 +765,60 @@ function createRecoveryCandidate(
   revision: string | null,
   payload: unknown,
   rawValue?: string,
+  options: RecoveryCandidateOptions = {},
 ): StartupRecoveryCandidate {
-  return {
-    id: [
-      source,
-      storeName,
-      key,
-      revision ?? "no-revision",
-      rawValue ?? JSON.stringify(toRecoveryPrimitive(payload)),
-    ].join("\u0000"),
+  const safePayload = toRecoveryPrimitive(payload);
+  const role = options.role ?? inferRecoveryCandidateRole(source, key);
+  const sourceKey = options.sourceKey ?? key;
+  const targetKey =
+    options.targetKey ?? (role === "app-payload" ? DATA_KEY : undefined);
+  let digest = options.digest;
+  if (!digest) {
+    try {
+      digest = createSynchronousFingerprint(safePayload);
+    } catch {
+      digest = undefined;
+    }
+  }
+  const digestFields = digest
+    ? {
+        digest: digest.value,
+        digestAlgorithm: digest.algorithm,
+        digestCanonicalization: digest.canonicalization,
+        ...("canonicalLength" in digest
+          ? { digestCanonicalLength: digest.canonicalLength }
+          : {}),
+      }
+    : {};
+  const adoptableByShape =
+    role === "app-payload" &&
+    (source === "indexedDB" || source === "runtime-fallback") &&
+    storeName !== STORES.SYNC_QUEUE &&
+    key === DATA_KEY &&
+    targetKey === DATA_KEY &&
+    digest !== undefined &&
+    (source !== "runtime-fallback" || revision !== null);
+  const identity = {
     source,
+    role,
+    storeName,
+    sourceKey,
+    targetKey,
+    ...(revision === null ? {} : { revision }),
+    ...digestFields,
+  };
+  return {
+    id: createStartupRecoveryCandidateId(identity),
+    source,
+    role,
+    adoptable: options.adoptable ?? adoptableByShape,
     storeName,
     key,
+    sourceKey,
+    ...(targetKey === undefined ? {} : { targetKey }),
     ...(revision === null ? {} : { revision }),
-    payload: toRecoveryPrimitive(payload),
+    ...digestFields,
+    payload: safePayload,
     ...(rawValue === undefined ? {} : { rawValue }),
   };
 }
@@ -600,12 +867,16 @@ async function readPersistenceSnapshotOnce(
   const metadataRequest = transaction
     .objectStore(STORES.SYNC_QUEUE)
     .get(createPersistenceMetadataKey(storeName, key));
-  const [payload, metadata] = await Promise.all([
+  const checkpointRequest = transaction
+    .objectStore(STORES.SYNC_QUEUE)
+    .get(createPersistenceCheckpointKey(storeName, key));
+  const [payload, metadata, checkpoint] = await Promise.all([
     requestResult(payloadRequest),
     requestResult(metadataRequest),
+    requestResult(checkpointRequest),
   ]);
   await finished;
-  return { payload, metadata };
+  return { payload, metadata, checkpoint };
 }
 
 async function readPersistenceSnapshotWithRetry(
@@ -667,14 +938,34 @@ async function validatePersistenceSnapshot<T>(
     snapshot.payload === undefined || snapshot.payload === null;
   const metadataMissing =
     snapshot.metadata === undefined || snapshot.metadata === null;
+  const checkpointMissing =
+    snapshot.checkpoint === undefined || snapshot.checkpoint === null;
 
   if (payloadMissing && metadataMissing) {
+    if (!checkpointMissing) {
+      return {
+        conflict: createConflictLoadResult(
+          `${storeName} の吸収checkpointだけが残っているため、安全に読み込めません。`,
+          storeName,
+          [
+            createRecoveryCandidate(
+              "indexedDB",
+              storeName,
+              createPersistenceCheckpointKey(storeName, key),
+              null,
+              snapshot.checkpoint,
+            ),
+          ],
+        ),
+      };
+    }
     const root = await createSyntheticRoot(storeName, key, null, true);
     return {
       validated: {
         status: "missing",
         data: null,
         root,
+        checkpoint: null,
       },
     };
   }
@@ -688,7 +979,7 @@ async function validatePersistenceSnapshot<T>(
           createRecoveryCandidate(
             "indexedDB",
             storeName,
-            key,
+            createPersistenceMetadataKey(storeName, key),
             isStoredPersistenceMetadata(snapshot.metadata, storeName, key)
               ? snapshot.metadata.revision
               : null,
@@ -700,6 +991,30 @@ async function validatePersistenceSnapshot<T>(
   }
 
   if (metadataMissing) {
+    if (!checkpointMissing) {
+      return {
+        conflict: createConflictLoadResult(
+          `${storeName} のpayloadと吸収checkpointに対応する世代情報がありません。`,
+          storeName,
+          [
+            createRecoveryCandidate(
+              "indexedDB",
+              storeName,
+              key,
+              null,
+              snapshot.payload,
+            ),
+            createRecoveryCandidate(
+              "indexedDB",
+              storeName,
+              createPersistenceCheckpointKey(storeName, key),
+              null,
+              snapshot.checkpoint,
+            ),
+          ],
+        ),
+      };
+    }
     try {
       const root = await createSyntheticRoot(storeName, key, snapshot.payload);
       return {
@@ -707,6 +1022,7 @@ async function validatePersistenceSnapshot<T>(
           status: "ok",
           data: snapshot.payload as T,
           root,
+          checkpoint: null,
         },
       };
     } catch {
@@ -744,7 +1060,7 @@ async function validatePersistenceSnapshot<T>(
           createRecoveryCandidate(
             "indexedDB",
             storeName,
-            key,
+            createPersistenceMetadataKey(storeName, key),
             null,
             snapshot.metadata,
           ),
@@ -783,9 +1099,42 @@ async function validatePersistenceSnapshot<T>(
           createRecoveryCandidate(
             "indexedDB",
             storeName,
-            key,
+            createPersistenceMetadataKey(storeName, key),
             snapshot.metadata.revision,
             snapshot.metadata,
+          ),
+        ],
+      ),
+    };
+  }
+
+  let checkpoint: PersistenceCheckpoint | null;
+  try {
+    checkpoint = validateCheckpointForRoot(
+      snapshot.checkpoint,
+      storeName,
+      key,
+      snapshot.metadata,
+    );
+  } catch (error) {
+    return {
+      conflict: createConflictLoadResult(
+        `${storeName} の吸収checkpointが確定rootと一致しません。`,
+        storeName,
+        [
+          createRecoveryCandidate(
+            "indexedDB",
+            storeName,
+            key,
+            snapshot.metadata.revision,
+            snapshot.payload,
+          ),
+          createRecoveryCandidate(
+            "indexedDB",
+            storeName,
+            createPersistenceCheckpointKey(storeName, key),
+            snapshot.metadata.revision,
+            snapshot.checkpoint,
           ),
         ],
       ),
@@ -797,6 +1146,7 @@ async function validatePersistenceSnapshot<T>(
       status: "ok",
       data: snapshot.payload as T,
       root: snapshot.metadata,
+      checkpoint,
     },
   };
 }
@@ -843,6 +1193,117 @@ interface RuntimeCandidateSnapshot<T> {
   storageKey: string;
   rawValue: string;
   candidate: RuntimeFallbackCandidate<T>;
+}
+
+function checkpointDescriptorFromRuntimeCandidate(
+  candidate: RuntimeFallbackCandidate,
+): PersistenceCheckpointAbsorbedCandidate {
+  return {
+    schemaVersion: candidate.schemaVersion,
+    revision: candidate.revision,
+    baseRevision: candidate.baseRevision,
+    digest: candidate.digest,
+    writerId: candidate.writerId,
+    createdAt: candidate.createdAt,
+  };
+}
+
+function checkpointDescriptorMatchesRuntimeCandidate(
+  descriptor: PersistenceCheckpointAbsorbedCandidate,
+  candidate: RuntimeFallbackCandidate,
+): boolean {
+  return (
+    descriptor.schemaVersion === candidate.schemaVersion &&
+    descriptor.revision === candidate.revision &&
+    descriptor.baseRevision === candidate.baseRevision &&
+    descriptor.digest.algorithm === candidate.digest.algorithm &&
+    descriptor.digest.canonicalization === candidate.digest.canonicalization &&
+    descriptor.digest.value === candidate.digest.value &&
+    descriptor.writerId === candidate.writerId &&
+    descriptor.createdAt === candidate.createdAt
+  );
+}
+
+function checkpointRecordsRuntimeCandidate(
+  checkpoint: PersistenceCheckpoint | null,
+  candidate: RuntimeFallbackCandidate,
+): boolean {
+  if (!checkpoint) return false;
+  const committed = checkpoint.committedRoot;
+  if (
+    committed.revision === candidate.revision &&
+    committed.baseRevision === candidate.baseRevision &&
+    committed.digest.algorithm === candidate.digest.algorithm &&
+    committed.digest.canonicalization === candidate.digest.canonicalization &&
+    committed.digest.value === candidate.digest.value &&
+    committed.writerId === candidate.writerId &&
+    committed.committedAt === candidate.createdAt
+  ) {
+    return true;
+  }
+  return checkpoint.absorbedCandidates.some((descriptor) =>
+    checkpointDescriptorMatchesRuntimeCandidate(descriptor, candidate),
+  );
+}
+
+function partitionRuntimeCandidateSnapshots<T>(
+  checkpoint: PersistenceCheckpoint | null,
+  snapshots: readonly RuntimeCandidateSnapshot<T>[],
+): {
+  absorbed: RuntimeCandidateSnapshot<T>[];
+  active: RuntimeCandidateSnapshot<T>[];
+} {
+  const absorbed: RuntimeCandidateSnapshot<T>[] = [];
+  const active: RuntimeCandidateSnapshot<T>[] = [];
+  snapshots.forEach((snapshot) => {
+    (checkpointRecordsRuntimeCandidate(checkpoint, snapshot.candidate)
+      ? absorbed
+      : active
+    ).push(snapshot);
+  });
+  return { absorbed, active };
+}
+
+function createNextPersistenceCheckpoint(
+  storeName: StoreName,
+  key: string,
+  metadata: StoredPersistenceMetadata,
+  previous: PersistenceCheckpoint | null,
+  absorbedSnapshots: readonly RuntimeCandidateSnapshot<unknown>[] = [],
+): PersistenceCheckpoint {
+  const absorbedByRevision = new Map(
+    (previous?.absorbedCandidates ?? []).map((descriptor) => [
+      descriptor.revision,
+      descriptor,
+    ]),
+  );
+  absorbedSnapshots.forEach(({ candidate }) => {
+    const descriptor = checkpointDescriptorFromRuntimeCandidate(candidate);
+    const existing = absorbedByRevision.get(descriptor.revision);
+    if (existing && !fingerprintsEqual(existing, descriptor)) {
+      throw new PersistenceConflictError(
+        `${storeName}:${key} has conflicting absorbed candidate metadata.`,
+      );
+    }
+    absorbedByRevision.set(descriptor.revision, descriptor);
+  });
+  return {
+    kind: "event-shopping-planner-persistence-checkpoint",
+    version: 1,
+    storeName,
+    key,
+    committedRoot: {
+      revision: metadata.revision,
+      baseRevision: metadata.baseRevision,
+      digest: metadata.payloadDigest,
+      writerId: metadata.writerId,
+      committedAt: metadata.committedAt,
+    },
+    absorbedCandidates: Array.from(absorbedByRevision.values()).sort(
+      (left, right) => left.revision.localeCompare(right.revision),
+    ),
+    updatedAt: new Date().toISOString(),
+  };
 }
 
 async function readRuntimeCandidateSnapshots<T>(
@@ -907,6 +1368,11 @@ async function readRuntimeCandidateSnapshots<T>(
           null,
           null,
           rawValue,
+          {
+            role: "invalid-source",
+            sourceKey: storageKey,
+            adoptable: false,
+          },
         ),
       );
     }
@@ -938,7 +1404,7 @@ function runtimeSnapshotsToRecoveryCandidates(
   key: string,
   snapshots: readonly RuntimeCandidateSnapshot<unknown>[],
 ): StartupRecoveryCandidate[] {
-  return snapshots.map(({ candidate, rawValue }) =>
+  return snapshots.map(({ storageKey, candidate, rawValue }) =>
     createRecoveryCandidate(
       "runtime-fallback",
       storeName,
@@ -946,23 +1412,97 @@ function runtimeSnapshotsToRecoveryCandidates(
       candidate.revision,
       candidate.payload,
       rawValue,
+      {
+        sourceKey: storageKey,
+        digest: candidate.digest,
+      },
     ),
   );
+}
+
+interface RecoveryAdoptionRetentionMarker {
+  kind: "event-shopping-planner-recovery-adoption-retention";
+  version: 1;
+  storageKey: string;
+  rawFingerprint: PersistenceSynchronousFingerprint;
+}
+
+function createRecoveryAdoptionRetentionKey(storageKey: string): string {
+  const fingerprint = createSynchronousFingerprint(storageKey);
+  return `${RECOVERY_ADOPTION_RETENTION_KEY_PREFIX}${fingerprint.value}`;
+}
+
+function createRecoveryAdoptionRetentionMarker(
+  snapshot: RuntimeCandidateSnapshot<unknown>,
+): RecoveryAdoptionRetentionMarker {
+  return {
+    kind: "event-shopping-planner-recovery-adoption-retention",
+    version: 1,
+    storageKey: snapshot.storageKey,
+    rawFingerprint: createSynchronousFingerprint(snapshot.rawValue),
+  };
+}
+
+function isRecoveryAdoptionRetentionMarker(
+  value: unknown,
+  snapshot: RuntimeCandidateSnapshot<unknown>,
+): boolean {
+  if (!isPlainRecord(value)) return false;
+  const expected = createRecoveryAdoptionRetentionMarker(snapshot);
+  return (
+    value.kind === expected.kind &&
+    value.version === expected.version &&
+    value.storageKey === expected.storageKey &&
+    isPersistenceSynchronousFingerprint(value.rawFingerprint) &&
+    fingerprintsEqual(value.rawFingerprint, expected.rawFingerprint)
+  );
+}
+
+function runtimeCandidateIsRetainedForRecoveryAdoption(
+  snapshot: RuntimeCandidateSnapshot<unknown>,
+): boolean {
+  const rawMarker = localStorage.getItem(
+    createRecoveryAdoptionRetentionKey(snapshot.storageKey),
+  );
+  if (rawMarker === null) return false;
+  try {
+    return isRecoveryAdoptionRetentionMarker(JSON.parse(rawMarker), snapshot);
+  } catch {
+    return false;
+  }
+}
+
+function retainRuntimeCandidatesForRecoveryAdoption(
+  snapshots: readonly RuntimeCandidateSnapshot<unknown>[],
+): void {
+  snapshots.forEach((snapshot) => {
+    const markerKey = createRecoveryAdoptionRetentionKey(snapshot.storageKey);
+    const marker = createRecoveryAdoptionRetentionMarker(snapshot);
+    const serialized = JSON.stringify(marker);
+    localStorage.setItem(markerKey, serialized);
+    if (
+      localStorage.getItem(markerKey) !== serialized ||
+      !runtimeCandidateIsRetainedForRecoveryAdoption(snapshot)
+    ) {
+      throw new PersistenceConflictError("Failed to retain a recovery source.");
+    }
+  });
 }
 
 function cleanupRuntimeCandidateSnapshots(
   snapshots: readonly RuntimeCandidateSnapshot<unknown>[],
 ): void {
-  snapshots.forEach(({ storageKey, rawValue }) => {
+  snapshots.forEach((snapshot) => {
+    const { storageKey, rawValue } = snapshot;
     try {
-      if (localStorage.getItem(storageKey) === rawValue) {
-        localStorage.removeItem(storageKey);
+      if (runtimeCandidateIsRetainedForRecoveryAdoption(snapshot)) return;
+      if (localStorage.getItem(storageKey) !== rawValue) return;
+      localStorage.removeItem(storageKey);
+      if (localStorage.getItem(storageKey) !== null) {
+        throw new Error("Runtime fallback remained after cleanup.");
       }
-    } catch (error) {
-      console.warn(
-        `Failed to clean committed runtime fallback ${storageKey}:`,
-        error,
-      );
+    } catch {
+      console.warn("Failed to clean a committed runtime fallback.");
     }
   });
 }
@@ -1037,6 +1577,32 @@ function assertCurrentSnapshotMatchesExpected(
   }
 }
 
+function assertCurrentCheckpointMatchesExpected(
+  storeName: StoreName,
+  key: string,
+  current: unknown,
+  expected: PersistenceCheckpoint | null,
+): void {
+  const currentMissing = current === undefined || current === null;
+  if (expected === null) {
+    if (!currentMissing) {
+      throw new PersistenceConflictError(
+        `${storeName}:${key} checkpoint was created by another writer.`,
+      );
+    }
+    return;
+  }
+  if (
+    currentMissing ||
+    !isPersistenceCheckpoint(current, { storeName, key }) ||
+    !fingerprintsEqual(current, expected)
+  ) {
+    throw new PersistenceConflictError(
+      `${storeName}:${key} checkpoint changed after it was last observed.`,
+    );
+  }
+}
+
 function observedRootsMatch(
   current: ObservedRevisionRoot,
   expected: ObservedRevisionRoot,
@@ -1052,11 +1618,12 @@ async function assertPhysicalRootMatchesLogicalFallback(
   storeName: StoreName,
   key: string,
   physicalRoot: ObservedRevisionRoot,
+  physicalCheckpoint: PersistenceCheckpoint | null,
   logicalExpected: ObservedRevisionRoot,
-): Promise<void> {
+): Promise<RuntimeCandidateSnapshot<unknown>[]> {
   if (!logicalExpected.runtimeFallback) {
     if (observedRootsMatch(physicalRoot, logicalExpected)) {
-      return;
+      return [];
     }
     throw new PersistenceConflictError(
       `${storeName}:${key} is not backed by a runtime fallback.`,
@@ -1075,6 +1642,10 @@ async function assertPhysicalRootMatchesLogicalFallback(
       )
     );
   }
+  const partitioned = partitionRuntimeCandidateSnapshots(
+    physicalCheckpoint,
+    candidateScan.snapshots,
+  );
 
   const reconciliation = reconcileRuntimeFallbackCandidates(
     {
@@ -1084,7 +1655,7 @@ async function assertPhysicalRootMatchesLogicalFallback(
       writerId: physicalRoot.missing ? undefined : physicalRoot.writerId,
       createdAt: physicalRoot.missing ? undefined : physicalRoot.committedAt,
     },
-    candidateScan.snapshots.map(({ candidate }) => candidate),
+    partitioned.active.map(({ candidate }) => candidate),
   );
   if (reconciliation.status === "conflict") {
     throw new PersistenceConflictError(
@@ -1097,10 +1668,10 @@ async function assertPhysicalRootMatchesLogicalFallback(
       reconciliation.head,
     );
     if (observedRootsMatch(reconciledHead, logicalExpected)) {
-      return;
+      return candidateScan.snapshots;
     }
   } else if (observedRootsMatch(physicalRoot, logicalExpected)) {
-    return;
+    return candidateScan.snapshots;
   }
 
   throw new PersistenceConflictError(
@@ -1138,10 +1709,9 @@ async function cleanupCommittedRuntimeCandidates(
         staleRevisions.has(candidate.revision),
       ),
     );
-  } catch (error) {
+  } catch {
     console.warn(
-      `Failed to inspect committed runtime fallbacks for ${storeName}:${key}:`,
-      error,
+      `Failed to inspect committed runtime fallbacks for ${storeName}.`,
     );
   }
 }
@@ -1151,7 +1721,9 @@ async function writeDataWithMetadataOnce<T>(
   key: string,
   data: T,
   expected: ObservedRevisionRoot,
+  expectedCheckpoint: PersistenceCheckpoint | null,
   metadata: StoredPersistenceMetadata,
+  checkpoint: PersistenceCheckpoint,
 ): Promise<void> {
   const database = await openDB();
   ensureStoreExists(database, storeName);
@@ -1188,10 +1760,14 @@ async function writeDataWithMetadataOnce<T>(
       const payloadRequest = payloadStore.get(key);
       const metadataKey = createPersistenceMetadataKey(storeName, key);
       const metadataRequest = controlStore.get(metadataKey);
+      const checkpointKey = createPersistenceCheckpointKey(storeName, key);
+      const checkpointRequest = controlStore.get(checkpointKey);
       let currentPayload: unknown;
       let currentMetadata: unknown;
+      let currentCheckpoint: unknown;
       let payloadLoaded = false;
       let metadataLoaded = false;
+      let checkpointLoaded = false;
       let writesQueued = false;
 
       const abortWith = (error: unknown) => {
@@ -1203,7 +1779,13 @@ async function writeDataWithMetadataOnce<T>(
         }
       };
       const commitIfReady = () => {
-        if (writesQueued || !payloadLoaded || !metadataLoaded) return;
+        if (
+          writesQueued ||
+          !payloadLoaded ||
+          !metadataLoaded ||
+          !checkpointLoaded
+        )
+          return;
         writesQueued = true;
         try {
           assertCurrentSnapshotMatchesExpected(
@@ -1213,13 +1795,23 @@ async function writeDataWithMetadataOnce<T>(
             currentMetadata,
             expected,
           );
+          assertCurrentCheckpointMatchesExpected(
+            storeName,
+            key,
+            currentCheckpoint,
+            expectedCheckpoint,
+          );
           const payloadPut = payloadStore.put(data, key);
           const metadataPut = controlStore.put(metadata, metadataKey);
+          const checkpointPut = controlStore.put(checkpoint, checkpointKey);
           payloadPut.onerror = () => {
             failure = failure ?? payloadPut.error;
           };
           metadataPut.onerror = () => {
             failure = failure ?? metadataPut.error;
+          };
+          checkpointPut.onerror = () => {
+            failure = failure ?? checkpointPut.error;
           };
         } catch (error) {
           abortWith(error);
@@ -1246,6 +1838,17 @@ async function writeDataWithMetadataOnce<T>(
       metadataRequest.onsuccess = () => {
         currentMetadata = metadataRequest.result;
         metadataLoaded = true;
+        commitIfReady();
+      };
+      checkpointRequest.onerror = () => {
+        failure =
+          failure ??
+          checkpointRequest.error ??
+          new Error(`Failed to read checkpoint for ${storeName}:${key}.`);
+      };
+      checkpointRequest.onsuccess = () => {
+        currentCheckpoint = checkpointRequest.result;
+        checkpointLoaded = true;
         commitIfReady();
       };
     } catch (error) {
@@ -1282,6 +1885,7 @@ async function prepareMetadataForPayload(
 interface RawMapSnapshot {
   entries: Record<string, unknown>;
   metadata: unknown;
+  checkpoint: unknown;
 }
 
 function readMapEntriesFromStore(
@@ -1383,12 +1987,18 @@ async function readRawMapSnapshotOnce(): Promise<RawMapSnapshot> {
       .objectStore(STORES.SYNC_QUEUE)
       .get(createPersistenceMetadataKey(STORES.MAP_DATA, DATA_KEY)),
   );
-  const [entries, metadata] = await Promise.all([
+  const checkpointPromise = requestResult(
+    transaction
+      .objectStore(STORES.SYNC_QUEUE)
+      .get(createPersistenceCheckpointKey(STORES.MAP_DATA, DATA_KEY)),
+  );
+  const [entries, metadata, checkpoint] = await Promise.all([
     entriesPromise,
     metadataPromise,
+    checkpointPromise,
   ]);
   await finished;
-  return { entries, metadata };
+  return { entries, metadata, checkpoint };
 }
 
 async function readRawMapSnapshotWithRetry(): Promise<RawMapSnapshot> {
@@ -1436,6 +2046,8 @@ async function validateMapSnapshot(
               DATA_KEY,
               null,
               snapshot.entries,
+              undefined,
+              { role: "invalid-source", adoptable: false },
             ),
             ...(snapshot.metadata === undefined || snapshot.metadata === null
               ? []
@@ -1443,7 +2055,7 @@ async function validateMapSnapshot(
                   createRecoveryCandidate(
                     "indexedDB",
                     STORES.MAP_DATA,
-                    DATA_KEY,
+                    createPersistenceMetadataKey(STORES.MAP_DATA, DATA_KEY),
                     isStoredPersistenceMetadata(
                       snapshot.metadata,
                       STORES.MAP_DATA,
@@ -1465,6 +2077,30 @@ async function validateMapSnapshot(
   const metadataMissing =
     snapshot.metadata === undefined || snapshot.metadata === null;
   if (metadataMissing) {
+    if (snapshot.checkpoint !== undefined && snapshot.checkpoint !== null) {
+      return {
+        conflict: createConflictLoadResult(
+          "mapData のpayloadと吸収checkpointに対応する世代情報がありません。",
+          STORES.MAP_DATA,
+          [
+            createRecoveryCandidate(
+              "indexedDB",
+              STORES.MAP_DATA,
+              DATA_KEY,
+              null,
+              logicalData,
+            ),
+            createRecoveryCandidate(
+              "indexedDB",
+              STORES.MAP_DATA,
+              createPersistenceCheckpointKey(STORES.MAP_DATA, DATA_KEY),
+              null,
+              snapshot.checkpoint,
+            ),
+          ],
+        ),
+      };
+    }
     try {
       const root = await createSyntheticRoot(
         STORES.MAP_DATA,
@@ -1477,6 +2113,7 @@ async function validateMapSnapshot(
           status: isMissing ? "missing" : "ok",
           data: isMissing ? null : logicalData,
           root,
+          checkpoint: null,
         },
       };
     } catch {
@@ -1516,7 +2153,7 @@ async function validateMapSnapshot(
           createRecoveryCandidate(
             "indexedDB",
             STORES.MAP_DATA,
-            DATA_KEY,
+            createPersistenceMetadataKey(STORES.MAP_DATA, DATA_KEY),
             null,
             snapshot.metadata,
           ),
@@ -1555,9 +2192,42 @@ async function validateMapSnapshot(
           createRecoveryCandidate(
             "indexedDB",
             STORES.MAP_DATA,
-            DATA_KEY,
+            createPersistenceMetadataKey(STORES.MAP_DATA, DATA_KEY),
             snapshot.metadata.revision,
             snapshot.metadata,
+          ),
+        ],
+      ),
+    };
+  }
+
+  let checkpoint: PersistenceCheckpoint | null;
+  try {
+    checkpoint = validateCheckpointForRoot(
+      snapshot.checkpoint,
+      STORES.MAP_DATA,
+      DATA_KEY,
+      snapshot.metadata,
+    );
+  } catch {
+    return {
+      conflict: createConflictLoadResult(
+        "mapData の吸収checkpointが確定rootと一致しません。",
+        STORES.MAP_DATA,
+        [
+          createRecoveryCandidate(
+            "indexedDB",
+            STORES.MAP_DATA,
+            DATA_KEY,
+            snapshot.metadata.revision,
+            logicalData,
+          ),
+          createRecoveryCandidate(
+            "indexedDB",
+            STORES.MAP_DATA,
+            createPersistenceCheckpointKey(STORES.MAP_DATA, DATA_KEY),
+            snapshot.metadata.revision,
+            snapshot.checkpoint,
           ),
         ],
       ),
@@ -1572,6 +2242,7 @@ async function validateMapSnapshot(
         ...snapshot.metadata,
         missing: isMissing,
       },
+      checkpoint,
     },
   };
 }
@@ -1612,7 +2283,9 @@ function assertCurrentMapMatchesExpected(
 async function writeMapDataWithMetadataOnce(
   data: MapDataStore,
   expected: ObservedRevisionRoot,
+  expectedCheckpoint: PersistenceCheckpoint | null,
   metadata: StoredPersistenceMetadata,
+  checkpoint: PersistenceCheckpoint,
 ): Promise<void> {
   const database = await openDB();
   ensureStoreExists(database, STORES.MAP_DATA);
@@ -1637,7 +2310,9 @@ async function writeMapDataWithMetadataOnce(
     let failure: unknown = null;
     let entries: Record<string, unknown> | null = null;
     let currentMetadata: unknown;
+    let currentCheckpoint: unknown;
     let metadataLoaded = false;
+    let checkpointLoaded = false;
     let committed = false;
     const mapStore = transaction.objectStore(STORES.MAP_DATA);
     const controlStore = transaction.objectStore(STORES.SYNC_QUEUE);
@@ -1663,7 +2338,8 @@ async function writeMapDataWithMetadataOnce(
     };
 
     const commitIfReady = () => {
-      if (committed || entries === null || !metadataLoaded) return;
+      if (committed || entries === null || !metadataLoaded || !checkpointLoaded)
+        return;
       committed = true;
       const observedEntries = entries;
       try {
@@ -1672,6 +2348,12 @@ async function writeMapDataWithMetadataOnce(
           currentMetadata,
           expected,
         ).filter((storageKey) => !desiredByStorageKey.has(storageKey));
+        assertCurrentCheckpointMatchesExpected(
+          STORES.MAP_DATA,
+          DATA_KEY,
+          currentCheckpoint,
+          expectedCheckpoint,
+        );
         deletes.forEach((storageKey) => {
           const request = mapStore.delete(storageKey);
           request.onerror = () => {
@@ -1699,6 +2381,13 @@ async function writeMapDataWithMetadataOnce(
         );
         metadataRequest.onerror = () => {
           failure = failure ?? metadataRequest.error;
+        };
+        const checkpointRequest = controlStore.put(
+          checkpoint,
+          createPersistenceCheckpointKey(STORES.MAP_DATA, DATA_KEY),
+        );
+        checkpointRequest.onerror = () => {
+          failure = failure ?? checkpointRequest.error;
         };
       } catch (error) {
         abortWith(error);
@@ -1734,6 +2423,19 @@ async function writeMapDataWithMetadataOnce(
       metadataLoaded = true;
       commitIfReady();
     };
+    const checkpointRequest = controlStore.get(
+      createPersistenceCheckpointKey(STORES.MAP_DATA, DATA_KEY),
+    );
+    checkpointRequest.onerror = () =>
+      abortWith(
+        checkpointRequest.error ??
+          new Error("Failed to read mapData checkpoint."),
+      );
+    checkpointRequest.onsuccess = () => {
+      currentCheckpoint = checkpointRequest.result;
+      checkpointLoaded = true;
+      commitIfReady();
+    };
   });
 }
 
@@ -1754,6 +2456,8 @@ async function writeMapData(data: MapDataStore): Promise<void> {
   if (!expected) {
     throw new Error("Failed to observe mapData before save.");
   }
+  const expectedCheckpoint =
+    expectedPersistenceCheckpoints.get(observedKey) ?? null;
 
   const metadata = await prepareMetadataForPayload(
     STORES.MAP_DATA,
@@ -1761,17 +2465,36 @@ async function writeMapData(data: MapDataStore): Promise<void> {
     stableData,
     expected.missing ? null : expected.revision,
   );
+  const checkpoint = createNextPersistenceCheckpoint(
+    STORES.MAP_DATA,
+    DATA_KEY,
+    metadata,
+    expectedCheckpoint,
+  );
   try {
-    await writeMapDataWithMetadataOnce(stableData, expected, metadata);
+    await writeMapDataWithMetadataOnce(
+      stableData,
+      expected,
+      expectedCheckpoint,
+      metadata,
+      checkpoint,
+    );
   } catch (firstError) {
     if (isPersistenceConflict(firstError)) throw firstError;
     resetDbInstance();
-    await writeMapDataWithMetadataOnce(stableData, expected, metadata);
+    await writeMapDataWithMetadataOnce(
+      stableData,
+      expected,
+      expectedCheckpoint,
+      metadata,
+      checkpoint,
+    );
   }
   expectedRevisionRoots.set(observedKey, {
     ...metadata,
     missing: Object.keys(stableData).length === 0,
   });
+  expectedPersistenceCheckpoints.set(observedKey, checkpoint);
 }
 
 async function loadMapDataInternal(): Promise<LoadResult<MapDataStore>> {
@@ -1799,6 +2522,10 @@ async function loadMapDataInternal(): Promise<LoadResult<MapDataStore>> {
   expectedRevisionRoots.set(
     getObservedRootKey(STORES.MAP_DATA, DATA_KEY),
     validation.validated.root,
+  );
+  expectedPersistenceCheckpoints.set(
+    getObservedRootKey(STORES.MAP_DATA, DATA_KEY),
+    validation.validated.checkpoint,
   );
   return {
     status: validation.validated.status,
@@ -1835,6 +2562,9 @@ async function saveData<T>(
 
   const logicalExpected = expected;
   let writeExpected = logicalExpected;
+  let writeExpectedCheckpoint =
+    expectedPersistenceCheckpoints.get(observedKey) ?? null;
+  let absorbedForCommit: RuntimeCandidateSnapshot<T>[] = [];
   if (logicalExpected.runtimeFallback) {
     try {
       const physicalSnapshot = await readPersistenceSnapshotWithRetry(
@@ -1855,13 +2585,15 @@ async function saveData<T>(
         );
       }
       const physicalRoot = physicalValidation.validated.root;
-      await assertPhysicalRootMatchesLogicalFallback(
+      absorbedForCommit = (await assertPhysicalRootMatchesLogicalFallback(
         storeName,
         key,
         physicalRoot,
+        physicalValidation.validated.checkpoint,
         logicalExpected,
-      );
+      )) as RuntimeCandidateSnapshot<T>[];
       writeExpected = physicalRoot;
+      writeExpectedCheckpoint = physicalValidation.validated.checkpoint;
     } catch (error) {
       if (
         isPersistenceConflict(error) ||
@@ -1870,6 +2602,47 @@ async function saveData<T>(
         throw error;
       }
     }
+  } else {
+    const candidateScan = await readRuntimeCandidateSnapshots<T>(
+      storeName,
+      key,
+    );
+    if (candidateScan.status === "conflict") {
+      throw (
+        candidateScan.result.error ??
+        new PersistenceConflictError(
+          `${storeName}:${key} has an invalid fallback candidate.`,
+        )
+      );
+    }
+    const partitioned = partitionRuntimeCandidateSnapshots(
+      writeExpectedCheckpoint,
+      candidateScan.snapshots,
+    );
+    const reconciliation = reconcileRuntimeFallbackCandidates(
+      {
+        revision: logicalExpected.missing ? null : logicalExpected.revision,
+        baseRevision: logicalExpected.missing
+          ? null
+          : logicalExpected.baseRevision,
+        digest: logicalExpected.missing
+          ? undefined
+          : logicalExpected.payloadDigest,
+        writerId: logicalExpected.missing
+          ? undefined
+          : logicalExpected.writerId,
+        createdAt: logicalExpected.missing
+          ? undefined
+          : logicalExpected.committedAt,
+      },
+      partitioned.active.map(({ candidate }) => candidate),
+    );
+    if (reconciliation.status === "conflict" || reconciliation.head) {
+      throw new PersistenceConflictError(
+        `${storeName}:${key} has an uncommitted persistence branch.`,
+      );
+    }
+    absorbedForCommit = candidateScan.snapshots;
   }
 
   const baseRevision = logicalExpected.missing
@@ -1881,6 +2654,13 @@ async function saveData<T>(
     stableData,
     baseRevision,
   );
+  const checkpoint = createNextPersistenceCheckpoint(
+    storeName,
+    key,
+    metadata,
+    writeExpectedCheckpoint,
+    absorbedForCommit,
+  );
 
   const saveOnce = () =>
     writeDataWithMetadataOnce(
@@ -1888,13 +2668,16 @@ async function saveData<T>(
       key,
       stableData,
       writeExpected,
+      writeExpectedCheckpoint,
       metadata,
+      checkpoint,
     );
 
   try {
     await saveOnce();
     expectedRevisionRoots.set(observedKey, metadata);
-    await cleanupCommittedRuntimeCandidates(storeName, key, metadata);
+    expectedPersistenceCheckpoints.set(observedKey, checkpoint);
+    cleanupRuntimeCandidateSnapshots(absorbedForCommit);
     return;
   } catch (firstError) {
     if (
@@ -1908,7 +2691,8 @@ async function saveData<T>(
     try {
       await saveOnce();
       expectedRevisionRoots.set(observedKey, metadata);
-      await cleanupCommittedRuntimeCandidates(storeName, key, metadata);
+      expectedPersistenceCheckpoints.set(observedKey, checkpoint);
+      cleanupRuntimeCandidateSnapshots(absorbedForCommit);
       return;
     } catch (retryError) {
       if (
@@ -1919,11 +2703,12 @@ async function saveData<T>(
       }
 
       console.warn(
-        `Falling back to immutable localStorage candidates for ${storeName}:`,
-        retryError ?? firstError,
+        `Using immutable fallback candidates for ${storeName} after an IndexedDB retry failure.`,
       );
 
       let current = logicalExpected;
+      let currentCheckpoint =
+        expectedPersistenceCheckpoints.get(observedKey) ?? null;
       try {
         const currentSnapshot = await readPersistenceSnapshotWithRetry(
           storeName,
@@ -1947,9 +2732,11 @@ async function saveData<T>(
           storeName,
           key,
           physicalCurrent,
+          currentValidation.validated.checkpoint,
           logicalExpected,
         );
         current = logicalExpected;
+        currentCheckpoint = currentValidation.validated.checkpoint;
       } catch (readError) {
         if (
           isPersistenceConflict(readError) ||
@@ -1972,6 +2759,10 @@ async function saveData<T>(
           )
         );
       }
+      const partitioned = partitionRuntimeCandidateSnapshots(
+        currentCheckpoint,
+        candidateScan.snapshots,
+      );
       const reconciliation = reconcileRuntimeFallbackCandidates(
         {
           revision: current.missing ? null : current.revision,
@@ -1980,7 +2771,7 @@ async function saveData<T>(
           writerId: current.missing ? undefined : current.writerId,
           createdAt: current.missing ? undefined : current.committedAt,
         },
-        candidateScan.snapshots.map(({ candidate }) => candidate),
+        partitioned.active.map(({ candidate }) => candidate),
       );
       if (reconciliation.status === "conflict" || reconciliation.head) {
         throw new PersistenceConflictError(
@@ -2004,13 +2795,13 @@ async function saveData<T>(
       const existing = localStorage.getItem(storageKey);
       if (existing !== null && existing !== serialized) {
         throw new PersistenceConflictError(
-          `Immutable fallback key already exists: ${storageKey}`,
+          "Immutable runtime fallback key already exists.",
         );
       }
       localStorage.setItem(storageKey, serialized);
       if (localStorage.getItem(storageKey) !== serialized) {
         const error = new Error(
-          `Runtime fallback readback verification failed: ${storageKey}`,
+          "Runtime fallback readback verification failed.",
         );
         error.name = "PersistenceFallbackReadbackError";
         throw error;
@@ -2076,34 +2867,24 @@ async function loadRuntimeFallbackWithoutIndexedDb<T>(
       digest: expected.missing ? undefined : expected.payloadDigest,
     };
   } else {
-    const revisions = new Set(
-      candidateScan.snapshots.map(({ candidate }) => candidate.revision),
-    );
-    const roots = candidateScan.snapshots.filter(
-      ({ candidate }) =>
-        candidate.baseRevision === null ||
-        !revisions.has(candidate.baseRevision),
-    );
-    if (roots.length !== 1) {
-      return createConflictLoadResult(
-        `${storeName} の退避候補に複数の起点があり、安全に選択できません。`,
+    return createConflictLoadResult(
+      `${storeName} のIndexedDB確定rootと吸収checkpointを確認できないため、退避候補を自動採用しません。`,
+      storeName,
+      runtimeSnapshotsToRecoveryCandidates(
         storeName,
-        runtimeSnapshotsToRecoveryCandidates(
-          storeName,
-          key,
-          candidateScan.snapshots,
-        ),
-      );
-    }
-    current = {
-      revision: roots[0].candidate.baseRevision,
-      baseRevision: null,
-    };
+        key,
+        candidateScan.snapshots,
+      ),
+    );
   }
+  const partitioned = partitionRuntimeCandidateSnapshots(
+    expectedPersistenceCheckpoints.get(observedKey) ?? null,
+    candidateScan.snapshots,
+  );
 
   const reconciliation = reconcileRuntimeFallbackCandidates(
     current,
-    candidateScan.snapshots.map(({ candidate }) => candidate),
+    partitioned.active.map(({ candidate }) => candidate),
   );
   if (reconciliation.status === "conflict") {
     return createConflictLoadResult(
@@ -2119,7 +2900,7 @@ async function loadRuntimeFallbackWithoutIndexedDb<T>(
 
   const head =
     reconciliation.head ??
-    candidateScan.snapshots.find(
+    partitioned.active.find(
       ({ candidate }) => candidate.revision === current.revision,
     )?.candidate ??
     null;
@@ -2169,9 +2950,19 @@ async function resolveFallbackRepairConflict<T>(
         current.payloadDigest.value === head.digest.value &&
         current.baseRevision === head.baseRevision &&
         current.writerId === head.writerId &&
-        current.committedAt === head.createdAt
+        current.committedAt === head.createdAt &&
+        runtimeSnapshots.every(({ candidate }) =>
+          checkpointRecordsRuntimeCandidate(
+            validation.validated.checkpoint,
+            candidate,
+          ),
+        )
       ) {
         expectedRevisionRoots.set(observedKey, current);
+        expectedPersistenceCheckpoints.set(
+          observedKey,
+          validation.validated.checkpoint,
+        );
         cleanupRuntimeCandidateSnapshots(runtimeSnapshots);
         return {
           status: "ok",
@@ -2202,17 +2993,16 @@ async function resolveFallbackRepairConflict<T>(
           createRecoveryCandidate(
             "indexedDB",
             storeName,
-            key,
+            createPersistenceMetadataKey(storeName, key),
             revision,
             snapshot.metadata,
           ),
         );
       }
     }
-  } catch (readError) {
+  } catch {
     console.warn(
-      `Failed to re-read ${storeName}:${key} after fallback repair conflict:`,
-      readError,
+      `Failed to re-read ${storeName} after a fallback repair conflict.`,
     );
   }
 
@@ -2261,6 +3051,7 @@ async function loadData<T>(
   const validated = validation.validated;
   if (storeName === STORES.MAP_DATA) {
     expectedRevisionRoots.set(observedKey, validated.root);
+    expectedPersistenceCheckpoints.set(observedKey, validated.checkpoint);
     return {
       status: validated.status,
       data: validated.data,
@@ -2290,6 +3081,10 @@ async function loadData<T>(
   if (candidateScan.status === "conflict") {
     return candidateScan.result;
   }
+  const partitioned = partitionRuntimeCandidateSnapshots(
+    validated.checkpoint,
+    candidateScan.snapshots,
+  );
 
   const reconciliation = reconcileRuntimeFallbackCandidates(
     {
@@ -2301,7 +3096,7 @@ async function loadData<T>(
         ? undefined
         : validated.root.committedAt,
     },
-    candidateScan.snapshots.map(({ candidate }) => candidate),
+    partitioned.active.map(({ candidate }) => candidate),
   );
   if (reconciliation.status === "conflict") {
     const candidates: StartupRecoveryCandidate[] = [
@@ -2311,6 +3106,11 @@ async function loadData<T>(
         key,
         validated.root.missing ? null : validated.root.revision,
         validated.data,
+        undefined,
+        {
+          digest: validated.root.payloadDigest,
+          adoptable: !validated.root.missing,
+        },
       ),
       ...runtimeSnapshotsToRecoveryCandidates(
         storeName,
@@ -2326,15 +3126,9 @@ async function loadData<T>(
   }
 
   if (!reconciliation.head) {
-    const staleRevisions = new Set(
-      reconciliation.staleCandidates.map(({ revision }) => revision),
-    );
-    cleanupRuntimeCandidateSnapshots(
-      candidateScan.snapshots.filter(({ candidate }) =>
-        staleRevisions.has(candidate.revision),
-      ),
-    );
+    cleanupRuntimeCandidateSnapshots(partitioned.absorbed);
     expectedRevisionRoots.set(observedKey, validated.root);
+    expectedPersistenceCheckpoints.set(observedKey, validated.checkpoint);
     return {
       status: validated.status,
       data: validated.data,
@@ -2354,6 +3148,13 @@ async function loadData<T>(
     writerId: head.writerId,
     committedAt: head.createdAt,
   };
+  const repairedCheckpoint = createNextPersistenceCheckpoint(
+    storeName,
+    key,
+    repairedMetadata,
+    validated.checkpoint,
+    candidateScan.snapshots,
+  );
   let repairFailure: unknown = null;
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
@@ -2362,7 +3163,9 @@ async function loadData<T>(
         key,
         head.payload,
         validated.root,
+        validated.checkpoint,
         repairedMetadata,
+        repairedCheckpoint,
       );
       repairFailure = null;
       break;
@@ -2405,13 +3208,13 @@ async function loadData<T>(
 
   if (repairFailure !== null) {
     console.warn(
-      `Failed to repair runtime fallback for ${storeName}; using the verified candidate:`,
-      repairFailure,
+      `Failed to repair runtime fallback for ${storeName}; using the verified candidate.`,
     );
     expectedRevisionRoots.set(
       observedKey,
       createObservedRootFromRuntimeCandidate(head),
     );
+    expectedPersistenceCheckpoints.set(observedKey, validated.checkpoint);
     return {
       status: "ok",
       data: head.payload,
@@ -2419,6 +3222,7 @@ async function loadData<T>(
   }
 
   expectedRevisionRoots.set(observedKey, repairedMetadata);
+  expectedPersistenceCheckpoints.set(observedKey, repairedCheckpoint);
   cleanupRuntimeCandidateSnapshots(candidateScan.snapshots);
   return {
     status: "ok",
@@ -2460,7 +3264,7 @@ async function getAllKeys(storeName: StoreName): Promise<string[]> {
       const request = store.getAllKeys();
 
       request.onerror = () => {
-        console.error(`Failed to get keys from ${storeName}:`, request.error);
+        console.error(`Failed to get keys from ${storeName}.`);
         reject(request.error);
       };
 
@@ -2506,10 +3310,7 @@ async function getAllData<T>(storeName: StoreName): Promise<Record<string, T>> {
       const cursorRequest = store.openCursor();
 
       cursorRequest.onerror = () => {
-        console.error(
-          `Failed to get all data from ${storeName}:`,
-          cursorRequest.error,
-        );
+        console.error(`Failed to get all data from ${storeName}.`);
         reject(cursorRequest.error);
       };
 
@@ -2604,6 +3405,20 @@ function captureLegacySourceStates(): LegacySourceState[] {
   }));
 }
 
+function captureLegacySyncQueueSource(): string | null {
+  return localStorage.getItem(LEGACY_SYNC_QUEUE_LOCAL_STORAGE_KEY);
+}
+
+function captureLegacySyncQueueSourceForRecovery(
+  fallback: string | null,
+): string | null {
+  try {
+    return captureLegacySyncQueueSource();
+  } catch {
+    return fallback;
+  }
+}
+
 function presentLegacySourceSnapshots(
   states: readonly LegacySourceState[],
 ): { target: LegacyMigrationTarget; rawValue: string }[] {
@@ -2644,9 +3459,12 @@ function assertJournalSourcesResumable(
     if (
       (journal.phase === "copied" ||
         journal.phase === "verified" ||
-        journal.phase === "cleanupPending") &&
+        journal.phase === "cleanup-ready" ||
+        journal.phase === "cleanup-in-progress" ||
+        journal.phase === "completed") &&
       (entry.cleanupStatus === "pending" ||
-        entry.cleanupStatus === "retained") &&
+        entry.cleanupStatus === "deferred" ||
+        entry.cleanupStatus === "in-progress") &&
       rawValue === null
     ) {
       return false;
@@ -2668,6 +3486,8 @@ interface PreparedLegacyMigrationEntry {
   rawDigest: PersistenceDigestDescriptor;
   payloadDigest: PersistenceDigestDescriptor;
   metadata: StoredPersistenceMetadata;
+  expectedCheckpoint: PersistenceCheckpoint | null;
+  checkpoint: PersistenceCheckpoint;
   mapPuts: { key: string; value: unknown }[];
 }
 
@@ -2705,38 +3525,43 @@ function parseLegacyMigrationPayload(
   return parsed;
 }
 
-function isLegacyMigrationJournal(
+function isLegacyMigrationJournalEntryV1(
   value: unknown,
-): value is LegacyMigrationJournal {
+  entryKeys: Set<string>,
+): value is LegacyMigrationJournalEntryV1 {
+  if (!isPlainRecord(value)) return false;
+  const target = LEGACY_MIGRATION_TARGETS.find(
+    ({ legacyKey, storeName }) =>
+      legacyKey === value.legacyKey && storeName === value.storeName,
+  );
+  if (
+    !target ||
+    typeof value.rawValue !== "string" ||
+    !isPersistenceDigestDescriptor(value.rawDigest) ||
+    !isPersistenceDigestDescriptor(value.payloadDigest) ||
+    typeof value.targetRevision !== "string" ||
+    value.targetRevision.length === 0 ||
+    !Array.isArray(value.mapKeys) ||
+    value.mapKeys.some((key) => typeof key !== "string") ||
+    !["pending", "retained", "removed"].includes(String(value.cleanupStatus)) ||
+    entryKeys.has(target.legacyKey)
+  ) {
+    return false;
+  }
+  entryKeys.add(target.legacyKey);
+  return true;
+}
+
+function isLegacyMigrationJournalV1(
+  value: unknown,
+): value is LegacyMigrationJournalV1 {
   if (!isPlainRecord(value)) return false;
   const entries = value.entries;
   if (!Array.isArray(entries)) return false;
   const entryKeys = new Set<string>();
-  const entriesValid = entries.every((entry) => {
-    if (!isPlainRecord(entry)) return false;
-    const target = LEGACY_MIGRATION_TARGETS.find(
-      ({ legacyKey, storeName }) =>
-        legacyKey === entry.legacyKey && storeName === entry.storeName,
-    );
-    if (
-      !target ||
-      typeof entry.rawValue !== "string" ||
-      !isPersistenceDigestDescriptor(entry.rawDigest) ||
-      !isPersistenceDigestDescriptor(entry.payloadDigest) ||
-      typeof entry.targetRevision !== "string" ||
-      entry.targetRevision.length === 0 ||
-      !Array.isArray(entry.mapKeys) ||
-      entry.mapKeys.some((key) => typeof key !== "string") ||
-      !["pending", "retained", "removed"].includes(
-        String(entry.cleanupStatus),
-      ) ||
-      entryKeys.has(target.legacyKey)
-    ) {
-      return false;
-    }
-    entryKeys.add(target.legacyKey);
-    return true;
-  });
+  const entriesValid = entries.every((entry) =>
+    isLegacyMigrationJournalEntryV1(entry, entryKeys),
+  );
   const phase = String(value.phase);
   const cleanupStateValid =
     phase === "cleanupPending" ||
@@ -2751,7 +3576,7 @@ function isLegacyMigrationJournal(
     entriesValid &&
     entries.length > 0 &&
     value.kind === "event-shopping-planner-legacy-migration" &&
-    value.schemaVersion === LEGACY_MIGRATION_SCHEMA_VERSION &&
+    value.schemaVersion === 1 &&
     typeof value.sessionId === "string" &&
     value.sessionId.length > 0 &&
     typeof value.ownerId === "string" &&
@@ -2767,6 +3592,158 @@ function isLegacyMigrationJournal(
   );
 }
 
+function isLegacyMigrationJournalEntry(
+  value: unknown,
+  entryKeys: Set<string>,
+): value is LegacyMigrationJournalEntry {
+  if (!isPlainRecord(value)) return false;
+  const target = LEGACY_MIGRATION_TARGETS.find(
+    ({ legacyKey, storeName }) =>
+      legacyKey === value.legacyKey && storeName === value.storeName,
+  );
+  if (
+    !target ||
+    typeof value.rawValue !== "string" ||
+    !isPersistenceDigestDescriptor(value.expectedRawDigest) ||
+    !isPersistenceDigestDescriptor(value.payloadDigest) ||
+    typeof value.targetRevision !== "string" ||
+    value.targetRevision.length === 0 ||
+    !Array.isArray(value.mapKeys) ||
+    value.mapKeys.some((key) => typeof key !== "string") ||
+    !["pending", "deferred", "in-progress", "removed"].includes(
+      String(value.cleanupStatus),
+    ) ||
+    entryKeys.has(target.legacyKey)
+  ) {
+    return false;
+  }
+  entryKeys.add(target.legacyKey);
+  return true;
+}
+
+function isLegacyMigrationJournal(
+  value: unknown,
+): value is LegacyMigrationJournal {
+  if (!isPlainRecord(value)) return false;
+  const entries = value.entries;
+  if (!Array.isArray(entries)) return false;
+  const entryKeys = new Set<string>();
+  if (
+    !entries.every((entry) => isLegacyMigrationJournalEntry(entry, entryKeys))
+  ) {
+    return false;
+  }
+
+  const phase = String(value.phase);
+  const dataMigrationStatus = String(value.dataMigrationStatus);
+  const cleanupStatus = String(value.cleanupStatus);
+  const phaseStatusValid =
+    (phase === "prepared" &&
+      dataMigrationStatus === "prepared" &&
+      cleanupStatus === "not-ready" &&
+      entries.every((entry) => entry.cleanupStatus === "pending")) ||
+    (phase === "copied" &&
+      dataMigrationStatus === "copied" &&
+      cleanupStatus === "not-ready" &&
+      entries.every((entry) => entry.cleanupStatus === "pending")) ||
+    (phase === "verified" &&
+      dataMigrationStatus === "verified" &&
+      cleanupStatus === "not-ready" &&
+      entries.every((entry) => entry.cleanupStatus === "pending")) ||
+    (phase === "cleanup-ready" &&
+      dataMigrationStatus === "verified" &&
+      (cleanupStatus === "ready" || cleanupStatus === "deferred") &&
+      entries.every((entry) =>
+        ["pending", "deferred", "removed"].includes(entry.cleanupStatus),
+      )) ||
+    (phase === "cleanup-in-progress" &&
+      dataMigrationStatus === "verified" &&
+      cleanupStatus === "in-progress" &&
+      entries.every((entry) =>
+        ["pending", "deferred", "in-progress", "removed"].includes(
+          entry.cleanupStatus,
+        ),
+      )) ||
+    (phase === "completed" &&
+      dataMigrationStatus === "verified" &&
+      cleanupStatus === "completed" &&
+      entries.every((entry) => entry.cleanupStatus === "removed"));
+
+  return (
+    value.kind === "event-shopping-planner-legacy-migration" &&
+    value.schemaVersion === LEGACY_MIGRATION_SCHEMA_VERSION &&
+    typeof value.sessionId === "string" &&
+    value.sessionId.length > 0 &&
+    typeof value.ownerId === "string" &&
+    value.ownerId.length > 0 &&
+    [
+      "prepared",
+      "copied",
+      "verified",
+      "cleanup-ready",
+      "cleanup-in-progress",
+      "completed",
+    ].includes(phase) &&
+    phaseStatusValid &&
+    typeof value.archiveKey === "string" &&
+    value.archiveKey === createLegacyMigrationArchiveKey(value.sessionId) &&
+    typeof value.createdAt === "string" &&
+    Number.isFinite(Date.parse(value.createdAt)) &&
+    typeof value.updatedAt === "string" &&
+    Number.isFinite(Date.parse(value.updatedAt))
+  );
+}
+
+function createLegacyMigrationArchiveKey(sessionId: string): string {
+  return `${LEGACY_MIGRATION_ARCHIVE_KEY_PREFIX}${encodeURIComponent(
+    sessionId,
+  )}`;
+}
+
+function isLegacyMigrationArchive(
+  value: unknown,
+): value is LegacyMigrationArchive {
+  if (!isPlainRecord(value) || !Array.isArray(value.entries)) return false;
+  const keys = new Set<string>();
+  const entriesValid = value.entries.every((entry) => {
+    if (!isPlainRecord(entry) || typeof entry.legacyKey !== "string") {
+      return false;
+    }
+    const migrationTarget = LEGACY_MIGRATION_TARGETS.find(
+      ({ legacyKey, storeName }) =>
+        entry.sourceKind === "migration-source" &&
+        legacyKey === entry.legacyKey &&
+        storeName === entry.storeName,
+    );
+    const preservedSyncQueue =
+      entry.sourceKind === "preserved-legacy-sync-queue" &&
+      entry.legacyKey === LEGACY_SYNC_QUEUE_LOCAL_STORAGE_KEY &&
+      entry.storeName === STORES.SYNC_QUEUE;
+    if (
+      (!migrationTarget && !preservedSyncQueue) ||
+      typeof entry.rawValue !== "string" ||
+      !isPersistenceDigestDescriptor(entry.rawDigest) ||
+      typeof entry.capturedAt !== "string" ||
+      !Number.isFinite(Date.parse(entry.capturedAt)) ||
+      keys.has(entry.legacyKey)
+    ) {
+      return false;
+    }
+    keys.add(entry.legacyKey);
+    return true;
+  });
+  return (
+    value.kind === "event-shopping-planner-legacy-migration-archive" &&
+    value.schemaVersion === LEGACY_MIGRATION_ARCHIVE_SCHEMA_VERSION &&
+    typeof value.sessionId === "string" &&
+    value.sessionId.length > 0 &&
+    typeof value.createdAt === "string" &&
+    Number.isFinite(Date.parse(value.createdAt)) &&
+    value.entries.length > 0 &&
+    entriesValid
+  );
+}
+
 async function readInternalControlRecord(key: string): Promise<unknown> {
   const database = await openDB();
   ensureStoreExists(database, STORES.SYNC_QUEUE);
@@ -2777,6 +3754,262 @@ async function readInternalControlRecord(key: string): Promise<unknown> {
   );
   await finished;
   return value;
+}
+
+async function createLegacyMigrationArchive(
+  journal: LegacyMigrationJournal | LegacyMigrationJournalV1,
+  legacySyncQueueRawValue: string | null,
+): Promise<LegacyMigrationArchive> {
+  const capturedAt = new Date().toISOString();
+  const migrationEntries = journal.entries.map((entry) => ({
+    legacyKey: entry.legacyKey,
+    sourceKind: "migration-source" as const,
+    storeName: entry.storeName,
+    rawValue: entry.rawValue,
+    rawDigest:
+      "expectedRawDigest" in entry ? entry.expectedRawDigest : entry.rawDigest,
+    capturedAt,
+  }));
+  const syncQueueEntries =
+    legacySyncQueueRawValue === null
+      ? []
+      : [
+          {
+            legacyKey: LEGACY_SYNC_QUEUE_LOCAL_STORAGE_KEY,
+            sourceKind: "preserved-legacy-sync-queue" as const,
+            storeName: STORES.SYNC_QUEUE,
+            rawValue: legacySyncQueueRawValue,
+            rawDigest: await createPersistenceDigest(legacySyncQueueRawValue),
+            capturedAt,
+          },
+        ];
+  return {
+    kind: "event-shopping-planner-legacy-migration-archive",
+    schemaVersion: LEGACY_MIGRATION_ARCHIVE_SCHEMA_VERSION,
+    sessionId: journal.sessionId,
+    createdAt: capturedAt,
+    entries: [...migrationEntries, ...syncQueueEntries],
+  };
+}
+
+async function validateLegacyMigrationArchive(
+  value: unknown,
+  journal: LegacyMigrationJournal,
+  expected?: LegacyMigrationArchive,
+): Promise<LegacyMigrationArchive> {
+  if (
+    !isLegacyMigrationArchive(value) ||
+    value.sessionId !== journal.sessionId ||
+    (expected !== undefined && !fingerprintsEqual(value, expected))
+  ) {
+    throw new PersistenceConflictError(
+      "Migration recovery archive is missing or was replaced.",
+    );
+  }
+
+  const entriesByKey = new Map(
+    value.entries.map((entry) => [entry.legacyKey, entry]),
+  );
+  for (const entry of value.entries) {
+    if (!(await verifyPersistenceDigest(entry.rawValue, entry.rawDigest))) {
+      throw new PersistenceConflictError(
+        `Migration recovery archive digest is invalid for ${entry.legacyKey}.`,
+      );
+    }
+  }
+  for (const journalEntry of journal.entries) {
+    const archived = entriesByKey.get(journalEntry.legacyKey);
+    if (
+      !archived ||
+      archived.sourceKind !== "migration-source" ||
+      archived.storeName !== journalEntry.storeName ||
+      archived.rawValue !== journalEntry.rawValue ||
+      !fingerprintsEqual(archived.rawDigest, journalEntry.expectedRawDigest)
+    ) {
+      throw new PersistenceConflictError(
+        `Migration recovery archive does not match ${journalEntry.legacyKey}.`,
+      );
+    }
+  }
+  return value;
+}
+
+async function readAndValidateLegacyMigrationArchive(
+  journal: LegacyMigrationJournal,
+  expected?: LegacyMigrationArchive,
+): Promise<LegacyMigrationArchive> {
+  return validateLegacyMigrationArchive(
+    await readInternalControlRecord(journal.archiveKey),
+    journal,
+    expected,
+  );
+}
+
+function upgradeLegacyMigrationJournalValue(
+  journal: LegacyMigrationJournalV1,
+): LegacyMigrationJournal {
+  const allRemoved = journal.entries.every(
+    ({ cleanupStatus }) => cleanupStatus === "removed",
+  );
+  let phase: LegacyMigrationPhase;
+  let dataMigrationStatus: LegacyMigrationJournal["dataMigrationStatus"];
+  let cleanupStatus: LegacyMigrationJournal["cleanupStatus"];
+  switch (journal.phase) {
+    case "prepared":
+      phase = "prepared";
+      dataMigrationStatus = "prepared";
+      cleanupStatus = "not-ready";
+      break;
+    case "copied":
+      phase = "copied";
+      dataMigrationStatus = "copied";
+      cleanupStatus = "not-ready";
+      break;
+    case "verified":
+      phase = "verified";
+      dataMigrationStatus = "verified";
+      cleanupStatus = "not-ready";
+      break;
+    case "cleanupPending":
+      phase = allRemoved ? "cleanup-in-progress" : "cleanup-ready";
+      dataMigrationStatus = "verified";
+      cleanupStatus = allRemoved ? "in-progress" : "deferred";
+      break;
+    case "completed":
+      phase = "completed";
+      dataMigrationStatus = "verified";
+      cleanupStatus = "completed";
+      break;
+  }
+
+  return {
+    kind: journal.kind,
+    schemaVersion: LEGACY_MIGRATION_SCHEMA_VERSION,
+    sessionId: journal.sessionId,
+    ownerId: journal.ownerId,
+    phase,
+    dataMigrationStatus,
+    cleanupStatus,
+    archiveKey: createLegacyMigrationArchiveKey(journal.sessionId),
+    createdAt: journal.createdAt,
+    updatedAt: new Date().toISOString(),
+    entries: journal.entries.map((entry) => ({
+      legacyKey: entry.legacyKey,
+      storeName: entry.storeName,
+      rawValue: entry.rawValue,
+      expectedRawDigest: entry.rawDigest,
+      payloadDigest: entry.payloadDigest,
+      targetRevision: entry.targetRevision,
+      mapKeys: [...entry.mapKeys],
+      cleanupStatus:
+        entry.cleanupStatus === "removed"
+          ? "removed"
+          : journal.phase === "cleanupPending"
+            ? "deferred"
+            : "pending",
+    })),
+  };
+}
+
+async function upgradeLegacyMigrationJournalV1Atomically(
+  journal: LegacyMigrationJournalV1,
+  legacySyncQueueRawValue: string | null,
+): Promise<LegacyMigrationJournal> {
+  await validateLegacyMigrationJournalDescriptors(journal);
+  const upgraded = upgradeLegacyMigrationJournalValue(journal);
+  const archive = await createLegacyMigrationArchive(
+    journal,
+    legacySyncQueueRawValue,
+  );
+  const database = await openDB();
+  ensureStoreExists(database, STORES.SYNC_QUEUE);
+
+  await new Promise<void>((resolve, reject) => {
+    const transaction = database.transaction(STORES.SYNC_QUEUE, "readwrite");
+    const store = transaction.objectStore(STORES.SYNC_QUEUE);
+    let failure: unknown = null;
+    let currentJournal: unknown;
+    let currentArchive: unknown;
+    let readsRemaining = 2;
+    let writesQueued = false;
+
+    const abortWith = (error: unknown) => {
+      failure = error;
+      try {
+        transaction.abort();
+      } catch {
+        reject(error);
+      }
+    };
+    const queueWrites = () => {
+      readsRemaining -= 1;
+      if (readsRemaining !== 0 || writesQueued) return;
+      writesQueued = true;
+      try {
+        if (
+          !isLegacyMigrationJournalV1(currentJournal) ||
+          currentJournal.sessionId !== journal.sessionId ||
+          !fingerprintsEqual(currentJournal, journal)
+        ) {
+          throw new PersistenceConflictError(
+            "Migration journal changed before its v2 upgrade.",
+          );
+        }
+        if (
+          currentArchive !== undefined &&
+          currentArchive !== null &&
+          (!isLegacyMigrationArchive(currentArchive) ||
+            !fingerprintsEqual(currentArchive, archive))
+        ) {
+          throw new PersistenceConflictError(
+            "A different immutable migration archive already exists.",
+          );
+        }
+        if (currentArchive === undefined || currentArchive === null) {
+          const archivePut = store.put(archive, upgraded.archiveKey);
+          archivePut.onerror = () => {
+            failure = failure ?? archivePut.error;
+          };
+        }
+        const journalPut = store.put(upgraded, LEGACY_MIGRATION_JOURNAL_KEY);
+        journalPut.onerror = () => {
+          failure = failure ?? journalPut.error;
+        };
+      } catch (error) {
+        abortWith(error);
+      }
+    };
+
+    const journalRequest = store.get(LEGACY_MIGRATION_JOURNAL_KEY);
+    journalRequest.onerror = () => {
+      failure = failure ?? journalRequest.error;
+    };
+    journalRequest.onsuccess = () => {
+      currentJournal = journalRequest.result;
+      queueWrites();
+    };
+    const archiveRequest = store.get(upgraded.archiveKey);
+    archiveRequest.onerror = () => {
+      failure = failure ?? archiveRequest.error;
+    };
+    archiveRequest.onsuccess = () => {
+      currentArchive = archiveRequest.result;
+      queueWrites();
+    };
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => {
+      failure = failure ?? transaction.error;
+    };
+    transaction.onabort = () =>
+      reject(
+        failure ??
+          transaction.error ??
+          new Error("Failed to upgrade the migration journal."),
+      );
+  });
+
+  await readAndValidateLegacyMigrationArchive(upgraded, archive);
+  return upgraded;
 }
 
 async function writeMigrationJournalWithCas(
@@ -2844,27 +4077,37 @@ function migrationRecoveryResult(
     target: LegacyMigrationTarget;
     rawValue: string;
   }[],
-  journal?: LegacyMigrationJournal,
+  journal?: unknown,
   currentSources?: readonly LegacySourceState[],
   additionalCandidates: readonly StartupRecoveryCandidate[] = [],
+  legacySyncQueueRawValue: string | null = null,
 ): PersistenceMigrationResult {
   const candidates = entries.map(({ target, rawValue }) =>
     createRecoveryCandidate(
       "legacy-localStorage",
       target.storeName,
-      DATA_KEY,
+      target.legacyKey,
       null,
       null,
       rawValue,
+      {
+        sourceKey: target.legacyKey,
+        targetKey: DATA_KEY,
+        adoptable: false,
+      },
     ),
   );
-  if (journal) {
+  if (journal !== undefined && journal !== null) {
+    const journalRevision =
+      isLegacyMigrationJournal(journal) || isLegacyMigrationJournalV1(journal)
+        ? (journal.entries[0]?.targetRevision ?? null)
+        : null;
     candidates.push(
       createRecoveryCandidate(
         "migration-journal",
         STORES.SYNC_QUEUE,
         LEGACY_MIGRATION_JOURNAL_KEY,
-        journal.entries[0]?.targetRevision ?? null,
+        journalRevision,
         journal,
       ),
     );
@@ -2879,19 +4122,43 @@ function migrationRecoveryResult(
         createRecoveryCandidate(
           "legacy-localStorage",
           target.storeName,
-          DATA_KEY,
+          target.legacyKey,
           null,
           rawValue === null
             ? { sourceState: "missing", snapshot: "current" }
             : { sourceState: "present", snapshot: "current" },
           rawValue ?? undefined,
+          {
+            sourceKey: target.legacyKey,
+            targetKey: DATA_KEY,
+            adoptable: false,
+          },
         ),
       );
     });
   }
+  if (legacySyncQueueRawValue !== null) {
+    candidates.push(
+      createRecoveryCandidate(
+        "legacy-localStorage",
+        STORES.SYNC_QUEUE,
+        LEGACY_SYNC_QUEUE_LOCAL_STORAGE_KEY,
+        null,
+        {
+          sourceState: "present",
+          preservation: "archive-only",
+        },
+        legacySyncQueueRawValue,
+      ),
+    );
+  }
   candidates.push(...additionalCandidates);
+  const recognizedJournal = isLegacyMigrationJournal(journal) ? journal : null;
   return {
     status: "recovery-required",
+    dataMigrationStatus:
+      recognizedJournal?.dataMigrationStatus ?? "recovery-required",
+    cleanupStatus: recognizedJournal?.cleanupStatus ?? "recovery-required",
     recoveryBundle: createRecoveryBundle(
       [
         createRecoveryIssue(
@@ -2926,6 +4193,7 @@ async function prepareLegacyMigrationEntries(
     const rawDigest = await createPersistenceDigest(snapshot.rawValue);
     const payloadDigest = await createPersistenceDigest(payload);
     let validated: ValidatedPersistenceSnapshot<unknown>;
+    let absorbedSnapshots: RuntimeCandidateSnapshot<unknown>[] = [];
 
     if (snapshot.target.storeName === STORES.MAP_DATA) {
       const rawMapSnapshot = await readRawMapSnapshotWithRetry();
@@ -2990,6 +4258,10 @@ async function prepareLegacyMigrationEntries(
           candidateScan.result.recoveryBundle?.candidates ?? [],
         );
       }
+      const partitioned = partitionRuntimeCandidateSnapshots(
+        validated.checkpoint,
+        candidateScan.snapshots,
+      );
       const reconciliation = reconcileRuntimeFallbackCandidates(
         {
           revision: validated.root.missing ? null : validated.root.revision,
@@ -3006,7 +4278,7 @@ async function prepareLegacyMigrationEntries(
             ? undefined
             : validated.root.committedAt,
         },
-        candidateScan.snapshots.map(({ candidate }) => candidate),
+        partitioned.active.map(({ candidate }) => candidate),
       );
       if (
         reconciliation.status === "conflict" ||
@@ -3029,6 +4301,7 @@ async function prepareLegacyMigrationEntries(
           );
         }
       }
+      absorbedSnapshots = candidateScan.snapshots;
     }
 
     roots.set(snapshot.target.storeName, validated.root);
@@ -3040,6 +4313,13 @@ async function prepareLegacyMigrationEntries(
       payloadDigest,
       createSynchronousFingerprint(payload),
     );
+    const checkpoint = createNextPersistenceCheckpoint(
+      snapshot.target.storeName,
+      DATA_KEY,
+      metadata,
+      validated.checkpoint,
+      absorbedSnapshots,
+    );
     entries.push({
       target: snapshot.target,
       rawValue: snapshot.rawValue,
@@ -3047,6 +4327,8 @@ async function prepareLegacyMigrationEntries(
       rawDigest,
       payloadDigest,
       metadata,
+      expectedCheckpoint: validated.checkpoint,
+      checkpoint,
       mapPuts:
         snapshot.target.storeName === STORES.MAP_DATA
           ? buildMapDataPuts(payload as MapDataStore)
@@ -3061,19 +4343,23 @@ function createLegacyMigrationJournal(
   entries: readonly PreparedLegacyMigrationEntry[],
 ): LegacyMigrationJournal {
   const now = new Date().toISOString();
+  const sessionId = createPersistenceRevision(persistenceWriterId);
   return {
     kind: "event-shopping-planner-legacy-migration",
     schemaVersion: LEGACY_MIGRATION_SCHEMA_VERSION,
-    sessionId: createPersistenceRevision(persistenceWriterId),
+    sessionId,
     ownerId: persistenceWriterId,
     phase: "prepared",
+    dataMigrationStatus: "prepared",
+    cleanupStatus: "not-ready",
+    archiveKey: createLegacyMigrationArchiveKey(sessionId),
     createdAt: now,
     updatedAt: now,
     entries: entries.map((entry) => ({
       legacyKey: entry.target.legacyKey,
       storeName: entry.target.storeName,
       rawValue: entry.rawValue,
-      rawDigest: entry.rawDigest,
+      expectedRawDigest: entry.rawDigest,
       payloadDigest: entry.payloadDigest,
       targetRevision: entry.metadata.revision,
       mapKeys: entry.mapPuts.map(({ key }) => key).sort(),
@@ -3087,9 +4373,27 @@ function withJournalPhase(
   phase: LegacyMigrationPhase,
   cleanupStatus?: LegacyMigrationJournalEntry["cleanupStatus"],
 ): LegacyMigrationJournal {
+  const dataMigrationStatus: LegacyMigrationJournal["dataMigrationStatus"] =
+    phase === "prepared"
+      ? "prepared"
+      : phase === "copied"
+        ? "copied"
+        : "verified";
+  const journalCleanupStatus: LegacyMigrationJournal["cleanupStatus"] =
+    phase === "prepared" || phase === "copied" || phase === "verified"
+      ? "not-ready"
+      : phase === "cleanup-ready"
+        ? cleanupStatus === "deferred"
+          ? "deferred"
+          : "ready"
+        : phase === "cleanup-in-progress"
+          ? "in-progress"
+          : "completed";
   return {
     ...journal,
     phase,
+    dataMigrationStatus,
+    cleanupStatus: journalCleanupStatus,
     updatedAt: new Date().toISOString(),
     entries:
       cleanupStatus === undefined
@@ -3102,6 +4406,7 @@ async function copyLegacyMigrationAtomically(
   entries: readonly PreparedLegacyMigrationEntry[],
   journal: LegacyMigrationJournal,
   roots: ReadonlyMap<StoreName, ObservedRevisionRoot>,
+  archive: LegacyMigrationArchive,
 ): Promise<LegacyMigrationJournal> {
   const database = await openDB();
   const targetStores = Array.from(
@@ -3142,9 +4447,11 @@ async function copyLegacyMigrationAtomically(
       const controlStore = transaction.objectStore(STORES.SYNC_QUEUE);
       const currentPayloads = new Map<StoreName, unknown>();
       const currentMetadata = new Map<StoreName, unknown>();
+      const currentCheckpoints = new Map<StoreName, unknown>();
       let currentMapEntries: Record<string, unknown> | null = null;
       let currentJournal: unknown;
-      let remainingReads = entries.length * 2 + 1;
+      let currentArchive: unknown;
+      let remainingReads = entries.length * 3 + 2;
       let writesQueued = false;
 
       const abortWith = (error: unknown) => {
@@ -3171,6 +4478,16 @@ async function copyLegacyMigrationAtomically(
           ) {
             throw new PersistenceConflictError(
               "Migration journal ownership changed before copy.",
+            );
+          }
+          if (
+            currentArchive !== undefined &&
+            currentArchive !== null &&
+            (!isLegacyMigrationArchive(currentArchive) ||
+              !fingerprintsEqual(currentArchive, archive))
+          ) {
+            throw new PersistenceConflictError(
+              "A different immutable migration archive already exists.",
             );
           }
 
@@ -3211,13 +4528,31 @@ async function copyLegacyMigrationAtomically(
                   .put(entry.payload, DATA_KEY),
               );
             }
+            assertCurrentCheckpointMatchesExpected(
+              entry.target.storeName,
+              DATA_KEY,
+              currentCheckpoints.get(entry.target.storeName),
+              entry.expectedCheckpoint,
+            );
             track(
               controlStore.put(
                 entry.metadata,
                 createPersistenceMetadataKey(entry.target.storeName, DATA_KEY),
               ),
             );
+            track(
+              controlStore.put(
+                entry.checkpoint,
+                createPersistenceCheckpointKey(
+                  entry.target.storeName,
+                  DATA_KEY,
+                ),
+              ),
+            );
           });
+          if (currentArchive === undefined || currentArchive === null) {
+            track(controlStore.put(archive, journal.archiveKey));
+          }
           track(controlStore.put(copiedJournal, LEGACY_MIGRATION_JOURNAL_KEY));
         } catch (error) {
           abortWith(error);
@@ -3232,6 +4567,14 @@ async function copyLegacyMigrationAtomically(
         currentJournal = journalRequest.result;
         commitIfReady();
       };
+      const archiveRequest = controlStore.get(journal.archiveKey);
+      archiveRequest.onerror = () => {
+        failure = failure ?? archiveRequest.error;
+      };
+      archiveRequest.onsuccess = () => {
+        currentArchive = archiveRequest.result;
+        commitIfReady();
+      };
 
       entries.forEach((entry) => {
         const metadataRequest = controlStore.get(
@@ -3242,6 +4585,19 @@ async function copyLegacyMigrationAtomically(
         };
         metadataRequest.onsuccess = () => {
           currentMetadata.set(entry.target.storeName, metadataRequest.result);
+          commitIfReady();
+        };
+        const checkpointRequest = controlStore.get(
+          createPersistenceCheckpointKey(entry.target.storeName, DATA_KEY),
+        );
+        checkpointRequest.onerror = () => {
+          failure = failure ?? checkpointRequest.error;
+        };
+        checkpointRequest.onsuccess = () => {
+          currentCheckpoints.set(
+            entry.target.storeName,
+            checkpointRequest.result,
+          );
           commitIfReady();
         };
 
@@ -3358,7 +4714,13 @@ async function verifyLegacyMigration(
 
 async function verifyCommittedMigrationTargets(
   journal: LegacyMigrationJournal,
-): Promise<void> {
+  requireJournalTarget = false,
+): Promise<{
+  roots: Map<StoreName, ObservedRevisionRoot>;
+  checkpoints: Map<StoreName, PersistenceCheckpoint | null>;
+}> {
+  const roots = new Map<StoreName, ObservedRevisionRoot>();
+  const checkpoints = new Map<StoreName, PersistenceCheckpoint | null>();
   for (const entry of journal.entries) {
     let validated: ValidatedPersistenceSnapshot<unknown>;
     if (entry.storeName === STORES.MAP_DATA) {
@@ -3396,11 +4758,23 @@ async function verifyCommittedMigrationTargets(
         `${entry.storeName} has no committed persistence root while resuming migration.`,
       );
     }
+    if (
+      requireJournalTarget &&
+      (validated.root.revision !== entry.targetRevision ||
+        validated.root.payloadDigest.value !== entry.payloadDigest.value)
+    ) {
+      throw new PersistenceConflictError(
+        `${entry.storeName} no longer matches the migration target root.`,
+      );
+    }
+    roots.set(entry.storeName, validated.root);
+    checkpoints.set(entry.storeName, validated.checkpoint);
   }
+  return { roots, checkpoints };
 }
 
 function legacySnapshotsFromJournal(
-  journal: LegacyMigrationJournal,
+  journal: LegacyMigrationJournal | LegacyMigrationJournalV1,
 ): { target: LegacyMigrationTarget; rawValue: string }[] {
   return journal.entries.map((entry) => {
     const target = LEGACY_MIGRATION_TARGETS.find(
@@ -3417,7 +4791,7 @@ function legacySnapshotsFromJournal(
 }
 
 async function validateLegacyMigrationJournalDescriptors(
-  journal: LegacyMigrationJournal,
+  journal: LegacyMigrationJournal | LegacyMigrationJournalV1,
 ): Promise<void> {
   for (const snapshot of legacySnapshotsFromJournal(journal)) {
     const journalEntry = journal.entries.find(
@@ -3433,7 +4807,12 @@ async function validateLegacyMigrationJournalDescriptors(
       snapshot.rawValue,
     );
     const [rawDigestValid, payloadDigestValid] = await Promise.all([
-      verifyPersistenceDigest(snapshot.rawValue, journalEntry.rawDigest),
+      verifyPersistenceDigest(
+        snapshot.rawValue,
+        "expectedRawDigest" in journalEntry
+          ? journalEntry.expectedRawDigest
+          : journalEntry.rawDigest,
+      ),
       verifyPersistenceDigest(payload, journalEntry.payloadDigest),
     ]);
     const mapKeys =
@@ -3471,7 +4850,7 @@ function assertPreparedEntriesMatchJournal(
       !recorded ||
       recorded.storeName !== entry.target.storeName ||
       recorded.rawValue !== entry.rawValue ||
-      recorded.rawDigest.value !== entry.rawDigest.value ||
+      recorded.expectedRawDigest.value !== entry.rawDigest.value ||
       recorded.payloadDigest.value !== entry.payloadDigest.value ||
       mapKeys.length !== recordedMapKeys.length ||
       mapKeys.some((key, index) => key !== recordedMapKeys[index])
@@ -3484,18 +4863,29 @@ function assertPreparedEntriesMatchJournal(
       ...entry.metadata,
       revision: recorded.targetRevision,
     };
+    entry.checkpoint = {
+      ...entry.checkpoint,
+      committedRoot: {
+        revision: entry.metadata.revision,
+        baseRevision: entry.metadata.baseRevision,
+        digest: entry.metadata.payloadDigest,
+        writerId: entry.metadata.writerId,
+        committedAt: entry.metadata.committedAt,
+      },
+      updatedAt: new Date().toISOString(),
+    };
   });
 }
 
-async function retainLegacySourcesFromJournal(
+async function deferLegacyCleanupFromJournal(
   journal: LegacyMigrationJournal,
 ): Promise<LegacyMigrationJournal> {
   assertJournalSourcesResumable(journal, captureLegacySourceStates());
   if (
-    journal.phase === "cleanupPending" &&
+    journal.phase === "cleanup-in-progress" &&
     journal.entries.every(({ cleanupStatus }) => cleanupStatus === "removed")
   ) {
-    const completedJournal = withJournalPhase(journal, "completed");
+    const completedJournal = withJournalPhase(journal, "completed", "removed");
     await writeMigrationJournalWithCas(journal, completedJournal);
     assertJournalSourcesResumable(
       completedJournal,
@@ -3504,27 +4894,620 @@ async function retainLegacySourcesFromJournal(
     return completedJournal;
   }
   if (
-    journal.phase !== "cleanupPending" ||
-    !journal.entries.some(({ cleanupStatus }) => cleanupStatus === "pending")
+    journal.phase !== "cleanup-ready" ||
+    journal.cleanupStatus === "deferred"
   ) {
     return journal;
   }
 
-  // Web Storage has no compare-and-remove primitive. A getItem/removeItem pair
-  // can erase a newer value written by another tab, so verified legacy sources
-  // remain as a recovery copy instead of being deleted automatically.
-  const retainedJournal: LegacyMigrationJournal = {
+  // Release A keeps physical cleanup disabled. Verification and deferred
+  // cleanup are separate states so normal startup can continue safely.
+  const deferredJournal: LegacyMigrationJournal = {
     ...journal,
+    cleanupStatus: "deferred",
     updatedAt: new Date().toISOString(),
     entries: journal.entries.map((entry) =>
       entry.cleanupStatus === "pending"
-        ? { ...entry, cleanupStatus: "retained" as const }
+        ? { ...entry, cleanupStatus: "deferred" as const }
         : entry,
     ),
   };
-  await writeMigrationJournalWithCas(journal, retainedJournal);
-  assertJournalSourcesResumable(retainedJournal, captureLegacySourceStates());
-  return retainedJournal;
+  await writeMigrationJournalWithCas(journal, deferredJournal);
+  assertJournalSourcesResumable(deferredJournal, captureLegacySourceStates());
+  return deferredJournal;
+}
+
+function removedLegacyMigrationKeys(
+  journal: LegacyMigrationJournal | null,
+): string[] {
+  return (
+    journal?.entries
+      .filter(({ cleanupStatus }) => cleanupStatus === "removed")
+      .map(({ legacyKey }) => legacyKey) ?? []
+  );
+}
+
+function legacyCleanupDeferred(
+  mode: PersistenceCleanupMode,
+  reason:
+    | PersistenceCleanupDeferredReason
+    | PersistenceLegacyCleanupTaskDeferredReason,
+  journal: LegacyMigrationJournal | null,
+): PersistenceLegacyCleanupResult {
+  return {
+    status: "cleanup-deferred",
+    mode,
+    reason,
+    removedKeys: removedLegacyMigrationKeys(journal),
+  };
+}
+
+function legacyCleanupBlocked(
+  mode: PersistenceCleanupMode,
+  reason:
+    | PersistenceCleanupBlockedReason
+    | PersistenceLegacyCleanupTaskBlockedReason,
+  journal: LegacyMigrationJournal | null,
+): PersistenceLegacyCleanupResult {
+  return {
+    status: "cleanup-blocked",
+    mode,
+    reason,
+    removedKeys: removedLegacyMigrationKeys(journal),
+  };
+}
+
+function legacyCleanupCompleted(
+  mode: PersistenceCleanupMode,
+  journal: LegacyMigrationJournal | null,
+): PersistenceLegacyCleanupResult {
+  return {
+    status: "completed",
+    mode,
+    removedKeys: journal?.entries.map(({ legacyKey }) => legacyKey) ?? [],
+  };
+}
+
+async function writeAndReadLegacyCleanupJournalWithCas(
+  expected: LegacyMigrationJournal,
+  next: LegacyMigrationJournal,
+): Promise<LegacyMigrationJournal | null> {
+  try {
+    await writeMigrationJournalWithCas(expected, next);
+    const readback = await readInternalControlRecord(
+      LEGACY_MIGRATION_JOURNAL_KEY,
+    );
+    if (
+      !isLegacyMigrationJournal(readback) ||
+      readback.sessionId !== next.sessionId ||
+      !fingerprintsEqual(
+        createSynchronousFingerprint(readback),
+        createSynchronousFingerprint(next),
+      )
+    ) {
+      return null;
+    }
+    return readback;
+  } catch {
+    return null;
+  }
+}
+
+function withLegacyCleanupInProgress(
+  journal: LegacyMigrationJournal,
+): LegacyMigrationJournal {
+  return {
+    ...journal,
+    phase: "cleanup-in-progress",
+    cleanupStatus: "in-progress",
+    updatedAt: new Date().toISOString(),
+    entries: journal.entries.map((entry) => ({ ...entry })),
+  };
+}
+
+function withLegacyCleanupEntryStatus(
+  journal: LegacyMigrationJournal,
+  entryIndex: number,
+  cleanupStatus: "in-progress" | "removed",
+): LegacyMigrationJournal {
+  return {
+    ...journal,
+    phase: "cleanup-in-progress",
+    cleanupStatus: "in-progress",
+    updatedAt: new Date().toISOString(),
+    entries: journal.entries.map((entry, index) =>
+      index === entryIndex ? { ...entry, cleanupStatus } : { ...entry },
+    ),
+  };
+}
+
+function withLegacyCleanupCompleted(
+  journal: LegacyMigrationJournal,
+): LegacyMigrationJournal {
+  return {
+    ...journal,
+    phase: "completed",
+    cleanupStatus: "completed",
+    updatedAt: new Date().toISOString(),
+    entries: journal.entries.map((entry) => ({
+      ...entry,
+      cleanupStatus: "removed",
+    })),
+  };
+}
+
+function inspectLegacyCleanupSourceConflict(
+  journal: LegacyMigrationJournal,
+): PersistenceLegacyCleanupTaskBlockedReason | null {
+  const entriesByKey = new Map(
+    journal.entries.map((entry) => [entry.legacyKey, entry]),
+  );
+  for (const { target, rawValue } of captureLegacySourceStates()) {
+    const entry = entriesByKey.get(target.legacyKey);
+    if (!entry) {
+      if (rawValue !== null) return "legacy-source-changed";
+      continue;
+    }
+    if (entry.cleanupStatus === "removed") {
+      if (rawValue !== null) return "legacy-source-reappeared";
+      continue;
+    }
+    if (rawValue !== null && rawValue !== entry.rawValue) {
+      return "legacy-source-changed";
+    }
+  }
+  return null;
+}
+
+async function readValidatedLegacyCleanupArchive(
+  journal: LegacyMigrationJournal,
+  expected?: LegacyMigrationArchive,
+): Promise<LegacyMigrationArchive | null> {
+  try {
+    return await readAndValidateLegacyMigrationArchive(journal, expected);
+  } catch {
+    return null;
+  }
+}
+
+async function committedLegacyCleanupTargetsAreValid(
+  journal: LegacyMigrationJournal,
+): Promise<boolean> {
+  try {
+    await verifyCommittedMigrationTargets(journal);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readLegacyCleanupSource(
+  legacyKey: string,
+): { status: "ok"; rawValue: string | null } | { status: "failed" } {
+  try {
+    return { status: "ok", rawValue: localStorage.getItem(legacyKey) };
+  } catch {
+    return { status: "failed" };
+  }
+}
+
+function removeLegacyCleanupSource(legacyKey: string): boolean {
+  try {
+    localStorage.removeItem(legacyKey);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function revalidateLegacyCleanupSafety(
+  mode: PersistenceCleanupMode,
+  journal: LegacyMigrationJournal | null,
+  revalidateSafety: PersistenceCleanupTaskContext["revalidateSafety"],
+): Promise<PersistenceLegacyCleanupResult | null> {
+  const safety = await revalidateSafety();
+  if (safety.status === "safe") return null;
+  return safety.status === "cleanup-blocked"
+    ? legacyCleanupBlocked(mode, safety.reason, journal)
+    : legacyCleanupDeferred(mode, safety.reason, journal);
+}
+
+async function executePhysicalLegacyCleanup(
+  request: PersistenceLegacyCleanupSafetyRequest,
+  revalidateSafety: PersistenceCleanupTaskContext["revalidateSafety"],
+): Promise<PersistenceLegacyCleanupResult> {
+  const mode = request.mode;
+  let rawJournal: unknown;
+  try {
+    rawJournal = await readInternalControlRecord(LEGACY_MIGRATION_JOURNAL_KEY);
+  } catch {
+    return legacyCleanupBlocked(mode, "migration-journal-invalid", null);
+  }
+
+  if (rawJournal === undefined || rawJournal === null) {
+    return legacyCleanupCompleted(mode, null);
+  }
+  if (!isLegacyMigrationJournal(rawJournal)) {
+    return legacyCleanupBlocked(mode, "migration-journal-invalid", null);
+  }
+
+  let journal = rawJournal;
+  const archive = await readValidatedLegacyCleanupArchive(journal);
+  if (!archive) {
+    return legacyCleanupBlocked(mode, "migration-archive-invalid", journal);
+  }
+  if (!(await committedLegacyCleanupTargetsAreValid(journal))) {
+    return legacyCleanupBlocked(mode, "committed-target-invalid", journal);
+  }
+
+  let sourceConflict: PersistenceLegacyCleanupTaskBlockedReason | null;
+  try {
+    sourceConflict = inspectLegacyCleanupSourceConflict(journal);
+  } catch {
+    return legacyCleanupBlocked(mode, "legacy-storage-unavailable", journal);
+  }
+  if (sourceConflict) {
+    return legacyCleanupBlocked(mode, sourceConflict, journal);
+  }
+
+  let safetyStop = await revalidateLegacyCleanupSafety(
+    mode,
+    journal,
+    revalidateSafety,
+  );
+  if (safetyStop) return safetyStop;
+
+  if (journal.phase === "completed") {
+    return legacyCleanupCompleted(mode, journal);
+  }
+  if (
+    journal.phase !== "cleanup-ready" &&
+    journal.phase !== "cleanup-in-progress"
+  ) {
+    return legacyCleanupDeferred(mode, "cleanup-not-ready", journal);
+  }
+
+  if (journal.phase === "cleanup-ready") {
+    const started = await writeAndReadLegacyCleanupJournalWithCas(
+      journal,
+      withLegacyCleanupInProgress(journal),
+    );
+    if (!started) {
+      return legacyCleanupDeferred(
+        mode,
+        "migration-journal-cas-failed",
+        journal,
+      );
+    }
+    journal = started;
+  }
+
+  for (let entryIndex = 0; entryIndex < journal.entries.length; entryIndex++) {
+    safetyStop = await revalidateLegacyCleanupSafety(
+      mode,
+      journal,
+      revalidateSafety,
+    );
+    if (safetyStop) return safetyStop;
+
+    if (!(await readValidatedLegacyCleanupArchive(journal, archive))) {
+      return legacyCleanupBlocked(mode, "migration-archive-invalid", journal);
+    }
+    if (!(await committedLegacyCleanupTargetsAreValid(journal))) {
+      return legacyCleanupBlocked(mode, "committed-target-invalid", journal);
+    }
+    try {
+      sourceConflict = inspectLegacyCleanupSourceConflict(journal);
+    } catch {
+      return legacyCleanupBlocked(mode, "legacy-storage-unavailable", journal);
+    }
+    if (sourceConflict) {
+      return legacyCleanupBlocked(mode, sourceConflict, journal);
+    }
+
+    let entry = journal.entries[entryIndex];
+    if (entry.cleanupStatus === "removed") continue;
+
+    const beforeClaim = readLegacyCleanupSource(entry.legacyKey);
+    if (beforeClaim.status === "failed") {
+      return legacyCleanupBlocked(mode, "legacy-storage-unavailable", journal);
+    }
+    if (beforeClaim.rawValue === null) {
+      if (entry.cleanupStatus !== "in-progress") {
+        return legacyCleanupBlocked(
+          mode,
+          "legacy-source-missing-before-claim",
+          journal,
+        );
+      }
+      const removed = await writeAndReadLegacyCleanupJournalWithCas(
+        journal,
+        withLegacyCleanupEntryStatus(journal, entryIndex, "removed"),
+      );
+      if (!removed) {
+        return legacyCleanupDeferred(
+          mode,
+          "migration-journal-cas-failed",
+          journal,
+        );
+      }
+      journal = removed;
+      const afterResume = readLegacyCleanupSource(entry.legacyKey);
+      if (afterResume.status === "failed") {
+        return legacyCleanupBlocked(
+          mode,
+          "legacy-storage-unavailable",
+          journal,
+        );
+      }
+      if (afterResume.rawValue !== null) {
+        return legacyCleanupBlocked(mode, "legacy-source-reappeared", journal);
+      }
+      emitPersistenceCleanupMetric(request.metricSink, {
+        name: "persistence-cleanup-key-confirmed-removed",
+        mode,
+      });
+      continue;
+    }
+    if (beforeClaim.rawValue !== entry.rawValue) {
+      return legacyCleanupBlocked(mode, "legacy-source-changed", journal);
+    }
+    let rawDigestMatches = false;
+    try {
+      rawDigestMatches = await verifyPersistenceDigest(
+        beforeClaim.rawValue,
+        entry.expectedRawDigest,
+      );
+    } catch {
+      rawDigestMatches = false;
+    }
+    if (!rawDigestMatches) {
+      return legacyCleanupBlocked(
+        mode,
+        "legacy-source-digest-mismatch",
+        journal,
+      );
+    }
+
+    if (entry.cleanupStatus !== "in-progress") {
+      const claimed = await writeAndReadLegacyCleanupJournalWithCas(
+        journal,
+        withLegacyCleanupEntryStatus(journal, entryIndex, "in-progress"),
+      );
+      if (!claimed) {
+        return legacyCleanupDeferred(
+          mode,
+          "migration-journal-cas-failed",
+          journal,
+        );
+      }
+      journal = claimed;
+      entry = journal.entries[entryIndex];
+    }
+
+    const beforeRemove = readLegacyCleanupSource(entry.legacyKey);
+    if (beforeRemove.status === "failed") {
+      return legacyCleanupBlocked(mode, "legacy-storage-unavailable", journal);
+    }
+    if (beforeRemove.rawValue === null) {
+      return legacyCleanupDeferred(
+        mode,
+        "legacy-source-missing-after-claim",
+        journal,
+      );
+    }
+    if (beforeRemove.rawValue !== entry.rawValue) {
+      return legacyCleanupBlocked(mode, "legacy-source-changed", journal);
+    }
+    safetyStop = await revalidateLegacyCleanupSafety(
+      mode,
+      journal,
+      revalidateSafety,
+    );
+    if (safetyStop) return safetyStop;
+
+    // Safety proof collection is asynchronous. Re-read synchronously after it
+    // completes so a write that happened during revalidation cannot be removed.
+    const immediatelyBeforeRemove = readLegacyCleanupSource(entry.legacyKey);
+    if (immediatelyBeforeRemove.status === "failed") {
+      return legacyCleanupBlocked(mode, "legacy-storage-unavailable", journal);
+    }
+    if (immediatelyBeforeRemove.rawValue === null) {
+      return legacyCleanupDeferred(
+        mode,
+        "legacy-source-missing-after-claim",
+        journal,
+      );
+    }
+    if (immediatelyBeforeRemove.rawValue !== entry.rawValue) {
+      return legacyCleanupBlocked(mode, "legacy-source-changed", journal);
+    }
+    if (!removeLegacyCleanupSource(entry.legacyKey)) {
+      return legacyCleanupDeferred(
+        mode,
+        "legacy-source-remove-failed",
+        journal,
+      );
+    }
+
+    const afterRemove = readLegacyCleanupSource(entry.legacyKey);
+    if (afterRemove.status === "failed") {
+      return legacyCleanupBlocked(mode, "legacy-storage-unavailable", journal);
+    }
+    if (afterRemove.rawValue !== null) {
+      return legacyCleanupBlocked(mode, "legacy-source-reappeared", journal);
+    }
+
+    const removed = await writeAndReadLegacyCleanupJournalWithCas(
+      journal,
+      withLegacyCleanupEntryStatus(journal, entryIndex, "removed"),
+    );
+    if (!removed) {
+      return legacyCleanupDeferred(
+        mode,
+        "migration-journal-cas-failed",
+        journal,
+      );
+    }
+    journal = removed;
+
+    const afterJournalCommit = readLegacyCleanupSource(entry.legacyKey);
+    if (afterJournalCommit.status === "failed") {
+      return legacyCleanupBlocked(mode, "legacy-storage-unavailable", journal);
+    }
+    if (afterJournalCommit.rawValue !== null) {
+      return legacyCleanupBlocked(mode, "legacy-source-reappeared", journal);
+    }
+    emitPersistenceCleanupMetric(request.metricSink, {
+      name: "persistence-cleanup-key-confirmed-removed",
+      mode,
+    });
+  }
+
+  if (!(await readValidatedLegacyCleanupArchive(journal, archive))) {
+    return legacyCleanupBlocked(mode, "migration-archive-invalid", journal);
+  }
+  if (!(await committedLegacyCleanupTargetsAreValid(journal))) {
+    return legacyCleanupBlocked(mode, "committed-target-invalid", journal);
+  }
+  try {
+    sourceConflict = inspectLegacyCleanupSourceConflict(journal);
+  } catch {
+    return legacyCleanupBlocked(mode, "legacy-storage-unavailable", journal);
+  }
+  if (sourceConflict) {
+    return legacyCleanupBlocked(mode, sourceConflict, journal);
+  }
+  if (
+    journal.entries.some(({ cleanupStatus }) => cleanupStatus !== "removed")
+  ) {
+    return legacyCleanupDeferred(mode, "cleanup-not-ready", journal);
+  }
+
+  safetyStop = await revalidateLegacyCleanupSafety(
+    mode,
+    journal,
+    revalidateSafety,
+  );
+  if (safetyStop) return safetyStop;
+
+  const completed = await writeAndReadLegacyCleanupJournalWithCas(
+    journal,
+    withLegacyCleanupCompleted(journal),
+  );
+  if (!completed) {
+    return legacyCleanupDeferred(mode, "migration-journal-cas-failed", journal);
+  }
+  journal = completed;
+
+  try {
+    sourceConflict = inspectLegacyCleanupSourceConflict(journal);
+  } catch {
+    return legacyCleanupBlocked(mode, "legacy-storage-unavailable", journal);
+  }
+  if (sourceConflict) {
+    return legacyCleanupBlocked(mode, sourceConflict, journal);
+  }
+  return legacyCleanupCompleted(mode, journal);
+}
+
+async function cleanupLegacyPersistenceSources(
+  request: PersistenceLegacyCleanupSafetyRequest,
+): Promise<PersistenceLegacyCleanupResult> {
+  let physicalOutcome: PersistenceLegacyCleanupResult | null = null;
+  const cleanupTask = async (context: PersistenceCleanupTaskContext) => {
+    physicalOutcome = await executePhysicalLegacyCleanup(
+      request,
+      context.revalidateSafety,
+    );
+    if (physicalOutcome.status === "cleanup-deferred") {
+      emitPersistenceCleanupMetric(request.metricSink, {
+        name: "persistence-cleanup-physical-deferred",
+        mode: request.mode,
+        reason: physicalOutcome.reason,
+      });
+    } else if (physicalOutcome.status === "cleanup-blocked") {
+      emitPersistenceCleanupMetric(request.metricSink, {
+        name: "persistence-cleanup-physical-blocked",
+        mode: request.mode,
+        reason: physicalOutcome.reason,
+      });
+    }
+    return physicalOutcome;
+  };
+  const metricSink = request.metricSink
+    ? (event: Parameters<NonNullable<typeof request.metricSink>>[0]) => {
+        if (
+          event.name === "persistence-cleanup-completed" &&
+          physicalOutcome?.status !== "completed"
+        ) {
+          return;
+        }
+        return request.metricSink?.(event);
+      }
+    : undefined;
+  const coordinated =
+    request.mode === "auto"
+      ? await coordinatePersistenceLegacyCleanup({
+          ...request,
+          buildFlagValue: undefined,
+          lockManager: undefined,
+          metricSink,
+          cleanupTask,
+        })
+      : await coordinatePersistenceLegacyCleanup({
+          ...request,
+          buildFlagValue: undefined,
+          lockManager: undefined,
+          metricSink,
+          cleanupTask,
+        });
+
+  if (coordinated.status === "completed") return coordinated.value;
+  return { ...coordinated, removedKeys: [] };
+}
+
+function registerCommittedMigrationState(state: {
+  roots: ReadonlyMap<StoreName, ObservedRevisionRoot>;
+  checkpoints: ReadonlyMap<StoreName, PersistenceCheckpoint | null>;
+}): void {
+  state.roots.forEach((root, storeName) => {
+    expectedRevisionRoots.set(getObservedRootKey(storeName, DATA_KEY), root);
+    expectedPersistenceCheckpoints.set(
+      getObservedRootKey(storeName, DATA_KEY),
+      state.checkpoints.get(storeName) ?? null,
+    );
+  });
+}
+
+function migrationArchiveRecoveryCandidates(
+  archive: LegacyMigrationArchive | undefined,
+): StartupRecoveryCandidate[] {
+  if (!archive) return [];
+  return [
+    createRecoveryCandidate(
+      "migration-journal",
+      STORES.SYNC_QUEUE,
+      createLegacyMigrationArchiveKey(archive.sessionId),
+      null,
+      archive,
+    ),
+  ];
+}
+
+function assertPreservedLegacySyncQueueUnchanged(
+  archive: LegacyMigrationArchive,
+  currentRawValue: string | null,
+): void {
+  const archived = archive.entries.find(
+    ({ sourceKind }) => sourceKind === "preserved-legacy-sync-queue",
+  );
+  if (currentRawValue === null) return;
+  if (!archived || archived.rawValue !== currentRawValue) {
+    throw new PersistenceConflictError(
+      "The preserved legacy syncQueue source changed after it was archived.",
+    );
+  }
 }
 
 async function migrateFromLocalStorage(
@@ -3541,8 +5524,10 @@ async function migrateFromLocalStorage(
   // verified migration source at deletion time.
   void options.cleanupLegacySources;
   let capturedSources: LegacySourceState[];
+  let capturedLegacySyncQueueRawValue: string | null;
   try {
     capturedSources = captureLegacySourceStates();
+    capturedLegacySyncQueueRawValue = captureLegacySyncQueueSource();
   } catch (error) {
     return migrationRecoveryResult(
       "旧データのスナップショットを取得できませんでした。",
@@ -3552,50 +5537,119 @@ async function migrateFromLocalStorage(
   }
   let snapshots = presentLegacySourceSnapshots(capturedSources);
   let existingJournal: LegacyMigrationJournal | null = null;
+  let rawJournalForRecovery: unknown;
+  let migrationArchive: LegacyMigrationArchive | undefined;
   try {
     const rawJournal = await readInternalControlRecord(
       LEGACY_MIGRATION_JOURNAL_KEY,
     );
+    rawJournalForRecovery = rawJournal;
     if (rawJournal !== undefined && rawJournal !== null) {
-      if (!isLegacyMigrationJournal(rawJournal)) {
+      if (isLegacyMigrationJournalV1(rawJournal)) {
+        existingJournal = await upgradeLegacyMigrationJournalV1Atomically(
+          rawJournal,
+          capturedLegacySyncQueueRawValue,
+        );
+        migrationArchive =
+          await readAndValidateLegacyMigrationArchive(existingJournal);
+      } else if (isLegacyMigrationJournal(rawJournal)) {
+        existingJournal = rawJournal;
+      } else {
+        const unsupportedVersion =
+          isPlainRecord(rawJournal) &&
+          rawJournal.kind === "event-shopping-planner-legacy-migration" &&
+          rawJournal.schemaVersion !== 1 &&
+          rawJournal.schemaVersion !== LEGACY_MIGRATION_SCHEMA_VERSION;
         return migrationRecoveryResult(
-          "移行ジャーナルの形式が不正です。",
-          new PersistenceConflictError("Invalid migration journal."),
+          unsupportedVersion
+            ? "未対応versionの移行ジャーナルを検出したため、自動処理を停止しました。"
+            : "移行ジャーナルの形式が不正です。",
+          new PersistenceConflictError(
+            unsupportedVersion
+              ? "Unsupported migration journal version."
+              : "Invalid migration journal.",
+          ),
           snapshots,
+          rawJournal,
+          undefined,
+          [],
+          capturedLegacySyncQueueRawValue,
         );
       }
-      existingJournal = rawJournal;
-      snapshots = legacySnapshotsFromJournal(rawJournal);
-      await validateLegacyMigrationJournalDescriptors(rawJournal);
+      snapshots = legacySnapshotsFromJournal(existingJournal);
+      await validateLegacyMigrationJournalDescriptors(existingJournal);
       try {
-        assertJournalSourcesResumable(rawJournal, capturedSources);
+        assertJournalSourcesResumable(existingJournal, capturedSources);
       } catch (error) {
         return migrationRecoveryResult(
           "移行待ちの原本が前回のスナップショットから変更されています。",
           error,
           snapshots,
-          rawJournal,
+          existingJournal,
           error instanceof LegacySourceChangedError
             ? error.currentSources
             : capturedSources,
+          migrationArchiveRecoveryCandidates(migrationArchive),
+          capturedLegacySyncQueueRawValue,
+        );
+      }
+
+      if (!migrationArchive) {
+        const rawArchive = await readInternalControlRecord(
+          existingJournal.archiveKey,
+        );
+        if (rawArchive !== undefined && rawArchive !== null) {
+          migrationArchive = await validateLegacyMigrationArchive(
+            rawArchive,
+            existingJournal,
+          );
+        } else if (existingJournal.phase !== "prepared") {
+          throw new PersistenceConflictError(
+            "Migration recovery archive is missing after copy.",
+          );
+        }
+      }
+      if (migrationArchive) {
+        assertPreservedLegacySyncQueueUnchanged(
+          migrationArchive,
+          capturedLegacySyncQueueRawValue,
         );
       }
 
       if (
-        rawJournal.phase === "completed" ||
-        rawJournal.phase === "cleanupPending"
+        existingJournal.phase === "completed" ||
+        existingJournal.phase === "cleanup-ready" ||
+        existingJournal.phase === "cleanup-in-progress"
       ) {
-        let terminalJournal = rawJournal;
+        let terminalJournal = existingJournal;
         try {
-          await verifyCommittedMigrationTargets(terminalJournal);
-          if (terminalJournal.phase === "cleanupPending") {
+          if (!migrationArchive) {
+            throw new PersistenceConflictError(
+              "Migration recovery archive is missing.",
+            );
+          }
+          await readAndValidateLegacyMigrationArchive(
+            terminalJournal,
+            migrationArchive,
+          );
+          const committedState =
+            await verifyCommittedMigrationTargets(terminalJournal);
+          if (
+            terminalJournal.phase === "cleanup-ready" ||
+            terminalJournal.phase === "cleanup-in-progress"
+          ) {
             terminalJournal =
-              await retainLegacySourcesFromJournal(terminalJournal);
+              await deferLegacyCleanupFromJournal(terminalJournal);
           }
           assertJournalSourcesResumable(
             terminalJournal,
             captureLegacySourceStates(),
           );
+          assertPreservedLegacySyncQueueUnchanged(
+            migrationArchive,
+            captureLegacySyncQueueSource(),
+          );
+          registerCommittedMigrationState(committedState);
         } catch (error) {
           return migrationRecoveryResult(
             "移行済みデータのcommitted rootが欠損または不整合です。",
@@ -3605,6 +5659,10 @@ async function migrateFromLocalStorage(
             error instanceof LegacySourceChangedError
               ? error.currentSources
               : undefined,
+            migrationArchiveRecoveryCandidates(migrationArchive),
+            captureLegacySyncQueueSourceForRecovery(
+              capturedLegacySyncQueueRawValue,
+            ),
           );
         }
         return {
@@ -3612,6 +5670,8 @@ async function migrateFromLocalStorage(
             terminalJournal.phase === "completed"
               ? "completed"
               : "cleanup-pending",
+          dataMigrationStatus: "verified",
+          cleanupStatus: terminalJournal.cleanupStatus,
           migratedKeys: terminalJournal.entries.map(
             ({ legacyKey }) => legacyKey,
           ),
@@ -3623,11 +5683,22 @@ async function migrateFromLocalStorage(
       "移行ジャーナルの所有権または原本を確認できませんでした。",
       error,
       snapshots,
-      existingJournal ?? undefined,
+      existingJournal ?? rawJournalForRecovery,
+      undefined,
+      migrationArchiveRecoveryCandidates(migrationArchive),
+      capturedLegacySyncQueueRawValue,
     );
   }
-  if (!existingJournal && snapshots.length === 0) {
-    return { status: "not-needed" };
+  if (
+    !existingJournal &&
+    snapshots.length === 0 &&
+    capturedLegacySyncQueueRawValue === null
+  ) {
+    return {
+      status: "not-needed",
+      dataMigrationStatus: "not-needed",
+      cleanupStatus: "not-needed",
+    };
   }
 
   let prepared: Awaited<ReturnType<typeof prepareLegacyMigrationEntries>>;
@@ -3643,6 +5714,7 @@ async function migrateFromLocalStorage(
       error instanceof LegacyMigrationRuntimeConflictError
         ? error.recoveryCandidates
         : [],
+      capturedLegacySyncQueueRawValue,
     );
   }
 
@@ -3658,6 +5730,24 @@ async function migrateFromLocalStorage(
       journal = createLegacyMigrationJournal(prepared.entries);
       await writeMigrationJournalWithCas(null, journal);
     }
+    if (!migrationArchive) {
+      const rawArchive = await readInternalControlRecord(journal.archiveKey);
+      if (rawArchive !== undefined && rawArchive !== null) {
+        migrationArchive = await validateLegacyMigrationArchive(
+          rawArchive,
+          journal,
+        );
+      } else {
+        migrationArchive = await createLegacyMigrationArchive(
+          journal,
+          capturedLegacySyncQueueRawValue,
+        );
+      }
+    }
+    assertPreservedLegacySyncQueueUnchanged(
+      migrationArchive,
+      capturedLegacySyncQueueRawValue,
+    );
 
     const capturedForCopy = capturedSources;
     if (journal.phase === "prepared") {
@@ -3666,36 +5756,57 @@ async function migrateFromLocalStorage(
         prepared.entries,
         journal,
         prepared.roots,
+        migrationArchive,
       );
     }
+    await readAndValidateLegacyMigrationArchive(journal, migrationArchive);
     await verifyLegacyMigration(prepared.entries, journal);
     assertLegacySourcesUnchanged(capturedForCopy);
+    assertPreservedLegacySyncQueueUnchanged(
+      migrationArchive,
+      captureLegacySyncQueueSource(),
+    );
+    const committedState = await verifyCommittedMigrationTargets(journal, true);
+    registerCommittedMigrationState(committedState);
     if (journal.phase !== "verified") {
       const verifiedJournal = withJournalPhase(journal, "verified");
       await writeMigrationJournalWithCas(journal, verifiedJournal);
       journal = verifiedJournal;
     }
     assertLegacySourcesUnchanged(capturedForCopy);
-
-    const cleanupPendingJournal = withJournalPhase(
-      journal,
-      "cleanupPending",
-      "retained",
+    assertPreservedLegacySyncQueueUnchanged(
+      migrationArchive,
+      captureLegacySyncQueueSource(),
     );
-    await writeMigrationJournalWithCas(journal, cleanupPendingJournal);
-    journal = cleanupPendingJournal;
+
+    const cleanupReadyJournal = withJournalPhase(journal, "cleanup-ready");
+    await writeMigrationJournalWithCas(journal, cleanupReadyJournal);
+    journal = cleanupReadyJournal;
     assertLegacySourcesUnchanged(capturedForCopy);
-    prepared.entries.forEach((entry) => {
-      expectedRevisionRoots.set(
-        getObservedRootKey(entry.target.storeName, DATA_KEY),
-        entry.metadata,
-      );
-    });
+    assertPreservedLegacySyncQueueUnchanged(
+      migrationArchive,
+      captureLegacySyncQueueSource(),
+    );
+    journal = await deferLegacyCleanupFromJournal(journal);
     return {
       status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: journal.cleanupStatus,
       migratedKeys: journal.entries.map(({ legacyKey }) => legacyKey),
     };
   } catch (error) {
+    if (
+      prepared.entries.length === 0 &&
+      capturedLegacySyncQueueRawValue !== null
+    ) {
+      return {
+        status: "cleanup-pending",
+        dataMigrationStatus: "not-needed",
+        cleanupStatus: "deferred",
+        cleanupDeferredReason: "legacy-sync-queue-archive-unavailable",
+        migratedKeys: [],
+      };
+    }
     return migrationRecoveryResult(
       "旧データの一括コピーまたは読戻し検証に失敗しました。",
       error,
@@ -3704,6 +5815,8 @@ async function migrateFromLocalStorage(
       error instanceof LegacySourceChangedError
         ? error.currentSources
         : undefined,
+      migrationArchiveRecoveryCandidates(migrationArchive),
+      captureLegacySyncQueueSourceForRecovery(capturedLegacySyncQueueRawValue),
     );
   }
 }
@@ -3737,11 +5850,13 @@ const APP_DATA_RESTORE_STORE_NAMES = [
 
 interface AppDataRestoreObservation {
   roots: Map<StoreName, ObservedRevisionRoot>;
+  checkpoints: Map<StoreName, PersistenceCheckpoint | null>;
   runtimeCandidates: RuntimeCandidateSnapshot<unknown>[];
 }
 
 async function observeAppDataRestoreState(): Promise<AppDataRestoreObservation> {
   const roots = new Map<StoreName, ObservedRevisionRoot>();
+  const checkpoints = new Map<StoreName, PersistenceCheckpoint | null>();
   const runtimeCandidates: RuntimeCandidateSnapshot<unknown>[] = [];
 
   await Promise.all(
@@ -3759,6 +5874,7 @@ async function observeAppDataRestoreState(): Promise<AppDataRestoreObservation> 
           );
         }
         roots.set(storeName, validation.validated.root);
+        checkpoints.set(storeName, validation.validated.checkpoint);
         return;
       }
 
@@ -3787,12 +5903,42 @@ async function observeAppDataRestoreState(): Promise<AppDataRestoreObservation> 
           )
         );
       }
+      const partitioned = partitionRuntimeCandidateSnapshots(
+        validation.validated.checkpoint,
+        candidateScan.snapshots,
+      );
+      const reconciliation = reconcileRuntimeFallbackCandidates(
+        {
+          revision: validation.validated.root.missing
+            ? null
+            : validation.validated.root.revision,
+          baseRevision: validation.validated.root.missing
+            ? null
+            : validation.validated.root.baseRevision,
+          digest: validation.validated.root.missing
+            ? undefined
+            : validation.validated.root.payloadDigest,
+          writerId: validation.validated.root.missing
+            ? undefined
+            : validation.validated.root.writerId,
+          createdAt: validation.validated.root.missing
+            ? undefined
+            : validation.validated.root.committedAt,
+        },
+        partitioned.active.map(({ candidate }) => candidate),
+      );
+      if (reconciliation.status === "conflict" || reconciliation.head) {
+        throw new PersistenceConflictError(
+          `${storeName} has an unresolved runtime fallback before restore.`,
+        );
+      }
       roots.set(storeName, validation.validated.root);
+      checkpoints.set(storeName, validation.validated.checkpoint);
       runtimeCandidates.push(...candidateScan.snapshots);
     }),
   );
 
-  return { roots, runtimeCandidates };
+  return { roots, checkpoints, runtimeCandidates };
 }
 
 async function restoreAppDataAtomically(data: AppData): Promise<void> {
@@ -3820,19 +5966,31 @@ async function restoreAppDataAtomically(data: AppData): Promise<void> {
     [STORES.MAP_VIEWPORT_SETTINGS, stableData.mapViewportSettings],
   ]);
   const preparedMetadata = new Map<StoreName, StoredPersistenceMetadata>();
+  const preparedCheckpoints = new Map<StoreName, PersistenceCheckpoint>();
   await Promise.all(
     APP_DATA_RESTORE_STORE_NAMES.map(async (storeName) => {
       const observed = observation.roots.get(storeName);
       if (!observed) {
         throw new Error(`Missing restore observation for ${storeName}.`);
       }
-      preparedMetadata.set(
+      const metadata = await prepareMetadataForPayload(
         storeName,
-        await prepareMetadataForPayload(
+        DATA_KEY,
+        restorePayloads.get(storeName),
+        observed.missing ? null : observed.revision,
+      );
+      preparedMetadata.set(storeName, metadata);
+      preparedCheckpoints.set(
+        storeName,
+        createNextPersistenceCheckpoint(
           storeName,
           DATA_KEY,
-          restorePayloads.get(storeName),
-          observed.missing ? null : observed.revision,
+          metadata,
+          observation.checkpoints.get(storeName) ?? null,
+          observation.runtimeCandidates.filter(
+            ({ candidate }) =>
+              candidate.storeName === storeName && candidate.key === DATA_KEY,
+          ),
         ),
       );
     }),
@@ -3854,8 +6012,9 @@ async function restoreAppDataAtomically(data: AppData): Promise<void> {
     let failure: unknown = null;
     const currentPayloads = new Map<StoreName, unknown>();
     const currentMetadata = new Map<StoreName, unknown>();
+    const currentCheckpoints = new Map<StoreName, unknown>();
     let currentMapEntries: Record<string, unknown> | null = null;
-    let remainingReads = APP_DATA_RESTORE_STORE_NAMES.length * 2;
+    let remainingReads = APP_DATA_RESTORE_STORE_NAMES.length * 3;
     let writesQueued = false;
 
     const trackRequest = (request: IDBRequest): void => {
@@ -3902,7 +6061,8 @@ async function restoreAppDataAtomically(data: AppData): Promise<void> {
         APP_DATA_RESTORE_STORE_NAMES.forEach((storeName) => {
           const observed = observation.roots.get(storeName);
           const metadata = preparedMetadata.get(storeName);
-          if (!observed || !metadata) {
+          const checkpoint = preparedCheckpoints.get(storeName);
+          if (!observed || !metadata || !checkpoint) {
             throw new Error(`Missing restore state for ${storeName}.`);
           }
 
@@ -3936,11 +6096,23 @@ async function restoreAppDataAtomically(data: AppData): Promise<void> {
                 .put(restorePayloads.get(storeName), DATA_KEY),
             );
           }
+          assertCurrentCheckpointMatchesExpected(
+            storeName,
+            DATA_KEY,
+            currentCheckpoints.get(storeName),
+            observation.checkpoints.get(storeName) ?? null,
+          );
 
           trackRequest(
             controlStore.put(
               metadata,
               createPersistenceMetadataKey(storeName, DATA_KEY),
+            ),
+          );
+          trackRequest(
+            controlStore.put(
+              checkpoint,
+              createPersistenceCheckpointKey(storeName, DATA_KEY),
             ),
           );
         });
@@ -3960,6 +6132,16 @@ async function restoreAppDataAtomically(data: AppData): Promise<void> {
         };
         metadataRequest.onsuccess = () => {
           currentMetadata.set(storeName, metadataRequest.result);
+          commitIfReady();
+        };
+        const checkpointRequest = controlStore.get(
+          createPersistenceCheckpointKey(storeName, DATA_KEY),
+        );
+        checkpointRequest.onerror = () => {
+          failure = failure ?? checkpointRequest.error;
+        };
+        checkpointRequest.onsuccess = () => {
+          currentCheckpoints.set(storeName, checkpointRequest.result);
           commitIfReady();
         };
 
@@ -4001,6 +6183,10 @@ async function restoreAppDataAtomically(data: AppData): Promise<void> {
   });
 
   preparedMetadata.forEach((metadata, storeName) => {
+    const checkpoint = preparedCheckpoints.get(storeName);
+    if (!checkpoint) {
+      throw new Error(`Missing committed restore checkpoint for ${storeName}.`);
+    }
     expectedRevisionRoots.set(
       getObservedRootKey(storeName, DATA_KEY),
       storeName === STORES.MAP_DATA
@@ -4010,8 +6196,836 @@ async function restoreAppDataAtomically(data: AppData): Promise<void> {
           }
         : metadata,
     );
+    expectedPersistenceCheckpoints.set(
+      getObservedRootKey(storeName, DATA_KEY),
+      checkpoint,
+    );
   });
   cleanupRuntimeCandidateSnapshots(observation.runtimeCandidates);
+}
+
+type RecoveryAdoptionStoreName = Exclude<StoreName, "syncQueue">;
+
+interface RecoveryAdoptionCurrentEvidence {
+  payload?: unknown;
+  mapEntries?: Record<string, unknown>;
+  metadata: unknown;
+  checkpoint: unknown;
+}
+
+interface RecoveryAdoptionArchive {
+  kind: "event-shopping-planner-recovery-adoption-archive";
+  schemaVersion: 1;
+  decisionId: string;
+  storeName: RecoveryAdoptionStoreName;
+  key: typeof DATA_KEY;
+  createdAt: string;
+  candidate: Pick<
+    StartupRecoveryCandidate,
+    | "id"
+    | "source"
+    | "role"
+    | "storeName"
+    | "key"
+    | "sourceKey"
+    | "targetKey"
+    | "revision"
+    | "digest"
+    | "digestAlgorithm"
+    | "digestCanonicalization"
+    | "digestCanonicalLength"
+  >;
+  chosenSourceEvidence: {
+    sourceKey: string;
+    payload: unknown;
+    rawValue?: string;
+  };
+  currentEvidence: RecoveryAdoptionCurrentEvidence;
+  observedRuntimeCandidates: {
+    storageKey: string;
+    rawValue: string;
+    candidate: RuntimeFallbackCandidate<unknown>;
+  }[];
+  committedMetadata: StoredPersistenceMetadata;
+  committedCheckpoint: PersistenceCheckpoint;
+}
+
+export interface RecoveryCandidateAdoptionResult {
+  status: "adopted";
+  storeName: RecoveryAdoptionStoreName;
+  key: typeof DATA_KEY;
+  revision: string;
+  digest: string;
+  archiveKey: string;
+}
+
+function isRecoveryAdoptionStoreName(
+  value: unknown,
+): value is RecoveryAdoptionStoreName {
+  return (
+    typeof value === "string" &&
+    value !== STORES.SYNC_QUEUE &&
+    (Object.values(STORES) as string[]).includes(value)
+  );
+}
+
+function getRecoveryCandidateIdentity(
+  candidate: StartupRecoveryCandidate,
+): Parameters<typeof createStartupRecoveryCandidateId>[0] {
+  return {
+    source: candidate.source,
+    role: candidate.role,
+    storeName: candidate.storeName,
+    sourceKey: candidate.sourceKey,
+    targetKey: candidate.targetKey,
+    revision: candidate.revision,
+    digest: candidate.digest,
+    digestAlgorithm: candidate.digestAlgorithm,
+    digestCanonicalization: candidate.digestCanonicalization,
+    digestCanonicalLength: candidate.digestCanonicalLength,
+  };
+}
+
+function assertAdoptableRecoveryCandidate(
+  candidate: StartupRecoveryCandidate,
+): asserts candidate is StartupRecoveryCandidate & {
+  source: "indexedDB" | "runtime-fallback";
+  role: "app-payload";
+  adoptable: true;
+  storeName: RecoveryAdoptionStoreName;
+  key: typeof DATA_KEY;
+  sourceKey: string;
+  targetKey: typeof DATA_KEY;
+  digest: string;
+  digestAlgorithm: "SHA-256" | "FNV-1A-64";
+  digestCanonicalization: "esp-json-v1";
+} {
+  if (
+    candidate.source !== "indexedDB" &&
+    candidate.source !== "runtime-fallback"
+  ) {
+    throw new PersistenceConflictError(
+      "Legacy and migration recovery candidates cannot be adopted directly.",
+    );
+  }
+  if (
+    candidate.role !== "app-payload" ||
+    candidate.adoptable !== true ||
+    !isRecoveryAdoptionStoreName(candidate.storeName) ||
+    candidate.key !== DATA_KEY ||
+    candidate.targetKey !== DATA_KEY ||
+    typeof candidate.sourceKey !== "string" ||
+    candidate.sourceKey.length === 0
+  ) {
+    throw new PersistenceConflictError(
+      "Only explicitly adoptable application payload candidates are supported.",
+    );
+  }
+  if (
+    typeof candidate.digest !== "string" ||
+    candidate.digest.length === 0 ||
+    (candidate.digestAlgorithm !== "SHA-256" &&
+      candidate.digestAlgorithm !== "FNV-1A-64") ||
+    candidate.digestCanonicalization !== "esp-json-v1" ||
+    (candidate.digestAlgorithm === "FNV-1A-64" &&
+      (!Number.isSafeInteger(candidate.digestCanonicalLength) ||
+        (candidate.digestCanonicalLength ?? -1) < 0))
+  ) {
+    throw new PersistenceConflictError(
+      "The recovery candidate does not contain a supported payload digest.",
+    );
+  }
+  if (
+    candidate.source === "indexedDB" &&
+    (candidate.sourceKey !== DATA_KEY || candidate.rawValue !== undefined)
+  ) {
+    throw new PersistenceConflictError(
+      "The IndexedDB recovery candidate does not identify an application payload.",
+    );
+  }
+  if (
+    candidate.source === "runtime-fallback" &&
+    (typeof candidate.revision !== "string" ||
+      candidate.revision.length === 0 ||
+      typeof candidate.rawValue !== "string" ||
+      candidate.sourceKey !==
+        createRuntimeFallbackKey(
+          candidate.storeName,
+          DATA_KEY,
+          candidate.revision,
+        ))
+  ) {
+    throw new PersistenceConflictError(
+      "The runtime fallback candidate does not identify an exact source record.",
+    );
+  }
+  if (
+    candidate.id !==
+    createStartupRecoveryCandidateId(getRecoveryCandidateIdentity(candidate))
+  ) {
+    throw new PersistenceConflictError(
+      "The recovery candidate identity was changed after it was observed.",
+    );
+  }
+  if (!Object.prototype.hasOwnProperty.call(candidate, "payload")) {
+    throw new PersistenceConflictError(
+      "The recovery candidate payload snapshot is missing.",
+    );
+  }
+}
+
+async function recoveryCandidateDigestMatchesPayload(
+  candidate: StartupRecoveryCandidate & {
+    digest: string;
+    digestAlgorithm: "SHA-256" | "FNV-1A-64";
+    digestCanonicalization: "esp-json-v1";
+  },
+  payload: unknown,
+): Promise<boolean> {
+  try {
+    if (candidate.digestAlgorithm === "SHA-256") {
+      const digest = await createPersistenceDigest(payload);
+      return (
+        digest.canonicalization === candidate.digestCanonicalization &&
+        digest.value === candidate.digest
+      );
+    }
+    const digest = createSynchronousFingerprint(
+      snapshotStartupRecoveryValue(payload),
+    );
+    return (
+      digest.canonicalization === candidate.digestCanonicalization &&
+      digest.canonicalLength === candidate.digestCanonicalLength &&
+      digest.value === candidate.digest
+    );
+  } catch {
+    return false;
+  }
+}
+
+function recoveryEvidenceMatches(left: unknown, right: unknown): boolean {
+  return fingerprintsEqual(
+    snapshotStartupRecoveryValue(left),
+    snapshotStartupRecoveryValue(right),
+  );
+}
+
+function captureRuntimeRawEvidence(
+  storeName: RecoveryAdoptionStoreName,
+): { storageKey: string; rawValue: string }[] {
+  const prefix = createRuntimeFallbackPrefix(storeName, DATA_KEY);
+  const evidence: { storageKey: string; rawValue: string }[] = [];
+  for (let index = 0; index < localStorage.length; index += 1) {
+    const storageKey = localStorage.key(index);
+    if (!storageKey?.startsWith(prefix)) continue;
+    const rawValue = localStorage.getItem(storageKey);
+    if (rawValue !== null) evidence.push({ storageKey, rawValue });
+  }
+  return evidence.sort((left, right) =>
+    left.storageKey.localeCompare(right.storageKey),
+  );
+}
+
+function assertRuntimeRawEvidenceUnchanged(
+  storeName: RecoveryAdoptionStoreName,
+  expected: readonly { storageKey: string; rawValue: string }[],
+): void {
+  if (
+    !recoveryEvidenceMatches(captureRuntimeRawEvidence(storeName), expected)
+  ) {
+    throw new PersistenceConflictError(
+      `${storeName} runtime fallback sources changed during recovery adoption.`,
+    );
+  }
+}
+
+function assertRecoveryCandidatePayloadSnapshot(
+  candidate: StartupRecoveryCandidate,
+  sourcePayload: unknown,
+): void {
+  if (
+    !recoveryEvidenceMatches(
+      candidate.payload,
+      snapshotStartupRecoveryValue(sourcePayload),
+    )
+  ) {
+    throw new PersistenceConflictError(
+      "The recovery candidate payload snapshot was changed after observation.",
+    );
+  }
+}
+
+function normalizeRecoveryAdoptionPayload(
+  storeName: RecoveryAdoptionStoreName,
+  payload: unknown,
+): unknown {
+  if (!isPlainRecord(payload)) {
+    throw new PersistenceConflictError(
+      `${storeName} recovery payload must be a JSON-compatible object.`,
+    );
+  }
+  const stablePayload = structuredClone(payload);
+  createSynchronousFingerprint(stablePayload);
+  if (storeName !== STORES.MAP_DATA) return stablePayload;
+
+  Object.values(stablePayload).forEach((eventMapData) => {
+    if (!isPlainRecord(eventMapData)) {
+      throw new PersistenceConflictError(
+        "mapData recovery payload contains an invalid event map.",
+      );
+    }
+    Object.values(eventMapData).forEach((dayMapData) => {
+      if (!isPlainRecord(dayMapData)) {
+        throw new PersistenceConflictError(
+          "mapData recovery payload contains an invalid day map.",
+        );
+      }
+    });
+  });
+  return normalizeMapDataForPersistence(stablePayload as MapDataStore);
+}
+
+function createRecoveryAdoptionArchiveKey(): string {
+  return `${RECOVERY_ADOPTION_ARCHIVE_KEY_PREFIX}${encodeURIComponent(
+    createPersistenceRevision(persistenceWriterId),
+  )}`;
+}
+
+async function readRecoveryAdoptionCurrentEvidence(
+  storeName: RecoveryAdoptionStoreName,
+): Promise<RecoveryAdoptionCurrentEvidence> {
+  if (storeName === STORES.MAP_DATA) {
+    const snapshot = await readRawMapSnapshotWithRetry();
+    return {
+      mapEntries: snapshot.entries,
+      metadata: snapshot.metadata,
+      checkpoint: snapshot.checkpoint,
+    };
+  }
+  const snapshot = await readPersistenceSnapshotWithRetry(storeName, DATA_KEY);
+  return {
+    payload: snapshot.payload,
+    metadata: snapshot.metadata,
+    checkpoint: snapshot.checkpoint,
+  };
+}
+
+function materializeRecoveryAdoptionCurrentPayload(
+  storeName: RecoveryAdoptionStoreName,
+  evidence: RecoveryAdoptionCurrentEvidence,
+): unknown {
+  if (storeName === STORES.MAP_DATA) {
+    if (!evidence.mapEntries) {
+      throw new PersistenceConflictError(
+        "mapData recovery evidence is missing its physical records.",
+      );
+    }
+    return materializeMapData(evidence.mapEntries).data;
+  }
+  return evidence.payload;
+}
+
+async function getTrustedRecoveryAdoptionRoot(
+  storeName: RecoveryAdoptionStoreName,
+  evidence: RecoveryAdoptionCurrentEvidence,
+): Promise<{
+  root: StoredPersistenceMetadata;
+  checkpoint: PersistenceCheckpoint | null;
+} | null> {
+  if (!isStoredPersistenceMetadata(evidence.metadata, storeName, DATA_KEY)) {
+    return null;
+  }
+  let payload: unknown;
+  try {
+    payload = materializeRecoveryAdoptionCurrentPayload(storeName, evidence);
+    if (
+      !(await verifyPersistenceDigest(
+        payload,
+        evidence.metadata.payloadDigest,
+      )) ||
+      !fingerprintsEqual(
+        createSynchronousFingerprint(payload),
+        evidence.metadata.payloadFingerprint,
+      )
+    ) {
+      return null;
+    }
+  } catch {
+    return null;
+  }
+
+  let checkpoint: PersistenceCheckpoint | null = null;
+  try {
+    checkpoint = validateCheckpointForRoot(
+      evidence.checkpoint,
+      storeName,
+      DATA_KEY,
+      evidence.metadata,
+    );
+  } catch {
+    // An invalid checkpoint is archived but is not carried into the new root.
+  }
+  return { root: evidence.metadata, checkpoint };
+}
+
+async function commitRecoveryCandidateAdoption({
+  storeName,
+  payload,
+  expectedEvidence,
+  expectedRuntimeEvidence,
+  metadata,
+  checkpoint,
+  archiveKey,
+  archive,
+}: {
+  storeName: RecoveryAdoptionStoreName;
+  payload: unknown;
+  expectedEvidence: RecoveryAdoptionCurrentEvidence;
+  expectedRuntimeEvidence: readonly {
+    storageKey: string;
+    rawValue: string;
+  }[];
+  metadata: StoredPersistenceMetadata;
+  checkpoint: PersistenceCheckpoint;
+  archiveKey: string;
+  archive: RecoveryAdoptionArchive;
+}): Promise<void> {
+  const database = await openDB();
+  ensureStoreExists(database, storeName);
+  ensureStoreExists(database, STORES.SYNC_QUEUE);
+  const mapPuts =
+    storeName === STORES.MAP_DATA
+      ? buildMapDataPuts(payload as MapDataStore)
+      : [];
+
+  await new Promise<void>((resolve, reject) => {
+    let transaction: IDBTransaction;
+    try {
+      transaction = database.transaction(
+        [storeName, STORES.SYNC_QUEUE],
+        "readwrite",
+      );
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    let failure: unknown = null;
+    let remainingReads = 3;
+    let writesQueued = false;
+    let currentPayload: unknown;
+    let currentMapEntries: Record<string, unknown> | undefined;
+    let currentMetadata: unknown;
+    let currentCheckpoint: unknown;
+    const payloadStore = transaction.objectStore(storeName);
+    const controlStore = transaction.objectStore(STORES.SYNC_QUEUE);
+
+    const abortWith = (error: unknown): void => {
+      failure = error;
+      try {
+        transaction.abort();
+      } catch {
+        reject(error);
+      }
+    };
+    const trackWrite = (request: IDBRequest): void => {
+      request.onerror = () => {
+        failure =
+          failure ??
+          request.error ??
+          new Error("Recovery adoption write request failed.");
+      };
+    };
+    const commitIfReady = (): void => {
+      remainingReads -= 1;
+      if (remainingReads !== 0 || writesQueued) return;
+      writesQueued = true;
+      try {
+        const observedEvidence: RecoveryAdoptionCurrentEvidence =
+          storeName === STORES.MAP_DATA
+            ? {
+                mapEntries: currentMapEntries,
+                metadata: currentMetadata,
+                checkpoint: currentCheckpoint,
+              }
+            : {
+                payload: currentPayload,
+                metadata: currentMetadata,
+                checkpoint: currentCheckpoint,
+              };
+        if (!recoveryEvidenceMatches(observedEvidence, expectedEvidence)) {
+          throw new PersistenceConflictError(
+            `${storeName} changed after the recovery candidate was observed.`,
+          );
+        }
+        assertRuntimeRawEvidenceUnchanged(storeName, expectedRuntimeEvidence);
+
+        if (storeName === STORES.MAP_DATA) {
+          if (!currentMapEntries) {
+            throw new PersistenceConflictError(
+              "mapData physical recovery evidence is unavailable.",
+            );
+          }
+          Object.keys(currentMapEntries)
+            .filter(
+              (storageKey) =>
+                storageKey === MAP_DATA_LEGACY_KEY ||
+                parseMapDataEntryKey(storageKey) !== null,
+            )
+            .forEach((storageKey) => {
+              trackWrite(payloadStore.delete(storageKey));
+            });
+          mapPuts.forEach(({ key, value }) => {
+            trackWrite(payloadStore.put(value, key));
+          });
+        } else {
+          trackWrite(payloadStore.put(payload, DATA_KEY));
+        }
+        trackWrite(
+          controlStore.put(
+            metadata,
+            createPersistenceMetadataKey(storeName, DATA_KEY),
+          ),
+        );
+        trackWrite(
+          controlStore.put(
+            checkpoint,
+            createPersistenceCheckpointKey(storeName, DATA_KEY),
+          ),
+        );
+        trackWrite(controlStore.add(archive, archiveKey));
+      } catch (error) {
+        abortWith(error);
+      }
+    };
+
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => {
+      failure = failure ?? transaction.error;
+    };
+    transaction.onabort = () =>
+      reject(
+        failure ??
+          transaction.error ??
+          new Error("Recovery adoption transaction was aborted."),
+      );
+
+    const metadataRequest = controlStore.get(
+      createPersistenceMetadataKey(storeName, DATA_KEY),
+    );
+    metadataRequest.onerror = () => {
+      failure =
+        failure ??
+        metadataRequest.error ??
+        new Error("Failed to read recovery metadata CAS evidence.");
+    };
+    metadataRequest.onsuccess = () => {
+      currentMetadata = metadataRequest.result;
+      commitIfReady();
+    };
+
+    const checkpointRequest = controlStore.get(
+      createPersistenceCheckpointKey(storeName, DATA_KEY),
+    );
+    checkpointRequest.onerror = () => {
+      failure =
+        failure ??
+        checkpointRequest.error ??
+        new Error("Failed to read recovery checkpoint CAS evidence.");
+    };
+    checkpointRequest.onsuccess = () => {
+      currentCheckpoint = checkpointRequest.result;
+      commitIfReady();
+    };
+
+    if (storeName === STORES.MAP_DATA) {
+      const entries: Record<string, unknown> = {};
+      const cursorRequest = payloadStore.openCursor();
+      cursorRequest.onerror = () => {
+        failure =
+          failure ??
+          cursorRequest.error ??
+          new Error("Failed to enumerate mapData recovery CAS evidence.");
+      };
+      cursorRequest.onsuccess = () => {
+        const cursor = cursorRequest.result;
+        if (cursor) {
+          entries[String(cursor.key)] = cursor.value;
+          cursor.continue();
+          return;
+        }
+        currentMapEntries = entries;
+        commitIfReady();
+      };
+    } else {
+      const payloadRequest = payloadStore.get(DATA_KEY);
+      payloadRequest.onerror = () => {
+        failure =
+          failure ??
+          payloadRequest.error ??
+          new Error("Failed to read recovery payload CAS evidence.");
+      };
+      payloadRequest.onsuccess = () => {
+        currentPayload = payloadRequest.result;
+        commitIfReady();
+      };
+    }
+  });
+}
+
+async function verifyRecoveryCandidateAdoption({
+  storeName,
+  payload,
+  metadata,
+  checkpoint,
+  archiveKey,
+  archive,
+  expectedRuntimeEvidence,
+}: {
+  storeName: RecoveryAdoptionStoreName;
+  payload: unknown;
+  metadata: StoredPersistenceMetadata;
+  checkpoint: PersistenceCheckpoint;
+  archiveKey: string;
+  archive: RecoveryAdoptionArchive;
+  expectedRuntimeEvidence: readonly {
+    storageKey: string;
+    rawValue: string;
+  }[];
+}): Promise<void> {
+  const readback = await readRecoveryAdoptionCurrentEvidence(storeName);
+  const readbackPayload = materializeRecoveryAdoptionCurrentPayload(
+    storeName,
+    readback,
+  );
+  if (
+    !recoveryEvidenceMatches(readbackPayload, payload) ||
+    !(await verifyPersistenceDigest(readbackPayload, metadata.payloadDigest)) ||
+    !isStoredPersistenceMetadata(readback.metadata, storeName, DATA_KEY) ||
+    !immutableObservedRootFieldsMatch(readback.metadata, metadata) ||
+    !fingerprintsEqual(
+      readback.metadata.payloadFingerprint,
+      metadata.payloadFingerprint,
+    )
+  ) {
+    throw new PersistenceConflictError(
+      `${storeName} recovery adoption direct readback failed.`,
+    );
+  }
+  let verifiedCheckpoint: PersistenceCheckpoint | null;
+  try {
+    verifiedCheckpoint = validateCheckpointForRoot(
+      readback.checkpoint,
+      storeName,
+      DATA_KEY,
+      metadata,
+    );
+  } catch {
+    verifiedCheckpoint = null;
+  }
+  if (
+    !verifiedCheckpoint ||
+    !recoveryEvidenceMatches(verifiedCheckpoint, checkpoint)
+  ) {
+    throw new PersistenceConflictError(
+      `${storeName} recovery checkpoint direct readback failed.`,
+    );
+  }
+  const archivedReadback = await readInternalControlRecord(archiveKey);
+  if (!recoveryEvidenceMatches(archivedReadback, archive)) {
+    throw new PersistenceConflictError(
+      `${storeName} recovery archive direct readback failed.`,
+    );
+  }
+  assertRuntimeRawEvidenceUnchanged(storeName, expectedRuntimeEvidence);
+}
+
+async function adoptRecoveryCandidateInternal(
+  requestedCandidate: StartupRecoveryCandidate,
+): Promise<RecoveryCandidateAdoptionResult> {
+  const candidate = structuredClone(requestedCandidate);
+  assertAdoptableRecoveryCandidate(candidate);
+  const storeName = candidate.storeName;
+
+  const [currentEvidence, candidateScan] = await Promise.all([
+    readRecoveryAdoptionCurrentEvidence(storeName),
+    readRuntimeCandidateSnapshots<unknown>(storeName, DATA_KEY),
+  ]);
+  if (candidateScan.status === "conflict") {
+    throw (
+      candidateScan.result.error ??
+      new PersistenceConflictError(
+        `${storeName} contains an invalid runtime fallback candidate.`,
+      )
+    );
+  }
+  const runtimeSnapshots = candidateScan.snapshots;
+  const expectedRuntimeEvidence = runtimeSnapshots
+    .map(({ storageKey, rawValue }) => ({ storageKey, rawValue }))
+    .sort((left, right) => left.storageKey.localeCompare(right.storageKey));
+  assertRuntimeRawEvidenceUnchanged(storeName, expectedRuntimeEvidence);
+
+  let sourcePayload: unknown;
+  let sourceRawValue: string | undefined;
+  if (candidate.source === "runtime-fallback") {
+    const sourceSnapshot = runtimeSnapshots.find(
+      ({ storageKey }) => storageKey === candidate.sourceKey,
+    );
+    if (
+      !sourceSnapshot ||
+      sourceSnapshot.rawValue !== candidate.rawValue ||
+      sourceSnapshot.candidate.revision !== candidate.revision
+    ) {
+      throw new PersistenceConflictError(
+        "The selected runtime fallback source is stale or missing.",
+      );
+    }
+    const observedCandidate = runtimeSnapshotsToRecoveryCandidates(
+      storeName,
+      DATA_KEY,
+      [sourceSnapshot],
+    )[0];
+    if (!observedCandidate || observedCandidate.id !== candidate.id) {
+      throw new PersistenceConflictError(
+        "The selected runtime fallback descriptor no longer matches its source.",
+      );
+    }
+    sourcePayload = sourceSnapshot.candidate.payload;
+    sourceRawValue = sourceSnapshot.rawValue;
+  } else {
+    sourcePayload = materializeRecoveryAdoptionCurrentPayload(
+      storeName,
+      currentEvidence,
+    );
+    const currentRevision = isStoredPersistenceMetadata(
+      currentEvidence.metadata,
+      storeName,
+      DATA_KEY,
+    )
+      ? currentEvidence.metadata.revision
+      : undefined;
+    if (candidate.revision !== currentRevision) {
+      throw new PersistenceConflictError(
+        "The selected IndexedDB candidate revision is stale.",
+      );
+    }
+  }
+
+  if (
+    !(await recoveryCandidateDigestMatchesPayload(candidate, sourcePayload))
+  ) {
+    throw new PersistenceConflictError(
+      "The selected recovery candidate digest does not match its live source.",
+    );
+  }
+  assertRecoveryCandidatePayloadSnapshot(candidate, sourcePayload);
+  const payload = normalizeRecoveryAdoptionPayload(storeName, sourcePayload);
+  const trustedCurrent = await getTrustedRecoveryAdoptionRoot(
+    storeName,
+    currentEvidence,
+  );
+  const baseRevision =
+    candidate.source === "runtime-fallback"
+      ? (candidate.revision ?? null)
+      : (trustedCurrent?.root.revision ?? null);
+  const metadata = await prepareMetadataForPayload(
+    storeName,
+    DATA_KEY,
+    payload,
+    baseRevision,
+  );
+  const checkpoint = createNextPersistenceCheckpoint(
+    storeName,
+    DATA_KEY,
+    metadata,
+    trustedCurrent?.checkpoint ?? null,
+    runtimeSnapshots,
+  );
+  const archiveKey = createRecoveryAdoptionArchiveKey();
+  const createdAt = new Date().toISOString();
+  const archive: RecoveryAdoptionArchive = {
+    kind: "event-shopping-planner-recovery-adoption-archive",
+    schemaVersion: 1,
+    decisionId: archiveKey.slice(RECOVERY_ADOPTION_ARCHIVE_KEY_PREFIX.length),
+    storeName,
+    key: DATA_KEY,
+    createdAt,
+    candidate: {
+      id: candidate.id,
+      source: candidate.source,
+      role: candidate.role,
+      storeName: candidate.storeName,
+      key: candidate.key,
+      sourceKey: candidate.sourceKey,
+      targetKey: candidate.targetKey,
+      revision: candidate.revision,
+      digest: candidate.digest,
+      digestAlgorithm: candidate.digestAlgorithm,
+      digestCanonicalization: candidate.digestCanonicalization,
+      digestCanonicalLength: candidate.digestCanonicalLength,
+    },
+    chosenSourceEvidence: {
+      sourceKey: candidate.sourceKey,
+      payload: sourcePayload,
+      ...(sourceRawValue === undefined ? {} : { rawValue: sourceRawValue }),
+    },
+    currentEvidence,
+    observedRuntimeCandidates: runtimeSnapshots,
+    committedMetadata: metadata,
+    committedCheckpoint: checkpoint,
+  };
+  assertStructuredCloneable(archive);
+  retainRuntimeCandidatesForRecoveryAdoption(runtimeSnapshots);
+  assertRuntimeRawEvidenceUnchanged(storeName, expectedRuntimeEvidence);
+
+  await commitRecoveryCandidateAdoption({
+    storeName,
+    payload,
+    expectedEvidence: currentEvidence,
+    expectedRuntimeEvidence,
+    metadata,
+    checkpoint,
+    archiveKey,
+    archive,
+  });
+  await verifyRecoveryCandidateAdoption({
+    storeName,
+    payload,
+    metadata,
+    checkpoint,
+    archiveKey,
+    archive,
+    expectedRuntimeEvidence,
+  });
+  if (
+    runtimeSnapshots.some(
+      (snapshot) => !runtimeCandidateIsRetainedForRecoveryAdoption(snapshot),
+    )
+  ) {
+    throw new PersistenceConflictError(
+      `${storeName} recovery source retention verification failed.`,
+    );
+  }
+
+  const observedKey = getObservedRootKey(storeName, DATA_KEY);
+  expectedRevisionRoots.set(
+    observedKey,
+    storeName === STORES.MAP_DATA
+      ? {
+          ...metadata,
+          missing: Object.keys(payload as MapDataStore).length === 0,
+        }
+      : metadata,
+  );
+  expectedPersistenceCheckpoints.set(observedKey, checkpoint);
+  return {
+    status: "adopted",
+    storeName,
+    key: DATA_KEY,
+    revision: metadata.revision,
+    digest: metadata.payloadDigest.value,
+    archiveKey,
+  };
 }
 
 const resolveLoadResultData = <T extends Record<string, unknown>>(
@@ -4023,7 +7037,7 @@ const resolveLoadResultData = <T extends Record<string, unknown>>(
   }
 
   if (result.status === "error" || result.status === "conflict") {
-    console.error(`Failed to load ${storeName}:`, result.error);
+    console.error(`Failed to load ${storeName}.`);
     throw (
       result.error ??
       new PersistenceConflictError(`Failed to resolve ${storeName}.`)
@@ -4041,10 +7055,7 @@ const removeEventFromStore = async <T extends Record<string, unknown>>(
 ): Promise<void> => {
   const loadResult = await loader();
   if (loadResult.status === "error" || loadResult.status === "conflict") {
-    console.error(
-      `Failed to load ${storeName} during event deletion:`,
-      loadResult.error,
-    );
+    console.error(`Failed to load ${storeName} during event deletion.`);
     throw (
       loadResult.error ??
       new PersistenceConflictError(
@@ -4068,6 +7079,12 @@ const removeEventFromStore = async <T extends Record<string, unknown>>(
 // 公開API
 export const db = {
   STORES,
+
+  async adoptRecoveryCandidate(
+    candidate: StartupRecoveryCandidate,
+  ): Promise<RecoveryCandidateAdoptionResult> {
+    return adoptRecoveryCandidateInternal(candidate);
+  },
 
   // イベントリスト
   async saveEventLists(data: Record<string, unknown[]>): Promise<void> {
@@ -4246,8 +7263,8 @@ export const db = {
         db.loadMapViewportSettings,
         db.saveMapViewportSettings,
       );
-    } catch (error) {
-      console.error(`Failed to delete ${eventName} from IndexedDB:`, error);
+    } catch {
+      console.error("Failed to delete event data from IndexedDB.");
     }
   },
 
@@ -4325,6 +7342,9 @@ export const db = {
 
   // localStorageからの移行
   migrateFromLocalStorage,
+
+  // Release B: 検証済み旧localStorage原本の条件付き物理cleanup
+  cleanupLegacyPersistenceSources,
 
   // ユーティリティ
   getAllKeys,

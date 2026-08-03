@@ -188,10 +188,13 @@ export function compactMapDataForStorage(
   const compacted: Record<string, Record<string, unknown>> = {};
 
   Object.entries(data).forEach(([eventName, eventMapData]) => {
-    compacted[eventName] = {};
+    const compactedEventMap: Record<string, unknown> = {};
     Object.entries(eventMapData).forEach(([dayMapName, dayMapData]) => {
-      compacted[eventName][dayMapName] = compactDayMapForStorage(dayMapData);
+      compactedEventMap[dayMapName] = compactDayMapForStorage(dayMapData);
     });
+    if (Object.keys(compactedEventMap).length > 0) {
+      compacted[eventName] = compactedEventMap;
+    }
   });
 
   return compacted;
@@ -203,7 +206,10 @@ export function expandMapDataFromStorage(
   const expanded: MapDataStore = {};
 
   Object.entries(data).forEach(([eventName, eventMapData]) => {
-    expanded[eventName] = expandEventMapDataFromStorage(eventMapData);
+    const expandedEventMap = expandEventMapDataFromStorage(eventMapData);
+    if (Object.keys(expandedEventMap).length > 0) {
+      expanded[eventName] = expandedEventMap;
+    }
   });
 
   return expanded;

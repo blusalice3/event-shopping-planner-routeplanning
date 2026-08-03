@@ -462,9 +462,9 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
         setActivePreviewSheet("");
         alert("マップデータの解析に失敗しました。");
       }
-    } catch (error) {
+    } catch {
       if (!isCurrentRequest()) return;
-      console.error("Preview error:", error);
+      console.error("Map preview failed (map-preview-failed).");
       setPreviewData(null);
       setPreviewSkippedSheets([]);
       setPreviewSignature(null);
@@ -524,12 +524,10 @@ const MapImportDialog: React.FC<MapImportDialogProps> = ({
         angleMap[sheetName] = normalizeRotationAngle(angle);
       });
       onImport(data, settings, angleMap);
-    } catch (error) {
+    } catch {
       if (!isCurrentRequest()) return;
-      console.error("Import error:", error);
-      alert(
-        `マップデータの取り込みに失敗しました: ${error instanceof Error ? error.message : "不明なエラー"}`,
-      );
+      console.error("Map import failed (map-import-failed).");
+      alert("マップデータの取り込みに失敗しました。");
     } finally {
       if (parseRequestTokenRef.current === requestToken) {
         setIsLoading(false);
