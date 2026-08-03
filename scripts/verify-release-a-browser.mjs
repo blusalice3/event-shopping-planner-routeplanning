@@ -1,6 +1,13 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { access, mkdir, mkdtemp, rm } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -37,7 +44,7 @@ const CHROME_CANDIDATES = [
   "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
 ].filter(Boolean);
 const METRICS_STORAGE_KEY = "__esp_internal__:release-a-metrics:v1";
-const ARTIFACT_MARKER_KEY = "__esp_internal__:browser-test:active-artifact:v1";
+const ARTIFACT_MARKER_FILE_NAME = "esp-active-artifact-marker-v1.txt";
 const LEGACY_DELETE_COUNT_KEY =
   "__esp_internal__:browser-test:legacy-delete-count:v1";
 const CONTROLLER_CHANGE_COUNT_KEY =
@@ -687,26 +694,23 @@ const collectRollbackDatabaseEvidence = async (client) =>
     })()`,
   );
 
-const readArtifactMarker = async (client) =>
-  await evaluate(
-    client,
-    `localStorage.getItem(${JSON.stringify(ARTIFACT_MARKER_KEY)})`,
-  );
+const readArtifactMarker = async () => {
+  try {
+    return (
+      await readFile(path.join(profileDirectory, ARTIFACT_MARKER_FILE_NAME), {
+        encoding: "utf8",
+      })
+    ).trim();
+  } catch {
+    return null;
+  }
+};
 
-const writeArtifactMarker = async (client, artifactId) =>
-  await evaluate(
-    client,
-    `(() => {
-      localStorage.setItem(
-        ${JSON.stringify(ARTIFACT_MARKER_KEY)},
-        ${JSON.stringify(artifactId)},
-      );
-      return (
-        localStorage.getItem(${JSON.stringify(ARTIFACT_MARKER_KEY)}) ===
-        ${JSON.stringify(artifactId)}
-      );
-    })()`,
-  );
+const writeArtifactMarker = async (artifactId) => {
+  const markerPath = path.join(profileDirectory, ARTIFACT_MARKER_FILE_NAME);
+  await writeFile(markerPath, `${artifactId}\n`, { encoding: "utf8" });
+  return (await readArtifactMarker()) === artifactId;
+};
 
 const createRollbackSavedEventThroughUi = async (client) => {
   const eventName = JSON.stringify(ROLLBACK_SAVE_EVENT_NAME);
@@ -1007,7 +1011,7 @@ try {
   await ensureControlledApplication(primary.client);
   if (TRANSITION_MODE === "rollback") {
     assert(
-      (await readArtifactMarker(primary.client)) === EXPECTED_FROM_ARTIFACT_ID,
+      (await readArtifactMarker()) === EXPECTED_FROM_ARTIFACT_ID,
       "Rollback profile does not contain the expected source artifact marker.",
     );
     await evaluate(
@@ -1182,7 +1186,7 @@ try {
       "Rollback did not observe a Service Worker controller change.",
     );
     assert(
-      await writeArtifactMarker(primary.client, TARGET_ARTIFACT_ID),
+      await writeArtifactMarker(TARGET_ARTIFACT_ID),
       "Rollback artifact marker could not be persisted.",
     );
 
@@ -1228,7 +1232,7 @@ try {
     );
   } else if (TRANSITION_MODE === "forward") {
     assert(
-      (await readArtifactMarker(primary.client)) === EXPECTED_FROM_ARTIFACT_ID,
+      (await readArtifactMarker()) === EXPECTED_FROM_ARTIFACT_ID,
       "Forward profile does not contain the expected rollback artifact marker.",
     );
     await evaluate(
@@ -1349,7 +1353,7 @@ try {
       "Forward update did not observe a Service Worker controller change.",
     );
     assert(
-      await writeArtifactMarker(primary.client, TARGET_ARTIFACT_ID),
+      await writeArtifactMarker(TARGET_ARTIFACT_ID),
       "Forward artifact marker could not be persisted.",
     );
 
@@ -1397,7 +1401,7 @@ try {
     const initialProbe = await collectOnlineProbe(primary.client);
     assertOnlineProbe(initialProbe);
     assert(
-      await writeArtifactMarker(primary.client, initialProbe.buildId),
+      await writeArtifactMarker(initialProbe.buildId),
       "Release A artifact marker could not be persisted.",
     );
     const [installability, appManifest] = await Promise.all([
