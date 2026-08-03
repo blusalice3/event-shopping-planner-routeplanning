@@ -51,6 +51,16 @@ const recoveryCandidates = [
   },
 ] satisfies readonly StartupRecoveryCandidate[];
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
 describe("PersistenceRecoveryScreen", () => {
   it("通常画面と自動保存を止めて候補を保持することを表示する", () => {
     render(<PersistenceRecoveryScreen {...defaultProps} />);
@@ -289,8 +299,9 @@ describe("PersistenceRecoveryScreen", () => {
     expect(screen.queryByText("候補2の非公開payload")).not.toBeInTheDocument();
   });
 
-  it("radioで選んだ候補だけを警告付きで明示採用し、二重実行を防ぐ", () => {
-    const onAdopt = vi.fn();
+  it("radioで選んだ候補だけを警告付きで明示採用し、完了まで二重実行を防ぐ", async () => {
+    const adoption = createDeferred<void>();
+    const onAdopt = vi.fn(() => adoption.promise);
     render(
       <PersistenceRecoveryScreen
         {...defaultProps}
@@ -334,6 +345,14 @@ describe("PersistenceRecoveryScreen", () => {
       screen.getByRole("button", { name: "選択候補を採用中…" }),
     ).toBeDisabled();
     expect(screen.getByRole("main")).toHaveAttribute("aria-busy", "true");
+
+    adoption.resolve();
+    await waitFor(() => {
+      expect(
+        screen.getByRole("button", { name: "選択候補を明示的に採用" }),
+      ).toBeEnabled();
+    });
+    expect(screen.getByRole("main")).toHaveAttribute("aria-busy", "false");
   });
 
   it("同一idでもdescriptorが異なる候補を別々に選択し、選んだ候補そのものを渡す", () => {

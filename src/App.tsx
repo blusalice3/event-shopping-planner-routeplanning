@@ -5307,9 +5307,7 @@ const App: React.FC = () => {
           adoptionError={recoveryAdoptionError}
           onRetry={retryInitialization}
           onExport={handlePersistenceRecoveryExport}
-          onAdopt={(candidate) => {
-            void adoptRecoveryCandidate(candidate);
-          }}
+          onAdopt={adoptRecoveryCandidate}
         />
       );
     }

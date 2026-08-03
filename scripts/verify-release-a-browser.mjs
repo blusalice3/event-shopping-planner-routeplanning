@@ -47,11 +47,41 @@ const SYNTHETIC_METADATA =
   '{"A10_FIXTURE":{"title":"synthetic-event","phase":"release-a-browser"}}';
 const SYNTHETIC_SYNC_QUEUE =
   '{"pending":[{"id":"synthetic-operation","kind":"archive-only"}]}';
+const SYNTHETIC_LEGACY_SOURCES = Object.freeze({
+  eventShoppingLists:
+    '{"A10_FIXTURE":[{"id":"synthetic-item","title":"synthetic-item"}]}',
+  eventMetadata: SYNTHETIC_METADATA,
+  executeModeItems: "{}",
+  dayModes: "{}",
+  mapData: "{}",
+  mapRotationSettings: "{}",
+  routeSettings: "{}",
+  hallDefinitions: "{}",
+  hallRouteSettings: "{}",
+  mapViewportSettings: "{}",
+  syncQueue: SYNTHETIC_SYNC_QUEUE,
+});
 
 const delay = (milliseconds) =>
   new Promise((resolve) => setTimeout(resolve, milliseconds));
 const sha256Text = (value) =>
   createHash("sha256").update(value, "utf8").digest("hex");
+const createExpectedLegacyFixtureEvidence = () => ({
+  legacySources: Object.fromEntries(
+    Object.entries(SYNTHETIC_LEGACY_SOURCES).map(([key, value]) => [
+      key,
+      {
+        present: true,
+        length: value.length,
+        hash: sha256Text(value),
+      },
+    ]),
+  ),
+  metadataLength: SYNTHETIC_METADATA.length,
+  metadataHash: sha256Text(SYNTHETIC_METADATA),
+  syncQueueLength: SYNTHETIC_SYNC_QUEUE.length,
+  syncQueueHash: sha256Text(SYNTHETIC_SYNC_QUEUE),
+});
 
 const withTimeout = (promise, milliseconds, label) =>
   new Promise((resolve, reject) => {
@@ -238,7 +268,9 @@ const closeTarget = async (port, target) => {
 
 const installBrowserInstrumentation = async (client) => {
   const source = `(() => {
-    const legacyKeys = new Set(["eventMetadata", "syncQueue"]);
+    const legacyKeys = new Set(${JSON.stringify(
+      Object.keys(SYNTHETIC_LEGACY_SOURCES),
+    )});
     const deleteCountKey = ${JSON.stringify(LEGACY_DELETE_COUNT_KEY)};
     const controllerChangeCountKey = ${JSON.stringify(
       CONTROLLER_CHANGE_COUNT_KEY,
@@ -487,10 +519,10 @@ const installSyntheticLegacyFixture = async (client) =>
   await evaluate(
     client,
     `(async () => {
-      const metadata = ${JSON.stringify(SYNTHETIC_METADATA)};
-      const syncQueue = ${JSON.stringify(SYNTHETIC_SYNC_QUEUE)};
-      localStorage.setItem("eventMetadata", metadata);
-      localStorage.setItem("syncQueue", syncQueue);
+      const legacySources = ${JSON.stringify(SYNTHETIC_LEGACY_SOURCES)};
+      for (const [key, value] of Object.entries(legacySources)) {
+        localStorage.setItem(key, value);
+      }
       const hash = async (value) => {
         const bytes = new TextEncoder().encode(value);
         const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -498,7 +530,18 @@ const installSyntheticLegacyFixture = async (client) =>
           .map((byte) => byte.toString(16).padStart(2, "0"))
           .join("");
       };
+      const legacySourceEvidence = {};
+      for (const [key, value] of Object.entries(legacySources)) {
+        legacySourceEvidence[key] = {
+          present: true,
+          length: value.length,
+          hash: await hash(value),
+        };
+      }
+      const metadata = legacySources.eventMetadata;
+      const syncQueue = legacySources.syncQueue;
       return {
+        legacySources: legacySourceEvidence,
         metadataLength: metadata.length,
         metadataHash: await hash(metadata),
         syncQueueLength: syncQueue.length,
@@ -511,6 +554,9 @@ const collectFixtureEvidence = async (client) =>
   await evaluate(
     client,
     `(async () => {
+      const legacySourceKeys = ${JSON.stringify(
+        Object.keys(SYNTHETIC_LEGACY_SOURCES),
+      )};
       const metadata = localStorage.getItem("eventMetadata");
       const syncQueue = localStorage.getItem("syncQueue");
       const hash = async (value) => {
@@ -520,7 +566,17 @@ const collectFixtureEvidence = async (client) =>
           .map((byte) => byte.toString(16).padStart(2, "0"))
           .join("");
       };
+      const legacySourceEvidence = {};
+      for (const key of legacySourceKeys) {
+        const value = localStorage.getItem(key);
+        legacySourceEvidence[key] = {
+          present: value !== null,
+          length: value?.length ?? 0,
+          hash: await hash(value),
+        };
+      }
       return {
+        legacySources: legacySourceEvidence,
         metadataPresent: metadata !== null,
         metadataLength: metadata?.length ?? 0,
         metadataHash: await hash(metadata),
@@ -746,6 +802,14 @@ const assertOnlineProbe = (probe) => {
 };
 
 const assertFixtureUnchanged = (before, after, label) => {
+  for (const [key, expected] of Object.entries(before.legacySources ?? {})) {
+    const actual = after.legacySources?.[key];
+    assert(actual?.present, `${label}: ${key} legacy source is missing.`);
+    assert(
+      actual.length === expected.length && actual.hash === expected.hash,
+      `${label}: ${key} legacy source changed.`,
+    );
+  }
   assert(after.metadataPresent, `${label}: metadata source is missing.`);
   assert(after.syncQueuePresent, `${label}: syncQueue source is missing.`);
   assert(
@@ -977,16 +1041,7 @@ try {
       activeRollbackWorker.sha256 === EXPECTED_SERVICE_WORKER_SHA256,
       "Active rollback Service Worker does not match the expected artifact.",
     );
-    const expectedFixture = {
-      metadataLength: SYNTHETIC_METADATA.length,
-      metadataHash: createHash("sha256")
-        .update(SYNTHETIC_METADATA)
-        .digest("hex"),
-      syncQueueLength: SYNTHETIC_SYNC_QUEUE.length,
-      syncQueueHash: createHash("sha256")
-        .update(SYNTHETIC_SYNC_QUEUE)
-        .digest("hex"),
-    };
+    const expectedFixture = createExpectedLegacyFixtureEvidence();
     const rollbackFixture = await collectFixtureEvidence(primary.client);
     assertFixtureUnchanged(
       expectedFixture,
@@ -1129,6 +1184,9 @@ try {
             syncQueuePresent: finalRollbackFixture.syncQueuePresent,
             syncQueueLength: finalRollbackFixture.syncQueueLength,
             syncQueueHash: finalRollbackFixture.syncQueueHash,
+            protectedLegacySourceCount: Object.keys(
+              finalRollbackFixture.legacySources,
+            ).length,
             unchanged: true,
             physicalDeleteCount: rollbackInstrumentation.legacyDeleteCount,
           },
@@ -1213,12 +1271,7 @@ try {
     );
     const forwardFixture = await collectFixtureEvidence(primary.client);
     assertFixtureUnchanged(
-      {
-        metadataLength: SYNTHETIC_METADATA.length,
-        metadataHash: sha256Text(SYNTHETIC_METADATA),
-        syncQueueLength: SYNTHETIC_SYNC_QUEUE.length,
-        syncQueueHash: sha256Text(SYNTHETIC_SYNC_QUEUE),
-      },
+      createExpectedLegacyFixtureEvidence(),
       forwardFixture,
       "forward update",
     );
@@ -1295,6 +1348,9 @@ try {
             syncQueuePresent: forwardFixture.syncQueuePresent,
             syncQueueLength: forwardFixture.syncQueueLength,
             syncQueueHash: forwardFixture.syncQueueHash,
+            protectedLegacySourceCount: Object.keys(
+              forwardFixture.legacySources,
+            ).length,
             unchanged: true,
             physicalDeleteCount: forwardInstrumentation.legacyDeleteCount,
           },
@@ -1485,6 +1541,8 @@ try {
             syncQueuePresent: finalFixture.syncQueuePresent,
             syncQueueLength: finalFixture.syncQueueLength,
             syncQueueHash: finalFixture.syncQueueHash,
+            protectedLegacySourceCount: Object.keys(finalFixture.legacySources)
+              .length,
             unchanged: true,
             physicalDeleteCount: finalInstrumentation.legacyDeleteCount,
           },

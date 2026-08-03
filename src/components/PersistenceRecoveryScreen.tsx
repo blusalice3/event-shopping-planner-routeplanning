@@ -16,7 +16,7 @@ export interface PersistenceRecoveryScreenProps {
   candidates?: readonly StartupRecoveryCandidate[];
   isAdopting?: boolean;
   adoptionError?: string | null;
-  onAdopt?: (candidate: StartupRecoveryCandidate) => void;
+  onAdopt?: (candidate: StartupRecoveryCandidate) => void | Promise<void>;
 }
 
 const EXPORT_UNAVAILABLE_REASON_ID =
@@ -101,6 +101,7 @@ const PersistenceRecoveryScreen: React.FC<PersistenceRecoveryScreenProps> = ({
     React.useState<PersistenceRecoveryExportResult | null>(null);
   const safeExitTitleRef = React.useRef<HTMLHeadingElement>(null);
   const wasAdoptingRef = React.useRef(isAdopting);
+  const adoptionRequestIdRef = React.useRef(0);
   const exportInProgressRef = React.useRef(false);
   const exportRequestIdRef = React.useRef(0);
   const isBusy = isRetrying || isAdopting || isAdoptionRequested || isExporting;
@@ -126,15 +127,24 @@ const PersistenceRecoveryScreen: React.FC<PersistenceRecoveryScreenProps> = ({
     setSelectedCandidateReference(null);
     setIsAdoptionRequested(false);
     setExportResult(null);
+    adoptionRequestIdRef.current += 1;
     exportRequestIdRef.current += 1;
     exportInProgressRef.current = false;
     setIsExporting(false);
   }, [candidates, canExport, details, message]);
 
-  const handleAdopt = () => {
+  const handleAdopt = async () => {
     if (isBusy || !selectedCandidate || !onAdopt) return;
+    const requestId = adoptionRequestIdRef.current + 1;
+    adoptionRequestIdRef.current = requestId;
     setIsAdoptionRequested(true);
-    onAdopt(selectedCandidate);
+    try {
+      await onAdopt(selectedCandidate);
+    } finally {
+      if (requestId === adoptionRequestIdRef.current) {
+        setIsAdoptionRequested(false);
+      }
+    }
   };
 
   const handleExport = async () => {
