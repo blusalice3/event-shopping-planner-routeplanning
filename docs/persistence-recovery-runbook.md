@@ -410,7 +410,7 @@ standalone legacy `syncQueue`は公開migration結果では`dataMigrationStatus=
 
 ### 13.3 自動rollback rehearsal
 
-cleanなworktreeで、port 4173を使用するpreviewを停止してから実行します。
+cleanなworktreeで、既存previewを停止してから実行します。演習は既定で空いているloopback portを一時選択し、固定portが必要な場合だけ`scripts/rehearse-release-a-rollback.ps1 -Port <port>`を直接指定します。
 
 ```powershell
 npm run test:release-a-rollback

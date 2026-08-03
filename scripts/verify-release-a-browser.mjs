@@ -462,6 +462,24 @@ const ensureControlledApplication = async (client) => {
   );
 };
 
+const waitForReleaseAStartupMetric = async (client) => {
+  await waitForExpression(
+    client,
+    `(() => {
+      try {
+        const metrics = JSON.parse(
+          sessionStorage.getItem(${JSON.stringify(METRICS_STORAGE_KEY)}) ??
+            "null",
+        );
+        return (metrics?.counters?.startup?.ready ?? 0) >= 1;
+      } catch {
+        return false;
+      }
+    })()`,
+    "Release A startup metric",
+  );
+};
+
 const collectOnlineProbe = async (client) =>
   await evaluate(
     client,
@@ -900,6 +918,9 @@ if (REQUESTED_PROFILE_DIRECTORY) {
 }
 const debugPort = await reservePort();
 const chromePath = await findChrome();
+const standaloneBootstrapUrl = new URL("/manifest.webmanifest", PREVIEW_URL);
+standaloneBootstrapUrl.hostname =
+  standaloneBootstrapUrl.hostname === "127.0.0.1" ? "localhost" : "127.0.0.1";
 const chromium = spawn(
   chromePath,
   [
@@ -913,7 +934,7 @@ const chromium = spawn(
     `--remote-debugging-port=${debugPort}`,
     "--remote-allow-origins=*",
     `--user-data-dir=${profileDirectory}`,
-    "--app=about:blank",
+    `--app=${standaloneBootstrapUrl.href}`,
   ],
   {
     stdio: "ignore",
@@ -1242,6 +1263,7 @@ try {
       ) >= 1`,
       "forward Service Worker controller change",
     );
+    await waitForReleaseAStartupMetric(primary.client);
     const forwardProbe = await collectOnlineProbe(primary.client);
     assertOnlineProbe(forwardProbe);
     assert(
@@ -1292,6 +1314,7 @@ try {
       )})`,
       "rollback-saved event after forward update in standalone app-window",
     );
+    await waitForReleaseAStartupMetric(standaloneTarget.client);
     const forwardStandaloneProbe = await collectOnlineProbe(
       standaloneTarget.client,
     );
@@ -1368,6 +1391,7 @@ try {
       )}\n`,
     );
   } else {
+    await waitForReleaseAStartupMetric(primary.client);
     const initialProbe = await collectOnlineProbe(primary.client);
     assertOnlineProbe(initialProbe);
     assert(
@@ -1406,6 +1430,7 @@ try {
     await installBrowserInstrumentation(secondary.client);
     await navigate(secondary.client, PREVIEW_URL);
     await ensureControlledApplication(secondary.client);
+    await waitForReleaseAStartupMetric(secondary.client);
     const secondaryProbe = await collectOnlineProbe(secondary.client);
     assertOnlineProbe(secondaryProbe);
     const secondaryFixture = await collectFixtureEvidence(secondary.client);
@@ -1418,6 +1443,7 @@ try {
       "standalone app-window render",
     );
     await ensureControlledApplication(standaloneTarget.client);
+    await waitForReleaseAStartupMetric(standaloneTarget.client);
     const standaloneProbe = await collectOnlineProbe(standaloneTarget.client);
     assertOnlineProbe(standaloneProbe);
     const standaloneMedia = await evaluate(
@@ -1469,6 +1495,7 @@ try {
       "navigator.serviceWorker.getRegistration().then((registration) => registration.update()).then(() => true)",
     );
     await reload(primary.client);
+    await waitForReleaseAStartupMetric(primary.client);
     const finalProbe = await collectOnlineProbe(primary.client);
     assertOnlineProbe(finalProbe);
     const finalFixture = await collectFixtureEvidence(primary.client);

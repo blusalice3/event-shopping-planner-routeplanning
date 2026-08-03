@@ -1,6 +1,7 @@
 param(
   [string]$BaselineCommit = "e5f26b76b1318d70b5d2373c8808cda20c7bb5c3",
-  [int]$Port = 4173
+  [ValidateRange(0, 65535)]
+  [int]$Port = 0
 )
 
 [Console]::InputEncoding  = [Text.UTF8Encoding]::new($false)
@@ -14,6 +15,18 @@ $ErrorActionPreference = "Stop"
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 $NodeExecutable = (Get-Command node).Source
 $ViteCli = Join-Path $ProjectRoot "node_modules\vite\bin\vite.js"
+if ($Port -eq 0) {
+  $portReservation = [Net.Sockets.TcpListener]::new(
+    [Net.IPAddress]::Loopback,
+    0
+  )
+  try {
+    $portReservation.Start()
+    $Port = ([Net.IPEndPoint]$portReservation.LocalEndpoint).Port
+  } finally {
+    $portReservation.Stop()
+  }
+}
 $PreviewUrl = "http://127.0.0.1:$Port/"
 $TempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $TempRoot = Join-Path $TempBase (
@@ -277,7 +290,16 @@ try {
   Remove-Item Env:ESP_PREVIEW_URL -ErrorAction SilentlyContinue
   Remove-Item Env:ESP_BROWSER_PROFILE_DIR -ErrorAction SilentlyContinue
   if (Test-Path -LiteralPath $BaselineNodeModules) {
-    Remove-Item -LiteralPath $BaselineNodeModules -Force
+    $nodeModulesJunction = Get-Item -LiteralPath $BaselineNodeModules -Force
+    if (
+      (
+        $nodeModulesJunction.Attributes -band
+        [IO.FileAttributes]::ReparsePoint
+      ) -eq 0
+    ) {
+      throw "Refusing to remove a non-junction node_modules path."
+    }
+    [IO.Directory]::Delete($BaselineNodeModules)
   }
   $resolvedTempRoot = [IO.Path]::GetFullPath($TempRoot)
   if (
