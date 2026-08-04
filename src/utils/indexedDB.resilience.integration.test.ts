@@ -19,6 +19,8 @@ import {
   serializeStartupRecoveryBundle,
 } from "./persistenceResilience";
 import legacyJournalV1NoCheckpointFixture from "../test/fixtures/legacy-journal-v1-no-checkpoint-d2389a0.json";
+import legacyMapJournalV1EmptyEventFixture from "../test/fixtures/legacy-map-journal-v1-empty-event-d2389a0.json";
+import legacyMapJournalV1ProtoDayFixture from "../test/fixtures/legacy-map-journal-v1-proto-day-d2389a0.json";
 
 const DATABASE_NAME = "EventShoppingPlannerDB";
 const CURRENT_DATABASE_VERSION = 5;
@@ -797,6 +799,118 @@ async function seedActualV1EventMetadataFixtureWithoutCheckpoint(): Promise<{
   return { payload, legacySource, targetRevision, checkpointKey };
 }
 
+async function seedActualV1EmptyMapFixtureWithoutCheckpoint(): Promise<{
+  legacyPayload: Record<string, unknown>;
+  normalizedPayload: MapDataStore;
+  legacySource: string;
+  targetRevision: string;
+  metadataKey: string;
+  checkpointKey: string;
+}> {
+  const legacySource = legacyMapJournalV1EmptyEventFixture.legacySource;
+  const legacyInput = JSON.parse(legacySource) as Record<string, unknown>;
+  const legacyPayload = structuredClone(
+    legacyMapJournalV1EmptyEventFixture.legacyPayload,
+  );
+  const normalizedPayload = structuredClone(
+    legacyMapJournalV1EmptyEventFixture.normalizedPayload,
+  ) as MapDataStore;
+  const targetRevision = legacyMapJournalV1EmptyEventFixture.targetRevision;
+  const metadataKey = createPersistenceMetadataKey("mapData", DATA_KEY);
+  const checkpointKey = createPersistenceCheckpointKey("mapData", DATA_KEY);
+  expect(legacyMapJournalV1EmptyEventFixture.sourceCommit).toBe(
+    "d2389a02363176ba8354c4562f1a669a0b15dab9",
+  );
+  expect(legacyMapJournalV1EmptyEventFixture.checkpointPresent).toBe(false);
+  expect(Object.prototype.hasOwnProperty.call(legacyInput, "__proto__")).toBe(
+    true,
+  );
+  expect(JSON.stringify(legacyInput)).toBe(legacySource);
+  await expect(createPersistenceDigest(legacyPayload)).resolves.toEqual(
+    legacyMapJournalV1EmptyEventFixture.metadata.payloadDigest,
+  );
+  await expect(createPersistenceDigest(legacySource)).resolves.toEqual(
+    legacyMapJournalV1EmptyEventFixture.journal.entries[0]?.rawDigest,
+  );
+  expect(createSynchronousFingerprint(legacyPayload)).toEqual(
+    legacyMapJournalV1EmptyEventFixture.metadata.payloadFingerprint,
+  );
+
+  await seedDatabase(CURRENT_DATABASE_VERSION);
+  for (const [key, value] of Object.entries(
+    legacyMapJournalV1EmptyEventFixture.physicalEntries,
+  )) {
+    await writeRawRecordAtExistingVersion("mapData", key, value);
+  }
+  await writeRawRecordAtExistingVersion(
+    "syncQueue",
+    metadataKey,
+    structuredClone(legacyMapJournalV1EmptyEventFixture.metadata),
+  );
+  await writeRawRecordAtExistingVersion(
+    "syncQueue",
+    LEGACY_MIGRATION_JOURNAL_KEY,
+    structuredClone(legacyMapJournalV1EmptyEventFixture.journal),
+  );
+  localStorage.setItem("mapData", legacySource);
+  return {
+    legacyPayload,
+    normalizedPayload,
+    legacySource,
+    targetRevision,
+    metadataKey,
+    checkpointKey,
+  };
+}
+
+async function seedActualV1ProtoDayFixtureWithoutCheckpoint(): Promise<{
+  legacySource: string;
+  targetRevision: string;
+  metadataKey: string;
+  checkpointKey: string;
+}> {
+  const legacySource = legacyMapJournalV1ProtoDayFixture.legacySource;
+  const legacyInput = JSON.parse(legacySource) as Record<string, unknown>;
+  const legacyEventMap = legacyInput.ProtoDayEvent as Record<string, unknown>;
+  const legacyPayload = structuredClone(
+    legacyMapJournalV1ProtoDayFixture.legacyPayload,
+  );
+  const targetRevision = legacyMapJournalV1ProtoDayFixture.targetRevision;
+  const metadataKey = createPersistenceMetadataKey("mapData", DATA_KEY);
+  const checkpointKey = createPersistenceCheckpointKey("mapData", DATA_KEY);
+  expect(legacyMapJournalV1ProtoDayFixture.sourceCommit).toBe(
+    "d2389a02363176ba8354c4562f1a669a0b15dab9",
+  );
+  expect(legacyMapJournalV1ProtoDayFixture.checkpointPresent).toBe(false);
+  expect(
+    Object.prototype.hasOwnProperty.call(legacyEventMap, "__proto__"),
+  ).toBe(true);
+  expect(JSON.stringify(legacyInput)).toBe(legacySource);
+  await expect(createPersistenceDigest(legacyPayload)).resolves.toEqual(
+    legacyMapJournalV1ProtoDayFixture.metadata.payloadDigest,
+  );
+  await expect(createPersistenceDigest(legacySource)).resolves.toEqual(
+    legacyMapJournalV1ProtoDayFixture.journal.entries[0]?.rawDigest,
+  );
+  expect(createSynchronousFingerprint(legacyPayload)).toEqual(
+    legacyMapJournalV1ProtoDayFixture.metadata.payloadFingerprint,
+  );
+
+  await seedDatabase(CURRENT_DATABASE_VERSION);
+  await writeRawRecordAtExistingVersion(
+    "syncQueue",
+    metadataKey,
+    structuredClone(legacyMapJournalV1ProtoDayFixture.metadata),
+  );
+  await writeRawRecordAtExistingVersion(
+    "syncQueue",
+    LEGACY_MIGRATION_JOURNAL_KEY,
+    structuredClone(legacyMapJournalV1ProtoDayFixture.journal),
+  );
+  localStorage.setItem("mapData", legacySource);
+  return { legacySource, targetRevision, metadataKey, checkpointKey };
+}
+
 beforeEach(() => {
   databaseFactory = new IDBFactory();
   vi.stubGlobal("indexedDB", databaseFactory);
@@ -1374,6 +1488,129 @@ describe("db payload compatibility", () => {
       expect(getRuntimeFallbackKeys("mapData")).toEqual([]);
     },
   );
+
+  it.each([
+    ["non-JSON suffix", "mapData:not-json"],
+    ["wrong tuple length", `mapData:${JSON.stringify(["イベントのみ"])}`],
+    [
+      "non-string tuple member",
+      `mapData:${JSON.stringify(["不正keyイベント", 42])}`,
+    ],
+  ])(
+    "fails closed and exports raw evidence for a managed split key with a %s",
+    async (_label, invalidSplitKey) => {
+      const invalidSplitValue = {
+        evidence: "壊れたsplit keyの物理値",
+      };
+      await seedDatabase(CURRENT_DATABASE_VERSION);
+      await writeRawRecordAtExistingVersion(
+        "mapData",
+        invalidSplitKey,
+        invalidSplitValue,
+      );
+      const db = await importFreshDb();
+
+      const loaded = await db.loadMapData();
+
+      expect(loaded).toMatchObject({
+        status: "conflict",
+        data: null,
+        error: { name: "InvalidMapPayload" },
+        recoveryBundle: {
+          candidates: expect.arrayContaining([
+            expect.objectContaining({
+              source: "indexedDB",
+              role: "invalid-source",
+              adoptable: false,
+              payload: { [invalidSplitKey]: invalidSplitValue },
+            }),
+          ]),
+        },
+      });
+      if (!loaded.recoveryBundle) {
+        throw new Error("Expected malformed split-key recovery evidence.");
+      }
+      expect(
+        JSON.parse(serializeStartupRecoveryBundle(loaded.recoveryBundle)),
+      ).toMatchObject({
+        candidates: expect.arrayContaining([
+          expect.objectContaining({
+            role: "invalid-source",
+            adoptable: false,
+            payload: { [invalidSplitKey]: invalidSplitValue },
+          }),
+        ]),
+      });
+
+      await expect(
+        db.saveMapData({
+          不正key復旧保全イベント: {
+            "1日目マップ": makeDayMap("replacement"),
+          },
+        }),
+      ).rejects.toMatchObject({ name: "InvalidMapPayload" });
+      expect(await readRawRecord("mapData", invalidSplitKey)).toEqual(
+        invalidSplitValue,
+      );
+      expect(
+        await readRawRecord(
+          "syncQueue",
+          createPersistenceMetadataKey("mapData", DATA_KEY),
+        ),
+      ).toBeUndefined();
+      expect(
+        await readRawRecord(
+          "syncQueue",
+          createPersistenceCheckpointKey("mapData", DATA_KEY),
+        ),
+      ).toBeUndefined();
+    },
+  );
+
+  it("aborts a cached-root save when a malformed managed split key appears before CAS", async () => {
+    const eventName = "不正key競合イベント";
+    const dayMapName = "1日目マップ";
+    const original: MapDataStore = {
+      [eventName]: {
+        [dayMapName]: makeDayMap("original"),
+      },
+    };
+    const replacement: MapDataStore = {
+      [eventName]: {
+        [dayMapName]: makeDayMap("replacement"),
+      },
+    };
+    const validSplitKey = createSplitMapKey(eventName, dayMapName);
+    const invalidSplitKey = "mapData:{broken-cas-key";
+    const invalidSplitValue = { evidence: "CAS直前に出現" };
+    const db = await importFreshDb();
+    await db.saveMapData(original);
+    const validBefore = await readRawRecord("mapData", validSplitKey);
+    const metadataKey = createPersistenceMetadataKey("mapData", DATA_KEY);
+    const checkpointKey = createPersistenceCheckpointKey("mapData", DATA_KEY);
+    const metadataBefore = await readRawRecord("syncQueue", metadataKey);
+    const checkpointBefore = await readRawRecord("syncQueue", checkpointKey);
+    await writeRawRecordAtExistingVersion(
+      "mapData",
+      invalidSplitKey,
+      invalidSplitValue,
+    );
+
+    await expect(db.saveMapData(replacement)).rejects.toMatchObject({
+      name: "InvalidMapPayload",
+    });
+
+    expect(await readRawRecord("mapData", validSplitKey)).toEqual(validBefore);
+    expect(await readRawRecord("mapData", invalidSplitKey)).toEqual(
+      invalidSplitValue,
+    );
+    expect(await readRawRecord("syncQueue", metadataKey)).toEqual(
+      metadataBefore,
+    );
+    expect(await readRawRecord("syncQueue", checkpointKey)).toEqual(
+      checkpointBefore,
+    );
+  });
 });
 
 describe("Release A persistence metric integration", () => {
@@ -4431,6 +4668,602 @@ describe("db.migrateFromLocalStorage resilience", () => {
       },
     });
     expect(localStorage.getItem("eventMetadata")).toBe(legacySource);
+  });
+
+  it("upgrades and repairs the copied d2389a0 empty-event map journal fixture", async () => {
+    const {
+      normalizedPayload,
+      legacySource,
+      targetRevision,
+      metadataKey,
+      checkpointKey,
+    } = await seedActualV1EmptyMapFixtureWithoutCheckpoint();
+    const normalizedDigest = await createPersistenceDigest(normalizedPayload);
+    const normalizedFingerprint =
+      createSynchronousFingerprint(normalizedPayload);
+    expect(await readRawRecord("syncQueue", checkpointKey)).toBeUndefined();
+    const db = await importFreshDb();
+
+    await expect(db.migrateFromLocalStorage()).resolves.toEqual({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+      migratedKeys: ["mapData"],
+    });
+
+    const upgradedJournal = await readMigrationJournalV2();
+    expect(upgradedJournal).toMatchObject({
+      schemaVersion: 2,
+      phase: "cleanup-ready",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+      entries: [
+        expect.objectContaining({
+          legacyKey: "mapData",
+          targetRevision,
+          payloadDigest: normalizedDigest,
+          mapKeys: [],
+          cleanupStatus: "deferred",
+        }),
+      ],
+    });
+    expect(await readRawRecord("syncQueue", metadataKey)).toMatchObject({
+      revision: targetRevision,
+      payloadDigest: normalizedDigest,
+      payloadFingerprint: normalizedFingerprint,
+    });
+    expect(await readRawRecord("syncQueue", checkpointKey)).toBeUndefined();
+    expect(
+      await readRawRecord("syncQueue", upgradedJournal.archiveKey),
+    ).toEqual(
+      expect.objectContaining({
+        kind: "event-shopping-planner-legacy-migration-archive",
+        entries: [
+          expect.objectContaining({
+            legacyKey: "mapData",
+            rawValue: legacySource,
+            rawDigest:
+              legacyMapJournalV1EmptyEventFixture.journal.entries[0]?.rawDigest,
+          }),
+        ],
+      }),
+    );
+    await expect(db.loadMapData()).resolves.toMatchObject({
+      status: "missing",
+      data: null,
+    });
+    expect(localStorage.getItem("mapData")).toBe(legacySource);
+
+    const savedImmediately: MapDataStore = {
+      v1修復後イベント: {
+        "1日目マップ": makeDayMap("saved-immediately"),
+      },
+    };
+    await db.saveMapData(savedImmediately);
+    const savedRevision = await readCurrentRevision("mapData");
+    expect(savedRevision).not.toBe(targetRevision);
+    expect(await readRawRecord("syncQueue", checkpointKey)).toMatchObject({
+      committedRoot: {
+        revision: savedRevision,
+        baseRevision: null,
+      },
+    });
+    await expect(db.loadMapData()).resolves.toMatchObject({
+      status: "ok",
+      data: savedImmediately,
+    });
+
+    vi.resetModules();
+    const restartedDb = await importFreshDb();
+    await expect(restartedDb.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+    });
+    await expect(restartedDb.loadMapData()).resolves.toMatchObject({
+      status: "ok",
+      data: savedImmediately,
+    });
+    expect(localStorage.getItem("mapData")).toBe(legacySource);
+  });
+
+  it("upgrades the d2389a0 nested __proto__ day journal and restores its split record", async () => {
+    const { legacySource, targetRevision, metadataKey, checkpointKey } =
+      await seedActualV1ProtoDayFixtureWithoutCheckpoint();
+    const splitKey = createSplitMapKey("ProtoDayEvent", "__proto__");
+    const db = await importFreshDb();
+
+    await expect(db.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+      migratedKeys: ["mapData"],
+    });
+
+    const upgradedJournal = await readMigrationJournalV2();
+    const upgradedEntry = upgradedJournal.entries[0]!;
+    expect(upgradedJournal).toMatchObject({
+      schemaVersion: 2,
+      phase: "cleanup-ready",
+      entries: [
+        expect.objectContaining({
+          legacyKey: "mapData",
+          targetRevision,
+          mapKeys: [splitKey],
+        }),
+      ],
+    });
+    expect(upgradedEntry.payloadDigest).not.toEqual(
+      legacyMapJournalV1ProtoDayFixture.metadata.payloadDigest,
+    );
+    expect(await db.getAllKeys("mapData")).toEqual([splitKey]);
+    expect(await readRawRecord("mapData", splitKey)).toMatchObject({
+      sheetName: "proto-day",
+      maxRow: 1,
+      maxCol: 1,
+    });
+    const loaded = await db.loadMapData();
+    expect(loaded).toMatchObject({ status: "ok" });
+    if (loaded.status !== "ok" || !loaded.data) {
+      throw new Error("Expected the restored nested __proto__ day map.");
+    }
+    const loadedEventMap = loaded.data.ProtoDayEvent!;
+    expect(
+      Object.prototype.hasOwnProperty.call(loadedEventMap, "__proto__"),
+    ).toBe(true);
+    expect(loadedEventMap.__proto__).toMatchObject({
+      sheetName: "proto-day",
+    });
+    const normalizedDigest = await createPersistenceDigest(loaded.data);
+    const normalizedFingerprint = createSynchronousFingerprint(loaded.data);
+    expect(upgradedEntry.payloadDigest).toEqual(normalizedDigest);
+    expect(await readRawRecord("syncQueue", metadataKey)).toMatchObject({
+      revision: targetRevision,
+      payloadDigest: normalizedDigest,
+      payloadFingerprint: normalizedFingerprint,
+    });
+    expect(await readRawRecord("syncQueue", checkpointKey)).toBeUndefined();
+    expect(
+      await readRawRecord("syncQueue", upgradedJournal.archiveKey),
+    ).toMatchObject({
+      entries: [
+        expect.objectContaining({
+          legacyKey: "mapData",
+          rawValue: legacySource,
+        }),
+      ],
+    });
+    expect(localStorage.getItem("mapData")).toBe(legacySource);
+  });
+
+  it("upgrades a prepared d2389a0 nested __proto__ day journal before its first copy", async () => {
+    const legacySource = legacyMapJournalV1ProtoDayFixture.legacySource;
+    const targetRevision = legacyMapJournalV1ProtoDayFixture.targetRevision;
+    const metadataKey = createPersistenceMetadataKey("mapData", DATA_KEY);
+    const checkpointKey = createPersistenceCheckpointKey("mapData", DATA_KEY);
+    const splitKey = createSplitMapKey("ProtoDayEvent", "__proto__");
+    const preparedJournal = structuredClone(
+      legacyMapJournalV1ProtoDayFixture.journal,
+    );
+    preparedJournal.phase = "prepared";
+    await seedDatabase(CURRENT_DATABASE_VERSION);
+    await writeRawRecordAtExistingVersion(
+      "syncQueue",
+      LEGACY_MIGRATION_JOURNAL_KEY,
+      preparedJournal,
+    );
+    localStorage.setItem("mapData", legacySource);
+    const db = await importFreshDb();
+
+    await expect(db.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      migratedKeys: ["mapData"],
+    });
+
+    const upgradedJournal = await readMigrationJournalV2();
+    expect(upgradedJournal).toMatchObject({
+      schemaVersion: 2,
+      phase: "cleanup-ready",
+      entries: [
+        expect.objectContaining({
+          legacyKey: "mapData",
+          targetRevision,
+          mapKeys: [splitKey],
+        }),
+      ],
+    });
+    const loaded = await db.loadMapData();
+    expect(loaded).toMatchObject({ status: "ok" });
+    if (loaded.status !== "ok" || !loaded.data) {
+      throw new Error("Expected the copied nested __proto__ day map.");
+    }
+    const normalizedDigest = await createPersistenceDigest(loaded.data);
+    expect(await readRawRecord("syncQueue", metadataKey)).toMatchObject({
+      revision: targetRevision,
+      payloadDigest: normalizedDigest,
+    });
+    expect(await readRawRecord("syncQueue", checkpointKey)).toMatchObject({
+      committedRoot: {
+        revision: targetRevision,
+        digest: normalizedDigest,
+      },
+    });
+    expect(await db.getAllKeys("mapData")).toEqual([splitKey]);
+    expect(
+      Object.prototype.hasOwnProperty.call(
+        loaded.data.ProtoDayEvent,
+        "__proto__",
+      ),
+    ).toBe(true);
+    expect(localStorage.getItem("mapData")).toBe(legacySource);
+  });
+
+  it("rolls back the nested __proto__ split-record repair when archive creation fails", async () => {
+    const { legacySource, metadataKey, checkpointKey } =
+      await seedActualV1ProtoDayFixtureWithoutCheckpoint();
+    const journalBefore = await readRawRecord(
+      "syncQueue",
+      LEGACY_MIGRATION_JOURNAL_KEY,
+    );
+    const metadataBefore = await readRawRecord("syncQueue", metadataKey);
+    const archiveKey = `${LEGACY_MIGRATION_ARCHIVE_KEY_PREFIX}${encodeURIComponent(
+      legacyMapJournalV1ProtoDayFixture.journal.sessionId,
+    )}`;
+    const archiveFailure = mockMigrationArchivePutFailure(
+      new DOMException(
+        "forced proto-day archive failure",
+        "QuotaExceededError",
+      ),
+    );
+    const db = await importFreshDb();
+
+    await expect(db.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "recovery-required",
+    });
+
+    expect(archiveFailure.getInjectionCount()).toBe(1);
+    expect(await db.getAllKeys("mapData")).toEqual([]);
+    expect(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ).toEqual(journalBefore);
+    expect(await readRawRecord("syncQueue", metadataKey)).toEqual(
+      metadataBefore,
+    );
+    expect(await readRawRecord("syncQueue", checkpointKey)).toBeUndefined();
+    expect(await readRawRecord("syncQueue", archiveKey)).toBeUndefined();
+    expect(localStorage.getItem("mapData")).toBe(legacySource);
+  });
+
+  it.each([
+    {
+      v1Phase: "verified" as const,
+      cleanupStatus: "pending" as const,
+      expectedStatus: "cleanup-pending",
+      expectedV2Phase: "cleanup-ready",
+    },
+    {
+      v1Phase: "cleanupPending" as const,
+      cleanupStatus: "retained" as const,
+      expectedStatus: "cleanup-pending",
+      expectedV2Phase: "cleanup-ready",
+    },
+    {
+      v1Phase: "completed" as const,
+      cleanupStatus: "removed" as const,
+      expectedStatus: "completed",
+      expectedV2Phase: "completed",
+    },
+  ])(
+    "repairs the unchanged d2389a0 map target while upgrading a v1 $v1Phase journal",
+    async ({ v1Phase, cleanupStatus, expectedStatus, expectedV2Phase }) => {
+      const {
+        normalizedPayload,
+        legacySource,
+        targetRevision,
+        metadataKey,
+        checkpointKey,
+      } = await seedActualV1EmptyMapFixtureWithoutCheckpoint();
+      const journal = structuredClone(
+        legacyMapJournalV1EmptyEventFixture.journal,
+      );
+      journal.phase = v1Phase;
+      journal.entries[0]!.cleanupStatus = cleanupStatus;
+      await writeRawRecordAtExistingVersion(
+        "syncQueue",
+        LEGACY_MIGRATION_JOURNAL_KEY,
+        journal,
+      );
+      if (v1Phase === "completed") {
+        localStorage.removeItem("mapData");
+      }
+      const normalizedDigest = await createPersistenceDigest(normalizedPayload);
+      const normalizedFingerprint =
+        createSynchronousFingerprint(normalizedPayload);
+      const db = await importFreshDb();
+
+      await expect(db.migrateFromLocalStorage()).resolves.toMatchObject({
+        status: expectedStatus,
+        dataMigrationStatus: "verified",
+      });
+
+      const upgradedJournal = await readMigrationJournalV2();
+      expect(upgradedJournal).toMatchObject({
+        schemaVersion: 2,
+        phase: expectedV2Phase,
+        entries: [
+          expect.objectContaining({
+            legacyKey: "mapData",
+            targetRevision,
+            payloadDigest: normalizedDigest,
+          }),
+        ],
+      });
+      expect(await readRawRecord("syncQueue", metadataKey)).toMatchObject({
+        revision: targetRevision,
+        payloadDigest: normalizedDigest,
+        payloadFingerprint: normalizedFingerprint,
+      });
+      expect(await readRawRecord("syncQueue", checkpointKey)).toBeUndefined();
+      expect(
+        await readRawRecord("syncQueue", upgradedJournal.archiveKey),
+      ).toMatchObject({
+        entries: [
+          expect.objectContaining({
+            legacyKey: "mapData",
+            rawValue: legacySource,
+          }),
+        ],
+      });
+      await expect(db.loadMapData()).resolves.toMatchObject({
+        status: "missing",
+        data: null,
+      });
+      expect(localStorage.getItem("mapData")).toBe(
+        v1Phase === "completed" ? null : legacySource,
+      );
+    },
+  );
+
+  it.each([
+    {
+      v1Phase: "verified" as const,
+      cleanupStatus: "pending" as const,
+      expectedStatus: "cleanup-pending",
+      expectedV2Phase: "cleanup-ready",
+    },
+    {
+      v1Phase: "cleanupPending" as const,
+      cleanupStatus: "retained" as const,
+      expectedStatus: "cleanup-pending",
+      expectedV2Phase: "cleanup-ready",
+    },
+    {
+      v1Phase: "completed" as const,
+      cleanupStatus: "removed" as const,
+      expectedStatus: "completed",
+      expectedV2Phase: "completed",
+    },
+  ])(
+    "preserves a valid newer map root while upgrading a v1 $v1Phase d2389a0 journal",
+    async ({ v1Phase, cleanupStatus, expectedStatus, expectedV2Phase }) => {
+      const { legacySource, targetRevision, metadataKey, checkpointKey } =
+        await seedActualV1EmptyMapFixtureWithoutCheckpoint();
+      const journal = structuredClone(
+        legacyMapJournalV1EmptyEventFixture.journal,
+      );
+      journal.phase = v1Phase;
+      journal.entries[0]!.cleanupStatus = cleanupStatus;
+      await writeRawRecordAtExistingVersion(
+        "syncQueue",
+        LEGACY_MIGRATION_JOURNAL_KEY,
+        journal,
+      );
+
+      const initialEventName = `${v1Phase}-更新済みイベント`;
+      const initialDayMapName = "1日目マップ";
+      const initialPayload: MapDataStore = {
+        [initialEventName]: {
+          [initialDayMapName]: makeDayMap(`before-${v1Phase}`),
+        },
+      };
+      const initialRevision = `newer-map-root-${v1Phase}`;
+      await writeRawRecordAtExistingVersion(
+        "mapData",
+        createSplitMapKey(initialEventName, initialDayMapName),
+        initialPayload[initialEventName]![initialDayMapName],
+      );
+      await writeRawRecordAtExistingVersion("syncQueue", metadataKey, {
+        ...legacyMapJournalV1EmptyEventFixture.metadata,
+        revision: initialRevision,
+        baseRevision: targetRevision,
+        payloadDigest: await createPersistenceDigest(initialPayload),
+        payloadFingerprint: createSynchronousFingerprint(initialPayload),
+        writerId: `newer-writer-${v1Phase}`,
+        committedAt: "2026-08-03T00:01:00.000Z",
+      });
+
+      const activeDb = await importFreshDb();
+      await expect(activeDb.loadMapData()).resolves.toMatchObject({
+        status: "ok",
+        data: initialPayload,
+      });
+      const savedPayload: MapDataStore = {
+        [`${v1Phase}-保存後イベント`]: {
+          "2日目マップ": makeDayMap(`after-${v1Phase}`),
+        },
+      };
+      await activeDb.saveMapData(savedPayload);
+      const metadataBefore = await readRawRecord("syncQueue", metadataKey);
+      const checkpointBefore = await readRawRecord("syncQueue", checkpointKey);
+      expect(checkpointBefore).toBeDefined();
+      const keysBefore = (await activeDb.getAllKeys("mapData")).sort();
+      const recordsBefore = await Promise.all(
+        keysBefore.map(async (key) => [
+          key,
+          await readRawRecord("mapData", key),
+        ]),
+      );
+      if (v1Phase === "completed") {
+        localStorage.removeItem("mapData");
+      }
+
+      vi.resetModules();
+      const resumedDb = await importFreshDb();
+      await expect(resumedDb.migrateFromLocalStorage()).resolves.toMatchObject({
+        status: expectedStatus,
+        dataMigrationStatus: "verified",
+      });
+
+      expect(await readMigrationJournalV2()).toMatchObject({
+        schemaVersion: 2,
+        phase: expectedV2Phase,
+        entries: [
+          expect.objectContaining({
+            legacyKey: "mapData",
+            targetRevision,
+          }),
+        ],
+      });
+      expect(await readRawRecord("syncQueue", metadataKey)).toEqual(
+        metadataBefore,
+      );
+      expect(await readRawRecord("syncQueue", checkpointKey)).toEqual(
+        checkpointBefore,
+      );
+      const keysAfter = (await resumedDb.getAllKeys("mapData")).sort();
+      const recordsAfter = await Promise.all(
+        keysAfter.map(async (key) => [
+          key,
+          await readRawRecord("mapData", key),
+        ]),
+      );
+      expect(recordsAfter).toEqual(recordsBefore);
+      await expect(resumedDb.loadMapData()).resolves.toMatchObject({
+        status: "ok",
+        data: savedPayload,
+      });
+      expect(localStorage.getItem("mapData")).toBe(
+        v1Phase === "completed" ? null : legacySource,
+      );
+    },
+  );
+
+  it("upgrades the prepared d2389a0 empty-event map journal before copying", async () => {
+    const legacySource = legacyMapJournalV1EmptyEventFixture.legacySource;
+    const targetRevision = legacyMapJournalV1EmptyEventFixture.targetRevision;
+    const metadataKey = createPersistenceMetadataKey("mapData", DATA_KEY);
+    const checkpointKey = createPersistenceCheckpointKey("mapData", DATA_KEY);
+    const preparedJournal = structuredClone(
+      legacyMapJournalV1EmptyEventFixture.journal,
+    );
+    preparedJournal.phase = "prepared";
+    await seedDatabase(CURRENT_DATABASE_VERSION);
+    await writeRawRecordAtExistingVersion(
+      "syncQueue",
+      LEGACY_MIGRATION_JOURNAL_KEY,
+      preparedJournal,
+    );
+    localStorage.setItem("mapData", legacySource);
+    const normalizedDigest = await createPersistenceDigest({});
+    const db = await importFreshDb();
+
+    await expect(db.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "cleanup-pending",
+      dataMigrationStatus: "verified",
+      cleanupStatus: "deferred",
+      migratedKeys: ["mapData"],
+    });
+
+    expect(await readMigrationJournalV2()).toMatchObject({
+      schemaVersion: 2,
+      phase: "cleanup-ready",
+      entries: [
+        expect.objectContaining({
+          legacyKey: "mapData",
+          targetRevision,
+          payloadDigest: normalizedDigest,
+        }),
+      ],
+    });
+    expect(await readRawRecord("syncQueue", metadataKey)).toMatchObject({
+      revision: targetRevision,
+      payloadDigest: normalizedDigest,
+    });
+    expect(await readRawRecord("syncQueue", checkpointKey)).toMatchObject({
+      committedRoot: {
+        revision: targetRevision,
+        digest: normalizedDigest,
+      },
+    });
+    await expect(db.loadMapData()).resolves.toMatchObject({
+      status: "missing",
+      data: null,
+    });
+    expect(localStorage.getItem("mapData")).toBe(legacySource);
+  });
+
+  it("rolls back the d2389a0 map metadata repair when archive creation fails", async () => {
+    const { legacySource, metadataKey, checkpointKey } =
+      await seedActualV1EmptyMapFixtureWithoutCheckpoint();
+    const journalBefore = await readRawRecord(
+      "syncQueue",
+      LEGACY_MIGRATION_JOURNAL_KEY,
+    );
+    const metadataBefore = await readRawRecord("syncQueue", metadataKey);
+    const archiveKey = `${LEGACY_MIGRATION_ARCHIVE_KEY_PREFIX}${encodeURIComponent(
+      legacyMapJournalV1EmptyEventFixture.journal.sessionId,
+    )}`;
+    const archiveFailure = mockMigrationArchivePutFailure(
+      new DOMException("forced v1 map archive failure", "QuotaExceededError"),
+    );
+    const db = await importFreshDb();
+
+    await expect(db.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "recovery-required",
+    });
+
+    expect(archiveFailure.getInjectionCount()).toBe(1);
+    expect(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ).toEqual(journalBefore);
+    expect(await readRawRecord("syncQueue", metadataKey)).toEqual(
+      metadataBefore,
+    );
+    expect(await readRawRecord("syncQueue", checkpointKey)).toBeUndefined();
+    expect(await readRawRecord("syncQueue", archiveKey)).toBeUndefined();
+    expect(await db.getAllKeys("mapData")).toEqual(
+      Object.keys(legacyMapJournalV1EmptyEventFixture.physicalEntries),
+    );
+    expect(localStorage.getItem("mapData")).toBe(legacySource);
+  });
+
+  it("rejects a tampered d2389a0 empty-event map digest without changing evidence", async () => {
+    const { legacySource, metadataKey, checkpointKey } =
+      await seedActualV1EmptyMapFixtureWithoutCheckpoint();
+    const tamperedJournal = structuredClone(
+      legacyMapJournalV1EmptyEventFixture.journal,
+    );
+    tamperedJournal.entries[0]!.payloadDigest.value = "f".repeat(64);
+    await writeRawRecordAtExistingVersion(
+      "syncQueue",
+      LEGACY_MIGRATION_JOURNAL_KEY,
+      tamperedJournal,
+    );
+    const metadataBefore = await readRawRecord("syncQueue", metadataKey);
+    const db = await importFreshDb();
+
+    await expect(db.migrateFromLocalStorage()).resolves.toMatchObject({
+      status: "recovery-required",
+    });
+
+    expect(
+      await readRawRecord("syncQueue", LEGACY_MIGRATION_JOURNAL_KEY),
+    ).toEqual(tamperedJournal);
+    expect(await readRawRecord("syncQueue", metadataKey)).toEqual(
+      metadataBefore,
+    );
+    expect(await readRawRecord("syncQueue", checkpointKey)).toBeUndefined();
+    expect(localStorage.getItem("mapData")).toBe(legacySource);
   });
 
   it.each([

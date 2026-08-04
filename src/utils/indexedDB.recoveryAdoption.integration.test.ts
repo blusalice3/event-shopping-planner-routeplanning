@@ -282,6 +282,46 @@ describe("explicit recovery candidate adoption", () => {
     );
   });
 
+  it("rejects an empty-baseRevision sibling before explicit adoption can commit", async () => {
+    const { recoveryDb, committed, candidate, selectedSource, siblingSource } =
+      await prepareRuntimeMetadataConflict();
+    const malformedSibling = JSON.parse(siblingSource.rawValue) as Record<
+      string,
+      unknown
+    >;
+    malformedSibling.baseRevision = "";
+    const malformedRawValue = JSON.stringify(malformedSibling);
+    localStorage.setItem(siblingSource.storageKey, malformedRawValue);
+    const controlRecordsBefore = await readAllRawRecords("syncQueue");
+
+    await expect(
+      recoveryDb.adoptRecoveryCandidate(candidate),
+    ).rejects.toMatchObject({ name: "PersistenceConflict" });
+
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(committed);
+    expect(await readAllRawRecords("syncQueue")).toEqual(controlRecordsBefore);
+    expect(localStorage.getItem(selectedSource.storageKey)).toBe(
+      selectedSource.rawValue,
+    );
+    expect(localStorage.getItem(siblingSource.storageKey)).toBe(
+      malformedRawValue,
+    );
+
+    const rescanned = await recoveryDb.loadEventMetadata();
+    expect(rescanned.status).toBe("conflict");
+    expect(rescanned.recoveryBundle?.candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: "runtime-fallback",
+          sourceKey: siblingSource.storageKey,
+          role: "invalid-source",
+          adoptable: false,
+          rawValue: malformedRawValue,
+        }),
+      ]),
+    );
+  });
+
   it("rejects a source that changes during the IndexedDB CAS transaction", async () => {
     const { recoveryDb, committed, candidate, selectedSource } =
       await prepareRuntimeMetadataConflict();

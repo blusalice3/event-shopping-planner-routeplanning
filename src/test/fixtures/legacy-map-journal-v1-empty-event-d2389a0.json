@@ -1,0 +1,61 @@
+{
+  "sourceCommit": "d2389a02363176ba8354c4562f1a669a0b15dab9",
+  "checkpointPresent": false,
+  "legacyPayload": {
+    "Event": {}
+  },
+  "normalizedPayload": {},
+  "physicalEntries": {},
+  "legacySource": "{\"Event\":{},\"__proto__\":{}}",
+  "targetRevision": "legacy-v1-map-empty-event-revision",
+  "metadata": {
+    "kind": "event-shopping-planner-persistence-metadata",
+    "version": 1,
+    "storeName": "mapData",
+    "key": "data",
+    "revision": "legacy-v1-map-empty-event-revision",
+    "baseRevision": null,
+    "payloadDigest": {
+      "algorithm": "SHA-256",
+      "canonicalization": "esp-json-v1",
+      "value": "df99fbdc73acce9e491b30f39171e6b8392dd0a5a87edfc33a58e38ff5a49a19"
+    },
+    "payloadFingerprint": {
+      "algorithm": "FNV-1A-64",
+      "canonicalization": "esp-json-v1",
+      "canonicalLength": 12,
+      "value": "212d6a3b62a50657"
+    },
+    "writerId": "writer-d2389a0-map-empty-event",
+    "committedAt": "2026-08-03T00:00:01.000Z"
+  },
+  "journal": {
+    "kind": "event-shopping-planner-legacy-migration",
+    "schemaVersion": 1,
+    "sessionId": "legacy-v1-map-empty-event-session",
+    "ownerId": "writer-d2389a0-map-empty-event",
+    "phase": "copied",
+    "createdAt": "2026-08-03T00:00:00.000Z",
+    "updatedAt": "2026-08-03T00:00:01.000Z",
+    "entries": [
+      {
+        "legacyKey": "mapData",
+        "storeName": "mapData",
+        "rawValue": "{\"Event\":{},\"__proto__\":{}}",
+        "rawDigest": {
+          "algorithm": "SHA-256",
+          "canonicalization": "esp-json-v1",
+          "value": "381d21db1258bcf18ea3cbf445ec2575f1fb84e894329fcfae4b3026cef586aa"
+        },
+        "payloadDigest": {
+          "algorithm": "SHA-256",
+          "canonicalization": "esp-json-v1",
+          "value": "df99fbdc73acce9e491b30f39171e6b8392dd0a5a87edfc33a58e38ff5a49a19"
+        },
+        "targetRevision": "legacy-v1-map-empty-event-revision",
+        "mapKeys": [],
+        "cleanupStatus": "pending"
+      }
+    ]
+  }
+}

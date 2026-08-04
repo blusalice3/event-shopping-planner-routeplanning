@@ -1,0 +1,60 @@
+{
+  "sourceCommit": "d2389a02363176ba8354c4562f1a669a0b15dab9",
+  "checkpointPresent": false,
+  "legacyPayload": {
+    "ProtoDayEvent": {}
+  },
+  "physicalEntries": {},
+  "legacySource": "{\"ProtoDayEvent\":{\"__proto__\":{\"sheetName\":\"proto-day\",\"maxRow\":1,\"maxCol\":1,\"cells\":[],\"mergedCells\":[],\"blocks\":[]}}}",
+  "targetRevision": "legacy-v1-map-proto-day-revision",
+  "metadata": {
+    "kind": "event-shopping-planner-persistence-metadata",
+    "version": 1,
+    "storeName": "mapData",
+    "key": "data",
+    "revision": "legacy-v1-map-proto-day-revision",
+    "baseRevision": null,
+    "payloadDigest": {
+      "algorithm": "SHA-256",
+      "canonicalization": "esp-json-v1",
+      "value": "6de87ebfce7a5b5fc275089278c67fc70237b62b79e307fceea3095e2478f8ab"
+    },
+    "payloadFingerprint": {
+      "algorithm": "FNV-1A-64",
+      "canonicalization": "esp-json-v1",
+      "canonicalLength": 20,
+      "value": "09e45f44625cba63"
+    },
+    "writerId": "writer-d2389a0-map-proto-day",
+    "committedAt": "2026-08-03T00:02:01.000Z"
+  },
+  "journal": {
+    "kind": "event-shopping-planner-legacy-migration",
+    "schemaVersion": 1,
+    "sessionId": "legacy-v1-map-proto-day-session",
+    "ownerId": "writer-d2389a0-map-proto-day",
+    "phase": "copied",
+    "createdAt": "2026-08-03T00:02:00.000Z",
+    "updatedAt": "2026-08-03T00:02:01.000Z",
+    "entries": [
+      {
+        "legacyKey": "mapData",
+        "storeName": "mapData",
+        "rawValue": "{\"ProtoDayEvent\":{\"__proto__\":{\"sheetName\":\"proto-day\",\"maxRow\":1,\"maxCol\":1,\"cells\":[],\"mergedCells\":[],\"blocks\":[]}}}",
+        "rawDigest": {
+          "algorithm": "SHA-256",
+          "canonicalization": "esp-json-v1",
+          "value": "1383603a3ce49e0022e426bb0c3e4bce60c5709c73877c1847b0347e5e4e728e"
+        },
+        "payloadDigest": {
+          "algorithm": "SHA-256",
+          "canonicalization": "esp-json-v1",
+          "value": "6de87ebfce7a5b5fc275089278c67fc70237b62b79e307fceea3095e2478f8ab"
+        },
+        "targetRevision": "legacy-v1-map-proto-day-revision",
+        "mapKeys": [],
+        "cleanupStatus": "pending"
+      }
+    ]
+  }
+}

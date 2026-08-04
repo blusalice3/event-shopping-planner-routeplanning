@@ -558,7 +558,7 @@ describe("runtime fallback candidate", () => {
     ).resolves.toBe(true);
   });
 
-  it("欠落・余分なfield、storage keyとの不一致、不正digestを拒否する", async () => {
+  it("欠落・余分なfield、空baseRevision、storage keyとの不一致、不正digestを拒否する", async () => {
     const candidate = await createCandidate("revision-2", "revision-1");
     const valid = JSON.parse(
       serializeRuntimeFallbackCandidate(candidate),
@@ -567,6 +567,7 @@ describe("runtime fallback candidate", () => {
     const withExtra = { ...valid, unsupported: true };
     const missingWriter = { ...valid };
     delete missingWriter.writerId;
+    const emptyBaseRevision = { ...valid, baseRevision: "" };
     const invalidDigest = {
       ...valid,
       digest: {
@@ -583,6 +584,9 @@ describe("runtime fallback candidate", () => {
       parseRuntimeFallbackCandidate(JSON.stringify(missingWriter)),
     ).toThrow(PersistenceEnvelopeError);
     expect(() =>
+      parseRuntimeFallbackCandidate(JSON.stringify(emptyBaseRevision)),
+    ).toThrow(PersistenceEnvelopeError);
+    expect(() =>
       parseRuntimeFallbackCandidate(JSON.stringify(invalidDigest)),
     ).toThrow(PersistenceEnvelopeError);
     expect(() =>
@@ -590,6 +594,9 @@ describe("runtime fallback candidate", () => {
         revision: "different-revision",
       }),
     ).toThrow(/does not match its storage key/);
+    await expect(createCandidate("revision-2", "")).rejects.toThrow(
+      PersistenceEnvelopeError,
+    );
   });
 });
 

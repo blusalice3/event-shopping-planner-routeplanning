@@ -678,6 +678,11 @@ export async function createRuntimeFallbackCandidate<T>({
   createdAt?: string;
   payload: T;
 }): Promise<RuntimeFallbackCandidate<T>> {
+  if (baseRevision !== null && baseRevision.length === 0) {
+    throw new PersistenceEnvelopeError(
+      "Runtime fallback baseRevision must be null or a non-empty string.",
+    );
+  }
   const canonicalPayload = cloneCanonicalPayload(payload);
   const digest = await createPersistenceDigest(canonicalPayload);
   return deepFreeze({
@@ -749,9 +754,7 @@ export function parseRuntimeFallbackCandidate<T = unknown>(
     typeof record.key !== "string" ||
     typeof record.revision !== "string" ||
     record.revision.length === 0 ||
-    !(
-      record.baseRevision === null || typeof record.baseRevision === "string"
-    ) ||
+    !isCheckpointBaseRevision(record.baseRevision) ||
     typeof record.writerId !== "string" ||
     record.writerId.length === 0 ||
     typeof record.createdAt !== "string" ||

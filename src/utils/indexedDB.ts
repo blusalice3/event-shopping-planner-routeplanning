@@ -676,10 +676,13 @@ function parseMapDataEntryKey(key: string): [string, string] | null {
       return [parsed[0], parsed[1]];
     }
   } catch {
-    // Ignore invalid split-map keys; legacy data is handled separately.
+    // The managed prefix makes this app-owned evidence. Fall through to the
+    // fail-closed error so the raw physical record is exported for recovery.
   }
 
-  return null;
+  throw new InvalidMapPayloadError(
+    "Persisted mapData contains an invalid managed split-record key.",
+  );
 }
 
 async function deleteDataFromIndexedDb(
@@ -1368,7 +1371,7 @@ function createNextPersistenceCheckpoint(
     }
     absorbedByRevision.set(descriptor.revision, descriptor);
   });
-  return {
+  const checkpoint: PersistenceCheckpoint = {
     kind: "event-shopping-planner-persistence-checkpoint",
     version: 1,
     storeName,
@@ -1385,6 +1388,18 @@ function createNextPersistenceCheckpoint(
     ),
     updatedAt: new Date().toISOString(),
   };
+  const validatedCheckpoint = validateCheckpointForRoot(
+    checkpoint,
+    storeName,
+    key,
+    metadata,
+  );
+  if (!validatedCheckpoint) {
+    throw new PersistenceConflictError(
+      `${storeName}:${key} produced an empty persistence checkpoint.`,
+    );
+  }
+  return validatedCheckpoint;
 }
 
 async function readRuntimeCandidateSnapshots<T>(
@@ -4395,6 +4410,60 @@ function parseLegacyMigrationPayload(
   return parsed;
 }
 
+function parseLegacyV1MigrationPayloadForDigest(
+  target: LegacyMigrationTarget,
+  rawValue: string,
+  normalizedPayload: Record<string, unknown>,
+): Record<string, unknown> {
+  if (target.storeName !== STORES.MAP_DATA) return normalizedPayload;
+  const parsed = JSON.parse(rawValue) as unknown;
+  if (!isPlainRecord(parsed)) {
+    throw new Error(`${target.legacyKey} must contain a JSON object.`);
+  }
+
+  // d2389a0 retained exactly empty map events in the logical digest even
+  // though it emitted no split records for them. Its ordinary property
+  // assignment also dropped "__proto__" event/day names as own keys.
+  // Reconstruct that historical representation while sourcing all retained
+  // day-map values from the current strict parser and normalizer.
+  const legacyPayload: Record<string, unknown> = {};
+  Object.entries(parsed).forEach(([eventName, eventMap]) => {
+    if (!isPlainRecord(eventMap)) {
+      throw new Error(`${target.legacyKey} contains an invalid event map.`);
+    }
+    // d2389a0 used ordinary property assignment. "__proto__" therefore
+    // replaced an intermediate prototype and never became an own event key.
+    if (eventName === "__proto__") return;
+    const normalizedEventMap = normalizedPayload[eventName];
+    const legacyEventMap: Record<string, unknown> = {};
+    Object.keys(eventMap).forEach((dayMapName) => {
+      // The nested ordinary assignment had the same "__proto__" behavior.
+      if (dayMapName === "__proto__") return;
+      if (
+        !isPlainRecord(normalizedEventMap) ||
+        !Object.prototype.hasOwnProperty.call(normalizedEventMap, dayMapName)
+      ) {
+        throw new Error(
+          `${target.legacyKey} could not reconstruct legacy day ${dayMapName}.`,
+        );
+      }
+      Object.defineProperty(legacyEventMap, dayMapName, {
+        value: normalizedEventMap[dayMapName],
+        enumerable: true,
+        configurable: true,
+        writable: true,
+      });
+    });
+    Object.defineProperty(legacyPayload, eventName, {
+      value: legacyEventMap,
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    });
+  });
+  return legacyPayload;
+}
+
 function isLegacyMigrationJournalEntryV1(
   value: unknown,
   entryKeys: Set<string>,
@@ -4724,9 +4793,29 @@ async function readAndValidateLegacyMigrationArchive(
   );
 }
 
-function upgradeLegacyMigrationJournalValue(
+async function upgradeLegacyMigrationJournalValue(
   journal: LegacyMigrationJournalV1,
-): LegacyMigrationJournal {
+): Promise<LegacyMigrationJournal> {
+  const normalizedPayloadDigests = new Map<
+    string,
+    PersistenceDigestDescriptor
+  >();
+  const normalizedMapKeys = new Map<string, string[]>();
+  for (const { target, rawValue } of legacySnapshotsFromJournal(journal)) {
+    const normalizedPayload = parseLegacyMigrationPayload(target, rawValue);
+    normalizedPayloadDigests.set(
+      target.legacyKey,
+      await createPersistenceDigest(normalizedPayload),
+    );
+    if (target.storeName === STORES.MAP_DATA) {
+      normalizedMapKeys.set(
+        target.legacyKey,
+        buildMapDataPuts(normalizedPayload as MapDataStore)
+          .map(({ key }) => key)
+          .sort(),
+      );
+    }
+  }
   const allRemoved = journal.entries.every(
     ({ cleanupStatus }) => cleanupStatus === "removed",
   );
@@ -4777,9 +4866,10 @@ function upgradeLegacyMigrationJournalValue(
       storeName: entry.storeName,
       rawValue: entry.rawValue,
       expectedRawDigest: entry.rawDigest,
-      payloadDigest: entry.payloadDigest,
+      payloadDigest:
+        normalizedPayloadDigests.get(entry.legacyKey) ?? entry.payloadDigest,
       targetRevision: entry.targetRevision,
-      mapKeys: [...entry.mapKeys],
+      mapKeys: normalizedMapKeys.get(entry.legacyKey) ?? [...entry.mapKeys],
       cleanupStatus:
         entry.cleanupStatus === "removed"
           ? "removed"
@@ -4790,26 +4880,151 @@ function upgradeLegacyMigrationJournalValue(
   };
 }
 
+interface LegacyV1MapNormalizationRepair {
+  expectedSnapshot: RawMapSnapshot;
+  repairedMetadata: StoredPersistenceMetadata;
+  mapDeletes: string[];
+  mapPuts: { key: string; value: unknown }[];
+}
+
+async function prepareLegacyV1MapNormalizationRepair(
+  journal: LegacyMigrationJournalV1,
+  upgraded: LegacyMigrationJournal,
+): Promise<LegacyV1MapNormalizationRepair | null> {
+  const legacyEntry = journal.entries.find(
+    ({ storeName }) => storeName === STORES.MAP_DATA,
+  );
+  const upgradedEntry = upgraded.entries.find(
+    ({ storeName }) => storeName === STORES.MAP_DATA,
+  );
+  if (
+    !legacyEntry ||
+    !upgradedEntry ||
+    fingerprintsEqual(legacyEntry.payloadDigest, upgradedEntry.payloadDigest)
+  ) {
+    return null;
+  }
+  if (journal.phase === "prepared") return null;
+
+  const target = LEGACY_MIGRATION_TARGETS.find(
+    ({ legacyKey, storeName }) =>
+      legacyKey === legacyEntry.legacyKey &&
+      storeName === legacyEntry.storeName,
+  );
+  if (!target) {
+    throw new PersistenceConflictError(
+      "A legacy v1 map journal contains an unknown target.",
+    );
+  }
+  const normalizedPayload = parseLegacyMigrationPayload(
+    target,
+    legacyEntry.rawValue,
+  );
+  const legacyDigestPayload = parseLegacyV1MigrationPayloadForDigest(
+    target,
+    legacyEntry.rawValue,
+    normalizedPayload,
+  );
+  const expectedLegacyFingerprint =
+    createSynchronousFingerprint(legacyDigestPayload);
+  const normalizedFingerprint = createSynchronousFingerprint(normalizedPayload);
+  const expectedLegacyPuts = buildMapDataPuts(
+    legacyDigestPayload as MapDataStore,
+  );
+  const normalizedPuts = buildMapDataPuts(normalizedPayload as MapDataStore);
+  const snapshot = await readRawMapSnapshotWithRetry();
+  const materialized = materializeMapData(snapshot.entries);
+  const actualKeys = [...materialized.knownKeys].sort();
+  const expectedKeys = [...legacyEntry.mapKeys].sort();
+  const expectedLegacyPutKeys = expectedLegacyPuts.map(({ key }) => key).sort();
+  const legacyMetadata = isStoredPersistenceMetadata(
+    snapshot.metadata,
+    STORES.MAP_DATA,
+    DATA_KEY,
+  )
+    ? snapshot.metadata
+    : null;
+  if (
+    legacyMetadata !== null &&
+    legacyMetadata.revision === legacyEntry.targetRevision &&
+    fingerprintsEqual(
+      legacyMetadata.payloadDigest,
+      legacyEntry.payloadDigest,
+    ) &&
+    fingerprintsEqual(
+      legacyMetadata.payloadFingerprint,
+      expectedLegacyFingerprint,
+    ) &&
+    snapshot.checkpoint === undefined &&
+    actualKeys.length === expectedKeys.length &&
+    actualKeys.every((key, index) => key === expectedKeys[index]) &&
+    expectedLegacyPutKeys.length === expectedKeys.length &&
+    expectedLegacyPutKeys.every((key, index) => key === expectedKeys[index]) &&
+    expectedLegacyPuts.every(({ key, value }) =>
+      fingerprintsEqual(snapshot.entries[key], value),
+    )
+  ) {
+    return {
+      expectedSnapshot: snapshot,
+      repairedMetadata: {
+        ...legacyMetadata,
+        payloadDigest: upgradedEntry.payloadDigest,
+        payloadFingerprint: normalizedFingerprint,
+      },
+      mapDeletes: actualKeys,
+      mapPuts: normalizedPuts,
+    };
+  }
+
+  if (journal.phase !== "copied") {
+    const currentValidation = await validateMapSnapshot(snapshot);
+    if (
+      !("conflict" in currentValidation) &&
+      !currentValidation.validated.root.synthetic
+    ) {
+      return null;
+    }
+  }
+  throw new PersistenceConflictError(
+    "A legacy v1 map journal does not match its physical root.",
+  );
+}
+
 async function upgradeLegacyMigrationJournalV1Atomically(
   journal: LegacyMigrationJournalV1,
   legacySyncQueueRawValue: string | null,
 ): Promise<LegacyMigrationJournal> {
   await validateLegacyMigrationJournalDescriptors(journal);
-  const upgraded = upgradeLegacyMigrationJournalValue(journal);
+  const upgraded = await upgradeLegacyMigrationJournalValue(journal);
+  const mapNormalizationRepair = await prepareLegacyV1MapNormalizationRepair(
+    journal,
+    upgraded,
+  );
   const archive = await createLegacyMigrationArchive(
     journal,
     legacySyncQueueRawValue,
   );
   const database = await openDB();
   ensureStoreExists(database, STORES.SYNC_QUEUE);
+  if (mapNormalizationRepair) {
+    ensureStoreExists(database, STORES.MAP_DATA);
+  }
 
   await new Promise<void>((resolve, reject) => {
-    const transaction = database.transaction(STORES.SYNC_QUEUE, "readwrite");
+    const transaction = database.transaction(
+      mapNormalizationRepair
+        ? [STORES.MAP_DATA, STORES.SYNC_QUEUE]
+        : STORES.SYNC_QUEUE,
+      "readwrite",
+    );
     const store = transaction.objectStore(STORES.SYNC_QUEUE);
     let failure: unknown = null;
     let currentJournal: unknown;
     let currentArchive: unknown;
-    let readsRemaining = 2;
+    let currentMapEntries: Record<string, unknown> | undefined;
+    let currentMapMetadata: unknown;
+    let currentMapCheckpoint: unknown;
+    let readsRemaining = mapNormalizationRepair ? 5 : 2;
     let writesQueued = false;
 
     const abortWith = (error: unknown) => {
@@ -4845,10 +5060,49 @@ async function upgradeLegacyMigrationJournalV1Atomically(
             currentArchive,
           );
         }
+        if (
+          mapNormalizationRepair &&
+          (!currentMapEntries ||
+            !fingerprintsEqual(
+              currentMapEntries,
+              mapNormalizationRepair.expectedSnapshot.entries,
+            ) ||
+            !fingerprintsEqual(
+              currentMapMetadata,
+              mapNormalizationRepair.expectedSnapshot.metadata,
+            ) ||
+            currentMapCheckpoint !== undefined)
+        ) {
+          throw new PersistenceConflictError(
+            "The copied legacy v1 map root changed before normalization.",
+          );
+        }
         if (currentArchive === undefined) {
           const archivePut = store.put(archive, upgraded.archiveKey);
           archivePut.onerror = () => {
             failure = failure ?? archivePut.error;
+          };
+        }
+        if (mapNormalizationRepair) {
+          const mapStore = transaction.objectStore(STORES.MAP_DATA);
+          mapNormalizationRepair.mapDeletes.forEach((key) => {
+            const mapDelete = mapStore.delete(key);
+            mapDelete.onerror = () => {
+              failure = failure ?? mapDelete.error;
+            };
+          });
+          mapNormalizationRepair.mapPuts.forEach(({ key, value }) => {
+            const mapPut = mapStore.put(value, key);
+            mapPut.onerror = () => {
+              failure = failure ?? mapPut.error;
+            };
+          });
+          const metadataPut = store.put(
+            mapNormalizationRepair.repairedMetadata,
+            createPersistenceMetadataKey(STORES.MAP_DATA, DATA_KEY),
+          );
+          metadataPut.onerror = () => {
+            failure = failure ?? metadataPut.error;
           };
         }
         const journalPut = store.put(upgraded, LEGACY_MIGRATION_JOURNAL_KEY);
@@ -4876,6 +5130,39 @@ async function upgradeLegacyMigrationJournalV1Atomically(
       currentArchive = archiveRequest.result;
       queueWrites();
     };
+    if (mapNormalizationRepair) {
+      void readMapEntriesFromStore(
+        transaction.objectStore(STORES.MAP_DATA),
+      ).then(
+        (entries) => {
+          currentMapEntries = entries;
+          queueWrites();
+        },
+        (error: unknown) => {
+          abortWith(error);
+        },
+      );
+      const metadataRequest = store.get(
+        createPersistenceMetadataKey(STORES.MAP_DATA, DATA_KEY),
+      );
+      metadataRequest.onerror = () => {
+        failure = failure ?? metadataRequest.error;
+      };
+      metadataRequest.onsuccess = () => {
+        currentMapMetadata = metadataRequest.result;
+        queueWrites();
+      };
+      const checkpointRequest = store.get(
+        createPersistenceCheckpointKey(STORES.MAP_DATA, DATA_KEY),
+      );
+      checkpointRequest.onerror = () => {
+        failure = failure ?? checkpointRequest.error;
+      };
+      checkpointRequest.onsuccess = () => {
+        currentMapCheckpoint = checkpointRequest.result;
+        queueWrites();
+      };
+    }
     transaction.oncomplete = () => resolve();
     transaction.onerror = () => {
       failure = failure ?? transaction.error;
@@ -4889,6 +5176,7 @@ async function upgradeLegacyMigrationJournalV1Atomically(
   });
 
   await readAndValidateLegacyMigrationArchive(upgraded, archive);
+  await validateLegacyMigrationJournalDescriptors(upgraded);
   return upgraded;
 }
 
@@ -5757,7 +6045,16 @@ async function validateLegacyMigrationJournalDescriptors(
       snapshot.target,
       snapshot.rawValue,
     );
-    const [rawDigestValid, payloadDigestValid] = await Promise.all([
+    const legacyV1MapPayload =
+      journal.schemaVersion === 1 &&
+      snapshot.target.storeName === STORES.MAP_DATA
+        ? parseLegacyV1MigrationPayloadForDigest(
+            snapshot.target,
+            snapshot.rawValue,
+            payload,
+          )
+        : null;
+    const [rawDigestValid, normalizedPayloadDigestValid] = await Promise.all([
       verifyPersistenceDigest(
         snapshot.rawValue,
         "expectedRawDigest" in journalEntry
@@ -5766,16 +6063,23 @@ async function validateLegacyMigrationJournalDescriptors(
       ),
       verifyPersistenceDigest(payload, journalEntry.payloadDigest),
     ]);
+    const legacyV1PayloadDigestValid =
+      !normalizedPayloadDigestValid && legacyV1MapPayload !== null
+        ? await verifyPersistenceDigest(
+            legacyV1MapPayload,
+            journalEntry.payloadDigest,
+          )
+        : false;
     const mapKeys =
       snapshot.target.storeName === STORES.MAP_DATA
-        ? buildMapDataPuts(payload as MapDataStore)
+        ? buildMapDataPuts((legacyV1MapPayload ?? payload) as MapDataStore)
             .map(({ key }) => key)
             .sort()
         : [];
     const recordedMapKeys = [...journalEntry.mapKeys].sort();
     if (
       !rawDigestValid ||
-      !payloadDigestValid ||
+      (!normalizedPayloadDigestValid && !legacyV1PayloadDigestValid) ||
       mapKeys.length !== recordedMapKeys.length ||
       mapKeys.some((key, index) => key !== recordedMapKeys[index])
     ) {
