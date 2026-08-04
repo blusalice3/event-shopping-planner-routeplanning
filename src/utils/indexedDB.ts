@@ -4888,6 +4888,7 @@ async function upgradeLegacyMigrationJournalValue(
 interface LegacyV1MapNormalizationRepair {
   expectedSnapshot: RawMapSnapshot;
   repairedMetadata: StoredPersistenceMetadata;
+  repairedCheckpoint: PersistenceCheckpoint;
   mapDeletes: string[];
   mapPuts: { key: string; value: unknown }[];
 }
@@ -4969,13 +4970,20 @@ async function prepareLegacyV1MapNormalizationRepair(
       fingerprintsEqual(snapshot.entries[key], value),
     )
   ) {
+    const repairedMetadata: StoredPersistenceMetadata = {
+      ...legacyMetadata,
+      payloadDigest: upgradedEntry.payloadDigest,
+      payloadFingerprint: normalizedFingerprint,
+    };
     return {
       expectedSnapshot: snapshot,
-      repairedMetadata: {
-        ...legacyMetadata,
-        payloadDigest: upgradedEntry.payloadDigest,
-        payloadFingerprint: normalizedFingerprint,
-      },
+      repairedMetadata,
+      repairedCheckpoint: createNextPersistenceCheckpoint(
+        STORES.MAP_DATA,
+        DATA_KEY,
+        repairedMetadata,
+        null,
+      ),
       mapDeletes: actualKeys,
       mapPuts: normalizedPuts,
     };
@@ -5108,6 +5116,13 @@ async function upgradeLegacyMigrationJournalV1Atomically(
           );
           metadataPut.onerror = () => {
             failure = failure ?? metadataPut.error;
+          };
+          const checkpointPut = store.put(
+            mapNormalizationRepair.repairedCheckpoint,
+            createPersistenceCheckpointKey(STORES.MAP_DATA, DATA_KEY),
+          );
+          checkpointPut.onerror = () => {
+            failure = failure ?? checkpointPut.error;
           };
         }
         const journalPut = store.put(upgraded, LEGACY_MIGRATION_JOURNAL_KEY);
