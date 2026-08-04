@@ -33,6 +33,9 @@ function getAutomaticAdoptionRejectionReason(
   candidate: StartupRecoveryCandidate,
 ): string {
   if (candidate.adoptable !== true) {
+    if (candidate.storeName === "syncQueue") {
+      return "syncQueueは未接続の不透明な実行待ちデータであり、内容を推測して送信・併合せず、JSON退避だけを許可するためです。";
+    }
     switch (candidate.role) {
       case "legacy-migration-source":
         return "旧localStorage原本は直接採用せず、検証済み移行またはJSON退避の対象として保持するためです。";

@@ -2846,7 +2846,12 @@ async function saveData<T>(
           createdAt: current.missing ? undefined : current.committedAt,
         },
         partitioned.active.map(({ candidate }) => candidate),
-        currentCheckpoint?.absorbedCandidates ?? [],
+        [
+          ...(currentCheckpoint?.absorbedCandidates ?? []),
+          ...absorbedForCommit.map(({ candidate }) =>
+            checkpointDescriptorFromRuntimeCandidate(candidate),
+          ),
+        ],
       );
       if (reconciliation.status === "conflict" || reconciliation.head) {
         throw new PersistenceConflictError(
@@ -3208,7 +3213,7 @@ async function loadDataUnobserved<T>(
         undefined,
         {
           digest: validated.root.payloadDigest,
-          adoptable: !validated.root.missing,
+          adoptable: storeName !== STORES.SYNC_QUEUE && !validated.root.missing,
         },
       ),
       ...runtimeSnapshotsToRecoveryCandidates(

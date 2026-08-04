@@ -299,6 +299,46 @@ describe("PersistenceRecoveryScreen", () => {
     expect(screen.queryByText("候補2の非公開payload")).not.toBeInTheDocument();
   });
 
+  it("syncQueue候補を採用不可の退避専用として説明する", () => {
+    const syncQueueCandidate: StartupRecoveryCandidate = {
+      id: "sync-queue-candidate",
+      source: "runtime-fallback",
+      role: "app-payload",
+      adoptable: false,
+      storeName: "syncQueue",
+      key: "data",
+      sourceKey: "esp:idb-fallback:v1:syncQueue:data:queue-revision",
+      targetKey: "data",
+      revision: "queue-revision",
+      digest: "queue-digest",
+      payload: [{ id: "画面に表示しないqueue payload" }],
+      rawValue: "画面に表示しないqueue raw",
+    };
+
+    render(
+      <PersistenceRecoveryScreen
+        {...defaultProps}
+        candidates={[syncQueueCandidate]}
+        onAdopt={vi.fn()}
+      />,
+    );
+
+    const candidateRadio = screen.getByRole("radio");
+    expect(candidateRadio).toBeDisabled();
+    expect(screen.getByText("復旧候補 1（退避のみ）")).toBeVisible();
+    expect(
+      screen.getByText(
+        "syncQueueは未接続の不透明な実行待ちデータであり、内容を推測して送信・併合せず、JSON退避だけを許可するためです。",
+      ),
+    ).toBeVisible();
+    expect(
+      screen.queryByText("画面に表示しないqueue payload"),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText("画面に表示しないqueue raw"),
+    ).not.toBeInTheDocument();
+  });
+
   it("radioで選んだ候補だけを警告付きで明示採用し、完了まで二重実行を防ぐ", async () => {
     const adoption = createDeferred<void>();
     const onAdopt = vi.fn(() => adoption.promise);

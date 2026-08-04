@@ -660,8 +660,34 @@ export function useIndexedDbPersistence({
 
     try {
       const migrationResult = await db.migrateFromLocalStorage();
+      const loadedSyncQueue = await db.loadSyncQueue();
       if (migrationResult.status === "recovery-required") {
-        const recoveryBundle = migrationResult.recoveryBundle;
+        const syncQueueFailed =
+          loadedSyncQueue.status === "error" ||
+          loadedSyncQueue.status === "conflict";
+        const recoveryBundle = syncQueueFailed
+          ? createRecoveryBundle(
+              [
+                {
+                  stage: "load",
+                  code:
+                    loadedSyncQueue.status === "conflict"
+                      ? "PersistenceConflict"
+                      : sanitizeErrorCode(
+                          readErrorField(loadedSyncQueue.error, "name") ||
+                            "LoadError",
+                        ),
+                  message:
+                    loadedSyncQueue.status === "conflict"
+                      ? "syncQueue に複数の保存候補があり、安全に選択できません。"
+                      : "syncQueue の保存データを読み込めませんでした。",
+                  storeName: "syncQueue",
+                  key: "data",
+                },
+              ],
+              [migrationResult.recoveryBundle, loadedSyncQueue.recoveryBundle],
+            )
+          : migrationResult.recoveryBundle;
         if (!isMountedRef.current) return;
         setStartupState({
           status: "recovery-required",
@@ -718,6 +744,7 @@ export function useIndexedDbPersistence({
         ["hallDefinitions", loadedHallDefinitions],
         ["hallRouteSettings", loadedHallRouteSettings],
         ["mapViewportSettings", loadedMapViewportSettings],
+        ["syncQueue", loadedSyncQueue],
       ] as const;
 
       const failedLoads = loadedStores.filter(

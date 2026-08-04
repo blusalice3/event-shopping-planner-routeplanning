@@ -184,6 +184,10 @@ localStorageに`syncQueue`が存在する場合:
 
 通常の旧データがなくlegacy `syncQueue`だけが存在し、archiveを容量不足等で保存できない場合は、app payloadの選択競合として扱いません。migration結果は`dataMigrationStatus=not-needed`、`cleanupStatus=deferred`、`cleanupDeferredReason=legacy-sync-queue-archive-unavailable`とし、原本を保持したまま通常起動とautosaveを継続します。通常の移行対象も同時に存在する場合のarchive失敗は、引き続き`recovery-required`です。
 
+namespaced runtime fallback `esp:idb-fallback:v1:syncQueue:data:<revision>` は、上記のgeneric legacy keyとは別物です。Release Aはmigration結果にかかわらず起動時に`loadSyncQueue()`で必ず走査し、envelope、payload digest、lineage、checkpointを検証します。確定rootからの一意な連続性を証明できる場合だけ既存の原子的修復経路でIDBへ確定し、commit後にfallbackを削除します。未知parent、未証明ancestor、branch、同revision不一致、破損envelopeは通常画面とautosaveを開始せず`recovery-required`にし、IDB rootと全runtime候補を原本のままrecovery JSONへ含めます。
+
+`syncQueue`は未接続の不透明な実行待ちデータであり、IndexedDB候補とruntime fallback候補はいずれも`adoptable=false`の「退避のみ」とします。復旧UIから明示採用、内容の推測変換、認証・共有・Realtime・送信処理への流用、ほかのqueueとのmergeは行いません。
+
 metricsへ記録できるのは`legacy_sync_queue_present=true/false`、archive成功可否、raw byte数のbucketまでです。raw値、digest、配列長、内部field名は送信しません。
 
 必要な回帰試験:
@@ -192,11 +196,18 @@ metricsへ記録できるのは`legacy_sync_queue_present=true/false`、archive�
 - archive失敗時に原本を削除しない
 - migration、restore、cleanupがIDB `syncQueue/data`と内部control recordを変更しない
 - legacy `syncQueue`だけが存在しても通常データへ推測移行しない
+- namespaced runtime fallbackをmigration結果にかかわらず起動時走査し、競合時は全候補を`adoptable=false`でJSON退避できる
+- namespaced runtime fallbackの未証明ancestor、未知parent、branch、破損時にIDB、checkpoint、localStorage原本を変更しない
 - recovery JSON以外のlog、error、telemetryへraw値を出さない
 
 ## 7. Release A gate
 
-すべてPASSするまでproductionへ配布しません。
+Release Aの判定は次の2段階に分離します。
+
+- `implementation-complete`: A1〜A12が同一のclean full SHAでPASSし、配布可能な実装資材とローカル／隔離環境の検証が完了している
+- `production-accepted`: A1〜A14が同一の配布SHAでPASSし、provider設定、24時間canary、実installed PWA、rollback、reviewer承認まで完了している
+
+`implementation-complete`だけを`production-accepted`、本番承認済み、Release A gate完了と表現してはいけません。repository内の実装と自動検証だけではA13/A14を完了できず、全gateがPASSするまでproductionへ配布しません。
 
 | Gate             | 合格条件                                                                   | 証跡                       |
 | ---------------- | -------------------------------------------------------------------------- | -------------------------- |
@@ -208,7 +219,7 @@ metricsへ記録できるのは`legacy_sync_queue_present=true/false`、archive�
 | A6 migration     | journal互換reader、各段階再開、実IDB root登録、archive検証                 | migration回帰結果          |
 | A7 recovery      | 親なし、破損、branchを保持し、JSON退避と再試行が可能                       | UI/integration結果         |
 | A8 compatibility | DB v5/v7、既存fallback、public DB API、atomic restore、import/exportを維持 | compatibility結果          |
-| A9 syncQueue     | legacy raw保持、IDB queue非破壊                                            | 専用回帰結果               |
+| A9 syncQueue     | legacy raw保持、runtime候補の起動時走査・JSON退避、IDB queue非破壊         | 専用回帰結果               |
 | A10 PWA          | `/sw.js` header、更新、offline、通常tab/PWA混在を確認                      | browser evidence           |
 | A11 privacy      | payloadなしのmetrics、同一origin backend、cleanup削除件数を確認            | telemetry/API review       |
 | A12 quality      | test、typecheck、build、format、文字コード検査がPASS                       | command log                |

@@ -23,6 +23,8 @@ import {
   startupRecoveryCandidatesHaveSameSelectionDescriptor,
   verifyPersistenceDigest,
   type PersistenceCheckpoint,
+  type PersistenceCheckpointAbsorbedCandidate,
+  type RuntimeFallbackCandidate,
   type StartupRecoveryCandidate,
 } from "./persistenceResilience";
 
@@ -44,6 +46,17 @@ const createCandidate = (
     createdAt: CREATED_AT,
     payload,
   });
+
+const checkpointDescriptorForCandidate = (
+  candidate: RuntimeFallbackCandidate,
+): PersistenceCheckpointAbsorbedCandidate => ({
+  schemaVersion: candidate.schemaVersion,
+  revision: candidate.revision,
+  baseRevision: candidate.baseRevision,
+  digest: candidate.digest,
+  writerId: candidate.writerId,
+  createdAt: candidate.createdAt,
+});
 
 const createCheckpoint = async (): Promise<PersistenceCheckpoint> => {
   const [committedDigest, ancestorDigest] = await Promise.all([
@@ -658,7 +671,7 @@ describe("reconcileRuntimeFallbackCandidates", () => {
     }
   });
 
-  it("IDBの直接・連鎖ancestorをstaleとして分離し、descendantを採用する", async () => {
+  it("checkpoint descriptorで証明済みのIDB ancestorだけをstaleとして分離し、descendantを採用する", async () => {
     const revision1 = await createCandidate("revision-1", "revision-0");
     const revision2 = await createCandidate("revision-2", "revision-1");
     const revision4 = await createCandidate("revision-4", "revision-3");
@@ -666,6 +679,10 @@ describe("reconcileRuntimeFallbackCandidates", () => {
     const result = reconcileRuntimeFallbackCandidates(
       { revision: "revision-3", baseRevision: "revision-2" },
       [revision1, revision4, revision2],
+      [
+        checkpointDescriptorForCandidate(revision1),
+        checkpointDescriptorForCandidate(revision2),
+      ],
     );
 
     expect(result).toMatchObject({
@@ -675,11 +692,45 @@ describe("reconcileRuntimeFallbackCandidates", () => {
       chain: [{ revision: "revision-4" }],
     });
     if (result.status === "resolved") {
-      expect(result.staleCandidates.map(({ revision }) => revision)).toEqual([
-        "revision-2",
-        "revision-1",
-      ]);
+      expect(result.staleCandidates.map(({ revision }) => revision)).toEqual(
+        expect.arrayContaining(["revision-2", "revision-1"]),
+      );
+      expect(result.staleCandidates).toHaveLength(2);
     }
+  });
+
+  it("descriptorのないcurrent.baseRevision候補をancestorと推測せずconflictにする", async () => {
+    const unverifiedAncestor = await createRuntimeFallbackCandidate({
+      storeName: STORE_NAME,
+      key: RECORD_KEY,
+      revision: "revision-parent",
+      baseRevision: "claimed-grandparent",
+      writerId: "different-writer",
+      createdAt: "2026-08-03T00:00:02.000Z",
+      payload: { value: "different-parent-payload" },
+    });
+
+    expect(
+      reconcileRuntimeFallbackCandidates(
+        {
+          revision: "revision-current",
+          baseRevision: unverifiedAncestor.revision,
+        },
+        [unverifiedAncestor],
+      ),
+    ).toMatchObject({
+      status: "conflict",
+      reason: "unverified-ancestor",
+      conflictingCandidates: [
+        {
+          revision: unverifiedAncestor.revision,
+          digest: unverifiedAncestor.digest,
+          writerId: unverifiedAncestor.writerId,
+          createdAt: unverifiedAncestor.createdAt,
+        },
+      ],
+      staleCandidates: [],
+    });
   });
 
   it("checkpoint済みancestorと同じrevisionの異なるdigestをstale扱いせずconflictにする", async () => {

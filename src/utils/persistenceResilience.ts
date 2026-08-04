@@ -183,7 +183,8 @@ export type RuntimeFallbackReconciliation<T = unknown> =
         | "unknown-parent"
         | "branch"
         | "ancestor-branch"
-        | "ancestor-cycle";
+        | "ancestor-cycle"
+        | "unverified-ancestor";
       conflictingCandidates: RuntimeFallbackCandidate<T>[];
       staleCandidates: RuntimeFallbackCandidate<T>[];
     };
@@ -908,7 +909,6 @@ export function reconcileRuntimeFallbackCandidates<T>(
     !visitedAncestors.has(ancestorRevision)
   ) {
     visitedAncestors.add(ancestorRevision);
-    staleRevisions.add(ancestorRevision);
     ancestorRevision = byRevision.get(ancestorRevision)?.baseRevision ?? null;
   }
   if (ancestorRevision && visitedAncestors.has(ancestorRevision)) {
@@ -922,6 +922,26 @@ export function reconcileRuntimeFallbackCandidates<T>(
             candidate !== undefined,
         ),
       staleCandidates: [],
+    };
+  }
+  const unverifiedAncestors = Array.from(visitedAncestors)
+    .filter((revision) => !staleRevisions.has(revision))
+    .map((revision) => byRevision.get(revision))
+    .filter(
+      (candidate): candidate is RuntimeFallbackCandidate<T> =>
+        candidate !== undefined,
+    );
+  if (unverifiedAncestors.length > 0) {
+    return {
+      status: "conflict",
+      reason: "unverified-ancestor",
+      conflictingCandidates: unverifiedAncestors,
+      staleCandidates: Array.from(staleRevisions)
+        .map((revision) => byRevision.get(revision))
+        .filter(
+          (candidate): candidate is RuntimeFallbackCandidate<T> =>
+            candidate !== undefined,
+        ),
     };
   }
 

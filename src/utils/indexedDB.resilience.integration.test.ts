@@ -5526,6 +5526,170 @@ describe("db.restoreAppDataAtomically resilience", () => {
 });
 
 describe("db runtime fallback resilience", () => {
+  it("keeps an unverified ancestor candidate and rejects save instead of absorbing it by revision alone", async () => {
+    const parentValue = {
+      未証明ancestorイベント: { generation: "actual-parent" },
+    };
+    const currentValue = {
+      未証明ancestorイベント: { generation: "current-root" },
+    };
+    const rejectedValue = {
+      未証明ancestorイベント: { generation: "must-not-commit" },
+    };
+    const counterfeitParentValue = {
+      未証明ancestorイベント: { generation: "counterfeit-parent" },
+    };
+    const db = await importFreshDb();
+    await db.saveEventMetadata(parentValue);
+    const actualParentRevision = await readCurrentRevision("eventMetadata");
+    await db.saveEventMetadata(currentValue);
+
+    const metadataKey = createPersistenceMetadataKey("eventMetadata", DATA_KEY);
+    const checkpointKey = createPersistenceCheckpointKey(
+      "eventMetadata",
+      DATA_KEY,
+    );
+    const metadataBefore = await readRawRecord("syncQueue", metadataKey);
+    const checkpointBefore = await readRawRecord("syncQueue", checkpointKey);
+    expect(metadataBefore).toMatchObject({
+      baseRevision: actualParentRevision,
+    });
+    expect(checkpointBefore).toMatchObject({
+      absorbedCandidates: [],
+    });
+
+    const counterfeitCandidate = await createRuntimeFallbackCandidate({
+      storeName: "eventMetadata",
+      key: DATA_KEY,
+      revision: actualParentRevision,
+      baseRevision: "counterfeit-grandparent",
+      writerId: "counterfeit-writer",
+      createdAt: "2026-08-04T00:00:00.000Z",
+      payload: counterfeitParentValue,
+    });
+    const counterfeitStorageKey = createRuntimeFallbackKey(
+      "eventMetadata",
+      DATA_KEY,
+      counterfeitCandidate.revision,
+    );
+    const counterfeitRaw =
+      serializeRuntimeFallbackCandidate(counterfeitCandidate);
+    localStorage.setItem(counterfeitStorageKey, counterfeitRaw);
+
+    await expect(db.saveEventMetadata(rejectedValue)).rejects.toMatchObject({
+      name: "PersistenceConflict",
+    });
+
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      currentValue,
+    );
+    expect(await readRawRecord("syncQueue", metadataKey)).toEqual(
+      metadataBefore,
+    );
+    expect(await readRawRecord("syncQueue", checkpointKey)).toEqual(
+      checkpointBefore,
+    );
+    expect(localStorage.getItem(counterfeitStorageKey)).toBe(counterfeitRaw);
+
+    vi.resetModules();
+    const recoveryDb = await importFreshDb();
+    const loaded = await recoveryDb.loadEventMetadata();
+    expect(loaded).toMatchObject({
+      status: "conflict",
+      data: null,
+      recoveryBundle: {
+        candidates: expect.arrayContaining([
+          expect.objectContaining({
+            source: "indexedDB",
+            storeName: "eventMetadata",
+          }),
+          expect.objectContaining({
+            source: "runtime-fallback",
+            storeName: "eventMetadata",
+            sourceKey: counterfeitStorageKey,
+            revision: counterfeitCandidate.revision,
+            digest: counterfeitCandidate.digest.value,
+          }),
+        ]),
+      },
+    });
+    expect(await readRawRecord("eventMetadata", DATA_KEY)).toEqual(
+      currentValue,
+    );
+    expect(await readRawRecord("syncQueue", checkpointKey)).toEqual(
+      checkpointBefore,
+    );
+    expect(localStorage.getItem(counterfeitStorageKey)).toBe(counterfeitRaw);
+  });
+
+  it("exposes a syncQueue branch for JSON recovery only and keeps every source unchanged", async () => {
+    const committedQueue = [{ id: "committed-queue-entry" }];
+    const fallbackQueue = [{ id: "unverified-queue-entry" }];
+    const db = await importFreshDb();
+    await db.saveSyncQueue(committedQueue);
+    const metadataKey = createPersistenceMetadataKey("syncQueue", DATA_KEY);
+    const checkpointKey = createPersistenceCheckpointKey("syncQueue", DATA_KEY);
+    const metadataBefore = await readRawRecord("syncQueue", metadataKey);
+    const checkpointBefore = await readRawRecord("syncQueue", checkpointKey);
+    const fallback = await installRuntimeFallbackCandidate({
+      storeName: "syncQueue",
+      revision: "unverified-sync-queue-branch",
+      baseRevision: "missing-sync-queue-parent",
+      payload: fallbackQueue,
+    });
+
+    vi.resetModules();
+    const recoveryDb = await importFreshDb();
+    const loaded = await recoveryDb.loadSyncQueue();
+    expect(loaded).toMatchObject({
+      status: "conflict",
+      data: null,
+      recoveryBundle: {
+        candidates: expect.arrayContaining([
+          expect.objectContaining({
+            source: "indexedDB",
+            role: "app-payload",
+            adoptable: false,
+            storeName: "syncQueue",
+            payload: committedQueue,
+          }),
+          expect.objectContaining({
+            source: "runtime-fallback",
+            role: "app-payload",
+            adoptable: false,
+            storeName: "syncQueue",
+            sourceKey: fallback.storageKey,
+            revision: fallback.candidate.revision,
+            digest: fallback.candidate.digest.value,
+            payload: fallbackQueue,
+            rawValue: fallback.serialized,
+          }),
+        ]),
+      },
+    });
+    const fallbackRecoveryCandidate = loaded.recoveryBundle?.candidates.find(
+      ({ source, storeName }) =>
+        source === "runtime-fallback" && storeName === "syncQueue",
+    );
+    if (!fallbackRecoveryCandidate) {
+      throw new Error("Missing syncQueue runtime recovery candidate.");
+    }
+
+    await expect(
+      recoveryDb.adoptRecoveryCandidate(fallbackRecoveryCandidate),
+    ).rejects.toMatchObject({
+      name: "PersistenceConflict",
+    });
+    expect(await readRawRecord("syncQueue", DATA_KEY)).toEqual(committedQueue);
+    expect(await readRawRecord("syncQueue", metadataKey)).toEqual(
+      metadataBefore,
+    );
+    expect(await readRawRecord("syncQueue", checkpointKey)).toEqual(
+      checkpointBefore,
+    );
+    expect(localStorage.getItem(fallback.storageKey)).toBe(fallback.serialized);
+  });
+
   it("keeps absorbed lineage proof when cleanup succeeds only for later candidates", async () => {
     const db = await importFreshDb();
     const baseValue = {

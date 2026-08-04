@@ -25,6 +25,7 @@ const dbMock = vi.hoisted(() => ({
   loadHallDefinitions: vi.fn(),
   loadHallRouteSettings: vi.fn(),
   loadMapViewportSettings: vi.fn(),
+  loadSyncQueue: vi.fn(),
   saveEventLists: vi.fn(),
   saveEventMetadata: vi.fn(),
   saveExecuteModeItems: vi.fn(),
@@ -200,6 +201,7 @@ describe("useIndexedDbPersistence", () => {
     dbMock.loadHallDefinitions.mockResolvedValue(missing);
     dbMock.loadHallRouteSettings.mockResolvedValue(missing);
     dbMock.loadMapViewportSettings.mockResolvedValue(missing);
+    dbMock.loadSyncQueue.mockResolvedValue(missing);
 
     dbMock.saveEventLists.mockResolvedValue(undefined);
     dbMock.saveEventMetadata.mockResolvedValue(undefined);
@@ -241,6 +243,7 @@ describe("useIndexedDbPersistence", () => {
 
     expect(result.current.startupState.status).toBe("ready");
     expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(1);
+    expect(dbMock.loadSyncQueue).toHaveBeenCalledTimes(1);
     expect(getPersistenceReleaseAMetricsSnapshot().counters.startup.ready).toBe(
       1,
     );
@@ -369,6 +372,7 @@ describe("useIndexedDbPersistence", () => {
       isRetrying: false,
     });
     expect(dbMock.loadEventLists).not.toHaveBeenCalled();
+    expect(dbMock.loadSyncQueue).toHaveBeenCalledTimes(1);
     Object.values(setters).forEach((setter) => {
       expect(setter).not.toHaveBeenCalled();
     });
@@ -390,10 +394,99 @@ describe("useIndexedDbPersistence", () => {
     });
 
     expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(2);
+    expect(dbMock.loadSyncQueue).toHaveBeenCalledTimes(2);
     expect(result.current.startupState.status).toBe("ready");
     expect(result.current.isInitialized).toBe(true);
     Object.values(setters).forEach((setter) => {
       expect(setter).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("migration recoveryでもsyncQueueを走査し、両方の退避候補を同じbundleへ統合する", async () => {
+    const migrationCandidate = {
+      id: "legacy-migration-candidate",
+      source: "legacy-localStorage" as const,
+      role: "legacy-migration-source" as const,
+      adoptable: false,
+      storeName: "eventMetadata",
+      key: "eventMetadata",
+      sourceKey: "eventMetadata",
+      rawValue: "legacy-raw",
+    };
+    const syncQueueCandidate = {
+      id: "sync-queue-runtime-candidate",
+      source: "runtime-fallback" as const,
+      role: "app-payload" as const,
+      adoptable: false,
+      storeName: "syncQueue",
+      key: "data",
+      sourceKey: "esp:idb-fallback:v1:syncQueue:data:queue-branch",
+      targetKey: "data",
+      revision: "queue-branch",
+      digest: "queue-digest",
+      payload: [{ id: "queue-entry" }],
+      rawValue: "queue-raw",
+    };
+    dbMock.migrateFromLocalStorage.mockResolvedValue({
+      status: "recovery-required",
+      recoveryBundle: {
+        kind: "event-shopping-planner-persistence-recovery",
+        version: 1,
+        capturedAt: "2026-08-04T00:00:00.000Z",
+        issues: [
+          {
+            stage: "migration",
+            code: "LegacyConflict",
+            message: "legacy conflict",
+          },
+        ],
+        candidates: [migrationCandidate],
+      },
+    });
+    dbMock.loadSyncQueue.mockResolvedValue({
+      status: "conflict",
+      data: null,
+      error: Object.assign(new Error("syncQueue conflict"), {
+        name: "PersistenceConflict",
+      }),
+      recoveryBundle: {
+        kind: "event-shopping-planner-persistence-recovery",
+        version: 1,
+        capturedAt: "2026-08-04T00:00:01.000Z",
+        issues: [
+          {
+            stage: "load",
+            code: "PersistenceConflict",
+            message: "syncQueue conflict",
+            storeName: "syncQueue",
+          },
+        ],
+        candidates: [syncQueueCandidate],
+      },
+    });
+    const setters = createSetters();
+
+    const { result } = renderHook(() =>
+      useIndexedDbPersistence({
+        values: createValues(),
+        setters,
+        saveDelayMs: 1,
+      }),
+    );
+    await act(flushMicrotasks);
+
+    expect(result.current.startupState.status).toBe("recovery-required");
+    if (result.current.startupState.status !== "recovery-required") {
+      throw new Error("Expected merged migration recovery state.");
+    }
+    expect(
+      result.current.startupState.recoveryBundle?.candidates.map(
+        ({ sourceKey }) => sourceKey,
+      ),
+    ).toEqual([migrationCandidate.sourceKey, syncQueueCandidate.sourceKey]);
+    expect(dbMock.loadEventLists).not.toHaveBeenCalled();
+    Object.values(setters).forEach((setter) => {
+      expect(setter).not.toHaveBeenCalled();
     });
   });
 
@@ -640,6 +733,89 @@ describe("useIndexedDbPersistence", () => {
       "Failed to save data to IndexedDB:",
       expect.anything(),
     );
+  });
+
+  it("syncQueueの競合候補を起動時に退避専用bundleへ含め、hydrateとautosaveを停止する", async () => {
+    const queuePayload = [{ id: "opaque-queue-entry" }];
+    const queueRawValue =
+      '{"baseRevision":"queue-parent","createdAt":"2026-08-04T00:00:00.000Z","digest":{"algorithm":"SHA-256","canonicalization":"esp-json-v1","value":"queue-digest"},"key":"data","payload":[{"id":"opaque-queue-entry"}],"revision":"queue-branch","schemaVersion":1,"storeName":"syncQueue","writerId":"queue-writer"}';
+    dbMock.loadSyncQueue.mockResolvedValue({
+      status: "conflict",
+      data: null,
+      error: Object.assign(new Error("syncQueue conflict"), {
+        name: "PersistenceConflict",
+      }),
+      recoveryBundle: {
+        kind: "event-shopping-planner-persistence-recovery",
+        version: 1,
+        capturedAt: "2026-08-04T00:00:00.000Z",
+        issues: [
+          {
+            stage: "load",
+            code: "PersistenceConflict",
+            message: "syncQueue conflict",
+            storeName: "syncQueue",
+          },
+        ],
+        candidates: [
+          {
+            id: "sync-queue-runtime-candidate",
+            source: "runtime-fallback",
+            role: "app-payload",
+            adoptable: false,
+            storeName: "syncQueue",
+            key: "data",
+            sourceKey: "esp:idb-fallback:v1:syncQueue:data:queue-branch",
+            targetKey: "data",
+            revision: "queue-branch",
+            digest: "queue-digest",
+            digestAlgorithm: "SHA-256",
+            digestCanonicalization: "esp-json-v1",
+            payload: queuePayload,
+            rawValue: queueRawValue,
+          },
+        ],
+      },
+    });
+    const setters = createSetters();
+    const { result, rerender } = renderHook(
+      ({ values }: { values: PersistedValues }) =>
+        useIndexedDbPersistence({ values, setters, saveDelayMs: 1 }),
+      { initialProps: { values: createValues() } },
+    );
+
+    await act(flushMicrotasks);
+
+    expect(dbMock.loadSyncQueue).toHaveBeenCalledTimes(1);
+    expect(result.current.startupState.status).toBe("recovery-required");
+    if (result.current.startupState.status !== "recovery-required") {
+      throw new Error("Expected syncQueue recovery-required startup state.");
+    }
+    expect(result.current.startupState.recoveryBundle).toMatchObject({
+      candidates: [
+        {
+          storeName: "syncQueue",
+          role: "app-payload",
+          adoptable: false,
+          payload: queuePayload,
+          rawValue: queueRawValue,
+        },
+      ],
+    });
+    Object.values(setters).forEach((setter) => {
+      expect(setter).not.toHaveBeenCalled();
+    });
+
+    rerender({
+      values: {
+        ...createValues(),
+        eventLists: { syncQueue競合後の変更: [] },
+      },
+    });
+    await act(async () => {
+      await vi.runOnlyPendingTimersAsync();
+    });
+    expect(dbMock.saveEventLists).not.toHaveBeenCalled();
   });
 
   it("複数storeのload競合候補を上書きせず1つの回復bundleへ統合する", async () => {

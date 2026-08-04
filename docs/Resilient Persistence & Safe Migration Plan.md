@@ -111,9 +111,12 @@ IndexedDB（以下IDB）とlocalStorageの間で、因果関係を確認でき�
 #### Release A: 読込・保存・復旧の安全化
 
 - checkpoint、互換reader、map正規化、実root登録、journal v2、復旧導線を導入します。
+- namespaced `syncQueue` runtime fallbackも起動時に検証し、未解決候補は明示採用せずJSON退避専用で復旧画面へ含めます。
 - 旧localStorageの物理cleanupはfeature flagで強制OFFにします。
 - canary環境でcheckpoint採用率、修復成功率、競合率、保存失敗率、起動時間を観測します。
 - `d2389a0`配布済みの場合は、孤立候補の検出・退避が機能することをRelease Bの必須条件にします。
+
+Release Aの「実装完了」は同一のclean full SHAでコード、A1〜A12相当の自動／隔離環境試験、配布資材が完了した状態です。「本番受入完了」はそれに加えてprovider設定、24時間canary、実installed PWA、rollback、証跡validator、承認が完了した状態です。実測していない外部証跡がある場合は前者だけを完了とし、本番承認済みとは判定しません。
 
 #### Release B: 条件付きcleanup
 
@@ -149,6 +152,7 @@ IndexedDB（以下IDB）とlocalStorageの間で、因果関係を確認でき�
 - mapの空eventを含む全対応値が保存・読込・migration・restoreで同じ論理値とdigestになる。
 - `copied` / `verified`再開直後の保存で偽のCAS競合が発生しない。
 - `d2389a0`由来を含む孤立候補を自動採用・自動削除せず、退避または明示復旧できる。
+- namespaced `syncQueue` fallbackを毎起動時に検証し、一意に連続する候補だけを修復する。競合候補はIDB・checkpoint・localStorage原本を保持し、明示採用不可のJSON退避対象として表示する。
 - public DB APIおよび永続化以外の既存機能に回帰がない。
 - 全自動テスト、型検査、build、format、対象ブラウザ/PWA試験、ロールバック演習が成功する。
 - UTF-8 BOMなしと既存改行形式を維持し、U+FFFD、不自然な`?`、日本語文字化け、改行だけの大量差分がない。
