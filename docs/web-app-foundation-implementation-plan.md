@@ -1,1113 +1,1593 @@
-# Webアプリ実装基盤 改修計画
+# Web アプリ基盤 実装計画
 
-- 文書状態: 実装照合・再レビュー反映済み
-- 基準日: 2026-08-05
-- 基準commit: `806794df6222053235139e7ef6684f4aa6538b3d`
-- 対象リポジトリ: `event-shopping-planner-routeplanning-1.9.6.7`
-- 対象範囲: フロントエンドの配信、PWA更新、性能、保守性、自動テスト基盤
+- 対象リポジトリ: `event-shopping-planner-routeplanning`
+- 実装照合日: 2026-08-05
+- 実装照合基準: `2c8cc6602e0a4b8bb301524fd7306d7bc87840ca`
+- 対象: Web 配信基盤、PWA 更新、CSS/CSP、XLSX 実行、買い物リスト描画、`App.tsx`、IndexedDB、品質ゲート
 
 ## 1. 目的
 
-現在の利用者向け機能と保存データの互換性を維持しながら、次を段階的に改善する。
-
-1. 一般操作E2E、アクセシビリティ検査、性能計測、CIを先に整備する。
-2. 既存の遅延チャンクを安全に扱えるPWA更新ライフサイクルを確立する。
-3. Tailwind CSSをCDN実行からローカルビルドへ移し、CSPを強制する。
-4. ExcelJSを初期読込経路から外し、XLSX処理をWeb Workerへ移す。
-5. 長い買い物一覧を、既存操作を維持したまま仮想化する。
-6. `src/App.tsx` と `src/utils/indexedDB.ts` を既存の分離済み境界を再利用して縮小する。
-7. React Hooks関連を中心とするlint警告を、挙動をテストで固定しながら0件にする。
-
-本計画では、構造変更、配信変更、性能変更、保存仕様変更を同じPRへ混在させない。各フェーズは、依存する品質ゲートとロールバック手段が実在し、成功した後にだけ次へ進む。
-
-## 2. 実装照合済みの現状
-
-### 2.1 基準環境と検証結果
-
-| 項目           | 2026-08-05時点の実測                                                                                        |
-| -------------- | ----------------------------------------------------------------------------------------------------------- |
-| 調査環境       | Windows 11、Node `20.20.0`、npm `10.8.2`                                                                    |
-| TypeScript     | `npm run typecheck` 成功                                                                                    |
-| lint           | エラー0件、警告130件                                                                                        |
-| lint内訳       | `react-hooks/exhaustive-deps` 83件、未使用38件、その他9件                                                   |
-| Vitest         | 120ファイル、1,198テスト成功                                                                                |
-| 大規模ファイル | `App.tsx` 5,844行、`indexedDB.ts` 9,176行、`ShoppingList.tsx` 4,414行、`useIndexedDbPersistence.ts` 1,050行 |
-| 文字コード     | 対象ソース・設定・MarkdownはUTF-8、BOMなし                                                                  |
-| 対象文書       | UTF-8、BOMなし、LF、U+FFFDなし                                                                              |
-
-Node 20は基準計測に使われたローカル環境であり、今後のサポート対象ではない。Node公式のリリース情報ではNode 20はEOLであるため、フェーズ0でNode 24 LTSへ更新して固定する。
-
-### 2.2 配信・PWA・バンドル
-
-| 項目              | 現状                                                                                  |
-| ----------------- | ------------------------------------------------------------------------------------- |
-| Tailwind          | `index.html:14` の `https://cdn.tailwindcss.com` を実行時読込                         |
-| インライン資産    | `index.html` にインラインstyle 1箇所、実行可能なインラインscript 3箇所                |
-| PWA登録           | `vite-plugin-pwa` が `registerSW.js` を自動生成                                       |
-| PWA更新           | `registerType: "autoUpdate"`、`skipWaiting: true`、`clientsClaim: true`               |
-| PWA cleanup       | `cleanupOutdatedCaches: true`                                                         |
-| runtime cache     | Tailwind CDNを30日間 `CacheFirst`                                                     |
-| 既存lazy chunk    | `AppMainContent.tsx` が `ImportScreen` と `FocusModeContainer` を `React.lazy` で読込 |
-| XLSX              | `xlsxMapParser.ts` と `exportImport.ts` がExcelJSを静的import                         |
-| 初期modulepreload | `xlsx-parser` manual chunkが初期HTMLからpreloadされる                                 |
-| Worker            | アプリ本体にWeb Workerなし                                                            |
-| CSP               | `vercel.json` に強制CSP、Report-Only CSPともになし                                    |
-| Vite manifest     | 通常buildでは生成していない                                                           |
-
-基準buildでは、主entryが約912 kB、`xlsx-parser` が約972 kB、既存lazy chunkが約17 kBと約138 kBであった。Workboxはこれらを含む19資産、約3.0 MiBをprecacheした。値は未圧縮のminified出力を含む一時点の値であり、フェーズ0の再現可能な計測で正式な基準へ置き換える。
-
-既にlazy chunkが存在するため、Service Workerの世代不一致は将来のXLSX Worker導入後だけの問題ではない。PWA更新安全化はTailwind、CSP、XLSXより前に行う。
-
-### 2.3 既存の分離済み境界
-
-`App.tsx` は巨大だが、次は既に分離されている。
-
-- `AppHeaderShell`、`AppMainContent`、`AppOverlayLayer`
-- `features/events` の更新、取込、バックアップ、品目操作
-- `features/map` の取込、再取込、ホール操作、selector
-- `features/lists` の範囲選択、移動plan、操作state
-- `features/space-navigation`
-- `components/focus` の一部hook、panel、dialog
-
-ただし、`App.tsx` から各shellへ多数のprops、生のsetter、handlerを渡しており、バックアップ、XLSX、マップ、イベントライフサイクルの調停も残っている。`App.tsx:5795-5839` にはshell外のoverlayと永続化UIも残る。`ActiveTab` 等には `features/app-shell/types.ts` と重複する型もある。
-
-永続化は `indexedDB.ts` だけではなく、次へ既に一部分離されている。
-
-- `useIndexedDbPersistence.ts`: hydration、autosave queue、排他restore、画面向けstatus
-- `mapDataPersistence.ts`: map payloadの正規化・圧縮・展開
-- `persistenceResilience.ts`: digest、checkpoint、fallback、復旧snapshot
-- `persistenceCleanupCoordinator.ts`: cleanupのlock、Service Worker、client quiescence判定
-- `persistenceReleaseAMetrics*.ts`: Release Aメトリクス
-- `persistenceRecoveryExport.ts`: 復旧用JSON出力
-
-後続の分割では、これらを重複実装または無計画に移動しない。
-
-### 2.4 品質基盤の不足
-
-- `.github/workflows` とbranch protectionの必須checkは未導入。
-- Playwright、axe連携、Vitest coverage、architecture検査は未導入。
-- `quality:local`、`quality:pr`、`quality:artifact`、`quality:release` は未定義。
-- `test:release-a-browser` はbuild済みpreviewを別途起動しなければ動かない。
-- 現行rollback rehearsalは旧commitを現在の `node_modules` で再buildしており、不変artifactの試験ではない。
-- `test:release-a-evidence` はvalidator自体のNodeテストであり、実証跡JSONの検証は `verify:release-a-evidence -- <path>` である。
-- 一部integration testは `App.tsx` のソース文字列とhandler名を直接検査するため、そのままでは責務抽出に追随できない。
-- `.gitattributes` の全体LF指定と、Prettierの2ファイルに対するCRLF指定が一致していない。
-- format、encoding、typecheck、lintはroot設定、HTML、将来のE2E設定を一部検査しない。
-- `npm audit` は全依存でCritical 1 / High 19、production依存でHigh 4を既に報告するため、単純な「High以上0件」ゲートは現状では通らない。
-
-## 3. 対象外
-
-次は本計画へ混在させない。
-
-- 共有、認証、Supabase同期の機能追加
-- 経路探索アルゴリズム、訪問順、購入状態の業務仕様変更
-- IndexedDBのDB version、store名、key、保存schemaの変更
-- イベント名を安定IDへ移行するデータモデル変更
-- XLSX、CSV、JSONバックアップのファイル仕様変更
-- 画面全体のデザイン刷新
-- 新しい本番telemetry endpointやCSP report収集APIの追加
-- 将来の共有機能originを現行CSPへ先行追加すること
-
-semantic element、label、dialog focus、ズーム許可など、品質ゲートを成立させる局所的なアクセシビリティ修正は対象に含める。
-
-## 4. 用語と不変条件
+この計画は、現在の機能、保存データ、復旧手順を維持したまま、Web アプリ基盤を段階的に安全化・高速化・分割するための実装順と合格条件を定める。
+
+達成する状態は次のとおり。
+
+1. 配布したソース、静的ファイル、Service Worker、Serverless Function、provider 設定を一つの immutable release package として識別・再配布できる。
+2. PWA 更新は、未保存データ、復旧中データ、別タブ、互換性不明の Worker がある状態で自動適用されない。
+3. Tailwind CDN と実行時生成 CSS を廃止し、固定したローカル CSS と実効性のある CSP を配信する。
+4. ExcelJS を page client の初期 module/request/evaluation graph から外し、XLSX の CPU 処理を単一 Worker port に集約する。
+5. 大規模な買い物リストでも操作性とアクセシビリティを保ち、必要時には恒久 full renderer へ戻せる。
+6. `App.tsx` と IndexedDB 実装を責務単位に分離し、既存の保存・復旧・移行契約を維持する。
+7. lint、unit、integration、E2E、a11y、CSP、PWA、性能、artifact、provider の各検査を再現可能な required gate にする。
+
+## 2. 対象外
+
+次は本計画では実施しない。
+
+- persistence Release B の有効化、legacy source の本番削除、Release A の安全条件緩和
+- React 19 への更新、router 導入、認証 UI、製品機能やデータモデルの変更
+- `src/lib/supabase.ts` のクライアント利用開始
+- 利用者行動を収集する新規本番テレメトリ
+- WebKit を Tier 1 の blocking browser にすること
+- virtual list の full renderer 自体を削除すること
+- IndexedDB の schema version、database 名、store 名、key、意味、復旧対象の変更
+
+対象外の作業が必要になった場合は、本計画の受入条件へ混在させず、独立した ADR と計画で扱う。
+
+## 3. 照合済みの実装現状
+
+### 3.1 アプリケーションと配信
+
+- React Router は使っておらず、`src/index.tsx` から一つの React root を起動する SPA である。
+- 非 `api/` path は `vercel.json` により `/index.html` へ rewrite される。
+- active な認証/session UI はない。
+- active な外部処理は同一 origin の `POST /api/persistence-release-a-metrics` である。
+- `api/persistence-release-a-metrics.mjs` は Supabase へ送信し、migration は `supabase/migrations/20260803000000_persistence_release_a_metrics.sql` である。
+- metrics API は POST-only、request body 上限 1 KiB、exact schema、成功時 202 の契約を持つ。
+- `src/lib/supabase.ts` と生成済み database types は entry graph から未参照で、現在の client bundle には Supabase SDK が含まれない。
+- `src/index.tsx` に root Error Boundary はない。
+
+### 3.2 PWA
+
+- `vite.config.ts` は `vite-plugin-pwa` の `generateSW` を使用する。
+- `registerType: "autoUpdate"`、`skipWaiting: true`、`clientsClaim: true` であり、利用者の許可なしに更新世代が切り替わり得る。
+- runtime caching は Tailwind CDN の `CacheFirst` と `https://*.supabase.co` の `NetworkOnly` を持つ。
+- `release-capabilities.json` と `release-capabilities.<buildId>.json` の `buildId` は source SHA である。
+- `build:release-a` は cleanup capability を強制的に OFF にする。
+- 現在の `build` は常に `vite build --mode release-a` を実行する。
+- 現行 browser verifier は固定した Playwright browser ではなく、環境内の Chrome/Edge を探索する。
+- 現行 rollback rehearsal は旧 commit を現在の `node_modules` で再 build するため、immutable rollback ではない。
+
+### 3.3 HTML、CSS、CSP
+
+- `index.html` は version 未固定の Tailwind CDN script、inline Tailwind 設定、inline style、theme 初期化 script、loading/viewport script を含む。
+- `vercel.json` に CSP はない。
+- JSX の `style={...}` は 105 箇所ある。
+- `X-XSS-Protection: 1; mode=block` を含む一部 security header はあるが、header 全体の正本と provider 照合はない。
+
+### 3.4 XLSX
+
+- ExcelJS は `src/utils/xlsxMapParser.ts` と `src/utils/exportImport.ts` から静的 import される。
+- map import、event import、event export の三経路が別々の call site を持つ。
+- 純粋な数値解析 helper や download helper が ExcelJS を持つ module と同居し、初期 graph からの分離を妨げている。
+- `ExportData` は `src/types/export.ts` と `src/utils/exportImport.ts` に異なる shape があり、実使用の source of truth が一つではない。
+- XLSX file size、ZIP 展開量、sheet/cell/text 数に明示上限がない。
+
+### 3.5 買い物リストと navigation
+
+- `ShoppingList.tsx` は window scroll、`elementFromPoint`、`getBoundingClientRect`、`querySelectorAll`、touch/native DnD に依存する。
+- mode/search 遷移、編集保存後の移動、execution-space navigation が DOM 要素の存在を前提とする。
+- virtual list を単純導入すると、非 mount row への scroll/focus、drag、履歴、アクセシビリティが破綻する。
+
+### 3.6 `App.tsx` と IndexedDB
+
+- `App.tsx` は 5,844 行、`src/utils/indexedDB.ts` は 9,176 行である。
+- `ShoppingList.tsx` は 4,414 行、`useIndexedDbPersistence.ts` は 1,050 行である。
+- `AppMainContent` は `ImportScreen` と `FocusModeContainer` を lazy import している。
+- 一部 integration test は source string や handler の存在を検査している。
+- `ActiveTab` 型が複数箇所にあり、shell へ raw setter が多く渡される。
+- IndexedDB の `syncQueue` store は未接続 queue payload だけでなく、全 payload の metadata/checkpoint、migration journal/archive/control record を持つ。
+- database 名は `EventShoppingPlannerDB`、現行 version は 5、forward-compatible 上限は 7 である。
+- app data restore は 10 個の app store を対象とし、`syncQueue` 本体は復元対象外である。
+- persistence status は `saved | unsaved | saving | failed` で、`beforeunload` guard と recovery state を持つが、root 向け reload safety port はない。
+- `persistenceCleanupCoordinator.ts` は安全判断と lock 調停の抽象契約を持つ。既存 executor は exact legacy `localStorage` key を削除できるが、通常起動経路から呼ばれない。IndexedDB database や `syncQueue` は削除対象ではない。
+- production proof provider、kill switch、operator UI がないため Release B は禁止状態である。
+
+### 3.7 再現済み品質基準
+
+| 項目                   |                                                                                       現状 |
+| ---------------------- | -----------------------------------------------------------------------------------------: |
+| Node                   |                                                                                  `20.20.0` |
+| npm                    |                                                                                   `10.8.2` |
+| Vite                   |                                                                                   `5.4.21` |
+| Vitest                 |                                                                                    `2.1.9` |
+| vite-plugin-pwa        |                                                                                   `0.20.5` |
+| React                  |                                                                                   `18.3.1` |
+| TypeScript             |                                                                                    `5.9.3` |
+| ESLint                 |                                                                                   `8.57.1` |
+| typecheck              |                                                                                       成功 |
+| unit/integration       |                                                               120 files / 1,198 tests 成功 |
+| lint                   |                                                                      error 0 / warning 130 |
+| lint warning 内訳      | exhaustive-deps 83、unused-vars 38、no-useless-escape 6、prefer-const 2、no-explicit-any 1 |
+| inline ESLint disable  |                                                                                          4 |
+| `@ts-expect-error`     |                                                                                          1 |
+| encoding 検査          |                                                                                       成功 |
+| release-a build        |                                                                                       成功 |
+| main chunk             |                                                                                  911.96 kB |
+| xlsx-parser chunk      |                                                                                  972.45 kB |
+| precache               |                                                                  19 entries / 3,085.67 KiB |
+| `npm audit` 全体       |                                                  critical 1 / high 19 / moderate 8 / low 1 |
+| `npm audit --omit=dev` |                                                                        high 4 / moderate 2 |
 
-### 4.1 用語
+上表は回帰判定の identity baseline であり、将来の合格値ではない。
 
-- **論理commit**: 1つの利用者操作について、React側の複数stateへ同じ現行snapshotから導出した結果を適用すること。
-- **永続化commit**: IndexedDB transactionが完了し、checkpoint等の永続化不変条件を満たすこと。
-- **artifact**: 1つのsource SHA、lockfile、toolchain、build mode、機能フラグ、precache responseへ影響するdelivery revisionから作成され、hashで固定された配布物。
-- **release package**: artifact archive、artifact manifest、provider header/config snapshot、release-package manifestから成るdeployable payload。試験前にrelease package IDとarchive hashで固定する。
-- **release evidence**: release packageを変更せず、package ID/hash、試験結果、provider deployment IDを参照して試験後に作るdetached immutable証跡。独自のevidence ID/hashを持つ。
-- **safe-hold package**: 互換floor以上、prompt protocol対応、事前検証済みのimmutable release package。古いfloorへ戻さず、更新問題を収束させるforward deploymentに使う。
-- **互換floor**: それより古い更新方式または保存仕様へrollbackしてはならない最低artifact。
-- **blocker**: reloadすると未保存入力、処理中state、またはautosave済みでも取消可能な未確定intentを失うため、PWA更新適用を止める明示的な状態。
+## 4. 用語
 
-論理commitと永続化commitを同一視しない。App分割の論理commit導入だけで、複数storeのIndexedDB書込が原子的になるとは扱わない。
+### 4.1 Identity
 
-### 4.2 保存データ
+- `sourceSha`: build 対象 commit の完全 SHA。既存 Release A の `buildId` はこれを維持する。
+- `buildInputId`: canonical build input descriptor の SHA-256。HTML、app bootstrap、Service Worker の世代照合へ埋め込める build 前 identity。
+- `artifactContentHash`: public identity manifest を含む `dist` payload の相対 path、size、file SHA-256 を canonical 順序で並べた tree hash。detached manifest と signature は対象外。
+- `artifactArchiveHash`: canonical static artifact archive bytes の SHA-256。
+- `releasePackageId`: self field を除いた release package descriptor の SHA-256。
+- `outerPackageHash`: release package archive 自体の SHA-256。archive 外の detached index/evidence にだけ保存する。
+- `deploymentId`: provider が返す immutable deployment identity。
 
-- `DB_VERSION = 5`、前方互換上限、store名、key、metadata、checkpoint、journal、archive形式を変えない。
-- `src/utils/indexedDB.ts` のimport path、named/default `db` export、公開型、`db.STORES`、method shapeを維持する。
-- 旧localStorage移行、runtime fallback、競合、復旧候補、原子的復元を常に回帰対象にする。
-- schema変更が必要になった場合は該当PRを止め、別の移行計画へ切り出す。
+`buildInputId` は content hash ではない。同じ入力から異なる bytes が生成された場合は `artifactContentHash` が異なるため、再現性検査を失敗させる。
 
-### 4.3 配信とロールバック
+### 4.2 Release A と Web 基盤 package
 
-- PWA更新方式、Tailwind、CSPは別PR・別artifactで配布する。
-- 高リスク最適化はbuild-timeフラグでrollout旧経路を保持するが、切替には再build・再配布が必要である。
-- rollback先は旧commitの再buildではなく、事前検証済みの不変release packageまたはproviderのimmutable deploymentとする。
-- 互換floor設定後は、それより古い `autoUpdate` artifactへ戻さない。
-- 初回installと未取得runtime資産にはonline接続が必要になり得るが、「PWA準備完了」後の既存主要操作、reload、更新、rollbackはoffline回帰対象にする。
-- 初期表示に外部CDNを必要とせず、offline保証を変更する資産は画面表示、cache方針、受入条件を同じPRで更新する。
+- persistence Release A は cleanup capability を hard OFF にした既存の安全リリースである。
+- `release-a-evidence/v1` schema、`buildId=sourceSha`、24 時間 canary、installed PWA、reviewer 承認の意味は変更しない。
+- Web 基盤の正本 build command は `build:artifact` とする。
+- `build:release-a` は Release A hard-OFF variant を生成する互換 wrapper として維持する。
+- 本計画で生成する全 production candidate は Release A hard-OFF であり、Release B を有効化する flag を受理しない。
 
-### 4.4 変更単位
+### 4.3 Rollback package
 
-- 1 PRは原則として1種類の主リスクだけを持つ。
-- ファイル移動だけのPRへ挙動変更、lint挙動修正、保存変更を混ぜない。
-- Hooks警告修正で動作が変わる場合は、構造変更PRと分ける。
-- テストを削除または弱体化して通さない。
-- 既存ファイルのencoding、BOM、改行を維持する。新規文書はUTF-8、BOMなし、LFとする。
+用語を次の三つに限定する。
 
-## 5. 対応ブラウザとテスト層
+- `previous-production package`: 現在 production で配信中の完全 package。
+- `phase-floor package`: 後続 phase が依存できる、受入済みの最小互換世代。
+- `paired-fallback package`: Worker/full renderer など、同じ source とデータ契約で機能 flag だけを OFF にした受入済み package。
 
-| tier           | 対象                                                   | 自動化と責務                                     |
-| -------------- | ------------------------------------------------------ | ------------------------------------------------ |
-| Tier 1         | desktop Chromium、mobile Chromium相当                  | 全利用者E2E、a11y、XLSX、仮想化                  |
-| Tier 1 release | Windows Chrome / Edge、Android Chromeの実installed PWA | 既存runbookに沿う手動release gate                |
-| Tier 2         | Playwright WebKit                                      | CSP強制前、Worker有効化前、仮想化有効化前のsmoke |
-| 参考確認       | iOS Safari / installed PWA                             | zoom、offline、更新、主要導線の手動確認          |
+rollback は source を checkout して再 build する操作ではなく、保存済み package を byte-for-byte 再 deploy する操作である。
 
-WebKit smokeとiOS確認は、全機能の正式な互換保証と同一ではない。Workerや仮想化の採用可否はTier 1を必須とし、Tier 2で重大な起動・データ破損・操作不能があれば配布を止める。
+### 4.4 PWA の安全用語
 
-通常E2Eは `serviceWorkers: "block"` と一意なbrowser contextを使用し、cacheと更新状態を混入させない。PWA E2EだけはService Workerを許可し、専用origin、専用profile、serial実行とする。
+- `pageBuildInputId`: 現在読み込んだ HTML/app bootstrap の `buildInputId`。
+- `activeWorkerBuildInputId`: controller が返す `buildInputId`。
+- `waitingWorkerBuildInputId`: waiting Worker が返す `buildInputId`。
+- `protocolVersion`: page と Worker の message protocol version。
+- `point of no return`: validation 成功後、同じ synchronous handler が nonce を消費して `activation-committed` にし、`skipWaiting()` を呼ぶ直前。ここから先は activation request を取り消せると仮定しない。
+- `blocker`: reload/update を行うと利用者の未確定状態を失う可能性がある状態。
+- `fail-closed`: 安全性を証明できない限り更新、cleanup、reload を実行しない状態。
 
-## 6. 実施順
+PONR 後の下位状態は `COMMITTED_NO_ACTIVATION | ACTIVATING | ACTIVATED | ACTIVATION_FAILED` とし、いずれも mutable App への復帰や legacy-auto rollback を許可しない。
 
-| フェーズ | 内容                                    | 次へ進む条件                       |
-| -------- | --------------------------------------- | ---------------------------------- |
-| 0A       | toolchain、検査範囲、CI骨格             | fresh cloneで基礎check成功         |
-| 0B       | E2E、a11y、操作契約                     | 現行アプリで代表6シナリオ成功      |
-| 0C       | bundle・性能計測、品質ゲート必須化      | 再現可能な基準と予算を固定         |
-| 1        | PWA更新安全化、artifact識別、検証器追随 | 既存lazy chunkと複数client試験成功 |
-| 2        | Tailwindローカル化                      | 見た目とoffline動作が一致          |
-| 3        | インライン実行除去、CSP強制             | 実responseで違反・許可漏れ0        |
-| 4        | XLSX境界分離、遅延読込、Worker          | 3操作、取消、offline、往復一致     |
-| 5        | 一覧行モデル、scroll adapter、仮想化    | DnD・focusを含む全モード成功       |
-| 6        | `App.tsx` 責務分割                      | 客観的なApp完了gateを通過          |
-| 7        | `indexedDB.ts` 責務分割                 | 公開API・物理形式・復旧互換        |
-| 継続     | lint警告削減                            | 最終的に警告0件                    |
-| 観測後   | rollout旧経路とフラグの削除             | 観測条件を満たす別PR               |
+### 4.5 Browser tier
 
-フェーズ1は既存lazy chunkを守るため、TailwindとCSPより先に完了する。フェーズ6が完了するまでフェーズ7を始めず、root stateの分割と永続化内部の分割を同時進行させない。
+- Tier 1: lock 済み Playwright Chromium。全 required E2E、PWA、CSP、a11y、性能 gate を blocking とする。
+- Tier 2: 現行 Safari/iOS Safari と Android Chrome の手動/実機 smoke。データ損失、reload loop、操作不能、重大な a11y 退行は release blocker とする。
+- Web Locks 不足時は定義済みの close-all-clients 手順へ移る。rollout 中の Worker module 不足時は paired-fallback を使い、M2 後に browser tier 外と判定した場合は XLSX 操作を明示的に利用不可にする。機能を黙って main thread 実行へ戻さない。
 
-## 7. フェーズ0: 安全網と基準計測
+## 5. 全体不変条件
 
-### 7.1 フェーズ0A: toolchainと検査範囲
+1. IndexedDB の schema、store、key、保存値、migration、recovery の意味を変えない。
+2. Release A の cleanup hard-OFF と evidence schema v1 を変えない。
+3. PWA 更新は blocker が一つでもある場合に適用しない。
+4. recovery-required、restore 実行中、restore 結果未確認を「安全な復旧画面」とみなさない。
+5. page、active Worker、waiting Worker の identity/protocol が不明な状態で app を自動 reload しない。
+6. source merge と production promotion を別操作にする。
+7. phase の途中 artifact を production へ配布しない。
+8. provider が検証済み package を再 build しない。再 build が避けられない場合は全 static/function hash の一致を必須とする。
+9. public build input に secret 値を含めない。env は key 名、version reference、presence のみを記録する。
+10. 既存 lint disable の増加、適用範囲拡大、新規 `@ts-ignore` を禁止する。
+11. full renderer は恒久 fallback として維持する。
+12. PWA、Tailwind、XLSX、virtual list の rollout flag は build-time flag とし、利用者データへ保存しない。
+13. 破壊的 cleanup は exact allowlist の resource だけを対象とする。
 
-1. Node 24 LTSを正式対象とし、フェーズ開始時の最新security patchを選定して、全既存test、build、rollback関連scriptの互換性を確認する。
-2. `.node-version` とCIは同じNode exact patch、`package.json.engines` は24系だけを許可するrange、`packageManager` とCIは同じnpm exact versionへ固定する。
-3. `npm ci` を唯一のCI install手順とし、Playwright browser binaryのinstall stepを別途明記する。
-4. `.gitattributes` に既存CRLF 2ファイルの例外を追加するか、改行専用PRでLFへ統一し、Prettier設定と一致させる。
-5. encoding検査を、git管理対象と未追跡の対象拡張子へ広げる。少なくとも `index.html`、lockfile、tsconfig群、Vitest、PWA、ESLint、Prettier、Playwright、Tailwind、PostCSS、workflowを含める。
-6. format対象へHTML、CJS、YAMLを追加する。
-7. app、tooling、Worker、E2E用tsconfigを分け、集約typecheckですべてを検査する。
-8. lint対象へVitest、PWA、Playwright、Tailwind/PostCSS config、E2Eを追加する。
-9. `playwright-report/`、`test-results/`、一時profile、計測出力を `.gitignore` へ追加する。
+## 6. Artifact、provider、evidence の設計
 
-既存のencoding/BOM/改行を一括変更するPRにしない。検査範囲の拡張で既存不整合が見つかった場合は、ファイル単位で根拠を記録して修正する。
+### 6.1 Canonical build input descriptor
 
-### 7.2 lint・disable・依存監査baseline
+`scripts/build/createBuildInputDescriptor.mjs` を正本とし、少なくとも次を canonical JSON へ含める。
 
-- ESLint JSONをrepo相対path、rule ID、message ID、位置で正規化し、130件のidentity baselineを生成する。
-- 既存警告の削除と別の新規警告の追加を相殺して通さない。
-- baseline生成、比較、意図した移動・renameの更新を別コマンドにする。
-- 既存 `eslint-disable` のidentity baselineを作り、新規または適用範囲拡大を失敗させる。
-- `npm audit --json` の既存advisoryは、package、advisory ID、到達可能性、owner、期限を持つwaiverへ記録する。
-- PRではlockfile差分により追加されたCritical/Highを拒否し、全体auditは定期・release jobでbaselineと比較する。
+- schema version
+- `sourceSha`
+- `package-lock.json` SHA-256
+- Node、npm、Vite、plugin、TypeScript の exact version
+- canonical build OS、architecture、container image digest
+- provider CLI の exact version と required managed function runtime family
+- build mode と全 rollout flag
+- reachable な public `import.meta.env` の key/value。ただし descriptor から生成する `buildInputId` 自身は除外する
+- `vite.config.ts`、`vitest.config.ts`、`vercel.json`、CSP/header catalog の hash
+- static asset generator の version と入力 hash
+- required migration file path/hash と適用前提
 
-フェーズ0完了前のlint gateは「エラー0、baseline外警告0」である。警告0へ到達した後にbaselineを削除し、`--max-warnings 0` へ切り替える。
+未参照の `VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY` は、entry graph へ接続されるまで byte-affecting input に含めない。
 
-### 7.3 フェーズ0B: E2E基盤
+descriptor を canonical UTF-8、BOM なし、LF、key sort で serialize し、その SHA-256 を `buildInputId` とする。descriptor 確定後に Vite `define` 相当で ID を注入し、`import.meta.env` を介して descriptor 自身へ戻さない。
 
-正確なversionをlockfileへ固定して、`@playwright/test` とPlaywright用axe連携を導入する。初期E2Eは選択肢を残さず、次の6ケースに固定する。
+canonical build は clean detached checkout だけを受理し、tracked/untracked/ignored build input の不足を拒否する。`TZ=UTC`、locale、`SOURCE_DATE_EPOCH` を source commit time に固定し、生成物への wall-clock timestamp、random ID、absolute path を禁止する。
 
-1. 固定CSV fixtureを取り込み、20件・2日・複数ホールのイベントを作成する。
-2. 指定IDの品目を編集列から実行列へ移し、並べ替え、範囲選択、購入状態変更後にreloadして保存を確認する。
-3. 集中モードで指定品目の状態・価格・数量を変更し、reload後も品目値は残る一方、進行ポインタと一時的な限数延期はリセットされることを確認する。
-4. 固定会場map XLSXを取り込み、preview中は無変更、取消時無変更、確定後に地図とホール設定が反映されることを確認する。
-5. 固定イベントをfull XLSXで出力し、固定した別名へ再取込して主要項目、実行列、地図設定の往復一致を確認する。
-6. JSONバックアップを出力し、固定した別名へ復元して、対象eventだけが追加され、取消・失敗時は無変更であることを確認する。
+### 6.2 App と Worker の identity
 
-各ケースはretry 0で3回連続成功を初期安定条件とする。CIの通常運用でretryを設ける場合も、retry成功を安定成功へ数えずflakeとして記録する。
+同じ `buildInputId` を次へ生成時注入する。
 
-通常ケースは画面操作でデータを作る。300件、1,000件、旧DB、競合、復旧候補はテストhelperから専用contextのIndexedDBへ投入してよいが、本番bundleへテストAPIを追加しない。
+- `index.html` の immutable meta
+- app bootstrap の compile-time constant
+- custom Service Worker の response payload
+- `dist/build-identity.json` と `dist/build-identity.<buildInputId>.json`
 
-localeは `ja-JP`、timezoneは `Asia/Tokyo`、reduced motion、theme、時計をテスト側で固定する。Google SheetsはPRではfixture応答を使い、実通信はprovider canaryへ分離する。
+startup は前三者、provider gate は四者すべてが一致することを検査する。public identity manifest は `schemaVersion`、`sourceSha`、`buildInputId`、`protocolVersion` だけを持ち、content/archive/package hash を持たない。既存 `sourceSha` は別 field として残し、`buildInputId` へ名称変更しない。
 
-通常E2EはPlaywright `webServer` または同等のmanaged wrapperがbuild、preview起動、ready待ち、終了を所有する。開発者が別terminalでserverを起動していることを成功条件にしない。
+### 6.3 Artifact manifest
 
-### 7.4 操作契約
+build 後に `dist` 外へ detached `artifact-manifest.json` を一つ生成する。
 
-次の操作について、前提、読取state、書込state、永続対象、session限定state、取消・失敗結果、focus・scroll結果、unit/integration/E2E IDを表にする。
+- public identity/capability manifest を含む全 `dist` payload file の path、media type、size、SHA-256
+- payload tree から算出した `artifactContentHash`
+- precache entry と size
+- entry chunk、lazy chunk、Worker chunk の logical graph
+- expected response header/cache policy
+- canonical static archive の path、size、`artifactArchiveHash`
 
-- イベント名称変更・削除
-- spreadsheet更新・重複解決
-- map取込・再取込
-- 訪問リスト編集・確定・取消
-- バックアップ復元
-- 集中モードreload
-- 平坦・ホール・スペース表示
-- PWA更新と処理blocker
+static archive は `dist` payload だけを含み、detached artifact manifest、signature、evidence は含めない。archive の path separator、entry 順、mode、uid/gid、mtime、compression algorithm/level を固定する。
 
-この契約をApp分割、仮想化、IndexedDB分割の回帰規範とする。
+既存 `release-capabilities.json` と `release-capabilities.<sourceSha>.json` は、Release A consumer と保存済み package のサポート期間中は維持する。既存 consumer を先に dual-read 対応し、Release A verifier/runbook が generic manifest 非依存で動くことを保つ。既存 verifier 内で source SHA を指す変数は `sourceBuildId` へ改名し、generic `buildInputId` と混同しない。
 
-### 7.5 アクセシビリティ
+### 6.4 完全 release package
 
-対象はイベント一覧、取込、編集、実行、集中、地図、バックアップ復元、永続化復旧とする。
+release package は次を含む。
 
-フェーズ0Bでは、rule、画面state、target fingerprint、impact、issue、owner、期限を持つbaseline manifestを作る。判定は次の2段階とする。
+1. canonical static artifact archive
+2. Vercel Build Output API 互換の static/function bundle、または同等の immutable provider bundle
+3. `api/persistence-release-a-metrics.mjs` と dependency/runtime hash
+4. `vercel.json` と期待する provider build/install/output 設定
+5. required managed function runtime family、provider CLI、project 設定 version
+6. required env key 名と validation rule
+7. 期待する WAF、rate-limit、CORS、origin policy
+8. required migration path/hash
+9. build input descriptor
+10. detached artifact manifest
+11. compatibility capabilities manifest
 
-- baseline導入直後: baseline外の新規違反をimpactにかかわらず失敗させる。
-- アクセシビリティ修正PR後: 主要導線の `critical` / `serious` は例外なし0件とし、`moderate` / `minor` は期限付きbaselineだけを許可する。
+required env key は `PERSISTENCE_METRICS_ALLOWED_ORIGIN`、`PERSISTENCE_METRICS_SUPABASE_URL` または `SUPABASE_URL`、`PERSISTENCE_METRICS_SUPABASE_SERVICE_ROLE_KEY` または `SUPABASE_SERVICE_ROLE_KEY` である。さらに、package 確定後に non-secret `WEB_FOUNDATION_RELEASE_PACKAGE_ID` と provider 由来 deployment ID binding を設定する。secret 値、service role key、利用者データ、実環境の presence/status は package と log に含めない。
 
-`maximum-scale=1.0, user-scalable=no` は削除する。SearchBarの入力へaccessible name、結果へlive regionを追加する。dialogは既存のrole実装を一律置換せず、初期focus、Escape、focus trap、呼出元復帰を実測して不足だけを直す。クリック可能な非semantic要素もaxeとkeyboard walkで確認してから修正する。
+package descriptor は全 payload member の path、size、SHA-256 を列挙し、descriptor 自身を member hash 一覧から除外する。その canonical descriptor から `releasePackageId` を算出して descriptor へ格納する。`outerPackageHash` は descriptor を含む package archive 全体から算出し、archive 内へ書き戻さず detached release index にだけ保存する。
 
-自動検査だけでなく、keyboardのみ、200%拡大、狭いviewportのreflow、focus可視性を確認する。
+実環境の env presence/version reference、migration status、provider/WAF resolved state、deployment ID、generic evidence、Release A evidence 参照は package ID 確定後の detached evidence hash-chain に置く。
 
-### 7.6 フェーズ0C: 計測
+package archive も path separator、entry 順、mode、uid/gid、mtime、compression algorithm/level を固定する。観測時刻、承認時刻、upload URI は detached evidence にだけ持たせる。
 
-次の成果物を `docs/baselines/web-foundation/` 配下のversion付きJSONとMarkdownへ保存する。
+### 6.5 Canonical build 環境
 
-- 初期request graph、modulepreload、各chunkのraw / gzip / Brotli
-- Workbox precache総量、lazy chunk、ExcelJSの収録位置
-- 300件・1,000件のDOM数、初期描画、入力応答、scroll frame、long task
-- 小・中・大XLSXのread、parse/write、clone、合計時間
-- PWA初回準備とoffline再起動の転送量
+- canonical artifact は x64 Linux の digest 固定 container、Node `24.18.0`、npm `11.16.0` で一度だけ build する。
+- Windows job は PowerShell、encoding、browser、path 固有の検査を担当し、production artifact を再 build しない。
+- provider の Node 24 build/function 対応を Phase 0 の hard gate とする。managed function は `nodejs24.x` family を要求し、provider が管理する patch version を package identity へ固定しない。
+- `verify:runtime` は local/canonical build の Node/npm を exact 検証し、provider は runtime family を検証する。deploy 時の resolved `process.version` と runtime ID は detached evidence に保存し、release policy の許容 Node 24 patch かを判定する。
+- `packageManager` と `engines` だけを version enforcement とみなさない。
 
-通常のproduction artifactへ計測用manifestを混入させない。`measure:bundle` はproductionと同じPWA構成を維持した専用analysis modeと一時outDirでVite manifestを追加生成し、終了時に一時出力を削除する。client初期graphはHTMLとmanifest、Service Worker登録・precache転送はbrowser traceと `sw.js` から別々に測る。
+### 6.6 Provider 同一性
 
-測定scriptはfixture hash、browser、OS、CPU、Node、試行数、warm-up、観測区間、集計式をJSONへ記録する。blocking指標と参考指標を分け、フェーズ0の変更前データで絶対上限と許容回帰率を固定する。実装後に予算を変更する場合は、別レビューと根拠を必要とする。
+保存済み package を prebuilt deploy し、provider が app bundle を再構築しない経路を正本とする。
 
-フェーズ0Cで `measure:bundle`、`measure:list`、`measure:xlsx`、`measure:pwa` と集約 `measure:web-foundation` をpackage scriptとして追加する。各個別scriptもfixtureと出力先を自分で準備し、単独実行できるようにする。
+deployment 後に `deploymentId` と package を結び、次を外部 URL から取得して manifest と照合する。
 
-### 7.7 実在させる品質コマンド
+- artifact manifest にある全 public static file の bytes/hash
+- 全 public route/resource の security/cache header
+- Service Worker 経由と network bypass の response
+- provider deployment API の function bundle/runtime/config provenance
+- metrics response の `X-Release-Package-Id` と `X-Deployment-Id`
 
-| コマンド                                                                | 実行場所          | 内容                                                                                              |
-| ----------------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------- |
-| `quality:local`                                                         | dirty worktree可  | encoding、format、全typecheck、lint identity、Vitest、通常build                                   |
-| `quality:pr`                                                            | clean CI checkout | local gate、evidence validator test、coverage/architecture導入済み分、通常E2E、a11y               |
-| `quality:artifact`                                                      | clean CI checkout | release buildを1回だけ作成、manifest生成・検証、同じdistのmanaged preview、Release A browser、PWA |
-| `quality:transition -- --scenario ...`                                  | 検証済みpackage群 | 同一profileで複数versionのupdate、rollback、cache migration。1Aで導入                             |
-| `quality:release -- --preview-url ... --package ... --evidence-out ...` | provider候補      | 実header、provider E2E、release package往復、detached証跡生成・validator                          |
+この二 response header は package build 後に設定する non-secret deployment metadata から返し、function bundle へ自己参照 ID を埋め込まない。response body、POST-only、1 KiB、exact schema、202 の Release A contract は変更しない。
 
-`test:e2e` と `test:e2e:a11y` は単独実行時もmanaged previewを所有する。`quality:pr` は同じbuildとpreviewを共有して両Playwright projectを実行する。`quality:artifact` はrelease build、manifest生成・検証、preview起動、Release A browserとPWA project、終了を1つのorchestratorで順に実行し、内側のtestは再buildしない。`git diff --check` はCIでbase SHAとhead SHAを指定する。
+QA は専用 backend/migration へ exact schema の synthetic POST を送り、CORS、202、DB 到達を検証する。production では test row を実データ表へ書かず、provider/Supabase 管理 API から env presence/version reference と migration hash/status を read-only 取得し、body なし GET/invalid schema など副作用のない route contract を検査する。production の実 DB ingestion は既存 Release A の 24 時間 evidence で証明する。
 
-coverageは `@vitest/coverage-v8` を導入し、保存、復元、XLSX契約、一覧行モデル、App横断commandの変更行と高リスク境界から開始する。architecture検査は導入した境界だけを対象にし、依存禁止と循環を失敗させる。
+一つでも static bytes/hash/header、function provenance、package/deployment identity、prerequisite が異なる場合は release を失敗させる。
 
-### 7.8 CI
+### 6.7 Cache-Control 正本
 
-- GitHub Actionsの安定したrequired check名を作る。
-- PR gateは原則 `windows-latest` でPowerShell手順も確認し、必要に応じて通常unit jobを並列化する。
-- Playwright browser version、Node/npm、locale/timezoneを固定する。
-- browser動画、trace、screenshot、DB dumpへ実利用者payloadを含めない。
-- branch protectionはrepository外設定なので、設定画面の証跡をフェーズ0成果物に残す。
+`config/response-policy.json` を header/cache policy の正本とする。
 
-### 7.9 フェーズ0完了条件
+| Resource                            | Cache-Control                         |
+| ----------------------------------- | ------------------------------------- |
+| `index.html` と SPA navigation      | `no-cache, no-store, must-revalidate` |
+| `sw.js`                             | `no-cache, no-store, must-revalidate` |
+| stable identity/capability manifest | `no-cache, no-store, must-revalidate` |
+| content-hashed JS/CSS/Worker/assets | `public, max-age=31536000, immutable` |
+| metrics API                         | `no-store`                            |
 
-- Node 24 LTSのfresh cloneで `npm ci` と全基礎checkが成功する。
-- 代表6 E2Eがretry 0で3回連続成功する。
-- a11y baseline外違反、lint identity外警告、新規disableを検出できる。
-- 主要導線のcritical/serious違反が0件である。
-- 300件、1,000件、XLSX、bundle、precacheの基準と予算が再現できる。
-- `quality:local`、`quality:pr`、現行autoUpdate用 `quality:artifact` が実在し、CI required checkとして機能する。
+local preview、provider URL、Service Worker cache 経由の三経路で同じ期待値を検証する。
 
-## 8. フェーズ1: PWA更新安全化
+### 6.8 Evidence の段階
 
-### 8.1 採用する更新方式
+generic schema は `web-foundation-evidence/v1` とする。
 
-`vite-plugin-pwa` のprompt registrationを使い、次を採用する。
+1. `artifact evidence fragment`: build、test、hash、budget、variant。同期生成できる。
+2. `deployment preflight evidence`: deployment ID、package 一致、header、API、migration prerequisite。
+3. `observation evidence`: canary 期間、browser matrix、test 回数、incident、owner sign-off。
+4. `release final evidence`: 上記三つへの参照と承認。
 
-- `registerType: "prompt"`
-- `injectRegister: null` とし、自動 `registerSW.js` を生成・挿入しない
-- `strategies: "injectManifest"` とし、`src/sw.ts` にprecache、runtime route、update protocolを明示する
-- `srcDir: "src"`、`filename: "sw.ts"`、`injectManifest.injectionPoint: "self.__WB_MANIFEST"` を明示し、injection pointがsourceと生成物に各1件だけあることをbuild verifierで確認する
-- install時の `skipWaiting` を無効化
-- `clientsClaim` を無効化
-- `virtual:pwa-register/react` から登録し、更新UIを表示
-- `cleanupOutdatedCaches` は維持するが、安全なactivateまたは旧client 0件の自然activate後だけcleanupが起きる構成にする
+各 fragment は前段 fragment の immutable URI と SHA-256 を参照する新規 object として生成し、既存 object へ追記しない。artifact gate で 24 時間観測や Release A final evidence を生成しない。既存 Release A evidence v1 は別 validator で検証し、generic final evidence から参照する。
 
-1Aで現行 `generateSW` と同じprecache、navigation fallback、Tailwind runtime route、offline動作を `injectManifest` 版でgolden比較し、custom Service Workerへ移行可能かをhard gateにする。必要な `workbox-*` packageはtransitive dependencyに頼らずdirect devDependencyへ正確なversionで追加し、Service Worker用tsconfigはWebWorker globalを検査する。`cleanupOutdatedCaches()` と `precacheAndRoute(self.__WB_MANIFEST)` を明示し、source SHA、artifact ID、protocol versionはService Worker bundleへbuild時に埋め込む。parityが証明できなければprompt実装へ進まず、client列挙を実装できないままgenerateSWへ継ぎ足さない。
+### 6.9 保管
 
-`virtual:pwa-register/react` はwaiting/offline/registration stateの購読に使うが、公開される汎用 `updateServiceWorker()` をactivationに直接使わない。custom registration adapterとwaiting Workerが `PREPARE_UPDATE` / `APPLY_UPDATE` のnonce付きprotocolを実装し、waiting Worker自身がclient再列挙、protocol/artifact照合、permit検証後にだけ `skipWaiting()` を呼ぶ。無条件の `SKIP_WAITING` message handlerは置かない。
+- package、detached hash、evidence は write-once または retention lock を持つ object storage に保存する。
+- production、phase-floor、paired-fallback package は、対応機能のサポート終了後 180 日か 18 か月の長い方まで保持する。
+- upload/download 権限を release operator と read-only reviewer に分離する。
+- 四半期ごとに download、outer hash、manifest、prebuilt deploy の restore drill を行う。
+- CI の一時 artifact だけを rollback source にしない。
+- release 採用時の raw test log、audit JSON、performance trace、provider response は package と同じ期間、immutable URI と SHA-256 付きで保持する。PR-only の raw artifact は 90 日保持する。
 
-permitは要求元client ID、active/waiting artifact ID、protocol versionへ束縛し、短い期限とsingle-useを持つ。期限切れ、再利用、要求元消失、client集合変化ではrejectし、waitingのままにする。
+## 7. PWA と cleanup の共通排他
 
-初回のprompt対応版は、旧 `autoUpdate` clientがすべて閉じるまでwaitingのままにする。旧clientには更新UIも後述のlock protocolもないため、pre-floor controllerからは「今すぐ更新」を無効にし、`skipWaiting` を送らない。全旧client終了後の自然activateによってprompt対応版を互換floorにする。
+### 7.1 Lock 名と順序
 
-### 8.2 単一client証明とfail-closed
+lock 名を次で固定する。
 
-startupはService Worker登録前の状態をsnapshotし、次の3分岐にする。
+1. update のみ: `event-shopping-planner:pwa-update-election:<waitingBuildInputId>`
+2. 共通: `event-shopping-planner:lifecycle-transition`
+3. update のみ: `event-shopping-planner:pwa-client-presence`
+4. cleanup のみ: 既存 `event-shopping-planner:persistence-legacy-cleanup`
 
-1. `navigator.serviceWorker.controller === null` かつ既存active/waiting registrationなしはfresh installとみなし、現HTMLを通常mountしてから登録する。このnavigationでは強制更新を無効にし、controller不在を理由にreloadしない。
-2. controller不在だが起動前からactive/waiting registrationがある場合は、active化待ちと通常navigation reloadを1回だけ行う。`sessionStorage` のattempt marker後もuncontrolledならAppをmountせず、close/reopenを案内するfail-closed画面にする。
-3. controllerが存在してprompt protocolへ応答した場合だけ、controllerとHTMLのartifact IDを比較する。不一致時のreconcile reloadも1回までとし、解消しなければfail-closed画面にする。
+Web Locks 対応 browser の互換 floor client は mutable App を mount する前に、世代にかかわらず 3 の同じ shared lock を取得・保持する。exclusive lock 保持中に開いた新 tab は compatibility hold に留まり、App を mount しない。世代別の lock 名にすると異なる controller 世代の tab を排他できないため禁止する。Web Locks 非対応 browser は capability を `close-all-only` として mount できるが、in-app APPLY/CLEANUP を一切許可せず、Worker の client 列挙には含める。
 
-prompt floor以降、Service WorkerとWeb Locksを利用できるcontrolled clientは、Appをmountする前にclient-presence用Web Lockをshared modeで取得する。Service Workerがないbrowserは通常起動し、Service WorkerはあるがWeb Locks非対応のbrowserはidentity一致を確認して通常起動する一方、強制更新を常に無効化する。「今すぐ更新」は、次をすべて満たす場合だけ許可する。
+election と lifecycle は exclusive、presence は通常 shared/update 時 exclusive で取得する。update は次の state machine だけを許可する。
 
-attempt markerのread/writeに失敗した場合は自動reloadせず、直ちにfail-closed画面へ進む。identity一致後はmarkerを削除する。
+1. ambient shared presence を保持したまま election を `ifAvailable: true` で一度だけ取得する。この non-waiting lease だけを順序例外とする。
+2. blocker を検査し、失敗時は shared presence を保持したまま election を解放する。
+3. UI を freeze し、自身の shared presence を解放する。
+4. shared presence を保持していない状態で lifecycle を AbortSignal 付き最大 5 秒で取得する。
+5. lifecycle 保持中に exclusive presence を AbortSignal 付き最大 5 秒で取得する。
+6. blocker と client set を再検査して permit protocol へ進む。
 
-1. 更新要求者が別名のelection lockをexclusive・`ifAvailable` で取得する。取得できない要求者はshared presence lockを解放しない。
-2. leaderだけが新規変更操作を凍結し、自分のshared presence lockを解放して、presence lockをexclusive・`ifAvailable` で取得する。
-3. Service Workerの `clients.matchAll({ type: "window", includeUncontrolled: true })` とversion handshakeで、window clientが要求元1件だけと確認できる。
-4. 要求元、active controller、waiting Workerがprompt protocol対応で、source/artifactの関係が期待どおりである。
-5. exclusive presence lock取得後のblocker再確認がsafeである。
+待機する election/lifecycle acquisition を shared presence 保持中に行うことを禁止する。persistence cleanup を開始する client も freeze 後に shared presence を解放し、lifecycle → legacy-cleanup の順で取得する。これにより lifecycle と presence の循環待ちを作らない。Web Locks に atomic downgrade はない。
 
-- 他のtab、installed PWA、uncontrolled client、旧protocol client、応答しないclientがある場合は適用せず、閉じるよう案内する。
-- Web Locks非対応、lock状態不明、休止clientの可能性を排除できない場合は `skipWaiting` を送らない。
-- exclusive lock中に起動したprompt clientはAppをmountせず待機し、lock取得後のartifact照合で必要ならreloadする。
-- 利用者が全clientを閉じた場合は、標準Service Worker lifecycleによる自然activateに任せる。
-- `clientsClaim` は無効なので、`controllerchange` だけをreload triggerにしない。waiting Workerの `statechange` を送信前から監視し、`activated` を期限付きで確認してから要求元を1回だけreloadする。
-- waiting Workerが `APPLY_UPDATE` を受理したackまたは `activating` への遷移の早い方をpoint-of-no-returnとする。それ以前に明示rejectされ、Workerがwaitingのままと確認できた場合だけ、shared presence lockを再取得して操作凍結を解除できる。
-- point-of-no-return後はexclusive presence lock、election lock、操作凍結をreload/unloadまで維持する。timeoutやack不明でも旧UIを再開せず、artifact一致reloadの再試行またはpage closeだけを案内する。
-- point-of-no-return前の失敗は保存データを消さず、shared presence lockを再取得してから操作凍結とelection lockを解き、再試行または全client終了を案内する。
+point of no return 前に失敗した場合は次の順で復帰する。
 
-BroadcastChannelだけを安全性の証明に使わない。画面間通知へ使う場合も、exclusive lock、client列挙、version handshakeを必須とする。
+1. election lock と UI freeze を維持する。
+2. exclusive presence lock を解放する。
+3. lifecycle lock を解放する。
+4. shared presence lock を再取得する。
+5. 再取得後にだけ UI freeze を解除する。
+6. election lock を解放する。
 
-### 8.3 blockerと所有者
+cleanup 完了/失敗時も legacy-cleanup → lifecycle の順で解放してから shared presence を再取得する。shared 再取得に失敗した場合は fail-closed を維持し、自動 reload しない。non-waiting election 例外、hidden tab が残る timeout、lock abort、crashed tab 解放後の再試行を architecture/state-machine test に含める。
 
-`src/features/pwa-update/` に状態機械、registration adapter、blocker registry、UI、`PwaUpdateBlockerProvider` を置く。フェーズ1時点では後続controllerの存在を前提にせず、現行 `App.tsx` と各componentのstateから小さなadapter hookでregistryへ接続する。フェーズ6では契約を変えずにownerだけをcontrollerへ移す。各blockerはID、現行owner、将来owner、開始、解除、取消・失敗、owner unmount時の処理を契約にする。
+### 7.2 Cleanup 境界
 
-| blocker                                          | フェーズ1のowner                                | 開始                                  | 解除                                     |
-| ------------------------------------------------ | ----------------------------------------------- | ------------------------------------- | ---------------------------------------- |
-| hydration / recovery                             | `useIndexedDbPersistence`                       | startup開始                           | startup readyまたは安全な復旧画面        |
-| autosave / retry待ち                             | `useIndexedDbPersistence`                       | debounce、save request、write開始     | すべて空でstatus `saved`                 |
-| exclusive restore / recovery adoption            | `useIndexedDbPersistence`                       | 排他処理開始                          | restore、読戻し、検証完了                |
-| dirty item edit / new item                       | `ItemEditDialog` / `ShoppingList` adapter       | 入力が初期値と異なる                  | 保存または明示取消                       |
-| dirty manual import form                         | `ImportScreen` adapter                          | 手入力・選択内容が初期値と異なる      | 確定または明示取消                       |
-| dirty event rename / URL update                  | `EventRenameDialog` / `UrlUpdateDialog` adapter | name、URL、sheet名が初期値と異なる    | 確定または明示取消                       |
-| duplicate / post-event / limited-purchase intent | 対応dialog adapter                              | alias、choice、配布、限数の未確定変更 | 確定または明示取消                       |
-| map reimport confirmation draft                  | `MapReimportConfirmationDialog` adapter         | 未確定の再取込選択開始                | 確定または明示取消                       |
-| spreadsheet / file import                        | 現行event import adapter                        | file処理開始                          | 確定、取消、失敗処理完了                 |
-| map preview / import                             | 現行map import adapter                          | preview requestまたは未確定設定開始   | request失効と確定/取消完了               |
-| hall / block / cell / vertex draft               | 現行App/map editing adapter                     | 未確定選択・定義開始                  | 確定または明示取消                       |
-| backup restore                                   | 現行backup adapter                              | 検証または適用開始                    | transactionとUI反映または失敗処理完了    |
-| 訪問リスト未確定編集                             | 現行App/list adapter                            | live stateへの暫定反映開始            | 確定または取消の補償適用                 |
-| XLSX実行                                         | フェーズ4で追加する `XlsxExecutionPort` adapter | request開始                           | result適用、error、adapter固有cancel完了 |
+- `persistenceCleanupCoordinator.ts`: proof、kill switch、lock、安全判断、fail-closed の調停
+- `migration/legacyCleanupService.ts`: journal/archive/committed target 検証、entry claim、control record の CAS write/readback、crash resume、各削除直前の safety revalidation を所有
+- `migration/legacyLocalStorageAdapter.ts`: service が指定した既存 exact legacy key の read/remove だけを実行
+- Service Worker cache cleanup: activation authorization に束縛された exact cache allowlist の idempotent executor
 
-dialogを開いているだけ、pristineなform、検索文字列、表示tabだけではblockしない。取消・失敗時は `finally` で処理blockerを解放し、dirty draftは明示破棄後にだけ解放する。React StrictModeの二重mount/unmountでも漏れや早期解除が起きない、idempotentなtokenまたは参照カウント方式にする。
+cleanup service は `controlRepository`、`transactionCoordinator`、coordinator revalidation を使用し、現 `executePhysicalLegacyCleanup` の順序と crash-safety contract を維持する。IndexedDB は journal/archive/proof/control の保持に使うが、database、store、record、generic `syncQueue` を削除対象にしない。prefix/glob に一致した `localStorage` key も削除しない。本計画は共通 lifecycle lock と proof transport の契約を実装するが、persistence Release B の provider、kill switch、実削除呼出しは production entry point へ接続しない。
 
-1Bで全dialog/componentのlocal `useState` と未確定modeをinventoryし、表にないreload消失stateを0件にする。各行はdirty/pristine、確定、取消、失敗、unmount、StrictModeのregistry testを持つ。
+Service Worker の activation authorization は、次のどちらか一つで成立する。
 
-`useIndexedDbPersistence` は表示用の `persistenceStatus` から推測させず、startup、debounce、save request、in-flight write、restore、recovery adoptionを一括評価する専用reload-safety portを公開する。`saved` かつ全処理なしだけをsafeとし、`unsaved`、`saving`、`failed`、不明はfail closedにする。同期確認とAbortSignal付き待機を分け、たとえば `getReloadSafety()` / `waitUntilSafe(signal)` とする。
+1. running client が lock と blocker を検証し、permit を消費した。
+2. browser が同 registration scope の旧世代 window client 0 件を確認して waiting Worker を自然 activate した。
 
-### 8.4 既存cleanup安全判定との統合
+両経路で同じ idempotent exact-cache cleanup を実行する。permit 経路では client が lifecycle/presence lock を保持し、自然 activation 経路では旧 client が存在しないことを Worker が `clients.matchAll({ type: "window", includeUncontrolled: true })` と registration scope filter で再確認する。どちらも証明できない activate では destructive cleanup をせず、次回の承認済み cleanup message まで保留する。
 
-`persistenceCleanupCoordinator.ts` のwaiting Worker、client version、quiescenceのfail-closed判定を別実装で迂回しない。共通のclient version / quiescence契約を抽出し、次を固定する。
+deferred cleanup は active Worker に対する `PREPARE_CLEANUP` / `APPLY_CLEANUP` とし、PWA permit と同じ source ID、nonce、expiry、client-set fingerprint、lifecycle/exclusive presence、blocker 再検査を使う。`skipWaiting()` は呼ばず、client は cleanup success ack と exact cache 残存 0 を確認するまで lock を保持する。
 
-- waiting Worker中はlegacy cleanupを延期する。
-- update blocker中またはclient証明不明時はcleanupを延期する。
-- activate・reload後に新artifact IDとclient quiescenceを再検証してからcleanupを再開する。
-- PWA更新用lockとcleanup用lockの取得順を固定し、deadlockを試験する。
+## 8. 品質 command と CI
 
-### 8.5 artifact識別
+### 8.1 段階導入する command
 
-現行の `buildId = sourceSha` はRelease A証跡用に維持し、別に `artifactId` を導入する。
+| Command                                         | 導入時点 | 責務                                                        |
+| ----------------------------------------------- | -------- | ----------------------------------------------------------- |
+| `verify:runtime`                                | 0A       | exact toolchain/build environment                           |
+| `capture:baseline-v0`                           | 0A-0     | 現行 artifact、lint、audit、CDN 表示を保存                  |
+| `quality:local`                                 | 0A       | typecheck、lint delta、format、encoding、unit               |
+| `quality:pr`                                    | 0B       | required static/unit/E2E/a11y/audit gate                    |
+| `build:artifact -- --variant <name>`            | 0C       | descriptor を固定し一度だけ build                           |
+| `package:release -- --artifact <path>`          | 0C       | 完全 package と detached index を生成                       |
+| `quality:artifact -- --package <path>`          | 0C       | hash、graph、budget、offline、package 検証                  |
+| `deploy:qa -- --package <path>`                 | 0C       | isolated QA へ保存済み package を prebuilt deploy           |
+| `verify:provider -- --deployment <id>`          | 0C       | QA の全 bytes/header/function/prerequisite を照合           |
+| `quality:transition -- --scenario <path>`       | 1A       | old → candidate transition                                  |
+| `release:preflight -- --package <path>`         | 1D       | production project の prerequisite と承認前検査             |
+| `release:create-candidate -- --package <path>`  | 1D       | domain 未切替の immutable production-target deployment 作成 |
+| `release:verify-candidate -- --deployment <id>` | 1D       | candidate の全 bytes/header/function/prerequisite を照合    |
+| `release:promote -- --deployment <id>`          | 1D       | 同じ deployment ID を二者承認で production alias へ昇格     |
+| `release:observe -- --deployment <id>`          | 1D       | 新規 immutable observation fragment を生成                  |
+| `release:finalize -- --evidence-in <path>`      | 1D       | 長時間観測後の final evidence                               |
 
-`artifactId` は少なくともsource SHA、lockfile hash、Node/npm、build mode、機能フラグ、bundle bytesへ影響するpublic build入力、precache responseへ影響するdelivery revisionの正規化digestから決定する。現行ではderived outputである `VITE_APP_BUILD_ID` を入力から除き、`VITE_PERSISTENCE_RELEASE_CHANNEL`、`VITE_PERSISTENCE_LEGACY_CLEANUP`、`VITE_SUPABASE_URL`、`VITE_SUPABASE_ANON_KEY` をcatalog化する。CSP header名、policy ID、Report-Only/強制mode、precache対象へ影響するheader config hashはdelivery revisionに含める。public build入力の値自体は証跡へ出さず、key名、設定有無、digestだけを記録する。未登録のpublic build入力がbundleで参照された場合はbuildを失敗させる。
+PowerShell の実行例では `<...>` を literal に使わない。
 
-source SHA、artifact ID、delivery revisionはHTMLとService Worker bundleへ別々に埋め込む。これによりheader modeだけが変わる場合もindex/SW bytesとprecache revisionが変わり、新Workerがinstallされる。同じartifact IDのままprecache対象headerを差し替えない。
+```powershell
+$scenarioPath = (Resolve-Path -LiteralPath '.\test-artifacts\transition-plan.json').Path
+npm run quality:transition -- --scenario $scenarioPath
+```
 
-provider headerはdist外にあるため、artifact IDだけでreleaseを識別しない。`releasePackageId` はartifact archive hash、provider-onlyの非secret deployment入力、CSP policy ID、`vercel.json` 等の配信設定hashから決定する。precache responseへ影響する設定はartifactのdelivery revisionとrelease packageの両方へ、providerだけに影響する設定はrelease packageだけへ含める。secretの値はmanifestへ入れず、provider側version referenceまたは設定有無だけをrelease evidenceへ記録する。
+### 8.2 Browser command の ownership
 
-post-buildでversion付き `artifact-manifest.json` を生成し、次を記録する。
+| Wrapper             | Inner project               |
+| ------------------- | --------------------------- |
+| `test:e2e`          | `test:e2e:project`          |
+| `test:e2e:a11y`     | `test:e2e:a11y:project`     |
+| `test:e2e:pwa`      | `test:e2e:pwa:project`      |
+| `test:e2e:csp`      | `test:e2e:csp:project`      |
+| `test:e2e:provider` | `test:e2e:provider:project` |
 
-- source SHA / source state
-- artifact ID
-- lockfile hash
-- Node / npm
-- build modeと機能フラグ
-- byte-affecting public build input catalog versionとdigest
-- delivery revision、CSP policy ID/mode、precache header config digest
-- PWA更新方式
-- index、Service Worker、主要assetのhash
-- 実行済みbuild verifier version
+単独 wrapper は build、preview server、port、cleanup を所有する。`quality:pr` と `quality:artifact` は一つの既存 build/server を共有し、inner project だけを呼ぶ。inner project は source を変更せず、再 build せず、server を起動しない。
 
-artifact生成後、packaging orchestratorが別の `release-package-manifest.json` をdist外に作り、artifact manifest/archiveのhash、CSP policy ID、provider header/config hash、release package IDを記録する。artifact manifestへrelease package IDを逆向きに埋め込まない。
+browser は `@playwright/test 1.62.1` と lockfile に対応する Chromium を `npm exec -- playwright install chromium` で用意する。既存 Release A CDP verifier を維持する間は `CHROME_PATH` を Playwright Chromium executable に固定し、ambient Chrome/Edge 探索を release gate で禁止する。
 
-release package IDはself fieldを除くcanonical package descriptorから計算し、manifestへ記録する。package archive作成後はarchive hashも固定する。後続試験はpayloadをread-onlyで使い、結果をpackageへ追記しない。
+canonical Linux build job は package を一度生成して immutable CI input として browser/provider job へ渡す。Windows browser job と QA/provider job はその package を read-only で使い、再 build しない。
 
-同一source SHAでもフラグが異なるartifactは異なるIDを持たなければならない。
+### 8.3 Lint baseline
 
-### 8.6 Release A検証の追随
+toolchain を変更する前に、現行 130 warnings、4 disables、1 `@ts-expect-error` を rule、path、line fingerprint 付きで固定する。
 
-1Aでbuild/browser/rollback verifierを旧auto/new promptの両方を識別できる形へ先行更新し、現行artifactで合格させる。1Bのprompt切替PRで期待値をpromptへ切り替え、どの中間PRでも既存required checkを壊さない。1Dでimmutable rehearsal、runbook、evidence schemaを確定する。
+- baseline 外の warning は 0
+- 新規 file の warning は 0
+- disable の新規追加と範囲拡大は禁止
+- 既存 disable を残す場合だけ、理由、owner、回帰 test を baseline に持つ
+- rule rename は旧 fingerprint と新 fingerprint の review 済み mapping を要求する
+- baseline 更新 command と通常比較 command を分離し、通常 CI に更新権限を与えない
 
-- `verify-release-a-build.mjs`: `registerSW.js` 固定必須をやめ、virtual registrationを検証
-- `verify-release-a-browser.mjs`: update UI、blocker、exclusive lock、明示承認を操作
-- rollback rehearsal: 即時 `controllerchange` 前提を廃止
-- READMEと `persistence-recovery-runbook.md`
-- evidence template / validatorのartifact IDとPWA更新証跡
+### 8.4 Audit gate
 
-現行rollback scriptは「source互換rehearsal」として名前と責務を明確にし、別に保存済みdist archive、artifact manifest、provider header/config snapshotを入力とする「immutable release package rehearsal」を追加する。旧commitを現在の `node_modules` で再buildしたものをrollback合格には使わない。
+- 全 PR で `npm audit --json` と `npm audit --omit=dev --json` を取得し、lockfile 変更有無に依存させない。
+- advisory がある場合の exit code 1 は JSON として解析する。JSON parse failure、registry failure、tool failure は別の hard failure とする。
+- reachable な critical/high、または production critical/high は Phase 1 着手前に 0 にする。
+- fix が存在しない advisory は machine-readable waiver schema に advisory ID、package、affected range、resolved version、reachability、影響、緩和策、owner、reviewer、承認時刻、30 日以内の期限を持つ場合だけ許す。
+- ExcelJS は untrusted XLSX を扱うため、moderate を含め個別 reachability review を必須とする。
+- registry 不達時は release を fail-closed とし、cache 済み結果だけで昇格しない。
+- production candidate 作成前 24 時間以内に live audit を再実行し、観測中は日次 scan する。新規 reachable critical/high または waiver 期限切れで alias 昇格を停止する。
 
-### 8.7 必須試験
+### 8.5 Coverage と architecture gate
 
-- 旧版で未読込の `ImportScreen` / `FocusModeContainer` を、新版waiting中も旧版clientから開ける。
-- autosave、map取込、restore、未確定訪問リスト中に更新できない。
-- blocker解放後、単一client時だけ明示承認でactivate・reloadできる。
-- 2 tabまたはtab + installed PWA相当ではexclusive lockを取得できず、更新しない。
-- Web Locks非対応時は強制activateせず、全client終了後に自然更新する。
-- pre-floor controllerでは明示activateせず、全旧client終了後にprompt floorが自然activateする。
-- clean profileの初回navigationは1回でmount・登録でき、controller不在によるreload loopがない。
-- 既存registrationがあるuncontrolled pageと永続的artifact不一致は、各1回のreconcile後にfail-closed画面となり、reload loopしない。
-- 2 clientが同時に更新を要求してもleaderは1件だけで、clientが残る限りactivateせず、失敗側を含めshared presence lockと操作可否を復元する。
-- exclusive lock取得後に新clientが起動してもmount前照合で世代を揃える。
-- waiting Workerのactivation、reload、errorの競合で二重reloadせず、`clientsClaim` 無効でも更新が完了する。
-- StrictModeのmount/unmount、保存失敗、dirty formの取消・画面離脱でblocker tokenの漏れ・早期解除がない。
-- waiting中のlegacy cleanupはdeferredになり、更新後に安全判定をやり直す。
-- A artifact → B artifact → 受入済み互換artifactの往復でoffline起動と保存データを維持する。
+- changed lines 85% 以上、changed branches 80% 以上
+- PWA protocol、persistence、XLSX contracts、release package は lines 90% 以上、branches 85% 以上
+- global coverage は Phase 0 baseline から低下させない
+- generated file、type-only file、fixture は明示 allowlist のみ除外
+- source string test は coverage と behavior test の代用にしない
 
-### 8.8 互換floorとロールバック
+`verify:architecture` は少なくとも次を検査する。
 
-prompt対応版を受入後、そのartifactをPWA互換floorとする。以後、`skipWaiting: true` のpre-floor artifactを配布しない。
+- lock の逆順取得
+- forbidden deep import
+- facade からの DB/business 実装
+- React component から ExcelJS 直接 import
+- `App.tsx` から repository 実装への直接依存
+- list navigation から DOM query の直接追加
+- inline script/style の再追加
+- lint disable の増加
 
-初回移行の問題には、事前作成したsafe-hold packageまたはforward fixをforward deploymentする。PWA更新方式だけを旧 `autoUpdate` へ戻すrollbackは行わない。
+### 8.6 A11y baseline
 
-## 9. フェーズ2: Tailwindローカル化
+- `a11y:baseline:capture`: rule set、axe version、browser、route、viewport、fingerprint を保存
+- `a11y:baseline:compare`: baseline 外の violation を失敗
+- `a11y:baseline:approve`: reviewer と owner 付きで更新
+- critical/serious は baseline 登録不可
+- moderate/minor の例外は 30 日で期限切れし、期限切れを CI failure にする
 
-### 9.1 方針
+### 8.7 性能予算
 
-設定形式を変えるTailwind 4へのmajor upgradeを混在させず、Tailwind 3.4系の正確なversion、PostCSS 8、Autoprefixerをlockfileへ固定する。現在のversion未固定CDN表示を視覚baselineとし、major upgradeは別計画とする。
+Phase 0 で `performance-budgets.json` を固定し、次の式を blocking 値にする。
 
-### 9.2 実装
+- phase 未変更 entry/chunk: baseline gzip/brotli + `max(2%, 10 KiB)` 以下
+- initial module graph: phase 別に承認した bootstrap delta を除き baseline より増加させない
+- Phase 4 後: ExcelJS module を page client initial graph に 0 件
+- precache: baseline から 10% を超えて増加させない。Worker precache は別行で計上する
+- PWA bootstrap: fixed runner の p95 が baseline + 10% 以下
+- XLSX 操作中 main-thread long task: 50 ms 超を 0 件
+- virtual list interaction latency: 1,000 行 fixture の p95 100 ms 以下、かつ full renderer baseline から悪化しない。Phase 5 採用にはさらに 30% 以上の改善を要求する
+- scroll/focus target miss: 0
 
-1. Tailwind / PostCSS configを作り、`darkMode: "class"` と `index.html`、`src/**/*.{ts,tsx}` をcontentへ指定する。
-2. `src/styles/app.css` にTailwind layerと現在のインラインCSSを移す。
-3. `src/index.tsx` からCSSをimportする。
-4. `index.html` からTailwind CDN、インラインTailwind設定、インライン `<style>` 要素を除く。
-5. `vite.config.ts` の `tailwind-cache` runtime cachingを削除するが、最初のlocal CSS artifactでは旧cacheをまだ消さない。
-6. local CSS artifactを観測・受入し、同じ構成のsafe-hold release packageを保存してTailwind互換floorにする。
-7. floor設定後のcleanup artifactだけにbuild-time markerを埋め、custom Service Workerの `activate` eventが `event.waitUntil(caches.delete("tailwind-cache"))` で正確な旧cacheだけを削除する。通常の `cleanupOutdatedCaches()` へ任せない。
-8. 動的class tokenを静的な完全classへ直す。safelistは理由、使用箇所、削除条件を記録した最小限だけを許可する。
-9. loading画面がCSS entry読込前後で崩れないことを確認する。
+`verify:bundle-budget` は artifact gate、`verify:xlsx-budget` と `verify:list-budget` は固定 self-hosted runner の promotion gate に接続する。`windows-latest` の timing を blocking 基準にしない。
 
-このフェーズでは残るテーマ・loading・viewportのインラインscriptを移動せず、CSP作業と分離する。
+timing gate は runner CPU/OS/browser/container digest を fingerprint 化し、warmup 5 回後に 20 sample を測定する。infra failure 以外の retry と best-of 選択は禁止する。logical entry 名と chunk graph の対応を manifest に保存し、hash filename の変化で予算対象が入れ替わらないようにする。phase 別 approved delta は owner/reviewer/期限を持つ budget file の独立差分としてだけ追加できる。
 
-### 9.3 受入条件
+variant 別の blocking 条件を次で固定する。
 
-- Tailwind CDNへのrequest、runtime cacheのread/write、残存 `tailwind-cache` がない。
-- `index.html` にインライン `<style>` 要素がない。
-- light / dark / system、desktop / mobile、主要dialog、sticky、z-indexの視覚差分が承認される。
-- prompt更新の前後とoffline再起動で装飾が一致する。
-- CSS未適用のloading画面を表示しない。
+| Variant            | Blocking performance/quality gate                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------------------- |
+| 全 variant         | semantic golden、resource limit、redaction、a11y、bundle/graph contract                                       |
+| XLSX Worker        | main-thread long task 50 ms 超 0、timeout/cancel/backpressure                                                 |
+| XLSX main fallback | semantic/resource limit、現行同 fixture の duration +10% 以下、低性能 fallback 表示。long-task 0 は要求しない |
+| virtual renderer   | p95 100 ms 以下、full baseline 非回帰、30% 以上改善、target miss 0                                            |
+| full-only renderer | full baseline p95 +10% 以下、keyboard/screen reader path                                                      |
 
-safe-hold → cleanup artifactの遷移は、同一browser profileでcacheの存在、activate後削除、offline再起動を確認する。prompt lifecycleにより旧client不在または単一client凍結が成立する前にはcleanup artifactをactivateしない。旧cache削除前の問題は受入済みprompt floorへ戻せる。削除後はlocal CSSのTailwind floorより前へ戻さず、事前検証したsafe-hold packageまたはforward fixを使う。PWA更新方式は戻さない。
+candidate 専用の改善値を paired fallback へ適用せず、fallback の安全・正確性条件を緩めない。
 
-## 10. フェーズ3: インライン実行除去とCSP
+### 8.8 CI hardening
 
-### 10.1 インラインscriptの除去
+- GitHub Actions は必要最小 `permissions`、job timeout、concurrency cancellation を持つ。
+- third-party action は full commit SHA で pin する。
+- fork PR へ secret を渡さない。
+- log と artifact から env/secret を redact する。
+- artifact retention を明示し、rollback package は WORM storage へ別送する。
+- workflow を先に merge して green を確認し、その後に branch protection の required check を有効化する。
+- repository setting、auto-deploy guard、required check の変更は evidence を残す独立した operator 作業にする。
 
-hash付きinlineを候補に残さず、自己ホストの外部scriptへ統一する。
+## 9. 全体実施順と production 昇格
 
-- 初期theme適用は、小さな同期classic script `public/theme-bootstrap.js` としてheadから読込み、最初の描画前に実行する。
-- 保存値は `system` / `light` / `dark` だけを許可し、localStorage例外時も `system` で起動する。
-- loading終了とviewport高さ更新は `src/bootstrap/browserLifecycle.ts` 等へ移し、cleanup可能なlistenerとして登録する。
-- 実行可能なインラインscriptとインラインstyleを0箇所にする。
+実施順は固定する。
 
-### 10.2 CSP候補
+0. Phase 0 guard: 最初の source merge より前に main auto-production promotion を停止
+1. Phase 0A-0: 現行の immutable baseline
+2. Phase 0A: toolchain、audit、lint identity
+3. Phase 0B: E2E、a11y、coverage、architecture
+4. Phase 0C: artifact/package/provider 基盤
+5. Phase 1A: QA-only custom Worker parity
+6. Phase 1B: prompt UI、blocker、startup、root boundary
+7. Phase 1C: multi-client permit、cleanup coordination
+8. Phase 1D: transition、provider、production floor
+9. Phase 2A: local Tailwind CSS
+10. Phase 2B: legacy Tailwind cache cleanup
+11. Phase 3: CSP
+12. Phase 4: XLSX Worker
+13. Phase 5: ShoppingList virtualization
+14. Phase 6: `App.tsx` 分割
+15. Phase 7: IndexedDB 分割
+16. M2: lint 0、観測、rollout 専用分岐削除
 
-実違反を確認する前の最小候補は次とする。
+operator は Phase 0 guard の provider/repository 設定と証跡を source PR より先に完了する。Phase 0A-0 から 1D までの source PR は merge できるが、production artifact は 1A～1D を一括で通過した互換 floor だけを昇格できる。
+
+現在の persistence Release A production acceptance が repository 内 evidence で完了していない場合、Phase 0 の source/QA 作業は進めてよいが、Phase 1D の production 昇格は行わない。
+
+各 PR は一つの主リスクだけを扱う。計測、coverage、repository setting、provider setting を一つの PR にまとめない。
+
+## 10. Phase 0A-0: 現行 baseline の固定
+
+### 10.1 変更
+
+auto-promotion guard 後、照合基準 commit を clean detached worktree へ checkout する。別の固定済み tooling checkout から `capture:baseline-v0 --source-dir <clean-checkout>` を実行し、現行 Node 20.20.0/npm 10.8.2 のまま次を保存する。capture tooling の追加 commit 自体を baseline source として build しない。
+
+- source SHA、lockfile、tool version
+- `build:release-a` の complete log と `dist` file hash tree
+- `index.html`、`sw.js`、capabilities manifest、precache
+- `vercel.json`、API function、migration hash、active env key 名
+- lint/audit/disable/expect-error identity
+- current autoUpdate Worker の transition fixture
+- Tailwind CDN response bytes、URL、取得時刻、SHA-256
+- 主要画面の screenshot と computed-style fingerprint
+- unit/build/encoding の実行結果
+- 既存 Release A evidence への参照
+
+baseline capture script は `npm audit` exit code 1 を advisory 結果として受理し、解析不能と混同しない。
+
+baseline 採取後に恒久 capture script/schema を merge する。source SHA が変われば capabilities、HTML、Service Worker bytes も変わるため、「script-only なので同じ build」と扱わず、production へ昇格しない。
+
+`.gitattributes` は全 text LF を要求する一方、Prettier は `AGENTS.md` と `docs/Resilient Persistence & Safe Migration Plan.md` を CRLF 指定し、tracked bytes も CRLF である。0A-0 で bytes/BOM/EOL を固定した後、独立 PR で `.gitattributes` にこの二 file の `eol=crlf` override を追加し、それ以外を LF のままにする。意図した属性差分だけを隔離し、`test:encoding` の scan 対象へ二 file を含め、Prettier、Git attributes、実 bytes が同じ期待 EOL を検査する。
+
+### 10.2 合格条件 `P0-BASELINE`
+
+- toolchain 変更前の artifact と CDN 表示を再検証できる。
+- baseline file は source と別の immutable storage にも保存される。
+- current previous-production package を再 deploy できるか、できない場合は production promotion を停止したまま原因を解消する。
+- main auto-production promotion が無効または承認制である証跡がある。
+- canonical build/capture が dirty または untracked input を拒否する。
+- BOM/EOL catalog と実 bytes が一致する。
+
+## 11. Phase 0A: Toolchain と依存関係
+
+### 11.1 Version 方針
+
+次の組合せを一つの compatibility PR に混在させず、順に更新する。
+
+1. Node `24.18.0`、npm `11.16.0`、`@types/node` `24.13.3`
+2. Vite `8.2.0`、`@vitejs/plugin-react` `6.0.5`
+3. Vitest `4.1.10`、`@vitest/coverage-v8` `4.1.10`、jsdom `30.0.1`
+4. vite-plugin-pwa `1.3.0`、`@vite-pwa/assets-generator` `1.0.2`、Workbox `7.4.1`
+5. ESLint `9.39.5`、typescript-eslint parser/plugin `8.66.0`、react-hooks `7.1.1`
+6. Playwright `1.62.1`、axe-core Playwright `4.12.1`
+7. Tailwind `3.4.19`、PostCSS `8.5.25`、Autoprefixer `10.5.4`
+8. `@supabase/supabase-js` `2.112.0`、`ws` `8.21.2`
+9. Vercel CLI `58.5.1`
+
+React 18.3、TypeScript 5.9、Tailwind 3 の major は維持する。選択 version は exact pin し、lockfile を正本とする。
+
+custom `src/sw.ts` が import する `workbox-core`、`workbox-precaching`、`workbox-routing`、`workbox-strategies`、必要な場合の `workbox-expiration` と、page 側の `workbox-window` はすべて `7.4.1` の direct devDependency にする。transitive dependency を実装 API として使わない。
+
+### 11.2 必須 migration
+
+- Vitest の `environmentMatchGlobs` を projects へ移す。
+- unit、DOM、Worker、tooling/API の tsconfig/project を分ける。
+- ESLint 9 flat config へ移し、旧 baseline fingerprint を明示 mapping する。
+- Vite 8 の暗黙 browser target を受け入れず、app と Worker の `build.target` を `es2020` に固定する。
+- manual chunk、lazy import、PWA manifest、precache、asset path の golden test を更新する。
+- provider build と function runtime が Node 24 で動くことを QA deployment で証明する。
+
+### 11.3 Security
+
+Phase 1 前に reachable critical/high と production critical/high を 0 にする。Vite、Vitest、vite-plugin-pwa、`ws` の advisory を新 PWA 実装より先に解消する。ExcelJS は更新だけで解消しない advisory を input limit、Worker isolation、reachability review と waiver の組で扱う。
+
+### 11.4 合格条件 `P0-TOOLCHAIN`
+
+- `verify:runtime` が local/CI の exact versionと provider の runtime family/resolved patch allowlist を検証する。
+- typecheck、unit 1,198 件以上、build、encoding が成功する。
+- lint baseline 外 warning が 0 である。
+- Vite 5 baseline と比較し、意図しない browser target、chunk、PWA output 差分がない。
+- production promotion は停止中である。
+
+## 12. Phase 0B: Browser、a11y、coverage
+
+### 12.1 Browser fixture
+
+決定的な fixture と test-only API を用意する。
+
+- fresh install
+- controlled page
+- waiting Worker
+- saved/unsaved/saving/failed/recovery-required persistence
+- map import preview、event import、event export
+- backup restore の draft と実行中
+- multi-tab
+- chunk load failure
+- offline/online
+- 1,000 行 shopping list
+
+production code に test bypass を埋めず、build-time test endpoint と fixture DB を production package から除外する。
+
+### 12.2 A11y
+
+keyboard、focus order、dialog、live region、color contrast、zoom、screen reader label を主要 route で検査する。viewport の zoom 禁止を除去し、200% zoom と narrow viewport を required case にする。
+
+### 12.3 合格条件 `P0-BROWSER`
+
+- wrapper/inner command の所有権が test で保証される。
+- fixed Chromium で通常 E2E、a11y、offline smoke が成功する。
+- changed coverage と high-risk coverage の閾値を満たす。
+- source string assertion を新規追加しない。
+- branch protection は workflow green 後にだけ required 化される。
+
+## 13. Phase 0C: Artifact と provider 基盤
+
+Phase 0C は次の独立 PR に分ける。
+
+1. build input descriptor と generic artifact manifest
+2. bundle/graph/performance budget
+3. complete release package
+4. provider prebuilt deploy と byte/header verification
+5. generic evidence fragment
+6. repository/provider setting の operator evidence
+
+`release-capabilities*` は dual-write のまま維持する。
+
+既存 Release A tooling は次の順で variant-aware にする。
+
+- `verify-release-a-build.mjs`: `registerSW.js` を hard-code せず、legacy generateSW と prompt injectManifest の各 contract を capabilities から選ぶ
+- `verify-release-a-browser.mjs`: fixed Playwright Chromium、package ID、startup 四分岐、旧/新 Worker transition を検査する
+- `rehearse-release-a-rollback.ps1`: 旧 source の再 build をやめ、保存済み package の prebuilt deploy と hash 再照合を行う
+- `verify-release-a-evidence.mjs`: schema v1 と `buildId=sourceSha` を変更しない
+
+旧再 build rollback は diagnostic 用にも release gate から除外する。generic verifier を先に追加し、Release A consumer の互換 test が green のまま各 consumer を移行する。
+
+### 13.1 合格条件 `P0-ARTIFACT`
+
+- 同じ input を canonical runner で二回 build し、static と function/provider bundle の content tree が一致する。
+- package を clean environment へ展開し、static app と metrics function を起動できる。
+- env secret 値を含まない。
+- `deploy:qa` した package の全 bytes、headers、API、migration prerequisite が `verify:provider` で一致する。
+- artifact evidence fragment は生成できるが、長時間観測を必要とする final evidence は生成しない。
+- previous-production package と新 package の transition scenario を記述できる。
+
+## 14. Phase 1: Prompt 型 PWA 更新
+
+### 14.1 最終構成
+
+- `vite-plugin-pwa` は `injectManifest` を使う。
+- custom Worker は `src/sw.ts` を正本とする。
+- `injectRegister: false`、`registerType: "prompt"`、`skipWaiting: false`、`clientsClaim: false` を明示する。
+- app bootstrap が registration state を snapshot する前に virtual register module や component を mount しない。
+- `index.html` の唯一の entry を小さい `src/bootstrap.ts` とし、React、App、feature/persistence module を静的 import させない。
+- `src/bootstrap.ts` が page/Worker identity と reload safety を照合し、安全分岐だけで `src/index.tsx` を dynamic import する。
+- app root/provider の外側に root Error Boundary と update coordinator を置く。
+
+`injectManifest` では activation が custom Worker 自身の責務である。`src/sw.ts` は generic `"SKIP_WAITING"` message を拒否し、permit handler 以外から `self.skipWaiting()` を呼ばず、activate 時に `clientsClaim()` を呼ばない。source scan と built `sw.js` scan の両方で無条件 activation/takeover がないことを固定する。
+
+### 14.2 `src/sw.ts` の parity
+
+Phase 1 の custom Worker は現 generateSW の次を再現する。
+
+- precache と revision
+- SPA navigation fallback
+- offline asset response
+- Workbox precache namespace に限定した outdated app cache cleanup
+- Tailwind CDN `CacheFirst`
+- Supabase origin `NetworkOnly`
+
+Supabase runtime route は client bundle が未接続でも、Phase 1 parity では維持する。削除は usage graph を証明する独立 PR、または Phase 2 の route owner 変更として行う。
+
+Workbox の cleanup helper が無条件 `activate` listener を登録する構成は使わない。旧 precache の判定規則を exact app-cache namespace に限定した executor へ移し、§7.2 の activation authorization 後にだけ呼ぶ。runtime cache の削除は phase ごとの明示 allowlist に限定する。
+
+### 14.3 Startup の四分岐
+
+mutable App を mount する分岐は、先に共通 `acquirePresenceOrHold()` barrier を通る。Web Locks 対応時は shared presence を最大 5 秒で取得できた場合だけ mount し、exclusive transition 中の timeout は hold にする。非対応時だけ capability を `close-all-only` に固定して mount する。
+
+1. `controller == null`: barrier 成功後、初回 load として app を mount し、snapshot 後に Worker を登録する。
+2. controller が応答し `pageBuildInputId == activeWorkerBuildInputId`、protocol 互換: barrier 成功後に app を mount する。
+3. controller が応答し protocol 互換だが identity 不一致、かつ waiting Worker が page と一致: compatibility hold 画面を出し、独立 persistence safety snapshot が idle を証明した場合だけ prompt protocol を開始する。
+4. controller があるが pre-floor、timeout、unknown protocol、identity 欠落: app chunk を追加 load せず fail-closed hold 画面を出す。「今すぐ更新」は無効にし、全 tab を閉じて再起動する手順だけを示す。bootstrap は candidate の registration/update check までは行ってよいが、`skipWaiting()` を要求せず、自動 reload loop を作らない。
+
+hold 画面は `src/bootstrap.ts` と小さい external bootstrap CSS だけで描画し、React/App chunk に依存しない。keyboard、screen reader label、200% zoom、offline を E2E 対象にする。
+
+controller 応答 timeout は固定値 3 秒、retry は利用者操作ごとに 1 回とする。
+
+### 14.4 Root Error Boundary
+
+React mount 前に root coordinator が `ReloadSafetyStore` を初期化する。bootstrap 用 validator は現行 recovery 判定から副作用なしの `inspectPersistenceRecoveryState()` を抽出し、10 app store payload/checkpoint、`syncQueue` control metadata、migration journal/archive、exact legacy `localStorage` runtime-fallback candidate の parse/digest/reconcile を read-only で検査する。control metadata だけで `idle` にしない。
+
+probe は migration、cleanup、write を開始しない。`indexedDB.databases()` などで DB 存在を確認できない場合は `unknown` とし、probe のために空 database を新規作成しない。最初は `unknown`、全 recovery source の整合を証明した後だけ `idle` にする。running App の persistence hook と blocker registry は同じ store へ同期 publish する。
+
+snapshot は `status`、`mutationEpoch`、`durableSaveEpoch`、`recoveryEpoch`、`blockerCount`、`observedAt` を持つ。`status == saved`、mutation/save epoch 一致、recovery 完了、blocker 0、snapshot freshness 1 秒以内を同時に満たす場合だけ reload-safe とする。mutation boundary は React effect を待たず同期的に epoch/token を更新し、App crash 直前の変更を古い `saved` snapshot で safe 判定しない。
+
+running App は `refreshReloadSafety()` で同期 ref、registry、read-only recovery probe を再検証し、prompt の有効化直前、PREPARE 前、APPLY 前に新しい `observedAt` を発行する。App crash/unexpected unmount 後は refresh を不可にして `unknown` を返すため、1 秒 freshness を heartbeat で見せかけない。
+
+root Error Boundary は lazy chunk/Worker chunk load error と通常 render error を分類する。
+
+- root coordinator が保持する `ReloadSafetyStore` が上記 reload-safe を証明した場合だけ update/retry 操作を提示する。
+- `unsaved`、`saving`、`failed`、`recovery-required`、snapshot 不明では reload/update を提示しない。
+- App crash を blocker 解放として扱わない。
+- raw stack、XLSX 内容、利用者データを evidence へ書かない。
+
+### 14.5 Blocker registry
+
+blocker は token 方式の単一 registry で管理し、登録元、開始時刻、理由、解除理由を持つ。
+
+| 状態                     | blocker 開始                      | blocker 解除                                             |
+| ------------------------ | --------------------------------- | -------------------------------------------------------- |
+| persistence unsaved      | mutation boundary                 | durable save 成功                                        |
+| persistence saving       | write 開始                        | success/failure token へ原子的に遷移                     |
+| persistence failed       | write failure                     | retry save 成功                                          |
+| recovery-required        | recovery 検出                     | recovery 完了・検証・保存成功                            |
+| map import               | file 選択/preview 作成            | apply 完了または cancel                                  |
+| event import             | file 選択                         | import transaction 完了または cancel                     |
+| event export draft       | options を変更                    | confirm 時に execution token へ原子的置換、または cancel |
+| event export execution   | confirm                           | download 成功または cancel                               |
+| backup restore draft     | restore source/mode/target を変更 | restore 完了または cancel                                |
+| backup restore execution | restore 開始                      | durable save と結果確認                                  |
+| XLSX Worker              | request accepted                  | result/cancel/error cleanup                              |
+| drag/edit                | operation 開始                    | commit または cancel                                     |
+
+status/token の置換は一つの registry transaction とし、`saving` 解除と `failed` 登録の間に blocker 0 を観測させない。failed 状態の破棄は本計画へ追加せず、既存 recovery/save で durable 化するまで保持する。
+
+全 operation/draft token の commit は、後続の execution、persistence-unsaved、persistence-saving token の登録と同じ registry transaction で置換する。map import apply、event import、export、backup restore、drag/edit の各 handoff で blocker 0 を観測しない race test を持つ。unexpected unmount/App crash では component cleanup が token を解放せず crash-seal し、通常 unmount は明示 commit/cancel transaction の完了時だけ解放する。
+
+dialog を pristine なまま開いただけでは blocker にしない。`BackupRestoreDialog` の `sourceEventName`、`restoreMode`、`targetEventName` と `ExportOptionsDialog` の local options を明示的に対象にする。Phase 1B で Item edit/add、event rename、URL/map edit、各 dialog draft、async operation の全 local state owner を inventory 化し、各開始/commit/cancel/unmount test が揃わない限り blocker registry を完了扱いにしない。
+
+### 14.6 Permit protocol
+
+#### PREPARE
+
+1. client は shared presence 保持中に `refreshReloadSafety()` を実行し、election を `ifAvailable` で取得して blocker を検査する。
+2. client は UI を freeze し、自身の shared presence を解放してから、lifecycle → exclusive presence を bounded acquisition する。
+3. client は reload safety と blocker を再検査する。
+4. client から waiting Worker へ MessageChannel で `PREPARE_UPDATE` を送る。
+5. waiting Worker は `MessageEvent.source.id` を要求元として取得する。
+6. Worker は `clients.matchAll({ type: "window", includeUncontrolled: true })` を実行し、registration scope で filter した client が要求元一件だけであることを確認する。
+7. Worker は nonce、15 秒 expiry、source client ID、protocol、page/active/waiting build ID、client-set fingerprint を memory に束縛して返す。
+
+#### APPLY
+
+1. client は lock 所有中に `refreshReloadSafety()`、blocker、identity をもう一度確認する。
+2. client は `APPLY_UPDATE` と nonce を同じ waiting Worker へ送る。
+3. Worker は source、protocol、identity、expiry、unused、client-set fingerprint を再検査する。
+4. Worker は await を挟まない同じ handler で permit を consumed、state を `activation-committed` にし、PONR を越えて `skipWaiting()` を呼ぶ。
+5. `skipWaiting()` の throw/reject/timeout も post-PONR failure として扱い、mutable App を再開しない。nonce は再利用しない。
+6. client は registration が candidate を `activating` または `activated` として観測する。
+7. activated Worker は authorized/idempotent cache cleanup を完了し、exact cache の残存を再検査して `ACTIVATION_COMPLETE` または `ACTIVATION_FAILED` を返す。Worker restart 後も status query は cache の実状態から同じ結果を再構成する。
+8. `clientsClaim: false` のため `controllerchange` は待たない。client は lifecycle/exclusive presence lock を保持したまま、`registration.active` へ MessageChannel で identity と activation status を問い合わせる。
+9. activated/expected identity、cleanup success の ack が一致した場合だけ、client は明示 reload を一度行う。reload 後の bootstrap が新 controller と page の一致を再検査する。
+
+waiting Worker が PREPARE 後に terminate/restart すると memory permit は失われる。APPLY は `PERMIT_NOT_FOUND` で失敗し、client は update を適用しない。再試行は全 lock/blocker 検査からやり直す。
+
+PONR 後に activation/cleanup ack が 10 秒で得られない場合は mutable App を再開せず hold 画面を維持する。election と freeze を維持したまま exclusive presence → lifecycle の順で解放し、shared presence を再取得してから election を解放する。自動 reload と legacy package rollback を行わず、runbook に従い現在の floor と互換な close-all/fix-forward package を配布し、idempotent cleanup/status query を再実行する。
+
+必須 reject test は次のとおり。
+
+- expired nonce
+- replay/reuse
+- requester 消失
+- source client ID 不一致
+- client set 追加/削除
+- page/active/waiting identity 不一致
+- protocol mismatch
+- Worker restart
+- blocker 再発
+- lock loss
+- `skipWaiting` failure
+- activation/cleanup ack timeout
+- natural activation と新 tab open の race
+
+### 14.7 Web Locks 非対応
+
+Web Locks がない browser では running app からの「今すぐ更新」を無効にする。全 client を閉じた後の browser 標準 activation と再起動だけを許可し、手動 reload を繰り返さない。
+
+## 15. Phase 1 の分割
+
+### 15.1 Phase 1A: QA-only parity
+
+- production `generateSW/autoUpdate` は変更しない。
+- QA variant だけで `injectManifest` custom Worker を build する。
+- navigation、offline、precache、Tailwind、Supabase route の parity を証明する。
+- current autoUpdate → `prompt-close-all` bridge → `prompt` candidate の transition harness を先に作る。
+- 長期休眠 client 用に `legacy-auto` → `prompt` の bridge skip、最古の保持対象 prompt-compatible floor → current candidate、複数 phase skip、unknown protocol を transition fixture に含める。
+
+合格条件 `P1A-PARITY`:
+
+- current previous-production package から QA bridge/candidate への全 transition test が実行可能である。
+- custom Worker の scope、navigation response、offline asset、precache集合、cache name/owner が baseline と exact または review 済み allowlist 差分である。
+- production promotion は禁止されたままである。
+
+### 15.2 Phase 1B: Prompt UI と startup
+
+- build-time `VITE_PWA_UPDATE_MODE=legacy-auto|prompt-close-all|prompt` を catalog 化する。
+- default production variant は 1D まで `legacy-auto` のままにする。
+- `prompt-close-all` と `prompt` の custom Worker は同じ protocol/permit を実装する。前者の page UI は future update の in-app APPLY を提示せず、close-all 手順だけを提示する。
+- prompt variant に startup 四分岐、root Error Boundary、blocker registry、single-client protocol を追加する。
+- persistence hook は root の `ReloadSafetyStore` へ mutation/save/recovery epoch と状態を publish する。状態不明を safe にしない。
+
+合格条件 `P1B-PROMPT`:
+
+- blocker 表の正負 E2E がすべて通る。
+- chunk failure 中に unsafe reload が起きない。
+- pre-floor controller で reload loop が起きない。
+- prompt source merge 後も production は legacy artifact のままである。
+
+### 15.3 Phase 1C: Multi-client と cleanup coordination
+
+- permit protocol の nonce/source/fingerprint/restart 処理を完成する。
+- lifecycle lock を persistence cleanup contract へ接続する。
+- exact cache cleanup allowlist と lock order architecture test を追加する。
+- persistence legacy `localStorage` key executor は production entry point へ接続しない。
+
+合格条件 `P1C-MULTICLIENT`:
+
+- 2～5 tab と hidden tab が残る間は 5 秒以内に update を拒否して shared state へ復帰し、crashed/closed tab の lock 解放後だけ再試行できる。
+- tab open/close race で mutable App と exclusive transition が並行しない。
+- permit reject test がすべて通る。
+- lock downgrade failure が fail-closed になる。
+- Release B capability は hard OFF のままである。
+
+### 15.4 Phase 1D: Production floor
+
+- `prompt-close-all` bridge と `prompt` の二つを完全 package 化する。
+- production project に domain 未切替 candidate deployment を作り、全 bytes/header/API を検証してから、二者承認で同じ deployment ID を alias 昇格する。
+- current autoUpdate → bridge、bridge → prompt、legacy-auto → prompt direct skip は close-all/natural activation、prompt → newer prompt と prompt → same-floor close-all fallback は permit/natural activation の transition matrix を通す。
+- 全 retained compatibility floor から candidate への複数 phase skip と、retention 外/unknown protocol の fail-closed hold を通す。
+- prompt → legacy-auto の transition と legacy-auto の再 deploy を拒否する。
+- Tier 2 smoke を行う。
+- Release/Data Safety/Operations reviewer が sign-off する。
+
+合格条件 `P1D-FLOOR`:
+
+- `P0-BASELINE`、`P0-TOOLCHAIN`、`P0-BROWSER`、`P0-ARTIFACT`、`P1A-PARITY`、`P1B-PROMPT`、`P1C-MULTICLIENT` が green。
+- persistence Release A の production gate が別途完了している。
+- preview/localhost transition rehearsal と、本番同一 origin の installed PWA transition を分けて実施する。Service Worker を割合 traffic で canary 済みとみなさない。
+- bridge を origin-wide 昇格して 24 時間以上監視し、その後 prompt を origin-wide 昇格してさらに 24 時間以上監視する。
+- prompt package と prompt-close-all bridge/fallback package の immutable copy がある。legacy-auto package は forensic/pre-floor fixture として保持するが通常 rollback に使わない。
+- provider auto-promotion を再開せず、承認済み package だけを production へ昇格する。
+
+`P1D-FLOOR` 完了後の prompt package を PWA phase-floor package とする。
+
+bridge が一台でも activation した後は roll-forward-only とし、legacy-auto を再配布しない。PONR 後の障害は現在の compatibility floor と同じ asset/security 契約を持つ `prompt-close-all` fallback、または新しい prompt-compatible fix-forward package で対処する。
+
+## 16. Phase 2A: Tailwind local CSS
+
+### 16.1 変更
+
+- `tailwind.config.ts`、`postcss.config.js`、`src/styles/tailwind.css` を追加する。
+- Tailwind 3.4.19 を exact pin する。
+- `index.html` の CDN script と inline Tailwind config を削除する。
+- content scan に `index.html` と全 TS/TSX source を含める。
+- 動的 class 名は明示 safelist または静的 mapping へ移す。
+- `src/sw.ts` から Tailwind CDN runtime route を削除する。
+- 未接続 Supabase client route は graph 検証後、別 commit で削除する。
+- local CSS を含む `prompt` と `prompt-close-all` を同じ source から package 化し、後者を P2B 後も使える新しい PWA safety fallback にする。
+
+比較対象は Phase 0A-0 で固定した screenshot/computed-style/CDN bytes であり、実装時点の live CDN ではない。
+
+### 16.2 合格条件 `P2A-LOCAL`
+
+- HTML、source、network、Service Worker route に Tailwind CDN request がない。
+- deterministic screenshot の unmasked pixel diff が各画面 0.1% 以下で、layout/visibility/font-size/color の選択済み computed-style field が exact 一致する。antialias mask と意図差分は owner/reviewer 付き allowlist に限定する。
+- offline cold start で同じ CSS が適用される。
+- CSS size budget を満たす。
+- 旧 `tailwind-cache` が残っていても参照されない。
+- PWA phase-floor への rollback が可能である。
+
+`P2A-LOCAL` package を Tailwind phase-floor とする。
+
+## 17. Phase 2B: Legacy Tailwind cache cleanup
+
+`P2A-LOCAL` を production で受け入れた後の別 artifact で実施する。
+
+- `src/sw.ts` の exact allowlist に旧 `tailwind-cache` 名を一つだけ追加する。
+- §7.2 の permit または client 0 natural activation authorization の中で idempotent cleanup を行い、次の page の status query でも残存 0 を確認する。
+- prefix/glob による cache 全削除を禁止する。
+- cleanup 前後に offline navigation と rollback compatibility を検査する。
+
+合格条件 `P2B-CACHE`:
+
+- current、waiting、rollback transition 後に旧 cache が残らない。
+- app cache、runtime cache、利用者データを削除しない。
+- offline 再起動が成功する。
+- cleanup artifact 自体を immutable package として保存する。
+
+旧 cache 削除後の rollback floor は `P2A-LOCAL` 以降に限定する。
+P1D の CDN bridge/fallback は transition fixture として保持してもよいが、P2B 後の通常 deploy/rollback を拒否する。
+
+## 18. Phase 3: CSP と inline code の撤去
+
+### 18.1 Inline code
+
+- theme 初期化を external hashed module へ移す。
+- loading/viewport 処理を bootstrap module へ移す。
+- inline `<style>` を local CSS へ移す。
+- inline event handler、`javascript:` URL、`eval`、`new Function` が 0 であることを source/build scan する。
+
+### 18.2 CSP 正本
+
+provider と local preview が同じ `config/response-policy.json` を使用する。
+
+初期 policy:
 
 ```text
 default-src 'self';
+base-uri 'self';
+object-src 'none';
+frame-ancestors 'none';
+form-action 'self';
 script-src 'self';
-script-src-attr 'none';
 style-src 'self';
-style-src-elem 'self';
 style-src-attr 'unsafe-inline';
 img-src 'self' data: blob:;
 font-src 'self' data:;
 connect-src 'self' https://docs.google.com;
 worker-src 'self';
 manifest-src 'self';
-object-src 'none';
-base-uri 'self';
-frame-ancestors 'none';
-form-action 'self';
 ```
 
-Reactのstyle属性を利用しているため `style-src-attr 'unsafe-inline'` は当面必要である。`script-src` に `unsafe-inline` / `unsafe-eval` は追加しない。共有無効の現行clientでSupabase originを許可しない。
+Google Sheets 導線で redirect origin が追加で必要な場合は、provider capture で実在を証明した exact origin だけを追加する。未接続の Supabase client origin は許可しない。
 
-Google Sheetsの実responseがredirectする場合は、provider canaryで最終originを記録し、その正確なoriginだけを `connect-src` へ追加する。開発serverのWebSocket要件を本番policyへ混ぜない。
+`style-src-attr 'unsafe-inline'` は全 style attribute を許可する例外であり、React 由来だけを CSP が識別するものではない。既存 105 箇所は source inventory と architecture gate で管理する。新規追加は原則 failure とするが、Phase 5 の virtual row owner に限り、`position/top/left/width/height/transform` と finite layout number/static enum 由来の値を review 済み allowlist へ追加できる。URL、content、任意文字列を style 値へ流さない。
 
-### 10.3 段階導入
+### 18.3 Security header
 
-追跡対象のCSP policy catalogを唯一のsource of truthにし、delivery mode入力からローカルheader server設定、provider header config、delivery revisionを同時生成する。3者を正規化比較し、手書きのpolicy複製を許可しない。
+- `X-Content-Type-Options: nosniff`
+- `Referrer-Policy: strict-origin-when-cross-origin`
+- `Permissions-Policy: camera=(), microphone=(), geolocation=()`
+- `X-Frame-Options: DENY`
+- `X-XSS-Protection: 0`
 
-1. `test:e2e:csp` は単独実行時だけrelease buildを作るwrapperとし、内部の `test:e2e:csp:project` は渡されたread-only dist / URLだけを検査する。`vercel.json` と同じheaderを返すローカルproduction-like serverの起動、ready待ち、試験、終了までwrapperまたは上位orchestratorが所有してReport-Onlyを試す。
-2. 同じsource/app入力からdelivery revisionだけが異なるReport-Only、強制、safe rollbackの3artifact/packageを作り、各artifact IDとSW bytesが異なることを確認する。
-3. 最初のnavigation前から `securitypolicyviolation` とconsoleを収集する。
-4. responseに期待するCSP headerが1件だけあり、policy ID、mode、内容が一致することをassertする。
-5. 通常E2E、Google fixture、XLSX現行操作、バックアップ、PWA、offlineを実行する。
-6. provider Previewでも実headerと実Google canaryを確認する。
-7. 違反0になってから強制packageへ進み、同じ試験を再実行する。
-8. `quality:transition` で同一installed profileをReport-Only → 強制 → safe rollback → 強制の順に進め、各activate後のonline/offline navigationとCache Storage内 `index.html` Responseが期待headerを持つことを確認する。
+obsolete な filter を有効化せず、CSP を正本にする。
 
-本計画では本番CSP report収集APIを作らない。Report-Onlyは隔離previewと自動証跡に限定する。
+### 18.4 合格条件 `P3-CSP`
 
-### 10.4 受入条件
+- local/provider の enforced CSP で violation 0。
+- report-only と enforced を同じ release で混在させない。
+- unsafe inline script、`unsafe-eval`、wildcard source がない。
+- style attribute が既存 inventory または virtual renderer 専用の property/value/owner/a11y test 付き allowlist に一致する。
+- HTML、manifest、Worker、API、hashed asset の header/cache matrix が一致する。
+- 同じ local CSS/CSP 契約の `prompt-close-all` package を保存し、PWA safety fallback をこの世代へ更新する。
+- P2A phase-floor へ rollback できる。
 
-- 実行可能なinline script、inline `<style>` 要素、Tailwind CDN参照がない。
-- `script-src` に `unsafe-inline` / `unsafe-eval` がない。
-- `style-src` / `style-src-elem` に `unsafe-inline` がなく、必要なReact style属性だけを `style-src-attr` で許可する。
-- 実responseの強制CSPが自動検査される。
-- installed PWAのprecache済みnavigationでも最新delivery revisionの強制headerが有効である。
-- 現時点の主要操作、Google Sheets、同一origin metrics API、PWAが違反なしで動作する。
-- `worker-src 'self'` はpolicyに存在する。実XLSX WorkerのCSP試験はフェーズ4で行う。
+## 19. Phase 4: XLSX Worker
 
-CSP問題時は、同じsource/app入力から直前の受入済みheader policyとdelivery revisionで作成・検証したsafe rollback artifact/packageへ切り替え、TailwindやPWAまで同時に戻さない。同じartifactの本番headerだけを編集しない。
+### 19.1 先行分離
 
-## 11. フェーズ4: XLSX遅延読込とWorker
+Worker 導入前に次を ExcelJS 非依存 module へ移す。
 
-### 11.1 先に分離する境界
+- number/date/text parsing helper
+- XLSX request/result contract
+- download helper
+- export options と実使用 `ExportData` の source of truth
+- map/event import preview の純粋 domain type
 
-挙動を変えないPRで次を分離する。
+`src/types/export.ts` と `src/utils/exportImport.ts` の重複 `ExportData` を解消し、互換 type test を追加する。`persistenceRecoveryExport.ts` は ExcelJS module ではなく download helper へ依存させる。
 
-- `itemNumberParsing.ts`: `extractNumberFromItemNumber` 等。ExcelJSへ依存しない。
-- `xlsxContracts.ts`: ExcelJS classを公開しないrequest/result型。
-- `downloadBlob.ts`: JSON復旧出力を含むdownload共通処理。
-- `xlsxMapParser.ts`: map Workbook変換。
-- event XLSX codec: 現在の `exportImport.ts` のimport/export変換。
+### 19.2 Contract
 
-`App.tsx` と `persistenceRecoveryExport.ts` は `downloadBlob.ts` を直接利用する。`ExportData`、`ImportResult`、fallback warning等の公開契約を `xlsxContracts.ts` へ移し、`features/events/exportFlow.ts` からExcelJS実装への静的importを除く。`FocusMode`、`FocusModeMapCanvas`、`hallGrouping`、`MapCanvas`、`MapView`、訪問panelからもExcelJS依存を除く。
+`src/workers/xlsxContracts.ts` は疎な共通 object ではなく discriminated union とする。
 
-UIへは3操作を持つ共通 `XlsxExecutionPort` だけを公開し、literal build flagでadapterを1つだけ選ぶ。
+```ts
+type XlsxRequest =
+  | {
+      kind: "map-import";
+      requestId: string;
+      schemaVersion: 1;
+      fileName: string;
+      buffer: ArrayBuffer;
+      options: MapImportOptions;
+    }
+  | {
+      kind: "event-import";
+      requestId: string;
+      schemaVersion: 1;
+      fileName: string;
+      buffer: ArrayBuffer;
+      options: EventImportOptions;
+    }
+  | {
+      kind: "event-export";
+      requestId: string;
+      schemaVersion: 1;
+      data: EventExportData;
+      options: ExportOptions;
+    };
 
-- Worker ON artifact: 専用Worker entryだけがcodecとExcelJSを静的importし、UIはExcelJS非依存の薄いWorker adapter / constructorをdynamic importする。
-- Worker OFF artifact: legacy main-thread adapterを操作時にdynamic importし、同じcodecとresult契約を使う。
-- runtime中にON/OFFを切り替えず、未選択adapter、Worker chunk、不要なExcelJS経路がdead-code eliminationで消えることをmanifestで検証する。
+type XlsxResult =
+  | { kind: "map-import-success"; requestId: string; payload: MapImportSummary }
+  | {
+      kind: "event-import-success";
+      requestId: string;
+      payload: EventImportSummary;
+    }
+  | {
+      kind: "event-export-success";
+      requestId: string;
+      payload: EventExportResult;
+    }
+  | {
+      kind: "cancelled";
+      requestId: string;
+      operation: XlsxRequest["kind"];
+      code: "USER_CANCELLED" | "SUPERSEDED" | "TIMEOUT";
+    }
+  | {
+      kind: "error";
+      requestId: string;
+      operation: XlsxRequest["kind"];
+      code: XlsxErrorCode;
+      stage: XlsxStage;
+      retryable: boolean;
+    };
 
-### 11.2 Worker契約
-
-request/resultは構造化複製可能なplain dataだけにする。
-
-```text
-request:
-  schemaVersion
-  requestId
-  operation
-  fileName       # import時は必須
-  buffer         # transferable ArrayBuffer
-  options
-
-result:
-  schemaVersion
-  requestId
-  operation
-  stage
-  success
-  payload | error
+type XlsxTransportMessage =
+  | { kind: "START"; request: XlsxRequest }
+  | {
+      kind: "CANCEL";
+      requestId: string;
+      reason: "USER_CANCELLED" | "SUPERSEDED" | "TIMEOUT";
+    }
+  | { kind: "CHUNK_ACK"; requestId: string; sequence: number }
+  | {
+      kind: "RESULT_CHUNK";
+      requestId: string;
+      operation: "map-import" | "event-import";
+      sequence: number;
+      rows: ArrayBuffer;
+    }
+  | { kind: "RESULT_END"; result: XlsxResult };
 ```
 
-現行event XLSX importは `file.name` をfallback event名に使うため、`ArrayBuffer` だけでは互換にならない。`fileName` を必ず渡し、同じfallback結果をgolden testで固定する。
+`XlsxErrorCode` は `FILE_TOO_LARGE | ZIP_ENTRY_LIMIT | ZIP_EXPANDED_TOO_LARGE | ZIP_RATIO_EXCEEDED | SHEET_LIMIT | CELL_LIMIT | TEXT_LIMIT | SCHEMA_MISMATCH | UNSUPPORTED_FORMAT | PARSE_FAILED | SERIALIZE_FAILED | WORKER_CRASHED | TIMEOUT | BUSY`、`XlsxStage` は `preflight | unzip | parse | validate | serialize | transfer` の固定集合とする。
 
-Worker ON artifactではWorker内部だけでExcelJS Workbookを生成する。exportはArrayBufferを返し、main threadでBlob化・downloadする。Worker request/resultへFile、DOM、React state、ExcelJS instanceを含めない。OFF adapterも同じplain resultと後段pipelineを返す。
+error/cancel/log/evidence に raw Error、stack、file cell content を含めない。success は operation 別に検証・正規化した payload だけを返す。
 
-`XlsxExecutionPort` はrequestのsettleとcancel outcomeを共通化する。ON adapterはcancel時にrequestを失効してWorkerをterminateし、OFF adapterは現行の同期処理を途中完了したと偽らず、実際にsettleするまでblockerを保持する。
+`RESULT_CHUNK.rows` は schema version 1 の正規化済み row 配列を canonical UTF-8 JSON にした Transferable `ArrayBuffer` とする。receiver は sequence/schema/size を検証してから decode する。
+import success payload は row 本体を重複して持たず、chunk count、row count、digest、warning summary だけを持つ。port adapter が検証済み chunk から最終 domain result を組み立てる。
 
-Workerのevent import責務はWorkbookからplainな `ImportResult` への変換までとする。main threadの `toImportedEventData` → `buildXlsxEventRestoreSource` → `createAppBackup` → `parseAppBackup` → `pendingBackup`、続く `runExclusiveRestore` / `db.restoreAppDataAtomically` と完了通知を維持し、parse結果を直接React stateへ適用しない。
+### 19.3 Port と owner
 
-### 11.3 feasibility hard gate
+- `XlsxExecutionPort` の owner は app root の単一 provider とする。
+- `App.tsx` event import、`features/events/exportFlow.ts`、`components/map/MapImportDialog.tsx` へ同じ port を inject する。
+- 同時 CPU operation は一件だけとする。map preview は latest-wins で前 request を `SUPERSEDED` にし、event import/export は実行中 request を置換せず新 request を `BUSY` で拒否する。暗黙 FIFO は作らない。
+- provider が Worker の create、terminate、crash recovery、request ID、blocker token を所有する。
+- `AbortSignal` 自体は Worker へ送らない。main owner が abort を明示 `CANCEL(requestId)` へ変換し、250 ms 以内に cancel ack/settlement がなければ Worker を terminate/recreate する。
+- `RESULT_CHUNK` は sequence ごとの `CHUNK_ACK` を受けるまで次を送らず、backpressure と cancel の順序を protocol test で固定する。
+- cancel/timeout/crash/terminate 時は全 pending Promise を一度だけ settle し、port、timer、blocker、chunk buffer、transferred buffer reference を必ず cleanup する。
+- component は Worker instance と ExcelJS を直接 import しない。
+- paired fallback は同じ port を main-thread adapter で実装し、contract を変えない。
 
-小さなfixtureで、採用browser tierのmodule Worker内からExcelJSのread/writeが動くことを先に証明する。
+### 19.4 Resource limit
 
-- Tier 1で失敗した場合はWorker実装を止める。
-- classic Worker、別library、main-thread fallbackへ自動的に切り替えない。
-- 失敗時は「dynamic importだけを導入する案」を別ADRで評価し、Worker完了とは扱わない。
+UI preflight と Worker の両方で検査する。
 
-### 11.4 実装順
+- compressed file: 50 MiB 以下
+- ZIP entry: 10,000 以下
+- declared uncompressed total: 250 MiB 以下
+- actual streamed uncompressed total: 250 MiB 以下
+- actual single ZIP entry: 64 MiB 以下
+- compression ratio: 100 以下
+- sheet: 100 以下
+- cell: workbook 全体で 1,000,000 以下
+- single text value: 1 MiB 以下
+- aggregate text: 50 MiB 以下
+- import timeout: 60 秒
+- export timeout: 120 秒
 
-1. typed `XlsxExecutionPort` adapterをdynamic importし、同時に1つのCPU集約処理だけを許可する。
-2. map解析を移し、既存preview raceとrequest失効を維持する。
-3. event XLSX importを移す。
-4. event XLSX exportを移す。
-5. 観測可能なstageだけを表示し、根拠のない百分率を出さない。
-6. cancel時はrequestを無効化してWorkerを `terminate()` し、次回に再生成する。
-7. timeout、crash、二重実行、古いrequest、retryを処理する。
-8. transfer後のbufferをretryへ再利用せず、必要なら元Fileから再読込する。
-9. dynamic import境界を確認し、不要になったmanual chunkを削除する。
-10. Vite manifestと初期HTMLを解析し、ExcelJSへの静的経路とmodulepreloadが0件であることを自動検査する。
+central/local header、entry path、declared size、CRC の欠落・矛盾・overflow を検査するだけでなく、各 entry を bounded streaming inflater へ通して実展開 byte を逐次計数し、single/aggregate 上限で直ちに停止する。続いて `workbook.xml`、worksheet XML、`sharedStrings.xml` を bounded SAX/streaming parser で走査し、sheet/cell/text 数を ExcelJS materialize 前に検査する。preflight 自体が entry 全体を一括保持しない。
 
-### 11.5 PWA cacheとfallback
+上限超過は固定 error code で返し、Worker を terminate して blocker を確実に解除する。偽装 declared size、local/central 不一致、CRC 不一致、巨大 sheet、高圧縮、cancel race を fixture 化する。
 
-現在はlazy chunkもprecacheされている。既存の「PWA準備後はXLSXをoffline利用可能」という期待を維持するため、初期方針は選択されたXLSX adapterとExcelJS chunkのprecacheとする。ON artifactはWorker entry/ExcelJS、OFF artifactはlegacy adapter/ExcelJSを含み、未選択側は含めない。
+event export は入力 domain row/cell/text 数を workbook 作成前に同じ上限で検査する。ZIP header + streaming inflate/XML preflight の実装または依存 package は Phase 0 audit gate を通した exact pin とし、ExcelJS を呼ぶ前に完了させる。
 
-フェーズ0のprecache予算を超える場合だけ、初回利用時runtime cacheへ変更するADRを作る。その場合は、初回online準備前はoffline XLSXを使えないことを画面に明示する。
+### 19.5 Semantics
 
-rollout中のWorker OFF経路は別artifactへbuildし、1つのartifactへWorker版とmain-thread版のExcelJSを二重収録しない。dead-code eliminationに失敗して両方が残るartifactはmanifest/size gateで不合格にする。ON artifactでruntime main-thread fallbackは採用せず、Worker再生成と回復可能なerrorを使う。
+- map import preview は最新 request ID だけを採用する。
+- event import は既存 backup、validation、selected-event restore semantics を維持する。
+- event export は既存 filename、sheet、cell 表現を golden workbook で検査する。
+- `ArrayBuffer` は Transferable とし、不要な clone をしない。
+- export workbook は Transferable `ArrayBuffer` で返す。import の正規化済み row は 250 行か 256 KiB の小さい方を上限とする `RESULT_CHUNK`、ack/backpressure、明示 CANCEL で渡し、巨大な一括 structured clone を禁止する。
+- offline XLSX 契約を維持するため Worker/ExcelJS chunk は Service Worker precache に残し、page 初期 request graph と precache install transfer を別 budget で測る。
+- Worker crash、chunk load failure、timeout は root Error Boundary と port error で扱い、自動 reload しない。
 
-既存 `React.lazy` と新しいWorker/dynamic importのchunk load failureはroot error boundaryで分類する。waiting更新がある場合もblockerを無視して自動reloadせず、保存安全性を確認した更新導線または再試行を提示する。
+### 19.6 合格条件 `P4-XLSX`
 
-### 11.6 受入条件
+- ExcelJS が page client 初期 module/request/evaluation graph に 0 件。
+- Worker precache/network transfer は別予算で計上され、初期 page graph と混同しない。
+- map import、event import、event export の golden output が一致する。
+- untrusted input limit と error redaction test が通る。
+- Worker ON candidate で main-thread long task 50 ms 超が 0。main fallback は §8.7 の fallback 基準を使う。
+- Tier 1 required、Tier 2 重大障害なし。
+- Worker ON と paired-fallback OFF package を同じ source から保存する。
 
-- 初期entryと初期modulepreloadからExcelJSが外れる。
-- page clientの初期module graphではExcelJS chunkをrequest・evaluateしない。Service Worker install時のprecache転送は別予算として計測する。
-- ON artifactでmap解析、event import、event exportがWorkerで成功する。
-- OFF artifactで同じ3操作がlegacy adapterから成功し、ON/OFFのplain resultと往復goldenが一致する。
-- file名fallback、sheet、列、値、地図設定、往復結果が変更前と一致する。
-- importは既存backup schema検証と原子的restore経路を通り、検証失敗・復元失敗・取消時はReact stateとIndexedDBがともに変更されない。
-- cancel後の古い結果を適用しない。
-- ON artifactでは大file中もmain threadのUIが応答する。
-- OFF artifactのmain-thread時間と入力応答は既存baseline以下へ悪化せず、3操作、互換、rollbackが成立する。
-- 強制CSP、prompt更新、fresh install後offlineでWorkerが動く。
-- feature flag別artifact IDが異なる。
-- ON manifestにlegacy adapter/client-side ExcelJS経路がなく、OFF manifestにWorker adapter/chunkがなく、どちらにも未選択実装が混在しない。
+production 既定 ON は paired transition と canary 後にだけ行う。
 
-Workerは既定OFFのQA artifact、既定ON artifact、観測中artifactの順に進める。既定ON配布前だけでなく観測完了までの各release candidateで、同じsource、lockfile、public build入力、Tailwind/CSP/PWA設定からWorker flagだけをOFFにしたpaired release packageも検証・保存する。問題時は同じcandidateのpaired packageへ戻し、無関係なフェーズを巻き戻さない。
+## 20. Phase 5: ShoppingList virtualization
 
-## 12. フェーズ5: 買い物一覧の仮想化
+### 20.1 分離する port
 
-### 12.1 現状リスク
+DOM 操作を business navigation から切り離す。
 
-`ShoppingList.tsx` は、平坦・ホール・スペース表示、可変高card、見出し、折りたたみ、PC/touch DnD、範囲選択、検索、警告jump、space navigation、window scroll、PC二列を持つ。`elementFromPoint`、`getBoundingClientRect`、`querySelectorAll`、window scrollへ依存する処理がある。
+```ts
+interface ListViewportPort {
+  ensureMounted(
+    target: ItemAddress,
+    signal: AbortSignal,
+  ): Promise<ViewportHandle>;
+  scroll(handle: ViewportHandle, options: ScrollOptions): Promise<void>;
+  focus(handle: ViewportHandle, options: FocusOptions): Promise<void>;
+  getEpoch(): number;
+  cancel(reason: ViewportCancelReason): void;
+}
+```
 
-drag開始中に全件描画と仮想描画を切り替える方式は採らない。DOM差替えでdrag source、scroll、focusが失われるためである。
+`useExecutionSpaceNavigator` は history/business guard を所有し、viewport port を inject される。直接 DOM caller である `App.tsx` の mode/search 遷移、`AppOverlayLayer.tsx` の edit-save、`useExecutionSpaceNavigator.ts` を先に移行する。
 
-### 12.2 PR A: 行モデル
+### 20.2 Row model
 
-- `ShoppingListPresentationModel` に `renderRows`、`logicalGroups`、`itemIdToLogicalIndex`、`itemIdToMountTarget` を持たせる。
-- `renderRows` は見出し、item、drop zone等を明示し、`logicalGroups` は折りたたみ中もgroup内の全item IDを保持する。
-- range選択は既存 `rangeSelection.ts` と同じlogical membershipを唯一の情報源にし、仮想化用に別group modelを並行生成しない。
-- 折りたたみ見出しの全group drag sourceと先頭item anchorの現行意味を維持する。
-- logical indexとmount対象を事前計算し、render中の反復的な `findIndex` とDOM探索を置き換える。
-- 現行の全件rendererを行モデル経由にし、まだ仮想化しない。
+- stable item ID を key にする。
+- filter/sort/group の domain result と render window を別 memo にする。
+- variable height は measured cache と epoch で無効化する。
+- focus target は `ensureMounted` 完了後にだけ scroll/focus する。
+- search/mode/event change は古い operation を AbortController で cancel する。
+- drag 中は overscan と target pinning を使い、DOM 非存在を business deletion と誤認しない。
 
-### 12.3 PR B: scroll / focus adapter
+### 20.3 Accessibility fallback
 
-- 既存 `useExecutionSpaceNavigator` の非同期scroll、snapshot、reveal契約を拡張し、window scrollとPC二列を維持する。
-- `ensureMounted -> scrollToRow` を基礎async契約にし、操作契約で必要な導線だけ `focusRow` / `announce` を続ける。
-- visible range、drop index、request cancelを契約へ含める。
-- Appのmode切替・検索、編集保存後scroll、space navigationの直接DOM操作を同じadapterへ寄せる。編集保存後は現行どおりscrollのみとし、focus移動を追加する場合はa11y挙動変更として別に検証する。
-- 対象keyへevent、day、column、view mode、list scopeを含め、古いrequestをepochで破棄する。PC二列でscopeを省略しない。
-- 全件rendererでも同じadapterを使う。
+full renderer は恒久実装として残す。
 
-### 12.4 PR C: QA-only feasibility
+- 利用者が a11y setting から full renderer を選べる。
+- screen reader の自動検出は行わない。focus recovery failure を検出した場合は、操作 idle 後に full renderer へ切替を提案する。
+- drag、edit、save、restore 中には renderer を切り替えない。
+- fallback preference は versioned UI preference とし、event data へ混ぜない。
 
-可変高、window scroll、PC二列、sticky見出し、touch、native DnD、画面外focusを候補libraryまたは自前prototypeで検証する。このPRの仮想rendererはQA-onlyフラグで、production既定ONにしない。
+### 20.4 合格条件 `P5-LIST`
 
-次を満たさなければproduction仮想化へ進まない。
+- 100、1,000、5,000 行 fixture で表示、scroll、search、edit、drag、mode change が正しい。
+- scroll/focus target miss 0。
+- keyboard と screen reader path が full/virtual 両方で通る。
+- virtual/full-only がそれぞれ §8.7 の variant 別 latency budget を満たす。
+- virtual ON と full paired-fallback package を保存する。
+- rollout flag を OFF にすると同じ domain state で full renderer が動く。
 
-- drag sourceがunmountされず、画面外drop indexをrow modelから決定できる。
-- pointer/touchとwindow端auto scrollが両立する。
-- card展開、倍率変更、viewport変更後に再測定できる。
-- search / warning / navigationで画面外rowをmount後にfocusできる。
-- 採用ARIA patternとscreen reader結果が承認される。
+M2 で削除できるのは rollout default-selection 分岐だけであり、full renderer と利用者向け a11y fallback は削除しない。
 
-失敗時は行モデルとadapterだけを維持し、仮想化完了を宣言しない。別のDnD方式または一覧UX変更は別ADRとする。
+## 21. Phase 6: `App.tsx` 分割
 
-### 12.5 PR D: production実装
+### 21.1 目標責務
 
-- productionで仮想化を有効にする時点では、閲覧、状態変更、range、検索、PC/touch DnDをすべて仮想rendererで扱う。
-- drag中にrendererを切り替えない。
-- active / focused / dragged rowを必要な間pinまたはoverlay化する。
-- overscan、測定cache、sticky責務を分離する。
-- 小規模listは単純rendererを使う閾値を、フェーズ0計測から固定する。
-- full rendererはbuild-time rollbackとアクセシビリティfallbackとして保持する。
+`App.tsx` に残してよいのは次だけとする。
 
-利用者が非仮想表示を選ぶ場合は、drag中やfocus移動中に切り替えず、idle時にscroll anchorを保存してrendererを切り替える。
+- root composition
+- provider wiring
+- route 相当の top-level screen selection
+- error/update boundary 接続
 
-### 12.6 合否
+次を module へ抽出する。
 
-既定の仮想表示経路について次を満たす。
+- bootstrap/session-like initialization
+- active event/date/tab state machine
+- shopping operation commands
+- import/export orchestration
+- focus mode orchestration
+- overlay/dialog orchestration
+- persistence command adapter
+- update blocker adapter
 
-- 300件・1,000件でitem DOM数が全件数ではなくviewport + overscanに連動する。
-- 300件の初期描画と入力応答が基準より改善し、1,000件で長時間taskとmemoryが予算内である。
-- 75% / 100% / 125%倍率、desktop / mobile、card展開後に空白・重なりがない。
-- 平坦・ホール・スペース、編集・実行二列、drag、touch移動、上下移動、range、一括変更が一致する。
-- 折りたたみ中も見出しからのgroup drag、非表示itemを含むrange、visit navigationの論理所属が一致する。
-- 検索、未入力警告、space navigationから画面外itemへ移動できる。
-- event/day/column/view mode/list scope切替後に古いscroll requestが別一覧をscrollまたはfocusしない。
-- keyboard順、位置情報、live announcementを維持する。
+raw setter の束を渡さず、intent command と read model を interface にする。重複 `ActiveTab` は一つの public type に統一する。
 
-明示的な非仮想アクセシビリティfallbackは「1,000件で全件DOMを作らない」条件の例外であり、既定経路の性能合格を免除しない。
+### 21.2 Operation semantics
 
-production既定ON前から観測完了までの各release candidateで、同じsource、lockfile、public build入力、Tailwind/CSP/PWA設定からvirtual flagだけをOFFにしたpaired release packageを検証・保存する。問題時は同じcandidateのpackageへ戻す。小規模listと明示的a11y用の全件rendererはrollout旧経路ではなく、承認済みの恒久fallbackとして扱う。
+抽出前に現行の commit timing、optimistic update、rollback、operation 排他、stale completion を characterization test で固定する。次の target contract と現行挙動が異なる場合は、抽出 PR に混ぜず、Data Safety review を持つ独立 behavior-change PR と exit evidence で先に解消する。
 
-## 13. フェーズ6: `App.tsx` の責務分割
+- operation ID と abort signal を持つ。
+- stale completion は state を上書きしない。
+- persistence commit 成功後にだけ UI success を確定する。
+- optimistic update の rollback を domain command が所有する。
+- backup restore、event switch、import の排他を state machine で表す。
 
-### 13.1 方針
+### 21.3 Test
 
-既存shellとfeaturesを新設し直さず、残る調停をそれらへ寄せる。最初から全App stateを新しいglobal `AppStateSnapshot` / reducerへ書き換えない。
+- source string/handler 存在 test を behavior contract test へ置換する。
+- extracted hook/module は isolated test を持つ。
+- app-shell integration は user intent → state → persistence call → UI result を検査する。
+- chunk/load boundary は root Error Boundary test を再利用する。
 
-現在の `eventLists`、`eventMetadata`、`executeModeItems` はref-backed setterを持つが、他stateは同じ方式ではない。全stateを単一commit coordinatorへ変える場合は、単純分割ではなく独立した状態architecture PRとして扱う。
+### 21.4 合格条件 `P6-APP`
 
-### 13.2 最初に固定する契約
+blocking 条件:
 
-1. state、ref、effect、handler、shell props、overlay、永続化経路のinventoryを作る。
-2. 各stateのsource of truth、owner、session/persisted区分を記録する。
-3. `PersistedStateValues` / `AppData` 相当のIndexedDB state、session/UI state、localStorageのblock detection設定を別境界として命名し、曖昧な「全state snapshot」を作らない。
-4. rename、delete、import確定、restoreについて、論理commit、localStorage side effectと補償、autosave境界をintegration testで固定する。
-5. backup restoreのIndexedDB原子性は既存 `restoreAppDataAtomically` / `runExclusiveRestore` に残し、React論理commitと混同しない。
-6. 新しいcoordinatorが必要なら、snapshot寿命、失敗時結果、autosave順序をADRで決め、独立PRにする。
+- 上記の非許可責務が `App.tsx` にない。
+- raw setter prop が shell boundary を越えない。
+- source string assertion が 0。
+- forbidden deep import が 0。
+- operation race test が通る。
+- extraction PR に未承認の behavior change が含まれない。
+- behavior、a11y、bundle、PWA gate が回帰しない。
 
-抽出前に、`App.eventUpdateSourceCommit`、`App.executeModeItemsCommit`、`App.mapImportFlow`、`App.movePlan` 等のAppソース文字列・handler名依存testを、同じ不変条件を検証するcontroller/domain/render integration testへ置き換える。assertionの削除や弱体化は行わない。
+行数 2,000 以下は目標値とするが、責務 gate を満たしていれば単独の release blocker にはしない。行数、import fan-out、prop count は Phase 0 baseline より減少し、増加は許可しない。
 
-`App.tsx` の `components/map` barrel経由のstorage/domain importは、controller抽出前に直接utils/domain portへ向ける。polygon判定は現行の境界点包含挙動を固定し、異なる実装へ無検証で統合しない。`ActiveTab` 等の重複型は既存 `features/app-shell/types.ts` をsource of truthにする。
+## 22. Phase 7: IndexedDB 分割
 
-### 13.3 抽出順
-
-1. selector、normalizer、plan builderなど副作用のない処理。
-2. XLSX、JSON、Google Sheetsの画面調停。フェーズ4の `XlsxExecutionPort` を利用する。
-3. イベント作成、選択、rename、delete、update、duplicate resolution。
-4. item更新、列移動、一括操作。
-5. map import、reimport、hall、visit list調停。
-6. focus session調停。
-7. search、tab、表示mode、overlay intent。
-8. shellへ渡すpropsをfeature別view modelとactionへまとめる。
-9. `App.tsx` に残るBackupRestore、MapReimport、DuplicateEvent、Persistence UIを適切なoverlay / root boundaryへ移す。
-
-`ImportScreen.tsx` と `features/events/sheetImport.ts` に重複するGoogle Sheets fetch経路は、挙動を先にtestで固定してから共通化する。
-
-dialog intent、対象のimmutable snapshot、確定actionはfeature側が所有し、portal、focus trap、focus復帰はshell側が所有する。同じdraftを両方で持たない。
-
-`mapImportFlow` の複数setter effect、bulk add、rename、deleteは、現行snapshotからpatch / commandを返す形へ段階的に変える。event updateの既存snapshot方式を先行例とし、未変更sliceの参照同一性、現行のstore別保存順、部分成功、retryを維持する。論理commitをIndexedDB全storeの原子的transactionとは呼ばない。
-
-訪問リストは現状、真の未保存draftではなくlive `executeModeItems` へ暫定反映し、取消時に元順序を再適用する未確定編集である。reload/crash時の挙動をフェーズ0で固定し、confirm時だけ反映する方式への変更は別の挙動変更PRにする。
-
-### 13.4 Hooks警告
-
-抽出前に対象effect/callbackの挙動をtestで固定し、次の順で判断する。
-
-1. effectをevent処理または導出値へ置換できないか。
-2. 関数形式updateでstale valueを避けられないか。
-3. callbackを小さくできないか。
-4. 外部購読だけ用途付きrefを使う。
-5. 抑制が必要なら理由と回帰testを付ける。
-
-依存配列変更で挙動が変わる修正は、移動PRと分ける。
-
-### 13.5 完了gate
-
-フェーズ7開始前にすべて満たす。
-
-- `App.tsx` にXLSX codec、File読込、map import手順、backup restore詳細が残らない。
-- 既存shellへ生のReact setterを渡さない。
-- shell propsはfeature別の型付きview model / action bundleであり、巨大な無型objectへ置き換えていない。
-- rename、delete、import、restoreの操作契約とautosave順序がintegration/E2Eで成功する。
-- Appソース文字列に依存したintegration testがなく、置換後もevent source、execute-mode ref同期、map import一回commit、両列move planの不変条件を検証する。
-- component barrelからstorage/domainへの逆向き依存がない。
-- IndexedDB永続対象、session-only state、localStorage設定の型付き境界とbackup/import/restore対応が1つの契約として固定される。
-- 各操作で未変更storeの参照同一性、保存対象store、保存回数・順序、部分失敗retryが分割前と一致する。
-- 訪問リストの暫定順序がautosaveされ、取消で元順序を補償保存する現行挙動と、取消可能期間中にPWA reloadをblockする挙動が成功する。
-- startup後のhall/map補正はowner、冪等性、autosave前後順序が固定される。
-- 抽出したcontrollerをApp全体なしでtestできる。
-- Appの依存fan-out、effect数、top-level handler数、shell props数がinventory基準から減る。
-- `App.tsx` は2,000行以下を目標ではなくgateとする。超える合理的理由がある場合は、フェーズ7開始前のADRで残存責務と解消期限を承認する。
-- 抽出範囲のlint警告が増えず、原則0になる。
-
-## 14. フェーズ7: `indexedDB.ts` の責務分割
-
-### 14.1 現行モジュールとの対応
-
-| 現行                               | 方針                                                                     |
-| ---------------------------------- | ------------------------------------------------------------------------ |
-| `useIndexedDbPersistence.ts`       | React orchestrationとして維持。公開idle portとfacadeだけに依存           |
-| `mapDataPersistence.ts`            | map codecとして当面path維持                                              |
-| `persistenceResilience.ts`         | pure digest/checkpoint/recovery helperとして維持し、必要な単位だけ分割   |
-| `persistenceCleanupCoordinator.ts` | fail-closed coordinatorとして維持                                        |
-| `persistenceReleaseAMetrics*.ts`   | metrics責務を維持                                                        |
-| `persistenceRecoveryExport.ts`     | UI向けexport adapterとして維持                                           |
-| `indexedDB.ts`                     | connection、primitive、repository、migration、recovery、facadeへ段階抽出 |
-
-既存helperの移動は `indexedDB.ts` 抽出と同じPRへ混ぜない。pathを変える場合は互換re-exportとimport migrationを別PRにする。
-
-### 14.2 目標責務
+### 22.1 依存方向
 
 ```text
-既存pathを維持:
-  src/hooks/useIndexedDbPersistence.ts
-  src/utils/mapDataPersistence.ts
-  src/utils/persistenceResilience.ts
-  src/utils/persistenceCleanupCoordinator.ts
-  src/utils/persistenceReleaseAMetrics*.ts
-  src/utils/persistenceRecoveryExport.ts
+facade
+  -> repositories
+      -> transaction coordinator
+          -> stores
+              -> raw database
+  -> migration/recovery services
+      -> transaction coordinator
+  -> pure resilience helpers
+```
 
-indexedDB.tsから新規抽出:
-src/features/persistence/
-  types.ts
+逆依存と repository 間の direct store import を禁止する。
+
+service/repository は clock、entropy、crypto、metrics の port interface にだけ依存し、root assembly が browser/Release A adapter を注入する。低層 store から metrics backend を直接 import しない。
+
+### 22.2 目標構成
+
+```text
+src/persistence/
+  index.ts
+  database.ts
   schema.ts
-  runtimeContext.ts
-  connection.ts
-  idbPrimitives.ts
+  transactions/
+    transactionCoordinator.ts
+    transactionCapabilities.ts
+  stores/
+    appDataStores.ts
+    mapDataStores.ts
+    syncControlStore.ts
   repositories/
     appDataRepository.ts
-    mapRepository.ts
-  restore.ts
+    mapDataRepository.ts
+    backupRepository.ts
+    controlRepository.ts
   migration/
-    journal.ts
-    legacyMigration.ts
-    legacyCleanup.ts
+    migrator.ts
+    legacyCleanupService.ts
+    legacyLocalStorageAdapter.ts
   recovery/
-    archive.ts
-    adoption.ts
-  facade.ts
+    recoveryService.ts
+    recoveryExport.ts
+  resilience/
+    validators.ts
+    serializers.ts
+    reconcile.ts
+    identityFactory.ts
+  ports/
+    clockPort.ts
+    entropyPort.ts
+    cryptoPort.ts
+    persistenceMetricsPort.ts
 ```
 
-digest、checkpoint、runtime fallback、recovery candidateの純粋処理は既存 `persistenceResilience.ts` を唯一のsource of truthとし、新規treeへ複製しない。残るmetadata I/Oだけをrepositoryへ置く。名前はdependency inventoryで調整してよいが、責務と依存方向は変更前に確定する。
+### 22.3 `syncQueue` と transaction
 
-### 14.3 owner境界
+- queue payload と control record は既存 stored field を読む in-memory type guard で論理分離する。persisted record へ discriminant field を追加せず、物理 `syncQueue` store の名前、key、record shape を変えない。
+- metadata/checkpoint、migration journal/archive、control record の access source of truth は `syncControlStore.ts` にする。
+- 10 個の app payload store と物理 `syncQueue` store にまたがる atomic write は `transactionCoordinator` だけが開始する。
+- repository が別 transaction を暗黙開始しない。
+- app data restore は現行 10 app stores を対象とし、`syncQueue` 本体を復元しない。
+- migration/recovery の crash point ごとに reopen test を持つ。
 
-- `runtimeContext` は `dbInstance`、open Promise、writer ID、expected revision/checkpoint mapを保持するだけで、DB open手順を持たない。
-- `connection` はopen、upgrade、blocked timeout、versionchange、closeを実装し、`runtimeContext` のconnection slotを変更できる唯一のmoduleとする。
-- test resetは本番facadeへ公開せず、test-only factoryまたはmodule再読込で行う。
-- `idbPrimitives` だけがrequest Promise化とtransaction完了補助を持つ。
-- repositoryはmigration/recovery UIへ依存しない。
-- recovery candidate生成はread-only portだけ、adoptionだけがcommit portを受け取る。
-- cleanup、migration staging、通常write、adoptionを同じ広権限repositoryへ渡さない。
-- facadeだけが各責務を組み立てる。
+### 22.4 Cleanup と resilience
 
-### 14.4 抽出順
+- `persistenceCleanupCoordinator.ts` は判断と lock 調停を維持する。
+- `migration/legacyCleanupService.ts` は現 `executePhysicalLegacyCleanup` の journal/archive、target validation、entry claim、CAS、readback、crash resume、直前 revalidation を維持する。
+- `migration/legacyLocalStorageAdapter.ts` は exact legacy key の read/remove だけを持つ。service は IndexedDB control data を使うが IndexedDB 自体を削除しない。
+- 既存 `db.cleanupLegacyPersistenceSources` public method は service への compatibility delegate として維持する。
+- 既存 `src/utils/persistenceResilience.ts` の deterministic validator/serializer/reconcile を複製せず対応する pure module へ move し、compatibility re-export を残す。
+- `Date.now`/`new Date`、`Math.random`、`crypto.getRandomValues`/`randomUUID` を使う writer ID/revision/candidate factory は `identityFactory.ts` へ分離し、`ClockPort`、`EntropyPort`、`CryptoPort` を inject する。既存 ID/revision format と ordering を golden test で維持する。
+- pure resilience module は DB、React、clock、entropy、crypto へ依存しない。
+- recovery service は pure helper と repository を組み立てる。
+- 現 `indexedDB.ts` が emit する Release A metrics は `PersistenceMetricsPort` へ移し、event name、順序、count、`buildId=sourceSha` payload を golden sequence test で維持する。
+- Release B entry point、production proof provider、kill switch は追加しない。
 
-1. 公開API shapeのtype testを追加する。
-2. 公開型、schema定数、error型を抽出する。
-3. runtime mutable stateを1つのcontextへ集約する。
-4. request / transaction primitiveを抽出する。
-5. 既存 `persistenceResilience.ts` のpure処理へ残存呼出を接続し、DB固有のmetadata I/Oだけをrepository候補へ分離する。
-6. connectionとversion compatibilityを抽出する。
-7. 通常repositoryとmap repositoryを抽出する。
-8. 既存runtime fallbackとsnapshot検証を接続する。
-9. atomic restoreを抽出する。
-10. legacy migration / cleanupをjournal、検証、staging、commitに分ける。
-11. recovery candidate / archive / adoptionを分ける。
-12. capability portとarchitecture testを固定する。
-13. 最後に互換facadeを新moduleから組み立てる。
+### 22.5 Facade
 
-各手順は原則独立PRとし、物理schema変更が必要になった時点で止める。
+`src/persistence/index.ts` を canonical facade、既存 `src/utils/indexedDB.ts` を compatibility shim とする。compatibility shim は既存 default/named export と型を re-export するだけとし、新しい実装 entry point にしない。
 
-### 14.5 必須試験
+facade の内容を次に限定する。
 
-- named `db`、default `db`、公開型、`db.STORES`、全method/property shape
-- 初回起動、空DB、通常保存、reload
-- DB v5、既知の前方互換v7、未知の新version拒否
-- 複数store、map個別保存、CAS競合
-- runtime fallback、壊れたmetadata/checkpoint/fallback
-- legacy migration準備・再開・検証・cleanup延期
-- recovery候補列挙、archive、adoption、再検証
-- atomic restoreの成功、途中失敗、retry
-- Release A browser、source互換rehearsal、immutable release package rehearsal
-- 分割前後のraw record、metadata、checkpoint、journal、archiveのgolden一致
-- 受入済み旧artifactのDBを新版で読み書きし、互換floor以降の旧artifactへ戻して再読込
+- public type/constant の re-export
+- compatibility alias
+- dependency assembly
+- public repository/service factory
 
-transaction順序は、注入したprimitiveで契約上必要な順序だけをassertする。実browserの非決定的なevent/microtask順を丸ごとgolden化しない。
+SQL/IDB request、transaction logic、migration、business rule を facade に置かない。
 
-### 14.6 完了条件
+### 22.6 合格条件 `P7-IDB`
 
-- 同一fixtureと操作について既存の非決定値を正規化した後、DB version、store、key、物理record shape、metadata、checkpoint、journal、archiveのgolden差分が0件である。
-- `src/utils/indexedDB.ts` がnamed/default exportを維持する薄い互換facadeである。
-- connectionとruntime stateのownerが各1箇所である。
-- migration、recovery、cleanup、通常writeのcapabilityが分離される。
-- 循環依存と禁止依存がarchitecture gateで0件である。
-- 既存永続化test、一般E2E、Release A gate、相互運用が成功する。
+- database/schema/store/key/version の byte/semantic compatibility test が通る。
+- `DB_NAME="EventShoppingPlannerDB"`、version 5、forward max 7、既存 store/key catalog が exact 一致する。
+- 既存 fixture を新実装で open、save、restore、reopen できる。
+- 全 cross-store atomicity と crash recovery test が通る。
+- `syncQueue` control record を失わない。
+- cleanup journal/CAS/crash-resume と Release A metrics event sequence が一致する。
+- public import の compatibility を維持する。
+- `indexedDB.ts` compatibility shim に非許可実装がない。
+- Release B は hard OFF。
 
-## 15. lint警告削減
+行数は参考値とし、依存方向、transaction owner、facade 内容、互換 test を blocking 条件にする。
 
-警告は各フェーズで触る範囲から減らし、最後へ一括延期しない。
+## 23. 継続 lint 削減
 
-1. 保存、取込、map、focusの状態遷移に関係するHooks警告
-2. `App.tsx`
-3. `FocusMode.tsx`
-4. `FocusModeMapCanvas.tsx`
-5. `MapCanvas.tsx` / `MapView.tsx`
-6. その他component
-7. 未使用、`prefer-const`、不要escape、`no-explicit-any`
+lint cleanup は各 phase の主リスクと混ぜず、小さな独立 PR で行う。
 
-Hooks 83件を自動一括修正しない。各警告を「不足依存」「不要effect」「安定化callback」「一度だけの意図」「外部購読」に分類する。
+優先順:
 
-最終条件はエラー0、警告0、新規disable 0、保存回数・listener数・render性能の回帰なしである。警告0になったPRでidentity baselineを削除し、CIを `--max-warnings 0` に固定する。
+1. unused vars と dead import
+2. no-useless-escape、prefer-const
+3. no-explicit-any
+4. exhaustive-deps
+5. 既存 disable と `@ts-expect-error`
 
-## 16. PR・品質ゲート
+exhaustive-deps は dependency を機械追加せず、effect の責務、stable callback、event callback、state machine へ分解する。既存 suppression を残す場合は理由と behavior test を追加するが、新規 suppression は追加しない。
 
-### 16.1 PR系列
+合格条件 `LINT-ZERO`:
 
-| ID         | 内容                                                                           | 主リスク         |
-| ---------- | ------------------------------------------------------------------------------ | ---------------- |
-| 0A-1       | Node/toolchain固定、EOL解消                                                    | build環境        |
-| 0A-2       | encoding/EOL/format/typecheck/lint範囲                                         | 品質設定         |
-| 0A-3       | lint/disable/audit baseline、CI骨格                                            | gate判定         |
-| 0B-1       | Playwright smokeとfixture                                                      | E2E基盤          |
-| 0B-2..4    | 代表6シナリオを機能群ごとに追加                                                | 利用者操作       |
-| 0B-5       | axe baselineと既存重大違反修正                                                 | a11y             |
-| 0C         | bundle/list/XLSX計測、coverage、branch protection                              | 計測・CI         |
-| 1A         | injectManifest parity、PWA harness、artifact ID、旧/新registration対応verifier | 配布識別         |
-| 1B         | prompt registration、idle port、blocker、verifier期待値切替                    | 更新・保存       |
-| 1C         | 複数client、既存cleanup統合                                                    | client協調       |
-| 1D         | Release A verifier/runbook/immutable release package rehearsal                 | 運用             |
-| 2A         | Tailwindローカル化、runtime route停止                                          | 視覚・offline    |
-| 2B         | Tailwind floor設定、旧runtime cache削除                                        | rollback・cache  |
-| 3A         | bootstrap外部化、Report-Only                                                   | 起動・CSP        |
-| 3B         | CSP強制                                                                        | 配信             |
-| 4A         | XLSX軽量境界                                                                   | dependency       |
-| 4B         | Worker feasibilityとclient                                                     | browser/取消     |
-| 4C         | map解析Worker                                                                  | map取込          |
-| 4D         | event import/export Worker                                                     | file互換         |
-| 5A         | row model                                                                      | 並び順           |
-| 5B         | scroll/focus adapter                                                           | navigation       |
-| 5C         | QA-only仮想化spike                                                             | feasibility      |
-| 5D         | production仮想化とDnD                                                          | 描画・入力・a11y |
-| 6以降      | App責務を1つずつ抽出                                                           | 状態調停         |
-| App完了後  | persistenceを低リスク順に抽出                                                  | 保存互換         |
-| lint final | baseline削除、警告0                                                            | lint挙動         |
-| 観測後     | Worker rollout旧経路、virtual rollout flagを削除                               | rollback縮小     |
+- error 0、warning 0
+- inline disable 0、または削除不能な generated/vendor allowlist だけ
+- `@ts-ignore` 0
+- `@ts-expect-error` は実際に error が消えると test failure になる
+- baseline file は空、または allowlist だけ
 
-rollout旧経路・フラグ削除を「lint final」と同じPRにしない。既定ON後の観測を終えた別releaseで行う。
+## 24. Rollout、観測、停止
 
-### 16.2 gateの層
+### 24.1 Variant
 
-**source PR gate**
+build input catalog は実装が存在する期間だけ次の値を受理する。
 
-```powershell
-npm run quality:pr
-```
+| Dimension            | 値                     | Production/build policy                                                                                   |
+| -------------------- | ---------------------- | --------------------------------------------------------------------------------------------------------- |
+| `pwaUpdateMode`      | `legacy-auto`          | P1D 前の baseline/transition fixture 専用。bridge activation 後は production build/deploy を拒否          |
+|                      | `prompt-close-all`     | P1D bridge と各 asset/security floor で更新する PWA fallback。page の APPLY UI だけ無効                   |
+|                      | `prompt`               | P1D 後の canonical production                                                                             |
+| `tailwindDelivery`   | `cdn`                  | P2A まで。P2A source merge 後は新規 build を拒否し、P2B までは保存済み fallback だけ保持                  |
+|                      | `local`                | P2A 後の canonical production                                                                             |
+| `xlsxExecution`      | `main`                 | Phase 4 rollout 中の paired fallback。M2 後は新規 build を拒否し、保存済み package だけ保持               |
+|                      | `worker`               | Phase 4 後の canonical production                                                                         |
+| `listRendererMode`   | `full-only`            | Phase 5 rollout 中の paired fallback。保存済み package は virtual preference を強制無効                   |
+|                      | `dual-default-full`    | Phase 5 QA/canary 専用                                                                                    |
+|                      | `dual-default-virtual` | Phase 5 後の canonical。M2 後は build-time default flag を削除し、同じ default と runtime a11y preference |
+| `persistenceCleanup` | `release-a-off`        | 唯一の許可値                                                                                              |
 
-`quality:pr` はencoding、format、全typecheck、lint identity、Vitest、evidence validator test、導入済みcoverage/architecture、通常build、同じmanaged preview上の通常E2E/a11yを順に実行する。未導入検査は担当フェーズでpackage scriptとrunnerを同時追加し、そのフェーズ以降のrequired checkにする。存在しないコマンドを先行フェーズの必須条件にはしない。
+`verify:variant-policy` は phase、release channel、source capability に対する valid combination を descriptor 生成前に検査し、retired implementation を source から復活させる build を拒否する。
 
-**clean artifact gate**
+同じ source SHA でも variant ごとに `buildInputId` と package ID が異なる。
 
-```powershell
-npm run quality:artifact
-```
+既存 persistence metrics は `buildId=sourceSha` 集約のまま維持し、variant 比較や M2 の採否には使わない。本計画の variant 観測は deployment ID、package ID、browser test evidence、incident 記録で行う。metrics schema を将来拡張する場合は Release A evidence v1 と別の versioned migration/contract とする。
 
-`quality:artifact` は `build:release-a` を1回だけ実行する。`build:release-a` はapp build → version付きartifact manifest生成 → Release A build verifierの順で完了してから戻る。orchestratorはmanifest、dist hash、provider header/config snapshotからrelease packageを組み立ててID/archive hashを固定後、同じdistを同じheader設定で1回だけread-only serveし、Release A browserとPWA projectを実行する。試験後はpackage ID/hashを参照するdetached release evidenceを生成し、検証後の再build、dist/package書換えを禁止する。
+### 24.2 Rollout 単位
 
-複数version遷移は単一artifact gateへ混ぜず、次の専用commandで試験する。
+- PWA prompt: Phase 1D で bridge → prompt の二段階 floor
+- Tailwind: 2A local floor、2B cleanup の二 release
+- XLSX: Worker OFF/ON paired package
+- list: full-only/dual paired package
+- App/IDB 分割: feature flag ではなく characterization contract を維持する package
 
-```powershell
-npm run quality:transition -- --scenario <transition-plan.json>
-```
+Phase 5 から M2 removal PR の直前まで、shared App/persistence を変更する PR と production candidate は次の四 package を同じ source から検査・保存する。
 
-scenario manifestは順番付きrelease package path、期待ID/hash、操作、rollback先、browser profile IDを持つ。runnerは全packageを先にhash検証し、同じprofileでautoUpdate → prompt、A → B → rollback → B、Tailwind safe-hold → cache cleanup、CSP Report-Only → 強制 → safe rollback等を順にserveする。packageを再buildせず、途中失敗でもprofileと証跡を隔離保存してserverを終了する。
+1. Worker + dual-default-virtual
+2. main-thread XLSX + dual-default-virtual
+3. Worker + full-only
+4. main-thread XLSX + full-only
 
-**provider / release gate**
+Phase 4 までは変更領域に応じた ON/OFF pair、Phase 1 は legacy transition fixture + bridge + prompt、Phase 2 は保存済み CDN floor → local の transition を required matrix とする。`quality:pr` は変更領域から required variant を機械選択し、`quality:artifact` は production candidate と全 paired fallback を検査する。
 
-- provider Previewの実CSP/security header
-- 実Google Sheets canary
-- immutable release package往復
-- Windows Chrome/Edge、Android Chromeの実installed PWA
-- 定期auditとwaiver照合
-- 実証跡JSONに対する `verify:release-a-evidence -- <path>`
+M2 removal 後、Phase 7 source から保存した最終四 package は `phase-floor package` として扱う。M2 source の main-thread adapter/default-selection は既に存在しないため、M2 candidate と同一 source の paired fallback を build 要求しない。M2 gate は canonical Worker + dual-default-virtual candidate と、保存済み Phase 7 floor 間の transition/restore/hash を検証する。
 
-`quality:release` はpreview URL、release-package manifest、detached evidence出力先を必須引数にし、未指定で成功しない。完了時に `verify:release-a-evidence -- <path>` で生成物を検証する。
+### 24.3 共通 production promotion gate
 
-### 16.3 フェーズ昇格matrix
+`P1D-FLOOR`、`P2A-LOCAL`、`P2B-CACHE`、`P3-CSP`、`P4-XLSX` rollout、`P5-LIST` rollout、`P6-APP`、`P7-IDB`、M2 package はすべて次を順に通す。
 
-各source PRはsource gateでmergeできるが、次フェーズへの昇格、互換floor設定、既定ON、強制policyは次の列をすべて満たしてから行う。
+1. candidate と phase 時点で有効な paired fallback の `quality:artifact`、live audit、waiver freshness を確認する。M2 は保存済み Phase 7 floor の hash/restore evidence を代わりに使う。
+2. `release:preflight` で env/migration/provider prerequisite と rollback floor を確認する。
+3. production project に domain 未切替の immutable candidate deployment を一度だけ作る。
+4. 全 static bytes/header、function provenance、API、package/deployment identity を照合する。
+5. Release/Data Safety/Operations のうち変更リスクに必要な二者が同じ deployment ID を承認する。
+6. 再 deploy せず、その deployment ID を production alias へ昇格する。
+7. production URL から全 identity/header と installed-PWA transition を再照合する。
+8. 最低 24 時間観測し、新しい immutable evidence fragment を生成して final evidence を確定する。
 
-| フェーズ      | source gate                    | clean artifact gate                                     | provider / release gate                                      |
-| ------------- | ------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------ |
-| 0A–0B         | 必須                           | 未導入分は非適用                                        | provider変更なし                                             |
-| 0C            | 必須                           | 現行autoUpdate artifactでbaseline必須                   | canary手順だけ固定                                           |
-| 1 PWA         | 必須                           | prompt、複数client、rollback必須                        | installed PWAとimmutable往復後にprompt floor設定             |
-| 2 Tailwind    | 必須                           | visual、offline、`quality:transition` で旧cache試験必須 | preview/installed PWA確認後にTailwind floor、続いてcache削除 |
-| 3 CSP         | 必須                           | local header serverで必須                               | provider Previewと実Google canary成功後だけ強制              |
-| 4 Worker      | 必須                           | 3操作、CSP、offline必須                                 | paired OFF packageと実browser確認後だけ既定ON                |
-| 5 仮想化      | 必須                           | 300/1,000件、DnD、a11y必須                              | paired OFF packageと実desktop/mobile確認後だけ既定ON         |
-| 6 App         | 必須                           | 通常/PWA smoke必須                                      | provider smoke成功後にフェーズ完了                           |
-| 7 persistence | 必須                           | Release A、相互運用、rollback必須                       | immutable往復と復旧runbook成功後に完了                       |
-| lint final    | 警告0必須                      | 通常artifact gate必須                                   | provider smoke。rollout分岐はまだ削除しない                  |
-| M2            | rollout削除PRのsource gate必須 | 残る既定経路の全artifact gate必須                       | 観測条件と連続release条件を満たしてからrollout分岐削除       |
+観測中に停止条件へ達した場合は alias を承認済み prompt-compatible floor/paired package へ切り替える。PONR 後に legacy-auto へ戻さない。phase exit はこの共通 gate の final evidence なしに完了しない。
 
-## 17. リリース、観測、ロールバック
+### 24.4 M2 観測 ADR
 
-### 17.1 milestone
+Phase 4/5 の rollout flag 削除前に ADR を作成し、次を具体値で埋める。
 
-- **M1 安定運用開始**: Workerと仮想化が既定ON、rollout旧経路を保持し、フェーズ0〜5の適用gateを通過。
-- **M2 計画完了**: 各機能ADRで事前に固定した観測期間と連続release条件を満たし、rollout専用の旧経路とflagを削除。恒久fallbackは維持。
+- 暦日 14 日以上
+- 連続 production candidate 2 件以上
+- Tier 1 全 required run 各 5 回以上
+- Tier 2 対象 device/browser 各 2 回以上
+- 再現可能な data loss、reload loop、chunk skew、操作不能 incident 0
+- stop condition と rollback package
+- evidence 保存先
+- Release/Data Safety/Operations owner
+- 日次確認頻度、alert 経路、go/stop 権限
+- incident evidence の保存先
 
-観測期間と必要release数は既定ON前に機能別ADRへ固定する。結果を見た後に短縮しない。
+存在しない Worker/virtual 利用率や本番 failure rate を条件にしない。
 
-### 17.2 feature flag
+### 24.5 即時停止条件
 
-Workerと仮想化は、`OFF QA` → `ON QA` → `既定ON・rollout旧経路保持` → `観測` → `rollout旧経路/flag削除` の順に進める。flag値はartifact IDの入力とmanifestへ含める。小規模listと明示的a11y用の全件rendererは削除対象にしない。
+次のいずれかで promotion を停止し、承認済み package を再 deploy する。
 
-Workerとvirtualの観測期間が重なるrelease candidateは、`ON/ON`、`OFF/ON`、`ON/OFF`、`OFF/OFF` の4variantを作る。各variantは同一sourceと他設定を使い、固有artifact IDを持ち、対象経路のartifact gateを通す。観測完了したflagのvariantだけを次releaseから廃止する。
+- data loss、restore failure、schema mismatch
+- PWA reload loop、multi-tab update、blocker 無視
+- package と provider bytes/header の不一致
+- CSP による主要操作不能
+- XLSX output semantic mismatch、resource limit bypass
+- scroll/focus target miss、keyboard 操作不能
+- audit の新規 reachable critical/high
+- evidence、package、migration prerequisite の欠落
 
-AppとIndexedDBの純粋な抽出はfeature flagではなく、小さいPRと互換facadeで戻せるようにする。
+rollback 後も DB schema を戻さない。前方互換 floor を満たす package だけを選ぶ。
 
-### 17.3 immutable release package
+## 25. Milestone
 
-release packageにはdist archive、artifact manifest、release-package manifest、provider header/config snapshot、source SHA、artifact/release package ID、lockfile hash、toolchain、flags、delivery revision、CSP policy ID/mode、主要hashを含める。品質・遷移・provider証跡は、release package ID/archive hashとprovider deployment IDを参照するdetached release evidence/indexとして別保存する。providerで「現行 → rollback → 現行」を、保存済みpackageまたは対応するimmutable deploymentそのもので演習する。
+### M0: 配布安全基盤
 
-PWA互換floor以前、保存schema互換外、旧localStorage原本を必要とするartifactへ戻さない。
+- `P0-BASELINE`
+- `P0-TOOLCHAIN`
+- `P0-BROWSER`
+- `P0-ARTIFACT`
+- `P1D-FLOOR`
+- `P2A-LOCAL`
+- `P2B-CACHE`
+- `P3-CSP`
 
-### 17.4 観測
+### M1: 性能基盤
 
-既存のprivacy-safe persistence metricsは継続利用する。Worker失敗率や仮想化失敗率の本番収集基盤は本計画で新設しないため、存在しない率を停止基準にしない。
+- `P4-XLSX` を既定 ON、paired-fallback 保存済み
+- `P5-LIST` を既定 ON、full renderer 恒久 fallback
+- 14 日観測を開始できる
 
-| 兆候                          | データ源                            | 停止条件                       | 初動                                                                                                                         |
-| ----------------------------- | ----------------------------------- | ------------------------------ | ---------------------------------------------------------------------------------------------------------------------------- |
-| 起動不能・CSP操作不能         | E2E、provider console、再現済み報告 | 1件再現                        | 配布停止、直前release package                                                                                                |
-| 保存・復旧不能                | 既存metrics、復旧画面、再現済み報告 | 1件確認                        | 即時停止、既存runbook                                                                                                        |
-| update中の世代不一致          | PWA E2E、artifact/build ID          | 1件再現                        | point-of-no-return前はactivate停止。以後/不明は凍結維持しmatching artifactへreloadまたはclose。safe-holdはforward deployment |
-| Worker/XLSX失敗               | E2E、QA、再現済み報告               | 基準fixtureまたは主要操作で1件 | paired Worker OFF package                                                                                                    |
-| 仮想化空白・誤drop・focus消失 | E2E、QA、再現済み報告               | 主要操作で1件                  | paired virtual OFF package                                                                                                   |
+### M2: 計画全体完了
 
-利用者の品目、備考、file内容をlogやartifactへ含めない。
+- Phase 0～7 の全 exit 条件
+- `LINT-ZERO`
+- M2 観測 ADR の条件達成
+- Phase 7 完了 source から四 variant の最終 paired package を保存・復元検証
+- XLSX rollout 専用 main-thread adapter を削除
+- virtual list の rollout default-selection 分岐を削除
+- M2 candidate と保存済み Phase 7 package の transition を検証し、後者を phase-floor package へ分類
+- full renderer と a11y fallback を維持
+- rollback package、evidence、runbook、restore drill が有効
 
-## 18. 決定事項と期限
+## 26. PR 順序
 
-| 項目                 | 決定                                                                                                      | 期限 / owner                |
-| -------------------- | --------------------------------------------------------------------------------------------------------- | --------------------------- |
-| Node                 | Node 24 LTSを正式対象                                                                                     | 0A / build owner            |
-| PWA                  | injectManifest + prompt + `skipWaiting`/`clientsClaim`既定無効 + election/presence lock + permit protocol | 1A–1C / PWA owner           |
-| 配布identity         | source SHA、artifact ID、release package IDを分離                                                         | 1A / release owner          |
-| Tailwind             | 3.4系を固定し、4系upgradeを混在させない                                                                   | 2開始前 / frontend owner    |
-| theme bootstrap      | 自己ホスト外部script。inline hash方式は採らない                                                           | 3A / security owner         |
-| CSP delivery         | policy mode/revisionをartifact入力にし、同一artifactのheader差替え禁止                                    | 3A / security+release owner |
-| XLSX cache           | 初期方針はprecache。予算超過時だけ再ADR                                                                   | 4B前 / PWA owner            |
-| Worker fallback      | runtime main-thread fallbackなし。rollout中はflag別paired package                                         | 4B / performance owner      |
-| 仮想化library / ARIA | QA spike合格後に固定                                                                                      | 5C / list+a11y owner        |
-| App coordinator      | inventoryで必要性を証明した場合だけ独立PR                                                                 | 6開始時 / app owner         |
-| persistence配置      | 現行module対応表を維持し、移動と分割を分離                                                                | 7開始時 / persistence owner |
+| 順序 | 主リスク                             | Production promotion   |
+| ---: | ------------------------------------ | ---------------------- |
+|    0 | auto-deploy/approval guard           | 最初の source merge 前 |
+|    1 | clean baseline capture               | 現行配布を維持         |
+|    2 | capture script/schema と EOL policy  | 禁止                   |
+|    3 | Node/npm/types                       | 禁止                   |
+|    4 | Vite/plugin                          | 禁止                   |
+|    5 | Vitest/projects                      | 禁止                   |
+|    6 | PWA/Workbox dependencies             | 禁止                   |
+|    7 | ESLint flat config/baseline mapping  | 禁止                   |
+|    8 | Playwright/a11y                      | 禁止                   |
+|    9 | coverage/architecture                | 禁止                   |
+|   10 | build identity/manifest              | 禁止                   |
+|   11 | budget/graph verifier                | 禁止                   |
+|   12 | complete package/provider verifier   | 禁止                   |
+|   13 | QA custom Worker parity              | 禁止                   |
+|   14 | startup/root boundary/blocker        | 禁止                   |
+|   15 | single-client permit                 | 禁止                   |
+|   16 | multi-client/lifecycle lock          | 禁止                   |
+|   17 | transition matrix/evidence           | canary のみ            |
+|   18 | prompt production floor              | 承認後のみ             |
+|   19 | local Tailwind CSS                   | 承認後のみ             |
+|   20 | old Tailwind cache cleanup           | 承認後のみ             |
+|   21 | CSP                                  | 承認後のみ             |
+|   22 | XLSX contracts/helper split          | behavior-equivalent    |
+|   23 | XLSX Worker adapter                  | default OFF            |
+|   24 | XLSX Worker rollout                  | canary → ON            |
+|   25 | viewport port/row model              | behavior-equivalent    |
+|   26 | virtual renderer                     | default full           |
+|   27 | virtual rollout                      | canary → virtual       |
+|   28 | `App.tsx` responsibility extraction  | contract-preserving    |
+|   29 | IndexedDB stores/transactions        | contract-preserving    |
+|   30 | IndexedDB repository/recovery/facade | contract-preserving    |
+|  31+ | lint category cleanup                | behavior-equivalent    |
+| 最終 | M2 rollout branch cleanup            | 観測条件後             |
 
-未決事項は依存フェーズの開始前にADRで決定し、未決のまま実装PRへ入らない。
+## 27. Phase exit matrix
 
-## 19. 全体完了条件
+| Exit ID           | 必須 gate                                                       | Rollback                                                    |
+| ----------------- | --------------------------------------------------------------- | ----------------------------------------------------------- |
+| `P0-BASELINE`     | baseline hash、auto-promotion guard                             | current production                                          |
+| `P0-TOOLCHAIN`    | runtime、typecheck、unit、audit、build                          | N/A: source PR を revert、current production package を維持 |
+| `P0-BROWSER`      | E2E、a11y、coverage、architecture                               | N/A: source PR を revert、current production package を維持 |
+| `P0-ARTIFACT`     | deterministic build、complete package、QA provider parity       | N/A: source PR を revert、current production package を維持 |
+| `P1A-PARITY`      | QA transition/offline/navigation                                | N/A: source PR を revert、current production package を維持 |
+| `P1B-PROMPT`      | startup、root boundary、blocker                                 | N/A: source PR を revert、current production package を維持 |
+| `P1C-MULTICLIENT` | permit、locks、cleanup contract                                 | N/A: source PR を revert、current production package を維持 |
+| `P1D-FLOOR`       | transition、provider、二段階 24h、promotion gate                | P2B 前は bridge、以後は同じ floor の close-all/fix-forward  |
+| `P2A-LOCAL`       | visual、offline、network、CSS budget、promotion gate            | P1D floor。P2B 後は P2A local floor                         |
+| `P2B-CACHE`       | exact cleanup、offline、transition、promotion gate              | P2A local floor                                             |
+| `P3-CSP`          | enforced CSP/header/provider、promotion gate                    | 最新の prompt-compatible local-CSS floor                    |
+| `P4-XLSX`         | semantic、resource、performance、paired package、promotion gate | Worker OFF pair                                             |
+| `P5-LIST`         | behavior、a11y、performance、paired package、promotion gate     | full-only pair                                              |
+| `P6-APP`          | responsibility、race、integration、promotion gate               | prior accepted four-variant package                         |
+| `P7-IDB`          | schema、transaction、recovery、facade、promotion gate           | prior forward-compatible four-variant package               |
+| `LINT-ZERO`       | lint/disable baseline empty、promotion gate                     | prior accepted package                                      |
 
-M2時点で次をすべて満たす。
+上位 milestone はこの表の exit ID を参照し、同じ受入条件を別の意味で再定義しない。
 
-- Node 24 LTSのfresh cloneから全required gateを再現できる。
-- PWA更新は単一client・全blocker idle・明示承認時だけ強制適用され、複数clientではfail-closedになる。
-- Tailwind CDN、Tailwind runtime cache、実行可能inline script、inline `<style>` 要素がない。Reactの必要なstyle属性はCSPで明示的に限定許可される。
-- 強制CSPが実responseへ1件だけ適用され、installed PWAのonline/offline navigationを含む主要操作に違反がない。
-- ExcelJSが初期request graphから外れ、3つのXLSX操作がWorkerで動く。
-- 既定の仮想表示で300件・1,000件を全件DOM化せず、DnD、focus、a11yを維持する。
-- `App.tsx` が客観的なフェーズ6 gateを満たす。
-- `indexedDB.ts` がnamed/default APIを維持する互換facadeになり、保存・移行・復旧責務が分離される。
-- lintエラー0、警告0、新規disable 0である。
-- 新規Critical/High依存がなく、既存waiverにownerと未超過の期限がある。
-- 通常E2E、a11y、PWA、永続化、immutable release package rollbackを継続実行できる。
-- feature flag、Worker rollout旧経路、virtual rollout分岐が観測後の別PRで削除され、承認済みの小規模/a11y全件rendererは維持されている。
-- README、runbook、開発手順、artifact/release package/evidence schemaが実装と一致する。
-- UTF-8、BOMなし、既存改行方針を維持し、文字化け検査が成功する。
+## 28. 全体完了条件
 
-## 20. 再レビュー記録
+次のすべてを満たした時だけ本計画を完了とする。
 
-2026-08-05に、文書内部、実装整合、tooling/品質ゲートの3観点で再レビューし、対象文書を直接編集しない独立レビュー結果を本改訂へ反映した。
+1. M2 の条件を満たす。
+2. production は保存済み release package からのみ配布され、source merge が自動 production promotion を起こさない。
+3. page、active Worker、waiting Worker、provider package の identity を追跡できる。
+4. PWA update は blocker、multi-tab、pre-floor、Worker restart の全失敗系で fail-closed になる。
+5. Tailwind CDN、旧 Tailwind runtime route/cache、inline script がない。
+6. enforced CSP と header/cache policy が local/provider で一致する。
+7. ExcelJS は page client 初期 graph に含まれず、XLSX resource limit が二重適用される。
+8. virtual/full renderer の両方で操作・a11y が成立する。
+9. `App.tsx` と persistence が定義した責務・依存方向を満たす。
+10. IndexedDB と Release A の data safety contract が維持される。
+11. lint warning 0、required quality gate が green である。
+12. package、detached hash、evidence、runbook、rollback drill が保管期限内である。
 
-| 重大指摘                                          | 解消内容                                                        |
-| ------------------------------------------------- | --------------------------------------------------------------- |
-| 既存lazy chunkがあるのにPWA安全化が遅い           | PWAをTailwind/CSPより前のフェーズ1へ移動                        |
-| prompt化でRelease A検証が壊れる                   | build/browser/rollback/runbook/evidenceの追随を同フェーズへ追加 |
-| inline外部化とhash案が矛盾                        | 自己ホスト外部bootstrapへ決定                                   |
-| 未実装WorkerをCSP受入に含める                     | 実Worker試験をフェーズ4へ移動                                   |
-| App分割と新state architectureを混在               | coordinatorを必要時の独立PRへ分離                               |
-| PWA単一client証明がlockだけで不十分               | client列挙、version handshake、mount前照合を必須化              |
-| `clientsClaim` 無効なのに `controllerchange` 待ち | waiting Workerのactivation監視後に明示reload                    |
-| generateSWではcustom update protocolを持てない    | injectManifestとpermit付きService Workerへ移行                  |
-| fresh installのcontroller不在でreload loop        | startupをfresh/uncontrolled/controlledへ分岐                    |
-| blockerが現行local draftを網羅しない              | component adapter/contextと全draft inventoryを追加              |
-| 既存persistence moduleと目標が重複                | 現行→目標の対応表とpath維持方針を追加                           |
-| XLSX Workerが既存restore経路を省略                | plain resultまでに限定し、原子的restore pipelineを維持          |
-| Worker OFF artifactとWorker-only依存が矛盾        | build-time選択の共通XlsxExecutionPortへ統一                     |
-| 行モデルが折りたたみgroupを表現不足               | render rowとlogical group、mount targetを分離                   |
-| App抽出でソース文字列testが破綻                   | 不変条件ベースのintegration testへ先行置換                      |
-| 仮想化でDnDだけ途中から旧描画                     | QA hard gateを置き、productionではrenderer途中切替を禁止        |
-| 品質コマンドが存在せず実行順も不成立              | source / artifact / provider gateとmanaged previewへ再設計      |
-| rollbackが不変artifactではない                    | source互換試験とimmutable release package試験を分離             |
-| build IDがflag違いを識別できない                  | source SHAとartifact IDを分離                                   |
-| CSP header差替えがprecacheへ反映されない          | delivery revisionをartifact/SW入力にしinstalled遷移を試験       |
-| packageへ試験後に証跡追記するとIDが変わる         | deployable payloadとdetached release evidenceを分離             |
-| a11y baselineと0件条件が不一致                    | 段階別manifest判定を明記                                        |
-| 最終PRのflag削除と観測期間が矛盾                  | M1とM2、観測後の別PRへ分離                                      |
+## 29. 実装時に参照する正本
 
-この改訂の根拠は、対象commitのソース、設定、既存runbook、実build、および `typecheck`、lint、全Vitestの実行結果である。
-
-## 21. 参考
-
-- Node.js Releases: <https://nodejs.org/en/about/previous-releases>
-- Vite PWA prompt registration: <https://vite-pwa-org.netlify.app/guide/prompt-for-update>
-- Vite PWA injectManifest: <https://vite-pwa-org.netlify.app/guide/inject-manifest>
-- Service Worker lifecycle: <https://developer.mozilla.org/en-US/docs/Web/API/Service_Worker_API>
-- Web Locks API: <https://developer.mozilla.org/en-US/docs/Web/API/Web_Locks_API>
-- Vercel custom headers: <https://vercel.com/docs/headers>
+- `package.json`
+- `package-lock.json`
+- `vite.config.ts`
+- `vitest.config.ts`
+- `tsconfig*.json`
+- `index.html`
+- `vercel.json`
+- `src/index.tsx`
+- `src/App.tsx`
+- `src/features/app-shell/components/AppMainContent.tsx`
+- `src/components/ShoppingList.tsx`
+- `src/hooks/useIndexedDbPersistence.ts`
+- `src/utils/indexedDB.ts`
+- `src/utils/persistenceCleanupCoordinator.ts`
+- `src/utils/persistenceResilience.ts`
+- `src/utils/persistenceRecoveryExport.ts`
+- `src/utils/xlsxMapParser.ts`
+- `src/utils/exportImport.ts`
+- `src/features/events/exportFlow.ts`
+- `src/components/map/MapImportDialog.tsx`
+- `src/components/BackupRestoreDialog.tsx`
+- `src/components/ExportOptionsDialog.tsx`
+- `api/persistence-release-a-metrics.mjs`
+- `supabase/migrations/20260803000000_persistence_release_a_metrics.sql`
+- `scripts/verify-release-a-build.mjs`
+- `scripts/verify-release-a-browser.mjs`
+- `scripts/verify-release-a-evidence.mjs`
+- `scripts/rehearse-release-a-rollback.ps1`
+- `.gitattributes`
+- `.prettierrc.json`
+- `docs/persistence-recovery-runbook.md`
+- `docs/Resilient Persistence & Safe Migration Plan.md`
