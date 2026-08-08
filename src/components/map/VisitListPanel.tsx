@@ -122,7 +122,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                 className="w-full px-4 py-3 text-left hover:bg-slate-50 dark:hover:bg-slate-700/50 transition-colors"
               >
                 <div className="flex items-center gap-3">
-                  <span className="flex items-center justify-center w-6 h-6 bg-red-500 text-white text-sm font-bold rounded-full">
+                  <span className="flex items-center justify-center w-6 h-6 bg-red-700 text-white text-sm font-bold rounded-full">
                     {cell.order}
                   </span>
                   <div className="flex-1">

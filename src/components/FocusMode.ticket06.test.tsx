@@ -34,7 +34,14 @@ describe("FocusMode TICKET-06 undefined price blink guard", () => {
     await waitFor(() => {
       expect(
         container.querySelector('[data-item-id="item-undefined-price"]'),
-      ).toHaveClass("animate-pulse", "ring-red-500");
+      ).toHaveClass(
+        "ring-red-500",
+        "animate-attention-outline",
+        "attention-outline-red",
+      );
+      expect(
+        container.querySelector('[data-item-id="item-undefined-price"]'),
+      ).not.toHaveClass("animate-pulse");
     });
   });
 
@@ -52,7 +59,14 @@ describe("FocusMode TICKET-06 undefined price blink guard", () => {
     await waitFor(() => {
       expect(
         container.querySelector('[data-item-id="item-undefined-price"]'),
-      ).toHaveClass("animate-pulse", "ring-red-500");
+      ).toHaveClass(
+        "ring-red-500",
+        "animate-attention-outline",
+        "attention-outline-red",
+      );
+      expect(
+        container.querySelector('[data-item-id="item-undefined-price"]'),
+      ).not.toHaveClass("animate-pulse");
     });
   });
 });

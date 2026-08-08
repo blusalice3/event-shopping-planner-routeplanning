@@ -1232,6 +1232,26 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     number: "",
     purchaseStatus: "None" as "None" | "Purchased" | "Postpone" | "Late",
   });
+  const addDialogBaseId = React.useId();
+  const addDialogRef = useRef<HTMLDivElement>(null);
+  const addDialogInputRef = useRef<HTMLInputElement>(null);
+  const addDialogReturnFocusRef = useRef<HTMLElement | null>(null);
+  const addDialogIds = {
+    title: `${addDialogBaseId}-title`,
+    description: `${addDialogBaseId}-description`,
+    circle: `${addDialogBaseId}-circle`,
+    circleSuggestions: `${addDialogBaseId}-circle-suggestions`,
+    itemTitle: `${addDialogBaseId}-item-title`,
+    eventDate: `${addDialogBaseId}-event-date`,
+    block: `${addDialogBaseId}-block`,
+    number: `${addDialogBaseId}-number`,
+    price: `${addDialogBaseId}-price`,
+    quickPrice: `${addDialogBaseId}-quick-price`,
+    quantity: `${addDialogBaseId}-quantity`,
+    purchaseStatus: `${addDialogBaseId}-purchase-status`,
+    remarks: `${addDialogBaseId}-remarks`,
+    url: `${addDialogBaseId}-url`,
+  };
 
   const addFormPriceOptions = useMemo(() => {
     const options: number[] = [0];
@@ -1245,8 +1265,15 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     block: string,
     number: string,
     circleSuggestions: string[] = [],
+    returnFocusTarget?: HTMLElement,
   ) => {
     if (isInspecting) return;
+    addDialogReturnFocusRef.current =
+      returnFocusTarget ??
+      (typeof document !== "undefined" &&
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null);
     setAddDialogDefaults({ block, number });
     setAddDialogCircleSuggestions(circleSuggestions);
     setNewItemForm({
@@ -1265,6 +1292,45 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   const closeAddDialog = () => {
     setAddDialogOpen(false);
+  };
+
+  const handleAddDialogKeyDown = (
+    event: React.KeyboardEvent<HTMLDivElement>,
+  ) => {
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      closeAddDialog();
+      return;
+    }
+    if (event.key !== "Tab") return;
+
+    const dialogElement = addDialogRef.current;
+    if (!dialogElement) return;
+    const focusableElements = Array.from(
+      dialogElement.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    const first = focusableElements[0];
+    const last = focusableElements[focusableElements.length - 1];
+    if (!first || !last) return;
+
+    if (
+      event.shiftKey &&
+      (document.activeElement === first ||
+        !dialogElement.contains(document.activeElement))
+    ) {
+      event.preventDefault();
+      last.focus();
+    } else if (
+      !event.shiftKey &&
+      (document.activeElement === last ||
+        !dialogElement.contains(document.activeElement))
+    ) {
+      event.preventDefault();
+      first.focus();
+    }
   };
 
   const handleAddItemSubmit = () => {
@@ -1286,12 +1352,22 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     closeAddDialog();
   };
 
-  const addDialogInputRef = useRef<HTMLInputElement>(null);
-
   useEffect(() => {
-    if (addDialogOpen && addDialogInputRef.current) {
-      addDialogInputRef.current.focus({ preventScroll: true });
-    }
+    if (!addDialogOpen) return;
+
+    const releaseBodyScrollLock = acquireBodyScrollLock({
+      lockOverscroll: true,
+    });
+    addDialogInputRef.current?.focus({ preventScroll: true });
+
+    return () => {
+      releaseBodyScrollLock();
+      const returnFocus = addDialogReturnFocusRef.current;
+      addDialogReturnFocusRef.current = null;
+      if (returnFocus?.isConnected) {
+        returnFocus.focus({ preventScroll: true });
+      }
+    };
   }, [addDialogOpen]);
 
   useEffect(() => {
@@ -2350,7 +2426,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
                         {displayName}
                       </span>
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                      <span className="text-xs text-slate-600 dark:text-slate-300">
                         {sectionItemCount}件
                       </span>
                     </div>
@@ -2632,6 +2708,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           <>
                             <div className="flex-1" />
                             <button
+                              type="button"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 const spaceBlock = group.spaceKey.split("-")[0];
@@ -2646,10 +2723,16 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                       .filter(Boolean),
                                   ),
                                 ];
-                                openAddDialog(spaceBlock, spaceNumber, circles);
+                                openAddDialog(
+                                  spaceBlock,
+                                  spaceNumber,
+                                  circles,
+                                  e.currentTarget,
+                                );
                               }}
                               className="px-1.5 py-0.5 mr-1 text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors"
                               title="このスペースにアイテムを追加"
+                              aria-label="このスペースにアイテムを追加"
                             >
                               <svg
                                 className="w-4 h-4"
@@ -2951,7 +3034,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                   status: "Purchased" as PurchaseStatus,
                                   label: "全購入",
                                   activeColor:
-                                    "bg-green-600 text-white dark:bg-green-500",
+                                    "bg-green-700 text-white dark:bg-green-700",
                                   hoverColor:
                                     "hover:bg-green-100 dark:hover:bg-green-900/30",
                                 },
@@ -2959,7 +3042,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                   status: "SoldOut" as PurchaseStatus,
                                   label: "全売切",
                                   activeColor:
-                                    "bg-red-600 text-white dark:bg-red-500",
+                                    "bg-red-600 text-white dark:bg-red-700",
                                   hoverColor:
                                     "hover:bg-red-100 dark:hover:bg-red-900/30",
                                 },
@@ -2967,7 +3050,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                   status: "Absent" as PurchaseStatus,
                                   label: "全欠席",
                                   activeColor:
-                                    "bg-yellow-500 text-white dark:bg-yellow-500",
+                                    "bg-yellow-700 text-white dark:bg-yellow-700",
                                   hoverColor:
                                     "hover:bg-yellow-100 dark:hover:bg-yellow-900/30",
                                 },
@@ -2975,7 +3058,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                   status: "Postpone" as PurchaseStatus,
                                   label: "全後回",
                                   activeColor:
-                                    "bg-purple-600 text-white dark:bg-purple-500",
+                                    "bg-purple-600 text-white dark:bg-purple-600",
                                   hoverColor:
                                     "hover:bg-purple-100 dark:hover:bg-purple-900/30",
                                 },
@@ -2983,7 +3066,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                   status: "Late" as PurchaseStatus,
                                   label: "全遅参",
                                   activeColor:
-                                    "bg-blue-600 text-white dark:bg-blue-500",
+                                    "bg-blue-600 text-white dark:bg-blue-600",
                                   hoverColor:
                                     "hover:bg-blue-100 dark:hover:bg-blue-900/30",
                                 },
@@ -2991,7 +3074,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                   status: "LimitedPurchase" as PurchaseStatus,
                                   label: "全限数",
                                   activeColor:
-                                    "bg-orange-600 text-white dark:bg-orange-500",
+                                    "bg-orange-700 text-white dark:bg-orange-700",
                                   hoverColor:
                                     "hover:bg-orange-100 dark:hover:bg-orange-900/30",
                                 },
@@ -3040,6 +3123,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       ) &&
                       onAddItem && (
                         <button
+                          type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             const spaceBlock = group.spaceKey.split("-")[0];
@@ -3054,7 +3138,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                   .filter(Boolean),
                               ),
                             ];
-                            openAddDialog(spaceBlock, spaceNumber, circles);
+                            openAddDialog(
+                              spaceBlock,
+                              spaceNumber,
+                              circles,
+                              e.currentTarget,
+                            );
                           }}
                           className={`text-green-600 dark:text-green-400 hover:bg-green-100 dark:hover:bg-green-900/30 rounded transition-colors ${
                             layoutMode === "smartphone"
@@ -3062,6 +3151,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                               : "px-2 py-1 mr-2"
                           }`}
                           title="このスペースにアイテムを追加"
+                          aria-label="このスペースにアイテムを追加"
                         >
                           <svg
                             className={
@@ -3534,7 +3624,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                   }
                                   onActivatePostponeFilter();
                                 }}
-                                className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-orange-600 hover:bg-orange-700 text-white dark:bg-orange-500 dark:hover:bg-orange-600 ${
+                                className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-orange-700 hover:bg-orange-800 text-white dark:bg-orange-700 dark:hover:bg-orange-800 ${
                                   layoutMode === "smartphone"
                                     ? "text-sm"
                                     : "text-sm"
@@ -3563,7 +3653,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                   }
                                   onActivateLateFilter();
                                 }}
-                                className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-sky-600 hover:bg-sky-700 text-white dark:bg-sky-500 dark:hover:bg-sky-600 ${
+                                className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-sky-700 hover:bg-sky-800 text-white dark:bg-sky-700 dark:hover:bg-sky-800 ${
                                   layoutMode === "smartphone"
                                     ? "text-sm"
                                     : "text-sm"
@@ -3589,7 +3679,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                   }
                                   onCollapseAndOpenNext(group.groupKey);
                                 }}
-                                className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-500 dark:hover:bg-blue-600 ${
+                                className={`w-full mt-2 py-2 rounded-lg font-medium transition-colors bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-600 dark:hover:bg-blue-700 ${
                                   layoutMode === "smartphone"
                                     ? "text-sm"
                                     : "text-sm"
@@ -3619,12 +3709,20 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
               onClick={closeAddDialog}
             >
               <div
+                ref={addDialogRef}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby={addDialogIds.title}
+                aria-describedby={addDialogIds.description}
                 className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto"
                 onClick={(e) => e.stopPropagation()}
+                onKeyDown={handleAddDialogKeyDown}
               >
-                <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4">
-                  <h2 className="text-lg font-bold">新規アイテム追加</h2>
-                  <p className="text-sm opacity-80 mt-1">
+                <div className="bg-gradient-to-r from-green-700 to-emerald-700 text-white p-4">
+                  <h2 id={addDialogIds.title} className="text-lg font-bold">
+                    新規アイテム追加
+                  </h2>
+                  <p id={addDialogIds.description} className="text-sm mt-1">
                     {currentDay} {addDialogDefaults.block}-
                     {addDialogDefaults.number}
                   </p>
@@ -3632,11 +3730,19 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 <div className="p-4 space-y-4">
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className={labelClass}>
-                        サークル名 <span className="text-red-500">*</span>
+                      <label
+                        htmlFor={addDialogIds.circle}
+                        className={labelClass}
+                      >
+                        サークル名{" "}
+                        <span aria-hidden="true" className="text-red-500">
+                          *
+                        </span>
                       </label>
                       <input
+                        id={addDialogIds.circle}
                         type="text"
+                        required
                         value={newItemForm.circle}
                         onChange={(e) =>
                           setNewItemForm((prev) => ({
@@ -3647,10 +3753,10 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         className={formInputClass}
                         placeholder="サークル名"
                         ref={addDialogInputRef}
-                        list="add-dialog-circle-suggestions"
+                        list={addDialogIds.circleSuggestions}
                       />
                       {addDialogCircleSuggestions.length > 0 && (
-                        <datalist id="add-dialog-circle-suggestions">
+                        <datalist id={addDialogIds.circleSuggestions}>
                           {addDialogCircleSuggestions.map((c) => (
                             <option key={c} value={c} />
                           ))}
@@ -3658,8 +3764,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       )}
                     </div>
                     <div>
-                      <label className={labelClass}>タイトル</label>
+                      <label
+                        htmlFor={addDialogIds.itemTitle}
+                        className={labelClass}
+                      >
+                        タイトル
+                      </label>
                       <input
+                        id={addDialogIds.itemTitle}
                         type="text"
                         value={newItemForm.title}
                         onChange={(e) =>
@@ -3675,8 +3787,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   </div>
                   <div className="grid grid-cols-3 gap-4">
                     <div>
-                      <label className={labelClass}>参加日</label>
+                      <label
+                        htmlFor={addDialogIds.eventDate}
+                        className={labelClass}
+                      >
+                        参加日
+                      </label>
                       <input
+                        id={addDialogIds.eventDate}
                         type="text"
                         value={currentDay || ""}
                         readOnly
@@ -3684,8 +3802,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       />
                     </div>
                     <div>
-                      <label className={labelClass}>ブロック</label>
+                      <label
+                        htmlFor={addDialogIds.block}
+                        className={labelClass}
+                      >
+                        ブロック
+                      </label>
                       <input
+                        id={addDialogIds.block}
                         type="text"
                         value={newItemForm.block}
                         onChange={(e) =>
@@ -3699,8 +3823,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       />
                     </div>
                     <div>
-                      <label className={labelClass}>ナンバー</label>
+                      <label
+                        htmlFor={addDialogIds.number}
+                        className={labelClass}
+                      >
+                        ナンバー
+                      </label>
                       <input
+                        id={addDialogIds.number}
                         type="text"
                         value={newItemForm.number}
                         onChange={(e) =>
@@ -3716,8 +3846,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                     <div className="relative">
-                      <label className={labelClass}>購入金額</label>
+                      <label
+                        htmlFor={addDialogIds.price}
+                        className={labelClass}
+                      >
+                        購入金額
+                      </label>
                       <input
+                        id={addDialogIds.price}
                         type="text"
                         value={newItemForm.price}
                         onChange={(e) => {
@@ -3728,13 +3864,22 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         placeholder="0"
                         inputMode="numeric"
                       />
-                      <span className="absolute right-3 top-9 text-slate-500 dark:text-slate-400">
+                      <span
+                        aria-hidden="true"
+                        className="absolute right-3 top-9 text-slate-500 dark:text-slate-400"
+                      >
                         円
                       </span>
                     </div>
                     <div>
-                      <label className={labelClass}>クイック選択</label>
+                      <label
+                        htmlFor={addDialogIds.quickPrice}
+                        className={labelClass}
+                      >
+                        クイック選択
+                      </label>
                       <select
+                        id={addDialogIds.quickPrice}
                         onChange={(e) => {
                           setNewItemForm((prev) => ({
                             ...prev,
@@ -3763,10 +3908,15 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className={labelClass}>数量</label>
+                      <label
+                        htmlFor={addDialogIds.quantity}
+                        className={labelClass}
+                      >
+                        数量
+                      </label>
                       <select
+                        id={addDialogIds.quantity}
                         value={newItemForm.quantity}
-                        aria-label="数量"
                         onChange={(e) =>
                           setNewItemForm((prev) => ({
                             ...prev,
@@ -3785,8 +3935,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       </select>
                     </div>
                     <div>
-                      <label className={labelClass}>購入状態</label>
+                      <label
+                        htmlFor={addDialogIds.purchaseStatus}
+                        className={labelClass}
+                      >
+                        購入状態
+                      </label>
                       <select
+                        id={addDialogIds.purchaseStatus}
                         value={newItemForm.purchaseStatus}
                         onChange={(e) =>
                           setNewItemForm((prev) => ({
@@ -3806,8 +3962,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
-                      <label className={labelClass}>利用者メモ</label>
+                      <label
+                        htmlFor={addDialogIds.remarks}
+                        className={labelClass}
+                      >
+                        利用者メモ
+                      </label>
                       <input
+                        id={addDialogIds.remarks}
                         type="text"
                         value={newItemForm.remarks}
                         onChange={(e) =>
@@ -3821,8 +3983,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       />
                     </div>
                     <div>
-                      <label className={labelClass}>URL</label>
+                      <label htmlFor={addDialogIds.url} className={labelClass}>
+                        URL
+                      </label>
                       <input
+                        id={addDialogIds.url}
                         type="text"
                         value={newItemForm.url}
                         onChange={(e) =>
@@ -3839,15 +4004,17 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 </div>
                 <div className="p-4 border-t border-slate-200 dark:border-slate-700 flex gap-2">
                   <button
+                    type="button"
                     onClick={closeAddDialog}
                     className="flex-1 py-2 px-4 bg-slate-200 dark:bg-slate-700 hover:bg-slate-300 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-300 rounded-lg font-medium transition-colors"
                   >
                     キャンセル
                   </button>
                   <button
+                    type="button"
                     onClick={handleAddItemSubmit}
                     disabled={!newItemForm.circle.trim()}
-                    className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors"
+                    className="flex-1 py-2 px-4 bg-green-700 hover:bg-green-800 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors"
                   >
                     リストに追加
                   </button>
@@ -3905,7 +4072,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                 <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
                   {displayName}
                 </span>
-                <span className="text-xs text-slate-500 dark:text-slate-400">
+                <span className="text-xs text-slate-600 dark:text-slate-300">
                   {group.items.length}件
                 </span>
               </div>

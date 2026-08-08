@@ -370,14 +370,14 @@ describe("FocusModeHeader purchase-aware background", () => {
     renderHeader({ currentVisitItems: items });
 
     expect(getStatusSegments()).toEqual([
-      { status: "unvisited", fill: "#94a3b8", x: "0", width: "50" },
-      { status: "purchased", fill: "#22c55e", x: "50", width: "50" },
+      { status: "unvisited", fill: "#64748b", x: "0", width: "50" },
+      { status: "purchased", fill: "#15803d", x: "50", width: "50" },
     ]);
     expect(
       screen
         .getByTestId("focus-mode-header")
         .querySelector("rect[data-header-overlay]"),
-    ).toHaveAttribute("fill", "rgba(15, 23, 42, 0.28)");
+    ).toHaveAttribute("fill", "rgba(15, 23, 42, 0.60)");
   });
 
   it("keeps the fixed status color order", () => {
@@ -396,13 +396,13 @@ describe("FocusModeHeader purchase-aware background", () => {
     expect(
       getStatusSegments().map(({ status, fill }) => ({ status, fill })),
     ).toEqual([
-      { status: "unvisited", fill: "#94a3b8" },
+      { status: "unvisited", fill: "#64748b" },
       { status: "postponed", fill: "#8b5cf6" },
       { status: "late", fill: "#3b82f6" },
       { status: "limited", fill: "#f97316" },
-      { status: "purchased", fill: "#22c55e" },
+      { status: "purchased", fill: "#15803d" },
       { status: "soldOut", fill: "#ef4444" },
-      { status: "absent", fill: "#eab308" },
+      { status: "absent", fill: "#a16207" },
     ]);
   });
 
@@ -418,7 +418,7 @@ describe("FocusModeHeader purchase-aware background", () => {
     });
 
     expect(getStatusSegments()).toEqual([
-      { status: "purchased", fill: "#22c55e", x: "0", width: "100" },
+      { status: "purchased", fill: "#15803d", x: "0", width: "100" },
     ]);
   });
 
@@ -444,7 +444,7 @@ describe("FocusModeHeader purchase-aware background", () => {
     });
 
     expect(getStatusSegments()).toEqual([
-      { status: "absent", fill: "#eab308", x: "0", width: "100" },
+      { status: "absent", fill: "#a16207", x: "0", width: "100" },
     ]);
   });
 
@@ -461,7 +461,7 @@ describe("FocusModeHeader purchase-aware background", () => {
 
     expect(getStatusSegments()).toEqual([
       { status: "limited", fill: "#f97316", x: "0", width: "50" },
-      { status: "purchased", fill: "#22c55e", x: "50", width: "50" },
+      { status: "purchased", fill: "#15803d", x: "50", width: "50" },
     ]);
   });
 

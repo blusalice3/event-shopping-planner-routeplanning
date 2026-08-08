@@ -40,7 +40,7 @@ export function FocusModeFooterPortal({
   onToggleMapVisibility,
   onLayoutModeChange,
 }: FocusModeFooterPortalProps) {
-  const footerRef = useRef<HTMLDivElement>(null);
+  const footerRef = useRef<HTMLElement>(null);
   const footerHeightOwnerId = useId();
   const spaceNavigator = useOptionalSpaceNavigator();
   const spaceNavigatorFooterEnabled = Boolean(
@@ -63,9 +63,10 @@ export function FocusModeFooterPortal({
   }, [footerHeightOwnerId]);
 
   return ReactDOM.createPortal(
-    <div
+    <footer
       ref={footerRef}
       id="focus-mode-footer"
+      aria-label="集中モード操作"
       className={`fixed bottom-0 left-0 right-0 ${
         compact
           ? "bg-white/90 dark:bg-slate-800/90"
@@ -98,7 +99,7 @@ export function FocusModeFooterPortal({
               {currentPhaseVisitsLength}
             </span>
             {!compact && (
-              <span className="text-sm text-slate-500 dark:text-slate-400 ml-3 opacity-60">
+              <span className="ml-3 text-sm text-slate-500 dark:text-slate-400">
                 ({currentVisitNumber}/{totalVisits})
               </span>
             )}
@@ -197,7 +198,7 @@ export function FocusModeFooterPortal({
           </div>
         </div>
       </div>
-    </div>,
+    </footer>,
     document.body,
   );
 }

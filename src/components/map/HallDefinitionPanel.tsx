@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { BlockDefinition, DayMapData, HallDefinition } from "../../types/map";
 import { isPointInPolygonInclusive } from "../../utils/mapRoutePolygon";
 import { validateHallPolygon } from "../../utils/polygonValidation";
+import { useModalDialogBehavior } from "../../hooks/useModalDialogBehavior";
 
 interface HallDefinitionPanelProps {
   isOpen: boolean;
@@ -68,6 +69,14 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
   const [syncTargetDates, setSyncTargetDates] = useState<Set<string>>(
     new Set(),
   );
+  const handleClose = useCallback(() => {
+    setLocalHalls(halls);
+    onClose();
+  }, [halls, onClose]);
+  const { dialogRef, onDialogKeyDown } = useModalDialogBehavior({
+    isOpen,
+    onEscape: handleClose,
+  });
 
   const otherMapDates = useMemo(
     () => mapTabDates.filter((d) => d !== activeEventDate),
@@ -320,17 +329,26 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="hall-definition-title"
+      onKeyDown={onDialogKeyDown}
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+    >
       <div className="flex w-full max-w-4xl max-h-[90vh] flex-col overflow-hidden rounded-lg bg-white shadow-xl dark:bg-slate-800">
         <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4 dark:border-slate-700">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+          <h2
+            id="hall-definition-title"
+            className="text-lg font-bold text-slate-900 dark:text-white"
+          >
             ホール定義エリア設定
           </h2>
           <button
-            onClick={() => {
-              setLocalHalls(halls);
-              onClose();
-            }}
+            type="button"
+            onClick={handleClose}
+            aria-label="ホール定義エリア設定を閉じる"
             className="text-2xl text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
           >
             ×
@@ -437,7 +455,8 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                           </button>
                           <button
                             onClick={() => handleDeleteHall(i)}
-                            className="p-1 text-red-500 hover:text-red-700"
+                            aria-label={`${hall.name}を削除`}
+                            className="p-1 text-red-700 hover:text-red-800 dark:text-red-300 dark:hover:text-red-200"
                           >
                             削除
                           </button>
@@ -672,10 +691,8 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
           )}
           <div className="flex justify-end gap-3">
             <button
-              onClick={() => {
-                setLocalHalls(halls);
-                onClose();
-              }}
+              type="button"
+              onClick={handleClose}
               className="rounded bg-slate-200 px-4 py-2 text-sm text-slate-700 hover:bg-slate-300 dark:bg-slate-700 dark:text-slate-300 dark:hover:bg-slate-600"
             >
               キャンセル

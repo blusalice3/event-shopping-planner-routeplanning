@@ -651,6 +651,9 @@ describe("SpaceNavigatorRail", () => {
     expect(slider.parentElement).toHaveClass("z-[45]");
     expect(slider).toHaveClass("w-4");
     expect(slider.parentElement).toHaveClass("w-4");
+    expect(
+      screen.getByRole("navigation", { name: "スペースナビゲーション" }),
+    ).toBe(slider.parentElement);
     expect(slider).not.toHaveAttribute("style");
 
     fireEvent.keyDown(slider, { key: "ArrowDown" });
@@ -809,6 +812,9 @@ describe("SpaceNavigatorHost and footer visibility", () => {
       (document.getElementById("focus-mode-footer") as HTMLElement).style
         .paddingBottom,
     ).toBe("");
+    expect(
+      screen.getByRole("contentinfo", { name: "集中モード操作" }),
+    ).toHaveAttribute("id", "focus-mode-footer");
     const footerHeightRule = Array.from(document.styleSheets)
       .flatMap((styleSheet) => Array.from(styleSheet.cssRules))
       .find(

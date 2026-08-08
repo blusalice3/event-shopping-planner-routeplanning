@@ -1509,7 +1509,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       }}
                       className={`px-2 py-1 text-xs font-medium rounded transition-colors flex-shrink-0 ${
                         executeSpaceGroupingEnabled
-                          ? "bg-blue-600 text-white dark:bg-blue-500"
+                          ? "bg-blue-600 text-white dark:bg-blue-600"
                           : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600"
                       }`}
                     >
@@ -1570,7 +1570,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                           }}
                           className={`px-2 py-1 text-xs font-medium rounded transition-colors whitespace-nowrap flex-shrink-0 ${
                             executeSpaceGroupingEnabled
-                              ? "bg-blue-600 text-white dark:bg-blue-500"
+                              ? "bg-blue-600 text-white dark:bg-blue-600"
                               : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600"
                           }`}
                         >

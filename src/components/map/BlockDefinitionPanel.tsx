@@ -762,19 +762,19 @@ const BlockDefinitionPanel: React.FC<BlockDefinitionPanelProps> = ({
                     <div className="flex gap-1">
                       <button
                         onClick={() => handleSwitchMode("normal")}
-                        className={`px-2 py-1 text-xs rounded ${editMode === "normal" ? "bg-blue-500 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
+                        className={`px-2 py-1 text-xs rounded ${editMode === "normal" ? "bg-blue-600 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
                       >
                         通常
                       </button>
                       <button
                         onClick={() => handleSwitchMode("multi")}
-                        className={`px-2 py-1 text-xs rounded ${editMode === "multi" ? "bg-purple-500 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
+                        className={`px-2 py-1 text-xs rounded ${editMode === "multi" ? "bg-purple-600 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
                       >
                         複数範囲
                       </button>
                       <button
                         onClick={() => handleSwitchMode("wall")}
-                        className={`px-2 py-1 text-xs rounded ${editMode === "wall" ? "bg-orange-500 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
+                        className={`px-2 py-1 text-xs rounded ${editMode === "wall" ? "bg-orange-700 text-white" : "bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-300"}`}
                       >
                         壁
                       </button>

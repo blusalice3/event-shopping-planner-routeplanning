@@ -170,6 +170,79 @@ const getRemarksInputForTitle = (title: string): HTMLInputElement => {
 };
 
 describe("ShoppingList purchase status control mode", () => {
+  it.each([
+    {
+      status: "Purchased" as const,
+      label: "全購入",
+      classes: ["bg-green-700", "dark:bg-green-700"],
+    },
+    {
+      status: "SoldOut" as const,
+      label: "全売切",
+      classes: ["bg-red-600", "dark:bg-red-700"],
+    },
+    {
+      status: "Absent" as const,
+      label: "全欠席",
+      classes: ["bg-yellow-700", "dark:bg-yellow-700"],
+    },
+    {
+      status: "Postpone" as const,
+      label: "全後回",
+      classes: ["bg-purple-600", "dark:bg-purple-600"],
+    },
+    {
+      status: "Late" as const,
+      label: "全遅参",
+      classes: ["bg-blue-600", "dark:bg-blue-600"],
+    },
+    {
+      status: "LimitedPurchase" as const,
+      label: "全限数",
+      classes: ["bg-orange-700", "dark:bg-orange-700"],
+    },
+  ])("uses AA active colors for $label in light and dark mode", (entry) => {
+    render(
+      <StatefulBulkShoppingListHarness
+        initialItems={[{ ...baseItem, purchaseStatus: entry.status }]}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: entry.label })).toHaveClass(
+      ...entry.classes,
+      "text-white",
+    );
+  });
+
+  it("uses AA normal and hover colors for the next-space action", () => {
+    render(
+      <StateFulShoppingListHarness
+        initialItems={[
+          { ...baseItem, purchaseStatus: "Purchased" },
+          {
+            ...baseItem,
+            id: "item-2",
+            number: "02",
+            title: "Second",
+            purchaseStatus: "Purchased",
+          },
+        ]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", {
+        name: "スペースを閉じて次のスペースを展開",
+      }),
+    ).toHaveClass(
+      "bg-blue-600",
+      "hover:bg-blue-700",
+      "dark:bg-blue-600",
+      "dark:hover:bg-blue-700",
+      "text-white",
+    );
+  });
+
   it("opens post-event distribution check dialog when an execute item becomes sold out", async () => {
     render(<StateFulShoppingListHarness initialItems={[baseItem]} />);
 
@@ -492,9 +565,15 @@ describe("ShoppingList purchase status control mode", () => {
       .getByLabelText("Select item Circle - 価格未定")
       .closest("[data-item-id]");
     if (!card) throw new Error("undefined price card not found");
-    expect(
-      within(card as HTMLElement).getByDisplayValue("価格未定"),
-    ).toHaveClass("ring-red-500", "animate-pulse");
+    const undefinedPrice = within(card as HTMLElement).getByDisplayValue(
+      "価格未定",
+    );
+    expect(undefinedPrice).toHaveClass(
+      "ring-red-500",
+      "animate-attention-outline",
+      "attention-outline-red",
+    );
+    expect(undefinedPrice).not.toHaveClass("animate-pulse");
   });
 
   it("does not share deferred limited quantities across priority groups in the same space", async () => {
@@ -630,6 +709,16 @@ describe("ShoppingList purchase status control mode", () => {
       />,
     );
 
+    expect(
+      screen.getByRole("button", { name: "後回しでフィルタ" }),
+    ).toHaveClass(
+      "bg-orange-700",
+      "hover:bg-orange-800",
+      "dark:bg-orange-700",
+      "dark:hover:bg-orange-800",
+      "text-white",
+    );
+
     clickLimitedDeferForTitle("限数1");
     await waitFor(() =>
       expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
@@ -654,6 +743,13 @@ describe("ShoppingList purchase status control mode", () => {
         showLateFilterButton
         onActivateLateFilter={onActivateLateFilter}
       />,
+    );
+    expect(screen.getByRole("button", { name: "遅参でフィルタ" })).toHaveClass(
+      "bg-sky-700",
+      "hover:bg-sky-800",
+      "dark:bg-sky-700",
+      "dark:hover:bg-sky-800",
+      "text-white",
     );
     clickLimitedDeferForTitle("遅参1");
     await waitFor(() =>

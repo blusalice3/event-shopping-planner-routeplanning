@@ -210,13 +210,13 @@ export const SimpleHallDefinitionPanel: React.FC<
             <h2 className="text-white font-bold text-base">
               ホール定義（ブロック割当）
             </h2>
-            <p className="text-blue-100 text-xs mt-0.5">
+            <p className="text-white text-xs mt-0.5">
               ブロック名でホールを定義します
             </p>
           </div>
           <button
             onClick={onClose}
-            className="text-white/80 hover:text-white text-2xl leading-none px-2"
+            className="text-white hover:text-white text-2xl leading-none px-2"
             aria-label="閉じる"
           >
             ×

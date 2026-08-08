@@ -85,6 +85,67 @@ describe("ShoppingItemCard purchase status control", () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    { layoutMode: "pc" as const, viewMode: "execute" as const },
+    { layoutMode: "smartphone" as const, viewMode: "edit" as const },
+    { layoutMode: "smartphone" as const, viewMode: "focus" as const },
+  ])(
+    "keeps read-only semantics on form controls instead of the generic $layoutMode/$viewMode card",
+    ({ layoutMode, viewMode }) => {
+      renderCard({ layoutMode, viewMode, readOnly: true });
+
+      const card = document.querySelector(
+        "div.rounded-lg.transition-all.duration-300",
+      );
+      expect(card).toBeInTheDocument();
+      expect(card).not.toHaveAttribute("aria-readonly");
+
+      const remarks = screen.getByRole("textbox", { name: "利用者メモ" });
+      expect(remarks).toHaveAttribute("readonly");
+      expect(remarks).toHaveAttribute("aria-readonly", "true");
+    },
+  );
+
+  it.each([
+    {
+      purchaseStatus: "None" as const,
+      label: "未購入",
+      classes: ["text-slate-600", "dark:text-slate-300"],
+    },
+    {
+      purchaseStatus: "Postpone" as const,
+      label: "後回し",
+      classes: ["text-purple-600", "dark:text-purple-300"],
+    },
+    {
+      purchaseStatus: "Late" as const,
+      label: "遅参",
+      classes: ["text-blue-600", "dark:text-blue-300"],
+    },
+  ])(
+    "uses AA status text colors for $purchaseStatus",
+    ({ purchaseStatus, label, classes }) => {
+      renderCard({ item: { ...baseItem, purchaseStatus } });
+
+      expect(screen.getByText(label, { selector: "span" })).toHaveClass(
+        ...classes,
+      );
+    },
+  );
+
+  it("uses readable dark-mode colors for the PC quantity and price labels", () => {
+    renderCard({ item: { ...baseItem, purchaseStatus: "Late" } });
+
+    expect(screen.getByText("数量")).toHaveClass(
+      "text-slate-600",
+      "dark:text-slate-300",
+    );
+    expect(screen.getByText("購入金額")).toHaveClass(
+      "text-slate-600",
+      "dark:text-slate-300",
+    );
+  });
+
   it("keeps cycle mode as the default click behavior", () => {
     const { onUpdate } = renderCard();
 

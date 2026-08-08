@@ -3069,7 +3069,9 @@ const FocusMode: React.FC<FocusModeProps> = ({
     ? { message: bulkLimitedMessage.message, tone: "info" as const }
     : notification;
   const visibleNotificationColorClass =
-    visibleNotification?.tone === "warning" ? "bg-red-600" : "bg-blue-600";
+    visibleNotification?.tone === "warning"
+      ? "bg-red-600 attention-outline-red"
+      : "bg-blue-600 attention-outline-blue";
   // フェーズ切り替え確認ダイアログ
   const phaseChangeDialogJSX = (
     <PhaseChangeDialogView
@@ -3146,7 +3148,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       >
         {visibleNotification && (
           <div
-            className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse ${visibleNotificationColorClass}`}
+            className={`fixed top-4 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-attention-outline ${visibleNotificationColorClass}`}
           >
             {visibleNotification.message}
           </div>
@@ -3300,7 +3302,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
       >
         {visibleNotification && (
           <div
-            className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse ${visibleNotificationColorClass}`}
+            className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-attention-outline ${visibleNotificationColorClass}`}
           >
             {visibleNotification.message}
           </div>
@@ -3410,11 +3412,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
           data-nav-right={`${splitMapNextRightPx}px`}
           className={`fixed top-1/2 h-12 w-12 -translate-y-1/2 transform rounded-full text-xl shadow-lg transition-[right] duration-200 ease-out flex items-center justify-center z-40 ${splitMapNextClassName} ${
             nextButtonBlockTone === "both" || nextButtonBlockTone === "price"
-              ? "bg-red-500 hover:bg-red-600 text-white"
+              ? "bg-red-700 hover:bg-red-800 text-white"
               : nextButtonBlockTone === "limited"
-                ? "bg-orange-500 hover:bg-orange-600 text-white"
+                ? "bg-orange-700 hover:bg-orange-800 text-white"
                 : isNextButtonBlinking
-                  ? "bg-green-500 hover:bg-green-600 text-white animate-pulse"
+                  ? "bg-green-700 hover:bg-green-800 text-white animate-attention-outline attention-outline-green"
                   : "bg-blue-600 hover:bg-blue-700 text-white"
           }`}
           title="次の訪問先"
@@ -3458,7 +3460,7 @@ const FocusMode: React.FC<FocusModeProps> = ({
     >
       {visibleNotification && (
         <div
-          className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-pulse ${visibleNotificationColorClass}`}
+          className={`fixed top-20 left-1/2 transform -translate-x-1/2 z-50 text-white px-6 py-3 rounded-lg shadow-lg animate-attention-outline ${visibleNotificationColorClass}`}
         >
           {visibleNotification.message}
         </div>
@@ -3523,11 +3525,11 @@ const FocusMode: React.FC<FocusModeProps> = ({
             data-nav-right={`${navNextRightPx}px`}
             className={`fixed top-1/2 h-14 w-14 -translate-y-1/2 transform rounded-full text-2xl shadow-lg transition-[right] duration-200 ease-out flex items-center justify-center z-40 ${navNextClassName} ${
               nextButtonBlockTone === "both" || nextButtonBlockTone === "price"
-                ? "bg-red-500 hover:bg-red-600 text-white"
+                ? "bg-red-700 hover:bg-red-800 text-white"
                 : nextButtonBlockTone === "limited"
-                  ? "bg-orange-500 hover:bg-orange-600 text-white"
+                  ? "bg-orange-700 hover:bg-orange-800 text-white"
                   : isNextButtonBlinking
-                    ? "bg-green-500 hover:bg-green-600 text-white animate-pulse"
+                    ? "bg-green-700 hover:bg-green-800 text-white animate-attention-outline attention-outline-green"
                     : "bg-blue-600 hover:bg-blue-700 text-white"
             }`}
             title="次の訪問先"

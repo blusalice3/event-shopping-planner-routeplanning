@@ -47,11 +47,11 @@ export function SpaceNavigatorRail({
   );
 
   return (
-    <div
+    <nav
       className={`fixed bottom-[var(--footer-height,0px)] top-[env(safe-area-inset-top)] z-[45] flex w-4 items-stretch ${
         side === "left" ? "left-0 justify-start" : "right-0 justify-end"
       }`}
-      aria-label="スペースナビ"
+      aria-label="スペースナビゲーション"
     >
       <div
         ref={railRef}
@@ -180,6 +180,6 @@ export function SpaceNavigatorRail({
           })}
         </div>
       </div>
-    </div>
+    </nav>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from "react";
 import { HallDefinition, HallRouteSettings } from "../../types/map";
+import { useModalDialogBehavior } from "../../hooks/useModalDialogBehavior";
 
 // 優先度レベルの型
 type PriorityLevel = "none" | "priority" | "highest";
@@ -52,6 +53,22 @@ const getGroupDisplayName = (
   return hallName;
 };
 
+const DEFAULT_GROUP_COLOR = "#9CA3AF";
+
+const normalizeOpaqueHexColor = (value: string | undefined): string | null => {
+  const match = /^#?([0-9A-F]{3}|[0-9A-F]{6})$/i.exec(value?.trim() ?? "");
+  if (!match) return null;
+  const compactHex = match[1];
+  const expandedHex =
+    compactHex.length === 3
+      ? compactHex
+          .split("")
+          .map((character) => character.repeat(2))
+          .join("")
+      : compactHex;
+  return `#${expandedHex.toUpperCase()}`;
+};
+
 // グループの色を取得
 const getGroupColor = (
   groupId: string | null,
@@ -59,11 +76,30 @@ const getGroupColor = (
 ): string => {
   const { hallId, priority } = parseGroupId(groupId);
 
-  if (priority === "highest") return "#EF4444"; // 赤
-  if (priority === "priority") return "#F97316"; // オレンジ
+  if (priority === "highest") return "#B91C1C"; // 赤 (red-700)
+  if (priority === "priority") return "#C2410C"; // オレンジ (orange-700)
 
   const hall = halls.find((h) => h.id === hallId);
-  return hall?.color || "#9CA3AF"; // グレー
+  return normalizeOpaqueHexColor(hall?.color) ?? DEFAULT_GROUP_COLOR;
+};
+
+const getBadgeTextClass = (backgroundColor: string): string => {
+  const expandedHex =
+    normalizeOpaqueHexColor(backgroundColor)?.slice(1) ??
+    DEFAULT_GROUP_COLOR.slice(1);
+
+  const channels = [0, 2, 4].map((offset) =>
+    parseInt(expandedHex.slice(offset, offset + 2), 16),
+  );
+  const [red, green, blue] = channels.map((channel) => {
+    const value = channel / 255;
+    return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  const luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue;
+  const whiteContrast = 1.05 / (luminance + 0.05);
+  const blackContrast = (luminance + 0.05) / 0.05;
+
+  return whiteContrast >= blackContrast ? "text-white" : "text-black";
 };
 
 const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
@@ -78,6 +114,10 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
   const [localOrder, setLocalOrder] = useState<string[]>(
     hallRouteSettings.hallOrder,
   );
+  const { dialogRef, onDialogKeyDown } = useModalDialogBehavior({
+    isOpen,
+    onEscape: onClose,
+  });
 
   // hallRouteSettingsが変更されたらlocalOrderを更新
   React.useEffect(() => {
@@ -152,15 +192,27 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
   );
 
   return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+    <div
+      ref={dialogRef}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="hall-order-title"
+      onKeyDown={onDialogKeyDown}
+      className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4"
+    >
       <div className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md max-h-[80vh] overflow-hidden flex flex-col">
         {/* ヘッダー */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
-          <h2 className="text-lg font-bold text-slate-900 dark:text-white">
+          <h2
+            id="hall-order-title"
+            className="text-lg font-bold text-slate-900 dark:text-white"
+          >
             ホール間移動順序
           </h2>
           <button
+            type="button"
             onClick={onClose}
+            aria-label="ホール間移動順序を閉じる"
             className="text-2xl text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
           >
             ✕
@@ -200,7 +252,9 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
                                 : "bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600"
                           }`}
                         >
-                          <span className="relative flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white">
+                          <span
+                            className={`relative flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-bold ${getBadgeTextClass(color)}`}
+                          >
                             <svg
                               className="absolute inset-0 h-full w-full"
                               viewBox="0 0 32 32"
@@ -214,7 +268,7 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
                             <div className="font-medium text-slate-900 dark:text-white truncate">
                               {displayName}
                             </div>
-                            <div className="text-xs text-slate-500 dark:text-slate-400">
+                            <div className="text-xs text-slate-700 dark:text-slate-200">
                               {itemCount}件の訪問先
                             </div>
                           </div>
@@ -244,7 +298,7 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
               {/* 訪問先がないグループ */}
               {groupsWithoutItems.length > 0 && (
                 <div>
-                  <h3 className="text-xs font-medium text-slate-400 dark:text-slate-500 mb-2">
+                  <h3 className="mb-2 text-xs font-medium text-slate-600 dark:text-slate-300">
                     訪問先がないグループ（スキップされます）
                   </h3>
                   <div className="space-y-1">
@@ -255,7 +309,7 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
                       return (
                         <div
                           key={groupId}
-                          className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded border border-slate-100 dark:border-slate-700 opacity-50"
+                          className="flex items-center gap-2 rounded border border-slate-100 bg-slate-50 p-2 dark:border-slate-700 dark:bg-slate-800"
                         >
                           <svg
                             className="h-6 w-6 flex-shrink-0 rounded-full"
@@ -264,7 +318,7 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
                           >
                             <circle cx="12" cy="12" r="12" fill={color} />
                           </svg>
-                          <span className="text-sm text-slate-500 dark:text-slate-400">
+                          <span className="text-sm text-slate-700 dark:text-slate-300">
                             {displayName}
                           </span>
                         </div>
@@ -289,7 +343,7 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
                     hallOrder: localOrder,
                   });
                 }}
-                className="px-4 py-2 text-sm rounded bg-amber-500 text-white hover:bg-amber-600"
+                className="px-4 py-2 text-sm rounded bg-amber-700 text-white hover:bg-amber-800"
                 title="実行列のアイテムをグループ順序に従って並び替えます"
               >
                 🔄 実行列を並び替え

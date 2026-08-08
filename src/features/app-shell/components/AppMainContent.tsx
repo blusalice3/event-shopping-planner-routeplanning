@@ -477,9 +477,9 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
               <div className="space-y-2">
                 <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-300 dark:border-blue-700 rounded-lg p-3">
                   <div className="flex items-center justify-between mb-2">
-                    <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-100">
+                    <h2 className="text-sm font-semibold text-blue-900 dark:text-blue-100">
                       実行リストアイテム
-                    </h3>
+                    </h2>
                     <div className="flex flex-col items-end gap-2">
                       <button
                         onClick={() => {
@@ -489,7 +489,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                         }}
                         className={`px-2 py-0.5 text-xs font-medium rounded transition-colors ${
                           spaceGroupingEnabled
-                            ? "bg-blue-600 text-white dark:bg-blue-500"
+                            ? "bg-blue-600 text-white dark:bg-blue-600"
                             : "bg-white dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600"
                         }`}
                       >
@@ -557,9 +557,9 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
               {/* 表示処理の補足 */}
               <div className="space-y-2">
                 <div className="bg-slate-100 dark:bg-slate-800 border-2 border-slate-300 dark:border-slate-700 rounded-lg p-3">
-                  <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
+                  <h2 className="text-sm font-semibold text-slate-900 dark:text-slate-100 mb-2">
                     候補アイテム
-                  </h3>
+                  </h2>
                   <p className="text-xs text-slate-600 dark:text-slate-400 mb-2">
                     このリストから選択したアイテムを実行リストへ移動します。
                   </p>
@@ -610,7 +610,7 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
                             onClick={() => handleToggleBlockFilter(block)}
                             className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${
                               selectedBlockFilters.has(block)
-                                ? "bg-blue-600 text-white dark:bg-blue-500"
+                                ? "bg-blue-600 text-white dark:bg-blue-600"
                                 : blocksWithPriorityRemarks.has(block)
                                   ? "bg-yellow-300 dark:bg-yellow-600 text-slate-700 dark:text-slate-300 hover:bg-yellow-400 dark:hover:bg-yellow-500 border border-slate-300 dark:border-slate-600"
                                   : "bg-white dark:bg-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-600 border border-slate-300 dark:border-slate-600"

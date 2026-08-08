@@ -89,13 +89,13 @@ const HEADER_STATUS_ORDER = [
 type HeaderStatusKind = (typeof HEADER_STATUS_ORDER)[number];
 
 const HEADER_STATUS_COLORS: Record<HeaderStatusKind, string> = {
-  unvisited: "#94a3b8",
+  unvisited: "#64748b",
   postponed: "#8b5cf6",
   late: "#3b82f6",
   limited: "#f97316",
-  purchased: "#22c55e",
+  purchased: "#15803d",
   soldOut: "#ef4444",
-  absent: "#eab308",
+  absent: "#a16207",
 };
 
 const getHeaderStatusKind = (item: ShoppingItem): HeaderStatusKind => {
@@ -133,7 +133,7 @@ const bulkStatusOptions: {
   {
     status: "Purchased",
     label: "全購入",
-    activeColor: "bg-green-600 text-white",
+    activeColor: "bg-green-700 text-white",
     hoverColor: "hover:bg-white/20",
   },
   {
@@ -145,7 +145,7 @@ const bulkStatusOptions: {
   {
     status: "Absent",
     label: "全欠席",
-    activeColor: "bg-yellow-500 text-white",
+    activeColor: "bg-yellow-700 text-white",
     hoverColor: "hover:bg-white/20",
   },
   {
@@ -163,7 +163,7 @@ const bulkStatusOptions: {
   {
     status: "LimitedPurchase",
     label: "全限数",
-    activeColor: "bg-orange-600 text-white",
+    activeColor: "bg-orange-700 text-white",
     hoverColor: "hover:bg-white/20",
   },
 ];
@@ -208,9 +208,9 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(
           data-item-id={item.id}
           className={`relative ${
             blinkingPriceItemIds.has(item.id)
-              ? "animate-pulse ring-2 ring-red-500 rounded-lg"
+              ? "ring-2 ring-red-500 rounded-lg animate-attention-outline attention-outline-red"
               : blinkingLimitedMissingItemIds.has(item.id)
-                ? "animate-pulse ring-2 ring-orange-500 rounded-lg"
+                ? "ring-2 ring-orange-500 rounded-lg animate-attention-outline attention-outline-orange"
                 : ""
           }`}
         >
@@ -243,7 +243,7 @@ export const FocusModeItemList: React.FC<FocusModeItemListProps> = React.memo(
         <div className="flex justify-center py-4">
           <button
             onClick={onAddItem}
-            className="w-12 h-12 bg-green-600 hover:bg-green-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl transition-colors"
+            className="w-12 h-12 bg-green-700 hover:bg-green-800 text-white rounded-full shadow-lg flex items-center justify-center text-2xl transition-colors"
             title="新規アイテム追加"
           >
             +
@@ -555,7 +555,7 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
           )}
           <rect
             data-header-overlay
-            fill="rgba(15, 23, 42, 0.28)"
+            fill="rgba(15, 23, 42, 0.60)"
             height="100"
             width="100"
           />

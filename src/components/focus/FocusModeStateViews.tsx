@@ -35,23 +35,21 @@ export function ResumeChoiceDialogView({
         aria-modal="true"
         aria-labelledby="resume-choice-title"
       >
-        <div className="bg-gradient-to-r from-teal-500 to-indigo-600 px-6 py-5 text-white">
+        <div className="bg-gradient-to-r from-teal-700 to-indigo-600 px-6 py-5 text-white">
           <h2 id="resume-choice-title" className="text-xl font-bold">
             集中モードを再開しますか？
           </h2>
-          <p className="mt-1 text-sm text-white/85">
-            どこから再開するか選んでください
-          </p>
+          <p className="mt-1 text-sm">どこから再開するか選んでください</p>
         </div>
         <div className="space-y-3 p-6">
           <button
             type="button"
             onClick={() => onChoice("lastChange")}
             disabled={!dialog.lastChangeEnabled}
-            className="w-full rounded-lg bg-teal-600 px-4 py-3 text-left font-medium text-white transition-colors hover:bg-teal-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="w-full rounded-lg bg-teal-700 px-4 py-3 text-left font-medium text-white transition-colors hover:bg-teal-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <span className="block">最後に購入状態を変更したスペース</span>
-            <span className="mt-1 block text-sm font-normal text-white/85">
+            <span className="mt-1 block text-sm font-normal">
               {dialog.lastSpaceLabel} ({lastPhaseName}フェーズ)
             </span>
           </button>
@@ -374,7 +372,7 @@ export function CompletionStateView({
       {limitedCounts.missing > 0 && (
         <button
           onClick={onLimitedMissingClick}
-          className="mb-4 rounded-lg bg-orange-600 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-700"
+          className="mb-4 rounded-lg bg-orange-700 px-5 py-2 text-sm font-semibold text-white transition-colors hover:bg-orange-800"
         >
           限数未入力を確認
         </button>

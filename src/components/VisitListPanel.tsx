@@ -11,6 +11,7 @@ import { getSpaceKey } from "../utils/spaceGrouping";
 import { parseGroupId, groupItemsByHallOrder } from "../utils/hallGrouping";
 import { findRouteLookupNumberCell } from "../utils/mapRoutingSignature";
 import { acquireBodyScrollLock } from "../utils/bodyScrollLock";
+import { useModalDialogBehavior } from "../hooks/useModalDialogBehavior";
 import { useDynamicCssClass } from "../styles/useDynamicCssClass";
 import GripVerticalIcon from "./icons/GripVerticalIcon";
 
@@ -290,6 +291,11 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
     clearHistory();
     onCancel();
   }, [history, onUpdateOrder, clearHistory, onCancel]);
+  const { dialogRef: mobileDialogRef, onDialogKeyDown: onMobileDialogKeyDown } =
+    useModalDialogBehavior({
+      isOpen: isOpen && layoutMode === "smartphone",
+      onEscape: onClose,
+    });
 
   // グループ化されたアイテム（ホール順序に従う）
   const groupedItems = useMemo(
@@ -982,7 +988,14 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
   // スマートフォンモード: ボトムシート
   if (layoutMode === "smartphone") {
     return (
-      <div className="fixed inset-0 z-50 pointer-events-none">
+      <div
+        ref={mobileDialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="visit-list-title-mobile"
+        onKeyDown={onMobileDialogKeyDown}
+        className="fixed inset-0 z-50 pointer-events-none"
+      >
         {/* 背景オーバーレイ */}
         <div
           className="absolute inset-0 bg-black/30 pointer-events-auto"
@@ -1007,9 +1020,12 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
 
           {/* ヘッダー */}
           <div className="flex items-center justify-between px-4 py-2 border-b border-slate-200 dark:border-slate-700">
-            <h3 className="font-bold text-lg text-slate-900 dark:text-slate-100">
+            <h2
+              id="visit-list-title-mobile"
+              className="font-bold text-lg text-slate-900 dark:text-slate-100"
+            >
               訪問先リスト
-            </h3>
+            </h2>
             <div className="flex items-center gap-2">
               <button
                 onClick={handleUndo}
@@ -1097,7 +1113,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                       rangeEndIndex,
                     )
                   }
-                  className="px-3 py-1.5 text-sm rounded-md bg-orange-500 text-white"
+                  className="px-3 py-1.5 text-sm rounded-md bg-orange-700 text-white"
                 >
                   区間反転
                 </button>
@@ -1151,11 +1167,11 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                     onClick={() => toggleHallCollapse(group.groupId)}
                   >
                     <GroupHeaderAccent color={headerStyle.borderColor} />
-                    <span className="font-semibold text-sm text-slate-700 dark:text-slate-300">
+                    <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">
                       {displayName}
                     </span>
                     <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-500 dark:text-slate-400">
+                      <span className="text-xs text-slate-800 dark:text-slate-100">
                         {group.items.length}件
                       </span>
                       <svg
@@ -1245,7 +1261,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                             group.priority === "highest"
                               ? "bg-red-600"
                               : group.priority === "priority"
-                                ? "bg-orange-500"
+                                ? "bg-orange-700"
                                 : "bg-blue-600"
                           }`}
                         >
@@ -1280,12 +1296,12 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                             {item.circle}
                           </p>
                           {item.title && (
-                            <p className="text-xs text-slate-500 dark:text-slate-500 truncate">
+                            <p className="text-xs text-slate-700 dark:text-slate-300 truncate">
                               {item.title}
                             </p>
                           )}
                           {item.remarks && (
-                            <p className="text-xs text-orange-600 dark:text-orange-400 truncate">
+                            <p className="text-xs text-orange-800 dark:text-orange-300 truncate">
                               {item.remarks}
                             </p>
                           )}
@@ -1363,14 +1379,18 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
 
   // PCモード: サイドパネル
   return (
-    <div
+    <aside
+      aria-labelledby="visit-list-title-desktop"
       className={`fixed top-0 bottom-0 ${panelPosition === "left" ? "left-0" : "right-0"} w-[30%] min-w-[300px] max-w-[400px] bg-white dark:bg-slate-900 shadow-2xl z-40 flex flex-col`}
     >
       {/* ヘッダー */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700">
-        <h3 className="font-bold text-lg text-slate-900 dark:text-slate-100">
+        <h2
+          id="visit-list-title-desktop"
+          className="font-bold text-lg text-slate-900 dark:text-slate-100"
+        >
           訪問先リスト
-        </h3>
+        </h2>
         <div className="flex items-center gap-2">
           {/* 位置切り替え */}
           <button
@@ -1514,7 +1534,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                   rangeEndIndex,
                 )
               }
-              className="px-3 py-1.5 text-sm rounded-md bg-orange-500 text-white hover:bg-orange-600 transition-colors"
+              className="px-3 py-1.5 text-sm rounded-md bg-orange-700 text-white hover:bg-orange-800 transition-colors"
             >
               区間反転
             </button>
@@ -1571,11 +1591,11 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                 onClick={() => toggleHallCollapse(group.groupId)}
               >
                 <GroupHeaderAccent color={headerStyle.borderColor} />
-                <span className="font-semibold text-sm text-slate-700 dark:text-slate-300">
+                <span className="font-semibold text-sm text-slate-900 dark:text-slate-100">
                   {displayName}
                 </span>
                 <div className="flex items-center gap-2">
-                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                  <span className="text-xs text-slate-800 dark:text-slate-100">
                     {group.items.length}件
                   </span>
                   <svg
@@ -1665,7 +1685,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                         group.priority === "highest"
                           ? "bg-red-600"
                           : group.priority === "priority"
-                            ? "bg-orange-500"
+                            ? "bg-orange-700"
                             : "bg-blue-600"
                       }`}
                     >
@@ -1700,12 +1720,12 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
                         {item.circle}
                       </p>
                       {item.title && (
-                        <p className="text-xs text-slate-500 dark:text-slate-500 truncate">
+                        <p className="text-xs text-slate-700 dark:text-slate-300 truncate">
                           {item.title}
                         </p>
                       )}
                       {item.remarks && (
-                        <p className="text-xs text-orange-600 dark:text-orange-400 truncate">
+                        <p className="text-xs text-orange-800 dark:text-orange-300 truncate">
                           {item.remarks}
                         </p>
                       )}
@@ -1832,7 +1852,7 @@ const VisitListPanel: React.FC<VisitListPanelProps> = ({
           </div>
         </div>
       )}
-    </div>
+    </aside>
   );
 };
 

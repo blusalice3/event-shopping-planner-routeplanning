@@ -352,6 +352,30 @@ describe("FocusMode resume dialog - integration", () => {
   });
 });
 
+describe("FocusMode accessible emphasis - integration", () => {
+  it("keeps the ready-to-advance white label opaque on its AA background", async () => {
+    render(
+      <StatefulFocusModeHarness
+        initialItems={singleVisitNoneItemFixture.items}
+        executeModeItemIds={singleVisitNoneItemFixture.executeModeItemIds}
+        resumeState={incompleteSessionFixture}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Current status:/ }));
+
+    const nextButton = screen.getByTitle("次の訪問先");
+    await waitFor(() =>
+      expect(nextButton).toHaveClass("bg-green-700", "hover:bg-green-800"),
+    );
+    expect(nextButton).toHaveClass(
+      "animate-attention-outline",
+      "attention-outline-green",
+    );
+    expect(nextButton).not.toHaveClass("animate-pulse");
+  });
+});
+
 describe("FocusMode limited purchase defer - integration", () => {
   it("blocks moving forward when only part of the current visit is deferred", async () => {
     render(
@@ -365,11 +389,15 @@ describe("FocusMode limited purchase defer - integration", () => {
     clickLimitedDeferAt(0);
     clickNextVisitButton();
 
-    expect(
-      await screen.findByText(
-        "限数未入力があります。実購入数を入力してください",
-      ),
-    ).toHaveClass("bg-red-600");
+    const notification = await screen.findByText(
+      "限数未入力があります。実購入数を入力してください",
+    );
+    expect(notification).toHaveClass(
+      "bg-red-600",
+      "animate-attention-outline",
+      "attention-outline-red",
+    );
+    expect(notification).not.toHaveClass("animate-pulse");
     expect(screen.getByText("A-01A")).toBeInTheDocument();
   });
 

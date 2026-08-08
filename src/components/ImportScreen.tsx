@@ -766,7 +766,7 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
                   <button
                     type="button"
                     onClick={handleUrlImport}
-                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-md transition-colors whitespace-nowrap"
+                    className="px-4 py-2 bg-green-700 hover:bg-green-800 text-white rounded-md transition-colors whitespace-nowrap"
                   >
                     URLからインポート
                   </button>

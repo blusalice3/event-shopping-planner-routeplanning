@@ -771,8 +771,10 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
 
       {smartInsertToast && (
         <div
-          className={`fixed top-16 left-1/2 transform -translate-x-1/2 z-[10000] text-white px-5 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-pulse ${
-            smartInsertToastType === "error" ? "bg-red-600" : "bg-green-600"
+          className={`fixed top-16 left-1/2 transform -translate-x-1/2 z-[10000] text-white px-5 py-2.5 rounded-lg shadow-lg text-sm font-medium animate-attention-outline ${
+            smartInsertToastType === "error"
+              ? "bg-red-600 attention-outline-red"
+              : "bg-green-700 attention-outline-green"
           }`}
         >
           {smartInsertToast}

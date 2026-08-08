@@ -5,6 +5,7 @@ import React, {
   useLayoutEffect,
   useMemo,
   useCallback,
+  useId,
 } from "react";
 import {
   ShoppingItem,
@@ -25,6 +26,7 @@ import {
   buildQuantityOptions,
   isStandardQuantityOption,
 } from "../quantityOptions";
+import { useModalDialogBehavior } from "../../hooks/useModalDialogBehavior";
 
 interface SpaceGroup {
   baseNumber: string;
@@ -99,6 +101,36 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   eventDate,
   position,
 }) => {
+  const fieldIdPrefix = useId();
+  const editDialogIds = {
+    title: `${fieldIdPrefix}-edit-title`,
+    description: `${fieldIdPrefix}-edit-description`,
+    circle: `${fieldIdPrefix}-edit-circle`,
+    itemTitle: `${fieldIdPrefix}-edit-item-title`,
+    pricePreset: `${fieldIdPrefix}-edit-price-preset`,
+    price: `${fieldIdPrefix}-edit-price`,
+    quantity: `${fieldIdPrefix}-edit-quantity`,
+    purchaseStatus: `${fieldIdPrefix}-edit-purchase-status`,
+    priority: `${fieldIdPrefix}-edit-priority`,
+    remarks: `${fieldIdPrefix}-edit-remarks`,
+    url: `${fieldIdPrefix}-edit-url`,
+  } as const;
+  const addDialogIds = {
+    title: `${fieldIdPrefix}-add-title`,
+    description: `${fieldIdPrefix}-add-description`,
+    circle: `${fieldIdPrefix}-add-circle`,
+    circleSuggestions: `${fieldIdPrefix}-add-circle-suggestions`,
+    itemTitle: `${fieldIdPrefix}-add-item-title`,
+    eventDate: `${fieldIdPrefix}-add-event-date`,
+    block: `${fieldIdPrefix}-add-block`,
+    number: `${fieldIdPrefix}-add-number`,
+    price: `${fieldIdPrefix}-add-price`,
+    pricePreset: `${fieldIdPrefix}-add-price-preset`,
+    quantity: `${fieldIdPrefix}-add-quantity`,
+    purchaseStatus: `${fieldIdPrefix}-add-purchase-status`,
+    remarks: `${fieldIdPrefix}-add-remarks`,
+    url: `${fieldIdPrefix}-add-url`,
+  } as const;
   const popupRef = useRef<HTMLDivElement>(null);
   const [longPressItem, setLongPressItem] = useState<ShoppingItem | null>(null);
   const [editingItem, setEditingItem] = useState<ShoppingItem | null>(null);
@@ -240,6 +272,18 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   const closeAddDialog = useCallback(() => {
     setAddDialogOpen(false);
   }, []);
+  const { dialogRef: editDialogRef, onDialogKeyDown: onEditDialogKeyDown } =
+    useModalDialogBehavior({
+      isOpen: editingItem !== null,
+      onEscape: () => setEditingItem(null),
+      fallbackFocusRef: popupRef,
+    });
+  const { dialogRef: addDialogRef, onDialogKeyDown: onAddDialogKeyDown } =
+    useModalDialogBehavior({
+      isOpen: addDialogOpen,
+      onEscape: closeAddDialog,
+      fallbackFocusRef: popupRef,
+    });
 
   const handleAddItem = useCallback(() => {
     if (!onAddItem || !newItemForm.circle.trim()) return;
@@ -448,10 +492,10 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
         {/* ヘッダー */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 dark:border-slate-700 gap-2">
           <div className="flex items-center gap-2 flex-1 min-w-0 flex-wrap">
-            <h3 className="font-semibold text-slate-900 dark:text-white whitespace-nowrap">
+            <h2 className="font-semibold text-slate-900 dark:text-white whitespace-nowrap">
               {blockName}-{number}{" "}
               {items.length > 0 ? `（${items.length}件）` : ""}
-            </h3>
+            </h2>
             {spaceGroups.length > 0 && (
               <div className="flex items-center gap-1 flex-wrap">
                 {spaceGroups.map((group) => {
@@ -484,7 +528,9 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
             )}
           </div>
           <button
+            type="button"
             onClick={onClose}
+            aria-label={`${blockName}-${number}のアイテム一覧を閉じる`}
             className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-300 flex-shrink-0"
           >
             <svg
@@ -508,7 +554,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
           <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700">
             <button
               onClick={openAddDialog}
-              className="w-full py-2 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
+              className="w-full py-2 px-4 bg-green-700 hover:bg-green-800 text-white rounded-lg font-medium transition-colors flex items-center justify-center gap-2"
             >
               <svg
                 className="w-5 h-5"
@@ -661,7 +707,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                             onClose();
                             onEditRequest(item);
                           }}
-                          className="rounded bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-700"
+                          className="rounded bg-orange-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-800"
                         >
                           限数を編集
                         </button>
@@ -742,14 +788,26 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
           onClick={() => setEditingItem(null)}
         >
           <div
+            ref={editDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={editDialogIds.title}
+            aria-describedby={editDialogIds.description}
             className="bg-white dark:bg-slate-800 rounded-lg shadow-xl w-full max-w-md"
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={onEditDialogKeyDown}
           >
             <div className="p-4 border-b border-slate-200 dark:border-slate-700">
-              <h3 className="text-lg font-bold text-slate-900 dark:text-white">
+              <h2
+                id={editDialogIds.title}
+                className="text-lg font-bold text-slate-900 dark:text-white"
+              >
                 アイテム編集
-              </h3>
-              <p className="text-sm text-slate-500 dark:text-slate-400 mt-0.5">
+              </h2>
+              <p
+                id={editDialogIds.description}
+                className="text-sm text-slate-500 dark:text-slate-400 mt-0.5"
+              >
                 {editingItem.block}-{editingItem.number}
               </p>
             </div>
@@ -784,7 +842,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                         onClose();
                         onEditRequest?.(editingItem);
                       }}
-                      className="mt-3 rounded bg-orange-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-700"
+                      className="mt-3 rounded bg-orange-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-orange-800"
                     >
                       限数を編集
                     </button>
@@ -803,10 +861,14 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               <>
                 <div className="p-4 space-y-4 max-h-[60vh] overflow-y-auto">
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    <label
+                      htmlFor={editDialogIds.circle}
+                      className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
                       サークル名
                     </label>
                     <input
+                      id={editDialogIds.circle}
                       type="text"
                       value={editingItem.circle}
                       onChange={(e) =>
@@ -819,10 +881,14 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    <label
+                      htmlFor={editDialogIds.itemTitle}
+                      className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
                       タイトル
                     </label>
                     <input
+                      id={editDialogIds.itemTitle}
                       type="text"
                       value={editingItem.title}
                       onChange={(e) =>
@@ -847,85 +913,106 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                     </div>
                   )}
                   {/* 購入金額: ドロップダウン + 直接入力 */}
-                  <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                  <fieldset>
+                    <legend className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
                       購入金額（利用者が編集）
-                    </label>
+                    </legend>
                     <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={
-                          editingItem.price === null
-                            ? "undecided"
-                            : editingItem.price !== null &&
-                                editingItem.price % 100 === 0 &&
-                                editingItem.price >= 0 &&
-                                editingItem.price <= 10000
-                              ? String(editingItem.price)
-                              : "custom"
-                        }
-                        onChange={(e) => {
-                          const v = e.target.value;
-                          if (v === "undecided") {
-                            setEditingItem({ ...editingItem, price: null });
-                          } else if (v === "custom") {
-                            // カスタム選択時は現在値を維持
-                          } else {
-                            setEditingItem({
-                              ...editingItem,
-                              price: parseInt(v, 10),
-                            });
+                      <div>
+                        <label
+                          htmlFor={editDialogIds.pricePreset}
+                          className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                        >
+                          クイック選択
+                        </label>
+                        <select
+                          id={editDialogIds.pricePreset}
+                          value={
+                            editingItem.price === null
+                              ? "undecided"
+                              : editingItem.price !== null &&
+                                  editingItem.price % 100 === 0 &&
+                                  editingItem.price >= 0 &&
+                                  editingItem.price <= 10000
+                                ? String(editingItem.price)
+                                : "custom"
                           }
-                        }}
-                        className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm"
-                      >
-                        <option value="undecided">価格未定</option>
-                        {Array.from({ length: 101 }, (_, i) => i * 100).map(
-                          (p) => (
-                            <option key={p} value={p}>
-                              {p.toLocaleString()}円
-                            </option>
-                          ),
-                        )}
-                        {editingItem.price !== null &&
-                          (editingItem.price % 100 !== 0 ||
-                            editingItem.price > 10000) && (
-                            <option value="custom">
-                              {editingItem.price.toLocaleString()}円（手入力）
-                            </option>
-                          )}
-                      </select>
-                      <div className="relative">
-                        <input
-                          type="text"
-                          inputMode="numeric"
-                          value={editingItem.price ?? ""}
                           onChange={(e) => {
-                            const raw = e.target.value.replace(/[^0-9]/g, "");
-                            setEditingItem({
-                              ...editingItem,
-                              price: raw === "" ? null : parseInt(raw, 10),
-                            });
+                            const v = e.target.value;
+                            if (v === "undecided") {
+                              setEditingItem({ ...editingItem, price: null });
+                            } else if (v === "custom") {
+                              // カスタム選択時は現在値を維持
+                            } else {
+                              setEditingItem({
+                                ...editingItem,
+                                price: parseInt(v, 10),
+                              });
+                            }
                           }}
-                          placeholder="直接入力"
-                          className="w-full px-3 py-2 pr-8 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm"
-                        />
-                        <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">
-                          円
-                        </span>
+                          className="w-full px-3 py-2 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm"
+                        >
+                          <option value="undecided">価格未定</option>
+                          {Array.from({ length: 101 }, (_, i) => i * 100).map(
+                            (p) => (
+                              <option key={p} value={p}>
+                                {p.toLocaleString()}円
+                              </option>
+                            ),
+                          )}
+                          {editingItem.price !== null &&
+                            (editingItem.price % 100 !== 0 ||
+                              editingItem.price > 10000) && (
+                              <option value="custom">
+                                {editingItem.price.toLocaleString()}円（手入力）
+                              </option>
+                            )}
+                        </select>
+                      </div>
+                      <div>
+                        <label
+                          htmlFor={editDialogIds.price}
+                          className="mb-1 block text-xs font-medium text-slate-600 dark:text-slate-300"
+                        >
+                          直接入力
+                        </label>
+                        <div className="relative">
+                          <input
+                            id={editDialogIds.price}
+                            type="text"
+                            inputMode="numeric"
+                            value={editingItem.price ?? ""}
+                            onChange={(e) => {
+                              const raw = e.target.value.replace(/[^0-9]/g, "");
+                              setEditingItem({
+                                ...editingItem,
+                                price: raw === "" ? null : parseInt(raw, 10),
+                              });
+                            }}
+                            placeholder="直接入力"
+                            className="w-full px-3 py-2 pr-8 border border-slate-300 dark:border-slate-600 rounded bg-white dark:bg-slate-700 text-slate-900 dark:text-white text-sm"
+                          />
+                          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">
+                            円
+                          </span>
+                        </div>
                       </div>
                     </div>
                     {editingItem.price === null && (
                       <p className="text-xs text-amber-500 mt-1">※ 価格未定</p>
                     )}
-                  </div>
+                  </fieldset>
                   <div className="grid grid-cols-2 gap-4">
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      <label
+                        htmlFor={editDialogIds.quantity}
+                        className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
                         数量
                       </label>
                       <select
+                        id={editDialogIds.quantity}
                         value={editingQuantityText}
-                        aria-label="数量"
                         onChange={(e) => {
                           setQuantityError(null);
                           setEditingQuantityText(e.target.value);
@@ -949,10 +1036,14 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                       )}
                     </div>
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      <label
+                        htmlFor={editDialogIds.purchaseStatus}
+                        className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
                         購入状態
                       </label>
                       <select
+                        id={editDialogIds.purchaseStatus}
                         value={editingItem.purchaseStatus}
                         onChange={(e) =>
                           setEditingItem({
@@ -974,10 +1065,14 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   </div>
                   {onUpdateItemPriority && (
                     <div>
-                      <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                      <label
+                        htmlFor={editDialogIds.priority}
+                        className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+                      >
                         優先度
                       </label>
                       <select
+                        id={editDialogIds.priority}
                         value={editingItem.priorityLevel || "none"}
                         onChange={(e) =>
                           setEditingItem({
@@ -1022,10 +1117,14 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                     </div>
                   )}
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    <label
+                      htmlFor={editDialogIds.remarks}
+                      className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
                       利用者メモ
                     </label>
                     <textarea
+                      id={editDialogIds.remarks}
                       value={editingItem.remarks}
                       onChange={(e) =>
                         setEditingItem({
@@ -1038,10 +1137,14 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                     />
                   </div>
                   <div>
-                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1">
+                    <label
+                      htmlFor={editDialogIds.url}
+                      className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1"
+                    >
                       URL
                     </label>
                     <input
+                      id={editDialogIds.url}
                       type="url"
                       value={editingItem.url || ""}
                       onChange={(e) =>
@@ -1092,23 +1195,39 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
           onClick={closeAddDialog}
         >
           <div
+            ref={addDialogRef}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby={addDialogIds.title}
+            aria-describedby={addDialogIds.description}
             className="bg-white dark:bg-slate-800 rounded-lg shadow-2xl max-w-lg w-full mx-4 overflow-hidden max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
+            onKeyDown={onAddDialogKeyDown}
           >
-            <div className="bg-gradient-to-r from-green-500 to-emerald-600 text-white p-4">
-              <h2 className="text-lg font-bold">新規アイテム追加</h2>
-              <p className="text-sm opacity-80 mt-1">
+            <div className="bg-gradient-to-r from-green-700 to-emerald-700 text-white p-4">
+              <h2 id={addDialogIds.title} className="text-lg font-bold">
+                新規アイテム追加
+              </h2>
+              <p
+                id={addDialogIds.description}
+                className="text-sm text-white mt-1"
+              >
                 {eventDate} {blockName}-{number}
               </p>
             </div>
             <div className="p-4 space-y-4">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>
-                    サークル名 <span className="text-red-500">*</span>
+                  <label htmlFor={addDialogIds.circle} className={labelClass}>
+                    サークル名{" "}
+                    <span aria-hidden="true" className="text-red-500">
+                      *
+                    </span>
                   </label>
                   <input
+                    id={addDialogIds.circle}
                     type="text"
+                    required
                     value={newItemForm.circle}
                     onChange={(e) =>
                       setNewItemForm((prev) => ({
@@ -1118,11 +1237,10 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                     }
                     className={formInputClass}
                     placeholder="サークル名"
-                    autoFocus
-                    list="cell-circle-suggestions"
+                    list={addDialogIds.circleSuggestions}
                   />
                   {items.length > 0 && (
-                    <datalist id="cell-circle-suggestions">
+                    <datalist id={addDialogIds.circleSuggestions}>
                       {[
                         ...new Set(
                           items.map((item) => item.circle).filter(Boolean),
@@ -1134,8 +1252,14 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   )}
                 </div>
                 <div>
-                  <label className={labelClass}>タイトル</label>
+                  <label
+                    htmlFor={addDialogIds.itemTitle}
+                    className={labelClass}
+                  >
+                    タイトル
+                  </label>
                   <input
+                    id={addDialogIds.itemTitle}
                     type="text"
                     value={newItemForm.title}
                     onChange={(e) =>
@@ -1151,8 +1275,14 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               </div>
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className={labelClass}>参加日</label>
+                  <label
+                    htmlFor={addDialogIds.eventDate}
+                    className={labelClass}
+                  >
+                    参加日
+                  </label>
                   <input
+                    id={addDialogIds.eventDate}
                     type="text"
                     value={eventDate || ""}
                     readOnly
@@ -1160,8 +1290,11 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>ブロック</label>
+                  <label htmlFor={addDialogIds.block} className={labelClass}>
+                    ブロック
+                  </label>
                   <input
+                    id={addDialogIds.block}
                     type="text"
                     value={blockName}
                     readOnly
@@ -1169,8 +1302,11 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>ナンバー</label>
+                  <label htmlFor={addDialogIds.number} className={labelClass}>
+                    ナンバー
+                  </label>
                   <input
+                    id={addDialogIds.number}
                     type="text"
                     value={newItemForm.numberOverride}
                     onChange={(e) =>
@@ -1186,8 +1322,11 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 items-end">
                 <div className="relative">
-                  <label className={labelClass}>購入金額</label>
+                  <label htmlFor={addDialogIds.price} className={labelClass}>
+                    購入金額
+                  </label>
                   <input
+                    id={addDialogIds.price}
                     type="text"
                     value={newItemForm.price}
                     onChange={handlePriceInputChange}
@@ -1200,8 +1339,14 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   </span>
                 </div>
                 <div>
-                  <label className={labelClass}>クイック選択</label>
+                  <label
+                    htmlFor={addDialogIds.pricePreset}
+                    className={labelClass}
+                  >
+                    クイック選択
+                  </label>
                   <select
+                    id={addDialogIds.pricePreset}
                     onChange={handlePriceSelectChange}
                     className={formInputClass}
                     value={
@@ -1223,10 +1368,12 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>数量</label>
+                  <label htmlFor={addDialogIds.quantity} className={labelClass}>
+                    数量
+                  </label>
                   <select
+                    id={addDialogIds.quantity}
                     value={newItemForm.quantity}
-                    aria-label="数量"
                     onChange={(e) => {
                       setAddQuantityError(null);
                       setNewItemForm((prev) => ({
@@ -1251,8 +1398,14 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   )}
                 </div>
                 <div>
-                  <label className={labelClass}>購入状態</label>
+                  <label
+                    htmlFor={addDialogIds.purchaseStatus}
+                    className={labelClass}
+                  >
+                    購入状態
+                  </label>
                   <select
+                    id={addDialogIds.purchaseStatus}
                     value={newItemForm.purchaseStatus}
                     onChange={(e) =>
                       setNewItemForm((prev) => ({
@@ -1272,8 +1425,11 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className={labelClass}>利用者メモ</label>
+                  <label htmlFor={addDialogIds.remarks} className={labelClass}>
+                    利用者メモ
+                  </label>
                   <input
+                    id={addDialogIds.remarks}
                     type="text"
                     value={newItemForm.remarks}
                     onChange={(e) =>
@@ -1287,8 +1443,11 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
                   />
                 </div>
                 <div>
-                  <label className={labelClass}>URL</label>
+                  <label htmlFor={addDialogIds.url} className={labelClass}>
+                    URL
+                  </label>
                   <input
+                    id={addDialogIds.url}
                     type="text"
                     value={newItemForm.url}
                     onChange={(e) =>
@@ -1313,7 +1472,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
               <button
                 onClick={handleAddItem}
                 disabled={!newItemForm.circle.trim()}
-                className="flex-1 py-2 px-4 bg-green-600 hover:bg-green-700 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors"
+                className="flex-1 py-2 px-4 bg-green-700 hover:bg-green-800 disabled:bg-slate-400 text-white rounded-lg font-medium transition-colors"
               >
                 リストに追加
               </button>

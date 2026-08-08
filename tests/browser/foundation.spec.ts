@@ -81,6 +81,18 @@ const waitForApplication = async (page: Page) => {
   return response!;
 };
 
+const waitForFiniteAnimations = async (page: Page) => {
+  await page.waitForFunction(() =>
+    document.getAnimations().every((animation) => {
+      const iterations = animation.effect?.getTiming().iterations;
+      return (
+        iterations === Infinity ||
+        (animation.playState !== "pending" && animation.playState !== "running")
+      );
+    }),
+  );
+};
+
 test("loads the source-bound PWA without remote runtime dependencies", async ({
   page,
 }) => {
@@ -272,22 +284,58 @@ test("keeps the controlled application available during an offline reload", asyn
   }
 });
 
-test("@a11y has no serious or critical automated accessibility violations", async ({
+test("@a11y has no moderate, serious, or critical automated accessibility violations", async ({
   page,
 }) => {
   await page.addInitScript({ content: axe.source });
   await waitForApplication(page);
+  const attentionOpacitySamples = await page.evaluate(async () => {
+    const probe = document.createElement("div");
+    probe.className =
+      "animate-attention-outline attention-outline-red bg-red-600 text-white";
+    probe.textContent = "attention animation contrast probe";
+    document.body.append(probe);
+    await new Promise<void>((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+    );
+    const samples = [getComputedStyle(probe).opacity];
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    samples.push(getComputedStyle(probe).opacity);
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    samples.push(getComputedStyle(probe).opacity);
+    probe.remove();
+    return samples;
+  });
+  expect(attentionOpacitySamples).toEqual(["1", "1", "1"]);
   const themeCases = [
     { colorScheme: "light", dataTheme: "light" },
     { colorScheme: "light", dataTheme: "dark" },
+    { colorScheme: "light", dataTheme: "system" },
     { colorScheme: "dark", dataTheme: "system" },
   ] as const;
   const violations = [];
 
   for (const themeCase of themeCases) {
     await page.emulateMedia({ colorScheme: themeCase.colorScheme });
-    const themeViolations = await page.evaluate(async ({ dataTheme }) => {
+    const useDarkTheme = await page.evaluate(({ colorScheme, dataTheme }) => {
+      const useDarkTheme =
+        dataTheme === "dark" ||
+        (dataTheme === "system" && colorScheme === "dark");
       document.documentElement.setAttribute("data-theme", dataTheme);
+      document.documentElement.classList.toggle("dark", useDarkTheme);
+      return useDarkTheme;
+    }, themeCase);
+    await expect(page.locator("html")).toHaveAttribute(
+      "data-theme",
+      themeCase.dataTheme,
+    );
+    expect(
+      await page
+        .locator("html")
+        .evaluate((element) => element.classList.contains("dark")),
+    ).toBe(useDarkTheme);
+    await waitForFiniteAnimations(page);
+    const themeViolations = await page.evaluate(async () => {
       const axeApi = (
         globalThis as typeof globalThis & {
           axe: {
@@ -310,7 +358,9 @@ test("@a11y has no serious or critical automated accessibility violations", asyn
         resultTypes: ["violations"],
       });
       return result.violations
-        .filter(({ impact }) => impact === "serious" || impact === "critical")
+        .filter(({ impact }) =>
+          ["moderate", "serious", "critical"].includes(impact ?? ""),
+        )
         .map(({ id, impact, nodes }) => ({
           id,
           impact,

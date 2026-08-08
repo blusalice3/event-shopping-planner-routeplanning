@@ -59,7 +59,8 @@ describe("AppOverlayLayer move plan integration", () => {
       handleRemoveFromExecuteColumn: vi.fn(),
       handleBulkSort: vi.fn(),
       handleClearSelection: vi.fn(),
-      smartInsertToast: null,
+      smartInsertToast: "保存しました",
+      smartInsertToastType: "success",
     } as unknown as ComponentProps<typeof AppOverlayLayer>;
 
     render(<AppOverlayLayer {...props} />);
@@ -70,5 +71,13 @@ describe("AppOverlayLayer move plan integration", () => {
     fireEvent.click(moveButton);
 
     expect(handleMoveToExecuteColumn).toHaveBeenCalledWith(["a", "b"]);
+
+    const toast = screen.getByText("保存しました");
+    expect(toast).toHaveClass(
+      "bg-green-700",
+      "animate-attention-outline",
+      "attention-outline-green",
+    );
+    expect(toast).not.toHaveClass("animate-pulse");
   });
 });
