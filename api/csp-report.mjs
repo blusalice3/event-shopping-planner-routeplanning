@@ -4,12 +4,43 @@ export const CSP_REPORT_RAW_LIMIT_BYTES = 16_384;
 export const CSP_REPORT_NORMALIZED_LIMIT_BYTES = 16_384;
 export const CSP_REPORT_BATCH_LIMIT = 20;
 export const CSP_REPORT_UPSTREAM_TIMEOUT_MS = 3_000;
+export const CSP_REPORT_BLOCKED_TARGET_COLUMN = "blocked_target";
+export const CSP_BLOCKED_TARGET_VALUES = Object.freeze([
+  "self",
+  "scheme",
+  "same-site",
+  "cross-site",
+  "unknown",
+]);
+export const CSP_EFFECTIVE_DIRECTIVE_VALUES = Object.freeze([
+  "base-uri",
+  "child-src",
+  "connect-src",
+  "default-src",
+  "font-src",
+  "form-action",
+  "frame-ancestors",
+  "frame-src",
+  "img-src",
+  "manifest-src",
+  "media-src",
+  "object-src",
+  "script-src",
+  "script-src-attr",
+  "script-src-elem",
+  "style-src",
+  "style-src-attr",
+  "style-src-elem",
+  "worker-src",
+  "unknown",
+]);
 
 const ALLOWED_CONTENT_TYPES = new Set([
   "application/csp-report",
   "application/reports+json",
 ]);
 const ALLOWED_DISPOSITIONS = new Set(["report", "enforce"]);
+const ALLOWED_EFFECTIVE_DIRECTIVES = new Set(CSP_EFFECTIVE_DIRECTIVE_VALUES);
 const DIRECTIVE_PATTERN = /^[a-z0-9][a-z0-9-]{0,127}$/;
 const FULL_SOURCE_SHA_PATTERN = /^[0-9a-f]{40}$/;
 const PROVIDER_DEPLOYMENT_ID_PATTERN = /^[A-Za-z0-9._:-]{1,160}$/;
@@ -157,6 +188,13 @@ const readString = (record, ...keys) => {
   return null;
 };
 
+export const normalizeEffectiveDirective = (rawValue) => {
+  if (typeof rawValue !== "string") return null;
+  const firstToken = rawValue.trim().toLowerCase().split(/\s+/, 1)[0];
+  if (!DIRECTIVE_PATTERN.test(firstToken)) return null;
+  return ALLOWED_EFFECTIVE_DIRECTIVES.has(firstToken) ? firstToken : "unknown";
+};
+
 const normalizeSingleReport = (candidate, applicationOrigin) => {
   if (!isRecord(candidate)) return null;
   const body = isRecord(candidate["csp-report"])
@@ -167,25 +205,19 @@ const normalizeSingleReport = (candidate, applicationOrigin) => {
   if (candidate.type !== undefined && candidate.type !== "csp-violation") {
     return null;
   }
-  const effectiveDirective = (
+  const effectiveDirective = normalizeEffectiveDirective(
     readString(
       body,
       "effective-directive",
       "effectiveDirective",
       "violated-directive",
       "violatedDirective",
-    ) ?? ""
-  )
-    .trim()
-    .toLowerCase()
-    .split(/\s+/, 1)[0];
+    ),
+  );
   const disposition = (
     readString(body, "disposition") ?? "report"
   ).toLowerCase();
-  if (
-    !DIRECTIVE_PATTERN.test(effectiveDirective) ||
-    !ALLOWED_DISPOSITIONS.has(disposition)
-  ) {
+  if (effectiveDirective === null || !ALLOWED_DISPOSITIONS.has(disposition)) {
     return null;
   }
   const blockedTarget = readString(
@@ -198,7 +230,7 @@ const normalizeSingleReport = (candidate, applicationOrigin) => {
     schema_version: 1,
     effective_directive: effectiveDirective,
     disposition,
-    blocked_target_classification: classifyBlockedTarget(
+    [CSP_REPORT_BLOCKED_TARGET_COLUMN]: classifyBlockedTarget(
       blockedTarget,
       applicationOrigin,
     ),

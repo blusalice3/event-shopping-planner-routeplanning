@@ -73,11 +73,6 @@
       "targetRegex": "^src/utils/indexedDB\\.ts$"
     },
     {
-      "id": "ui-direct-xlsx-adapter",
-      "sourceRegex": "^src/(?:App\\.tsx|components/|features/)",
-      "targetRegex": "^src/utils/(?:exportImport|xlsxMapParser)\\.ts$"
-    },
-    {
       "id": "ui-direct-xlsx-package",
       "sourceRegex": "^src/(?:App\\.tsx|components/|features/)",
       "packageRegex": "^(?:exceljs|xlsx)$"
@@ -137,7 +132,7 @@
     {
       "id": "containment-entry-no-xlsx",
       "entry": "src/pwa/containment/index.ts",
-      "forbiddenTargetRegex": "^src/(?:xlsx/|utils/(?:exportImport|xlsxMapParser)\\.ts$)"
+      "forbiddenTargetRegex": "^src/xlsx/"
     },
     {
       "id": "containment-entry-no-list",
@@ -162,6 +157,11 @@
       "pattern": "\\b(?:indexedDB|IDBDatabase|IDBTransaction|ServiceWorkerRegistration|skipWaiting|clientsClaim)\\b|\\bnavigator\\s*\\.\\s*serviceWorker\\b"
     },
     {
+      "id": "hook-no-direct-persistence-mutation",
+      "sourceRegex": "^src/hooks/useIndexedDbPersistence\\.ts$",
+      "pattern": "\\bdb\\s*\\.\\s*(?:save[A-Z]|migrateFromLocalStorage|adoptRecoveryCandidate)"
+    },
+    {
       "id": "outer-agent-no-dynamic-nonliteral-import",
       "sourceRegex": "^src/pwa/(?:recovery/|releaseIdentityProtocol\\.ts$)",
       "pattern": "\\bimport\\s*\\(\\s*(?![\"'])"
@@ -175,6 +175,10 @@
     }
   ],
   "forbiddenProductionPathRules": [
+    {
+      "id": "no-legacy-xlsx-facades",
+      "pathRegex": "^src/utils/(?:exportImport|xlsxMapParser)\\.ts$"
+    },
     {
       "id": "no-temporary-app-persistence-bridge",
       "pathRegex": "^src/(?:app|persistence)/.*(?:legacyIndexedDb|temporary(?:Persistence)?Bridge).*(?:\\.ts|\\.tsx)$"

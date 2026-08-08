@@ -332,7 +332,7 @@ export const assertRoleEntryGraph = (graph, manifest) => {
     graph.graphKind === "rollup-role-entry-v1"
   ) {
     const forbiddenContainmentModule =
-      /^(?:src\/(?:App\.tsx$|app\/|persistence\/|xlsx\/|hooks\/useIndexedDbPersistence\.ts$|utils\/(?:indexedDB|exportImport|xlsxMapParser)\.ts$|features\/shopping-list\/|components\/(?:ShoppingList|ShoppingItemCard|SummaryBar|VisitListPanel|map\/(?:MapVisitListPanel|VisitListPanel))\.(?:ts|tsx)$)|node_modules\/(?:exceljs\/|@zip\.js\/|@tanstack\/react-virtual\/))/;
+      /^(?:src\/(?:App\.tsx$|app\/|persistence\/|xlsx\/|hooks\/useIndexedDbPersistence\.ts$|utils\/indexedDB\.ts$|features\/shopping-list\/|components\/(?:ShoppingList|ShoppingItemCard|SummaryBar|VisitListPanel|map\/(?:MapVisitListPanel|VisitListPanel))\.(?:ts|tsx)$)|node_modules\/(?:exceljs\/|@zip\.js\/|@tanstack\/react-virtual\/))/;
     const forbidden = graph.modules.find((module) =>
       forbiddenContainmentModule.test(module.id),
     );

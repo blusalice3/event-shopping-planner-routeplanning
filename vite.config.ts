@@ -542,16 +542,6 @@ export default defineConfig(({ command, mode }) => {
           },
           chunkFileNames: "assets/[name]-[hash].js",
           assetFileNames: "assets/[name]-[hash][extname]",
-          manualChunks: (moduleId) => {
-            const normalized = moduleId.replaceAll("\\", "/");
-            if (
-              normalized.endsWith("/src/utils/xlsxMapParser.ts") ||
-              normalized.endsWith("/src/utils/exportImport.ts")
-            ) {
-              return "xlsx-parser";
-            }
-            return undefined;
-          },
         },
       },
     },

@@ -1,7 +1,10 @@
 import ExcelJS from "exceljs";
 import { describe, expect, it } from "vitest";
 import type { ShoppingItem } from "../types/item";
-import { exportToXlsx, importFromXlsx } from "./exportImport";
+import {
+  exportToXlsx,
+  importFromXlsx,
+} from "../xlsx/engine/eventWorkbookEngine";
 
 const legacyHeaders = [
   "ID",

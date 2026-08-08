@@ -25,7 +25,7 @@
     "test:release-state": "node --test scripts/release-state/acceptanceEvidenceInputProducerCli.test.mjs scripts/release-state/acceptanceEvidenceInputs.test.mjs scripts/release-state/authoritativeInputProducerCli.test.mjs scripts/release-state/authoritativeInputProducers.test.mjs scripts/release-state/executeReleaseLifecycleCli.test.mjs scripts/release-state/lifecycleExecution.test.mjs scripts/release-state/protectedReleaseCli.test.mjs scripts/release-state/protectedWorkflowCore.test.mjs scripts/release-state/releaseStateAdapters.test.mjs scripts/release-state/releaseStateReducer.test.mjs",
     "test:release-a-browser": "node scripts/verify-release-a-browser.mjs",
     "test:release-a-evidence": "node --test scripts/verify-release-a-evidence.test.mjs",
-    "test:release-a-rollback": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/rehearse-release-a-rollback.ps1",
+    "test:release-a-rollback": "pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/rehearse-release-a-rollback.ps1",
     "test:encoding": "node scripts/verify-encoding.mjs",
     "test:unit": "vitest run --project unit",
     "test:integration": "vitest run --project integration",
@@ -123,26 +123,18 @@
     "yazl": "3.3.1"
   },
   "overrides": {
-    "@vercel/fun": {
-      "path-to-regexp": "8.4.2"
-    },
-    "@vercel/node": {
-      "path-to-regexp": "6.3.0",
-      "undici": "6.28.0"
-    },
-    "@vercel/python-analysis": {
-      "minimatch": "10.2.6"
-    },
-    "@vercel/remix-builder": {
-      "path-to-regexp": "6.3.0"
-    },
     "js-yaml": "4.3.1",
+    "minimatch@10.1.1": "10.2.6",
+    "path-to-regexp@6.1.0": "6.3.0",
+    "path-to-regexp@8.2.0": "8.4.2",
+    "path-to-regexp@8.3.0": "8.4.2",
     "sharp": "0.35.3",
     "smol-toml": "1.7.1",
     "tar": "7.5.22",
-    "vercel": {
-      "path-to-regexp": "8.4.2",
-      "undici": "6.28.0"
-    }
+    "undici@5.28.4": "6.28.0",
+    "undici@5.29.0": "6.28.0",
+    "undici@^6.23.0": "6.28.0",
+    "undici@^7.27.1": "7.29.0",
+    "uuid@^8.3.0": "11.1.1"
   }
 }

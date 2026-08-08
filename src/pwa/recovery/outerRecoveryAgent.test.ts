@@ -95,10 +95,39 @@ const verifiedWorkerIdentity = (
   identity: value,
 });
 
-const registration = (waiting: ServiceWorker | null = null) => ({
-  waiting,
-  update: vi.fn<() => Promise<unknown>>(async () => undefined),
-});
+const registration = (
+  waiting: ServiceWorker | null = null,
+  installing: ServiceWorker | null = null,
+) =>
+  Object.assign(new EventTarget(), {
+    installing,
+    waiting,
+    update: vi.fn<() => Promise<unknown>>(async () => undefined),
+  });
+
+const serviceWorker = (
+  state: ServiceWorkerState = "installing",
+): ServiceWorker => {
+  const worker = new EventTarget() as ServiceWorker;
+  Object.defineProperty(worker, "state", {
+    configurable: true,
+    value: state,
+    writable: true,
+  });
+  return worker;
+};
+
+const transitionWorker = (
+  worker: ServiceWorker,
+  state: ServiceWorkerState,
+): void => {
+  Object.defineProperty(worker, "state", {
+    configurable: true,
+    value: state,
+    writable: true,
+  });
+  worker.dispatchEvent(new Event("statechange"));
+};
 
 const serviceWorkerContainer = ({
   controller = {} as ServiceWorker,
@@ -395,6 +424,149 @@ describe("outer recovery runtime identity gate", () => {
         bound.root.querySelector("[data-pwa-update-notice]"),
       ).toHaveTextContent("保存が完了しました"),
     );
+  });
+
+  it("discovers an updatefound worker after its installed statechange", async () => {
+    const currentRegistration = registration();
+    const queryIdentity = vi
+      .fn()
+      .mockResolvedValueOnce(verifiedWorkerIdentity())
+      .mockResolvedValueOnce(verifiedWorkerIdentity("waiting"));
+    const requestBlockerSnapshots = vi.fn(async () => []);
+    const bound = dependencies({
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity,
+      requestBlockerSnapshots,
+    });
+
+    await expect(startOuterRecoveryAgent(bound)).resolves.toMatchObject({
+      status: "role-started",
+      source: "controller",
+    });
+
+    const installing = serviceWorker();
+    currentRegistration.installing = installing;
+    currentRegistration.dispatchEvent(new Event("updatefound"));
+    currentRegistration.waiting = installing;
+    transitionWorker(installing, "installed");
+
+    await vi.waitFor(() =>
+      expect(requestBlockerSnapshots).toHaveBeenCalledWith(installing, true),
+    );
+    expect(bound.root.querySelector("[data-pwa-update-notice]")).not.toBeNull();
+  });
+
+  it("discovers a worker that is already installed when updatefound fires", async () => {
+    const currentRegistration = registration();
+    const queryIdentity = vi
+      .fn()
+      .mockResolvedValueOnce(verifiedWorkerIdentity())
+      .mockResolvedValueOnce(verifiedWorkerIdentity("waiting"));
+    const requestBlockerSnapshots = vi.fn(async () => []);
+    const bound = dependencies({
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity,
+      requestBlockerSnapshots,
+    });
+    await startOuterRecoveryAgent(bound);
+
+    const installed = serviceWorker("installed");
+    currentRegistration.installing = installed;
+    currentRegistration.waiting = installed;
+    currentRegistration.dispatchEvent(new Event("updatefound"));
+
+    await vi.waitFor(() =>
+      expect(requestBlockerSnapshots).toHaveBeenCalledWith(installed, true),
+    );
+  });
+
+  it("deduplicates repeated lifecycle events for the same waiting worker", async () => {
+    const currentRegistration = registration();
+    const queryIdentity = vi
+      .fn()
+      .mockResolvedValueOnce(verifiedWorkerIdentity())
+      .mockResolvedValueOnce(verifiedWorkerIdentity("waiting"));
+    const requestBlockerSnapshots = vi.fn(async () => []);
+    const bound = dependencies({
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity,
+      requestBlockerSnapshots,
+    });
+    await startOuterRecoveryAgent(bound);
+
+    const installed = serviceWorker("installed");
+    currentRegistration.installing = installed;
+    currentRegistration.waiting = installed;
+    currentRegistration.dispatchEvent(new Event("updatefound"));
+    currentRegistration.dispatchEvent(new Event("updatefound"));
+    installed.dispatchEvent(new Event("statechange"));
+
+    await vi.waitFor(() => expect(requestBlockerSnapshots).toHaveBeenCalled());
+    expect(queryIdentity).toHaveBeenCalledTimes(2);
+    expect(requestBlockerSnapshots).toHaveBeenCalledOnce();
+  });
+
+  it("ignores stale installing workers and invalid waiting identities", async () => {
+    const currentRegistration = registration();
+    const invalidIdentity = {
+      ...verifiedWorkerIdentity("waiting"),
+      scriptUrl: "https://planner.test/unexpected-sw.js",
+    };
+    const queryIdentity = vi
+      .fn()
+      .mockResolvedValueOnce(verifiedWorkerIdentity())
+      .mockResolvedValueOnce(invalidIdentity);
+    const requestBlockerSnapshots = vi.fn(async () => []);
+    const bound = dependencies({
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity,
+      requestBlockerSnapshots,
+    });
+    await startOuterRecoveryAgent(bound);
+
+    const stale = serviceWorker();
+    currentRegistration.installing = stale;
+    currentRegistration.dispatchEvent(new Event("updatefound"));
+    const current = serviceWorker("installed");
+    currentRegistration.installing = current;
+    currentRegistration.waiting = current;
+    currentRegistration.dispatchEvent(new Event("updatefound"));
+    currentRegistration.waiting = stale;
+    transitionWorker(stale, "installed");
+    currentRegistration.waiting = current;
+    current.dispatchEvent(new Event("statechange"));
+
+    await vi.waitFor(() => expect(queryIdentity).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(requestBlockerSnapshots).not.toHaveBeenCalled();
+    expect(bound.root.querySelector("[data-pwa-update-notice]")).toBeNull();
+    expect(bound.root).not.toHaveAttribute("data-pwa-recovery");
+  });
+
+  it("keeps the current role when a discovered worker identity query fails", async () => {
+    const currentRegistration = registration();
+    const queryIdentity = vi
+      .fn()
+      .mockResolvedValueOnce(verifiedWorkerIdentity())
+      .mockRejectedValueOnce(new Error("waiting identity unavailable"));
+    const requestBlockerSnapshots = vi.fn(async () => []);
+    const bound = dependencies({
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity,
+      requestBlockerSnapshots,
+    });
+    await startOuterRecoveryAgent(bound);
+
+    const installed = serviceWorker("installed");
+    currentRegistration.installing = installed;
+    currentRegistration.waiting = installed;
+    currentRegistration.dispatchEvent(new Event("updatefound"));
+
+    await vi.waitFor(() => expect(queryIdentity).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(requestBlockerSnapshots).not.toHaveBeenCalled();
+    expect(bound.root.querySelector("[data-pwa-update-notice]")).toBeNull();
+    expect(bound.root).not.toHaveAttribute("data-pwa-recovery");
   });
 
   it("does not render a false save-complete notice when blocker aggregation fails", async () => {

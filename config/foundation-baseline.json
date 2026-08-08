@@ -18,13 +18,13 @@
     },
     "policyHashes": {
       "config/architecture-baseline.json": "b1a7b744e38a7101574877ead34601fb804c5a2bf98ef58eaf9ff68bad266dc1",
-      "config/architecture-policy.json": "138dbeb1d44f7478d16f33c0c89db04559c4b151ac4f240cf994cd643f20cd90",
+      "config/architecture-policy.json": "d7d81bf81f94a15c55742657a5013bb269712a5055cbb349942bba66379f5d10",
       "config/audit-waivers.json": "e0f936192f6ee6b7357aa2a8c3fc6e3e6e0fbcca8cbbec5cf76cb588b2034cfa",
       "config/coverage-policy.json": "a023058ef6c2ef3500fe0ed42c4099129ad4c08ca3f99878823292bfc6c3f3d6",
       "config/encoding-policy.json": "14cc71e2e1baf4571af438e0a683f1656ce8c5361bf1f03a0793746a1a034c06",
       "config/performance-budgets.json": "59945bbcac56f85dfdb8997049420a3f39d4462bc34d34b8ca75c8b7e826aff0",
       "config/test-project-membership.json": "7e1fab86c8a92d59b64ca10e8e52d76cabf9562c7cb23fac20bb45b103edf6d6",
-      "config/toolchain-versions.json": "712944d63445137613b200a5584b242c514e02945b12d79923ef957741048cf3",
+      "config/toolchain-versions.json": "505ce256877f4baa8b7784c5b5031b2114ac6f07a230b9a3fac98f325a4eff6b",
       "config/ui-scenarios.json": "2777e038d108ba09bbb9d8757654cc2ee003c60180ffa169e6f3c5fc2d877e1c"
     },
     "commandEvidenceHash": "2298696db2743f58ea5e8e59c9c445f332d0f170b14f8673790c04707faa6a93",
@@ -88,7 +88,7 @@
       "inlineJsxStyleCount": 101
     }
   },
-  "baselineEvidenceSha256": "15373feabafbeb9fc3c2b32e719c655c3d5c547a9cd17395e78fb32500ef1de2",
+  "baselineEvidenceSha256": "a5997fe5fdbb9e410aa81ec37197092fcb717957a68ba9f31f4fc63431564aeb",
   "externalBindings": {
     "providerProduction": {
       "status": "unknown",

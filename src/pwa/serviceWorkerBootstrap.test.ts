@@ -8,7 +8,7 @@ describe("prompt-close-all service worker bootstrap", () => {
     ).resolves.toEqual({ status: "unsupported" });
   });
 
-  it("registers the fixed module worker without update-cache reuse", async () => {
+  it("registers the fixed classic worker without update-cache reuse", async () => {
     const registration = {} as ServiceWorkerRegistration;
     const register = vi.fn(async () => registration);
     const container = {
@@ -20,7 +20,7 @@ describe("prompt-close-all service worker bootstrap", () => {
     ).resolves.toEqual({ status: "registered", registration });
     expect(register).toHaveBeenCalledWith("/versioned-sw.js", {
       scope: "/",
-      type: "module",
+      type: "classic",
       updateViaCache: "none",
     });
   });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import ExcelJS from "exceljs";
-import { importFromXlsx } from "./exportImport";
+import { importFromXlsx } from "../xlsx/engine/eventWorkbookEngine";
 
 const headers = [
   "ID",

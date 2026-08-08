@@ -296,11 +296,6 @@ if (errors.length > 0) {
         "Existing monolith edge retained until the Phase 6/7 facade split.",
       expiry: "2027-06-30",
     },
-    "ui-direct-xlsx-adapter": {
-      owner: "XLSX/UI",
-      reason: "Existing main-thread XLSX edge retained until the Phase 3 port.",
-      expiry: "2027-03-31",
-    },
     "ui-direct-xlsx-package": {
       owner: "XLSX/UI",
       reason: "Existing package edge retained until the Phase 3 worker port.",

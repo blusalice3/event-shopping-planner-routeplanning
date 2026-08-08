@@ -5,7 +5,7 @@ import { StrictMode, type PropsWithChildren } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   normalizePersistenceFailure,
-  useIndexedDbPersistence,
+  useIndexedDbPersistence as useIndexedDbPersistenceImplementation,
 } from "./useIndexedDbPersistence";
 import {
   getPersistenceReleaseAMetricsSnapshot,
@@ -13,8 +13,6 @@ import {
 } from "../utils/persistenceReleaseAMetrics";
 
 const dbMock = vi.hoisted(() => ({
-  adoptRecoveryCandidate: vi.fn(),
-  migrateFromLocalStorage: vi.fn(),
   loadEventLists: vi.fn(),
   loadEventMetadata: vi.fn(),
   loadExecuteModeItems: vi.fn(),
@@ -26,6 +24,11 @@ const dbMock = vi.hoisted(() => ({
   loadHallRouteSettings: vi.fn(),
   loadMapViewportSettings: vi.fn(),
   loadSyncQueue: vi.fn(),
+}));
+
+const persistenceCommandMock = vi.hoisted(() => ({
+  migrateFromLocalStorage: vi.fn(),
+  adoptRecoveryCandidate: vi.fn(),
   saveEventLists: vi.fn(),
   saveEventMetadata: vi.fn(),
   saveExecuteModeItems: vi.fn(),
@@ -36,11 +39,23 @@ const dbMock = vi.hoisted(() => ({
   saveHallDefinitions: vi.fn(),
   saveHallRouteSettings: vi.fn(),
   saveMapViewportSettings: vi.fn(),
+  restoreAppDataAtomically: vi.fn(),
 }));
 
 vi.mock("../utils/indexedDB", () => ({
   db: dbMock,
 }));
+
+type ImplementationHookParams = Parameters<
+  typeof useIndexedDbPersistenceImplementation
+>[0];
+const useIndexedDbPersistence = (
+  params: Omit<ImplementationHookParams, "persistenceCommands">,
+) =>
+  useIndexedDbPersistenceImplementation({
+    ...params,
+    persistenceCommands: persistenceCommandMock,
+  });
 
 type HookParams = Parameters<typeof useIndexedDbPersistence>[0];
 type PersistedValues = HookParams["values"];
@@ -185,10 +200,10 @@ describe("useIndexedDbPersistence", () => {
     resetPersistenceReleaseAMetrics();
 
     const missing = { status: "missing" as const, data: null };
-    dbMock.migrateFromLocalStorage.mockResolvedValue({
+    persistenceCommandMock.migrateFromLocalStorage.mockResolvedValue({
       status: "not-needed",
     });
-    dbMock.adoptRecoveryCandidate.mockResolvedValue({
+    persistenceCommandMock.adoptRecoveryCandidate.mockResolvedValue({
       status: "adopted",
     });
     dbMock.loadEventLists.mockResolvedValue(missing);
@@ -203,16 +218,19 @@ describe("useIndexedDbPersistence", () => {
     dbMock.loadMapViewportSettings.mockResolvedValue(missing);
     dbMock.loadSyncQueue.mockResolvedValue(missing);
 
-    dbMock.saveEventLists.mockResolvedValue(undefined);
-    dbMock.saveEventMetadata.mockResolvedValue(undefined);
-    dbMock.saveExecuteModeItems.mockResolvedValue(undefined);
-    dbMock.saveDayModes.mockResolvedValue(undefined);
-    dbMock.saveMapDataChanges.mockResolvedValue(undefined);
-    dbMock.saveMapRotationSettings.mockResolvedValue(undefined);
-    dbMock.saveRouteSettings.mockResolvedValue(undefined);
-    dbMock.saveHallDefinitions.mockResolvedValue(undefined);
-    dbMock.saveHallRouteSettings.mockResolvedValue(undefined);
-    dbMock.saveMapViewportSettings.mockResolvedValue(undefined);
+    persistenceCommandMock.saveEventLists.mockResolvedValue(undefined);
+    persistenceCommandMock.saveEventMetadata.mockResolvedValue(undefined);
+    persistenceCommandMock.saveExecuteModeItems.mockResolvedValue(undefined);
+    persistenceCommandMock.saveDayModes.mockResolvedValue(undefined);
+    persistenceCommandMock.saveMapDataChanges.mockResolvedValue(undefined);
+    persistenceCommandMock.saveMapRotationSettings.mockResolvedValue(undefined);
+    persistenceCommandMock.saveRouteSettings.mockResolvedValue(undefined);
+    persistenceCommandMock.saveHallDefinitions.mockResolvedValue(undefined);
+    persistenceCommandMock.saveHallRouteSettings.mockResolvedValue(undefined);
+    persistenceCommandMock.saveMapViewportSettings.mockResolvedValue(undefined);
+    persistenceCommandMock.restoreAppDataAtomically.mockResolvedValue(
+      undefined,
+    );
   });
 
   afterEach(() => {
@@ -222,7 +240,9 @@ describe("useIndexedDbPersistence", () => {
 
   it("StrictModeのeffect再実行でも初期化をsingle-flightに保つ", async () => {
     const migration = createDeferred<{ status: "not-needed" }>();
-    dbMock.migrateFromLocalStorage.mockReturnValueOnce(migration.promise);
+    persistenceCommandMock.migrateFromLocalStorage.mockReturnValueOnce(
+      migration.promise,
+    );
     const setters = createSetters();
     const wrapper = ({ children }: PropsWithChildren) => (
       <StrictMode>{children}</StrictMode>
@@ -237,12 +257,16 @@ describe("useIndexedDbPersistence", () => {
       { wrapper },
     );
 
-    expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(1);
+    expect(
+      persistenceCommandMock.migrateFromLocalStorage,
+    ).toHaveBeenCalledTimes(1);
     migration.resolve({ status: "not-needed" });
     await act(flushMicrotasks);
 
     expect(result.current.startupState.status).toBe("ready");
-    expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(1);
+    expect(
+      persistenceCommandMock.migrateFromLocalStorage,
+    ).toHaveBeenCalledTimes(1);
     expect(dbMock.loadSyncQueue).toHaveBeenCalledTimes(1);
     expect(getPersistenceReleaseAMetricsSnapshot().counters.startup.ready).toBe(
       1,
@@ -253,7 +277,7 @@ describe("useIndexedDbPersistence", () => {
   });
 
   it("IDB open blocked timeoutをdatabase分類し、recovery表示はprivacy-safeな固定文言に保つ", async () => {
-    dbMock.migrateFromLocalStorage.mockRejectedValueOnce(
+    persistenceCommandMock.migrateFromLocalStorage.mockRejectedValueOnce(
       Object.assign(new Error("秘密のdatabase path"), {
         name: "IndexedDBOpenBlocked",
       }),
@@ -303,7 +327,9 @@ describe("useIndexedDbPersistence", () => {
 
   it("初期化中にunmountした場合は後続のstate反映と自動保存を行わない", async () => {
     const migration = createDeferred<{ status: "not-needed" }>();
-    dbMock.migrateFromLocalStorage.mockReturnValueOnce(migration.promise);
+    persistenceCommandMock.migrateFromLocalStorage.mockReturnValueOnce(
+      migration.promise,
+    );
     const setters = createSetters();
     const { unmount } = renderHook(() =>
       useIndexedDbPersistence({
@@ -323,7 +349,7 @@ describe("useIndexedDbPersistence", () => {
     Object.values(setters).forEach((setter) => {
       expect(setter).not.toHaveBeenCalled();
     });
-    expect(dbMock.saveEventLists).not.toHaveBeenCalled();
+    expect(persistenceCommandMock.saveEventLists).not.toHaveBeenCalled();
   });
 
   it("keeps setters and autosave disabled until a migration recovery is retried successfully", async () => {
@@ -348,7 +374,7 @@ describe("useIndexedDbPersistence", () => {
         },
       ],
     };
-    dbMock.migrateFromLocalStorage
+    persistenceCommandMock.migrateFromLocalStorage
       .mockResolvedValueOnce({
         status: "recovery-required",
         recoveryBundle,
@@ -390,14 +416,16 @@ describe("useIndexedDbPersistence", () => {
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
     });
-    expect(dbMock.saveEventLists).not.toHaveBeenCalled();
+    expect(persistenceCommandMock.saveEventLists).not.toHaveBeenCalled();
 
     await act(async () => {
       result.current.retryInitialization();
       await flushMicrotasks();
     });
 
-    expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(2);
+    expect(
+      persistenceCommandMock.migrateFromLocalStorage,
+    ).toHaveBeenCalledTimes(2);
     expect(dbMock.loadSyncQueue).toHaveBeenCalledTimes(2);
     expect(result.current.startupState.status).toBe("ready");
     expect(result.current.isInitialized).toBe(true);
@@ -431,7 +459,7 @@ describe("useIndexedDbPersistence", () => {
       payload: [{ id: "queue-entry" }],
       rawValue: "queue-raw",
     };
-    dbMock.migrateFromLocalStorage.mockResolvedValue({
+    persistenceCommandMock.migrateFromLocalStorage.mockResolvedValue({
       status: "recovery-required",
       recoveryBundle: {
         kind: "event-shopping-planner-persistence-recovery",
@@ -495,7 +523,7 @@ describe("useIndexedDbPersistence", () => {
   });
 
   it("allows normal startup and autosave while verified legacy cleanup is deferred", async () => {
-    dbMock.migrateFromLocalStorage.mockResolvedValue({
+    persistenceCommandMock.migrateFromLocalStorage.mockResolvedValue({
       status: "cleanup-pending",
       migratedKeys: ["eventLists"],
     });
@@ -528,7 +556,7 @@ describe("useIndexedDbPersistence", () => {
       await vi.runOnlyPendingTimersAsync();
     });
 
-    expect(dbMock.saveEventMetadata).toHaveBeenCalledWith(
+    expect(persistenceCommandMock.saveEventMetadata).toHaveBeenCalledWith(
       changedValues.eventMetadata,
     );
     expect(result.current.persistenceStatus).toBe("saved");
@@ -569,7 +597,7 @@ describe("useIndexedDbPersistence", () => {
       ],
       candidates: [sameIdDifferentCandidate, candidate],
     };
-    dbMock.migrateFromLocalStorage
+    persistenceCommandMock.migrateFromLocalStorage
       .mockResolvedValueOnce({
         status: "recovery-required",
         recoveryBundle,
@@ -598,11 +626,15 @@ describe("useIndexedDbPersistence", () => {
       await result.current.adoptRecoveryCandidate(candidate);
     });
 
-    expect(dbMock.adoptRecoveryCandidate).toHaveBeenCalledWith(candidate);
-    expect(dbMock.adoptRecoveryCandidate).not.toHaveBeenCalledWith(
-      sameIdDifferentCandidate,
+    expect(persistenceCommandMock.adoptRecoveryCandidate).toHaveBeenCalledWith(
+      candidate,
     );
-    expect(dbMock.migrateFromLocalStorage).toHaveBeenCalledTimes(2);
+    expect(
+      persistenceCommandMock.adoptRecoveryCandidate,
+    ).not.toHaveBeenCalledWith(sameIdDifferentCandidate);
+    expect(
+      persistenceCommandMock.migrateFromLocalStorage,
+    ).toHaveBeenCalledTimes(2);
     expect(result.current.startupState.status).toBe("ready");
     expect(result.current.isInitialized).toBe(true);
     expect(result.current.legacyCleanupStatus).toBe("deferred");
@@ -640,12 +672,14 @@ describe("useIndexedDbPersistence", () => {
       ],
       candidates: [candidate],
     };
-    dbMock.migrateFromLocalStorage.mockResolvedValue({
+    persistenceCommandMock.migrateFromLocalStorage.mockResolvedValue({
       status: "recovery-required",
       recoveryBundle,
     });
     const adoption = createDeferred<never>();
-    dbMock.adoptRecoveryCandidate.mockReturnValueOnce(adoption.promise);
+    persistenceCommandMock.adoptRecoveryCandidate.mockReturnValueOnce(
+      adoption.promise,
+    );
     const setters = createSetters();
     const { result } = renderHook(() =>
       useIndexedDbPersistence({
@@ -660,7 +694,9 @@ describe("useIndexedDbPersistence", () => {
     act(() => {
       adoptionPromise = result.current.adoptRecoveryCandidate(candidate);
     });
-    expect(dbMock.adoptRecoveryCandidate).toHaveBeenCalledTimes(1);
+    expect(persistenceCommandMock.adoptRecoveryCandidate).toHaveBeenCalledTimes(
+      1,
+    );
     expect(result.current.isAdoptingRecoveryCandidate).toBe(true);
     expect(result.current.isUpdateBlocked()).toBe(true);
     await expect(result.current.flushPendingSave()).rejects.toThrow(
@@ -736,7 +772,7 @@ describe("useIndexedDbPersistence", () => {
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
     });
-    expect(dbMock.saveEventLists).not.toHaveBeenCalled();
+    expect(persistenceCommandMock.saveEventLists).not.toHaveBeenCalled();
     expect(consoleErrorSpy).not.toHaveBeenCalledWith(
       "Failed to save data to IndexedDB:",
       expect.anything(),
@@ -823,7 +859,7 @@ describe("useIndexedDbPersistence", () => {
     await act(async () => {
       await vi.runOnlyPendingTimersAsync();
     });
-    expect(dbMock.saveEventLists).not.toHaveBeenCalled();
+    expect(persistenceCommandMock.saveEventLists).not.toHaveBeenCalled();
   });
 
   it("複数storeのload競合候補を上書きせず1つの回復bundleへ統合する", async () => {
@@ -941,8 +977,10 @@ describe("useIndexedDbPersistence", () => {
       await vi.runOnlyPendingTimersAsync();
     });
 
-    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(1);
-    expect(dbMock.saveEventLists).toHaveBeenCalledWith(changedEventLists);
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenCalledTimes(1);
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenCalledWith(
+      changedEventLists,
+    );
     expect(result.current.persistenceStatus).toBe("saved");
     expect(result.current.failedStores).toEqual([]);
     expect(
@@ -973,14 +1011,16 @@ describe("useIndexedDbPersistence", () => {
 
     expect(result.current.persistenceStatus).toBe("unsaved");
     expect(result.current.isUpdateBlocked()).toBe(true);
-    expect(dbMock.saveEventLists).not.toHaveBeenCalled();
+    expect(persistenceCommandMock.saveEventLists).not.toHaveBeenCalled();
 
     await act(async () => {
       await result.current.flushPendingSave();
     });
 
-    expect(dbMock.saveEventLists).toHaveBeenCalledOnce();
-    expect(dbMock.saveEventLists).toHaveBeenCalledWith(changedEventLists);
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenCalledOnce();
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenCalledWith(
+      changedEventLists,
+    );
     expect(result.current.persistenceStatus).toBe("saved");
     expect(result.current.isUpdateBlocked()).toBe(false);
   });
@@ -989,7 +1029,7 @@ describe("useIndexedDbPersistence", () => {
     vi.spyOn(console, "error").mockImplementation(() => undefined);
     const setters = createSetters();
     const initialValues = createValues();
-    dbMock.saveEventLists.mockRejectedValue(
+    persistenceCommandMock.saveEventLists.mockRejectedValue(
       new Error("eventLists write failed"),
     );
     const { result, rerender } = renderHook(
@@ -1012,7 +1052,7 @@ describe("useIndexedDbPersistence", () => {
       );
     });
 
-    expect(dbMock.saveEventLists).toHaveBeenCalledOnce();
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenCalledOnce();
     expect(result.current.persistenceStatus).toBe("failed");
     expect(result.current.failedStores).toEqual(["eventLists"]);
     expect(result.current.isUpdateBlocked()).toBe(true);
@@ -1033,7 +1073,7 @@ describe("useIndexedDbPersistence", () => {
     });
     const saveError = new Error("mapData write failed");
 
-    dbMock.saveMapDataChanges
+    persistenceCommandMock.saveMapDataChanges
       .mockRejectedValueOnce(saveError)
       .mockResolvedValueOnce(undefined);
 
@@ -1061,8 +1101,8 @@ describe("useIndexedDbPersistence", () => {
       await vi.runOnlyPendingTimersAsync();
     });
 
-    expect(dbMock.saveMapDataChanges).toHaveBeenCalledTimes(1);
-    expect(dbMock.saveMapDataChanges).toHaveBeenLastCalledWith(
+    expect(persistenceCommandMock.saveMapDataChanges).toHaveBeenCalledTimes(1);
+    expect(persistenceCommandMock.saveMapDataChanges).toHaveBeenLastCalledWith(
       {},
       changedMapData,
     );
@@ -1088,7 +1128,7 @@ describe("useIndexedDbPersistence", () => {
       }),
     ]);
     const eventListSaveCountAfterFailure =
-      dbMock.saveEventLists.mock.calls.length;
+      persistenceCommandMock.saveEventLists.mock.calls.length;
 
     const latestMapData: PersistedValues["mapData"] = {
       importedEvent: {
@@ -1113,12 +1153,12 @@ describe("useIndexedDbPersistence", () => {
       await flushMicrotasks();
     });
 
-    expect(dbMock.saveMapDataChanges).toHaveBeenCalledTimes(2);
-    expect(dbMock.saveMapDataChanges).toHaveBeenLastCalledWith(
+    expect(persistenceCommandMock.saveMapDataChanges).toHaveBeenCalledTimes(2);
+    expect(persistenceCommandMock.saveMapDataChanges).toHaveBeenLastCalledWith(
       {},
       latestMapData,
     );
-    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenCalledTimes(
       eventListSaveCountAfterFailure,
     );
     expect(alertSpy).not.toHaveBeenCalled();
@@ -1135,7 +1175,7 @@ describe("useIndexedDbPersistence", () => {
       new Error("quota exceeded\r\nwhile writing map data"),
       { name: "QuotaExceededError" },
     );
-    dbMock.saveMapDataChanges.mockRejectedValue(quotaError);
+    persistenceCommandMock.saveMapDataChanges.mockRejectedValue(quotaError);
 
     const { result, rerender } = renderHook(
       ({ values }: { values: PersistedValues }) =>
@@ -1173,7 +1213,7 @@ describe("useIndexedDbPersistence", () => {
       await flushMicrotasks();
     });
 
-    expect(dbMock.saveMapDataChanges).toHaveBeenCalledTimes(2);
+    expect(persistenceCommandMock.saveMapDataChanges).toHaveBeenCalledTimes(2);
     expect(result.current.persistenceStatus).toBe("failed");
     const detailsBeforeRestore = result.current.failureDetails;
 
@@ -1202,7 +1242,7 @@ describe("useIndexedDbPersistence", () => {
     const setters = createSetters();
     const initialValues = createValues();
     const firstSave = createDeferred<void>();
-    dbMock.saveEventLists
+    persistenceCommandMock.saveEventLists
       .mockImplementationOnce(() => firstSave.promise)
       .mockResolvedValueOnce(undefined);
 
@@ -1258,7 +1298,7 @@ describe("useIndexedDbPersistence", () => {
       await flushMicrotasks();
     });
 
-    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(2);
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenCalledTimes(2);
     expect(result.current.persistenceStatus).toBe("saved");
     expect(result.current.failedStores).toEqual([]);
     expect(isBeforeUnloadPrevented()).toBe(false);
@@ -1268,7 +1308,7 @@ describe("useIndexedDbPersistence", () => {
     const setters = createSetters();
     const initialValues = createValues();
     const firstSave = createDeferred<void>();
-    dbMock.saveEventLists
+    persistenceCommandMock.saveEventLists
       .mockImplementationOnce(() => firstSave.promise)
       .mockResolvedValueOnce(undefined);
 
@@ -1320,8 +1360,10 @@ describe("useIndexedDbPersistence", () => {
       vi.advanceTimersByTime(1);
     });
     await act(flushMicrotasks);
-    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(1);
-    expect(dbMock.saveEventLists).toHaveBeenLastCalledWith(firstEventLists);
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenCalledTimes(1);
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenLastCalledWith(
+      firstEventLists,
+    );
     expect(result.current.persistenceStatus).toBe("saving");
 
     const newestEventLists: PersistedValues["eventLists"] = {
@@ -1346,7 +1388,7 @@ describe("useIndexedDbPersistence", () => {
     });
     await act(flushMicrotasks);
 
-    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(1);
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenCalledTimes(1);
 
     let flushPromise!: Promise<void>;
     act(() => {
@@ -1360,11 +1402,13 @@ describe("useIndexedDbPersistence", () => {
       await flushPromise;
     });
 
-    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(2);
-    expect(dbMock.saveEventLists).toHaveBeenLastCalledWith(newestEventLists);
-    expect(dbMock.saveEventLists.mock.calls[1][0].変更しないイベント).toEqual(
-      unchangedEvent,
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenCalledTimes(2);
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenLastCalledWith(
+      newestEventLists,
     );
+    expect(
+      persistenceCommandMock.saveEventLists.mock.calls[1][0].変更しないイベント,
+    ).toEqual(unchangedEvent);
     expect(result.current.persistenceStatus).toBe("saved");
     expect(result.current.isUpdateBlocked()).toBe(false);
   });
@@ -1373,7 +1417,9 @@ describe("useIndexedDbPersistence", () => {
     const setters = createSetters();
     const initialValues = createValues();
     const activeSave = createDeferred<void>();
-    dbMock.saveEventLists.mockImplementationOnce(() => activeSave.promise);
+    persistenceCommandMock.saveEventLists.mockImplementationOnce(
+      () => activeSave.promise,
+    );
 
     const { result, rerender } = renderHook(
       ({ values }: { values: PersistedValues }) =>
@@ -1392,7 +1438,7 @@ describe("useIndexedDbPersistence", () => {
       vi.advanceTimersByTime(1);
     });
     await act(flushMicrotasks);
-    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(1);
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenCalledTimes(1);
 
     const restoredValues: PersistedValues = {
       ...initialValues,
@@ -1424,7 +1470,7 @@ describe("useIndexedDbPersistence", () => {
       await vi.runOnlyPendingTimersAsync();
     });
 
-    expect(dbMock.saveEventLists).toHaveBeenCalledTimes(1);
+    expect(persistenceCommandMock.saveEventLists).toHaveBeenCalledTimes(1);
     expect(result.current.persistenceStatus).toBe("saved");
     expect(result.current.failedStores).toEqual([]);
   });

@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { chromium as playwrightChromium } from "playwright";
+import { ServiceWorkerActivationTracker } from "./lib/service-worker-activation-tracker.mjs";
 
 const PREVIEW_URL = process.env.ESP_PREVIEW_URL ?? "http://127.0.0.1:4173/";
 const ROLLBACK_MODE = process.env.ESP_ROLLBACK_MODE === "true";
@@ -453,9 +454,163 @@ const collectActiveServiceWorkerSourceEvidence = async (
   );
 };
 
-const ensureControlledApplication = async (client) => {
+const waitForNaturalServiceWorkerActivation = async (
+  pageClient,
+  serviceWorkerUrl,
+  requestUpdate,
+  releaseClients,
+  reopenClients,
+  timeoutMs = 20_000,
+) => {
+  const tracker = new ServiceWorkerActivationTracker(serviceWorkerUrl);
+  const waitForTrackedState = async (predicate, label, deadline) => {
+    while (Date.now() < deadline) {
+      const result = predicate();
+      if (result) return result;
+      await delay(100);
+    }
+    throw new Error(
+      `${label} was not observed. Tracker: ${JSON.stringify(tracker.describe())}`,
+    );
+  };
+
+  const unsubscribe = pageClient.on(
+    "ServiceWorker.workerVersionUpdated",
+    (event) => tracker.observe(event),
+  );
+  try {
+    await pageClient.send("ServiceWorker.enable");
+    await waitForTrackedState(
+      () => tracker.isBaselineReady(),
+      "stable Service Worker baseline",
+      Date.now() + timeoutMs,
+    );
+    const baselineVersionIds = tracker.freezeBaselineVersionIds();
+    const updateEvidence = await requestUpdate();
+    const waitingVersionId = await waitForTrackedState(
+      () => tracker.getNewInstalledVersionId(),
+      "installed waiting Service Worker",
+      Date.now() + timeoutMs,
+    );
+    tracker.markClientsReleaseStarted(waitingVersionId);
+    const releaseEvidence = await releaseClients();
+    await waitForTrackedState(
+      () => tracker.isNaturalActivationComplete(),
+      "natural Service Worker activation",
+      Date.now() + timeoutMs,
+    );
+    const reopenEvidence = await reopenClients();
+    const reopenedAt = Date.now();
+    await waitForTrackedState(
+      () =>
+        Date.now() - reopenedAt >= 300 && tracker.isNaturalActivationComplete(),
+      "stable Service Worker activation after client reopen",
+      Date.now() + timeoutMs,
+    );
+    return {
+      versionId: waitingVersionId,
+      baselineVersionIds,
+      updateEvidence,
+      reopenEvidence,
+      ...releaseEvidence,
+    };
+  } finally {
+    unsubscribe();
+    await pageClient.send("ServiceWorker.disable").catch(() => undefined);
+  }
+};
+
+const requestTargetServiceWorkerUpdate = async (client) =>
+  evaluate(
+    client,
+    `(() => (async () => {
+      const previousRegistration =
+        await navigator.serviceWorker.getRegistration();
+      if (!previousRegistration) {
+        throw new Error("Existing Service Worker registration is missing.");
+      }
+      const previousInstalling = previousRegistration.installing;
+      const previousWaiting = previousRegistration.waiting;
+      let updateFoundCount = 0;
+      const onUpdateFound = () => {
+        updateFoundCount += 1;
+      };
+      previousRegistration.addEventListener("updatefound", onUpdateFound);
+      try {
+        const registration = await navigator.serviceWorker.register("/sw.js", {
+          scope: "/",
+          type: "classic",
+          updateViaCache: "none",
+        });
+        const candidate = await new Promise((resolve, reject) => {
+          const deadline = Date.now() + 15_000;
+          const inspect = () => {
+            const installing = registration.installing;
+            const waiting = registration.waiting;
+            if (installing && installing !== previousInstalling) {
+              resolve(installing);
+              return;
+            }
+            if (waiting && waiting !== previousWaiting) {
+              resolve(waiting);
+              return;
+            }
+            if (Date.now() >= deadline) {
+              reject(
+                new Error("New target Service Worker candidate was not observed."),
+              );
+              return;
+            }
+            setTimeout(inspect, 50);
+          };
+          inspect();
+        });
+        await new Promise((resolve, reject) => {
+          let timeout;
+          const finish = (error) => {
+            clearTimeout(timeout);
+            candidate.removeEventListener("statechange", inspect);
+            if (error) reject(error);
+            else resolve();
+          };
+          const inspect = () => {
+            if (candidate.state === "installed") {
+              finish();
+            } else if (
+              candidate.state === "activating" ||
+              candidate.state === "activated" ||
+              candidate.state === "redundant"
+            ) {
+              finish(
+                new Error(
+                  "Target Service Worker reached " +
+                    candidate.state +
+                    " before client release.",
+                ),
+              );
+            }
+          };
+          candidate.addEventListener("statechange", inspect);
+          timeout = setTimeout(
+            () => finish(new Error("Target Service Worker install timed out.")),
+            15_000,
+          );
+          inspect();
+        });
+        return {
+          candidateState: candidate.state,
+          candidateScriptUrl: candidate.scriptURL,
+          hadPreviousWaiting: previousWaiting !== null,
+          updateFoundCount,
+        };
+      } finally {
+        previousRegistration.removeEventListener("updatefound", onUpdateFound);
+      }
+    })())`,
+  );
+
+const waitForControlledApplication = async (client) => {
   await evaluate(client, "navigator.serviceWorker.ready.then(() => true)");
-  await reload(client);
   await waitForExpression(
     client,
     "Boolean(navigator.serviceWorker.controller)",
@@ -466,6 +621,12 @@ const ensureControlledApplication = async (client) => {
     "Boolean(document.querySelector('#root')?.childElementCount)",
     "rendered application root",
   );
+};
+
+const ensureControlledApplication = async (client) => {
+  await evaluate(client, "navigator.serviceWorker.ready.then(() => true)");
+  await reload(client);
+  await waitForControlledApplication(client);
 };
 
 const waitForReleaseAStartupMetric = async (client) => {
@@ -1301,13 +1462,82 @@ try {
       (await readArtifactMarker()) === EXPECTED_FROM_ARTIFACT_ID,
       "Forward profile does not contain the expected rollback artifact marker.",
     );
-    await evaluate(
+    const previewOrigin = new URL(PREVIEW_URL).origin;
+    const hasPreviewOrigin = (page) => {
+      try {
+        return new URL(page.url()).origin === previewOrigin;
+      } catch {
+        return false;
+      }
+    };
+    const naturalActivation = await waitForNaturalServiceWorkerActivation(
       primary.client,
-      "navigator.serviceWorker.getRegistration().then((registration) => registration.update()).then(() => true)",
+      new URL("/sw.js", PREVIEW_URL).href,
+      () => requestTargetServiceWorkerUpdate(primary.client),
+      async () => {
+        const originPages = browserContext.pages().filter(hasPreviewOrigin);
+        assert(
+          originPages.length > 0,
+          "Forward transition has no controlled origin client to release.",
+        );
+        const releasePages = new Set([
+          primary.page,
+          standaloneTarget.page,
+          ...originPages,
+        ]);
+        await Promise.all(
+          [...releasePages].map((page) =>
+            page.goto("about:blank", { waitUntil: "load" }),
+          ),
+        );
+        assert(
+          browserContext.pages().filter(hasPreviewOrigin).length === 0,
+          "Forward transition did not release every controlled origin client.",
+        );
+        return {
+          releasedClientCount: originPages.length,
+          releasedTargetCount: releasePages.size,
+        };
+      },
+      async () => {
+        const collectRegistrationState = (client) =>
+          evaluate(
+            client,
+            `navigator.serviceWorker.getRegistration().then((registration) => ({
+              activeScriptUrl: registration?.active?.scriptURL ?? null,
+              activeState: registration?.active?.state ?? null,
+              installing: Boolean(registration?.installing),
+              waiting: Boolean(registration?.waiting),
+            }))`,
+          );
+        const assertStableRegistration = (state, label) => {
+          assert(
+            state.activeScriptUrl === new URL("/sw.js", PREVIEW_URL).href &&
+              state.activeState === "activated" &&
+              !state.installing &&
+              !state.waiting,
+            `${label} observed an unstable Service Worker registration.`,
+          );
+        };
+
+        await navigate(primary.client, PREVIEW_URL);
+        await waitForControlledApplication(primary.client);
+        await waitForReleaseAStartupMetric(primary.client);
+        const primaryRegistration = await collectRegistrationState(
+          primary.client,
+        );
+        assertStableRegistration(primaryRegistration, "Primary reopen");
+
+        await navigate(standaloneTarget.client, PREVIEW_URL);
+        await waitForControlledApplication(standaloneTarget.client);
+        await waitForReleaseAStartupMetric(standaloneTarget.client);
+        const standaloneRegistration = await collectRegistrationState(
+          standaloneTarget.client,
+        );
+        assertStableRegistration(standaloneRegistration, "Standalone reopen");
+        return { primaryRegistration, standaloneRegistration };
+      },
     );
-    await delay(1_500);
-    await reload(primary.client);
-    await ensureControlledApplication(primary.client);
     await waitForExpression(
       primary.client,
       `document.querySelector(
@@ -1324,16 +1554,6 @@ try {
             ${JSON.stringify(EXPECTED_MAIN_ASSET)},
       )`,
       "forward Release A main asset",
-    );
-    await waitForExpression(
-      primary.client,
-      `Number.parseInt(
-        sessionStorage.getItem(${JSON.stringify(
-          CONTROLLER_CHANGE_COUNT_KEY,
-        )}) ?? "0",
-        10,
-      ) >= 1`,
-      "forward Service Worker controller change",
     );
     await waitForReleaseAStartupMetric(primary.client);
     const forwardProbe = await collectOnlineProbe(primary.client);
@@ -1377,8 +1597,6 @@ try {
         forwardDatabase.rollbackSavedEvent.itemCount >= 1,
       "Rollback-saved event was not retained after the forward update.",
     );
-    await navigate(standaloneTarget.client, PREVIEW_URL);
-    await ensureControlledApplication(standaloneTarget.client);
     await waitForExpression(
       standaloneTarget.client,
       `document.body.textContent?.includes(${JSON.stringify(
@@ -1415,10 +1633,6 @@ try {
       "Forward update attempted to delete a protected legacy source.",
     );
     assert(
-      forwardInstrumentation.controllerChangeCount >= 1,
-      "Forward update did not observe a Service Worker controller change.",
-    );
-    assert(
       await writeArtifactMarker(TARGET_ARTIFACT_ID),
       "Forward artifact marker could not be persisted.",
     );
@@ -1434,6 +1648,7 @@ try {
           targetArtifactId: TARGET_ARTIFACT_ID,
           indexSha256: previewIndexSha256,
           activeServiceWorker: activeForwardWorker,
+          naturalActivation,
           offlineControllerIdentity,
           controllerChangeCount: forwardInstrumentation.controllerChangeCount,
           legacySources: {

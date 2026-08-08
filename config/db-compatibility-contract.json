@@ -83,7 +83,10 @@
       "operatorBoundedFunctionOnly": true,
       "cspApplicationCredentialDormantUntilPhase2B": true
     },
-    "migrationSha256": "04a28f077af00d724dcd521c1d94fc85ae777f077cfc639adf1be200d213683b"
+    "migrationChecksums": {
+      "20260805000000_persistence_release_a_hardening.sql": "04a28f077af00d724dcd521c1d94fc85ae777f077cfc639adf1be200d213683b",
+      "20260808000000_csp_report_contract.sql": "7d0c2c053aaf6f7e75eea5297bb0a2b0759683e0b9065873408a0114dad82e03"
+    }
   },
   "releaseA": {
     "releaseChannel": "release-a",

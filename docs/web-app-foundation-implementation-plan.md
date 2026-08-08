@@ -1241,8 +1241,8 @@ Phase 3 の移行対象には少なくとも次を含む。
 - `src/App.tsx`
 - `src/features/events/exportFlow.ts`
 - `src/features/events/fileImport.ts`
-- `src/utils/exportImport.ts`
-- `src/utils/xlsxMapParser.ts`
+- `src/xlsx/engine/eventWorkbookEngine.ts`
+- `src/xlsx/engine/mapWorkbookEngine.ts`
 - `src/utils/persistenceRecoveryExport.ts`のdownload side effectだけ
 - `src/components/map/MapImportDialog.tsx`
 - `src/components/FocusMode.tsx`
@@ -2070,33 +2070,33 @@ package redeploy:
 
 ### 11.1 Existing source
 
-| path                                                                             | owner / phase                                           |
-| -------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| `package.json`, `package-lock.json`                                              | Build / 0B〜8                                           |
-| `vite.config.ts`, `vercel.json`, `index.html`, `src/index.tsx`                   | Build/PWA/Release / 0〜4                                |
-| `src/App.tsx`, `src/components/ShoppingList.tsx`                                 | App/List / 1、3、5、6                                   |
-| `src/features/app-shell/**`, `src/features/map/domain/mapImportFlow.ts`          | App/Map / 5、6                                          |
-| `src/utils/exportImport.ts`, `src/utils/xlsxMapParser.ts`, `src/types/export.ts` | XLSX / 3                                                |
-| §6.8 に列挙した consumer                                                         | XLSX/UI / 3                                             |
-| `src/utils/indexedDB.ts`, `src/hooks/useIndexedDbPersistence.ts`                 | Persistence / 6、7                                      |
-| `src/utils/persistenceResilience.ts`                                             | persistence compatibility / 7                           |
-| `src/utils/mapDataPersistence.ts`                                                | strict map validation / 7                               |
-| `src/utils/persistenceRecoveryExport.ts`                                         | recovery JSON evidence / 6、7（3はdownload helperだけ） |
-| `src/utils/persistenceReleaseAMetrics.ts`                                        | Release A metrics / 0D、7                               |
-| `src/utils/persistenceReleaseAMetricsBackend.ts`                                 | Release A client transport / 0D、1、7                   |
-| `src/utils/persistenceReleaseAMetrics*.test.ts`                                  | Release A client contract gate / 0D、1、7               |
-| `src/utils/persistenceCleanupCoordinator.ts`                                     | dormant cleanup safety / 1、7                           |
-| `src/test/fixtures/*.json`, `src/utils/indexedDB.*.integration.test.*`           | compatibility gate / 7                                  |
-| `api/persistence-release-a-metrics.mjs`                                          | API/Data Safety / 0D                                    |
-| `supabase/migrations/20260803000000_persistence_release_a_metrics.sql`           | immutable DB baseline / 0D                              |
-| `scripts/verify-release-a-build.mjs`                                             | Release A hard-off / 0〜1                               |
-| `scripts/verify-release-a-browser.mjs`                                           | browser compatibility / 0C                              |
-| `scripts/rehearse-release-a-rollback.ps1`                                        | same-profile rollback contract / 0C〜8                  |
-| `scripts/verify-release-a-evidence.mjs`                                          | frozen v1 verifier / 0D〜8                              |
-| `docs/release-a-evidence.template.json`                                          | frozen v1 template / 0D〜8                              |
-| `README.md`                                                                      | developer/product contract / 0〜8                       |
-| `docs/persistence-recovery-runbook.md`                                           | Release A/cleanup operation / 1、7                      |
-| `docs/Resilient Persistence & Safe Migration Plan.md`                            | persistence contract / 1、7                             |
+| path                                                                    | owner / phase                                           |
+| ----------------------------------------------------------------------- | ------------------------------------------------------- |
+| `package.json`, `package-lock.json`                                     | Build / 0B〜8                                           |
+| `vite.config.ts`, `vercel.json`, `index.html`, `src/index.tsx`          | Build/PWA/Release / 0〜4                                |
+| `src/App.tsx`, `src/components/ShoppingList.tsx`                        | App/List / 1、3、5、6                                   |
+| `src/features/app-shell/**`, `src/features/map/domain/mapImportFlow.ts` | App/Map / 5、6                                          |
+| `src/xlsx/engine/**`, `src/xlsx/domain/**`, `src/types/export.ts`       | XLSX / 3                                                |
+| §6.8 に列挙した consumer                                                | XLSX/UI / 3                                             |
+| `src/utils/indexedDB.ts`, `src/hooks/useIndexedDbPersistence.ts`        | Persistence / 6、7                                      |
+| `src/utils/persistenceResilience.ts`                                    | persistence compatibility / 7                           |
+| `src/utils/mapDataPersistence.ts`                                       | strict map validation / 7                               |
+| `src/utils/persistenceRecoveryExport.ts`                                | recovery JSON evidence / 6、7（3はdownload helperだけ） |
+| `src/utils/persistenceReleaseAMetrics.ts`                               | Release A metrics / 0D、7                               |
+| `src/utils/persistenceReleaseAMetricsBackend.ts`                        | Release A client transport / 0D、1、7                   |
+| `src/utils/persistenceReleaseAMetrics*.test.ts`                         | Release A client contract gate / 0D、1、7               |
+| `src/utils/persistenceCleanupCoordinator.ts`                            | dormant cleanup safety / 1、7                           |
+| `src/test/fixtures/*.json`, `src/utils/indexedDB.*.integration.test.*`  | compatibility gate / 7                                  |
+| `api/persistence-release-a-metrics.mjs`                                 | API/Data Safety / 0D                                    |
+| `supabase/migrations/20260803000000_persistence_release_a_metrics.sql`  | immutable DB baseline / 0D                              |
+| `scripts/verify-release-a-build.mjs`                                    | Release A hard-off / 0〜1                               |
+| `scripts/verify-release-a-browser.mjs`                                  | browser compatibility / 0C                              |
+| `scripts/rehearse-release-a-rollback.ps1`                               | same-profile rollback contract / 0C〜8                  |
+| `scripts/verify-release-a-evidence.mjs`                                 | frozen v1 verifier / 0D〜8                              |
+| `docs/release-a-evidence.template.json`                                 | frozen v1 template / 0D〜8                              |
+| `README.md`                                                             | developer/product contract / 0〜8                       |
+| `docs/persistence-recovery-runbook.md`                                  | Release A/cleanup operation / 1、7                      |
+| `docs/Resilient Persistence & Safe Migration Plan.md`                   | persistence contract / 1、7                             |
 
 ### 11.2 Planned policy、schema、release tool
 

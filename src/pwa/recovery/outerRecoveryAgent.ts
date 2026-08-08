@@ -29,8 +29,13 @@ export type OuterRecoveryAgentResult =
   | { status: "unsupported"; reasonCode: string };
 
 type RegistrationLike = {
+  installing: ServiceWorker | null;
   waiting: ServiceWorker | null;
   update(): Promise<unknown>;
+  addEventListener(
+    type: "updatefound",
+    listener: EventListenerOrEventListenerObject,
+  ): void;
 };
 
 type ServiceWorkerContainerLike = {
@@ -305,25 +310,75 @@ export const startOuterRecoveryAgent = async (
     return { status: "recovery", reasonCode: "role-entry-load-failed" };
   }
 
-  if (registration?.waiting) {
-    void dependencies
-      .queryIdentity(registration.waiting, "waiting")
-      .then(async (waitingIdentity) => {
+  if (registration) {
+    const attemptedWaitingWorkers = new WeakSet<ServiceWorker>();
+    const observedInstallingWorkers = new WeakSet<ServiceWorker>();
+    let latestInstallingWorker: ServiceWorker | null = null;
+
+    const discoverWaitingWorker = (worker: ServiceWorker | null): void => {
+      if (
+        !worker ||
+        registration.waiting !== worker ||
+        attemptedWaitingWorkers.has(worker)
+      ) {
+        return;
+      }
+      attemptedWaitingWorkers.add(worker);
+
+      void (async () => {
+        try {
+          const waitingIdentity = await dependencies.queryIdentity(
+            worker,
+            "waiting",
+          );
+          if (
+            registration.waiting !== worker ||
+            waitingIdentity.workerState !== "waiting" ||
+            waitingIdentity.identity.pwaLifecycle !== "prompt-close-all-v1" ||
+            !verifyWorkerEnvelope(waitingIdentity, origin)
+          ) {
+            return;
+          }
+          const snapshots = await dependencies.requestBlockerSnapshots(
+            worker,
+            true,
+          );
+          if (registration.waiting !== worker) return;
+          renderWaitingUpdateNotice(root, waitingIdentity.identity, snapshots);
+        } catch {
+          // Current verified role remains usable. Update discovery fails closed.
+        }
+      })();
+    };
+
+    const observeInstallingWorker = (worker: ServiceWorker | null): void => {
+      if (!worker || observedInstallingWorkers.has(worker)) return;
+      observedInstallingWorkers.add(worker);
+
+      const onStateChange = (): void => {
         if (
-          waitingIdentity.identity.pwaLifecycle !== "prompt-close-all-v1" ||
-          !verifyWorkerEnvelope(waitingIdentity, origin)
+          worker.state !== "installed" ||
+          latestInstallingWorker !== worker ||
+          registration.waiting !== worker
         ) {
           return;
         }
-        const snapshots = await dependencies.requestBlockerSnapshots(
-          registration!.waiting!,
-          true,
-        );
-        renderWaitingUpdateNotice(root, waitingIdentity.identity, snapshots);
-      })
-      .catch(() => {
-        // Current verified role remains usable. Update discovery fails closed.
-      });
+        discoverWaitingWorker(worker);
+      };
+
+      worker.addEventListener("statechange", onStateChange);
+      onStateChange();
+    };
+
+    const onUpdateFound = (): void => {
+      latestInstallingWorker = registration.installing;
+      observeInstallingWorker(latestInstallingWorker);
+    };
+
+    registration.addEventListener("updatefound", onUpdateFound);
+    latestInstallingWorker = registration.installing;
+    observeInstallingWorker(latestInstallingWorker);
+    discoverWaitingWorker(registration.waiting);
   }
 
   return { status: "role-started", identity: currentIdentity, source };

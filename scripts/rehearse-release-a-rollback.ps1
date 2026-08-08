@@ -13,7 +13,33 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
-$NodeExecutable = (Get-Command node).Source
+$nodeCommand = Get-Command `
+  node `
+  -CommandType Application `
+  -ErrorAction Stop | Select-Object -First 1
+$nodeExecutableOutput = @(
+  & $nodeCommand.Source -p "process.execPath"
+)
+if (
+  $LASTEXITCODE -ne 0 -or
+  $nodeExecutableOutput.Count -ne 1 -or
+  -not $nodeExecutableOutput[0]
+) {
+  throw "Could not resolve the active Node executable."
+}
+$NodeExecutable = [IO.Path]::GetFullPath(
+  ([string]$nodeExecutableOutput[0]).Trim()
+)
+if (
+  -not [string]::Equals(
+    [IO.Path]::GetExtension($NodeExecutable),
+    ".exe",
+    [StringComparison]::OrdinalIgnoreCase
+  ) -or
+  -not (Test-Path -LiteralPath $NodeExecutable -PathType Leaf)
+) {
+  throw "The active Node runtime did not resolve to a Windows executable."
+}
 $ViteCli = Join-Path $ProjectRoot "node_modules\vite\bin\vite.js"
 if ($Port -eq 0) {
   $portReservation = [Net.Sockets.TcpListener]::new(
@@ -35,7 +61,6 @@ $TempRoot = Join-Path $TempBase (
 $BaselineArchive = Join-Path $TempRoot "baseline.zip"
 $BaselineRoot = Join-Path $TempRoot "baseline"
 $ProfileDirectory = Join-Path $TempRoot "browser-profile"
-$BaselineNodeModules = Join-Path $BaselineRoot "node_modules"
 $PreviewProcess = $null
 
 function Invoke-CheckedCommand {
@@ -52,26 +77,78 @@ function Invoke-CheckedCommand {
   }
 }
 
+function Get-PreviewDiagnostics {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$Paths
+  )
+
+  $parts = @(
+    foreach ($path in $Paths) {
+      if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        continue
+      }
+      try {
+        $content = [string](
+          Get-Content -LiteralPath $path -Raw -Encoding utf8
+        )
+        $content = $content.Trim()
+        if ($content.Length -gt 2000) {
+          $content = $content.Substring($content.Length - 2000)
+        }
+        if ($content) {
+          "$(Split-Path $path -Leaf): $content"
+        }
+      } catch {
+        "$(Split-Path $path -Leaf): <unavailable>"
+      }
+    }
+  )
+  if ($parts.Count -eq 0) {
+    return "preview emitted no diagnostics"
+  }
+  return $parts -join [Environment]::NewLine
+}
+
 function Wait-PreviewReady {
   param(
     [Parameter(Mandatory = $true)]
-    [Diagnostics.Process]$Process
+    [Diagnostics.Process]$Process,
+    [Parameter(Mandatory = $true)]
+    [string[]]$DiagnosticPaths
   )
 
-  for ($attempt = 0; $attempt -lt 100; $attempt += 1) {
+  $deadline = [DateTime]::UtcNow.AddSeconds(60)
+  while ([DateTime]::UtcNow -lt $deadline) {
     if ($Process.HasExited) {
-      throw "Preview process exited before becoming ready."
+      $diagnostics = Get-PreviewDiagnostics -Paths $DiagnosticPaths
+      throw (
+        "Preview process exited with code {0} before becoming ready.{1}{2}" -f `
+          $Process.ExitCode,
+          [Environment]::NewLine,
+          $diagnostics
+      )
     }
     try {
-      $response = Invoke-WebRequest -Uri $PreviewUrl -UseBasicParsing
+      $response = Invoke-WebRequest `
+        -Uri $PreviewUrl `
+        -UseBasicParsing `
+        -TimeoutSec 2
       if ($response.StatusCode -eq 200) {
         return
       }
     } catch {
-      Start-Sleep -Milliseconds 100
+      # The process can be healthy while the listener is still starting.
     }
+    Start-Sleep -Milliseconds 100
   }
-  throw "Preview did not become ready at $PreviewUrl."
+  $diagnostics = Get-PreviewDiagnostics -Paths $DiagnosticPaths
+  throw (
+    "Preview did not become ready at {0} within 60 seconds.{1}{2}" -f `
+      $PreviewUrl,
+      [Environment]::NewLine,
+      $diagnostics
+  )
 }
 
 function Start-ArtifactPreview {
@@ -80,6 +157,9 @@ function Start-ArtifactPreview {
     [string]$WorkingDirectory
   )
 
+  $logId = [Guid]::NewGuid().ToString("N")
+  $standardOutputPath = Join-Path $TempRoot "preview-$logId.stdout.log"
+  $standardErrorPath = Join-Path $TempRoot "preview-$logId.stderr.log"
   $process = Start-Process `
     -FilePath $NodeExecutable `
     -ArgumentList @(
@@ -93,8 +173,17 @@ function Start-ArtifactPreview {
     ) `
     -WorkingDirectory $WorkingDirectory `
     -WindowStyle Hidden `
+    -RedirectStandardOutput $standardOutputPath `
+    -RedirectStandardError $standardErrorPath `
     -PassThru
-  Wait-PreviewReady -Process $process
+  try {
+    Wait-PreviewReady `
+      -Process $process `
+      -DiagnosticPaths @($standardOutputPath, $standardErrorPath)
+  } catch {
+    Stop-ArtifactPreview -Process $process
+    throw
+  }
   return $process
 }
 
@@ -138,17 +227,50 @@ function Get-ArtifactEvidence {
   $indexPath = Join-Path $DistDirectory "index.html"
   $serviceWorkerPath = Join-Path $DistDirectory "sw.js"
   $indexSource = Get-Content -LiteralPath $indexPath -Raw -Encoding utf8
-  $assetMatch = [regex]::Match(
-    $indexSource,
-    'src="(?<asset>/assets/index-[^"]+\.js)"'
+  $moduleAssets = @(
+    foreach ($scriptMatch in [regex]::Matches(
+      $indexSource,
+      '<script\b[^>]*>',
+      [Text.RegularExpressions.RegexOptions]::IgnoreCase
+    )) {
+      if (-not [regex]::IsMatch(
+        $scriptMatch.Value,
+        '\btype\s*=\s*["'']module["'']',
+        [Text.RegularExpressions.RegexOptions]::IgnoreCase
+      )) {
+        continue
+      }
+      $sourceMatch = [regex]::Match(
+        $scriptMatch.Value,
+        '\bsrc\s*=\s*["''](?<asset>/assets/[A-Za-z0-9._-]+\.js)["'']',
+        [Text.RegularExpressions.RegexOptions]::IgnoreCase
+      )
+      if ($sourceMatch.Success) {
+        $sourceMatch.Groups["asset"].Value
+      }
+    }
   )
-  if (-not $assetMatch.Success) {
-    throw "Main application asset was not found in $indexPath."
+  if ($moduleAssets.Count -ne 1) {
+    throw (
+      "Expected exactly one module application asset in {0}; found {1}." -f `
+        $indexPath,
+        $moduleAssets.Count
+    )
+  }
+  $mainAsset = $moduleAssets[0]
+  $assetPath = Join-Path `
+    $DistDirectory `
+    $mainAsset.Substring(1).Replace(
+      "/",
+      [IO.Path]::DirectorySeparatorChar
+    )
+  if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
+    throw "Module application asset is missing: $mainAsset."
   }
   return @{
     IndexSha256 = Get-Sha256File -Path $indexPath
     ServiceWorkerSha256 = Get-Sha256File -Path $serviceWorkerPath
-    MainAsset = $assetMatch.Groups["asset"].Value
+    MainAsset = $mainAsset
   }
 }
 
@@ -215,10 +337,10 @@ if (-not (Test-Path -LiteralPath $ViteCli -PathType Leaf)) {
   throw "Vite CLI is missing. Run npm install before the rehearsal."
 }
 
-New-Item -ItemType Directory -Path $TempRoot | Out-Null
-New-Item -ItemType Directory -Path $ProfileDirectory | Out-Null
-
 try {
+  New-Item -ItemType Directory -Path $TempRoot | Out-Null
+  New-Item -ItemType Directory -Path $ProfileDirectory | Out-Null
+
   Push-Location $ProjectRoot
   try {
     Invoke-CheckedCommand `
@@ -253,13 +375,12 @@ try {
   Expand-Archive `
     -LiteralPath $BaselineArchive `
     -DestinationPath $BaselineRoot
-  New-Item `
-    -ItemType Junction `
-    -Path $BaselineNodeModules `
-    -Target (Join-Path $ProjectRoot "node_modules") | Out-Null
 
   Push-Location $BaselineRoot
   try {
+    Invoke-CheckedCommand `
+      -Command { npm ci } `
+      -FailureMessage "Rollback baseline dependency installation failed"
     $env:VITE_PERSISTENCE_LEGACY_CLEANUP = "false"
     Invoke-CheckedCommand `
       -Command { npm run build } `
@@ -304,31 +425,21 @@ try {
   Clear-TransitionEnvironment
   Remove-Item Env:ESP_PREVIEW_URL -ErrorAction SilentlyContinue
   Remove-Item Env:ESP_BROWSER_PROFILE_DIR -ErrorAction SilentlyContinue
-  if (Test-Path -LiteralPath $BaselineNodeModules) {
-    $nodeModulesJunction = Get-Item -LiteralPath $BaselineNodeModules -Force
+  if (Test-Path -LiteralPath $TempRoot) {
+    $resolvedTempRoot = [IO.Path]::GetFullPath($TempRoot)
     if (
-      (
-        $nodeModulesJunction.Attributes -band
-        [IO.FileAttributes]::ReparsePoint
-      ) -eq 0
+      $resolvedTempRoot.StartsWith(
+        $TempBase,
+        [StringComparison]::OrdinalIgnoreCase
+      ) -and
+      (Split-Path $resolvedTempRoot -Leaf).StartsWith(
+        "esp-release-a-rollback-",
+        [StringComparison]::Ordinal
+      )
     ) {
-      throw "Refusing to remove a non-junction node_modules path."
+      Remove-Item -LiteralPath $resolvedTempRoot -Recurse -Force
+    } else {
+      throw "Refusing to remove an unexpected rehearsal path: $resolvedTempRoot"
     }
-    [IO.Directory]::Delete($BaselineNodeModules)
-  }
-  $resolvedTempRoot = [IO.Path]::GetFullPath($TempRoot)
-  if (
-    $resolvedTempRoot.StartsWith(
-      $TempBase,
-      [StringComparison]::OrdinalIgnoreCase
-    ) -and
-    (Split-Path $resolvedTempRoot -Leaf).StartsWith(
-      "esp-release-a-rollback-",
-      [StringComparison]::Ordinal
-    )
-  ) {
-    Remove-Item -LiteralPath $resolvedTempRoot -Recurse -Force
-  } else {
-    throw "Refusing to remove an unexpected rehearsal path: $resolvedTempRoot"
   }
 }

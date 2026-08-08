@@ -3,7 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ShoppingItem } from "../types/item";
 import type { CellBorders, DayMapData, MapDataStore } from "../types/map";
 import { toImportedEventData } from "../features/events/fileImport";
-import { exportToXlsx, importFromXlsx } from "./exportImport";
+import {
+  exportToXlsx,
+  importFromXlsx,
+} from "../xlsx/engine/eventWorkbookEngine";
 import { db } from "./indexedDB";
 
 const emptyBorders: CellBorders = {

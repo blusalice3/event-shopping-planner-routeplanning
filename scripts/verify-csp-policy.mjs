@@ -1,15 +1,32 @@
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  CSP_BLOCKED_TARGET_VALUES,
+  CSP_EFFECTIVE_DIRECTIVE_VALUES,
+  CSP_REPORT_BLOCKED_TARGET_COLUMN,
+  normalizeEffectiveDirective,
+} from "../api/csp-report.mjs";
 import { readJsonStrict } from "./lib/canonical-json.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
-const [policy, vercelConfig, indexHtml] = await Promise.all([
-  readJsonStrict(path.join(root, "config", "csp-policy.json")),
-  readJsonStrict(path.join(root, "vercel.json")),
-  readFile(path.join(root, "index.html"), "utf8"),
-]);
+const [policy, vercelConfig, indexHtml, cspReportApi, cspContractMigration] =
+  await Promise.all([
+    readJsonStrict(path.join(root, "config", "csp-policy.json")),
+    readJsonStrict(path.join(root, "vercel.json")),
+    readFile(path.join(root, "index.html"), "utf8"),
+    readFile(path.join(root, "api", "csp-report.mjs"), "utf8"),
+    readFile(
+      path.join(
+        root,
+        "supabase",
+        "migrations",
+        "20260808000000_csp_report_contract.sql",
+      ),
+      "utf8",
+    ),
+  ]);
 
 const productionSources = [];
 
@@ -45,6 +62,114 @@ if (
   Array.isArray(policy.directives)
 ) {
   fail("config/csp-policy.json has an invalid contract");
+}
+
+const expectedEffectiveDirectiveValues = [
+  "base-uri",
+  "child-src",
+  "connect-src",
+  "default-src",
+  "font-src",
+  "form-action",
+  "frame-ancestors",
+  "frame-src",
+  "img-src",
+  "manifest-src",
+  "media-src",
+  "object-src",
+  "script-src",
+  "script-src-attr",
+  "script-src-elem",
+  "style-src",
+  "style-src-attr",
+  "style-src-elem",
+  "worker-src",
+  "unknown",
+];
+const expectedBlockedTargetValues = [
+  "self",
+  "scheme",
+  "same-site",
+  "cross-site",
+  "unknown",
+];
+const readNamedCheckValues = (constraintName, columnName) => {
+  const escapedConstraintName = constraintName.replaceAll("_", "\\_");
+  const escapedColumnName = columnName.replaceAll("_", "\\_");
+  const constraint = cspContractMigration.match(
+    new RegExp(
+      `\\badd\\s+constraint\\s+${escapedConstraintName}\\s+check\\s*\\(\\s*${escapedColumnName}\\s+in\\s*\\(([\\s\\S]*?)\\)\\s*\\)`,
+      "i",
+    ),
+  );
+  return constraint
+    ? [...constraint[1].matchAll(/'([^']+)'/g)].map((match) => match[1])
+    : [];
+};
+const sqlEffectiveDirectiveValues = readNamedCheckValues(
+  "csp_violation_reports_effective_directive_check",
+  "effective_directive",
+);
+const sqlBlockedTargetValues = readNamedCheckValues(
+  "csp_violation_reports_blocked_target_check",
+  "blocked_target",
+);
+const sameOrderedValues = (actual, expected) =>
+  actual.length === expected.length &&
+  actual.every((value, index) => value === expected[index]);
+if (
+  !sameOrderedValues(
+    CSP_EFFECTIVE_DIRECTIVE_VALUES,
+    expectedEffectiveDirectiveValues,
+  ) ||
+  !sameOrderedValues(
+    sqlEffectiveDirectiveValues,
+    expectedEffectiveDirectiveValues,
+  ) ||
+  normalizeEffectiveDirective("script-src-elem") !== "script-src-elem" ||
+  normalizeEffectiveDirective("trusted-types") !== "unknown" ||
+  normalizeEffectiveDirective("script_src") !== null ||
+  CSP_REPORT_BLOCKED_TARGET_COLUMN !== "blocked_target" ||
+  !sameOrderedValues(CSP_BLOCKED_TARGET_VALUES, expectedBlockedTargetValues) ||
+  !sameOrderedValues(sqlBlockedTargetValues, expectedBlockedTargetValues) ||
+  !cspReportApi.includes(
+    "[CSP_REPORT_BLOCKED_TARGET_COLUMN]: classifyBlockedTarget(",
+  ) ||
+  !cspReportApi.includes(
+    "const effectiveDirective = normalizeEffectiveDirective(",
+  ) ||
+  !cspReportApi.includes("effective_directive: effectiveDirective,") ||
+  /\bblocked_target_classification\s*:/.test(cspReportApi)
+) {
+  fail("the CSP API and DB closed report contract differ");
+}
+
+const requiredMigrationFragments = [
+  "-- CSP_REPORT_CONTRACT_UPGRADE_BEGIN",
+  "drop constraint if exists csp_violation_reports_effective_directive_check",
+  "drop constraint if exists csp_violation_reports_blocked_target_check",
+  "set effective_directive = 'unknown'",
+  "when blocked_target in (",
+  "then 'scheme'",
+  "add constraint csp_violation_reports_effective_directive_check",
+  ") not valid;",
+  "validate constraint csp_violation_reports_effective_directive_check",
+  "add constraint csp_violation_reports_blocked_target_check",
+  ") not valid;",
+  "validate constraint csp_violation_reports_blocked_target_check",
+  "-- CSP_REPORT_CONTRACT_UPGRADE_END",
+];
+const normalizedCspContractMigration = cspContractMigration.toLowerCase();
+let previousMigrationFragmentIndex = -1;
+for (const requiredMigrationFragment of requiredMigrationFragments) {
+  const fragmentIndex = normalizedCspContractMigration.indexOf(
+    requiredMigrationFragment.toLowerCase(),
+    previousMigrationFragmentIndex + 1,
+  );
+  if (fragmentIndex === -1) {
+    fail(`the CSP DB migration lacks: ${requiredMigrationFragment}`);
+  }
+  previousMigrationFragmentIndex = fragmentIndex;
 }
 
 for (const [directive, values] of Object.entries(policy.directives)) {

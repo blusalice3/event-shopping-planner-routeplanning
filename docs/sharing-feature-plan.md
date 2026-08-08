@@ -261,7 +261,7 @@ online購入状態同期までとする。手入力codeとhostの商品内容編
 | `src/features/events/bulkAdd.ts`                        | 手動event作成時のmetadata／安定ID                      |
 | `src/features/events/exportFlow.ts`                     | version付きXLSXへのevent ID出力                        |
 | `src/features/events/fileImport.ts`                     | legacy／restore／別copy importの判定                   |
-| `src/utils/exportImport.ts`                             | format versionと`localEventId`のcodec                  |
+| `src/xlsx/engine/eventWorkbookEngine.ts`                | format versionと`localEventId`のcodec                  |
 | `src/lib/supabase.ts`                                   | SDK導入phaseで型付きadapterとして新規作成              |
 | `src/lib/database.types.ts`                             | local migrationから再生成                              |
 | `supabase/migrations/`                                  | schema、RPC、RLS、server gate                          |

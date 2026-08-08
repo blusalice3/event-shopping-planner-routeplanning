@@ -2,6 +2,7 @@
 
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -9,6 +10,22 @@ import { readJsonStrict } from "./lib/canonical-json.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const packageJson = await readJsonStrict(path.join(root, "package.json"));
+const cspContractMigration = await readFile(
+  path.join(
+    root,
+    "supabase",
+    "migrations",
+    "20260808000000_csp_report_contract.sql",
+  ),
+  "utf8",
+);
+const cspUpgradeMatch = cspContractMigration.match(
+  /-- CSP_REPORT_CONTRACT_UPGRADE_BEGIN([\s\S]*?)-- CSP_REPORT_CONTRACT_UPGRADE_END/u,
+);
+if (!cspUpgradeMatch) {
+  throw new Error("CSP report contract upgrade block is missing");
+}
+const cspReportContractUpgradeSql = cspUpgradeMatch[1];
 if (process.versions.node !== packageJson.engines.node) {
   throw new Error(
     `Disposable DB gate requires Node ${packageJson.engines.node}; received ${process.versions.node}`,
@@ -132,6 +149,97 @@ try {
     if (requiredFunctions.rowCount !== 4) {
       throw new Error("Disposable DB is missing a bounded operator function");
     }
+
+    const legacyCspSourceSha = "fedcba9876543210fedcba9876543210fedcba98";
+    await client.query(`
+      alter table public.csp_violation_reports
+        drop constraint csp_violation_reports_blocked_target_check;
+      alter table public.csp_violation_reports
+        add check (
+          blocked_target in (
+            'self',
+            'data',
+            'blob',
+            'http',
+            'https',
+            'same-site',
+            'cross-site',
+            'inline',
+            'eval',
+            'unknown'
+          )
+        );
+      insert into public.csp_violation_reports (
+        schema_version,
+        effective_directive,
+        disposition,
+        blocked_target,
+        source_sha,
+        provider_deployment_id
+      ) values (
+        1,
+        'script-src',
+        'report',
+        'data',
+        '${legacyCspSourceSha}',
+        'deployment_disposable_csp_legacy'
+      );
+    `);
+    const legacyBlockedTargetConstraint = await scalar(
+      client,
+      `select constraint_name
+       from information_schema.check_constraints
+       where constraint_schema = 'public'
+         and constraint_name like 'csp_violation_reports_blocked_target_check%'`,
+    );
+    if (
+      legacyBlockedTargetConstraint !==
+      "csp_violation_reports_blocked_target_check"
+    ) {
+      throw new Error(
+        `Legacy CSP constraint received an unexpected name: ${legacyBlockedTargetConstraint}`,
+      );
+    }
+
+    await client.query(cspReportContractUpgradeSql);
+    const upgradedLegacyTarget = await scalar(
+      client,
+      `select blocked_target
+       from public.csp_violation_reports
+       where provider_deployment_id = 'deployment_disposable_csp_legacy'`,
+    );
+    const upgradedConstraints = await client.query(`
+      select conname, convalidated
+      from pg_catalog.pg_constraint
+      where conrelid = 'public.csp_violation_reports'::regclass
+        and contype = 'c'
+        and (
+          pg_catalog.pg_get_constraintdef(oid) like '%effective_directive%'
+          or pg_catalog.pg_get_constraintdef(oid) like '%blocked_target%'
+        )
+      order by conname
+    `);
+    const expectedUpgradedConstraintNames = [
+      "csp_violation_reports_blocked_target_check",
+      "csp_violation_reports_effective_directive_check",
+    ];
+    if (
+      upgradedLegacyTarget !== "scheme" ||
+      upgradedConstraints.rowCount !== 2 ||
+      upgradedConstraints.rows.some(
+        (constraint, index) =>
+          constraint.conname !== expectedUpgradedConstraintNames[index],
+      ) ||
+      upgradedConstraints.rows.some(
+        (constraint) => constraint.convalidated !== true,
+      )
+    ) {
+      throw new Error("CSP report contract upgrade was not validated");
+    }
+    await client.query(
+      `delete from public.csp_violation_reports
+       where provider_deployment_id = 'deployment_disposable_csp_legacy'`,
+    );
 
     const grants = await client.query(`
       select
@@ -337,6 +445,131 @@ try {
       );
     } finally {
       await client.query("rollback");
+    }
+
+    const cspSourceSha = "89abcdef0123456789abcdef0123456789abcdef";
+    await client.query("begin");
+    try {
+      await client.query("set local role service_role");
+      await client.query({
+        text: `insert into public.csp_violation_reports (
+          schema_version,
+          effective_directive,
+          disposition,
+          blocked_target,
+          source_sha,
+          provider_deployment_id
+        ) values
+          (1, 'worker-src', 'report', 'scheme', $1, $2),
+          (1, 'unknown', 'report', 'unknown', $1, $3)`,
+        values: [
+          cspSourceSha,
+          "deployment_disposable_csp_1",
+          "deployment_disposable_csp_2",
+        ],
+      });
+      await client.query("commit");
+    } catch (error) {
+      await client.query("rollback");
+      throw error;
+    }
+
+    await client.query("begin");
+    try {
+      await client.query("set local role service_role");
+      await assert.rejects(
+        client.query({
+          text: `insert into public.csp_violation_reports (
+            schema_version,
+            effective_directive,
+            disposition,
+            blocked_target,
+            source_sha,
+            provider_deployment_id
+          ) values (1, 'trusted-types', 'report', 'unknown', $1, $2)`,
+          values: [cspSourceSha, "deployment_disposable_csp_invalid"],
+        }),
+        /csp_violation_reports_effective_directive_check/,
+      );
+    } finally {
+      await client.query("rollback");
+    }
+
+    await client.query("begin");
+    try {
+      await client.query("set local role service_role");
+      await assert.rejects(
+        client.query("select blocked_target from public.csp_violation_reports"),
+        /permission denied for table csp_violation_reports/,
+      );
+    } finally {
+      await client.query("rollback");
+    }
+
+    const cspOperatorRole = "foundation_disposable_csp_operator";
+    await client.query(`create role ${cspOperatorRole} nologin`);
+    try {
+      await client.query(
+        `grant execute on function public.read_csp_violation_aggregates(
+          timestamptz,
+          timestamptz,
+          integer
+        ) to ${cspOperatorRole}`,
+      );
+      await client.query("begin");
+      try {
+        await client.query(`set local role ${cspOperatorRole}`);
+        await assert.rejects(
+          client.query(
+            "select blocked_target from public.csp_violation_reports",
+          ),
+          /permission denied for table csp_violation_reports/,
+        );
+      } finally {
+        await client.query("rollback");
+      }
+
+      await client.query("begin");
+      try {
+        await client.query(`set local role ${cspOperatorRole}`);
+        const cspAggregate = await client.query({
+          text: `select *
+            from public.read_csp_violation_aggregates(
+              clock_timestamp() - interval '1 minute',
+              clock_timestamp() + interval '1 minute',
+              10
+            )`,
+        });
+        const aggregatesByDirective = new Map(
+          cspAggregate.rows.map((row) => [row.effective_directive, row]),
+        );
+        const workerAggregate = aggregatesByDirective.get("worker-src");
+        const unknownAggregate = aggregatesByDirective.get("unknown");
+        if (
+          cspAggregate.rowCount !== 2 ||
+          workerAggregate?.source_sha !== cspSourceSha ||
+          workerAggregate?.disposition !== "report" ||
+          workerAggregate?.blocked_target !== "scheme" ||
+          Number(workerAggregate?.violation_count) !== 1 ||
+          unknownAggregate?.source_sha !== cspSourceSha ||
+          unknownAggregate?.disposition !== "report" ||
+          unknownAggregate?.blocked_target !== "unknown" ||
+          Number(unknownAggregate?.violation_count) !== 1
+        ) {
+          throw new Error("Disposable DB CSP operator aggregate differs");
+        }
+      } finally {
+        await client.query("rollback");
+      }
+    } finally {
+      await client.query(
+        `revoke execute on function public.read_csp_violation_aggregates(
+          timestamptz,
+          timestamptz,
+          integer
+        ) from ${cspOperatorRole}`,
+      );
+      await client.query(`drop role ${cspOperatorRole}`);
     }
 
     const retention = await client.query(

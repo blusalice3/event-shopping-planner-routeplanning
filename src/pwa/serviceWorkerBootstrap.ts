@@ -14,7 +14,7 @@ export const registerPromptCloseAllServiceWorker = async (
   try {
     const registration = await container.register(scriptUrl, {
       scope: "/",
-      type: "module",
+      type: "classic",
       updateViaCache: "none",
     });
     return { status: "registered", registration };

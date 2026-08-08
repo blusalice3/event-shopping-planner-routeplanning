@@ -572,6 +572,7 @@ const App: React.FC = () => {
     flushPendingSave,
     runExclusiveRestore,
   } = useIndexedDbPersistence({
+    persistenceCommands: appRuntime.persistenceCommands,
     values: {
       eventLists,
       eventMetadata,
