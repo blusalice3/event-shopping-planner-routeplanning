@@ -13,11 +13,14 @@ afterEach(() => {
 
 describe("outer recovery update blocker registry", () => {
   it("registers, filters, flushes, and unregisters blockers", async () => {
-    const flush = vi.fn(async () => undefined);
+    let blocking = true;
+    const flush = vi.fn(async () => {
+      blocking = false;
+    });
     const unregister = registerUpdateBlocker({
       id: "pending-save",
       label: "保存中",
-      isBlocking: () => true,
+      isBlocking: () => blocking,
       flush,
     });
     registerUpdateBlocker({
@@ -31,7 +34,7 @@ describe("outer recovery update blocker registry", () => {
     ).resolves.toMatchObject({
       clientId: "client-a",
       responsive: true,
-      blockers: [{ id: "pending-save", label: "保存中" }],
+      blockers: [],
       flushError: false,
     });
     expect(flush).toHaveBeenCalledOnce();

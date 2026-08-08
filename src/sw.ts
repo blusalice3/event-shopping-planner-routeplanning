@@ -233,15 +233,20 @@ const collectBlockerSnapshots = async (
       resolve,
       timeout,
     });
-    clients.forEach((client) =>
-      client.postMessage({
-        type: "PWA_BLOCKER_SNAPSHOT_REQUEST",
-        protocolVersion: 1,
-        requestId,
-        clientId: client.id,
-        flush,
-      }),
-    );
+    clients.forEach((client) => {
+      try {
+        client.postMessage({
+          type: "PWA_BLOCKER_SNAPSHOT_REQUEST",
+          protocolVersion: 1,
+          requestId,
+          clientId: client.id,
+          flush,
+        });
+      } catch {
+        // A client can close after matchAll(). Keep collecting the remaining
+        // clients and report this one as unresponsive when the timeout fires.
+      }
+    });
   });
 };
 

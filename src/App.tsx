@@ -568,6 +568,8 @@ const App: React.FC = () => {
     retryInitialization,
     adoptRecoveryCandidate,
     retrySave,
+    isUpdateBlocked,
+    flushPendingSave,
     runExclusiveRestore,
   } = useIndexedDbPersistence({
     values: {
@@ -595,6 +597,17 @@ const App: React.FC = () => {
       setMapViewportSettings,
     },
   });
+
+  useEffect(
+    () =>
+      appRuntime.registerUpdateBlocker({
+        id: "event-autosave",
+        label: "イベントを保存中",
+        isBlocking: isUpdateBlocked,
+        flush: flushPendingSave,
+      }),
+    [flushPendingSave, isUpdateBlocked],
+  );
 
   const hallDefinitionsMigratedRef = useRef(false);
   useEffect(() => {

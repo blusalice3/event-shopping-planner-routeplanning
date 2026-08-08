@@ -80,6 +80,13 @@ describe("outer recovery root", () => {
         capturedAt: "2026-08-06T00:00:00.000Z",
         responsive: false,
         blockers: [],
+        flushError: false,
+      },
+      {
+        clientId: "client-c",
+        capturedAt: "2026-08-06T00:00:00.000Z",
+        responsive: true,
+        blockers: [],
         flushError: true,
       },
     ]);
@@ -87,9 +94,11 @@ describe("outer recovery root", () => {
     const notice = root.querySelector("[data-pwa-update-notice]");
     expect(notice).not.toBeNull();
     expect(notice).toHaveAttribute("data-variant-id", identity.variantId);
-    expect(notice?.querySelectorAll("li")).toHaveLength(2);
+    expect(notice?.querySelectorAll("li")).toHaveLength(3);
     expect(notice).toHaveTextContent("保存中 (client-a)");
     expect(notice).toHaveTextContent("応答なし: 1画面");
+    expect(notice).toHaveTextContent("保存失敗: 1画面");
+    expect(notice).not.toHaveTextContent("保存が完了しました");
 
     renderWaitingUpdateNotice(root, identity, [
       {

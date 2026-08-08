@@ -13,3 +13,6 @@ coverage/
 .tmp-*
 .DS_Store
 Thumbs.db
+
+/artifacts/playwright/
+/artifacts/playwright-report/

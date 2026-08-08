@@ -57,6 +57,15 @@ let responderInstalled = false;
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
+const getActiveBlockers = (): UpdateBlocker[] =>
+  [...blockers.values()].filter((blocker) => {
+    try {
+      return blocker.isBlocking();
+    } catch {
+      return true;
+    }
+  });
+
 export const registerUpdateBlocker = (blocker: UpdateBlocker): (() => void) => {
   if (
     !/^[a-z0-9][a-z0-9._:-]{0,127}$/i.test(blocker.id) ||
@@ -78,19 +87,14 @@ export const captureLocalBlockerSnapshot = async (
   clientId: string,
   flush: boolean,
 ): Promise<UpdateBlockerSnapshot> => {
-  const active = [...blockers.values()].filter((blocker) => {
-    try {
-      return blocker.isBlocking();
-    } catch {
-      return true;
-    }
-  });
+  let active = getActiveBlockers();
   let flushError = false;
   if (flush) {
     const results = await Promise.allSettled(
       active.map((blocker) => blocker.flush?.()),
     );
     flushError = results.some((result) => result.status === "rejected");
+    active = getActiveBlockers();
   }
   return {
     clientId,

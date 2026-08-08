@@ -389,11 +389,13 @@ export function useIndexedDbPersistence({
   const persistenceStatusRef = useRef<PersistenceStatus>(persistenceStatus);
   const failedStoresRef = useRef<PersistedStoreName[]>(failedStores);
   const failureDetailsRef = useRef<PersistenceFailureDetail[]>(failureDetails);
+  const isInitializedRef = useRef(false);
   latestValuesRef.current = values;
   persistenceStatusRef.current = persistenceStatus;
   failedStoresRef.current = failedStores;
   failureDetailsRef.current = failureDetails;
   const isInitialized = startupState.status === "ready";
+  isInitializedRef.current = isInitialized;
   const {
     eventLists,
     eventMetadata,
@@ -562,6 +564,61 @@ export function useIndexedDbPersistence({
     saveRequestedRef.current = true;
     void drainSaveQueue();
   }, [drainSaveQueue, isInitialized]);
+
+  const isUpdateBlocked = useCallback((): boolean => {
+    if (
+      !isInitializedRef.current ||
+      restoreInProgressRef.current ||
+      recoveryAdoptionInProgressRef.current ||
+      isSavingRef.current ||
+      saveRequestedRef.current ||
+      persistenceStatusRef.current !== "saved"
+    ) {
+      return true;
+    }
+
+    return (
+      createSaveTasks(previousSavedValuesRef.current, latestValuesRef.current)
+        .length > 0
+    );
+  }, []);
+
+  const flushPendingSave = useCallback(async (): Promise<void> => {
+    if (recoveryAdoptionInProgressRef.current) {
+      throw new Error("復旧候補の採用中は保存を確定できません。");
+    }
+    if (!isInitializedRef.current) {
+      throw new Error("保存データの初期化が完了していません。");
+    }
+    if (restoreInProgressRef.current) {
+      throw new Error("復元処理の完了前に保存を確定できません。");
+    }
+
+    while (isUpdateBlocked()) {
+      if (restoreInProgressRef.current) {
+        throw new Error("復元処理の完了前に保存を確定できません。");
+      }
+      if (recoveryAdoptionInProgressRef.current) {
+        throw new Error("復旧候補の採用中は保存を確定できません。");
+      }
+
+      // debounce待ちと実行中の保存のどちらでも、最新snapshotをもう一度queueへ載せる。
+      // drainSaveQueueはsingle-flightなので、実行中ならこの要求を現在の保存後に処理する。
+      saveRequestedRef.current = true;
+      await drainSaveQueue();
+      await waitForSaveIdle();
+
+      if (restoreInProgressRef.current) {
+        throw new Error("復元処理の完了前に保存を確定できません。");
+      }
+      if (recoveryAdoptionInProgressRef.current) {
+        throw new Error("復旧候補の採用中は保存を確定できません。");
+      }
+      if (persistenceStatusRef.current === "failed") {
+        throw new Error("保存を完了できませんでした。");
+      }
+    }
+  }, [drainSaveQueue, isUpdateBlocked, waitForSaveIdle]);
 
   const runExclusiveRestore = useCallback(
     async <T>(
@@ -1045,6 +1102,8 @@ export function useIndexedDbPersistence({
     retryInitialization,
     adoptRecoveryCandidate,
     retrySave,
+    isUpdateBlocked,
+    flushPendingSave,
     runExclusiveRestore,
   } as const;
 }

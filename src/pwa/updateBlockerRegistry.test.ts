@@ -12,11 +12,14 @@ afterEach(() => {
 
 describe("update blocker registry", () => {
   it("flushes active blockers before returning a snapshot", async () => {
-    const flush = vi.fn(async () => undefined);
+    let blocking = true;
+    const flush = vi.fn(async () => {
+      blocking = false;
+    });
     registerUpdateBlocker({
       id: "event-autosave",
       label: "イベントを保存中",
-      isBlocking: () => true,
+      isBlocking: () => blocking,
       flush,
     });
     registerUpdateBlocker({
@@ -31,7 +34,7 @@ describe("update blocker registry", () => {
       clientId: "client-a",
       capturedAt: expect.any(String),
       responsive: true,
-      blockers: [{ id: "event-autosave", label: "イベントを保存中" }],
+      blockers: [],
       flushError: false,
     });
     expect(flush).toHaveBeenCalledOnce();

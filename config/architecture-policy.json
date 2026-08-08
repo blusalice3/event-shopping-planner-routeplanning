@@ -111,6 +111,11 @@
       "id": "application-ws-runtime",
       "sourceRegex": "^src/",
       "packageRegex": "^ws$"
+    },
+    {
+      "id": "outer-agent-no-package-import",
+      "sourceRegex": "^src/pwa/(?:recovery/|releaseIdentityProtocol\\.ts$)",
+      "packageRegex": ".+"
     }
   ],
   "entryGraphRules": [
@@ -138,6 +143,11 @@
       "id": "containment-entry-no-list",
       "entry": "src/pwa/containment/index.ts",
       "forbiddenTargetRegex": "^src/(?:features/shopping-list/|components/(?:ShoppingList|ShoppingItemCard|SummaryBar|VisitListPanel|map/(?:MapVisitListPanel|VisitListPanel))\\.(?:ts|tsx)$)"
+    },
+    {
+      "id": "outer-agent-closed-graph",
+      "entry": "src/pwa/recovery/outerRecoveryAgent.ts",
+      "forbiddenTargetRegex": "^(?!src/pwa/(?:recovery/|releaseIdentityProtocol\\.ts$)).+"
     }
   ],
   "forbiddenTextRules": [
@@ -150,6 +160,11 @@
       "id": "app-no-browser-persistence-or-sw-global",
       "sourceRegex": "^src/App\\.tsx$",
       "pattern": "\\b(?:indexedDB|IDBDatabase|IDBTransaction|ServiceWorkerRegistration|skipWaiting|clientsClaim)\\b|\\bnavigator\\s*\\.\\s*serviceWorker\\b"
+    },
+    {
+      "id": "outer-agent-no-dynamic-nonliteral-import",
+      "sourceRegex": "^src/pwa/(?:recovery/|releaseIdentityProtocol\\.ts$)",
+      "pattern": "\\bimport\\s*\\(\\s*(?![\"'])"
     }
   ],
   "forbiddenContractTestTextRules": [

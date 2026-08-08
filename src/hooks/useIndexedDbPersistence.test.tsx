@@ -366,6 +366,10 @@ describe("useIndexedDbPersistence", () => {
     await act(flushMicrotasks);
 
     expect(result.current.isInitialized).toBe(false);
+    expect(result.current.isUpdateBlocked()).toBe(true);
+    await expect(result.current.flushPendingSave()).rejects.toThrow(
+      "保存データの初期化が完了していません。",
+    );
     expect(result.current.startupState).toMatchObject({
       status: "recovery-required",
       recoveryBundle,
@@ -658,6 +662,10 @@ describe("useIndexedDbPersistence", () => {
     });
     expect(dbMock.adoptRecoveryCandidate).toHaveBeenCalledTimes(1);
     expect(result.current.isAdoptingRecoveryCandidate).toBe(true);
+    expect(result.current.isUpdateBlocked()).toBe(true);
+    await expect(result.current.flushPendingSave()).rejects.toThrow(
+      "復旧候補の採用中は保存を確定できません。",
+    );
     await act(async () => {
       adoption.reject(
         Object.assign(new Error("非公開イベント do-not-display"), {
@@ -942,6 +950,74 @@ describe("useIndexedDbPersistence", () => {
     ).toBe(1);
   });
 
+  it("flushPendingSave bypasses the debounce and persists the latest snapshot immediately", async () => {
+    const setters = createSetters();
+    const initialValues = createValues();
+    const { result, rerender } = renderHook(
+      ({ values }: { values: PersistedValues }) =>
+        useIndexedDbPersistence({ values, setters, saveDelayMs: 60_000 }),
+      { initialProps: { values: initialValues } },
+    );
+
+    await act(flushMicrotasks);
+
+    const changedEventLists: PersistedValues["eventLists"] = {
+      即時保存イベント: [],
+    };
+    rerender({
+      values: {
+        ...initialValues,
+        eventLists: changedEventLists,
+      },
+    });
+
+    expect(result.current.persistenceStatus).toBe("unsaved");
+    expect(result.current.isUpdateBlocked()).toBe(true);
+    expect(dbMock.saveEventLists).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await result.current.flushPendingSave();
+    });
+
+    expect(dbMock.saveEventLists).toHaveBeenCalledOnce();
+    expect(dbMock.saveEventLists).toHaveBeenCalledWith(changedEventLists);
+    expect(result.current.persistenceStatus).toBe("saved");
+    expect(result.current.isUpdateBlocked()).toBe(false);
+  });
+
+  it("flushPendingSave rejects and remains blocked when IndexedDB persistence fails", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const setters = createSetters();
+    const initialValues = createValues();
+    dbMock.saveEventLists.mockRejectedValue(
+      new Error("eventLists write failed"),
+    );
+    const { result, rerender } = renderHook(
+      ({ values }: { values: PersistedValues }) =>
+        useIndexedDbPersistence({ values, setters, saveDelayMs: 60_000 }),
+      { initialProps: { values: initialValues } },
+    );
+
+    await act(flushMicrotasks);
+    rerender({
+      values: {
+        ...initialValues,
+        eventLists: { 保存失敗イベント: [] },
+      },
+    });
+
+    await act(async () => {
+      await expect(result.current.flushPendingSave()).rejects.toThrow(
+        "保存を完了できませんでした。",
+      );
+    });
+
+    expect(dbMock.saveEventLists).toHaveBeenCalledOnce();
+    expect(result.current.persistenceStatus).toBe("failed");
+    expect(result.current.failedStores).toEqual(["eventLists"]);
+    expect(result.current.isUpdateBlocked()).toBe(true);
+  });
+
   it("reports a mapData failure and retrySave immediately persists its latest value", async () => {
     const alertSpy = vi
       .spyOn(window, "alert")
@@ -1188,7 +1264,7 @@ describe("useIndexedDbPersistence", () => {
     expect(isBeforeUnloadPrevented()).toBe(false);
   });
 
-  it("serializes saves and drains the newest snapshot after a slow save", async () => {
+  it("flushPendingSave waits for an active save and drains its newest snapshot", async () => {
     const setters = createSetters();
     const initialValues = createValues();
     const firstSave = createDeferred<void>();
@@ -1272,8 +1348,17 @@ describe("useIndexedDbPersistence", () => {
 
     expect(dbMock.saveEventLists).toHaveBeenCalledTimes(1);
 
-    firstSave.resolve();
+    let flushPromise!: Promise<void>;
+    act(() => {
+      flushPromise = result.current.flushPendingSave();
+    });
     await act(flushMicrotasks);
+    expect(result.current.isUpdateBlocked()).toBe(true);
+
+    await act(async () => {
+      firstSave.resolve();
+      await flushPromise;
+    });
 
     expect(dbMock.saveEventLists).toHaveBeenCalledTimes(2);
     expect(dbMock.saveEventLists).toHaveBeenLastCalledWith(newestEventLists);
@@ -1281,6 +1366,7 @@ describe("useIndexedDbPersistence", () => {
       unchangedEvent,
     );
     expect(result.current.persistenceStatus).toBe("saved");
+    expect(result.current.isUpdateBlocked()).toBe(false);
   });
 
   it("waits for an active save before restore and adopts the restored snapshot as the new baseline", async () => {
@@ -1322,6 +1408,10 @@ describe("useIndexedDbPersistence", () => {
     });
     await act(flushMicrotasks);
     expect(restoreOperation).not.toHaveBeenCalled();
+    expect(result.current.isUpdateBlocked()).toBe(true);
+    await expect(result.current.flushPendingSave()).rejects.toThrow(
+      "復元処理の完了前に保存を確定できません。",
+    );
 
     await act(async () => {
       activeSave.resolve();

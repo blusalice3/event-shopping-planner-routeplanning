@@ -85,12 +85,15 @@ export const renderWaitingUpdateNotice = (
   const unresponsive = snapshots.filter(
     (snapshot) => !snapshot.responsive,
   ).length;
+  const flushFailures = snapshots.filter(
+    (snapshot) => snapshot.flushError,
+  ).length;
 
-  if (activeBlockers.length > 0 || unresponsive > 0) {
+  if (activeBlockers.length > 0 || unresponsive > 0 || flushFailures > 0) {
     appendText(
       notice,
       "p",
-      "保存待ちの画面、または応答していない画面があります。すべて確認してください。",
+      "保存待ち、保存失敗、または応答していない画面があります。すべて確認してください。",
     );
     const list = document.createElement("ul");
     activeBlockers.forEach((blocker) => {
@@ -98,6 +101,9 @@ export const renderWaitingUpdateNotice = (
     });
     if (unresponsive > 0) {
       appendText(list, "li", `応答なし: ${unresponsive}画面`);
+    }
+    if (flushFailures > 0) {
+      appendText(list, "li", `保存失敗: ${flushFailures}画面`);
     }
     notice.appendChild(list);
   } else {

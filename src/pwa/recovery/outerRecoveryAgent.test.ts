@@ -128,6 +128,7 @@ const dependencies = (
   currentOuterAgentUrl: "https://planner.test/assets/outer-agent.js",
   loadRoleEntry: vi.fn(async () => undefined),
   queryIdentity: vi.fn(async () => verifiedWorkerIdentity()),
+  requestBlockerSnapshots: vi.fn(async () => []),
   ...overrides,
 });
 
@@ -366,5 +367,62 @@ describe("outer recovery runtime identity gate", () => {
     });
     await vi.waitFor(() => expect(queryIdentity).toHaveBeenCalledTimes(2));
     expect(bound.root.querySelector("[data-pwa-update-notice]")).toBeNull();
+  });
+
+  it("renders a save-complete notice after a valid waiting worker reports no blockers", async () => {
+    const waiting = {} as ServiceWorker;
+    const currentRegistration = registration(waiting);
+    const queryIdentity = vi
+      .fn()
+      .mockResolvedValueOnce(verifiedWorkerIdentity())
+      .mockResolvedValueOnce(verifiedWorkerIdentity("waiting"));
+    const requestBlockerSnapshots = vi.fn(async () => []);
+    const bound = dependencies({
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity,
+      requestBlockerSnapshots,
+    });
+
+    await expect(startOuterRecoveryAgent(bound)).resolves.toMatchObject({
+      status: "role-started",
+      source: "controller",
+    });
+    await vi.waitFor(() =>
+      expect(requestBlockerSnapshots).toHaveBeenCalledWith(waiting, true),
+    );
+    await vi.waitFor(() =>
+      expect(
+        bound.root.querySelector("[data-pwa-update-notice]"),
+      ).toHaveTextContent("保存が完了しました"),
+    );
+  });
+
+  it("does not render a false save-complete notice when blocker aggregation fails", async () => {
+    const waiting = {} as ServiceWorker;
+    const currentRegistration = registration(waiting);
+    const queryIdentity = vi
+      .fn()
+      .mockResolvedValueOnce(verifiedWorkerIdentity())
+      .mockResolvedValueOnce(verifiedWorkerIdentity("waiting"));
+    const requestBlockerSnapshots = vi.fn(async () => {
+      throw new Error("snapshot channel unavailable");
+    });
+    const bound = dependencies({
+      serviceWorker: serviceWorkerContainer({ currentRegistration }),
+      queryIdentity,
+      requestBlockerSnapshots,
+    });
+
+    await expect(startOuterRecoveryAgent(bound)).resolves.toMatchObject({
+      status: "role-started",
+      source: "controller",
+    });
+    await vi.waitFor(() =>
+      expect(requestBlockerSnapshots).toHaveBeenCalledWith(waiting, true),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(bound.root.querySelector("[data-pwa-update-notice]")).toBeNull();
+    expect(bound.root).not.toHaveTextContent("保存が完了しました");
   });
 });

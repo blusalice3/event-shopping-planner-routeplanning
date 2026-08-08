@@ -48,6 +48,7 @@ export type OuterRecoveryAgentDependencies = {
   currentOuterAgentUrl: string;
   loadRoleEntry: (identity: PromptCloseAllReleaseIdentity) => Promise<void>;
   queryIdentity: typeof queryReleaseIdentity;
+  requestBlockerSnapshots: typeof requestAllClientBlockerSnapshots;
 };
 
 const getMeta = (document: Document, name: string): string | null =>
@@ -182,6 +183,7 @@ const defaultDependencies = (): OuterRecoveryAgentDependencies => ({
   currentOuterAgentUrl: import.meta.url,
   loadRoleEntry: (identity) => appendRoleEntryModule(document, identity),
   queryIdentity: queryReleaseIdentity,
+  requestBlockerSnapshots: requestAllClientBlockerSnapshots,
 });
 
 export const startOuterRecoveryAgent = async (
@@ -313,10 +315,10 @@ export const startOuterRecoveryAgent = async (
         ) {
           return;
         }
-        const snapshots = await requestAllClientBlockerSnapshots(
+        const snapshots = await dependencies.requestBlockerSnapshots(
           registration!.waiting!,
           true,
-        ).catch(() => []);
+        );
         renderWaitingUpdateNotice(root, waitingIdentity.identity, snapshots);
       })
       .catch(() => {
