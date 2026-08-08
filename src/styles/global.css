@@ -93,9 +93,10 @@ textarea {
 
 #loading-screen.hidden {
   pointer-events: none;
+  visibility: hidden;
   opacity: 0;
 }
 
 #loading-text {
-  color: var(--text-secondary);
+  color: var(--text-primary);
 }

@@ -46,10 +46,37 @@ type ReleaseCapabilities = {
   legacyLocalStorageCleanup: "forced-off";
 };
 
+type RuntimePageIdentity = {
+  buildId: string | null;
+  sourceSha: string | null;
+  variantId: string | null;
+  releaseRole: string | null;
+  controllerScriptUrl: string | null;
+};
+
+const readRuntimePageIdentity = async (
+  page: Page,
+): Promise<RuntimePageIdentity> =>
+  page.evaluate(() => {
+    const meta = (name: string): string | null =>
+      document
+        .querySelector<HTMLMetaElement>(`meta[name="${name}"]`)
+        ?.content.trim() ?? null;
+    return {
+      buildId: meta("event-shopping-planner-build-id"),
+      sourceSha: meta("event-shopping-planner-source-sha"),
+      variantId: meta("event-shopping-planner-variant-id"),
+      releaseRole: meta("event-shopping-planner-release-role"),
+      controllerScriptUrl:
+        navigator.serviceWorker.controller?.scriptURL ?? null,
+    };
+  });
+
 const waitForApplication = async (page: Page) => {
   const response = await page.goto("/");
   expect(response).not.toBeNull();
   await expect(page.locator("#loading-screen")).toHaveClass(/hidden/);
+  await expect(page.locator("#loading-screen")).toBeHidden();
   await expect(page.locator("#root")).not.toBeEmpty();
   return response!;
 };
@@ -199,17 +226,47 @@ test("keeps the controlled application available during an offline reload", asyn
       page.evaluate(() => Boolean(navigator.serviceWorker.controller)),
     )
     .toBe(true);
+  const onlineIdentity = await readRuntimePageIdentity(page);
+  expect(onlineIdentity).toEqual({
+    buildId: expect.stringMatching(/^[0-9a-f]{40}$/),
+    sourceSha: expect.stringMatching(/^[0-9a-f]{40}$/),
+    variantId: expect.stringMatching(/^[0-9a-f]{64}$/),
+    releaseRole: "standard",
+    controllerScriptUrl: new URL("/sw.js", applicationOrigin).href,
+  });
+  expect(onlineIdentity.sourceSha).toBe(onlineIdentity.buildId);
 
   await context.setOffline(true);
   try {
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.locator("#loading-screen")).toHaveClass(/hidden/);
+    await expect(page.locator("#loading-screen")).toBeHidden();
     await expect(page.locator("#root")).not.toBeEmpty();
     await expect
       .poll(() =>
         page.evaluate(() => Boolean(navigator.serviceWorker.controller)),
       )
       .toBe(true);
+    expect(await readRuntimePageIdentity(page)).toEqual(onlineIdentity);
+
+    const offlineCapabilities = await page.evaluate(async () => {
+      const response = await fetch("/release-capabilities.json");
+      if (!response.ok) {
+        throw new Error(`offline capabilities HTTP ${response.status}`);
+      }
+      return (await response.json()) as ReleaseCapabilities;
+    });
+    expect({
+      buildId: offlineCapabilities.buildId,
+      sourceSha: offlineCapabilities.sourceSha,
+      releaseChannel: offlineCapabilities.releaseChannel,
+      legacyLocalStorageCleanup: offlineCapabilities.legacyLocalStorageCleanup,
+    }).toEqual({
+      buildId: onlineIdentity.buildId,
+      sourceSha: onlineIdentity.sourceSha,
+      releaseChannel: "release-a",
+      legacyLocalStorageCleanup: "forced-off",
+    });
   } finally {
     await context.setOffline(false);
   }
@@ -220,36 +277,53 @@ test("@a11y has no serious or critical automated accessibility violations", asyn
 }) => {
   await page.addInitScript({ content: axe.source });
   await waitForApplication(page);
-  const violations = await page.evaluate(async () => {
-    const axeApi = (
-      globalThis as typeof globalThis & {
-        axe: {
-          run(
-            context: Document,
-            options: {
-              resultTypes: string[];
-            },
-          ): Promise<{
-            violations: Array<{
-              id: string;
-              impact: string | null;
-              nodes: Array<{ target: string[] }>;
+  const themeCases = [
+    { colorScheme: "light", dataTheme: "light" },
+    { colorScheme: "light", dataTheme: "dark" },
+    { colorScheme: "dark", dataTheme: "system" },
+  ] as const;
+  const violations = [];
+
+  for (const themeCase of themeCases) {
+    await page.emulateMedia({ colorScheme: themeCase.colorScheme });
+    const themeViolations = await page.evaluate(async ({ dataTheme }) => {
+      document.documentElement.setAttribute("data-theme", dataTheme);
+      const axeApi = (
+        globalThis as typeof globalThis & {
+          axe: {
+            run(
+              context: Document,
+              options: {
+                resultTypes: string[];
+              },
+            ): Promise<{
+              violations: Array<{
+                id: string;
+                impact: string | null;
+                nodes: Array<{ target: string[] }>;
+              }>;
             }>;
-          }>;
-        };
-      }
-    ).axe;
-    const result = await axeApi.run(document, {
-      resultTypes: ["violations"],
-    });
-    return result.violations
-      .filter(({ impact }) => impact === "serious" || impact === "critical")
-      .map(({ id, impact, nodes }) => ({
-        id,
-        impact,
-        targets: nodes.map(({ target }) => target.join(" ")),
-      }));
-  });
+          };
+        }
+      ).axe;
+      const result = await axeApi.run(document, {
+        resultTypes: ["violations"],
+      });
+      return result.violations
+        .filter(({ impact }) => impact === "serious" || impact === "critical")
+        .map(({ id, impact, nodes }) => ({
+          id,
+          impact,
+          targets: nodes.map(({ target }) => target.join(" ")),
+        }));
+    }, themeCase);
+    violations.push(
+      ...themeViolations.map((violation) => ({
+        ...violation,
+        theme: themeCase.dataTheme,
+      })),
+    );
+  }
 
   expect(violations).toEqual([]);
 });

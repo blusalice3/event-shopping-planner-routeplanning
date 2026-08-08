@@ -128,7 +128,14 @@ const handleFetch = async (request: Request): Promise<Response> => {
     return fetch(request);
   }
   const cache = await caches.open(CACHE_NAME);
-  const cached = await cache.match(request, { ignoreSearch: false });
+  // Static preview/CDN responses can vary on Origin while module and
+  // crossorigin stylesheet requests add that header only at runtime. The
+  // cache itself is same-origin and source/variant-addressed, so the response
+  // bytes are already bound more strictly than Vary can express here.
+  const cached = await cache.match(request, {
+    ignoreSearch: false,
+    ignoreVary: true,
+  });
   if (cached) return cached;
 
   if (request.mode === "navigate") {

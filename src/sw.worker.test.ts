@@ -13,6 +13,15 @@ type WorkerMessageEvent = Event & {
   waitUntil(promise: Promise<unknown>): void;
 };
 
+type WorkerFetchEvent = Event & {
+  request: Request;
+  respondWith(response: Promise<Response> | Response): void;
+};
+
+type WorkerExtendableEvent = Event & {
+  waitUntil(promise: Promise<unknown>): void;
+};
+
 const createClient = (id: string): TestClient => ({
   id,
   postMessage: vi.fn(),
@@ -29,7 +38,9 @@ const createSnapshot = (
   flushError: false,
 });
 
-const bootWorker = async (clients: TestClient[]): Promise<EventListener> => {
+const bootWorkerListeners = async (
+  clients: TestClient[],
+): Promise<Map<string, EventListener>> => {
   vi.resetModules();
   const listeners = new Map<string, EventListener>();
   vi.stubGlobal("self", {
@@ -53,6 +64,11 @@ const bootWorker = async (clients: TestClient[]): Promise<EventListener> => {
   );
 
   await import("./sw");
+  return listeners;
+};
+
+const bootWorker = async (clients: TestClient[]): Promise<EventListener> => {
+  const listeners = await bootWorkerListeners(clients);
   const listener = listeners.get("message");
   if (!listener) throw new Error("Service Worker message listener is missing.");
   return listener;
@@ -252,5 +268,97 @@ describe("Service Worker blocker snapshot aggregation", () => {
       }),
     ]);
     expect(nextResponse.snapshots).not.toContainEqual(lateSnapshot);
+  });
+});
+
+describe("Service Worker offline precache fetch", () => {
+  it("serves same-origin module requests despite an Origin Vary mismatch", async () => {
+    const cachedResponse = new Response("export const cached = true;", {
+      headers: {
+        "Content-Type": "text/javascript",
+        Vary: "Origin",
+      },
+    });
+    const match = vi.fn(
+      async (
+        _request: Request,
+        options?: CacheQueryOptions,
+      ): Promise<Response | undefined> =>
+        options?.ignoreVary ? cachedResponse : undefined,
+    );
+    vi.stubGlobal("caches", {
+      open: vi.fn(async () => ({ match })),
+    });
+    const networkFetch = vi.fn(async () => {
+      throw new Error("offline");
+    });
+    vi.stubGlobal("fetch", networkFetch);
+    const listeners = await bootWorkerListeners([]);
+    const fetchListener = listeners.get("fetch");
+    if (!fetchListener) {
+      throw new Error("Service Worker fetch listener is missing.");
+    }
+    const request = new Request(
+      "https://planner.test/assets/outer-recovery-agent.js",
+      {
+        headers: { Origin: "https://planner.test" },
+      },
+    );
+    let responseTask: Promise<Response> | undefined;
+    const event = {
+      request,
+      respondWith(response: Promise<Response> | Response) {
+        responseTask = Promise.resolve(response);
+      },
+    } as unknown as WorkerFetchEvent;
+
+    fetchListener(event);
+
+    await expect(responseTask).resolves.toBe(cachedResponse);
+    expect(match).toHaveBeenCalledWith(request, {
+      ignoreSearch: false,
+      ignoreVary: true,
+    });
+    expect(networkFetch).not.toHaveBeenCalled();
+  });
+});
+
+describe("Service Worker cache activation", () => {
+  it("deletes only stale owned precaches and preserves the current and foreign caches", async () => {
+    const currentCache = `event-shopping-planner-precache-${"1".repeat(40)}-${"2".repeat(64)}`;
+    const staleOwnedCache =
+      "event-shopping-planner-precache-stale-source-stale-variant";
+    const foreignCache = "another-application-precache-v1";
+    const similarlyNamedForeignCache = "event-shopping-planner-runtime-v1";
+    const deleteCache = vi.fn(async () => true);
+    vi.stubGlobal("caches", {
+      keys: vi.fn(async () => [
+        staleOwnedCache,
+        currentCache,
+        foreignCache,
+        similarlyNamedForeignCache,
+      ]),
+      delete: deleteCache,
+    });
+    const listeners = await bootWorkerListeners([]);
+    const activateListener = listeners.get("activate");
+    if (!activateListener) {
+      throw new Error("Service Worker activate listener is missing.");
+    }
+    let activationTask: Promise<unknown> | undefined;
+    const event = {
+      waitUntil(promise: Promise<unknown>) {
+        activationTask = promise;
+      },
+    } as unknown as WorkerExtendableEvent;
+
+    activateListener(event);
+
+    await expect(activationTask).resolves.toBeUndefined();
+    expect(deleteCache).toHaveBeenCalledOnce();
+    expect(deleteCache).toHaveBeenCalledWith(staleOwnedCache);
+    expect(deleteCache).not.toHaveBeenCalledWith(currentCache);
+    expect(deleteCache).not.toHaveBeenCalledWith(foreignCache);
+    expect(deleteCache).not.toHaveBeenCalledWith(similarlyNamedForeignCache);
   });
 });
