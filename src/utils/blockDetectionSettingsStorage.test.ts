@@ -124,7 +124,7 @@ describe("blockDetectionSettingsStorage", () => {
   });
 
   it("復元後の処理が失敗した場合、元の保存文字列へ戻せる", () => {
-    const original = '{\"夏イベント\":{\"custom\":\"preserve-exactly\"}}';
+    const original = '{"夏イベント":{"custom":"preserve-exactly"}}';
     localStorage.setItem(BLOCK_DETECTION_SETTINGS_STORAGE_KEY, original);
 
     expect(() =>

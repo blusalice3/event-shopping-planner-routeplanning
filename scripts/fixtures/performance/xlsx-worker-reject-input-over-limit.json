@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "xlsx-worker-reject-input-over-limit",
+  "domain": "xlsx-worker",
+  "dataset": {
+    "generator": "opaque-bytes-v1",
+    "compressedBytes": 33554433
+  },
+  "resourcePolicyExpectation": {
+    "limitField": "maxCompressedBytes",
+    "configuredLimitBytes": 33554432,
+    "excessBytes": 1
+  },
+  "operation": {
+    "kind": "event-import",
+    "execution": "worker"
+  },
+  "expectedTerminal": {
+    "kind": "error",
+    "category": "resource-limit"
+  },
+  "requiredAssertions": [
+    "rejected-before-workbook-parse",
+    "single-terminal-error",
+    "zero-domain-commits",
+    "zero-download-side-effects"
+  ],
+  "requiredTelemetry": ["durationMs"]
+}

@@ -50,11 +50,11 @@
 
 ### 2.3 Supabase
 
-`src/lib/supabase.ts`は`VITE_SUPABASE_URL`と`VITE_SUPABASE_ANON_KEY`がある場合にclientを
-作るだけで、Auth、RPC、Realtimeを呼ぶconsumerは存在しない。
+現行production graphにはSupabase SDK、`src/lib/supabase.ts`、Auth、RPC、Realtimeを呼ぶ
+consumerは存在しない。共有機能を実装するphaseで、SDK、型付きadapter、環境変数allowlist、
+通信先CSPを同じcompatibility clusterとして追加する。
 
-`isSharingEnabled()`の現行実装は「clientを作れる」ことしか示さない。共有有効化は次の全条件を
-満たす場合だけとする。
+共有有効化は、client生成の可否だけではなく次の全条件を満たす場合だけとする。
 
 1. `VITE_SHARING_ENABLED === "true"`
 2. URLとanon keyが設定されている

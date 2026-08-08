@@ -22,7 +22,6 @@ import {
   type MovePlan,
 } from "../../lists/domain/movePlan";
 import type {
-  ActiveTab,
   BulkSortDirection,
   CellSelectionMode,
   LayoutMode,
@@ -93,8 +92,7 @@ type AppOverlayLayerProps = {
   setPendingUpdateEventName: React.Dispatch<
     React.SetStateAction<string | null>
   >;
-  setActiveEventName: React.Dispatch<React.SetStateAction<string | null>>;
-  setActiveTab: React.Dispatch<React.SetStateAction<ActiveTab>>;
+  onShowEventList: () => void;
   showRenameDialog: boolean;
   eventToRename: string | null;
   handleConfirmRename: EventRenameDialogProps["onConfirm"];
@@ -183,6 +181,7 @@ type AppOverlayLayerProps = {
   mapImportPendingEventName: string;
   handleMapImportConfirm: MapImportDialogProps["onImport"];
   handleMapImportClose: MapImportDialogProps["onClose"];
+  xlsxExecutionPort: MapImportDialogProps["xlsxExecutionPort"];
   exportFileInputRef: React.RefObject<HTMLInputElement>;
   handleExportFileImport: (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -229,8 +228,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
   handleUrlUpdate,
   setShowUrlUpdateDialog,
   setPendingUpdateEventName,
-  setActiveEventName,
-  setActiveTab,
+  onShowEventList,
   showRenameDialog,
   eventToRename,
   handleConfirmRename,
@@ -303,6 +301,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
   mapImportPendingEventName,
   handleMapImportConfirm,
   handleMapImportClose,
+  xlsxExecutionPort,
   exportFileInputRef,
   handleExportFileImport,
   activeEventName,
@@ -310,9 +309,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
   currentMode,
   visibleItems,
   showHeaderBar,
-  sortLabels,
   sortDisplayLabel,
-  sortState,
   handleSortToggle,
   selectedItemIds,
   handleBulkSort,
@@ -411,8 +408,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
           onCancel={() => {
             setShowUrlUpdateDialog(false);
             setPendingUpdateEventName(null);
-            setActiveEventName(null);
-            setActiveTab("eventList");
+            onShowEventList();
           }}
         />
       )}
@@ -698,7 +694,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         ref={mapFileInputRef}
         accept=".xlsx"
         onChange={handleMapFileChange}
-        style={{ display: "none" }}
+        className="hidden"
       />
 
       <MapImportDialog
@@ -712,6 +708,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         }
         onImport={handleMapImportConfirm}
         onClose={handleMapImportClose}
+        xlsxExecutionPort={xlsxExecutionPort}
       />
 
       <input
@@ -719,7 +716,7 @@ const AppOverlayLayer: React.FC<AppOverlayLayerProps> = ({
         ref={exportFileInputRef}
         accept=".xlsx"
         onChange={handleExportFileImport}
-        style={{ display: "none" }}
+        className="hidden"
       />
 
       {activeEventName && items.length > 0 && mainContentVisible && (

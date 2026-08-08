@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "xlsx-worker-timeout",
+  "domain": "xlsx-worker",
+  "dataset": {
+    "generator": "non-terminating-worker-harness-v1"
+  },
+  "operation": {
+    "kind": "event-import",
+    "execution": "worker",
+    "requestTimeoutMs": 30000
+  },
+  "resourcePolicyExpectation": {
+    "limitField": "maxWallTimeMs",
+    "configuredLimitMs": 30000
+  },
+  "expectedTerminal": {
+    "kind": "error",
+    "category": "timeout"
+  },
+  "requiredAssertions": [
+    "cancel-message-observed",
+    "worker-terminated",
+    "late-result-ignored",
+    "zero-domain-commits",
+    "zero-download-side-effects"
+  ],
+  "requiredTelemetry": ["timeoutAcknowledgementMs"]
+}

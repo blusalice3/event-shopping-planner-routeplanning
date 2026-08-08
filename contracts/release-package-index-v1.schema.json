@@ -1,0 +1,204 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:event-shopping-planner:release-package-index:v1",
+  "title": "ReleasePackageIndex v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/sourceHardenedPair"
+    },
+    {
+      "$ref": "#/$defs/legacyBootstrapSingle"
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sourceSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "immutableRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["uri", "sha256"]
+    },
+    "dbCompatibilityBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractUri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["contractUri", "fingerprint"]
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "releaseRole": {
+          "enum": ["standard", "containment"]
+        },
+        "variantId": {
+          "$ref": "#/$defs/sha256"
+        },
+        "manifest": {
+          "$ref": "#/$defs/immutableRef"
+        },
+        "archive": {
+          "$ref": "#/$defs/immutableRef"
+        }
+      },
+      "required": ["releaseRole", "variantId", "manifest", "archive"]
+    },
+    "commonProperties": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "sourceSha": {
+          "$ref": "#/$defs/sourceSha"
+        },
+        "buildId": {
+          "$ref": "#/$defs/sourceSha"
+        },
+        "toolchainPolicyHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "providerConfigurationHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "providerPolicyHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "releasePolicyHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "requiredDbCompatibility": {
+          "$ref": "#/$defs/dbCompatibilityBinding"
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "sourceSha",
+        "buildId",
+        "toolchainPolicyHash",
+        "providerConfigurationHash",
+        "providerPolicyHash",
+        "releasePolicyHash",
+        "requiredDbCompatibility"
+      ]
+    },
+    "sourceHardenedPair": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/commonProperties"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "packageKind": {
+              "const": "source-hardened-pair"
+            },
+            "artifacts": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/artifactRef"
+                    },
+                    {
+                      "properties": {
+                        "releaseRole": {
+                          "const": "standard"
+                        }
+                      }
+                    }
+                  ]
+                },
+                {
+                  "allOf": [
+                    {
+                      "$ref": "#/$defs/artifactRef"
+                    },
+                    {
+                      "properties": {
+                        "releaseRole": {
+                          "const": "containment"
+                        }
+                      }
+                    }
+                  ]
+                }
+              ],
+              "items": false,
+              "minItems": 2,
+              "maxItems": 2
+            }
+          },
+          "required": ["packageKind", "artifacts"],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "legacyBootstrapSingle": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/commonProperties"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "packageKind": {
+              "const": "legacy-bootstrap-single"
+            },
+            "bootstrapInput": {
+              "$ref": "#/$defs/immutableRef"
+            },
+            "rawDistManifest": {
+              "$ref": "#/$defs/immutableRef"
+            },
+            "artifact": {
+              "allOf": [
+                {
+                  "$ref": "#/$defs/artifactRef"
+                },
+                {
+                  "properties": {
+                    "releaseRole": {
+                      "const": "containment"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          "required": [
+            "packageKind",
+            "bootstrapInput",
+            "rawDistManifest",
+            "artifact"
+          ],
+          "unevaluatedProperties": false
+        }
+      ]
+    }
+  }
+}

@@ -41,20 +41,27 @@ const BackupRestoreDialog: React.FC<BackupRestoreDialogProps> = ({
   const [isRestoring, setIsRestoring] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const backupEventNamesSignature = JSON.stringify(backupEventNames);
+  const currentEventNamesSignature = JSON.stringify(currentEventNames);
 
   useEffect(() => {
     if (!isOpen) return;
-    const initialSource = backupEventNames[0] ?? "";
+    const stableBackupEventNames = JSON.parse(
+      backupEventNamesSignature,
+    ) as string[];
+    const stableCurrentEventNames = JSON.parse(
+      currentEventNamesSignature,
+    ) as string[];
+    const initialSource = stableBackupEventNames[0] ?? "";
     setSourceEventName(initialSource);
     setRestoreMode("copy");
     setTargetEventName(
       initialSource
-        ? createUniqueRestoredEventName(initialSource, currentEventNames)
+        ? createUniqueRestoredEventName(initialSource, stableCurrentEventNames)
         : "",
     );
     setIsRestoring(false);
     setErrorMessage("");
-  }, [backupEventNamesSignature, isOpen]);
+  }, [backupEventNamesSignature, currentEventNamesSignature, isOpen]);
 
   const trimmedTargetName = targetEventName.trim();
   const copyNameAlreadyExists =

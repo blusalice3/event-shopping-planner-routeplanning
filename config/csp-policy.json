@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "policyId": "web-foundation-csp-v1",
+  "reportEndpoint": "/api/csp-report",
+  "directives": {
+    "default-src": ["'self'"],
+    "base-uri": ["'self'"],
+    "object-src": ["'none'"],
+    "frame-ancestors": ["'none'"],
+    "script-src": ["'self'"],
+    "worker-src": ["'self'"],
+    "style-src-elem": ["'self'"],
+    "style-src-attr": ["'none'"],
+    "img-src": ["'self'", "data:", "blob:"],
+    "font-src": ["'self'"],
+    "connect-src": ["'self'"],
+    "manifest-src": ["'self'"],
+    "form-action": ["'self'"],
+    "report-uri": ["/api/csp-report"]
+  },
+  "securityHeaders": {
+    "X-Content-Type-Options": "nosniff",
+    "X-Frame-Options": "DENY",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "Permissions-Policy": "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+  },
+  "temporaryExceptions": [],
+  "forbiddenTokens": {
+    "script-src": ["'unsafe-inline'", "'unsafe-eval'"],
+    "style-src-elem": ["'unsafe-inline'"],
+    "style-src-attr": ["'unsafe-inline'"]
+  }
+}

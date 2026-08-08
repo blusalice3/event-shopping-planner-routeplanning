@@ -7,15 +7,11 @@ import React, {
 } from "react";
 import {
   DayMapData,
-  ZoomLevel,
   HallDefinition,
   HallRouteSettings,
   BlockDefinition,
-  CellGroup,
   MapViewportState,
   RouteSegment,
-  MIN_ZOOM,
-  MAX_ZOOM,
 } from "../../types/map";
 import { ShoppingItem } from "../../types/item";
 import MapCanvas from "./MapCanvas";
@@ -27,7 +23,7 @@ import type { SmartInsertMode } from "../../features/app-shell/types";
 import {
   extractNumberFromItemNumber,
   extractNumberAlphaPrefix,
-} from "../../utils/xlsxMapParser";
+} from "../../xlsx/domain/itemNumber";
 import {
   resolveHallByBlockName,
   resolveManualHallId,
@@ -182,7 +178,6 @@ const MapView: React.FC<MapViewProps> = ({
   onUpdateItemPriority,
   onDeleteItem,
   onEditRequest,
-  onAddNewItem,
   onAddItem,
   onAddToExecuteListAtPosition,
   onBatchAddToExecuteList,
@@ -232,11 +227,12 @@ const MapView: React.FC<MapViewProps> = ({
   }, []);
 
   useEffect(() => {
+    const offsetRef = canvasOffsetRef;
     return () => {
       onViewportChangeRef.current?.({
         zoomLevel: zoomLevelRef.current,
-        offsetX: canvasOffsetRef.current.x,
-        offsetY: canvasOffsetRef.current.y,
+        offsetX: offsetRef.current.x,
+        offsetY: offsetRef.current.y,
       });
     };
   }, []);
@@ -1639,7 +1635,6 @@ const MapView: React.FC<MapViewProps> = ({
       itemsById,
       executeModeItemIds,
       onAddToExecuteList,
-      onAddToExecuteListAtPosition,
       onBatchAddToExecuteList,
       onBatchAddToExecuteListAtPosition,
       batchAddToHallVisitList,
@@ -1881,10 +1876,7 @@ const MapView: React.FC<MapViewProps> = ({
     mapRouteInsertPending?.routeInsertMissMapDataAtStart;
 
   return (
-    <div
-      className="relative bg-slate-100 dark:bg-slate-900 overflow-hidden"
-      style={{ height: "calc(100vh - 140px)" }}
-    >
+    <div className="relative h-[calc(100vh-140px)] overflow-hidden bg-slate-100 dark:bg-slate-900">
       {/* Top-right controls: hall selection, hall order, route visibility. */}
       {!hideInternalControls && (
         <div className="absolute top-4 right-4 z-10 flex items-center gap-3">

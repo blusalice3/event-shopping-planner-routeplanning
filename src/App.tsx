@@ -33,25 +33,18 @@ import { MAPLESS_HALL_KEY, getMaplessKey } from "./types/map";
 import {
   resolveHallByBlockName,
   resolveManualHallId,
-  findHallsByBlockName,
 } from "./utils/hallFallback";
 import { buildMergedHallRouteSettings } from "./utils/mergedHallRouteSettings";
 import {
   BlockDetectionSettingsRollbackError,
   isPointInPolygon,
   readBlockDetectionSettingsStoreForBackup,
-  removeBlockDetectionSettingsForEvent,
-  renameBlockDetectionSettingsForEvent,
   runWithBlockDetectionSettingsRestore,
   saveBlockDetectionSettings,
 } from "./components/map";
 import { extractEventDates } from "./utils/eventDates";
 import { getSpaceKey } from "./utils/spaceGrouping";
-import {
-  importFromXlsx,
-  downloadBlob,
-  type ItemFallbackWarning,
-} from "./utils/exportImport";
+import { downloadBlob } from "./utils/downloadBlob";
 import {
   buildBulkAddUiPlan,
   buildBulkAddEventMetadata,
@@ -78,7 +71,6 @@ import {
   buildXlsxEventRestoreSource,
   toImportedEventData,
 } from "./features/events/fileImport";
-import { removeRecordKey, renameRecordKey } from "./features/events/recordOps";
 import {
   computeUpdateItem,
   computeDeleteItem,
@@ -131,9 +123,7 @@ import DuplicateEventDialog from "./components/DuplicateEventDialog";
 import { buildEventRestoreData } from "./features/events/backupRestore";
 import {
   analyzeDuplicateEventImport,
-  type DifferentSourceEventAnalysis,
   type DuplicateEventResolution,
-  type SameSourceEventAnalysis,
 } from "./features/events/duplicateEvent";
 import { settleEventUpdatePreviewIfCurrent } from "./features/events/sourceSwitchPreview";
 import {
@@ -150,9 +140,17 @@ import {
   createAppBackup,
   parseAppBackup,
   serializeAppBackup,
-  type AppBackupV1,
 } from "./utils/appBackup";
-import { db, type AppData } from "./utils/indexedDB";
+import {
+  appRuntime,
+  type AppItemFallbackWarning,
+} from "./app/composition/appRuntime";
+import { useEventLifecycleCommands } from "./app/commands/useEventLifecycleCommands";
+import { useAppNavigationController } from "./app/navigation";
+import type { PersistenceSnapshot } from "./app/ports/PersistenceCommandPort";
+import { useAppUiState } from "./app/state/useAppUiState";
+import { useCommittedState } from "./app/state/useCommittedState";
+import { useMapWorkspaceState } from "./app/state/useMapWorkspaceState";
 import {
   exportStartupRecoveryBundle,
   type PersistenceRecoveryExportResult,
@@ -177,17 +175,14 @@ import {
   useIndexedDbPersistence,
   type PersistedStateValues,
 } from "./hooks/useIndexedDbPersistence";
-import type { SmartInsertMode, SortState } from "./features/app-shell/types";
-import { normalizeSmartInsertMode } from "./utils/smartInsertMode";
+import type { ActiveTab, SortState } from "./features/app-shell/types";
 import {
   clearLimitedPurchase,
   getLimitedPurchaseCounts,
   matchesPurchaseStatusFilter,
 } from "./utils/purchaseQuantity";
 
-type ActiveTab = "eventList" | "import" | string;
 export type BulkSortDirection = "asc" | "desc";
-type BlockSortDirection = "asc" | "desc";
 
 const sortCycle: SortState[] = [
   "Manual",
@@ -212,45 +207,6 @@ const sortLabels: Record<SortState, string> = {
 
 const buildFocusSessionKey = (eventName: string, eventDate: string): string =>
   `${eventName}::${eventDate}`;
-
-const removeFocusModeSessionByEvent = (
-  sessions: Record<string, FocusModeSessionState>,
-  eventName: string,
-): Record<string, FocusModeSessionState> => {
-  let changed = false;
-  const next: Record<string, FocusModeSessionState> = {};
-
-  Object.entries(sessions).forEach(([key, value]) => {
-    if (key.startsWith(`${eventName}::`)) {
-      changed = true;
-      return;
-    }
-    next[key] = value;
-  });
-
-  return changed ? next : sessions;
-};
-
-const renameFocusModeSessionKeys = (
-  sessions: Record<string, FocusModeSessionState>,
-  oldEventName: string,
-  newEventName: string,
-): Record<string, FocusModeSessionState> => {
-  let changed = false;
-  const next: Record<string, FocusModeSessionState> = {};
-
-  Object.entries(sessions).forEach(([key, value]) => {
-    if (key.startsWith(`${oldEventName}::`)) {
-      const suffix = key.slice(oldEventName.length);
-      next[`${newEventName}${suffix}`] = value;
-      changed = true;
-    } else {
-      next[key] = value;
-    }
-  });
-
-  return changed ? next : sessions;
-};
 
 const areStringArraysEqual = (a: string[], b: string[]): boolean => {
   if (a.length !== b.length) return false;
@@ -306,17 +262,10 @@ const normalizeMapDayToken = (value: string): string =>
     .replace(/[ \u3000]/g, "")
     .replace(/マップ$/, "");
 
+const isAbortError = (error: unknown): boolean =>
+  error instanceof Error && error.name === "AbortError";
+
 type RotationScreenType = "mapTab" | "focusMode";
-
-type PendingDuplicateEventImport = {
-  analysis: SameSourceEventAnalysis | DifferentSourceEventAnalysis;
-  metadata?: BulkAddMetadata;
-};
-
-type PendingXlsxRestoreCompletion = {
-  errors: string[];
-  itemCount: number;
-};
 
 const resolveDayMapRotationState = (
   state:
@@ -334,93 +283,25 @@ const resolveDayMapRotationState = (
 };
 
 const App: React.FC = () => {
-  const [eventLists, setEventListsState] = useState<
-    Record<string, ShoppingItem[]>
-  >({});
-  const eventListsRef = useRef<Record<string, ShoppingItem[]>>({});
-  const commitEventLists = useCallback(
-    (nextAllEvents: Record<string, ShoppingItem[]>) => {
-      eventListsRef.current = nextAllEvents;
-      setEventListsState(nextAllEvents);
-    },
-    [],
-  );
-  const setEventLists = useCallback(
-    (next: React.SetStateAction<Record<string, ShoppingItem[]>>) => {
-      const nextAllEvents =
-        typeof next === "function"
-          ? (
-              next as (
-                current: Record<string, ShoppingItem[]>,
-              ) => Record<string, ShoppingItem[]>
-            )(eventListsRef.current)
-          : next;
-      commitEventLists(nextAllEvents);
-    },
-    [commitEventLists],
-  );
-  const [eventMetadata, setEventMetadataState] = useState<
-    Record<string, EventMetadata>
-  >({});
-  const eventMetadataRef = useRef<Record<string, EventMetadata>>({});
-  const commitEventMetadata = useCallback(
-    (nextAllEvents: Record<string, EventMetadata>) => {
-      eventMetadataRef.current = nextAllEvents;
-      setEventMetadataState(nextAllEvents);
-    },
-    [],
-  );
-  const setEventMetadata = useCallback(
-    (next: React.SetStateAction<Record<string, EventMetadata>>) => {
-      const nextAllEvents =
-        typeof next === "function"
-          ? (
-              next as (
-                current: Record<string, EventMetadata>,
-              ) => Record<string, EventMetadata>
-            )(eventMetadataRef.current)
-          : next;
-      commitEventMetadata(nextAllEvents);
-    },
-    [commitEventMetadata],
-  );
-  const [executeModeItems, setExecuteModeItems] = useState<
-    Record<string, ExecuteModeItems>
-  >({});
-  const executeModeItemsRef = useRef<Record<string, ExecuteModeItems>>({});
-  const commitExecuteModeItems = useCallback(
-    (nextAllEvents: Record<string, ExecuteModeItems>) => {
-      executeModeItemsRef.current = nextAllEvents;
-      setExecuteModeItems(nextAllEvents);
-    },
-    [],
-  );
-  const updateExecuteModeItems = useCallback(
-    (
-      updater: (
-        current: Record<string, ExecuteModeItems>,
-      ) => Record<string, ExecuteModeItems>,
-    ) => {
-      const nextAllEvents = updater(executeModeItemsRef.current);
-      commitExecuteModeItems(nextAllEvents);
-      return nextAllEvents;
-    },
-    [commitExecuteModeItems],
-  );
-  const setExecuteModeItemsCommitted = useCallback(
-    (next: React.SetStateAction<Record<string, ExecuteModeItems>>) => {
-      const nextAllEvents =
-        typeof next === "function"
-          ? (
-              next as (
-                current: Record<string, ExecuteModeItems>,
-              ) => Record<string, ExecuteModeItems>
-            )(executeModeItemsRef.current)
-          : next;
-      commitExecuteModeItems(nextAllEvents);
-    },
-    [commitExecuteModeItems],
-  );
+  const {
+    value: eventLists,
+    valueRef: eventListsRef,
+    commit: commitEventLists,
+    set: setEventLists,
+  } = useCommittedState<Record<string, ShoppingItem[]>>({});
+  const {
+    value: eventMetadata,
+    valueRef: eventMetadataRef,
+    commit: commitEventMetadata,
+    set: setEventMetadata,
+  } = useCommittedState<Record<string, EventMetadata>>({});
+  const {
+    value: executeModeItems,
+    valueRef: executeModeItemsRef,
+    commit: commitExecuteModeItems,
+    set: setExecuteModeItemsCommitted,
+    update: updateExecuteModeItems,
+  } = useCommittedState<Record<string, ExecuteModeItems>>({});
   const commitExecuteModeItemsForEvent = useCallback(
     (eventName: string, nextEventItems: ExecuteModeItems) => {
       commitExecuteModeItems({
@@ -428,29 +309,156 @@ const App: React.FC = () => {
         [eventName]: nextEventItems,
       });
     },
-    [commitExecuteModeItems],
+    [commitExecuteModeItems, executeModeItemsRef],
   );
   const [dayModes, setDayModes] = useState<Record<string, DayModeState>>({});
 
-  const [activeEventName, setActiveEventName] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<ActiveTab>("eventList");
-  const [mapViewActive, setMapViewActive] = useState(false);
+  const navigation = useAppNavigationController();
+  const { activeEventName, activeTab, mapViewActive } = navigation;
+  const navigationCommands = navigation.commands;
+  const navigateToTab = useCallback(
+    (tab: ActiveTab) => {
+      if (tab === "eventList") {
+        navigationCommands.showEventList();
+        return;
+      }
+      if (tab === "import") {
+        navigationCommands.showImport(activeEventName);
+        return;
+      }
+      if (navigation.state.kind === "event") {
+        navigationCommands.changeDay(tab);
+        return;
+      }
+      if (activeEventName) {
+        navigationCommands.openEvent(activeEventName, tab);
+      }
+    },
+    [activeEventName, navigation.state.kind, navigationCommands],
+  );
+  const {
+    sortState,
+    setSortState,
+    blockSortDirection,
+    setBlockSortDirection,
+    itemToEdit,
+    setItemToEdit,
+    editDialogItem,
+    setEditDialogItem,
+    itemToDelete,
+    setItemToDelete,
+    zoomLevel,
+    setZoomLevel,
+    recentlyChangedItemIds,
+    setRecentlyChangedItemIds,
+    newItemDefaults,
+    setNewItemDefaults,
+    pendingEventUpdate,
+    setPendingEventUpdate,
+    showUrlUpdateDialog,
+    setShowUrlUpdateDialog,
+    pendingUpdateEventName,
+    setPendingUpdateEventName,
+    showRenameDialog,
+    setShowRenameDialog,
+    eventToRename,
+    setEventToRename,
+    pendingDuplicateEvent,
+    setPendingDuplicateEvent,
+    searchKeyword,
+    setSearchKeyword,
+    currentSearchIndex,
+    setCurrentSearchIndex,
+    highlightedItemId,
+    setHighlightedItemId,
+    layoutMode,
+    setLayoutMode,
+    uiVisibilityOverride,
+    setUiVisibilityOverride,
+    focusModeMapVisible,
+    setFocusModeMapVisible,
+    focusModeSessions,
+    setFocusModeSessions,
+    simpleHallDefinitionMode,
+    setSimpleHallDefinitionMode,
+    globalHallOrderPanelOpen,
+    setGlobalHallOrderPanelOpen,
+    showExportOptions,
+    setShowExportOptions,
+    exportEventName,
+    setExportEventName,
+    pendingBackup,
+    setPendingBackup,
+    pendingXlsxRestoreCompletion,
+    setPendingXlsxRestoreCompletion,
+    mapImportDialogOpen,
+    setMapImportDialogOpen,
+    mapImportPendingFile,
+    setMapImportPendingFile,
+    mapImportPendingEventName,
+    setMapImportPendingEventName,
+    pendingMapReimport,
+    setPendingMapReimport,
+    showPostponeFilterButton,
+    setShowPostponeFilterButton,
+    showLateFilterButton,
+    setShowLateFilterButton,
+    candidateNumberSortDirection,
+    setCandidateNumberSortDirection,
+  } = useAppUiState();
+  const {
+    mapTabMenuOpen,
+    setMapTabMenuOpen,
+    mapTabMenuPosition,
+    setMapTabMenuPosition,
+    visitListPanelOpen,
+    setVisitListPanelOpen,
+    visitListPanelMapTab,
+    setVisitListPanelMapTab,
+    visitListHasUnsavedChanges,
+    setVisitListHasUnsavedChanges,
+    visitListOriginalOrder,
+    setVisitListOriginalOrder,
+    highlightedMapCell,
+    setHighlightedMapCell,
+    showVisitListConfirmDialog,
+    setShowVisitListConfirmDialog,
+    pendingTabChange,
+    setPendingTabChange,
+    blockDefinitionMode,
+    setBlockDefinitionMode,
+    mapSelectedHallId,
+    setMapSelectedHallId,
+    mapIsRouteVisible,
+    setMapIsRouteVisible,
+    mapIsHallOrderOpen,
+    setMapIsHallOrderOpen,
+    mapHallSelectorOpen,
+    setMapHallSelectorOpen,
+    mapSmartInsertEnabled,
+    setMapSmartInsertEnabled,
+    mapSmartInsertMode,
+    setMapSmartInsertMode,
+    smartInsertToast,
+    smartInsertToastType,
+    showSmartInsertToast,
+    cellSelectionMode,
+    setCellSelectionMode,
+    pendingCellSelection,
+    setPendingCellSelection,
+    hallDefinitionMode,
+    setHallDefinitionMode,
+    vertexSelectionMode,
+    setVertexSelectionMode,
+    pendingVertexSelection,
+    setPendingVertexSelection,
+    vertexGuideOptions,
+    setVertexGuideOptions,
+  } = useMapWorkspaceState();
   const mapToggleLongPressRef = React.useRef<number | null>(null);
   const mapToggleLongPressFiredRef = React.useRef(false);
   const mapToggleButtonRef = React.useRef<HTMLButtonElement>(null);
   const mapToggleMenuRef = React.useRef<HTMLDivElement>(null);
-  const [sortState, setSortState] = useState<SortState>("Manual");
-  const [blockSortDirection, setBlockSortDirection] =
-    useState<BlockSortDirection | null>(null);
-  const [itemToEdit, setItemToEdit] = useState<ShoppingItem | null>(null);
-  const [editDialogItem, setEditDialogItem] = useState<ShoppingItem | null>(
-    null,
-  );
-  const [itemToDelete, setItemToDelete] = useState<ShoppingItem | null>(null);
-  const [zoomLevel, setZoomLevel] = useState(100);
-  const [recentlyChangedItemIds, setRecentlyChangedItemIds] = useState<
-    Set<string>
-  >(new Set());
   const {
     selectedItemIds,
     selectedBlockFilters,
@@ -476,23 +484,7 @@ const App: React.FC = () => {
     toggleRangeItemIdsSelection,
   } = useListInteractionState();
 
-  const [newItemDefaults, setNewItemDefaults] = useState<{
-    eventDate: string;
-    block: string;
-    number: string;
-  } | null>(null);
-
-  const [pendingEventUpdate, setPendingEventUpdate] =
-    useState<PendingEventUpdate | null>(null);
   const pendingEventUpdateBaseItemsRef = useRef<ShoppingItem[] | null>(null);
-  const [showUrlUpdateDialog, setShowUrlUpdateDialog] = useState(false);
-  const [pendingUpdateEventName, setPendingUpdateEventName] = useState<
-    string | null
-  >(null);
-  const [showRenameDialog, setShowRenameDialog] = useState(false);
-  const [eventToRename, setEventToRename] = useState<string | null>(null);
-  const [pendingDuplicateEvent, setPendingDuplicateEvent] =
-    useState<PendingDuplicateEventImport | null>(null);
   const eventUpdatePreviewEpochRef = useRef(0);
 
   useEffect(
@@ -502,20 +494,8 @@ const App: React.FC = () => {
     [],
   );
 
-  const [searchKeyword, setSearchKeyword] = useState("");
-  const [currentSearchIndex, setCurrentSearchIndex] = useState(-1);
-  const [highlightedItemId, setHighlightedItemId] = useState<string | null>(
-    null,
-  );
-
-  const [layoutMode, setLayoutMode] = useState<"pc" | "smartphone">(() =>
-    typeof window !== "undefined" && window.innerWidth < 768
-      ? "smartphone"
-      : "pc",
-  );
   const { uiVisibilitySettings, setUiVisibilitySettings } =
     useUIVisibilitySettings();
-  const [uiVisibilityOverride, setUiVisibilityOverride] = useState(false);
   const {
     draftSettings: draftUIVisibilitySettings,
     isPanelOpen: uiSettingsPanelOpen,
@@ -552,11 +532,6 @@ const App: React.FC = () => {
     postEventDistributionCheckEnabled,
     setPostEventDistributionCheckEnabled,
   } = usePostEventDistributionCheck();
-  const [focusModeMapVisible, setFocusModeMapVisible] = useState(false);
-  const [focusModeSessions, setFocusModeSessions] = useState<
-    Record<string, FocusModeSessionState>
-  >({});
-
   const { themeMode, setThemeMode } = useThemeMode();
 
   const [mapData, setMapData] = useState<MapDataStore>({});
@@ -570,27 +545,17 @@ const App: React.FC = () => {
   );
   const [hallRouteSettings, setHallRouteSettings] =
     useState<HallRouteSettingsStore>({});
-  const [simpleHallDefinitionMode, setSimpleHallDefinitionMode] =
-    useState(false);
-  const [globalHallOrderPanelOpen, setGlobalHallOrderPanelOpen] =
-    useState(false);
-  const [showExportOptions, setShowExportOptions] = useState(false);
-  const [exportEventName, setExportEventName] = useState<string | null>(null);
   const mapFileInputRef = useRef<HTMLInputElement>(null);
   const exportFileInputRef = useRef<HTMLInputElement>(null);
   const backupFileInputRef = useRef<HTMLInputElement>(null);
-  const [pendingBackup, setPendingBackup] = useState<AppBackupV1 | null>(null);
-  const [pendingXlsxRestoreCompletion, setPendingXlsxRestoreCompletion] =
-    useState<PendingXlsxRestoreCompletion | null>(null);
+  const xlsxOperationRef = useRef<AbortController | null>(null);
 
-  const [mapImportDialogOpen, setMapImportDialogOpen] = useState(false);
-  const [mapImportPendingFile, setMapImportPendingFile] = useState<File | null>(
-    null,
+  useEffect(
+    () => () => {
+      xlsxOperationRef.current?.abort();
+    },
+    [],
   );
-  const [mapImportPendingEventName, setMapImportPendingEventName] =
-    useState<string>("");
-  const [pendingMapReimport, setPendingMapReimport] =
-    useState<PreparedMapImport | null>(null);
   const {
     isInitialized,
     startupState,
@@ -736,7 +701,6 @@ const App: React.FC = () => {
   );
 
   const {
-    mapTabs,
     isMapTab,
     currentMapTabName,
     currentMapData,
@@ -942,7 +906,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [currentFocusSessionKey],
+    [currentFocusSessionKey, setFocusModeSessions],
   );
 
   const validFocusSessionKeys = useMemo(() => {
@@ -968,7 +932,7 @@ const App: React.FC = () => {
       });
       return changed ? next : prev;
     });
-  }, [validFocusSessionKeys]);
+  }, [setFocusModeSessions, validFocusSessionKeys]);
 
   const currentFocusEventDate = useMemo(
     () => activeEventDate,
@@ -1204,14 +1168,22 @@ const App: React.FC = () => {
       );
       alert(uiPlan.alertMessage);
 
-      if (uiPlan.nextActiveEventName) {
-        setActiveEventName(uiPlan.nextActiveEventName);
-      }
       if (uiPlan.nextActiveTab) {
-        setActiveTab(uiPlan.nextActiveTab);
+        navigationCommands.openEvent(
+          uiPlan.nextActiveEventName ?? eventName,
+          uiPlan.nextActiveTab,
+        );
+      } else if (uiPlan.nextActiveEventName) {
+        navigationCommands.showImport(uiPlan.nextActiveEventName);
       }
     },
-    [eventLists],
+    [
+      eventLists,
+      navigationCommands,
+      setEventLists,
+      setEventMetadata,
+      updateExecuteModeItems,
+    ],
   );
 
   const handleBulkAdd = useCallback(
@@ -1253,7 +1225,13 @@ const App: React.FC = () => {
       setPendingDuplicateEvent({ analysis, metadata });
       return false;
     },
-    [activeEventName, applyBulkAdd, eventLists, eventMetadata],
+    [
+      activeEventName,
+      applyBulkAdd,
+      eventLists,
+      eventMetadata,
+      setPendingDuplicateEvent,
+    ],
   );
 
   const handleUpdateItem = useCallback(
@@ -1289,7 +1267,13 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeTab, eventDates, dayModes],
+    [
+      activeEventDate,
+      activeEventName,
+      dayModes,
+      setEventLists,
+      setRecentlyChangedItemIds,
+    ],
   );
 
   const handleMoveItem = useCallback(
@@ -1371,16 +1355,19 @@ const App: React.FC = () => {
     },
     [
       activeEventName,
-      selectedItemIds,
-      activeTab,
-      dayModes,
-      executeModeItems,
-      eventDates,
-      selectedBlockFilters,
-      eventLists,
-      areItemsInSameHall,
-      areItemsInSameHallGroup,
       clearRangeSelection,
+      setSortState,
+      setBlockSortDirection,
+      activeEventDate,
+      dayModes,
+      selectedItemIds,
+      executeModeItemsRef,
+      eventLists,
+      selectedBlockFilters,
+      areItemsInSameHallGroup,
+      areItemsInSameHall,
+      setEventLists,
+      updateExecuteModeItems,
     ],
   );
   const handleMoveItemVerticalInternal = useCallback(
@@ -1400,8 +1387,6 @@ const App: React.FC = () => {
         executeModeItemsRef.current[activeEventName] || {};
 
       const spaceGroupIds = spaceGroupDragItemIdsRef.current;
-      const isSpaceGroupMove = !!spaceGroupIds;
-
       if (mode === "edit" && targetColumn === "execute") {
         const dayItems = [
           ...(currentEventExecuteItems[currentEventDate] || []),
@@ -1537,16 +1522,19 @@ const App: React.FC = () => {
     },
     [
       activeEventName,
-      selectedItemIds,
-      activeTab,
+      clearRangeSelection,
+      setSortState,
+      setBlockSortDirection,
+      activeEventDate,
       dayModes,
-      executeModeItems,
-      eventDates,
+      executeModeItemsRef,
+      selectedItemIds,
       eventLists,
       items,
-      areItemsInSameHall,
+      updateExecuteModeItems,
       areItemsInSameHallGroup,
-      clearRangeSelection,
+      areItemsInSameHall,
+      setEventLists,
     ],
   );
 
@@ -1595,7 +1583,14 @@ const App: React.FC = () => {
 
       clearSelection();
     },
-    [activeEventDate, activeEventName, clearSelection, items],
+    [
+      activeEventDate,
+      activeEventName,
+      clearSelection,
+      executeModeItemsRef,
+      items,
+      updateExecuteModeItems,
+    ],
   );
   const handleRemoveFromExecuteColumn = useCallback(
     (itemIds: string[]) => {
@@ -1624,7 +1619,14 @@ const App: React.FC = () => {
 
       clearSelection();
     },
-    [activeEventDate, activeEventName, clearSelection, items],
+    [
+      activeEventDate,
+      activeEventName,
+      clearSelection,
+      executeModeItemsRef,
+      items,
+      updateExecuteModeItems,
+    ],
   );
 
   const handleToggleMode = useCallback(() => {
@@ -1655,7 +1657,13 @@ const App: React.FC = () => {
 
     clearSelection();
     setCandidateNumberSortDirection(null);
-  }, [activeEventDate, activeEventName, clearSelection, dayModes]);
+  }, [
+    activeEventDate,
+    activeEventName,
+    clearSelection,
+    dayModes,
+    setCandidateNumberSortDirection,
+  ]);
 
   const handleSetViewMode = useCallback(
     (mode: ViewMode, scrollToItemId?: string) => {
@@ -1692,118 +1700,41 @@ const App: React.FC = () => {
     [
       activeEventName,
       activeEventDate,
-      activeTab,
       clearSelection,
+      setCandidateNumberSortDirection,
       closeUiSettingsPanel,
-      eventDates,
+      setFocusModeMapVisible,
     ],
   );
 
-  const handleSelectEvent = useCallback(
-    (eventName: string) => {
-      const eventItems = eventLists[eventName] || [];
-      const nextTab = resolveEventListTab(eventItems);
-      if (!nextTab) {
-        alert("参加日がないため処理を停止しました。");
-        return;
-      }
-
-      setActiveEventName(eventName);
-      clearSelection();
-      setSelectedBlockFilters(new Set());
-      setActiveTab(nextTab);
-    },
-    [clearSelection, eventLists],
-  );
-
-  const handleDeleteEvent = useCallback(
-    (eventName: string) => {
-      setPendingEventUpdate((pending) =>
-        pending?.eventName === eventName ? null : pending,
-      );
-      setEventLists((prev) => removeRecordKey(prev, eventName));
-      setEventMetadata((prev) => removeRecordKey(prev, eventName));
-      updateExecuteModeItems((prev) => removeRecordKey(prev, eventName));
-      setDayModes((prev) => removeRecordKey(prev, eventName));
-      setMapData((prev) => removeRecordKey(prev, eventName));
-      setMapRotationSettings((prev) => removeRecordKey(prev, eventName));
-      setRouteSettings((prev) => removeRecordKey(prev, eventName));
-      setHallDefinitions((prev) => removeRecordKey(prev, eventName));
-      setHallRouteSettings((prev) => removeRecordKey(prev, eventName));
-      setMapViewportSettings((prev) => removeRecordKey(prev, eventName));
-      removeBlockDetectionSettingsForEvent(eventName);
-      setFocusModeSessions((prev) =>
-        removeFocusModeSessionByEvent(prev, eventName),
-      );
-      if (activeEventName === eventName) {
-        setActiveEventName(null);
-        setActiveTab("eventList");
-      }
-    },
-    [activeEventName],
-  );
-
-  const handleRenameEvent = useCallback((oldName: string) => {
-    setEventToRename(oldName);
-    setShowRenameDialog(true);
-  }, []);
-
-  const handleConfirmRename = useCallback(
-    (newName: string) => {
-      if (!eventToRename) return;
-
-      if (eventToRename === newName) {
-        setShowRenameDialog(false);
-        setEventToRename(null);
-        return;
-      }
-
-      if (eventLists[newName]) {
-        alert("同名のイベントが既に存在します。別の名前を指定してください。");
-        return;
-      }
-
-      setEventLists((prev) => renameRecordKey(prev, eventToRename, newName));
-
-      setEventMetadata((prev) => renameRecordKey(prev, eventToRename, newName));
-
-      setDayModes((prev) => renameRecordKey(prev, eventToRename, newName));
-
-      updateExecuteModeItems((prev) =>
-        renameRecordKey(prev, eventToRename, newName),
-      );
-
-      setMapData((prev) => renameRecordKey(prev, eventToRename, newName));
-      setMapRotationSettings((prev) =>
-        renameRecordKey(prev, eventToRename, newName),
-      );
-
-      setRouteSettings((prev) => renameRecordKey(prev, eventToRename, newName));
-
-      setHallDefinitions((prev) =>
-        renameRecordKey(prev, eventToRename, newName),
-      );
-
-      setHallRouteSettings((prev) =>
-        renameRecordKey(prev, eventToRename, newName),
-      );
-      setMapViewportSettings((prev) =>
-        renameRecordKey(prev, eventToRename, newName),
-      );
-      renameBlockDetectionSettingsForEvent(eventToRename, newName);
-      setFocusModeSessions((prev) =>
-        renameFocusModeSessionKeys(prev, eventToRename, newName),
-      );
-
-      if (activeEventName === eventToRename) {
-        setActiveEventName(newName);
-      }
-
-      setShowRenameDialog(false);
-      setEventToRename(null);
-    },
-    [eventToRename, eventLists, activeEventName],
-  );
+  const {
+    selectEvent: handleSelectEvent,
+    deleteEvent: handleDeleteEvent,
+    requestRename: handleRenameEvent,
+    confirmRename: handleConfirmRename,
+  } = useEventLifecycleCommands({
+    activeEventName,
+    eventToRename,
+    eventLists,
+    navigation: navigationCommands,
+    notify: alert,
+    clearSelection,
+    setSelectedBlockFilters,
+    setPendingEventUpdate,
+    setEventLists,
+    setEventMetadata,
+    updateExecuteModeItems,
+    setDayModes,
+    setMapData,
+    setMapRotationSettings,
+    setRouteSettings,
+    setHallDefinitions,
+    setHallRouteSettings,
+    setMapViewportSettings,
+    setFocusModeSessions,
+    setEventToRename,
+    setShowRenameDialog,
+  });
 
   const handleSortToggle = () => {
     clearSelection();
@@ -1912,21 +1843,24 @@ const App: React.FC = () => {
     setEditDialogItem(item);
   };
 
-  const handleDeleteRequest = useCallback((item: ShoppingItem) => {
-    setItemToDelete(item);
-  }, []);
+  const handleDeleteRequest = useCallback(
+    (item: ShoppingItem) => {
+      setItemToDelete(item);
+    },
+    [setItemToDelete],
+  );
 
   const handleDeleteItemFromMap = useCallback(
     (itemId: string) => {
       const item = items.find((i) => i.id === itemId);
       if (item) setItemToDelete(item);
     },
-    [items],
+    [items, setItemToDelete],
   );
 
   const handleClearNewItemDefaults = useCallback(() => {
     setNewItemDefaults(null);
-  }, []);
+  }, [setNewItemDefaults]);
 
   const handleModeChangeFromFocus = useCallback(
     (mode: "edit" | "execute", lastItemId?: string) =>
@@ -1954,11 +1888,15 @@ const App: React.FC = () => {
   const handleDoneEditing = () => {
     if (itemToEdit?.eventDate) {
       setItemToEdit(null);
-      setActiveTab(itemToEdit.eventDate);
+      if (activeEventName) {
+        navigationCommands.openEvent(activeEventName, itemToEdit.eventDate);
+      } else {
+        navigationCommands.showEventList();
+      }
     } else {
       setItemToEdit(null);
       alert("参加日がないため処理を停止しました。");
-      setActiveTab("eventList");
+      navigationCommands.showEventList();
     }
   };
 
@@ -1986,15 +1924,9 @@ const App: React.FC = () => {
 
   const spaceGroupDragItemIdsRef = useRef<string[] | null>(null);
 
-  const [showPostponeFilterButton, setShowPostponeFilterButton] =
-    useState(false);
-  const [showLateFilterButton, setShowLateFilterButton] = useState(false);
   const executeSpaceGroupOrderRef = useRef<string[]>([]);
   const executeColumnItemsRef = useRef<ShoppingItem[]>([]);
   const recentlyChangedItemIdsRef = useRef<Set<string>>(new Set());
-
-  const [candidateNumberSortDirection, setCandidateNumberSortDirection] =
-    useState<"asc" | "desc" | null>(null);
 
   const handleCandidateNumberSort = useCallback(() => {
     if (!activeEventName) return;
@@ -2091,12 +2023,13 @@ const App: React.FC = () => {
     clearSelection();
   }, [
     activeEventName,
-    activeTab,
+    candidateNumberSortDirection,
+    activeEventDate,
+    setEventLists,
+    setCandidateNumberSortDirection,
+    clearSelection,
     executeModeItems,
     selectedBlockFilters,
-    candidateNumberSortDirection,
-    clearSelection,
-    eventDates,
   ]);
 
   const handleClearSelection = clearSelection;
@@ -2139,7 +2072,7 @@ const App: React.FC = () => {
         setCollapsedSpaces(allGroupKeys);
       }
     },
-    [activeEventDate, clearRangeSelection, items],
+    [activeEventDate, clearRangeSelection, items, setCollapsedSpaces],
   );
 
   const handleExecuteToggleSpaceCollapse = useCallback(
@@ -2180,6 +2113,7 @@ const App: React.FC = () => {
       clearRangeSelection,
       executeModeItems,
       items,
+      setExecuteCollapsedSpaces,
     ],
   );
 
@@ -2253,7 +2187,14 @@ const App: React.FC = () => {
         }
       }
     },
-    [activeEventName, sortState],
+    [
+      activeEventName,
+      setEventLists,
+      setRecentlyChangedItemIds,
+      setShowLateFilterButton,
+      setShowPostponeFilterButton,
+      sortState,
+    ],
   );
 
   const handleExecuteItemUpdate = useCallback(
@@ -2313,20 +2254,25 @@ const App: React.FC = () => {
         if (allVisibleNonNone) setShowLateFilterButton(true);
       }
     },
-    [handleUpdateItem, sortState],
+    [
+      handleUpdateItem,
+      setShowLateFilterButton,
+      setShowPostponeFilterButton,
+      sortState,
+    ],
   );
 
   const handleActivatePostponeFilter = useCallback(() => {
     setRecentlyChangedItemIds(new Set());
     setSortState("Postpone");
     setShowPostponeFilterButton(false);
-  }, []);
+  }, [setRecentlyChangedItemIds, setShowPostponeFilterButton, setSortState]);
 
   const handleActivateLateFilter = useCallback(() => {
     setRecentlyChangedItemIds(new Set());
     setSortState("Late");
     setShowLateFilterButton(false);
-  }, []);
+  }, [setRecentlyChangedItemIds, setShowLateFilterButton, setSortState]);
 
   const handleExecuteSpaceGroupOrderChange = useCallback(
     (orderedGroupKeys: string[]) => {
@@ -2353,7 +2299,7 @@ const App: React.FC = () => {
         return next;
       });
     },
-    [clearRangeSelection],
+    [clearRangeSelection, setExecuteCollapsedSpaces],
   );
 
   const handleSetSpaceGroupDragItemIds = useCallback(
@@ -2524,12 +2470,15 @@ const App: React.FC = () => {
     [
       activeEventName,
       selectedItemIds,
-      items,
-      activeTab,
+      clearRangeSelection,
+      setSortState,
+      setBlockSortDirection,
+      activeEventDate,
       dayModes,
       executeModeItems,
-      eventDates,
-      clearRangeSelection,
+      items,
+      updateExecuteModeItems,
+      setEventLists,
     ],
   );
 
@@ -2543,11 +2492,11 @@ const App: React.FC = () => {
       setExportEventName(eventName);
       setShowExportOptions(true);
     },
-    [eventLists],
+    [eventLists, setExportEventName, setShowExportOptions],
   );
 
   const buildCurrentAppData = useCallback(
-    (): AppData => ({
+    (): PersistenceSnapshot => ({
       eventLists,
       eventMetadata,
       executeModeItems,
@@ -2646,7 +2595,7 @@ const App: React.FC = () => {
         );
       }
     },
-    [],
+    [setPendingBackup, setPendingXlsxRestoreCompletion],
   );
 
   const handleBackupRestore = useCallback(
@@ -2692,7 +2641,8 @@ const App: React.FC = () => {
           runWithBlockDetectionSettingsRestore(
             targetEventName,
             restoredBlockDetectionSettings,
-            () => db.restoreAppDataAtomically(nextData),
+            () =>
+              appRuntime.persistenceCommands.restoreAppDataAtomically(nextData),
           ),
         );
       } catch (error) {
@@ -2721,9 +2671,12 @@ const App: React.FC = () => {
       const restoredItems = nextData.eventLists[
         targetEventName
       ] as ShoppingItem[];
-      setActiveEventName(targetEventName);
-      setActiveTab(resolveEventListTab(restoredItems) ?? "eventList");
-      setMapViewActive(false);
+      const restoredTab = resolveEventListTab(restoredItems);
+      if (restoredTab) {
+        navigationCommands.openEvent(targetEventName, restoredTab);
+      } else {
+        navigationCommands.showEventList();
+      }
       clearSelection();
       setPendingBackup(null);
       setPendingXlsxRestoreCompletion(null);
@@ -2740,12 +2693,17 @@ const App: React.FC = () => {
       }
     },
     [
-      buildCurrentAppData,
-      clearSelection,
       pendingBackup,
+      buildCurrentAppData,
+      setEventLists,
+      setEventMetadata,
+      setExecuteModeItemsCommitted,
+      clearSelection,
+      setPendingBackup,
+      setPendingXlsxRestoreCompletion,
       pendingXlsxRestoreCompletion,
       runExclusiveRestore,
-      setExecuteModeItemsCommitted,
+      navigationCommands,
     ],
   );
 
@@ -2758,8 +2716,13 @@ const App: React.FC = () => {
         return;
       }
 
+      xlsxOperationRef.current?.abort();
+      const controller = new AbortController();
+      xlsxOperationRef.current = controller;
       try {
-        const { blob, filename } = await buildEventExportFile(
+        const { bytes, filename } = await buildEventExportFile(
+          appRuntime.xlsxCommands,
+          controller.signal,
           exportEventName,
           itemsToExport,
           options,
@@ -2779,19 +2742,26 @@ const App: React.FC = () => {
                 : {},
           },
         );
-
-        downloadBlob(blob, filename);
-      } catch {
+        if (controller.signal.aborted) return;
+        appRuntime.downloadXlsx(bytes, filename);
+      } catch (error) {
+        if (isAbortError(error)) return;
         console.error("Item export failed (item-export-failed).");
         alert("アイテムの出力に失敗しました。");
+      } finally {
+        if (xlsxOperationRef.current === controller) {
+          xlsxOperationRef.current = null;
+        }
       }
 
       setExportEventName(null);
     },
     [
+      exportEventName,
       eventLists,
-      executeModeItems,
+      setExportEventName,
       eventMetadata,
+      executeModeItems,
       dayModes,
       mapData,
       mapRotationSettings,
@@ -2799,7 +2769,6 @@ const App: React.FC = () => {
       routeSettings,
       hallDefinitions,
       hallRouteSettings,
-      exportEventName,
     ],
   );
 
@@ -2811,8 +2780,20 @@ const App: React.FC = () => {
       e.target.value = "";
       setPendingXlsxRestoreCompletion(null);
 
+      xlsxOperationRef.current?.abort();
+      const controller = new AbortController();
+      xlsxOperationRef.current = controller;
       try {
-        const result = await importFromXlsx(file);
+        const input = await file.arrayBuffer();
+        if (controller.signal.aborted) return;
+        const response = await appRuntime.xlsxCommands.importWorkbook(
+          { kind: "event-import", input, fileName: file.name },
+          controller.signal,
+        );
+        if (response.kind !== "event-import") {
+          throw new Error("XLSX Worker returned an unexpected result kind.");
+        }
+        const result = response.value;
 
         if (!result.success) {
           alert(`インポートに失敗しました:\n${result.errors.join("\n")}`);
@@ -2824,7 +2805,7 @@ const App: React.FC = () => {
         const BULK_APPROVAL_THRESHOLD = 6;
 
         const describeFallbackWarning = (
-          warning: ItemFallbackWarning,
+          warning: AppItemFallbackWarning,
         ): string =>
           `${warning.rowNumber}行目\n${warning.reasons.map((reason) => `- ${reason}`).join("\n")}`;
 
@@ -2926,14 +2907,19 @@ const App: React.FC = () => {
           itemCount: importedData.items.length,
         });
         setPendingBackup(validation.backup);
-      } catch {
+      } catch (error) {
+        if (isAbortError(error)) return;
         console.error("Item import failed (item-import-failed).");
         alert(
           "アイテムの取り込みに失敗しました。ファイル形式を確認してください。",
         );
+      } finally {
+        if (xlsxOperationRef.current === controller) {
+          xlsxOperationRef.current = null;
+        }
       }
     },
-    [],
+    [setPendingBackup, setPendingXlsxRestoreCompletion],
   );
 
   const previewEventUpdate = useCallback(
@@ -2983,7 +2969,7 @@ const App: React.FC = () => {
         onError,
       });
     },
-    [eventLists],
+    [eventLists, eventListsRef, setPendingEventUpdate],
   );
 
   const handleUpdateEvent = useCallback(
@@ -3007,7 +2993,12 @@ const App: React.FC = () => {
         },
       });
     },
-    [eventMetadata, previewEventUpdate],
+    [
+      eventMetadata,
+      previewEventUpdate,
+      setPendingUpdateEventName,
+      setShowUrlUpdateDialog,
+    ],
   );
 
   const handleDuplicateEventResolution = useCallback(
@@ -3079,17 +3070,24 @@ const App: React.FC = () => {
         },
       });
     },
-    [applyBulkAdd, pendingDuplicateEvent, previewEventUpdate],
+    [
+      applyBulkAdd,
+      pendingDuplicateEvent,
+      previewEventUpdate,
+      setPendingDuplicateEvent,
+      setPendingUpdateEventName,
+      setShowUrlUpdateDialog,
+    ],
   );
 
   const handleDuplicateEventCancel = useCallback(() => {
     eventUpdatePreviewEpochRef.current += 1;
     setPendingDuplicateEvent(null);
-  }, []);
+  }, [setPendingDuplicateEvent]);
 
   const handleCancelUpdate = useCallback(() => {
     setPendingEventUpdate(null);
-  }, []);
+  }, [setPendingEventUpdate]);
 
   const handleConfirmUpdate = useCallback(
     (options: EventUpdateApplyOptions) => {
@@ -3125,7 +3123,11 @@ const App: React.FC = () => {
       commitEventLists,
       commitEventMetadata,
       commitExecuteModeItems,
+      eventListsRef,
+      eventMetadataRef,
+      executeModeItemsRef,
       pendingEventUpdate,
+      setPendingEventUpdate,
     ],
   );
 
@@ -3154,7 +3156,13 @@ const App: React.FC = () => {
         },
       });
     },
-    [pendingUpdateEventName, eventMetadata, previewEventUpdate],
+    [
+      setShowUrlUpdateDialog,
+      pendingUpdateEventName,
+      eventMetadata,
+      setPendingUpdateEventName,
+      previewEventUpdate,
+    ],
   );
 
   const handleImportMapData = useCallback(async (eventName: string) => {
@@ -3177,7 +3185,11 @@ const App: React.FC = () => {
 
       e.target.value = "";
     },
-    [],
+    [
+      setMapImportDialogOpen,
+      setMapImportPendingEventName,
+      setMapImportPendingFile,
+    ],
   );
 
   const commitPreparedMapImport = useCallback(
@@ -3205,8 +3217,11 @@ const App: React.FC = () => {
           setMapViewportSettings,
           saveBlockDetectionSettings,
           activateTarget: (eventName, mapTabName) => {
-            setActiveEventName(eventName);
-            setActiveTab(mapTabName);
+            navigationCommands.openEvent(
+              eventName,
+              mapTabName,
+              mapViewActive ? "map" : "list",
+            );
           },
           finishImport: () => {
             setPendingMapReimport(null);
@@ -3221,13 +3236,19 @@ const App: React.FC = () => {
     [
       eventLists,
       executeModeItems,
-      hallDefinitions,
-      hallRouteSettings,
       mapData,
       mapRotationSettings,
-      mapViewportSettings,
       routeSettings,
+      hallDefinitions,
+      hallRouteSettings,
+      mapViewportSettings,
       setEventLists,
+      navigationCommands,
+      mapViewActive,
+      setPendingMapReimport,
+      setMapImportDialogOpen,
+      setMapImportPendingFile,
+      setMapImportPendingEventName,
     ],
   );
 
@@ -3329,6 +3350,10 @@ const App: React.FC = () => {
       mapRotationSettings,
       mapViewportSettings,
       routeSettings,
+      setMapImportDialogOpen,
+      setMapImportPendingEventName,
+      setMapImportPendingFile,
+      setPendingMapReimport,
     ],
   );
 
@@ -3346,13 +3371,21 @@ const App: React.FC = () => {
       clearPendingFile: () => setMapImportPendingFile(null),
       clearPendingEventName: () => setMapImportPendingEventName(""),
     });
-  }, []);
+  }, [
+    setMapImportPendingEventName,
+    setMapImportPendingFile,
+    setPendingMapReimport,
+  ]);
 
   const handleMapImportClose = useCallback(() => {
     setMapImportDialogOpen(false);
     setMapImportPendingFile(null);
     setMapImportPendingEventName("");
-  }, []);
+  }, [
+    setMapImportDialogOpen,
+    setMapImportPendingEventName,
+    setMapImportPendingFile,
+  ]);
 
   const handleAddToExecuteListFromMap = useCallback(
     (itemId: string) => {
@@ -3392,13 +3425,14 @@ const App: React.FC = () => {
     },
     [
       activeEventName,
-      activeEventDate,
-      currentMapTabName,
       isMapTab,
-      items,
+      currentMapTabName,
+      activeEventDate,
       hallDefinitions,
       hallRouteSettings,
       mapData,
+      executeModeItemsRef,
+      items,
       commitExecuteModeItemsForEvent,
     ],
   );
@@ -3429,11 +3463,12 @@ const App: React.FC = () => {
     },
     [
       activeEventName,
-      activeEventDate,
       isMapTab,
+      activeEventDate,
+      executeModeItemsRef,
       items,
-      areItemsInSameHallGroup,
       commitExecuteModeItemsForEvent,
+      areItemsInSameHallGroup,
     ],
   );
 
@@ -3456,8 +3491,9 @@ const App: React.FC = () => {
     },
     [
       activeEventName,
-      activeEventDate,
       isMapTab,
+      activeEventDate,
+      executeModeItemsRef,
       items,
       commitExecuteModeItemsForEvent,
     ],
@@ -3506,14 +3542,15 @@ const App: React.FC = () => {
     },
     [
       activeEventName,
-      activeEventDate,
-      currentMapTabName,
       isMapTab,
-      items,
+      currentMapTabName,
+      activeEventDate,
       hallDefinitions,
       hallRouteSettings,
       mapData,
+      executeModeItemsRef,
       commitExecuteModeItemsForEvent,
+      items,
     ],
   );
 
@@ -3545,11 +3582,12 @@ const App: React.FC = () => {
     },
     [
       activeEventName,
-      activeEventDate,
       isMapTab,
+      activeEventDate,
+      executeModeItemsRef,
       items,
-      areItemsInSameHallGroup,
       commitExecuteModeItemsForEvent,
+      areItemsInSameHallGroup,
     ],
   );
 
@@ -3571,8 +3609,9 @@ const App: React.FC = () => {
     },
     [
       activeEventName,
-      activeEventDate,
       isMapTab,
+      activeEventDate,
+      executeModeItemsRef,
       items,
       commitExecuteModeItemsForEvent,
     ],
@@ -3582,9 +3621,9 @@ const App: React.FC = () => {
     (eventDate: string, block: string, number: string) => {
       setNewItemDefaults({ eventDate, block, number });
       setItemToEdit(null);
-      setActiveTab("import");
+      navigationCommands.showImport(activeEventName);
     },
-    [],
+    [activeEventName, navigationCommands, setItemToEdit, setNewItemDefaults],
   );
 
   const handleAddItemFromFocusMode = useCallback(
@@ -3605,7 +3644,13 @@ const App: React.FC = () => {
         [activeEventName]: result.executeModeItems,
       }));
     },
-    [activeEventName, eventLists, executeModeItems],
+    [
+      activeEventName,
+      eventLists,
+      executeModeItemsRef,
+      setEventLists,
+      updateExecuteModeItems,
+    ],
   );
 
   const handleMoveToFirstFromMap = useCallback(
@@ -3630,7 +3675,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeEventDate, isMapTab],
+    [activeEventName, activeEventDate, isMapTab, updateExecuteModeItems],
   );
 
   const handleMoveToLastFromMap = useCallback(
@@ -3655,7 +3700,7 @@ const App: React.FC = () => {
         };
       });
     },
-    [activeEventName, activeEventDate, isMapTab],
+    [activeEventName, activeEventDate, isMapTab, updateExecuteModeItems],
   );
 
   const currentMapExecuteItemIds = useMemo(() => {
@@ -3671,15 +3716,6 @@ const App: React.FC = () => {
     return items.filter((item) => item.eventDate === activeTab);
   }, [items, activeTab, activeEventName, eventDates]);
 
-  const [mapTabMenuOpen, setMapTabMenuOpen] = useState<string | null>(null);
-  const [mapTabMenuPosition, setMapTabMenuPosition] = useState<{
-    left: number;
-    top: number;
-  }>({
-    left: 0,
-    top: 0,
-  });
-
   React.useEffect(() => {
     if (mapTabMenuOpen !== "mapToggle") return;
     const handleClickOutside = (e: MouseEvent) => {
@@ -3694,109 +3730,12 @@ const App: React.FC = () => {
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [mapTabMenuOpen]);
+  }, [mapTabMenuOpen, setMapTabMenuOpen]);
 
-  const [visitListPanelOpen, setVisitListPanelOpen] = useState(false);
-  const [visitListPanelMapTab, setVisitListPanelMapTab] = useState<
-    string | null
-  >(null);
-  const [visitListHasUnsavedChanges, setVisitListHasUnsavedChanges] =
-    useState(false);
-  const [visitListOriginalOrder, setVisitListOriginalOrder] = useState<
-    string[]
-  >([]);
-  const [highlightedMapCell, setHighlightedMapCell] = useState<{
-    row: number;
-    col: number;
-  } | null>(null);
-  const [showVisitListConfirmDialog, setShowVisitListConfirmDialog] =
-    useState(false);
-  const [pendingTabChange, setPendingTabChange] = useState<string | null>(null);
-  const [blockDefinitionMode, setBlockDefinitionMode] = useState(false);
-
-  const [mapSelectedHallId, setMapSelectedHallId] = useState<string>("all");
-  const [mapIsRouteVisible, setMapIsRouteVisible] = useState(true);
-  const [mapIsHallOrderOpen, setMapIsHallOrderOpen] = useState(false);
-  const [mapHallSelectorOpen, setMapHallSelectorOpen] = useState(false);
-  const [mapSmartInsertEnabled, setMapSmartInsertEnabled] = useState<boolean>(
-    () => {
-      try {
-        const saved = localStorage.getItem("mapSmartInsertEnabled");
-        return saved !== null ? saved === "true" : true;
-      } catch {
-        return true;
-      }
-    },
-  );
-  const [mapSmartInsertMode, setMapSmartInsertMode] = useState<SmartInsertMode>(
-    () => {
-      try {
-        return normalizeSmartInsertMode(
-          localStorage.getItem("mapSmartInsertMode"),
-        );
-      } catch {
-        return "map";
-      }
-    },
-  );
-  const [smartInsertToast, setSmartInsertToast] = useState<string | null>(null);
-  const [smartInsertToastType, setSmartInsertToastType] = useState<
-    "success" | "error"
-  >("success");
   const smartInsertLongPressRef = React.useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
   const smartInsertLongPressTriggeredRef = React.useRef(false);
-
-  const showSmartInsertToast = useCallback(
-    (message: string, type: "success" | "error" = "success") => {
-      setSmartInsertToastType(type);
-      setSmartInsertToast(message);
-    },
-    [],
-  );
-
-  React.useEffect(() => {
-    try {
-      localStorage.setItem(
-        "mapSmartInsertEnabled",
-        String(mapSmartInsertEnabled),
-      );
-    } catch {
-      console.error(
-        "Smart insert preference save failed (preference-save-failed).",
-      );
-      showSmartInsertToast("スマート挿入設定の保存に失敗しました。", "error");
-    }
-  }, [mapSmartInsertEnabled, showSmartInsertToast]);
-
-  React.useEffect(() => {
-    try {
-      localStorage.setItem("mapSmartInsertMode", mapSmartInsertMode);
-    } catch {
-      console.error("Smart insert mode save failed (preference-save-failed).");
-      showSmartInsertToast("スマート挿入モードの保存に失敗しました。", "error");
-    }
-  }, [mapSmartInsertMode, showSmartInsertToast]);
-
-  React.useEffect(() => {
-    if (smartInsertToast) {
-      const timer = setTimeout(() => setSmartInsertToast(null), 2000);
-      return () => clearTimeout(timer);
-    }
-  }, [smartInsertToast]);
-
-  const [cellSelectionMode, setCellSelectionMode] = useState<{
-    type: "corner" | "multiCorner" | "rangeStart" | "individual";
-    clickedCells: { row: number; col: number }[];
-    editingBlockData?: unknown;
-  } | null>(null);
-
-  const [pendingCellSelection, setPendingCellSelection] = useState<{
-    type: string;
-    cells: { row: number; col: number }[];
-    editingData?: unknown;
-  } | null>(null);
 
   const openVisitListPanel = useCallback(
     (mapTab: string) => {
@@ -3813,7 +3752,14 @@ const App: React.FC = () => {
       setVisitListHasUnsavedChanges(false);
       setVisitListPanelOpen(true);
     },
-    [activeEventName, executeModeItems],
+    [
+      activeEventName,
+      executeModeItems,
+      setVisitListHasUnsavedChanges,
+      setVisitListOriginalOrder,
+      setVisitListPanelMapTab,
+      setVisitListPanelOpen,
+    ],
   );
 
   React.useEffect(() => {
@@ -3843,6 +3789,10 @@ const App: React.FC = () => {
     visitListPanelMapTab,
     visitListHasUnsavedChanges,
     executeModeItems,
+    activeEventDate,
+    setVisitListOriginalOrder,
+    setVisitListPanelMapTab,
+    setVisitListHasUnsavedChanges,
   ]);
 
   const handleVisitListOrderUpdate = useCallback(
@@ -3864,13 +3814,18 @@ const App: React.FC = () => {
       }));
       setVisitListHasUnsavedChanges(true);
     },
-    [visitListPanelMapTab, activeEventName],
+    [
+      visitListPanelMapTab,
+      activeEventName,
+      updateExecuteModeItems,
+      setVisitListHasUnsavedChanges,
+    ],
   );
 
   const handleVisitListConfirm = useCallback(() => {
     setVisitListHasUnsavedChanges(false);
     setVisitListOriginalOrder([]);
-  }, []);
+  }, [setVisitListHasUnsavedChanges, setVisitListOriginalOrder]);
 
   const handleVisitListCancel = useCallback(() => {
     if (!visitListPanelMapTab || !activeEventName) return;
@@ -3890,19 +3845,29 @@ const App: React.FC = () => {
     }
     setVisitListHasUnsavedChanges(false);
     setVisitListOriginalOrder([]);
-  }, [visitListOriginalOrder, visitListPanelMapTab, activeEventName]);
+  }, [
+    visitListPanelMapTab,
+    activeEventName,
+    visitListOriginalOrder,
+    setVisitListHasUnsavedChanges,
+    setVisitListOriginalOrder,
+    updateExecuteModeItems,
+  ]);
 
   const handleVisitListClose = useCallback(() => {
     setVisitListPanelOpen(false);
-  }, []);
+  }, [setVisitListPanelOpen]);
 
-  const handleHighlightMapCell = useCallback((row: number, col: number) => {
-    setHighlightedMapCell({ row, col });
-  }, []);
+  const handleHighlightMapCell = useCallback(
+    (row: number, col: number) => {
+      setHighlightedMapCell({ row, col });
+    },
+    [setHighlightedMapCell],
+  );
 
   const handleClearMapCellHighlight = useCallback(() => {
     setHighlightedMapCell(null);
-  }, []);
+  }, [setHighlightedMapCell]);
 
   const visitListItems = useMemo(() => {
     if (!visitListPanelMapTab || !activeEventName) return [];
@@ -3997,6 +3962,8 @@ const App: React.FC = () => {
       hallDefinitions,
       mapData,
       hallRouteSettings,
+      setEventLists,
+      updateExecuteModeItems,
     ],
   );
 
@@ -4074,6 +4041,8 @@ const App: React.FC = () => {
       hallRouteSettings,
       getItemHallId,
       getMapTabForDate,
+      setEventLists,
+      updateExecuteModeItems,
     ],
   );
 
@@ -4160,37 +4129,43 @@ const App: React.FC = () => {
       hallRouteSettings,
       getItemHallId,
       getMapTabForDate,
+      updateExecuteModeItems,
     ],
   );
-
-  const handleTabChangeWithVisitListCheck = (newTab: string): boolean => {
-    if (visitListPanelOpen && visitListHasUnsavedChanges) {
-      setPendingTabChange(newTab);
-      setShowVisitListConfirmDialog(true);
-      return false;
-    }
-    return true;
-  };
 
   const handleVisitListDialogConfirm = useCallback(() => {
     handleVisitListConfirm();
     setShowVisitListConfirmDialog(false);
     setVisitListPanelOpen(false);
     if (pendingTabChange) {
-      setActiveTab(pendingTabChange as ActiveTab);
+      navigateToTab(pendingTabChange);
       setPendingTabChange(null);
     }
-  }, [handleVisitListConfirm, pendingTabChange]);
+  }, [
+    handleVisitListConfirm,
+    navigateToTab,
+    pendingTabChange,
+    setPendingTabChange,
+    setShowVisitListConfirmDialog,
+    setVisitListPanelOpen,
+  ]);
 
   const handleVisitListDialogCancel = useCallback(() => {
     handleVisitListCancel();
     setShowVisitListConfirmDialog(false);
     setVisitListPanelOpen(false);
     if (pendingTabChange) {
-      setActiveTab(pendingTabChange as ActiveTab);
+      navigateToTab(pendingTabChange);
       setPendingTabChange(null);
     }
-  }, [handleVisitListCancel, pendingTabChange]);
+  }, [
+    handleVisitListCancel,
+    navigateToTab,
+    pendingTabChange,
+    setPendingTabChange,
+    setShowVisitListConfirmDialog,
+    setVisitListPanelOpen,
+  ]);
 
   const handleUpdateBlocks = useCallback(
     (blocks: BlockDefinition[]) => {
@@ -4337,7 +4312,7 @@ const App: React.FC = () => {
         return updated;
       });
     },
-    [activeEventName, activeEventDate, hallDefinitions, hallRouteSettings],
+    [activeEventName, activeEventDate, hallDefinitions],
   );
 
   const handleSyncPolygonHallsToOtherDates = useCallback(
@@ -4394,7 +4369,6 @@ const App: React.FC = () => {
       isMapTab,
       currentMapTabName,
       hallDefinitions,
-      hallRouteSettings,
       getMapTabForDate,
     ],
   );
@@ -4580,29 +4554,17 @@ const App: React.FC = () => {
       hallDefinitions,
       hallRouteSettings,
       items,
+      updateExecuteModeItems,
     ],
   );
 
-  const [hallDefinitionMode, setHallDefinitionMode] = useState(false);
-
-  const [vertexSelectionMode, setVertexSelectionMode] = useState<{
-    clickedVertices: { row: number; col: number }[];
-    editingData?: unknown;
-  } | null>(null);
-
-  const [pendingVertexSelection, setPendingVertexSelection] = useState<{
-    vertices: { row: number; col: number }[];
-    editingData?: unknown;
-  } | null>(null);
-  const [vertexGuideOptions, setVertexGuideOptions] = useState({
-    showGrid: true,
-    showRuler: true,
-  });
-
-  const handleStartVertexSelection = useCallback((editingData?: unknown) => {
-    setVertexSelectionMode({ clickedVertices: [], editingData });
-    setHallDefinitionMode(false);
-  }, []);
+  const handleStartVertexSelection = useCallback(
+    (editingData?: unknown) => {
+      setVertexSelectionMode({ clickedVertices: [], editingData });
+      setHallDefinitionMode(false);
+    },
+    [setHallDefinitionMode, setVertexSelectionMode],
+  );
 
   const sortVerticesNonCrossing = useCallback(
     (
@@ -4638,7 +4600,13 @@ const App: React.FC = () => {
     }
     setVertexSelectionMode(null);
     setHallDefinitionMode(true);
-  }, [sortVerticesNonCrossing, vertexSelectionMode]);
+  }, [
+    setHallDefinitionMode,
+    setPendingVertexSelection,
+    setVertexSelectionMode,
+    sortVerticesNonCrossing,
+    vertexSelectionMode,
+  ]);
 
   const handleCancelVertexSelection = useCallback(() => {
     if (vertexSelectionMode?.editingData) {
@@ -4649,7 +4617,12 @@ const App: React.FC = () => {
     }
     setVertexSelectionMode(null);
     setHallDefinitionMode(true);
-  }, [vertexSelectionMode]);
+  }, [
+    setHallDefinitionMode,
+    setPendingVertexSelection,
+    setVertexSelectionMode,
+    vertexSelectionMode?.editingData,
+  ]);
 
   useEffect(() => {
     const handleMapCellClickForVertex = (
@@ -4695,7 +4668,7 @@ const App: React.FC = () => {
         handleMapCellClickForVertex as EventListener,
       );
     };
-  }, [vertexSelectionMode]);
+  }, [setVertexSelectionMode, vertexSelectionMode]);
 
   const handleStartCellSelection = useCallback(
     (
@@ -4709,7 +4682,7 @@ const App: React.FC = () => {
       });
       setBlockDefinitionMode(false);
     },
-    [],
+    [setBlockDefinitionMode, setCellSelectionMode],
   );
 
   const handleConfirmCellSelection = useCallback(() => {
@@ -4722,7 +4695,12 @@ const App: React.FC = () => {
     }
     setCellSelectionMode(null);
     setBlockDefinitionMode(true);
-  }, [cellSelectionMode]);
+  }, [
+    cellSelectionMode,
+    setBlockDefinitionMode,
+    setCellSelectionMode,
+    setPendingCellSelection,
+  ]);
 
   const handleCancelCellSelection = useCallback(() => {
     if (cellSelectionMode?.editingBlockData) {
@@ -4734,7 +4712,12 @@ const App: React.FC = () => {
     }
     setCellSelectionMode(null);
     setBlockDefinitionMode(true);
-  }, [cellSelectionMode]);
+  }, [
+    cellSelectionMode?.editingBlockData,
+    setBlockDefinitionMode,
+    setCellSelectionMode,
+    setPendingCellSelection,
+  ]);
 
   useEffect(() => {
     const handleMapCellClick = (
@@ -4775,7 +4758,7 @@ const App: React.FC = () => {
         "mapCellClick",
         handleMapCellClick as EventListener,
       );
-  }, [cellSelectionMode]);
+  }, [cellSelectionMode, setCellSelectionMode]);
 
   const TabButton: React.FC<{
     tab: ActiveTab;
@@ -4815,7 +4798,7 @@ const App: React.FC = () => {
         setSelectedBlockFilters(new Set());
         setCandidateNumberSortDirection(null);
         setCollapsedSpaces(new Set());
-        setActiveTab(tab);
+        navigateToTab(tab);
       }
     };
 
@@ -4850,7 +4833,7 @@ const App: React.FC = () => {
     return executeIds
       .map((id) => itemsMap.get(id))
       .filter(Boolean) as ShoppingItem[];
-  }, [activeEventName, activeTab, executeModeItems, items, eventDates]);
+  }, [activeEventDate, activeEventName, executeModeItems, items]);
 
   useEffect(() => {
     executeColumnItemsRef.current = executeColumnItems;
@@ -4863,7 +4846,12 @@ const App: React.FC = () => {
   useEffect(() => {
     setShowPostponeFilterButton(false);
     setShowLateFilterButton(false);
-  }, [currentMode, sortState]);
+  }, [
+    currentMode,
+    setShowLateFilterButton,
+    setShowPostponeFilterButton,
+    sortState,
+  ]);
 
   const baseFilteredItems = useMemo(() => {
     const currentEventDate = activeEventDate;
@@ -4885,13 +4873,12 @@ const App: React.FC = () => {
 
     return itemsForTab;
   }, [
-    activeTab,
+    activeEventDate,
     currentTabItems,
     sortState,
     activeEventName,
     dayModes,
     executeColumnItems,
-    eventDates,
   ]);
 
   const baseFilteredItemIds = useMemo(
@@ -5030,12 +5017,17 @@ const App: React.FC = () => {
       setCurrentSearchIndex(-1);
       setHighlightedItemId(null);
     }
-  }, [searchKeyword, searchMatches]);
+  }, [
+    searchKeyword,
+    searchMatches,
+    setCurrentSearchIndex,
+    setHighlightedItemId,
+  ]);
 
   useEffect(() => {
     setCurrentSearchIndex(-1);
     setHighlightedItemId(null);
-  }, [activeTab]);
+  }, [activeTab, setCurrentSearchIndex, setHighlightedItemId]);
 
   const duplicateCircleItemIds = useMemo(() => {
     if (!activeEventName || !eventDates.includes(activeTab))
@@ -5088,13 +5080,7 @@ const App: React.FC = () => {
       }
       return a.localeCompare(b, "ja", { numeric: true, sensitivity: "base" });
     });
-  }, [
-    activeEventName,
-    activeTab,
-    executeModeItems,
-    currentTabItems,
-    eventDates,
-  ]);
+  }, [activeEventDate, activeEventName, executeModeItems, currentTabItems]);
 
   const allBlocksForHallDefinition = useMemo(() => {
     if (!activeEventName) return [];
@@ -5149,12 +5135,11 @@ const App: React.FC = () => {
       });
     });
   }, [
+    activeEventDate,
     activeEventName,
-    activeTab,
     executeModeItems,
     currentTabItems,
     selectedBlockFilters,
-    eventDates,
     candidateNumberSortDirection,
   ]);
 
@@ -5181,9 +5166,8 @@ const App: React.FC = () => {
     return searchMatches.filter((id) => visibleItemIds.has(id));
   }, [
     searchMatches,
+    activeEventDate,
     activeEventName,
-    activeTab,
-    eventDates,
     dayModes,
     visibleItems,
     executeColumnItems,
@@ -5211,7 +5195,14 @@ const App: React.FC = () => {
         element.scrollIntoView({ behavior: "smooth", block: "center" });
       }
     }, 100);
-  }, [searchKeyword, visibleSearchMatches, currentSearchIndex, searchMatches]);
+  }, [
+    searchKeyword,
+    visibleSearchMatches,
+    currentSearchIndex,
+    setCurrentSearchIndex,
+    setHighlightedItemId,
+    searchMatches.length,
+  ]);
 
   const blocksWithPriorityRemarks = useMemo(() => {
     if (!activeEventName) return new Set<string>();
@@ -5234,13 +5225,7 @@ const App: React.FC = () => {
     });
 
     return blocksWithPriority;
-  }, [
-    activeEventName,
-    activeTab,
-    executeModeItems,
-    currentTabItems,
-    eventDates,
-  ]);
+  }, [activeEventDate, activeEventName, executeModeItems, currentTabItems]);
 
   const currentExecuteOrderedIds = useMemo(
     () =>
@@ -5403,8 +5388,9 @@ const App: React.FC = () => {
         purchaseStatusControlMode={purchaseStatusControlMode}
         searchKeyword={searchKeyword}
         selectedItemIds={selectedItemIds}
-        setActiveEventName={setActiveEventName}
-        setActiveTab={setActiveTab}
+        onShowEventList={navigationCommands.showEventList}
+        onShowImport={navigationCommands.showImport}
+        onToggleEventSurface={navigationCommands.toggleEventSurface}
         setBlockDefinitionMode={setBlockDefinitionMode}
         setExecuteCollapsedSpaces={setExecuteCollapsedSpaces}
         setExecuteSpaceGroupingEnabled={setExecuteSpaceGroupingEnabled}
@@ -5420,7 +5406,6 @@ const App: React.FC = () => {
         setMapSmartInsertMode={setMapSmartInsertMode}
         setMapTabMenuOpen={setMapTabMenuOpen}
         setMapTabMenuPosition={setMapTabMenuPosition}
-        setMapViewActive={setMapViewActive}
         setDisablePriceUndefinedCheck={setDisablePriceUndefinedCheck}
         setDisableLimitedPurchaseQuantityCheck={
           setDisableLimitedPurchaseQuantityCheck
@@ -5466,7 +5451,7 @@ const App: React.FC = () => {
               closeUiSettingsPanel({ resetVisibilityOverride: false });
               setUiVisibilityOverride((prev) => !prev);
             }}
-            className={`fixed z-[110] flex h-10 w-10 touch-manipulation select-none items-center justify-center rounded-full shadow-lg transition-all ${
+            className={`fixed z-[110] flex h-10 w-10 touch-manipulation select-none items-center justify-center rounded-full shadow-lg transition-all [-webkit-tap-highlight-color:transparent] ${
               layoutMode === "smartphone" &&
               currentMode === "focus" &&
               focusModeMapVisible
@@ -5483,7 +5468,6 @@ const App: React.FC = () => {
             aria-label={
               uiVisibilityOverride ? "自動表示に戻す" : "画面要素をすべて表示"
             }
-            style={{ WebkitTapHighlightColor: "transparent" }}
             type="button"
           >
             {uiVisibilityOverride ? (
@@ -5690,8 +5674,7 @@ const App: React.FC = () => {
         handleUrlUpdate={handleUrlUpdate}
         setShowUrlUpdateDialog={setShowUrlUpdateDialog}
         setPendingUpdateEventName={setPendingUpdateEventName}
-        setActiveEventName={setActiveEventName}
-        setActiveTab={setActiveTab}
+        onShowEventList={navigationCommands.showEventList}
         showRenameDialog={showRenameDialog}
         eventToRename={eventToRename}
         handleConfirmRename={handleConfirmRename}
@@ -5768,6 +5751,7 @@ const App: React.FC = () => {
         mapImportPendingEventName={mapImportPendingEventName}
         handleMapImportConfirm={handleMapImportConfirm}
         handleMapImportClose={handleMapImportClose}
+        xlsxExecutionPort={appRuntime.xlsxCommands}
         exportFileInputRef={exportFileInputRef}
         handleExportFileImport={handleExportFileImport}
         activeEventName={activeEventName}

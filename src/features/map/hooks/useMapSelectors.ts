@@ -44,7 +44,6 @@ type UseMapSelectorsResult = {
 
 export function useMapSelectors({
   activeEventName,
-  activeTab,
   activeEventDate,
   mapViewActive,
   mapData,

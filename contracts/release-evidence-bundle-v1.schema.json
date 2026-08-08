@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:event-shopping-planner:release-evidence-bundle:v1",
+  "title": "ReleaseEvidenceBundle v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "kind": {
+      "const": "release-evidence-bundle/v1"
+    },
+    "stage": {
+      "enum": [
+        "pre-promotion",
+        "post-assignment-validation",
+        "incident-activation",
+        "acceptance-final"
+      ]
+    },
+    "sourceSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "releaseRole": {
+      "enum": ["standard", "containment"]
+    },
+    "v1Evidence": {
+      "$ref": "#/$defs/immutableRef"
+    },
+    "packageIndex": {
+      "$ref": "#/$defs/immutableRef"
+    },
+    "artifactManifest": {
+      "$ref": "#/$defs/immutableRef"
+    },
+    "providerDeploymentEvidence": {
+      "$ref": "#/$defs/immutableRef"
+    },
+    "providerAssignmentEvidence": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/immutableRef"
+        }
+      ]
+    },
+    "dbCompatibilityContract": {
+      "$ref": "#/$defs/immutableRef"
+    },
+    "releasePolicy": {
+      "$ref": "#/$defs/immutableRef"
+    },
+    "providerPolicy": {
+      "$ref": "#/$defs/immutableRef"
+    },
+    "releaseStateEvent": {
+      "$ref": "#/$defs/immutableRef"
+    },
+    "approvals": {
+      "type": "array",
+      "minItems": 0,
+      "maxItems": 3,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/immutableRef"
+      }
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "kind",
+    "stage",
+    "sourceSha",
+    "releaseRole",
+    "v1Evidence",
+    "packageIndex",
+    "artifactManifest",
+    "providerDeploymentEvidence",
+    "providerAssignmentEvidence",
+    "dbCompatibilityContract",
+    "releasePolicy",
+    "providerPolicy",
+    "releaseStateEvent",
+    "approvals"
+  ],
+  "$defs": {
+    "immutableRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "pattern": "^release-state://[a-z0-9][a-z0-9-]{2,62}/(?:evidence|events/[1-9][0-9]*)/[0-9a-f]{64}$"
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "required": ["uri", "sha256"]
+    }
+  }
+}

@@ -5,6 +5,7 @@ import { acquireBodyScrollLock } from "./bodyScrollLock";
 
 describe("bodyScrollLock", () => {
   afterEach(() => {
+    document.body.className = "";
     document.body.style.overflow = "";
     document.body.style.overscrollBehavior = "";
     document.body.style.touchAction = "";
@@ -19,14 +20,24 @@ describe("bodyScrollLock", () => {
       lockOverscroll: true,
     });
 
-    expect(document.body.style.overflow).toBe("hidden");
-    expect(document.body.style.overscrollBehavior).toBe("none");
+    expect(document.body).toHaveClass(
+      "esp-body-scroll-lock",
+      "esp-body-overscroll-lock",
+    );
+    expect(document.body.style.overflow).toBe("auto");
+    expect(document.body.style.overscrollBehavior).toBe("contain");
 
     releaseDragLock();
-    expect(document.body.style.overflow).toBe("hidden");
-    expect(document.body.style.overscrollBehavior).toBe("none");
+    expect(document.body).toHaveClass(
+      "esp-body-scroll-lock",
+      "esp-body-overscroll-lock",
+    );
 
     releaseNavigatorLock();
+    expect(document.body).not.toHaveClass(
+      "esp-body-scroll-lock",
+      "esp-body-overscroll-lock",
+    );
     expect(document.body.style.overflow).toBe("auto");
     expect(document.body.style.overscrollBehavior).toBe("contain");
   });
@@ -43,14 +54,26 @@ describe("bodyScrollLock", () => {
     });
 
     releaseNavigatorLock();
-    expect(document.body.style.overflow).toBe("hidden");
+    expect(document.body).toHaveClass(
+      "esp-body-scroll-lock",
+      "esp-body-touch-lock",
+    );
+    expect(document.body).not.toHaveClass("esp-body-overscroll-lock");
+    expect(document.body.style.overflow).toBe("");
     expect(document.body.style.overscrollBehavior).toBe("contain");
-    expect(document.body.style.touchAction).toBe("none");
+    expect(document.body.style.touchAction).toBe("pan-y");
 
     releaseNavigatorLock();
-    expect(document.body.style.overflow).toBe("hidden");
+    expect(document.body).toHaveClass(
+      "esp-body-scroll-lock",
+      "esp-body-touch-lock",
+    );
 
     releasePanelLock();
+    expect(document.body).not.toHaveClass(
+      "esp-body-scroll-lock",
+      "esp-body-touch-lock",
+    );
     expect(document.body.style.overflow).toBe("");
     expect(document.body.style.overscrollBehavior).toBe("contain");
     expect(document.body.style.touchAction).toBe("pan-y");

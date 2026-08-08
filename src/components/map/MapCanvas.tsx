@@ -19,7 +19,7 @@ import {
 } from "../../types/map";
 import { ShoppingItem } from "../../types/item";
 import { useCanvasViewport } from "../../features/map/canvas/useCanvasViewport";
-import { extractNumberFromItemNumber } from "../../utils/xlsxMapParser";
+import { extractNumberFromItemNumber } from "../../xlsx/domain/itemNumber";
 import { findRouteLookupNumberCell } from "../../utils/mapRoutingSignature";
 import { generateRouteSegments, simplifyPath } from "../../utils/pathfinding";
 import {
@@ -118,15 +118,6 @@ export const syncCanvasBackingStoreSize = (
   cssHeight: number,
   dpr: number,
 ): void => {
-  const cssWidthValue = `${cssWidth}px`;
-  const cssHeightValue = `${cssHeight}px`;
-  if (canvas.style.width !== cssWidthValue) {
-    canvas.style.width = cssWidthValue;
-  }
-  if (canvas.style.height !== cssHeightValue) {
-    canvas.style.height = cssHeightValue;
-  }
-
   // Canvas width/height setters truncate fractional values and reset the whole
   // drawing state. Avoid invoking them when the backing store is already sized.
   const backingWidth = Math.max(0, Math.trunc(cssWidth * dpr));
@@ -372,7 +363,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
     setOffset({ x: newOffsetX, y: newOffsetY });
     prevCellSizeRef.current = cellSize;
-  }, [cellSize]);
+  }, [cellSize, containerRef, offsetRef, prevCellSizeRef, setOffset]);
 
   const prevSelectedHallRef = useRef<HallDefinition | undefined>(undefined);
 
@@ -422,15 +413,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     } else if (!selectedHall) {
       setOffset({ x: 0, y: 0 });
     }
-  }, [selectedHall, cellSize]);
-
-  const cellsMap = useMemo(() => {
-    const map = new Map<string, CellData>();
-    mapData.cells.forEach((cell) => {
-      map.set(`${cell.row}-${cell.col}`, cell);
-    });
-    return map;
-  }, [mapData.cells]);
+  }, [selectedHall, cellSize, containerRef, setOffset]);
 
   const mergedCellsMap = useMemo(() => {
     const map = new Map<string, MergedCellInfo>();
@@ -2305,6 +2288,8 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       ctx.restore();
     }
   }, [
+    canvasRef,
+    containerRef,
     mapData,
     cellSize,
     cellStates,
@@ -2331,6 +2316,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     mapCenterY,
     numberCellOutlineStyle,
     routeCrossingData,
+    offsetRef,
   ]);
 
   // Keep drawCanvasRef current so rAF can call the latest draw function.
@@ -2551,7 +2537,12 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
         lastPointerTypeRef.current,
       );
     },
-    [getPointerViewMetrics, handleTapAtViewPosition],
+    [
+      getPointerViewMetrics,
+      handleTapAtViewPosition,
+      isDraggingRef,
+      suppressClickUntilRef,
+    ],
   );
 
   const hallScrollBounds = useMemo(() => {
@@ -2638,7 +2629,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       minY: containerHeight - rotatedMaxY,
       maxY: -rotatedMinY,
     };
-  }, [activeScrollBounds, cellSize, rotateAroundMapCenter]);
+  }, [activeScrollBounds, cellSize, containerRef, rotateAroundMapCenter]);
 
   useEffect(() => {
     if (!vertexSelectionMode) {
@@ -2692,7 +2683,14 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
       dragStartRef.current = { x: e.clientX, y: e.clientY };
       dragStartOffsetRef.current = { ...offsetRef.current };
     },
-    [],
+    [
+      activeTouchesRef,
+      dragStartOffsetRef,
+      dragStartRef,
+      isDraggingRef,
+      offsetRef,
+      setIsDragging,
+    ],
   );
 
   const handlePointerMove = useCallback(
@@ -2752,9 +2750,19 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     },
     [
       calculateScrollLimits,
+      activeTouchesRef,
+      dragStartOffsetRef,
+      dragStartRef,
+      drawCanvasRef,
       hoverGuide,
+      isDraggingRef,
+      isPinchGestureRef,
+      offsetRef,
+      rafPendingRef,
+      setIsDragging,
       updateHoverGuideFromPointer,
       vertexSelectionMode,
+      zoomLevelRef,
     ],
   );
 
@@ -2765,7 +2773,7 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
     setTimeout(() => {
       setIsDragging(false);
     }, 100);
-  }, []);
+  }, [isDraggingRef, offsetRef, setIsDragging, setOffsetState]);
 
   const handlePointerUp = useCallback(
     (e: React.PointerEvent<HTMLCanvasElement>) => {
@@ -2793,7 +2801,14 @@ const MapCanvas: React.FC<MapCanvasProps> = ({
 
       finishPointerInteraction();
     },
-    [finishPointerInteraction, getPointerViewMetrics, handleTapAtViewPosition],
+    [
+      finishPointerInteraction,
+      getPointerViewMetrics,
+      handleTapAtViewPosition,
+      isDraggingRef,
+      isPinchGestureRef,
+      suppressClickUntilRef,
+    ],
   );
 
   const handlePointerLeave = useCallback(

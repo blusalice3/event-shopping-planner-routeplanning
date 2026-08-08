@@ -23,22 +23,22 @@ release記録など、対象commitと環境を特定できる場所に分離す�
 
 ## 2. 現行ソースの開始地点
 
-2026-07-31時点のソース監査で確認できた事実は次のとおりである。
+2026-08-06時点のソース監査で確認できた事実は次のとおりである。
 
 | 領域           | 現在の状態                                                                                            |
 | -------------- | ----------------------------------------------------------------------------------------------------- |
 | フロントエンド | React 18、TypeScript、Vite、PWA。主状態は`src/App.tsx`の`useState`にある                              |
 | ローカル永続化 | `src/utils/indexedDB.ts`の`EventShoppingPlannerDB` version 5。通常10 storeと未接続の`syncQueue`がある |
-| Supabase       | SDK依存と`src/lib/supabase.ts`の任意client初期化だけがある。業務コードからの利用はない                |
+| Supabase       | SDK依存、runtime client、`src/lib/supabase.ts`は存在しない                                            |
 | DB型           | `src/lib/database.types.ts`はmigrationで裏付けられていない簡易型であり、実装契約として使用できない    |
 | 共有機能       | `src/features/sharing/`、共有UI、Auth、RPC、Realtime、同期処理は存在しない                            |
-| backend資材    | `supabase/`、migration、DB試験、共有用scriptは存在しない                                              |
-| QR             | `qrcode`は依存済みだが、現行ソースからは未使用                                                        |
+| backend資材    | 共有用schema、RPC、RLS、DB試験、共有用scriptは存在しない。基盤用migrationを共有契約として流用しない   |
+| QR             | QR生成runtimeと直接依存は存在しない                                                                   |
 | テスト         | Vitestの既存unit／integration試験はあるが、共有、Auth、RLS、複数client、offline同期の試験はない       |
 | 識別子         | eventは変更可能な`eventName`をkeyにする。item IDの発番方式は複数あり、eventの安定IDはない             |
 
-したがって、共有機能の実装状態は「一部完了」ではなく「未着手」とする。既存のSupabase client、
-DB型、`syncQueue`は参考資材であり、検証なしに旧設計の続きとして実装しない。
+したがって、共有機能の実装状態は「一部完了」ではなく「未着手」とする。既存のDB型と
+`syncQueue`は参考資材であり、検証なしに旧設計の続きとして実装しない。
 
 実装とrelease証跡は、変更履歴を追跡できるGit管理下のworking treeで行う。
 
@@ -262,7 +262,7 @@ online購入状態同期までとする。手入力codeとhostの商品内容編
 | `src/features/events/exportFlow.ts`                     | version付きXLSXへのevent ID出力                        |
 | `src/features/events/fileImport.ts`                     | legacy／restore／別copy importの判定                   |
 | `src/utils/exportImport.ts`                             | format versionと`localEventId`のcodec                  |
-| `src/lib/supabase.ts`                                   | feature gate、Auth開始、接続状態の明確化               |
+| `src/lib/supabase.ts`                                   | SDK導入phaseで型付きadapterとして新規作成              |
 | `src/lib/database.types.ts`                             | local migrationから再生成                              |
 | `supabase/migrations/`                                  | schema、RPC、RLS、server gate                          |
 | `supabase/tests/`                                       | RLS、RPC、競合、冪等性、保持のDB試験                   |

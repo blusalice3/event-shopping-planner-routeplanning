@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "profileId": "recovery-candidate",
+  "localStorage": {},
+  "indexedDb": {
+    "databaseName": "EventShoppingPlannerDB",
+    "version": 5,
+    "stores": {
+      "eventLists": {
+        "fixture-event": {
+          "schemaVersion": 1,
+          "itemCount": 1
+        }
+      },
+      "eventMetadata": {
+        "fixture-event": {
+          "schemaVersion": 1,
+          "status": "recovery-required"
+        }
+      }
+    }
+  }
+}

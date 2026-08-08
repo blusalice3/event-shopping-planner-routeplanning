@@ -1,7 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useId, useRef } from "react";
 import ReactDOM from "react-dom";
 import { SpaceNavigatorFooterButton } from "../../features/space-navigation/components/SpaceNavigatorFooterButton";
 import { useOptionalSpaceNavigator } from "../../features/space-navigation/SpaceNavigatorContext";
+import {
+  clearFooterHeightCss,
+  setFooterHeightCss,
+} from "../../styles/useDynamicCssClass";
 
 interface FocusModeFooterPortalProps {
   compact?: boolean;
@@ -37,6 +41,7 @@ export function FocusModeFooterPortal({
   onLayoutModeChange,
 }: FocusModeFooterPortalProps) {
   const footerRef = useRef<HTMLDivElement>(null);
+  const footerHeightOwnerId = useId();
   const spaceNavigator = useOptionalSpaceNavigator();
   const spaceNavigatorFooterEnabled = Boolean(
     spaceNavigator?.settings.footerButtonVisible,
@@ -46,19 +51,16 @@ export function FocusModeFooterPortal({
     const element = footerRef.current;
     if (!element) return;
     const updateHeight = () => {
-      document.documentElement.style.setProperty(
-        "--footer-height",
-        `${element.offsetHeight}px`,
-      );
+      setFooterHeightCss(footerHeightOwnerId, element.offsetHeight);
     };
     const observer = new ResizeObserver(updateHeight);
     observer.observe(element);
     updateHeight();
     return () => {
       observer.disconnect();
-      document.documentElement.style.setProperty("--footer-height", "0px");
+      clearFooterHeightCss(footerHeightOwnerId);
     };
-  }, []);
+  }, [footerHeightOwnerId]);
 
   return ReactDOM.createPortal(
     <div
@@ -68,12 +70,9 @@ export function FocusModeFooterPortal({
         compact
           ? "bg-white/90 dark:bg-slate-800/90"
           : "bg-white/80 dark:bg-slate-800/80"
-      } backdrop-blur-sm border-t border-slate-200 dark:border-slate-700 shadow-t-lg z-20`}
-      style={{
-        paddingBottom: spaceNavigatorFooterEnabled
-          ? "env(safe-area-inset-bottom)"
-          : undefined,
-      }}
+      } ${
+        spaceNavigatorFooterEnabled ? "pb-[env(safe-area-inset-bottom)]" : ""
+      } z-20 border-t border-slate-200 shadow-t-lg backdrop-blur-sm dark:border-slate-700`}
     >
       <div
         className={

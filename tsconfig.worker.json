@@ -1,0 +1,18 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "composite": false,
+    "lib": ["ES2022", "WebWorker"],
+    "types": [],
+    "noEmit": true
+  },
+  "include": [
+    "src/sw.ts",
+    "src/pwa/releaseIdentityProtocol.ts",
+    "src/xlsx/domain/**/*.ts",
+    "src/xlsx/port/**/*.ts",
+    "src/xlsx/security/**/*.ts",
+    "src/xlsx/worker/**/*.ts"
+  ],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
+}

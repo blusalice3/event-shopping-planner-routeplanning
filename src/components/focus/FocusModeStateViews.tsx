@@ -250,7 +250,7 @@ export function CompletionStateView({
   onTouchMove,
   onTouchEnd,
   onLimitedMissingClick,
-  prevButtonStyle,
+  prevButtonClassName,
 }: {
   executeItems: ShoppingItem[];
   layoutMode: "pc" | "smartphone";
@@ -260,7 +260,7 @@ export function CompletionStateView({
   onTouchMove: (e: React.TouchEvent) => void;
   onTouchEnd: (e: React.TouchEvent) => void;
   onLimitedMissingClick?: () => void;
-  prevButtonStyle?: React.CSSProperties;
+  prevButtonClassName?: string;
 }) {
   const purchased = executeItems.filter(isCountedAsPurchased);
   const soldOut = executeItems.filter((i) => i.purchaseStatus === "SoldOut");
@@ -290,8 +290,7 @@ export function CompletionStateView({
       {layoutMode === "pc" && (
         <button
           onClick={onPrev}
-          style={prevButtonStyle}
-          className="fixed top-1/2 transform -translate-y-1/2 w-14 h-14 bg-slate-600 hover:bg-slate-700 text-white rounded-full shadow-lg flex items-center justify-center text-2xl transition-all z-40"
+          className={`fixed top-1/2 h-14 w-14 -translate-y-1/2 transform rounded-full bg-slate-600 text-2xl text-white shadow-lg transition-[left] duration-200 ease-out flex items-center justify-center z-40 hover:bg-slate-700 ${prevButtonClassName ?? ""}`}
           title="前の訪問先"
         >
           ◀

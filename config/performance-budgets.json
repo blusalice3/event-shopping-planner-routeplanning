@@ -1,0 +1,411 @@
+{
+  "schemaVersion": 2,
+  "status": "pending-external-evidence",
+  "measurementSourceSha": "638dc0d2b05a09da9ea09e3f25e00bb36e1b2994",
+  "evidenceSchemaRef": "config/performance-evidence.schema.json",
+  "machineProfile": {
+    "status": "external-binding-required",
+    "os": "Windows 11",
+    "cpu": null,
+    "memoryBytes": null,
+    "powerMode": null
+  },
+  "browser": {
+    "family": "chromium",
+    "version": null,
+    "channel": null
+  },
+  "sampleCount": 30,
+  "statistics": ["median", "p95"],
+  "statisticsMethod": "median-average-p95-nearest-rank-v1",
+  "measurementRules": {
+    "freshBrowserContextPerSample": true,
+    "warmupSamplesExcluded": true,
+    "sampleOrder": "deterministic-rotating-v1",
+    "outlierRemoval": "forbidden",
+    "primaryAbsoluteCeilingAppliesTo": "p95",
+    "regressionCeilingAppliesTo": ["median", "p95"]
+  },
+  "gateRequirements": [
+    {
+      "gate": "P0-TOOLCHAIN",
+      "inherits": [],
+      "evidenceScope": "own",
+      "scenarioIds": [
+        "foundation-startup-cold",
+        "foundation-startup-warm",
+        "foundation-full-list",
+        "foundation-benign-main-thread-xlsx",
+        "foundation-indexeddb-current"
+      ],
+      "temporaryExceptions": []
+    },
+    {
+      "gate": "P3-XLSX",
+      "inherits": ["P0-TOOLCHAIN"],
+      "evidenceScope": "own",
+      "scenarioIds": [
+        "xlsx-worker-import-valid",
+        "xlsx-worker-export-roundtrip",
+        "xlsx-worker-reject-corrupt",
+        "xlsx-worker-reject-input-over-limit",
+        "xlsx-worker-reject-zip-bomb",
+        "xlsx-worker-cancel",
+        "xlsx-worker-timeout"
+      ],
+      "temporaryExceptions": []
+    },
+    {
+      "gate": "P5-DUAL",
+      "inherits": ["P3-XLSX"],
+      "evidenceScope": "own",
+      "scenarioIds": [
+        "list-long-full",
+        "list-long-virtual",
+        "list-virtual-scroll-anchor",
+        "list-virtual-focus-interaction"
+      ],
+      "temporaryExceptions": []
+    },
+    {
+      "gate": "P5-LIST",
+      "inherits": ["P5-DUAL"],
+      "evidenceScope": "own",
+      "scenarioIds": ["list-renderer-selection"],
+      "temporaryExceptions": []
+    },
+    {
+      "gate": "P8-CLEAN",
+      "inherits": ["P5-LIST"],
+      "evidenceScope": "all-inherited",
+      "scenarioIds": [],
+      "temporaryExceptions": []
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "foundation-startup-cold",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {},
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": ["P0-PERFORMANCE-MACHINE", "P0-PERFORMANCE-SAMPLES"]
+      }
+    },
+    {
+      "id": "foundation-startup-warm",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {},
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": ["P0-PERFORMANCE-MACHINE", "P0-PERFORMANCE-SAMPLES"]
+      }
+    },
+    {
+      "id": "foundation-full-list",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {},
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": ["P0-PERFORMANCE-MACHINE", "P0-PERFORMANCE-SAMPLES"]
+      }
+    },
+    {
+      "id": "foundation-benign-main-thread-xlsx",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {},
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": ["P0-PERFORMANCE-MACHINE", "P0-PERFORMANCE-SAMPLES"]
+      }
+    },
+    {
+      "id": "foundation-indexeddb-current",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {},
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": ["P0-PERFORMANCE-MACHINE", "P0-PERFORMANCE-SAMPLES"]
+      }
+    },
+    {
+      "id": "xlsx-worker-import-valid",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {
+        "maxUiHeartbeatGapMs": null,
+        "peakMemoryDeltaBytes": null
+      },
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": ["P3-PERFORMANCE-PROFILE", "P3-PERFORMANCE-EVIDENCE"]
+      }
+    },
+    {
+      "id": "xlsx-worker-export-roundtrip",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {
+        "maxUiHeartbeatGapMs": null,
+        "peakMemoryDeltaBytes": null
+      },
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": ["P3-PERFORMANCE-PROFILE", "P3-PERFORMANCE-EVIDENCE"]
+      }
+    },
+    {
+      "id": "xlsx-worker-reject-corrupt",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {},
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": ["P3-PERFORMANCE-PROFILE", "P3-PERFORMANCE-EVIDENCE"]
+      }
+    },
+    {
+      "id": "xlsx-worker-reject-input-over-limit",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {},
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": ["P3-PERFORMANCE-PROFILE", "P3-PERFORMANCE-EVIDENCE"]
+      }
+    },
+    {
+      "id": "xlsx-worker-reject-zip-bomb",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {
+        "peakMemoryDeltaBytes": null
+      },
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": ["P3-PERFORMANCE-PROFILE", "P3-PERFORMANCE-EVIDENCE"]
+      }
+    },
+    {
+      "id": "xlsx-worker-cancel",
+      "primaryMetric": "cancelAcknowledgementMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {
+        "peakMemoryDeltaBytes": null
+      },
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": ["P3-PERFORMANCE-PROFILE", "P3-PERFORMANCE-EVIDENCE"]
+      }
+    },
+    {
+      "id": "xlsx-worker-timeout",
+      "primaryMetric": "timeoutAcknowledgementMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {},
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": ["P3-PERFORMANCE-PROFILE", "P3-PERFORMANCE-EVIDENCE"]
+      }
+    },
+    {
+      "id": "list-long-full",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {
+        "maxMainThreadTaskMs": null,
+        "renderedDomRowCount": null
+      },
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": [
+          "P5-DUAL-PERFORMANCE-PROFILE",
+          "P5-DUAL-PERFORMANCE-EVIDENCE"
+        ]
+      }
+    },
+    {
+      "id": "list-long-virtual",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {
+        "maxMainThreadTaskMs": null,
+        "renderedDomRowCount": null
+      },
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": [
+          "P5-DUAL-PERFORMANCE-PROFILE",
+          "P5-DUAL-PERFORMANCE-EVIDENCE"
+        ]
+      }
+    },
+    {
+      "id": "list-virtual-scroll-anchor",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {
+        "maxMainThreadTaskMs": null,
+        "scrollAnchorDriftPx": null
+      },
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": [
+          "P5-DUAL-PERFORMANCE-PROFILE",
+          "P5-DUAL-PERFORMANCE-EVIDENCE"
+        ]
+      }
+    },
+    {
+      "id": "list-virtual-focus-interaction",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {
+        "maxMainThreadTaskMs": null,
+        "focusRestoreFailureCount": null
+      },
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": [
+          "P5-DUAL-PERFORMANCE-PROFILE",
+          "P5-DUAL-PERFORMANCE-EVIDENCE"
+        ]
+      }
+    },
+    {
+      "id": "list-renderer-selection",
+      "primaryMetric": "durationMs",
+      "measurement": null,
+      "absoluteCeilingMs": null,
+      "regressionCeilingPercent": null,
+      "regressionReference": null,
+      "evidenceSha256": null,
+      "supplementaryCeilings": {
+        "rendererMismatchCount": null
+      },
+      "pendingState": {
+        "status": "external-blocked",
+        "blockerIds": [
+          "P5-LIST-PERFORMANCE-PROFILE",
+          "P5-LIST-PERFORMANCE-EVIDENCE"
+        ]
+      }
+    }
+  ],
+  "blockers": [
+    {
+      "id": "P0-PERFORMANCE-MACHINE",
+      "reason": "The canonical physical machine and browser version have not been externally bound.",
+      "blocksExit": "P0-TOOLCHAIN"
+    },
+    {
+      "id": "P0-PERFORMANCE-SAMPLES",
+      "reason": "Thirty-sample median and p95 measurements have not been collected on the canonical profile.",
+      "blocksExit": "P0-TOOLCHAIN"
+    },
+    {
+      "id": "P3-PERFORMANCE-PROFILE",
+      "reason": "The canonical Phase 3 physical machine, Chromium build, clean source, and release artifact are not externally bound.",
+      "blocksExit": "P3-XLSX"
+    },
+    {
+      "id": "P3-PERFORMANCE-EVIDENCE",
+      "reason": "Thirty-sample Worker import/export, rejection, cancel, timeout, heartbeat, and memory evidence has not been collected; absolute and regression ceilings remain null.",
+      "blocksExit": "P3-XLSX"
+    },
+    {
+      "id": "P5-DUAL-PERFORMANCE-PROFILE",
+      "reason": "The canonical Phase 5D physical machine, Chromium build, clean source, and release artifact are not externally bound.",
+      "blocksExit": "P5-DUAL"
+    },
+    {
+      "id": "P5-DUAL-PERFORMANCE-EVIDENCE",
+      "reason": "Thirty-sample full/virtual long-list, scroll-anchor, focus, interaction, DOM-window, and main-thread evidence has not been collected; absolute and regression ceilings remain null.",
+      "blocksExit": "P5-DUAL"
+    },
+    {
+      "id": "P5-LIST-PERFORMANCE-PROFILE",
+      "reason": "The canonical Phase 5E physical machine, Chromium build, clean source, and release artifact are not externally bound.",
+      "blocksExit": "P5-LIST"
+    },
+    {
+      "id": "P5-LIST-PERFORMANCE-EVIDENCE",
+      "reason": "Thirty-sample renderer-selection and drag/multi-column/zoom/modal/recovery fallback evidence has not been collected; absolute and regression ceilings remain null.",
+      "blocksExit": "P5-LIST"
+    },
+    {
+      "id": "P8-PERFORMANCE-CLOSURE",
+      "reason": "P8 cannot remove the temporary performance baseline state until every inherited P0, P3, and P5 scenario is source-bound with non-null ceilings and accepted evidence.",
+      "blocksExit": "P8-CLEAN"
+    }
+  ]
+}

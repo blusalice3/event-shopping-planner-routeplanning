@@ -12,6 +12,7 @@ import {
   parseSpreadsheetPaste,
 } from "../features/events/pasteColumns";
 import { decideSheetQuantity } from "../features/events/quantitySync";
+import { fetchGoogleSheetCsv } from "../features/events/sheetImport";
 
 interface ImportScreenProps {
   onBulkAdd: (
@@ -411,22 +412,8 @@ const ImportScreen: React.FC<ImportScreenProps> = ({
     }
 
     try {
-      const sheetIdMatch = spreadsheetUrl.match(
-        /\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/,
-      );
-      if (!sheetIdMatch) {
-        throw new Error("無効なURL");
-      }
-
       const sheetName = "品目表";
-      const csvUrl = `https://docs.google.com/spreadsheets/d/${sheetIdMatch[1]}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(sheetName)}`;
-
-      const response = await fetch(csvUrl);
-      if (!response.ok) {
-        throw new Error("スプレッドシートの読み込みに失敗しました。");
-      }
-
-      const text = await response.text();
+      const text = await fetchGoogleSheetCsv(spreadsheetUrl, sheetName);
       const lines = text.split("\n").filter((line) => line.trim() !== "");
       const importResult = processImportData(lines);
 

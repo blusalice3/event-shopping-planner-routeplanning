@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { AppData } from "../../utils/indexedDB";
+import type { AppData } from "../../app/ports/PersistenceCommandPort";
 import { buildEventRestoreData } from "./backupRestore";
 
 const APP_DATA_SECTIONS = [

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "bindingStatus": "unconfigured",
+  "engine": "postgresql",
+  "postgresMajor": 17,
+  "timezone": "UTC",
+  "databaseUrlEnvironmentName": "RELEASE_STATE_DATABASE_URL",
+  "tlsMode": "verify-full",
+  "allowedHosts": [],
+  "allowedDatabases": [],
+  "allowedExecutorRoles": [],
+  "connectTimeoutMilliseconds": 5000,
+  "statementTimeoutMilliseconds": 15000,
+  "maximumEvidenceObjectBytes": 268435456,
+  "credentialRotationDays": 90,
+  "productionCaSha256": null,
+  "localContainerImage": null,
+  "migrationChecksums": {
+    "0001_release_state_store.sql": "772493b153e661e284acc4a7442b8c1b6b6b9a803fd7e97af4b3dc7ab246f553"
+  },
+  "blockerCodes": [
+    "control-database-host-unconfigured",
+    "control-database-name-unconfigured",
+    "executor-role-unconfigured",
+    "production-ca-unobserved",
+    "backup-owner-unconfigured"
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "schemaVersion": 1,
+  "bindingStatus": "unconfigured",
+  "provider": "vercel",
+  "expectedTeamId": null,
+  "expectedProjectId": null,
+  "ownedProductionDomains": [],
+  "productionEnvironmentName": "production",
+  "providerNodeFamily": "24.x",
+  "productionBranch": "main",
+  "autoAssignCustomProductionDomains": false,
+  "gitProductionAutoDeploy": false,
+  "allowedPreviewBranches": [],
+  "requiredEnvironmentNames": [
+    "PERSISTENCE_METRICS_SUPABASE_URL",
+    "PERSISTENCE_METRICS_SUPABASE_SERVICE_ROLE_KEY",
+    "PERSISTENCE_METRICS_EXPECTED_PROJECT_REF",
+    "PERSISTENCE_METRICS_EXPECTED_PROVIDER_PROJECT_ID",
+    "PERSISTENCE_METRICS_ALLOWED_ORIGIN",
+    "VERCEL_DEPLOYMENT_ID",
+    "VERCEL_PROJECT_ID",
+    "VERCEL_PROJECT_PRODUCTION_URL",
+    "VERCEL_URL",
+    "CSP_REPORT_DB_URL",
+    "CSP_REPORT_DB_SERVICE_ROLE_KEY",
+    "CSP_REPORT_PUBLIC_ORIGIN",
+    "CSP_REPORT_SOURCE_SHA",
+    "CSP_REPORT_PROVIDER_DEPLOYMENT_ID",
+    "GOOGLE_SHEETS_CSV_ALLOWED_ORIGIN"
+  ],
+  "forbiddenEnvironmentNames": [
+    "SUPABASE_URL",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "PERSISTENCE_METRICS_ALLOW_GENERIC_FALLBACK"
+  ],
+  "rawRequestByteCeilings": {
+    "persistenceReleaseAMetrics": 1024,
+    "cspReport": 16384,
+    "googleSheetsCsv": 512
+  },
+  "wafRules": {
+    "metricsRoute": null,
+    "cspReportRoute": null,
+    "googleSheetsCsvRoute": null
+  },
+  "logPolicy": {
+    "allowedFields": [
+      "requestId",
+      "route",
+      "method",
+      "status",
+      "providerDeploymentId"
+    ],
+    "retentionDays": null,
+    "retentionObservation": {
+      "kind": null,
+      "observabilityPlus": null,
+      "drainId": null,
+      "jsonPointer": null
+    }
+  },
+  "hstsOwner": "provider",
+  "hstsPolicy": {
+    "minimumMaxAgeSeconds": null,
+    "requireIncludeSubDomains": null,
+    "requirePreload": null
+  },
+  "observationPolicy": {
+    "apiBaseUrl": "https://api.vercel.com",
+    "firewallConfigVersion": "active",
+    "maxResponseAgeSeconds": 300,
+    "maxFutureClockSkewSeconds": 30,
+    "requireEtag": false
+  },
+  "requiredConfigurationEvidence": [
+    "project",
+    "team",
+    "domains",
+    "environment-presence",
+    "git-integration",
+    "waf",
+    "log-retention",
+    "hsts"
+  ],
+  "blockerCodes": [
+    "expected-team-id-missing",
+    "expected-project-id-missing",
+    "production-domain-set-empty",
+    "waf-values-unobserved",
+    "log-retention-unobserved"
+  ]
+}

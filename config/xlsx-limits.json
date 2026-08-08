@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "digestAlgorithm": "SHA-256",
+  "maxCompressedBytes": 33554432,
+  "maxEntryCount": 4096,
+  "maxEntryUncompressedBytes": 67108864,
+  "maxTotalInflatedBytes": 268435456,
+  "maxXmlNodes": 2000000,
+  "maxXmlTextBytes": 67108864,
+  "maxWorksheetCount": 256,
+  "maxRowCount": 1500000,
+  "maxCellCount": 5000000,
+  "maxSharedStringCount": 1000000,
+  "maxStyleCount": 200000,
+  "maxCompressionRatio": 100,
+  "maxWallTimeMs": 30000,
+  "maxCpuTimeMs": 25000,
+  "progressIntervalMs": 100
+}

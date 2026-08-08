@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, type MockedFunction } from "vitest";
 import type { ShoppingItem } from "../../../types/item";
 import {
   DEFAULT_BLOCK_DETECTION_SETTINGS,
@@ -85,7 +85,9 @@ const prepareImport = (
 });
 
 const createCommitEffects = (): MapImportCommitEffects & {
-  [K in keyof MapImportCommitEffects]: ReturnType<typeof vi.fn>;
+  [K in keyof MapImportCommitEffects]: MockedFunction<
+    MapImportCommitEffects[K]
+  >;
 } => ({
   setEventLists: vi.fn(),
   setMapData: vi.fn(),

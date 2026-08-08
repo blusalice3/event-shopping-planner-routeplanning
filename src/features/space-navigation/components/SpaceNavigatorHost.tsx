@@ -67,7 +67,7 @@ export function SpaceNavigatorHost() {
     setActionTargetVisitId(null);
     setActionResult(null);
     setPendingIntent(null);
-  }, [navigator?.pickerOpen, registration?.id]);
+  }, [navigator?.pickerOpen, registration]);
 
   useEffect(() => {
     if (actionTargetVisitId === null || actionTarget) return;
@@ -95,12 +95,7 @@ export function SpaceNavigatorHost() {
         Math.max(0, registration.entries.length - 1),
       ),
     );
-  }, [
-    navigator?.pickerOpen,
-    registration?.currentIndex,
-    registration?.entries.length,
-    registration?.id,
-  ]);
+  }, [navigator?.pickerOpen, registration]);
 
   useEffect(() => {
     if (!navigationOverlayOpen) return;
@@ -194,12 +189,11 @@ export function SpaceNavigatorHost() {
         <button
           type="button"
           onClick={navigator.clearNotification}
-          className={`fixed left-1/2 z-[95] max-w-[calc(100%-1rem)] -translate-x-1/2 rounded-lg px-4 py-2 text-sm font-medium shadow-xl ${
+          className={`fixed bottom-[calc(var(--footer-height,0px)+0.75rem)] left-1/2 z-[95] max-w-[calc(100%-1rem)] -translate-x-1/2 rounded-lg px-4 py-2 text-sm font-medium shadow-xl ${
             navigator.notificationTone === "warning"
               ? "bg-red-600 text-white dark:bg-red-700 dark:text-white"
               : "bg-slate-950 text-white dark:bg-slate-100 dark:text-slate-950"
           }`}
-          style={{ bottom: "calc(var(--footer-height, 0px) + .75rem)" }}
           role="status"
         >
           {navigator.notification}

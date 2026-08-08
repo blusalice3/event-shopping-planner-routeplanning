@@ -335,23 +335,38 @@ describe("FocusMode Space Navigator integration", () => {
       history: 0,
     });
     await waitFor(() => {
-      expect(screen.getByTitle("前の訪問先")).toHaveStyle({ left: "32px" });
-      expect(screen.getByTitle("次の訪問先")).toHaveStyle({ right: "16px" });
+      expect(screen.getByTitle("前の訪問先")).toHaveAttribute(
+        "data-nav-left",
+        "32px",
+      );
+      expect(screen.getByTitle("次の訪問先")).toHaveAttribute(
+        "data-nav-right",
+        "16px",
+      );
     });
 
     fireEvent.click(
       screen.getByRole("button", { name: "navigator-side-right" }),
     );
     await waitFor(() => {
-      expect(screen.getByTitle("前の訪問先")).toHaveStyle({ left: "16px" });
-      expect(screen.getByTitle("次の訪問先")).toHaveStyle({ right: "32px" });
+      expect(screen.getByTitle("前の訪問先")).toHaveAttribute(
+        "data-nav-left",
+        "16px",
+      );
+      expect(screen.getByTitle("次の訪問先")).toHaveAttribute(
+        "data-nav-right",
+        "32px",
+      );
     });
 
     fireEvent.click(screen.getByTitle("マップを表示"));
     await waitFor(() =>
       expect(screen.getByTestId("focus-map-canvas-mock")).toBeInTheDocument(),
     );
-    expect(screen.getByTitle("次の訪問先")).toHaveStyle({ right: "32px" });
+    expect(screen.getByTitle("次の訪問先")).toHaveAttribute(
+      "data-nav-right",
+      "32px",
+    );
   });
 
   it("applies the rail-aware offset to the completion view previous button", () => {
@@ -364,11 +379,13 @@ describe("FocusMode Space Navigator integration", () => {
         onTouchStart={vi.fn()}
         onTouchMove={vi.fn()}
         onTouchEnd={vi.fn()}
-        prevButtonStyle={{ left: "32px" }}
+        prevButtonClassName="completion-prev-offset"
       />,
     );
 
-    expect(screen.getByTitle("前の訪問先")).toHaveStyle({ left: "32px" });
+    expect(screen.getByTitle("前の訪問先")).toHaveClass(
+      "completion-prev-offset",
+    );
   });
 
   it("keeps the formal session pointer unchanged while a temporary visit is displayed", async () => {
@@ -1288,7 +1305,7 @@ describe("FocusMode Space Navigator integration", () => {
     const movementDialog = await screen.findByRole("dialog", {
       name: "次へ進む基準フェーズを選択",
     });
-    expect(document.body.style.overflow).toBe("hidden");
+    expect(document.body).toHaveClass("esp-body-scroll-lock");
     expect(
       within(movementDialog).getByRole("button", { name: /^通常/ }),
     ).toHaveTextContent("Z-99a");
@@ -1306,7 +1323,7 @@ describe("FocusMode Space Navigator integration", () => {
         "space-aggregate:Z-99a",
       );
     });
-    expect(document.body.style.overflow).not.toBe("hidden");
+    expect(document.body).not.toHaveClass("esp-body-scroll-lock");
     expect(screen.getByText("移動基準：通常")).toBeInTheDocument();
     expect(screen.getByTestId("navigator-history-length")).toHaveTextContent(
       "1",

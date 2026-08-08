@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "roots": ["src"],
+  "testFileRegex": "\\.(?:test|spec)\\.(?:ts|tsx)$",
+  "projects": [
+    {
+      "name": "worker",
+      "configPath": "vitest.worker.config.ts",
+      "packageScript": "test:worker",
+      "includeRegex": "\\.worker\\.(?:test|spec)\\.(?:ts|tsx)$",
+      "excludeRegex": null,
+      "environment": "node",
+      "allowEmpty": true
+    },
+    {
+      "name": "integration",
+      "configPath": "vitest.integration.config.ts",
+      "packageScript": "test:integration",
+      "includeRegex": "\\.integration\\.(?:test|spec)\\.(?:ts|tsx)$",
+      "excludeRegex": "\\.worker\\.(?:test|spec)\\.(?:ts|tsx)$",
+      "environment": "node-with-file-jsdom-overrides",
+      "allowEmpty": false
+    },
+    {
+      "name": "unit",
+      "configPath": "vitest.unit.config.ts",
+      "packageScript": "test:unit",
+      "includeRegex": "\\.(?:test|spec)\\.(?:ts|tsx)$",
+      "excludeRegex": "\\.(?:integration|worker)\\.(?:test|spec)\\.(?:ts|tsx)$",
+      "environment": "node-with-file-jsdom-overrides",
+      "allowEmpty": false
+    }
+  ],
+  "expectedBaseline": {
+    "measurementSourceSha": "638dc0d2b05a09da9ea09e3f25e00bb36e1b2994",
+    "totalFiles": 137,
+    "projectCounts": {
+      "integration": 25,
+      "unit": 107,
+      "worker": 5
+    }
+  }
+}

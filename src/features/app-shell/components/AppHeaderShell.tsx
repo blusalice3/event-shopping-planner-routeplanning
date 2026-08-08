@@ -225,8 +225,9 @@ type AppHeaderShellProps = {
   searchKeyword: string;
   selectedItemIds: Set<string>;
   executeSpaceGroupingEnabled: boolean;
-  setActiveEventName: React.Dispatch<React.SetStateAction<string | null>>;
-  setActiveTab: React.Dispatch<React.SetStateAction<ActiveTab>>;
+  onShowEventList: () => void;
+  onShowImport: (eventName: string | null) => void;
+  onToggleEventSurface: () => void;
   setBlockDefinitionMode: React.Dispatch<React.SetStateAction<boolean>>;
   setExecuteCollapsedSpaces: React.Dispatch<React.SetStateAction<Set<string>>>;
   setExecuteSpaceGroupingEnabled: React.Dispatch<React.SetStateAction<boolean>>;
@@ -244,7 +245,6 @@ type AppHeaderShellProps = {
   setMapTabMenuPosition: React.Dispatch<
     React.SetStateAction<MapTabMenuPosition>
   >;
-  setMapViewActive: React.Dispatch<React.SetStateAction<boolean>>;
   setDisablePriceUndefinedCheck: React.Dispatch<React.SetStateAction<boolean>>;
   setDisableLimitedPurchaseQuantityCheck: React.Dispatch<
     React.SetStateAction<boolean>
@@ -337,7 +337,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     hasUndefinedPriorityItems,
     isMapTab,
     items,
-    itemToEdit,
     layoutMode,
     mainContentVisible,
     mapHallSelectorOpen,
@@ -346,7 +345,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     mapSmartInsertEnabled,
     mapSmartInsertMode,
     mapTabMenuOpen,
-    mapTabMenuPosition,
     mapToggleButtonRef,
     mapToggleLongPressFiredRef,
     mapToggleLongPressRef,
@@ -360,8 +358,9 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     searchKeyword,
     selectedItemIds,
     executeSpaceGroupingEnabled,
-    setActiveEventName,
-    setActiveTab,
+    onShowEventList,
+    onShowImport,
+    onToggleEventSurface,
     setBlockDefinitionMode,
     setExecuteCollapsedSpaces,
     setExecuteSpaceGroupingEnabled,
@@ -376,8 +375,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     setMapSmartInsertEnabled,
     setMapSmartInsertMode,
     setMapTabMenuOpen,
-    setMapTabMenuPosition,
-    setMapViewActive,
     setDisablePriceUndefinedCheck,
     setDisableLimitedPurchaseQuantityCheck,
     setSkipLimitedPurchaseForSingleQuantity,
@@ -395,9 +392,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
     showTabBar,
     smartInsertLongPressRef,
     smartInsertLongPressTriggeredRef,
-    sortLabels,
     sortDisplayLabel,
-    sortState,
     TabButton,
     themeMode,
     uiSettingsPanelOpen,
@@ -554,21 +549,13 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                               mapToggleLongPressFiredRef.current = false;
                               return;
                             }
-                            setMapViewActive((prev: boolean) => !prev);
+                            onToggleEventSurface();
                           }}
-                          onPointerDown={(e) => {
+                          onPointerDown={() => {
                             if (!mapViewActive) return;
-                            const target = e.currentTarget as HTMLButtonElement;
-                            const rect = target.getBoundingClientRect();
-                            const menuLeft = rect.left + rect.width / 2;
-                            const menuTop = rect.bottom + 4;
                             mapToggleLongPressRef.current = window.setTimeout(
                               () => {
                                 mapToggleLongPressFiredRef.current = true;
-                                setMapTabMenuPosition({
-                                  left: menuLeft,
-                                  top: menuTop,
-                                });
                                 setMapTabMenuOpen("mapToggle");
                                 mapToggleLongPressRef.current = null;
                               },
@@ -615,12 +602,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                         {mapTabMenuOpen === "mapToggle" && (
                           <div
                             ref={mapToggleMenuRef}
-                            className="fixed bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 z-50 min-w-[160px]"
-                            style={{
-                              left: `${mapTabMenuPosition.left}px`,
-                              top: `${mapTabMenuPosition.top}px`,
-                              transform: "translateX(-50%)",
-                            }}
+                            className="absolute left-1/2 top-[calc(100%+0.25rem)] z-50 min-w-[160px] -translate-x-1/2 rounded-lg border border-slate-200 bg-white shadow-xl dark:border-slate-700 dark:bg-slate-800"
                           >
                             <div className="py-1">
                               <button
@@ -664,17 +646,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                         e.stopPropagation();
                         onToggleUiSettingsPanel();
                       }}
-                      className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                      className={`min-h-11 min-w-11 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                         uiSettingsPanelOpen
                           ? "bg-slate-200 dark:bg-slate-700"
                           : "hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600"
                       }`}
                       title="表示項目の設定"
-                      style={{
-                        WebkitTapHighlightColor: "transparent",
-                        minWidth: "44px",
-                        minHeight: "44px",
-                      }}
                       type="button"
                     >
                       <svg
@@ -732,7 +709,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                   return next;
                                 });
                               }}
-                              className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
+                              className="touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors hover:bg-slate-200 active:bg-slate-300 dark:hover:bg-slate-700 dark:active:bg-slate-600"
                               title={
                                 themeMode === "system"
                                   ? "システム設定 → ライトモードへ"
@@ -740,7 +717,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                     ? "ライトモード → ダークモードへ"
                                     : "ダークモード → システム設定へ"
                               }
-                              style={{ WebkitTapHighlightColor: "transparent" }}
                               type="button"
                             >
                               {themeMode === "system" ? (
@@ -800,7 +776,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                   layoutMode === "pc" ? "smartphone" : "pc",
                                 )
                               }
-                              className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                              className={`touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                                 layoutMode === "smartphone"
                                   ? "bg-blue-600 text-white"
                                   : "bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300"
@@ -810,7 +786,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                                   ? "スマートフォンモードに切替"
                                   : "タブレット/PCモードに切替"
                               }
-                              style={{ WebkitTapHighlightColor: "transparent" }}
                               type="button"
                             >
                               {layoutMode === "smartphone" ? (
@@ -1205,17 +1180,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       {/* 表示処理の補足 */}
                       <button
                         onClick={() => handleSetViewMode("edit")}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                        className={`min-h-10 min-w-10 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                           currentMode === "edit"
                             ? "bg-blue-100 dark:bg-blue-900/50 text-blue-600 dark:text-blue-400"
                             : "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400"
                         }`}
                         title="編集モード"
-                        style={{
-                          WebkitTapHighlightColor: "transparent",
-                          minWidth: "40px",
-                          minHeight: "40px",
-                        }}
                         type="button"
                       >
                         <span className="text-lg">📝</span>
@@ -1224,17 +1194,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       {/* 表示処理の補足 */}
                       <button
                         onClick={() => handleSetViewMode("execute")}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                        className={`min-h-10 min-w-10 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                           currentMode === "execute"
                             ? "bg-green-100 dark:bg-green-900/50 text-green-600 dark:text-green-400"
                             : "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400"
                         }`}
                         title="実行モード"
-                        style={{
-                          WebkitTapHighlightColor: "transparent",
-                          minWidth: "40px",
-                          minHeight: "40px",
-                        }}
                         type="button"
                       >
                         <span className="text-lg">🏃‍♂️</span>
@@ -1243,17 +1208,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       {/* 表示処理の補足 */}
                       <button
                         onClick={() => handleSetViewMode("focus")}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                        className={`min-h-10 min-w-10 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                           currentMode === "focus"
                             ? "bg-purple-100 dark:bg-purple-900/50 text-purple-600 dark:text-purple-400"
                             : "hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-600 dark:text-slate-400"
                         }`}
                         title="集中モード"
-                        style={{
-                          WebkitTapHighlightColor: "transparent",
-                          minWidth: "40px",
-                          minHeight: "40px",
-                        }}
                         type="button"
                       >
                         <span className="text-lg">🔍</span>
@@ -1272,17 +1232,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                               onClick={() =>
                                 setMapHallSelectorOpen(!mapHallSelectorOpen)
                               }
-                              className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                              className={`min-h-11 min-w-11 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                                 mapHallSelectorOpen
                                   ? "bg-slate-200 dark:bg-slate-700"
                                   : "hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600"
                               }`}
                               title={`表示ホール: ${mapSelectedHallId === "all" ? "全ホール" : currentHalls.find((h) => h.id === mapSelectedHallId)?.name || ""}`}
-                              style={{
-                                WebkitTapHighlightColor: "transparent",
-                                minWidth: "44px",
-                                minHeight: "44px",
-                              }}
                               type="button"
                             >
                               {/* 表示処理の補足 */}
@@ -1356,13 +1311,8 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                           {/* 表示処理の補足 */}
                           <button
                             onClick={() => setMapIsHallOrderOpen(true)}
-                            className="p-2 rounded-md transition-colors hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600 touch-manipulation select-none"
+                            className="min-h-11 min-w-11 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors hover:bg-slate-200 active:bg-slate-300 dark:hover:bg-slate-700 dark:active:bg-slate-600"
                             title="ホール順を編集"
-                            style={{
-                              WebkitTapHighlightColor: "transparent",
-                              minWidth: "44px",
-                              minHeight: "44px",
-                            }}
                             type="button"
                           >
                             <svg
@@ -1385,7 +1335,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                       {/* 表示処理の補足 */}
                       <button
                         onClick={() => setMapIsRouteVisible(!mapIsRouteVisible)}
-                        className={`p-2 rounded-md transition-colors touch-manipulation select-none ${
+                        className={`min-h-11 min-w-11 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                           mapIsRouteVisible
                             ? "bg-blue-100 dark:bg-blue-900/50 hover:bg-blue-200 dark:hover:bg-blue-800"
                             : "hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600"
@@ -1395,11 +1345,6 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                             ? "ルート表示: 有効"
                             : "ルート表示: 無効"
                         }
-                        style={{
-                          WebkitTapHighlightColor: "transparent",
-                          minWidth: "44px",
-                          minHeight: "44px",
-                        }}
                         type="button"
                       >
                         {/* 表示処理の補足 */}
@@ -1455,17 +1400,12 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                           }
                           setMapSmartInsertEnabled(!mapSmartInsertEnabled);
                         }}
-                        className={`relative p-2 rounded-md transition-colors touch-manipulation select-none ${
+                        className={`relative min-h-11 min-w-11 touch-manipulation select-none rounded-md p-2 [-webkit-tap-highlight-color:transparent] transition-colors ${
                           mapSmartInsertEnabled
                             ? "bg-green-100 dark:bg-green-900/50 hover:bg-green-200 dark:hover:bg-green-800"
                             : "hover:bg-slate-200 dark:hover:bg-slate-700 active:bg-slate-300 dark:active:bg-slate-600"
                         }`}
                         title={`スマート挿入: ${mapSmartInsertEnabled ? "有効" : "無効"}（${mapSmartInsertMode === "map" ? "マップ" : "プレビュー"}）`}
-                        style={{
-                          WebkitTapHighlightColor: "transparent",
-                          minWidth: "44px",
-                          minHeight: "44px",
-                        }}
                         type="button"
                       >
                         <svg
@@ -1586,11 +1526,10 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                   tab="eventList"
                   label="イベント一覧"
                   onClick={() => {
-                    setActiveEventName(null);
                     setItemToEdit(null);
                     handleClearSelection();
                     setSelectedBlockFilters(new Set());
-                    setActiveTab("eventList");
+                    onShowEventList();
                   }}
                 />
                 {activeEventName ? (
@@ -1643,7 +1582,7 @@ const AppHeaderShell: React.FC<AppHeaderShellProps> = (props) => {
                   <button
                     onClick={() => {
                       setItemToEdit(null);
-                      setActiveTab("import");
+                      onShowImport(activeEventName);
                     }}
                     className={`px-4 py-2 text-sm font-medium rounded-md transition-colors duration-200 whitespace-nowrap ${
                       activeTab === "import"

@@ -1,0 +1,151 @@
+{
+  "schemaVersion": 1,
+  "policyId": "web-foundation-v1",
+  "activationStatus": "proposed",
+  "activationBlockers": [
+    "provider-binding-unconfigured",
+    "release-state-store-unconfigured",
+    "db-contract-not-remotely-observed",
+    "protected-approvals-unconfigured"
+  ],
+  "dimensions": {
+    "releaseRole": ["standard", "containment"],
+    "pwaLifecycle": ["legacy-auto-update-v1", "prompt-close-all-v1"],
+    "cssDelivery": ["cdn", "local"],
+    "cspMode": ["none", "report-only", "enforced"],
+    "xlsxExecution": ["main", "worker", "disabled"],
+    "listEngine": ["full", "dual", "disabled"],
+    "listDefault": ["full", "auto", "disabled"],
+    "persistenceArchitecture": ["monolith", "split-facade"]
+  },
+  "initialStandard": {
+    "releaseRole": "standard",
+    "pwaLifecycle": "legacy-auto-update-v1",
+    "cssDelivery": "cdn",
+    "cspMode": "none",
+    "xlsxExecution": "main",
+    "listEngine": "full",
+    "listDefault": "full",
+    "persistenceArchitecture": "monolith"
+  },
+  "targetStandard": {
+    "releaseRole": "standard",
+    "pwaLifecycle": "prompt-close-all-v1",
+    "cssDelivery": "local",
+    "cspMode": "enforced",
+    "xlsxExecution": "worker",
+    "listEngine": "dual",
+    "listDefault": "auto",
+    "persistenceArchitecture": "split-facade"
+  },
+  "containmentProjection": {
+    "legacy-auto-update-v1": {
+      "releaseRole": "containment",
+      "xlsxExecution": "main",
+      "listEngine": "full",
+      "listDefault": "full"
+    },
+    "prompt-close-all-v1": {
+      "releaseRole": "containment",
+      "xlsxExecution": "disabled",
+      "listEngine": "disabled",
+      "listDefault": "disabled"
+    }
+  },
+  "minimumSafetyFloors": {
+    "releaseChannel": "release-a",
+    "legacyLocalStorageCleanup": "forced-off",
+    "legacyPhysicalDeletion": "forbidden",
+    "dbCompatibility": "exact",
+    "providerEnvironmentIsolation": "required",
+    "dataPreservation": "fail-closed",
+    "styleSrcAttr": "none"
+  },
+  "acceptedStandardFloors": {
+    "pwaLifecycle": "legacy-auto-update-v1",
+    "cssDelivery": "cdn",
+    "cspMode": "none",
+    "xlsxExecution": "main",
+    "listEngine": "full",
+    "listDefault": "full",
+    "persistenceArchitecture": "monolith"
+  },
+  "phaseSequence": [
+    {
+      "gate": "P0-RELEASE",
+      "change": null
+    },
+    {
+      "gate": "P1-PWA",
+      "change": {
+        "pwaLifecycle": "prompt-close-all-v1"
+      }
+    },
+    {
+      "gate": "P2A-LOCAL",
+      "change": {
+        "cssDelivery": "local"
+      }
+    },
+    {
+      "gate": "P2B-REPORT",
+      "change": {
+        "cspMode": "report-only"
+      }
+    },
+    {
+      "gate": "P3-XLSX",
+      "change": {
+        "xlsxExecution": "worker"
+      }
+    },
+    {
+      "gate": "P4-CSP",
+      "change": {
+        "cspMode": "enforced"
+      }
+    },
+    {
+      "gate": "P5-DUAL",
+      "change": {
+        "listEngine": "dual"
+      }
+    },
+    {
+      "gate": "P5-LIST",
+      "change": {
+        "listDefault": "auto"
+      }
+    },
+    {
+      "gate": "P6-APP",
+      "change": null
+    },
+    {
+      "gate": "P7-IDB",
+      "change": {
+        "persistenceArchitecture": "split-facade"
+      }
+    },
+    {
+      "gate": "P8-CLEAN",
+      "change": null,
+      "minimumSafetyFloorChange": {
+        "styleSrcAttr": "none"
+      }
+    }
+  ],
+  "temporaryDwellSeconds": {
+    "legacyBootstrap": 21600,
+    "sourceHardenedContainment": 86400
+  },
+  "requiredApprovalRoles": {
+    "prePromotion": ["releaseOwner", "dataSafetyReviewer"],
+    "standardAcceptance": [
+      "releaseOwner",
+      "dataSafetyReviewer",
+      "operationsReviewer"
+    ]
+  },
+  "compatiblePredecessorPolicies": []
+}

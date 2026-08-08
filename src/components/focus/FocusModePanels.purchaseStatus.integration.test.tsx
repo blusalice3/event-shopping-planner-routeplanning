@@ -346,8 +346,18 @@ describe("FocusModeMapControls responsive layout", () => {
 });
 
 describe("FocusModeHeader purchase-aware background", () => {
-  const getBackgroundImage = () =>
-    screen.getByTestId("focus-mode-header").style.backgroundImage;
+  const getStatusSegments = () =>
+    Array.from(
+      screen
+        .getByTestId("focus-mode-header")
+        .querySelectorAll<SVGRectElement>("rect[data-header-status]"),
+    ).map((segment) => ({
+      status: segment.dataset.headerStatus,
+      fill: segment.getAttribute("fill"),
+      x: segment.getAttribute("x") ?? "0",
+      width: segment.getAttribute("width"),
+    }));
+  const getStatusSignature = () => JSON.stringify(getStatusSegments());
 
   it("uses equal-width segments even when item counts are nine to one", () => {
     const items = [
@@ -359,12 +369,15 @@ describe("FocusModeHeader purchase-aware background", () => {
 
     renderHeader({ currentVisitItems: items });
 
-    const backgroundImage = getBackgroundImage();
-    expect(backgroundImage).toContain("#94a3b8 0%");
-    expect(backgroundImage).toContain("#94a3b8 50%");
-    expect(backgroundImage).toContain("#22c55e 50%");
-    expect(backgroundImage).toContain("#22c55e 100%");
-    expect(backgroundImage).toContain("rgba(15, 23, 42, 0.28)");
+    expect(getStatusSegments()).toEqual([
+      { status: "unvisited", fill: "#94a3b8", x: "0", width: "50" },
+      { status: "purchased", fill: "#22c55e", x: "50", width: "50" },
+    ]);
+    expect(
+      screen
+        .getByTestId("focus-mode-header")
+        .querySelector("rect[data-header-overlay]"),
+    ).toHaveAttribute("fill", "rgba(15, 23, 42, 0.28)");
   });
 
   it("keeps the fixed status color order", () => {
@@ -380,19 +393,17 @@ describe("FocusModeHeader purchase-aware background", () => {
       ],
     });
 
-    const backgroundImage = getBackgroundImage();
-    const colorPositions = [
-      "#94a3b8",
-      "#8b5cf6",
-      "#3b82f6",
-      "#f97316",
-      "#22c55e",
-      "#ef4444",
-      "#eab308",
-    ].map((color) => backgroundImage.indexOf(color));
-
-    expect(colorPositions.every((position) => position >= 0)).toBe(true);
-    expect(colorPositions).toEqual([...colorPositions].sort((a, b) => a - b));
+    expect(
+      getStatusSegments().map(({ status, fill }) => ({ status, fill })),
+    ).toEqual([
+      { status: "unvisited", fill: "#94a3b8" },
+      { status: "postponed", fill: "#8b5cf6" },
+      { status: "late", fill: "#3b82f6" },
+      { status: "limited", fill: "#f97316" },
+      { status: "purchased", fill: "#22c55e" },
+      { status: "soldOut", fill: "#ef4444" },
+      { status: "absent", fill: "#eab308" },
+    ]);
   });
 
   it("keeps purchased and completed limited quantities green", () => {
@@ -406,13 +417,9 @@ describe("FocusModeHeader purchase-aware background", () => {
       ],
     });
 
-    const backgroundImage = getBackgroundImage();
-    expect(backgroundImage).toContain("#22c55e 0%");
-    expect(backgroundImage).toContain("#22c55e 100%");
-    expect(backgroundImage).not.toContain("#94a3b8");
-    expect(backgroundImage).not.toContain("#f97316");
-    expect(backgroundImage).not.toContain("#ef4444");
-    expect(backgroundImage).not.toContain("#eab308");
+    expect(getStatusSegments()).toEqual([
+      { status: "purchased", fill: "#22c55e", x: "0", width: "100" },
+    ]);
   });
 
   it("uses a full red background when every item is sold out", () => {
@@ -423,11 +430,9 @@ describe("FocusModeHeader purchase-aware background", () => {
       ],
     });
 
-    const backgroundImage = getBackgroundImage();
-    expect(backgroundImage).toContain("#ef4444 0%");
-    expect(backgroundImage).toContain("#ef4444 100%");
-    expect(backgroundImage).not.toContain("#22c55e");
-    expect(backgroundImage).not.toContain("#eab308");
+    expect(getStatusSegments()).toEqual([
+      { status: "soldOut", fill: "#ef4444", x: "0", width: "100" },
+    ]);
   });
 
   it("uses a full yellow background when every item is absent", () => {
@@ -438,11 +443,9 @@ describe("FocusModeHeader purchase-aware background", () => {
       ],
     });
 
-    const backgroundImage = getBackgroundImage();
-    expect(backgroundImage).toContain("#eab308 0%");
-    expect(backgroundImage).toContain("#eab308 100%");
-    expect(backgroundImage).not.toContain("#22c55e");
-    expect(backgroundImage).not.toContain("#ef4444");
+    expect(getStatusSegments()).toEqual([
+      { status: "absent", fill: "#eab308", x: "0", width: "100" },
+    ]);
   });
 
   it("separates missing and entered limited quantities into orange and green", () => {
@@ -456,11 +459,10 @@ describe("FocusModeHeader purchase-aware background", () => {
       ],
     });
 
-    const backgroundImage = getBackgroundImage();
-    expect(backgroundImage).toContain("#f97316 0%");
-    expect(backgroundImage).toContain("#f97316 50%");
-    expect(backgroundImage).toContain("#22c55e 50%");
-    expect(backgroundImage).toContain("#22c55e 100%");
+    expect(getStatusSegments()).toEqual([
+      { status: "limited", fill: "#f97316", x: "0", width: "50" },
+      { status: "purchased", fill: "#22c55e", x: "50", width: "50" },
+    ]);
   });
 
   it("does not let an undefined price change the status classification", () => {
@@ -473,7 +475,7 @@ describe("FocusModeHeader purchase-aware background", () => {
       price: null,
     }));
     const view = renderHeader({ currentVisitItems: pricedItems });
-    const pricedBackground = getBackgroundImage();
+    const pricedBackground = getStatusSignature();
 
     view.rerender(
       <FocusModeHeader
@@ -481,7 +483,7 @@ describe("FocusModeHeader purchase-aware background", () => {
       />,
     );
 
-    expect(getBackgroundImage()).toBe(pricedBackground);
+    expect(getStatusSignature()).toBe(pricedBackground);
   });
 
   it("applies the same status background to smartphone and desktop roots", () => {
@@ -493,7 +495,7 @@ describe("FocusModeHeader purchase-aware background", () => {
       layoutMode: "pc",
       currentVisitItems: items,
     });
-    const desktopBackground = getBackgroundImage();
+    const desktopBackground = getStatusSignature();
 
     view.rerender(
       <FocusModeHeader
@@ -504,7 +506,7 @@ describe("FocusModeHeader purchase-aware background", () => {
       />,
     );
 
-    expect(getBackgroundImage()).toBe(desktopBackground);
+    expect(getStatusSignature()).toBe(desktopBackground);
   });
 });
 

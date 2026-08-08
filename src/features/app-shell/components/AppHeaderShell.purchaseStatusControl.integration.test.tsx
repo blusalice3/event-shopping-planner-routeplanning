@@ -107,8 +107,9 @@ const minimalAppHeaderShellProps = (): ComponentProps<
   purchaseStatusControlMode: "cycle",
   searchKeyword: "",
   selectedItemIds: new Set(),
-  setActiveEventName: vi.fn(),
-  setActiveTab: vi.fn(),
+  onShowEventList: vi.fn(),
+  onShowImport: vi.fn(),
+  onToggleEventSurface: vi.fn(),
   setBlockDefinitionMode: vi.fn(),
   setExecuteCollapsedSpaces: vi.fn(),
   setExecuteSpaceGroupingEnabled: vi.fn(),
@@ -124,7 +125,6 @@ const minimalAppHeaderShellProps = (): ComponentProps<
   setMapSmartInsertMode: vi.fn(),
   setMapTabMenuOpen: vi.fn(),
   setMapTabMenuPosition: vi.fn(),
-  setMapViewActive: vi.fn(),
   setDisablePriceUndefinedCheck: vi.fn(),
   setDisableLimitedPurchaseQuantityCheck: vi.fn(),
   setSkipLimitedPurchaseForSingleQuantity: vi.fn(),
@@ -374,5 +374,41 @@ describe("AppHeaderShell range reset integration", () => {
 
     expect(props.handleClearRangeSelection).toHaveBeenCalledOnce();
     expect(props.setExecuteCollapsedSpaces).toHaveBeenCalledWith(new Set());
+  });
+});
+
+describe("AppHeaderShell typed navigation integration", () => {
+  it("routes event-list and map actions through navigation commands", () => {
+    const props = minimalAppHeaderShellProps();
+    props.uiSettingsPanelOpen = false;
+    props.showTabBar = true;
+    props.getMapTabForDate = vi.fn(() => "Day1Map");
+    props.TabButton = ({ label, onClick }) => (
+      <button onClick={onClick}>{label}</button>
+    );
+
+    render(<AppHeaderShell {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "イベント一覧" }));
+    expect(props.onShowEventList).toHaveBeenCalledOnce();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "マップ表示に切り替え" }),
+    );
+    expect(props.onToggleEventSurface).toHaveBeenCalledOnce();
+  });
+
+  it("routes new-list creation through the typed import command", () => {
+    const props = minimalAppHeaderShellProps();
+    props.activeEventName = null;
+    props.activeTab = "eventList";
+    props.mainContentVisible = false;
+    props.uiSettingsPanelOpen = false;
+    props.showTabBar = true;
+
+    render(<AppHeaderShell {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "新規リスト作成" }));
+
+    expect(props.onShowImport).toHaveBeenCalledWith(null);
   });
 });

@@ -200,11 +200,15 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
                                 : "bg-white dark:bg-slate-700 border-slate-200 dark:border-slate-600"
                           }`}
                         >
-                          <span
-                            className="flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full text-sm font-bold text-white"
-                            style={{ backgroundColor: color }}
-                          >
-                            {displayIndex + 1}
+                          <span className="relative flex h-8 w-8 flex-shrink-0 items-center justify-center overflow-hidden rounded-full text-sm font-bold text-white">
+                            <svg
+                              className="absolute inset-0 h-full w-full"
+                              viewBox="0 0 32 32"
+                              aria-hidden="true"
+                            >
+                              <circle cx="16" cy="16" r="16" fill={color} />
+                            </svg>
+                            <span className="relative">{displayIndex + 1}</span>
                           </span>
                           <div className="flex-1 min-w-0">
                             <div className="font-medium text-slate-900 dark:text-white truncate">
@@ -253,10 +257,13 @@ const HallOrderPanel: React.FC<HallOrderPanelProps> = ({
                           key={groupId}
                           className="flex items-center gap-2 p-2 bg-slate-50 dark:bg-slate-800 rounded border border-slate-100 dark:border-slate-700 opacity-50"
                         >
-                          <span
-                            className="flex-shrink-0 w-6 h-6 rounded-full"
-                            style={{ backgroundColor: color }}
-                          />
+                          <svg
+                            className="h-6 w-6 flex-shrink-0 rounded-full"
+                            viewBox="0 0 24 24"
+                            aria-hidden="true"
+                          >
+                            <circle cx="12" cy="12" r="12" fill={color} />
+                          </svg>
                           <span className="text-sm text-slate-500 dark:text-slate-400">
                             {displayName}
                           </span>

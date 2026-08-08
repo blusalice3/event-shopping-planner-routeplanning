@@ -5,7 +5,7 @@ import {
   candidateIndexFromCoordinate,
   clampCandidateIndex,
 } from "../domain/candidateIndex";
-import { NAVIGATOR_STATUS_COLORS } from "./SpaceNavigatorLegend";
+import { NAVIGATOR_STATUS_CLASS_NAMES } from "./SpaceNavigatorLegend";
 
 export const SPACE_NAVIGATOR_RAIL_WIDTH_PX = 16;
 
@@ -18,19 +18,6 @@ interface SpaceNavigatorRailProps {
   onCandidateChange: (index: number) => void;
   onOpen: () => void;
 }
-
-const getEntryBackground = (entry: NavigatorEntry) => {
-  if (entry.statusSegments.length === 0)
-    return NAVIGATOR_STATUS_COLORS.unvisited;
-  const stops = entry.statusSegments.flatMap((segment) => {
-    const color = NAVIGATOR_STATUS_COLORS[segment.kind];
-    return [
-      `${color} ${segment.startRatio * 100}%`,
-      `${color} ${segment.endRatio * 100}%`,
-    ];
-  });
-  return `linear-gradient(to right, ${stops.join(", ")})`;
-};
 
 export function SpaceNavigatorRail({
   entries,
@@ -61,22 +48,14 @@ export function SpaceNavigatorRail({
 
   return (
     <div
-      className={`fixed top-[env(safe-area-inset-top)] z-[45] flex items-stretch ${
+      className={`fixed bottom-[var(--footer-height,0px)] top-[env(safe-area-inset-top)] z-[45] flex w-4 items-stretch ${
         side === "left" ? "left-0 justify-start" : "right-0 justify-end"
       }`}
-      style={{
-        bottom: "var(--footer-height, 0px)",
-        width: `${SPACE_NAVIGATOR_RAIL_WIDTH_PX}px`,
-      }}
       aria-label="スペースナビ"
     >
       <div
         ref={railRef}
-        className="relative h-full bg-transparent"
-        style={{
-          touchAction: "none",
-          width: `${SPACE_NAVIGATOR_RAIL_WIDTH_PX}px`,
-        }}
+        className="relative h-full w-4 touch-none bg-transparent"
         role="slider"
         tabIndex={0}
         aria-label="スペースナビ"
@@ -149,10 +128,9 @@ export function SpaceNavigatorRail({
         }}
       >
         <div
-          className={`pointer-events-none absolute top-0 flex h-full flex-col overflow-hidden border-x border-white/60 bg-slate-200 shadow-md dark:border-slate-700/70 dark:bg-slate-700 ${
+          className={`pointer-events-none absolute top-0 flex h-full w-4 flex-col overflow-hidden border-x border-white/60 bg-slate-200 shadow-md dark:border-slate-700/70 dark:bg-slate-700 ${
             side === "left" ? "left-0" : "right-0"
           }`}
-          style={{ width: `${SPACE_NAVIGATOR_RAIL_WIDTH_PX}px` }}
         >
           {entries.map((entry, index) => {
             const phaseBoundary =
@@ -160,22 +138,25 @@ export function SpaceNavigatorRail({
             return (
               <span
                 key={entry.id}
-                className={`relative min-h-0 flex-1 ${
+                className={`relative flex min-h-0 flex-1 ${
                   phaseBoundary
                     ? "border-t-2 border-white dark:border-slate-950"
                     : ""
                 }`}
-                style={{ background: getEntryBackground(entry) }}
                 title={entry.label}
               >
+                {entry.statusSegments.length === 0 ? (
+                  <span className="flex-1 bg-slate-400" />
+                ) : (
+                  entry.statusSegments.map((segment) => (
+                    <span
+                      key={segment.kind}
+                      className={`flex-1 ${NAVIGATOR_STATUS_CLASS_NAMES[segment.kind]}`}
+                    />
+                  ))
+                )}
                 {entry.warningKinds.length > 0 && (
-                  <span
-                    className="pointer-events-none absolute inset-0"
-                    style={{
-                      backgroundImage:
-                        "repeating-linear-gradient(135deg, rgba(245,158,11,.95) 0 1px, transparent 1px 4px)",
-                    }}
-                  />
+                  <span className="pointer-events-none absolute inset-0 [background-image:repeating-linear-gradient(135deg,rgba(245,158,11,.95)_0_1px,transparent_1px_4px)]" />
                 )}
                 {index === formalIndex && (
                   <span

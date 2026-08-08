@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "bindingStatus": "unconfigured",
+  "trustedIssuer": "https://token.actions.githubusercontent.com",
+  "oidcAudience": "urn:event-shopping-planner:foundation-release-state",
+  "oidcClockSkewSeconds": 60,
+  "oidcMaxTokenAgeSeconds": 600,
+  "repository": "blusalice3/event-shopping-planner-routeplanning",
+  "workflowRef": "blusalice3/event-shopping-planner-routeplanning/.github/workflows/release.yml@refs/heads/main",
+  "protectedEnvironment": "foundation-release-state",
+  "roles": {
+    "releaseOwner": {
+      "reviewerTeam": null
+    },
+    "dataSafetyReviewer": {
+      "reviewerTeam": null
+    },
+    "operationsReviewer": {
+      "reviewerTeam": null
+    }
+  },
+  "distinctApprovalIds": true,
+  "distinctProviderReviewerIds": true,
+  "blockerCodes": [
+    "release-owner-team-unconfigured",
+    "data-safety-team-unconfigured",
+    "operations-team-unconfigured"
+  ]
+}

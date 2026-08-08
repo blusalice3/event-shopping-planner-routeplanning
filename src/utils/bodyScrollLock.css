@@ -1,0 +1,11 @@
+body.esp-body-scroll-lock {
+  overflow: hidden !important;
+}
+
+body.esp-body-overscroll-lock {
+  overscroll-behavior: none !important;
+}
+
+body.esp-body-touch-lock {
+  touch-action: none !important;
+}

@@ -163,11 +163,10 @@ describe("SpaceNavigatorPicker", () => {
     expect(windowElement.querySelectorAll("button")).toHaveLength(
       entries.length,
     );
-    expect(windowElement.style.gridTemplateRows).toBe("");
-    expect(windowElement.style.touchAction).toBe("pan-y");
-    expect(windowElement.style.maxHeight).toBe("");
+    expect(windowElement).not.toHaveAttribute("style");
     expect(windowElement).toHaveClass(
       "flex-1",
+      "touch-pan-y",
       "overflow-y-auto",
       "overscroll-contain",
     );
@@ -182,9 +181,12 @@ describe("SpaceNavigatorPicker", () => {
     expect(
       screen.queryByTestId("space-navigator-selection"),
     ).not.toBeInTheDocument();
-    expect(screen.getByRole("dialog", { name: "スペース一覧" })).toHaveStyle({
-      bottom: "var(--footer-height, 0px)",
-    });
+    expect(screen.getByRole("dialog", { name: "スペース一覧" })).toHaveClass(
+      "bottom-[var(--footer-height,0px)]",
+    );
+    expect(
+      screen.getByRole("dialog", { name: "スペース一覧" }),
+    ).not.toHaveAttribute("style");
     expect(
       screen.getByText(
         "一覧を上下にスクロールして、移動先のスペースをタップしてください。",
@@ -196,13 +198,16 @@ describe("SpaceNavigatorPicker", () => {
     let resizeCallback: ResizeObserverCallback | null = null;
     const observe = vi.fn();
     const disconnect = vi.fn();
-    vi.stubGlobal(
-      "ResizeObserver",
-      vi.fn().mockImplementation((callback: ResizeObserverCallback) => {
+    class ResizeObserverMock {
+      readonly disconnect = disconnect;
+      readonly observe = observe;
+      readonly unobserve = vi.fn();
+
+      constructor(callback: ResizeObserverCallback) {
         resizeCallback = callback;
-        return { disconnect, observe, unobserve: vi.fn() };
-      }),
-    );
+      }
+    }
+    vi.stubGlobal("ResizeObserver", ResizeObserverMock);
     render(
       <SpaceNavigatorPicker
         entries={entries}
@@ -242,9 +247,13 @@ describe("SpaceNavigatorPicker", () => {
     expect(windowElement.querySelector('[aria-current="true"]')).toBe(
       windowElement.querySelectorAll("button")[4],
     );
-    expect(screen.getByTestId("space-navigator-selection")).toHaveStyle({
-      top: "50%",
-    });
+    expect(screen.getByTestId("space-navigator-selection")).toBe(
+      windowElement.querySelector('[aria-current="true"]'),
+    );
+    expect(screen.getByTestId("space-navigator-selection")).toHaveClass(
+      "border-y-2",
+      "border-indigo-500",
+    );
   });
 
   it("shifts the window at the end and leaves no blank rows", () => {
@@ -266,9 +275,9 @@ describe("SpaceNavigatorPicker", () => {
     expect(visibleButtons).toHaveLength(5);
     expect(visibleButtons[0]).toHaveTextContent(entries[4].label);
     expect(visibleButtons[4]).toHaveTextContent(entries[8].label);
-    expect(screen.getByTestId("space-navigator-selection")).toHaveStyle({
-      top: "90%",
-    });
+    expect(screen.getByTestId("space-navigator-selection")).toBe(
+      visibleButtons[4],
+    );
   });
 
   it("uses only real rows when fewer entries exist than the available window", () => {
@@ -640,8 +649,9 @@ describe("SpaceNavigatorRail", () => {
     expect(slider).toHaveAttribute("aria-valuenow", "2");
     expect(slider).toHaveAttribute("aria-valuetext", entries[1].label);
     expect(slider.parentElement).toHaveClass("z-[45]");
-    expect(slider).toHaveStyle({ width: "16px" });
-    expect(slider.parentElement).toHaveStyle({ width: "16px" });
+    expect(slider).toHaveClass("w-4");
+    expect(slider.parentElement).toHaveClass("w-4");
+    expect(slider).not.toHaveAttribute("style");
 
     fireEvent.keyDown(slider, { key: "ArrowDown" });
     expect(onCandidateChange).toHaveBeenLastCalledWith(2);
@@ -727,6 +737,7 @@ describe("SpaceNavigatorHost and footer visibility", () => {
   });
 
   afterEach(() => {
+    document.body.className = "";
     document.body.style.overflow = "";
     document.body.style.overscrollBehavior = "";
     vi.restoreAllMocks();
@@ -753,6 +764,9 @@ describe("SpaceNavigatorHost and footer visibility", () => {
   });
 
   it("keeps the traditional footer padding when only the rail is enabled", () => {
+    const dynamicRegistry = document.createElement("style");
+    dynamicRegistry.textContent = ".esp-dynamic-css-registry {}";
+    document.head.appendChild(dynamicRegistry);
     localStorage.setItem(
       "spaceNavigatorSettings",
       JSON.stringify({ railVisible: true, footerButtonVisible: false }),
@@ -795,9 +809,21 @@ describe("SpaceNavigatorHost and footer visibility", () => {
       (document.getElementById("focus-mode-footer") as HTMLElement).style
         .paddingBottom,
     ).toBe("");
+    const footerHeightRule = Array.from(document.styleSheets)
+      .flatMap((styleSheet) => Array.from(styleSheet.cssRules))
+      .find(
+        (rule) =>
+          rule.type === CSSRule.STYLE_RULE &&
+          (rule as CSSStyleRule).selectorText ===
+            ":root:where(:not(.esp-dynamic-css-disabled))",
+      ) as CSSStyleRule | undefined;
+    expect(footerHeightRule?.style.getPropertyValue("--footer-height")).toBe(
+      "123px",
+    );
     expect(
       document.documentElement.style.getPropertyValue("--footer-height"),
-    ).toBe("123px");
+    ).toBe("");
+    dynamicRegistry.remove();
     offsetHeight.mockRestore();
   });
 
@@ -855,9 +881,10 @@ describe("SpaceNavigatorHost and footer visibility", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "通知" }));
-    expect(screen.getByRole("status")).toHaveStyle({
-      bottom: "calc(var(--footer-height, 0px) + .75rem)",
-    });
+    expect(screen.getByRole("status")).toHaveClass(
+      "bottom-[calc(var(--footer-height,0px)+0.75rem)]",
+    );
+    expect(screen.getByRole("status")).not.toHaveAttribute("style");
   });
 
   it("keeps information notifications slate and renders warnings in red", () => {
@@ -907,8 +934,10 @@ describe("SpaceNavigatorHost and footer visibility", () => {
       expect(
         screen.getByRole("dialog", { name: entries[0].label }),
       ).toBeInTheDocument();
-      expect(document.body.style.overflow).toBe("hidden");
-      expect(document.body.style.overscrollBehavior).toBe("none");
+      expect(document.body).toHaveClass(
+        "esp-body-scroll-lock",
+        "esp-body-overscroll-lock",
+      );
 
       fireEvent.click(
         screen.getByRole("button", { name: invalidateRegistrationLabel }),
@@ -916,6 +945,10 @@ describe("SpaceNavigatorHost and footer visibility", () => {
 
       await waitFor(() => {
         expect(screen.queryAllByRole("dialog")).toHaveLength(0);
+        expect(document.body).not.toHaveClass(
+          "esp-body-scroll-lock",
+          "esp-body-overscroll-lock",
+        );
         expect(document.body.style.overflow).toBe("auto");
         expect(document.body.style.overscrollBehavior).toBe("contain");
       });

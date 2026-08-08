@@ -1,7 +1,7 @@
 import React from "react";
 import { ShoppingItem } from "../../types/item";
 import { BlockDefinition } from "../../types/map";
-import { extractNumberFromItemNumber } from "../../utils/xlsxMapParser";
+import { extractNumberFromItemNumber } from "../../xlsx/domain/itemNumber";
 import { findRouteLookupNumberCell } from "../../utils/mapRoutingSignature";
 
 interface MapVisitListPanelProps {

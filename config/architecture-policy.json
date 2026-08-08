@@ -1,0 +1,182 @@
+{
+  "schemaVersion": 1,
+  "sourceRoots": ["src"],
+  "extensions": [".ts", ".tsx"],
+  "contractTestRoots": ["src", "tests", "scripts"],
+  "contractTestExtensions": [".ts", ".tsx", ".js", ".mjs", ".cjs"],
+  "productionExcludes": [
+    "\\.(?:test|spec)\\.(?:ts|tsx)$",
+    "\\.d\\.ts$",
+    "(?:^|/)test/",
+    "_backup\\.tsx?$",
+    "\\.backup\\.tsx?$"
+  ],
+  "layers": [
+    {
+      "name": "entry",
+      "pathRegex": "^src/(?:index\\.tsx|bootstrap\\.ts|sw\\.ts)$"
+    },
+    {
+      "name": "pwa",
+      "pathRegex": "^src/pwa/"
+    },
+    {
+      "name": "app",
+      "pathRegex": "^src/(?:App\\.tsx|app/|features/app-shell/)"
+    },
+    {
+      "name": "ui",
+      "pathRegex": "^src/(?:components/|features/.*/components/)"
+    },
+    {
+      "name": "feature",
+      "pathRegex": "^src/features/"
+    },
+    {
+      "name": "xlsx",
+      "pathRegex": "^src/xlsx/"
+    },
+    {
+      "name": "persistence",
+      "pathRegex": "^src/persistence/"
+    },
+    {
+      "name": "hook",
+      "pathRegex": "^src/hooks/"
+    },
+    {
+      "name": "utility",
+      "pathRegex": "^src/utils/"
+    },
+    {
+      "name": "style",
+      "pathRegex": "^src/styles/"
+    },
+    {
+      "name": "library",
+      "pathRegex": "^src/lib/"
+    },
+    {
+      "name": "type",
+      "pathRegex": "^src/(?:types\\.ts|types/)"
+    }
+  ],
+  "forbiddenImportRules": [
+    {
+      "id": "production-node-runtime",
+      "sourceRegex": "^src/",
+      "packageRegex": "^(?:node:|fs$|path$|child_process$|crypto$|net$|os$)"
+    },
+    {
+      "id": "ui-direct-indexeddb",
+      "sourceRegex": "^src/(?:App\\.tsx|components/|features/)",
+      "targetRegex": "^src/utils/indexedDB\\.ts$"
+    },
+    {
+      "id": "ui-direct-xlsx-adapter",
+      "sourceRegex": "^src/(?:App\\.tsx|components/|features/)",
+      "targetRegex": "^src/utils/(?:exportImport|xlsxMapParser)\\.ts$"
+    },
+    {
+      "id": "ui-direct-xlsx-package",
+      "sourceRegex": "^src/(?:App\\.tsx|components/|features/)",
+      "packageRegex": "^(?:exceljs|xlsx)$"
+    },
+    {
+      "id": "ui-direct-xlsx-implementation",
+      "sourceRegex": "^src/(?:App\\.tsx|components/|features/)",
+      "targetRegex": "^src/xlsx/(?:adapters|download|engine|security|worker)/"
+    },
+    {
+      "id": "ui-direct-persistence-implementation",
+      "sourceRegex": "^src/(?:components/|features/)",
+      "targetRegex": "^src/persistence/"
+    },
+    {
+      "id": "app-direct-xlsx-implementation",
+      "sourceRegex": "^src/App\\.tsx$",
+      "targetRegex": "^src/xlsx/"
+    },
+    {
+      "id": "app-direct-persistence-implementation",
+      "sourceRegex": "^src/App\\.tsx$",
+      "targetRegex": "^src/(?:persistence/|utils/indexedDB\\.ts$)"
+    },
+    {
+      "id": "app-direct-service-worker-implementation",
+      "sourceRegex": "^src/App\\.tsx$",
+      "targetRegex": "^src/(?:pwa/|sw\\.ts$)"
+    },
+    {
+      "id": "application-ws-runtime",
+      "sourceRegex": "^src/",
+      "packageRegex": "^ws$"
+    }
+  ],
+  "entryGraphRules": [
+    {
+      "id": "application-entry-no-supabase",
+      "entry": "src/index.tsx",
+      "forbiddenTargetRegex": "^src/lib/supabase\\.ts$"
+    },
+    {
+      "id": "containment-entry-no-application",
+      "entry": "src/pwa/containment/index.ts",
+      "forbiddenTargetRegex": "^src/(?:App\\.tsx$|app/|features/app-shell/)"
+    },
+    {
+      "id": "containment-entry-no-persistence",
+      "entry": "src/pwa/containment/index.ts",
+      "forbiddenTargetRegex": "^src/(?:persistence/|utils/indexedDB\\.ts$|hooks/useIndexedDbPersistence\\.ts$)"
+    },
+    {
+      "id": "containment-entry-no-xlsx",
+      "entry": "src/pwa/containment/index.ts",
+      "forbiddenTargetRegex": "^src/(?:xlsx/|utils/(?:exportImport|xlsxMapParser)\\.ts$)"
+    },
+    {
+      "id": "containment-entry-no-list",
+      "entry": "src/pwa/containment/index.ts",
+      "forbiddenTargetRegex": "^src/(?:features/shopping-list/|components/(?:ShoppingList|ShoppingItemCard|SummaryBar|VisitListPanel|map/(?:MapVisitListPanel|VisitListPanel))\\.(?:ts|tsx)$)"
+    }
+  ],
+  "forbiddenTextRules": [
+    {
+      "id": "release-a-no-cleanup-call",
+      "sourceRegex": "^src/(?!utils/indexedDB\\.ts$)",
+      "pattern": "\\bcleanupLegacyPersistenceSources\\s*\\("
+    },
+    {
+      "id": "app-no-browser-persistence-or-sw-global",
+      "sourceRegex": "^src/App\\.tsx$",
+      "pattern": "\\b(?:indexedDB|IDBDatabase|IDBTransaction|ServiceWorkerRegistration|skipWaiting|clientsClaim)\\b|\\bnavigator\\s*\\.\\s*serviceWorker\\b"
+    }
+  ],
+  "forbiddenContractTestTextRules": [
+    {
+      "id": "no-app-source-text-contract-test",
+      "sourceRegex": "\\.(?:test|spec)\\.(?:ts|tsx)$",
+      "pattern": "(?:readFileSync|readFile)\\s*\\([\\s\\S]{0,240}?(?:src/|src\\\\\\\\)?App\\.tsx"
+    }
+  ],
+  "forbiddenProductionPathRules": [
+    {
+      "id": "no-temporary-app-persistence-bridge",
+      "pathRegex": "^src/(?:app|persistence)/.*(?:legacyIndexedDb|temporary(?:Persistence)?Bridge).*(?:\\.ts|\\.tsx)$"
+    }
+  ],
+  "baseline": "config/architecture-baseline.json",
+  "exceptionPolicy": {
+    "requiredFields": [
+      "id",
+      "ruleId",
+      "source",
+      "owner",
+      "reason",
+      "expiry",
+      "fingerprint"
+    ],
+    "rejectExpired": true,
+    "rejectNewViolations": true
+  }
+}

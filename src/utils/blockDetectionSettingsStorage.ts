@@ -2,6 +2,7 @@ import type {
   BlockDetectionSettings,
   BlockDetectionSettingsStore,
 } from "../types/map";
+import { isBlockDetectionSettings } from "../types/map";
 
 export const BLOCK_DETECTION_SETTINGS_STORAGE_KEY =
   "blockDetectionSettings" as const;
@@ -26,47 +27,7 @@ const hasOwn = (value: UnknownRecord, key: string): boolean =>
 const isRecord = (value: unknown): value is UnknownRecord =>
   typeof value === "object" && value !== null && !Array.isArray(value);
 
-const isIntegerInRange = (
-  value: unknown,
-  minimum: number,
-  maximum: number,
-): value is number =>
-  typeof value === "number" &&
-  Number.isInteger(value) &&
-  value >= minimum &&
-  value <= maximum;
-
-export function isBlockDetectionSettings(
-  value: unknown,
-): value is BlockDetectionSettings {
-  if (!isRecord(value) || !isRecord(value.allowedCharTypes)) return false;
-
-  const allowedCharTypes = value.allowedCharTypes;
-  const requiredCharTypes = [
-    "katakana",
-    "hiragana",
-    "alphabet",
-    "kanji",
-    "digit",
-    "symbol",
-  ] as const;
-
-  return (
-    isIntegerInRange(value.maxBlockNameLength, 1, 10) &&
-    requiredCharTypes.every(
-      (key) =>
-        hasOwn(allowedCharTypes, key) &&
-        typeof allowedCharTypes[key] === "boolean",
-    ) &&
-    typeof value.allowDigitSymbolOnly === "boolean" &&
-    isIntegerInRange(value.minNumberCellsPerBlock, 1, 20) &&
-    isIntegerInRange(value.minMergedCellCount, 1, 12) &&
-    isIntegerInRange(value.numberCellMin, 0, 9999) &&
-    isIntegerInRange(value.numberCellMax, value.numberCellMin, 9999) &&
-    isIntegerInRange(value.maxRegionSize, 500, 10000) &&
-    isIntegerInRange(value.polygonThreshold, 50, 100)
-  );
-}
+export { isBlockDetectionSettings };
 
 const cloneSettings = (
   settings: BlockDetectionSettings,

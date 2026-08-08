@@ -1,0 +1,195 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:event-shopping-planner:provider-deployment-evidence:v1",
+  "title": "ProviderDeploymentEvidence v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "providerProjectId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "providerDeploymentId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 255
+    },
+    "deploymentUrl": {
+      "type": "string",
+      "format": "uri",
+      "pattern": "^https://"
+    },
+    "sourceSha": {
+      "$ref": "#/$defs/sourceSha"
+    },
+    "variantId": {
+      "$ref": "#/$defs/sha256"
+    },
+    "releaseRole": {
+      "enum": ["standard", "containment"]
+    },
+    "artifactManifestHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "packageIndexHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "providerConfigurationHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "providerPolicyHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "releasePolicyHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "requiredDbCompatibility": {
+      "$ref": "#/$defs/dbCompatibilityBinding"
+    },
+    "publicIdentity": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/releaseIdentityEvidence"
+        },
+        {
+          "$ref": "#/$defs/legacyBootstrapEvidence"
+        }
+      ]
+    },
+    "routeProbeEvidenceHash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "environmentPresenceEvidenceHash": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "providerProjectId",
+    "providerDeploymentId",
+    "deploymentUrl",
+    "sourceSha",
+    "variantId",
+    "releaseRole",
+    "artifactManifestHash",
+    "packageIndexHash",
+    "providerConfigurationHash",
+    "providerPolicyHash",
+    "releasePolicyHash",
+    "requiredDbCompatibility",
+    "publicIdentity",
+    "routeProbeEvidenceHash",
+    "environmentPresenceEvidenceHash"
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sourceSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "dbCompatibilityBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractUri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["contractUri", "fingerprint"]
+    },
+    "releaseIdentityEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "identityKind": {
+          "const": "release-identity-v1"
+        },
+        "identity": {
+          "type": "object",
+          "required": [
+            "schemaVersion",
+            "sourceSha",
+            "buildId",
+            "variantId",
+            "releaseRole",
+            "requiredDbCompatibilityFingerprint",
+            "pwaLifecycle"
+          ]
+        },
+        "identitySha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["identityKind", "identity", "identitySha256"]
+    },
+    "legacyBootstrapEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "identityKind": {
+          "const": "legacy-bootstrap-v1"
+        },
+        "sourceSha": {
+          "$ref": "#/$defs/sourceSha"
+        },
+        "buildId": {
+          "$ref": "#/$defs/sourceSha"
+        },
+        "sourceState": {
+          "const": "clean"
+        },
+        "capabilitySha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "htmlMetaSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "serviceWorkerSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "rawDistTreeSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "rawDistManifestUri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "rawDistManifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bootstrapInputUri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "bootstrapInputSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "identityKind",
+        "sourceSha",
+        "buildId",
+        "sourceState",
+        "capabilitySha256",
+        "htmlMetaSha256",
+        "serviceWorkerSha256",
+        "rawDistTreeSha256",
+        "rawDistManifestUri",
+        "rawDistManifestSha256",
+        "bootstrapInputUri",
+        "bootstrapInputSha256"
+      ]
+    }
+  }
+}

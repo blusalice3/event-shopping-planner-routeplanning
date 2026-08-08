@@ -52,7 +52,6 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
   onStartVertexSelection,
   pendingVertexSelection,
   onClearPendingVertexSelection,
-  eventDates = [],
   activeEventDate = "",
   mapTabDates = [],
   onSyncToOtherDates,
@@ -409,15 +408,23 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                             onClick={() => handleSelectHall(i)}
                             className="flex flex-1 items-center gap-2 text-left"
                           >
-                            <div
-                              className="flex h-8 w-8 items-center justify-center rounded text-xs font-bold"
-                              style={{
-                                backgroundColor: hall.color || "#FFE0B2",
-                              }}
-                            >
-                              {hall.vertices && hall.vertices.length >= 4
-                                ? `${hall.vertices.length}角`
-                                : "ブロック"}
+                            <div className="relative flex h-8 w-8 items-center justify-center overflow-hidden rounded text-xs font-bold">
+                              <svg
+                                className="absolute inset-0 h-full w-full"
+                                viewBox="0 0 32 32"
+                                aria-hidden="true"
+                              >
+                                <rect
+                                  width="32"
+                                  height="32"
+                                  fill={hall.color || "#FFE0B2"}
+                                />
+                              </svg>
+                              <span className="relative">
+                                {hall.vertices && hall.vertices.length >= 4
+                                  ? `${hall.vertices.length}角`
+                                  : "ブロック"}
+                              </span>
                             </div>
                             <div>
                               <div className="text-sm font-medium text-slate-900 dark:text-white">
@@ -539,8 +546,15 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
                               ? "border-blue-500"
                               : "border-transparent"
                           }`}
-                          style={{ backgroundColor: color }}
-                        />
+                        >
+                          <svg
+                            className="absolute inset-0 h-full w-full"
+                            viewBox="0 0 32 32"
+                            aria-hidden="true"
+                          >
+                            <rect width="32" height="32" fill={color} />
+                          </svg>
+                        </button>
                       ))}
                     </div>
                   </div>
@@ -695,25 +709,6 @@ const HallDefinitionPanel: React.FC<HallDefinitionPanelProps> = ({
     </div>
   );
 };
-
-const POLYGON_EPSILON = 1e-9;
-
-function isPointOnSegment(
-  row: number,
-  col: number,
-  a: { row: number; col: number },
-  b: { row: number; col: number },
-): boolean {
-  const cross =
-    (b.col - a.col) * (row - a.row) - (b.row - a.row) * (col - a.col);
-  if (Math.abs(cross) > POLYGON_EPSILON) return false;
-
-  const minCol = Math.min(a.col, b.col) - POLYGON_EPSILON;
-  const maxCol = Math.max(a.col, b.col) + POLYGON_EPSILON;
-  const minRow = Math.min(a.row, b.row) - POLYGON_EPSILON;
-  const maxRow = Math.max(a.row, b.row) + POLYGON_EPSILON;
-  return col >= minCol && col <= maxCol && row >= minRow && row <= maxRow;
-}
 
 function isPointInPolygon(
   row: number,

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "xlsx-worker-cancel",
+  "domain": "xlsx-worker",
+  "dataset": {
+    "generator": "valid-event-workbook-v1",
+    "rowCount": 50000,
+    "targetCompressedBytes": 16777216
+  },
+  "operation": {
+    "kind": "event-import",
+    "execution": "worker",
+    "cancelTrigger": "first-parse-progress"
+  },
+  "expectedTerminal": {
+    "kind": "abort",
+    "name": "AbortError"
+  },
+  "requiredAssertions": [
+    "cancel-message-observed",
+    "late-result-ignored",
+    "zero-domain-commits",
+    "zero-download-side-effects"
+  ],
+  "requiredTelemetry": ["cancelAcknowledgementMs", "peakMemoryDeltaBytes"]
+}

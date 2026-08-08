@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "list-long-full",
+  "domain": "shopping-list",
+  "dataset": {
+    "generator": "shopping-list-seeded-v1",
+    "seed": 1967,
+    "rowCount": 10000,
+    "grouped": false
+  },
+  "viewport": {
+    "columnCount": 1,
+    "zoomPercent": 100
+  },
+  "operation": {
+    "rendererPreference": "full",
+    "interaction": "initial-render"
+  },
+  "requiredAssertions": [
+    "selected-renderer-full",
+    "canonical-row-model",
+    "accessible-name-parity"
+  ],
+  "requiredTelemetry": [
+    "durationMs",
+    "maxMainThreadTaskMs",
+    "renderedDomRowCount"
+  ]
+}

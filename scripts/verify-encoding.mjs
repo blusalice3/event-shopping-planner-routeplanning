@@ -1,84 +1,75 @@
 #!/usr/bin/env node
 
-import { readFile, readdir } from "node:fs/promises";
-import { extname, relative, resolve } from "node:path";
+import { readdir, readFile, stat } from "node:fs/promises";
+import path from "node:path";
+import {
+  fail,
+  normalizePath,
+  projectRoot,
+  readJson,
+  utf8Compare,
+} from "./foundation-policy-utils.mjs";
 
-const PROJECT_ROOT = process.cwd();
-const SCAN_ROOTS = ["src", "docs", "scripts", "api", "supabase"];
-const ROOT_FILES = [
-  "README.md",
-  "package.json",
-  "vercel.json",
-  "vite.config.ts",
-];
-const TEXT_EXTENSIONS = new Set([
-  ".css",
-  ".html",
-  ".js",
-  ".json",
-  ".jsx",
-  ".md",
-  ".mjs",
-  ".ps1",
-  ".sql",
-  ".ts",
-  ".tsx",
-]);
-const REQUIRED_REPRESENTATIVE_STRINGS = [
-  "ユーザー登録",
-  "エラーが発生しました",
-];
-const SUSPICIOUS_MOJIBAKE =
-  /(?:繧[ァ-ヶ]|繝[ァ-ヶ]|縺[ぁ-ん]|譁\uFFFD|陦\uFFFD|蜿\uFFFD|隱\uFFFD|髫\uFFFD)/u;
-const SUSPICIOUS_QUESTION_MARK =
-  /(?:[ぁ-んァ-ヶ一-龠々〆ヵヶ]\?[ぁ-んァ-ヶ一-龠々〆ヵヶ]|\?{3,})/u;
+const policy = await readJson("config/encoding-policy.json");
+const extensions = new Set(policy.textExtensions);
+const errors = [];
+const files = new Set();
 
 async function collectFiles(directory) {
   const entries = await readdir(directory, { withFileTypes: true });
-  const files = [];
   for (const entry of entries) {
-    const absolutePath = resolve(directory, entry.name);
+    const absolutePath = path.resolve(directory, entry.name);
     if (entry.isDirectory()) {
-      files.push(...(await collectFiles(absolutePath)));
-    } else if (entry.isFile() && TEXT_EXTENSIONS.has(extname(entry.name))) {
-      files.push(absolutePath);
+      await collectFiles(absolutePath);
+    } else if (entry.isFile() && extensions.has(path.extname(entry.name))) {
+      files.add(absolutePath);
     }
   }
-  return files;
 }
 
-const files = [];
-for (const root of SCAN_ROOTS) {
+for (const root of policy.scanRoots) {
+  const absoluteRoot = path.resolve(projectRoot, root);
   try {
-    files.push(...(await collectFiles(resolve(PROJECT_ROOT, root))));
+    if ((await stat(absoluteRoot)).isDirectory())
+      await collectFiles(absoluteRoot);
   } catch (error) {
     if (error?.code !== "ENOENT") throw error;
   }
 }
-for (const rootFile of ROOT_FILES) {
-  files.push(resolve(PROJECT_ROOT, rootFile));
-}
-files.sort((left, right) => left.localeCompare(right));
 
-const errors = [];
+for (const rootFile of policy.rootFiles) {
+  const absolutePath = path.resolve(projectRoot, rootFile);
+  try {
+    if ((await stat(absolutePath)).isFile()) files.add(absolutePath);
+  } catch (error) {
+    if (error?.code !== "ENOENT") throw error;
+    errors.push(`${normalizePath(rootFile)}: policy root file is missing`);
+  }
+}
+
 const representativeMatches = new Map(
-  REQUIRED_REPRESENTATIVE_STRINGS.map((value) => [value, 0]),
+  policy.requiredRepresentativeStrings.map((value) => [value, 0]),
+);
+const mojibakePattern = new RegExp(policy.suspiciousMojibakePattern, "u");
+const questionMarkPattern = new RegExp(
+  policy.suspiciousQuestionMarkPattern,
+  "u",
 );
 let questionMarkCount = 0;
 let lfFileCount = 0;
 let crlfFileCount = 0;
 let noNewlineFileCount = 0;
 
-for (const filePath of files) {
-  const displayPath = relative(PROJECT_ROOT, filePath).replaceAll("\\", "/");
-  let bytes;
-  try {
-    bytes = await readFile(filePath);
-  } catch (error) {
-    errors.push(`${displayPath}: cannot be read (${error?.code ?? "error"})`);
-    continue;
-  }
+const sortedFiles = [...files].sort((left, right) =>
+  utf8Compare(
+    normalizePath(path.relative(projectRoot, left)),
+    normalizePath(path.relative(projectRoot, right)),
+  ),
+);
 
+for (const filePath of sortedFiles) {
+  const displayPath = normalizePath(path.relative(projectRoot, filePath));
+  const bytes = await readFile(filePath);
   if (
     bytes.length >= 3 &&
     bytes[0] === 0xef &&
@@ -90,19 +81,19 @@ for (const filePath of files) {
 
   let text;
   try {
-    text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+    text = new TextDecoder(policy.encoding, { fatal: true }).decode(bytes);
   } catch {
-    errors.push(`${displayPath}: invalid UTF-8`);
+    errors.push(`${displayPath}: invalid ${policy.encoding.toUpperCase()}`);
     continue;
   }
 
   if (text.includes("\uFFFD")) {
     errors.push(`${displayPath}: contains U+FFFD`);
   }
-  if (SUSPICIOUS_MOJIBAKE.test(text)) {
+  if (mojibakePattern.test(text)) {
     errors.push(`${displayPath}: contains a likely mojibake sequence`);
   }
-  if (SUSPICIOUS_QUESTION_MARK.test(text)) {
+  if (questionMarkPattern.test(text)) {
     errors.push(`${displayPath}: contains a suspicious question-mark sequence`);
   }
 
@@ -110,12 +101,21 @@ for (const filePath of files) {
   const withoutCrlf = text.replaceAll("\r\n", "");
   const bareLfCount = withoutCrlf.match(/\n/g)?.length ?? 0;
   const bareCrCount = withoutCrlf.match(/\r/g)?.length ?? 0;
+  const expectedEol = policy.eolExceptions[displayPath] ?? policy.defaultEol;
+
   if (bareCrCount > 0) {
     errors.push(`${displayPath}: contains a bare CR newline`);
   }
   if (crlfCount > 0 && bareLfCount > 0) {
     errors.push(`${displayPath}: contains mixed CRLF and LF newlines`);
   }
+  if (expectedEol === "lf" && crlfCount > 0) {
+    errors.push(`${displayPath}: expected LF but found CRLF`);
+  }
+  if (expectedEol === "crlf" && bareLfCount > 0) {
+    errors.push(`${displayPath}: expected CRLF but found bare LF`);
+  }
+
   if (crlfCount > 0) {
     crlfFileCount += 1;
   } else if (bareLfCount > 0) {
@@ -125,7 +125,7 @@ for (const filePath of files) {
   }
 
   questionMarkCount += text.match(/\?/g)?.length ?? 0;
-  for (const representative of REQUIRED_REPRESENTATIVE_STRINGS) {
+  for (const representative of policy.requiredRepresentativeStrings) {
     const occurrences = text.split(representative).length - 1;
     representativeMatches.set(
       representative,
@@ -141,19 +141,17 @@ for (const [representative, count] of representativeMatches) {
 }
 
 if (errors.length > 0) {
-  console.error(`FAIL encoding verification (${errors.length} issue(s))`);
-  for (const error of errors) console.error(`- ${error}`);
-  process.exitCode = 1;
+  fail("FAIL encoding verification", errors);
 } else {
-  console.log(
+  process.stdout.write(
     [
-      `PASS encoding verification: ${files.length} text files`,
-      `UTF-8 without BOM; U+FFFD/mojibake/suspicious '?' absent`,
+      `PASS encoding verification: ${sortedFiles.length} text files`,
+      "UTF-8 without BOM; U+FFFD/mojibake/suspicious '?' absent",
       `newlines: LF=${lfFileCount}, CRLF=${crlfFileCount}, none=${noNewlineFileCount}`,
       `question marks reviewed=${questionMarkCount}`,
       `representative strings: ${[...representativeMatches.entries()]
         .map(([value, count]) => `${value}=${count}`)
         .join(", ")}`,
-    ].join("; "),
+    ].join("; ") + "\n",
   );
 }

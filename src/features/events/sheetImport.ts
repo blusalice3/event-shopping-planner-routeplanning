@@ -34,19 +34,18 @@ function toPrice(value: string): number | null {
   return parseInt(value.replace(/[^0-9]/g, ""), 10) || 0;
 }
 
-export function buildGoogleSheetCsvUrl(
+export function buildGoogleSheetCsvRequest(
   spreadsheetUrl: string,
   sheetName?: string,
-): string {
+): { spreadsheetId: string; sheetName?: string } {
   const sheetIdMatch = spreadsheetUrl.match(SPREADSHEET_ID_REGEX);
   if (!sheetIdMatch) {
     throw new Error("Invalid spreadsheet URL");
   }
-
-  const encodedSheet = sheetName
-    ? `&sheet=${encodeURIComponent(sheetName)}`
-    : "";
-  return `https://docs.google.com/spreadsheets/d/${sheetIdMatch[1]}/gviz/tq?tqx=out:csv${encodedSheet}`;
+  return {
+    spreadsheetId: sheetIdMatch[1],
+    ...(sheetName ? { sheetName } : {}),
+  };
 }
 
 export function parseEventItemsFromCsv(csvText: string): SheetItem[] {
@@ -92,16 +91,32 @@ export function parseEventItemsFromCsv(csvText: string): SheetItem[] {
   return items;
 }
 
-export async function fetchEventItemsFromSpreadsheet(
+export async function fetchGoogleSheetCsv(
   spreadsheetUrl: string,
   sheetName?: string,
-): Promise<SheetItem[]> {
-  const csvUrl = buildGoogleSheetCsvUrl(spreadsheetUrl, sheetName);
-  const response = await fetch(csvUrl);
+): Promise<string> {
+  const request = buildGoogleSheetCsvRequest(spreadsheetUrl, sheetName);
+  const response = await fetch("/api/google-sheets-csv", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: {
+      Accept: "text/csv",
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(request),
+  });
   if (!response.ok) {
     throw new Error("Failed to fetch spreadsheet data.");
   }
 
-  const text = await response.text();
-  return parseEventItemsFromCsv(text);
+  return await response.text();
+}
+
+export async function fetchEventItemsFromSpreadsheet(
+  spreadsheetUrl: string,
+  sheetName?: string,
+): Promise<SheetItem[]> {
+  return parseEventItemsFromCsv(
+    await fetchGoogleSheetCsv(spreadsheetUrl, sheetName),
+  );
 }

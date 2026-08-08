@@ -23,6 +23,7 @@ const item: ShoppingItem = {
 describe("ShoppingList touch drag cleanup", () => {
   afterEach(() => {
     vi.useRealTimers();
+    document.body.className = "";
     document.body.style.overflow = "";
     document.body.style.overscrollBehavior = "";
   });
@@ -63,22 +64,29 @@ describe("ShoppingList touch drag cleanup", () => {
 
     expect(source).toHaveClass("opacity-40");
     expect(source).toHaveAttribute("draggable", "false");
-    expect(document.body.style.overflow).toBe("hidden");
-    expect(document.body.style.overscrollBehavior).toBe("none");
+    expect(document.body).toHaveClass(
+      "esp-body-scroll-lock",
+      "esp-body-overscroll-lock",
+    );
+    const dragClone = document.body.querySelector(".esp-shopping-touch-clone");
+    expect(dragClone).not.toBeNull();
+    expect(dragClone).not.toHaveAttribute("style");
 
     view.unmount();
 
     expect(source).not.toHaveClass("opacity-40");
     expect(source).toHaveAttribute("draggable", "true");
-    expect(document.body.style.overflow).toBe("hidden");
-    expect(document.body.style.overscrollBehavior).toBe("none");
-    expect(
-      Array.from(document.body.children).some(
-        (element) => (element as HTMLElement).style.zIndex === "9999",
-      ),
-    ).toBe(false);
+    expect(document.body).toHaveClass(
+      "esp-body-scroll-lock",
+      "esp-body-overscroll-lock",
+    );
+    expect(document.body.querySelector(".esp-shopping-touch-clone")).toBeNull();
 
     releaseNavigatorLock();
+    expect(document.body).not.toHaveClass(
+      "esp-body-scroll-lock",
+      "esp-body-overscroll-lock",
+    );
     expect(document.body.style.overflow).toBe("auto");
     expect(document.body.style.overscrollBehavior).toBe("");
   });

@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:event-shopping-planner:companion-recovery-drill:v1",
+  "title": "Companion recovery drill v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "evidenceKind": {
+      "const": "companion-recovery-drill/v1"
+    },
+    "namespace": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]{2,62}$"
+    },
+    "operationId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "sourceSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "buildId": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "releasePolicy": {
+      "$ref": "#/$defs/evidenceRef"
+    },
+    "releaseAEvidenceSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sourceEvidenceSha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "status": {
+      "const": "PASS"
+    },
+    "command": {
+      "const": "npm run test:release-a-rollback"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "drillEvidenceRef": {
+      "$ref": "urn:event-shopping-planner:companion-recovery-drill-source:v1#/$defs/externalRef"
+    },
+    "companion": {
+      "$ref": "urn:event-shopping-planner:companion-recovery-drill-source:v1#/$defs/companion"
+    },
+    "steps": {
+      "$ref": "urn:event-shopping-planner:companion-recovery-drill-source:v1#/properties/steps"
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "evidenceKind",
+    "namespace",
+    "operationId",
+    "sourceSha",
+    "buildId",
+    "releasePolicy",
+    "releaseAEvidenceSha256",
+    "sourceEvidenceSha256",
+    "status",
+    "command",
+    "startedAt",
+    "completedAt",
+    "drillEvidenceRef",
+    "companion",
+    "steps"
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "evidenceRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "pattern": "^release-state://[a-z0-9][a-z0-9-]{2,62}/evidence/[0-9a-f]{64}$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["uri", "sha256"]
+    }
+  }
+}

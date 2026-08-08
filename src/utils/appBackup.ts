@@ -1,6 +1,6 @@
 import { ItemSources, ProtectionLevels, PurchaseStatuses } from "../types/item";
 import type { BlockDetectionSettingsStore } from "../types/map";
-import type { AppData } from "./indexedDB";
+import type { AppData } from "../app/ports/PersistenceCommandPort";
 import { validateLimitedPurchaseQuantities } from "./purchaseQuantity";
 
 export const APP_BACKUP_KIND = "event-shopping-planner-backup" as const;

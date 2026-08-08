@@ -1,0 +1,185 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:event-shopping-planner:companion-recovery-drill-source:v1",
+  "title": "Companion recovery drill source v1",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "sourceKind": {
+      "const": "companion-recovery-drill-source/v1"
+    },
+    "status": {
+      "const": "PASS"
+    },
+    "command": {
+      "const": "npm run test:release-a-rollback"
+    },
+    "startedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "completedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "drillEvidenceRef": {
+      "$ref": "#/$defs/externalRef"
+    },
+    "companion": {
+      "$ref": "#/$defs/companion"
+    },
+    "steps": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/packageStep"
+        },
+        {
+          "$ref": "#/$defs/probeStep"
+        },
+        {
+          "$ref": "#/$defs/returnStep"
+        }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "sourceKind",
+    "status",
+    "command",
+    "startedAt",
+    "completedAt",
+    "drillEvidenceRef",
+    "companion",
+    "steps"
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "externalRef": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 512,
+      "pattern": "^(https://|artifact://|run://|dashboard://|ticket://)"
+    },
+    "companion": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bindingId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "sourceSha": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "buildId": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "variantId": {
+          "$ref": "#/$defs/sha256"
+        },
+        "providerProjectId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "providerDeploymentId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255
+        },
+        "packageIndexSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "artifactManifestSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "providerEvidenceSha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "bindingId",
+        "sourceSha",
+        "buildId",
+        "variantId",
+        "providerProjectId",
+        "providerDeploymentId",
+        "packageIndexSha256",
+        "artifactManifestSha256",
+        "providerEvidenceSha256"
+      ]
+    },
+    "stepBase": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "step": {
+          "type": "string"
+        },
+        "status": {
+          "const": "PASS"
+        },
+        "evidenceRef": {
+          "$ref": "#/$defs/externalRef"
+        }
+      },
+      "required": ["step", "status", "evidenceRef"]
+    },
+    "packageStep": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/stepBase"
+        },
+        {
+          "properties": {
+            "step": {
+              "const": "package-redeploy-without-rebuild"
+            }
+          }
+        }
+      ]
+    },
+    "probeStep": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/stepBase"
+        },
+        {
+          "properties": {
+            "step": {
+              "const": "independent-companion-probe"
+            }
+          }
+        }
+      ]
+    },
+    "returnStep": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/stepBase"
+        },
+        {
+          "properties": {
+            "step": {
+              "const": "standard-return"
+            }
+          }
+        }
+      ]
+    }
+  }
+}

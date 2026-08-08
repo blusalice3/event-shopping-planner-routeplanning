@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "scenarioId": "xlsx-worker-import-valid",
+  "domain": "xlsx-worker",
+  "dataset": {
+    "generator": "valid-event-workbook-v1",
+    "rowCount": 50000,
+    "targetCompressedBytes": 16777216
+  },
+  "operation": {
+    "kind": "event-import",
+    "execution": "worker",
+    "transferInput": true
+  },
+  "requiredAssertions": [
+    "worker-execution-observed",
+    "ui-heartbeat-observed",
+    "progress-observed",
+    "single-terminal-result",
+    "atomic-domain-commit"
+  ],
+  "requiredTelemetry": [
+    "durationMs",
+    "maxUiHeartbeatGapMs",
+    "peakMemoryDeltaBytes"
+  ]
+}

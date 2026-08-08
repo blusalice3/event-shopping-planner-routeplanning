@@ -1,0 +1,155 @@
+{
+  "schemaVersion": 2,
+  "fixtureHashAlgorithm": "sha256-raw-bytes",
+  "baselineFixtureSourceSha": "638dc0d2b05a09da9ea09e3f25e00bb36e1b2994",
+  "scenarios": [
+    {
+      "id": "foundation-startup-cold",
+      "kind": "performance",
+      "fixtureRef": "src/App.tsx",
+      "fixtureSha256": "03b0b85ec83cd6f8d2eac2f05a92d8d367158923696d0b1f3a821fffdbf93918",
+      "introducedAtGate": "P0-BASELINE",
+      "requiredFromExit": "P0-TOOLCHAIN"
+    },
+    {
+      "id": "foundation-startup-warm",
+      "kind": "performance",
+      "fixtureRef": "src/test/fixtures/legacy-journal-v1-no-checkpoint-d2389a0.json",
+      "fixtureSha256": "8636bda9b4452a894734fb9e52f13358f1ecb8f7f0c38788d8871e594645e7d1",
+      "introducedAtGate": "P0-BASELINE",
+      "requiredFromExit": "P0-TOOLCHAIN"
+    },
+    {
+      "id": "foundation-full-list",
+      "kind": "browser-visual-a11y-performance",
+      "fixtureRef": "src/components/ShoppingList.rangeSelection.integration.test.tsx",
+      "fixtureSha256": "f41735a679c9c7641943f1d3c8d53f21458e92b536a9ffc36d926d699e8bf112",
+      "introducedAtGate": "P0-BASELINE",
+      "requiredFromExit": "P0-TOOLCHAIN"
+    },
+    {
+      "id": "foundation-benign-main-thread-xlsx",
+      "kind": "performance",
+      "fixtureRef": "src/features/events/fileImport.simpleXlsx.test.ts",
+      "fixtureSha256": "4f2434389232544aa6379238714328f22560fb88109d5dff567560c9205943a3",
+      "introducedAtGate": "P0-BASELINE",
+      "requiredFromExit": "P0-TOOLCHAIN"
+    },
+    {
+      "id": "foundation-indexeddb-current",
+      "kind": "integration-performance",
+      "fixtureRef": "src/test/fixtures/legacy-journal-v1-no-checkpoint-d2389a0.json",
+      "fixtureSha256": "8636bda9b4452a894734fb9e52f13358f1ecb8f7f0c38788d8871e594645e7d1",
+      "introducedAtGate": "P0-BASELINE",
+      "requiredFromExit": "P0-TOOLCHAIN"
+    },
+    {
+      "id": "xlsx-worker-import-valid",
+      "kind": "browser-integration-performance",
+      "fixtureRef": "scripts/fixtures/performance/xlsx-worker-import-valid.json",
+      "fixtureSha256": "6735aa18fb958644e26302aa49f2c2d360301264fb1a1d4c21ec108d7b4ed395",
+      "fixtureBinding": "current-policy-tree",
+      "introducedAtGate": "P3-XLSX",
+      "requiredFromExit": "P3-XLSX"
+    },
+    {
+      "id": "xlsx-worker-export-roundtrip",
+      "kind": "browser-integration-performance",
+      "fixtureRef": "scripts/fixtures/performance/xlsx-worker-export-roundtrip.json",
+      "fixtureSha256": "c690da278e338a43186c033863edd381dd5447a50b3a664375e315dbea5fc3e4",
+      "fixtureBinding": "current-policy-tree",
+      "introducedAtGate": "P3-XLSX",
+      "requiredFromExit": "P3-XLSX"
+    },
+    {
+      "id": "xlsx-worker-reject-corrupt",
+      "kind": "worker-security-performance",
+      "fixtureRef": "scripts/fixtures/performance/xlsx-worker-reject-corrupt.json",
+      "fixtureSha256": "a79e35f9217fd8e03eb89cbc59add0376ad69a7b82ef425e28874b420e047ee1",
+      "fixtureBinding": "current-policy-tree",
+      "introducedAtGate": "P3-XLSX",
+      "requiredFromExit": "P3-XLSX"
+    },
+    {
+      "id": "xlsx-worker-reject-input-over-limit",
+      "kind": "worker-security-performance",
+      "fixtureRef": "scripts/fixtures/performance/xlsx-worker-reject-input-over-limit.json",
+      "fixtureSha256": "06d9af458518b77cdacf5e1acef44e58ff6dd104aee9c6a04965e0639fdd7051",
+      "fixtureBinding": "current-policy-tree",
+      "introducedAtGate": "P3-XLSX",
+      "requiredFromExit": "P3-XLSX"
+    },
+    {
+      "id": "xlsx-worker-reject-zip-bomb",
+      "kind": "worker-security-performance",
+      "fixtureRef": "scripts/fixtures/performance/xlsx-worker-reject-zip-bomb.json",
+      "fixtureSha256": "e6ec696e7e56bbc2bc701c3b16b66f580b343c51d1d1c66c3a62ef72e68084f6",
+      "fixtureBinding": "current-policy-tree",
+      "introducedAtGate": "P3-XLSX",
+      "requiredFromExit": "P3-XLSX"
+    },
+    {
+      "id": "xlsx-worker-cancel",
+      "kind": "worker-integration-performance",
+      "fixtureRef": "scripts/fixtures/performance/xlsx-worker-cancel.json",
+      "fixtureSha256": "f5830630144285650838423f437c842327adbbe35ce4c962b1fe81385ecd9424",
+      "fixtureBinding": "current-policy-tree",
+      "introducedAtGate": "P3-XLSX",
+      "requiredFromExit": "P3-XLSX"
+    },
+    {
+      "id": "xlsx-worker-timeout",
+      "kind": "worker-integration-performance",
+      "fixtureRef": "scripts/fixtures/performance/xlsx-worker-timeout.json",
+      "fixtureSha256": "a9ee2e4e54e1a4f95a3260914834bfdf67e4823cee7f9be6401da3a98dcee520",
+      "fixtureBinding": "current-policy-tree",
+      "introducedAtGate": "P3-XLSX",
+      "requiredFromExit": "P3-XLSX"
+    },
+    {
+      "id": "list-long-full",
+      "kind": "browser-visual-a11y-performance",
+      "fixtureRef": "scripts/fixtures/performance/list-long-full.json",
+      "fixtureSha256": "b36ad348d674596f68219116aac2b5a83efde6755295d9688e9334d26758ef70",
+      "fixtureBinding": "current-policy-tree",
+      "introducedAtGate": "P5-DUAL",
+      "requiredFromExit": "P5-DUAL"
+    },
+    {
+      "id": "list-long-virtual",
+      "kind": "browser-visual-a11y-performance",
+      "fixtureRef": "scripts/fixtures/performance/list-long-virtual.json",
+      "fixtureSha256": "a33888c67cb4d051b6f0e6b6688d987be9470fe2a8d010a75c9f85c135bc794b",
+      "fixtureBinding": "current-policy-tree",
+      "introducedAtGate": "P5-DUAL",
+      "requiredFromExit": "P5-DUAL"
+    },
+    {
+      "id": "list-virtual-scroll-anchor",
+      "kind": "browser-visual-a11y-performance",
+      "fixtureRef": "scripts/fixtures/performance/list-virtual-scroll-anchor.json",
+      "fixtureSha256": "deba005de4376f9124ceb4f4e74d11a36c53880ae2f5e1f6f55fee2fde642e3a",
+      "fixtureBinding": "current-policy-tree",
+      "introducedAtGate": "P5-DUAL",
+      "requiredFromExit": "P5-DUAL"
+    },
+    {
+      "id": "list-virtual-focus-interaction",
+      "kind": "browser-visual-a11y-performance",
+      "fixtureRef": "scripts/fixtures/performance/list-virtual-focus-interaction.json",
+      "fixtureSha256": "134a5d683eefde65a1a912f516120e68d3673bb7c255a116cee0a36edf647f73",
+      "fixtureBinding": "current-policy-tree",
+      "introducedAtGate": "P5-DUAL",
+      "requiredFromExit": "P5-DUAL"
+    },
+    {
+      "id": "list-renderer-selection",
+      "kind": "browser-a11y-integration-performance",
+      "fixtureRef": "scripts/fixtures/performance/list-renderer-selection.json",
+      "fixtureSha256": "0a17824be738abc5f31d05717a96304d01f522b83a0f997222a69d70015db82e",
+      "fixtureBinding": "current-policy-tree",
+      "introducedAtGate": "P5-LIST",
+      "requiredFromExit": "P5-LIST"
+    }
+  ]
+}

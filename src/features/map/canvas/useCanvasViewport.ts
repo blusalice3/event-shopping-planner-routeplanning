@@ -353,7 +353,6 @@ export const useCanvasViewport = ({
       calculateOffsetForZoomPoint,
       maxZoom,
       minZoom,
-      offsetRef,
       onZoomChange,
       setOffset,
     ],

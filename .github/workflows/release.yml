@@ -1,0 +1,753 @@
+name: Foundation release
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Full clean source commit SHA at the protected main head
+        required: true
+        type: string
+      operation:
+        description: Protected release operation
+        required: true
+        type: choice
+        options:
+          - build-and-verify
+          - deploy-prebuilt
+          - produce-promotion-subject
+          - prepare-and-promote
+          - record-promotion
+          - reconcile
+          - produce-acceptance-inputs
+          - accept-standard
+      release_role:
+        description: Prebuilt package role for deploy-prebuilt
+        required: true
+        default: standard
+        type: choice
+        options:
+          - standard
+          - containment
+      artifact_run_id:
+        description: build-and-verify run containing the immutable package
+        required: false
+        default: ""
+        type: string
+      replay_receipt_run_id:
+        description: deploy-prebuilt run whose exact receipt must be replayed
+        required: false
+        default: ""
+        type: string
+      standard_deployment_run_id:
+        description: deploy-prebuilt run containing the standard binding
+        required: false
+        default: ""
+        type: string
+      containment_deployment_run_id:
+        description: deploy-prebuilt run containing the containment binding
+        required: false
+        default: ""
+        type: string
+      prepromotion_evidence_run_id:
+        description: Trusted run containing the stored pre-promotion evidence set
+        required: false
+        default: ""
+        type: string
+      operation_id:
+        description: Stable promotion operation id
+        required: false
+        default: ""
+        type: string
+      subject_run_id:
+        description: produce-promotion-subject run containing the reviewed subject
+        required: false
+        default: ""
+        type: string
+      subject_sha256:
+        description: Reviewed canonical promotion subject SHA-256
+        required: false
+        default: ""
+        type: string
+      promotion_run_id:
+        description: prepare-and-promote run to resume after a partial lifecycle failure
+        required: false
+        default: ""
+        type: string
+      acceptance_evidence_run_id:
+        description: Trusted run containing release evidence and raw acceptance sources
+        required: false
+        default: ""
+        type: string
+      acceptance_inputs_run_id:
+        description: produce-acceptance-inputs run containing canonical acceptance inputs
+        required: false
+        default: ""
+        type: string
+      evidence_sha256:
+        description: Reviewed canonical acceptance evidence SHA-256
+        required: false
+        default: ""
+        type: string
+      continuous_probe_source_sha256:
+        description: Reviewed raw continuous production probe source SHA-256
+        required: false
+        default: ""
+        type: string
+      companion_recovery_source_sha256:
+        description: Reviewed raw companion recovery drill source SHA-256 when required
+        required: false
+        default: ""
+        type: string
+      continuous_probe_sha256:
+        description: Reviewed canonical continuous production probe SHA-256
+        required: false
+        default: ""
+        type: string
+      companion_recovery_drill_sha256:
+        description: Reviewed canonical companion recovery drill SHA-256 when required
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: foundation-release-state
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: foundation-release-state
+    timeout-minutes: 60
+    env:
+      REQUESTED_SOURCE_SHA: ${{ inputs.source_sha }}
+      REQUESTED_OPERATION: ${{ inputs.operation }}
+      REQUESTED_RELEASE_ROLE: ${{ inputs.release_role }}
+      REQUESTED_ARTIFACT_RUN_ID: ${{ inputs.artifact_run_id }}
+      REQUESTED_REPLAY_RECEIPT_RUN_ID: ${{ inputs.replay_receipt_run_id }}
+      REQUESTED_STANDARD_DEPLOYMENT_RUN_ID: ${{ inputs.standard_deployment_run_id }}
+      REQUESTED_CONTAINMENT_DEPLOYMENT_RUN_ID: ${{ inputs.containment_deployment_run_id }}
+      REQUESTED_PREPROMOTION_EVIDENCE_RUN_ID: ${{ inputs.prepromotion_evidence_run_id }}
+      REQUESTED_OPERATION_ID: ${{ inputs.operation_id }}
+      REQUESTED_SUBJECT_RUN_ID: ${{ inputs.subject_run_id }}
+      REQUESTED_SUBJECT_SHA256: ${{ inputs.subject_sha256 }}
+      REQUESTED_PROMOTION_RUN_ID: ${{ inputs.promotion_run_id }}
+      REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID: ${{ inputs.acceptance_evidence_run_id }}
+      REQUESTED_ACCEPTANCE_INPUTS_RUN_ID: ${{ inputs.acceptance_inputs_run_id }}
+      REQUESTED_EVIDENCE_SHA256: ${{ inputs.evidence_sha256 }}
+      REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256: ${{ inputs.continuous_probe_source_sha256 }}
+      REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256: ${{ inputs.companion_recovery_source_sha256 }}
+      REQUESTED_CONTINUOUS_PROBE_SHA256: ${{ inputs.continuous_probe_sha256 }}
+      REQUESTED_COMPANION_RECOVERY_DRILL_SHA256: ${{ inputs.companion_recovery_drill_sha256 }}
+      RELEASE_STATE_NAMESPACE: ${{ vars.RELEASE_STATE_NAMESPACE }}
+      RELEASE_STATE_DATABASE_URL: ${{ secrets.RELEASE_STATE_DATABASE_URL }}
+      RELEASE_STATE_DATABASE_CA_PEM: ${{ secrets.RELEASE_STATE_DATABASE_CA_PEM }}
+    steps:
+      - name: Validate reviewed dispatch inputs
+        shell: pwsh
+        run: |
+          $runIdPattern = '^[1-9][0-9]*$'
+          $sha256Pattern = '^[0-9a-f]{64}$'
+          if ($env:REQUESTED_SOURCE_SHA -notmatch '^[0-9a-f]{40}$') {
+            throw "source_sha must be a full lowercase commit SHA"
+          }
+          if ($env:RELEASE_STATE_NAMESPACE -notmatch '^[a-z0-9][a-z0-9-]{2,62}$') {
+            throw "RELEASE_STATE_NAMESPACE is absent or invalid"
+          }
+          if (
+            -not [string]::IsNullOrEmpty($env:REQUESTED_REPLAY_RECEIPT_RUN_ID) -and
+            $env:REQUESTED_REPLAY_RECEIPT_RUN_ID -notmatch $runIdPattern
+          ) {
+            throw "replay_receipt_run_id must identify a prior trusted workflow run"
+          }
+
+          switch ($env:REQUESTED_OPERATION) {
+            'build-and-verify' {}
+            'deploy-prebuilt' {
+              if ($env:REQUESTED_ARTIFACT_RUN_ID -notmatch $runIdPattern) {
+                throw "artifact_run_id is required for deploy-prebuilt"
+              }
+            }
+            'produce-promotion-subject' {
+              if (
+                $env:REQUESTED_STANDARD_DEPLOYMENT_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_CONTAINMENT_DEPLOYMENT_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_PREPROMOTION_EVIDENCE_RUN_ID -notmatch $runIdPattern
+              ) {
+                throw "all three authoritative input run ids are required"
+              }
+              if ($env:REQUESTED_OPERATION_ID -notmatch '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$') {
+                throw "operation_id is absent or invalid"
+              }
+            }
+            'prepare-and-promote' {
+              if (
+                $env:REQUESTED_SUBJECT_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_SUBJECT_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "subject_run_id and reviewed subject_sha256 are required"
+              }
+            }
+            'record-promotion' {
+              if ($env:REQUESTED_PROMOTION_RUN_ID -notmatch $runIdPattern) {
+                throw "promotion_run_id is required to resume a promotion"
+              }
+            }
+            'reconcile' {}
+            'produce-acceptance-inputs' {
+              if (
+                $env:REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_EVIDENCE_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "acceptance evidence run and reviewed evidence/continuous source hashes are required"
+              }
+              if (
+                -not [string]::IsNullOrEmpty($env:REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256) -and
+                $env:REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "companion_recovery_source_sha256 must be empty or a reviewed SHA-256"
+              }
+            }
+            'accept-standard' {
+              if (
+                $env:REQUESTED_ACCEPTANCE_EVIDENCE_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_ACCEPTANCE_INPUTS_RUN_ID -notmatch $runIdPattern -or
+                $env:REQUESTED_EVIDENCE_SHA256 -notmatch $sha256Pattern -or
+                $env:REQUESTED_CONTINUOUS_PROBE_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "reviewed evidence and canonical continuous probe inputs are required"
+              }
+              if (
+                -not [string]::IsNullOrEmpty($env:REQUESTED_COMPANION_RECOVERY_DRILL_SHA256) -and
+                $env:REQUESTED_COMPANION_RECOVERY_DRILL_SHA256 -notmatch $sha256Pattern
+              ) {
+                throw "companion_recovery_drill_sha256 must be empty or a reviewed SHA-256"
+              }
+            }
+            default {
+              throw "unknown release operation"
+            }
+          }
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.19.0
+          cache: npm
+
+      - name: Pin npm
+        shell: pwsh
+        run: npm install --global npm@11.19.0
+
+      - name: Install exact dependency graph
+        shell: pwsh
+        run: npm ci
+
+      - name: Verify protected source identity
+        shell: pwsh
+        run: |
+          $actual = (git rev-parse HEAD).Trim()
+          if ($actual -ne $env:REQUESTED_SOURCE_SHA) {
+            throw "checked-out source differs from requested source"
+          }
+          if ($env:GITHUB_SHA -ne $env:REQUESTED_SOURCE_SHA) {
+            throw "requested source must be the reviewed workflow-dispatch head"
+          }
+          if ($env:GITHUB_REF -ne 'refs/heads/main' -or $env:GITHUB_REF_PROTECTED -ne 'true') {
+            throw "release operation must run from protected main"
+          }
+          if ((git status --porcelain).Length -ne 0) {
+            throw "release checkout is dirty"
+          }
+          if ((node --version) -ne 'v24.19.0' -or (npm --version) -ne '11.19.0') {
+            throw "release runtime differs from the pinned toolchain"
+          }
+
+      - name: Collect authoritative provider configuration
+        if: inputs.operation == 'build-and-verify' || inputs.operation == 'deploy-prebuilt'
+        shell: pwsh
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          $observationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
+          npm run provider:observe -- --output $observationPath
+
+      - name: Verify source and foundation policies
+        shell: pwsh
+        run: |
+          npm run test:encoding
+          npm run verify:foundation
+          npm run verify:db-compatibility
+          if (
+            $env:REQUESTED_OPERATION -eq 'build-and-verify' -or
+            $env:REQUESTED_OPERATION -eq 'deploy-prebuilt'
+          ) {
+            $observationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
+            npm run verify:provider-policy -- --require-configured --observation $observationPath
+          }
+
+      - name: Build and verify immutable package
+        if: inputs.operation == 'build-and-verify'
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        shell: pwsh
+        run: |
+          $observationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
+          $packagePath = Join-Path $env:RUNNER_TEMP 'foundation-release-package'
+          npm run artifact:build -- --output $packagePath --provider-observation $observationPath
+
+      - name: Upload verified immutable package
+        if: inputs.operation == 'build-and-verify'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-release-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/foundation-release-package
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download verified immutable package
+        if: inputs.operation == 'deploy-prebuilt'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-release-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/foundation-release-package
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.artifact_run_id }}
+
+      - name: Download exact replay receipt
+        if: inputs.operation == 'deploy-prebuilt' && inputs.replay_receipt_run_id != ''
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-deployment-${{ inputs.source_sha }}-${{ inputs.release_role }}
+          path: ${{ runner.temp }}/deployment-replay
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.replay_receipt_run_id }}
+
+      - name: Deploy and bind selected verified prebuilt role
+        if: inputs.operation == 'deploy-prebuilt'
+        shell: pwsh
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          $packagePath = Join-Path $env:RUNNER_TEMP 'foundation-release-package'
+          $observationPath = Join-Path $env:RUNNER_TEMP 'provider-observation.json'
+          $outputPath = Join-Path $env:RUNNER_TEMP 'deployment-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $receiptPath = Join-Path $outputPath 'prebuilt-deployment-receipt.json'
+          $idempotencyRunId = $env:GITHUB_RUN_ID
+          if (-not [string]::IsNullOrEmpty($env:REQUESTED_REPLAY_RECEIPT_RUN_ID)) {
+            $receiptPath = Join-Path $env:RUNNER_TEMP 'deployment-replay/prebuilt-deployment-receipt.json'
+            $idempotencyRunId = $env:REQUESTED_REPLAY_RECEIPT_RUN_ID
+          }
+          $idempotencyKey = "deploy:${idempotencyRunId}:$($env:REQUESTED_SOURCE_SHA):$($env:REQUESTED_RELEASE_ROLE)"
+          npm run release:deploy-prebuilt -- `
+            --package $packagePath `
+            --role $env:REQUESTED_RELEASE_ROLE `
+            --provider-observation $observationPath `
+            --idempotency-key $idempotencyKey `
+            --receipt $receiptPath
+          $publishedReceiptPath = Join-Path $outputPath 'prebuilt-deployment-receipt.json'
+          if ($receiptPath -ne $publishedReceiptPath) {
+            Copy-Item -LiteralPath $receiptPath -Destination $publishedReceiptPath -ErrorAction Stop
+          }
+          $bindingPath = Join-Path $outputPath 'deployment-binding.json'
+          npm run release:produce-deployment-binding -- deployment-binding `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --package $packagePath `
+            --role $env:REQUESTED_RELEASE_ROLE `
+            --deployment-receipt $publishedReceiptPath `
+            --provider-observation $observationPath `
+            --output $bindingPath
+
+      - name: Upload immutable deployment receipt and binding
+        if: inputs.operation == 'deploy-prebuilt'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-deployment-${{ inputs.source_sha }}-${{ inputs.release_role }}
+          path: ${{ runner.temp }}/deployment-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download standard deployment binding
+        if: inputs.operation == 'produce-promotion-subject'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-deployment-${{ inputs.source_sha }}-standard
+          path: ${{ runner.temp }}/standard-deployment
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.standard_deployment_run_id }}
+
+      - name: Download containment deployment binding
+        if: inputs.operation == 'produce-promotion-subject'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-deployment-${{ inputs.source_sha }}-containment
+          path: ${{ runner.temp }}/containment-deployment
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.containment_deployment_run_id }}
+
+      - name: Download stored pre-promotion evidence set
+        if: inputs.operation == 'produce-promotion-subject'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-prepromotion-evidence-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/prepromotion-evidence
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.prepromotion_evidence_run_id }}
+
+      - name: Produce authoritative promotion subject
+        if: inputs.operation == 'produce-promotion-subject'
+        shell: pwsh
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'promotion-subject-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $subjectPath = Join-Path $outputPath 'promotion-subject.json'
+          npm run release:produce-input -- promotion-subject `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --operation-id $env:REQUESTED_OPERATION_ID `
+            --standard-binding (Join-Path $env:RUNNER_TEMP 'standard-deployment/deployment-binding.json') `
+            --containment-binding (Join-Path $env:RUNNER_TEMP 'containment-deployment/deployment-binding.json') `
+            --evidence-set (Join-Path $env:RUNNER_TEMP 'prepromotion-evidence/pre-promotion-evidence-set.json') `
+            --output $subjectPath
+          $hash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Promotion subject SHA-256: ``$hash``" -Encoding utf8
+
+      - name: Upload authoritative promotion subject
+        if: inputs.operation == 'produce-promotion-subject'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-promotion-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/promotion-subject-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download reviewed promotion subject
+        if: inputs.operation == 'prepare-and-promote'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-promotion-subject-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/promotion-subject-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.subject_run_id }}
+
+      - name: Prepare, promote, stage, validate, and record the exact subject
+        if: inputs.operation == 'prepare-and-promote'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          $subjectPath = Join-Path $env:RUNNER_TEMP 'promotion-subject-input/promotion-subject.json'
+          $actualSubjectHash = (Get-FileHash -LiteralPath $subjectPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualSubjectHash -ne $env:REQUESTED_SUBJECT_SHA256) {
+            throw "promotion subject differs from the reviewed SHA-256"
+          }
+          $outputPath = Join-Path $env:RUNNER_TEMP 'promotion-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $preparedPath = Join-Path $outputPath 'prepared-promotion.json'
+          $receiptPath = Join-Path $outputPath 'prepared-promotion-receipt.json'
+          $authorityPath = Join-Path $outputPath 'production-assignment-authority.json'
+          $assignmentRecordPath = Join-Path $outputPath 'deployment-assignment-lifecycle.json'
+          $assignmentPath = Join-Path $outputPath 'assignment-validation.json'
+          $probePath = Join-Path $outputPath 'production-assignment-probe.json'
+          $lifecyclePath = Join-Path $outputPath 'promotion-lifecycle.json'
+          npm run release:protected -- prepare-promotion `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --source-sha $env:REQUESTED_SOURCE_SHA `
+            --run-id $env:GITHUB_RUN_ID `
+            --subject $subjectPath `
+            --subject-sha256 $env:REQUESTED_SUBJECT_SHA256 `
+            --output $preparedPath
+          npm run release:promote-prepared -- `
+            --prepared-result $preparedPath `
+            --receipt $receiptPath
+          npm run provider:validate-production-assignment -- assignment-authority `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --prepared-result $preparedPath `
+            --promotion-receipt $receiptPath `
+            --assignment-authority $authorityPath
+          npm run release:lifecycle -- record-assignment `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --prepared-result $preparedPath `
+            --promotion-receipt $receiptPath `
+            --assignment-authority $authorityPath `
+            --output $assignmentRecordPath
+          npm run provider:validate-production-assignment -- assignment-validation `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --prepared-result $preparedPath `
+            --promotion-receipt $receiptPath `
+            --assignment-authority $authorityPath `
+            --assignment-validation $assignmentPath `
+            --production-probe $probePath
+          npm run release:lifecycle -- record-promotion `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --prepared-result $preparedPath `
+            --promotion-receipt $receiptPath `
+            --assignment-authority $authorityPath `
+            --assignment-validation $assignmentPath `
+            --production-probe $probePath `
+            --output $lifecyclePath
+
+      - name: Upload promotion recovery chain
+        if: always() && inputs.operation == 'prepare-and-promote'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-promotion-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/promotion-output
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Download a partial promotion chain
+        if: inputs.operation == 'record-promotion'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-promotion-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/promotion-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.promotion_run_id }}
+
+      - name: Revalidate and record a partial promotion
+        if: inputs.operation == 'record-promotion'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          $inputPath = Join-Path $env:RUNNER_TEMP 'promotion-input'
+          $outputPath = Join-Path $env:RUNNER_TEMP 'promotion-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $preparedPath = Join-Path $outputPath 'prepared-promotion.json'
+          $receiptPath = Join-Path $outputPath 'prepared-promotion-receipt.json'
+          Copy-Item -LiteralPath (Join-Path $inputPath 'prepared-promotion.json') -Destination $preparedPath -ErrorAction Stop
+          Copy-Item -LiteralPath (Join-Path $inputPath 'prepared-promotion-receipt.json') -Destination $receiptPath -ErrorAction Stop
+          $authorityPath = Join-Path $outputPath 'production-assignment-authority.json'
+          $assignmentRecordPath = Join-Path $outputPath 'deployment-assignment-lifecycle.json'
+          $assignmentPath = Join-Path $outputPath 'assignment-validation.json'
+          $probePath = Join-Path $outputPath 'production-assignment-probe.json'
+          $lifecyclePath = Join-Path $outputPath 'promotion-lifecycle.json'
+          npm run provider:validate-production-assignment -- assignment-authority `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --prepared-result $preparedPath `
+            --promotion-receipt $receiptPath `
+            --assignment-authority $authorityPath
+          npm run release:lifecycle -- record-assignment `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --prepared-result $preparedPath `
+            --promotion-receipt $receiptPath `
+            --assignment-authority $authorityPath `
+            --output $assignmentRecordPath
+          npm run provider:validate-production-assignment -- assignment-validation `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --prepared-result $preparedPath `
+            --promotion-receipt $receiptPath `
+            --assignment-authority $authorityPath `
+            --assignment-validation $assignmentPath `
+            --production-probe $probePath
+          npm run release:lifecycle -- record-promotion `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --prepared-result $preparedPath `
+            --promotion-receipt $receiptPath `
+            --assignment-authority $authorityPath `
+            --assignment-validation $assignmentPath `
+            --production-probe $probePath `
+            --output $lifecyclePath
+
+      - name: Upload resumed promotion chain
+        if: always() && inputs.operation == 'record-promotion'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-promotion-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/promotion-output
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Reconcile provider assignments into Release State
+        if: inputs.operation == 'reconcile'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          $outputPath = Join-Path $env:RUNNER_TEMP 'reconcile-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $observationPath = Join-Path $outputPath 'provider-alias-observation.json'
+          $resultPath = Join-Path $outputPath 'reconcile-result.json'
+          npm run release:produce-input -- provider-observation `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --output $observationPath
+          npm run release:protected -- reconcile `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --provider-observation $observationPath `
+            --output $resultPath
+
+      - name: Upload reconciliation evidence
+        if: always() && inputs.operation == 'reconcile'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-reconcile-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/reconcile-output
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Download reviewed acceptance evidence
+        if: inputs.operation == 'produce-acceptance-inputs' || inputs.operation == 'accept-standard'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-acceptance-evidence-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/acceptance-input
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.acceptance_evidence_run_id }}
+
+      - name: Produce canonical acceptance inputs from reviewed sources
+        if: inputs.operation == 'produce-acceptance-inputs'
+        shell: pwsh
+        run: |
+          $inputPath = Join-Path $env:RUNNER_TEMP 'acceptance-input'
+          $evidencePath = Join-Path $inputPath 'release-a-acceptance-evidence.json'
+          $continuousSourcePath = Join-Path $inputPath 'continuous-production-probe-source.json'
+          $companionSourcePath = Join-Path $inputPath 'companion-recovery-drill-source.json'
+          $actualEvidenceHash = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          $actualContinuousSourceHash = (Get-FileHash -LiteralPath $continuousSourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if (
+            $actualEvidenceHash -ne $env:REQUESTED_EVIDENCE_SHA256 -or
+            $actualContinuousSourceHash -ne $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256
+          ) {
+            throw "acceptance evidence or continuous probe source differs from its reviewed SHA-256"
+          }
+          $outputPath = Join-Path $env:RUNNER_TEMP 'acceptance-inputs-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $continuousPath = Join-Path $outputPath 'continuous-production-probe.json'
+          npm run release:acceptance-input -- continuous-probe `
+            --namespace $env:RELEASE_STATE_NAMESPACE `
+            --release-evidence $evidencePath `
+            --release-evidence-sha256 $env:REQUESTED_EVIDENCE_SHA256 `
+            --source $continuousSourcePath `
+            --source-sha256 $env:REQUESTED_CONTINUOUS_PROBE_SOURCE_SHA256 `
+            --output $continuousPath
+          $continuousHash = (Get-FileHash -LiteralPath $continuousPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Continuous probe SHA-256: ``$continuousHash``" -Encoding utf8
+
+          if ([string]::IsNullOrEmpty($env:REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256)) {
+            if (Test-Path -LiteralPath $companionSourcePath) {
+              throw "companion recovery source exists without a reviewed SHA-256"
+            }
+          } else {
+            $actualCompanionSourceHash = (Get-FileHash -LiteralPath $companionSourcePath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualCompanionSourceHash -ne $env:REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256) {
+              throw "companion recovery source differs from the reviewed SHA-256"
+            }
+            $companionPath = Join-Path $outputPath 'companion-recovery-drill.json'
+            npm run release:acceptance-input -- companion-recovery `
+              --namespace $env:RELEASE_STATE_NAMESPACE `
+              --release-evidence $evidencePath `
+              --release-evidence-sha256 $env:REQUESTED_EVIDENCE_SHA256 `
+              --source $companionSourcePath `
+              --source-sha256 $env:REQUESTED_COMPANION_RECOVERY_SOURCE_SHA256 `
+              --output $companionPath
+            $companionHash = (Get-FileHash -LiteralPath $companionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "Companion recovery drill SHA-256: ``$companionHash``" -Encoding utf8
+          }
+
+      - name: Upload canonical acceptance inputs
+        if: inputs.operation == 'produce-acceptance-inputs'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-acceptance-inputs-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/acceptance-inputs-output
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Download reviewed canonical acceptance inputs
+        if: inputs.operation == 'accept-standard'
+        uses: actions/download-artifact@v4
+        with:
+          name: foundation-acceptance-inputs-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/acceptance-inputs
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          run-id: ${{ inputs.acceptance_inputs_run_id }}
+
+      - name: Accept the standard release after fresh observation
+        if: inputs.operation == 'accept-standard'
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $evidencePath = Join-Path $env:RUNNER_TEMP 'acceptance-input/release-a-acceptance-evidence.json'
+          $actualEvidenceHash = (Get-FileHash -LiteralPath $evidencePath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualEvidenceHash -ne $env:REQUESTED_EVIDENCE_SHA256) {
+            throw "acceptance evidence differs from the reviewed SHA-256"
+          }
+          $continuousPath = Join-Path $env:RUNNER_TEMP 'acceptance-inputs/continuous-production-probe.json'
+          $actualContinuousHash = (Get-FileHash -LiteralPath $continuousPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actualContinuousHash -ne $env:REQUESTED_CONTINUOUS_PROBE_SHA256) {
+            throw "continuous production probe differs from the reviewed SHA-256"
+          }
+          $companionPath = Join-Path $env:RUNNER_TEMP 'acceptance-inputs/companion-recovery-drill.json'
+          $outputPath = Join-Path $env:RUNNER_TEMP 'acceptance-output'
+          New-Item -ItemType Directory -Path $outputPath -ErrorAction Stop | Out-Null
+          $acceptanceArguments = @(
+            'run',
+            'release:lifecycle',
+            '--',
+            'accept-standard',
+            '--namespace',
+            $env:RELEASE_STATE_NAMESPACE,
+            '--evidence',
+            $evidencePath,
+            '--evidence-sha256',
+            $env:REQUESTED_EVIDENCE_SHA256,
+            '--continuous-probe',
+            $continuousPath,
+            '--continuous-probe-sha256',
+            $env:REQUESTED_CONTINUOUS_PROBE_SHA256
+          )
+          if ([string]::IsNullOrEmpty($env:REQUESTED_COMPANION_RECOVERY_DRILL_SHA256)) {
+            if (Test-Path -LiteralPath $companionPath) {
+              throw "companion recovery drill exists without a reviewed SHA-256"
+            }
+          } else {
+            $actualCompanionHash = (Get-FileHash -LiteralPath $companionPath -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($actualCompanionHash -ne $env:REQUESTED_COMPANION_RECOVERY_DRILL_SHA256) {
+              throw "companion recovery drill differs from the reviewed SHA-256"
+            }
+            $acceptanceArguments += @(
+              '--companion-recovery-drill',
+              $companionPath,
+              '--companion-recovery-drill-sha256',
+              $env:REQUESTED_COMPANION_RECOVERY_DRILL_SHA256
+            )
+          }
+          $acceptanceArguments += @(
+            '--output',
+            (Join-Path $outputPath 'acceptance-result.json')
+          )
+          & npm @acceptanceArguments
+          if ($LASTEXITCODE -ne 0) {
+            throw "accept-standard lifecycle failed with exit code $LASTEXITCODE"
+          }
+
+      - name: Upload acceptance result
+        if: always() && inputs.operation == 'accept-standard'
+        uses: actions/upload-artifact@v4
+        with:
+          name: foundation-acceptance-${{ inputs.source_sha }}
+          path: ${{ runner.temp }}/acceptance-output
+          if-no-files-found: warn
+          retention-days: 30

@@ -1,0 +1,146 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:event-shopping-planner:release-identity:v1",
+  "title": "ReleaseIdentity v1",
+  "oneOf": [
+    {
+      "$ref": "#/$defs/legacyAutoUpdate"
+    },
+    {
+      "$ref": "#/$defs/promptCloseAll"
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sourceSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "sameOriginPath": {
+      "type": "string",
+      "pattern": "^/(?!/)[A-Za-z0-9._~!$&'()*+,;=:@%/-]+$"
+    },
+    "baseProperties": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "sourceSha": {
+          "$ref": "#/$defs/sourceSha"
+        },
+        "buildId": {
+          "$ref": "#/$defs/sourceSha"
+        },
+        "variantId": {
+          "$ref": "#/$defs/sha256"
+        },
+        "releaseRole": {
+          "enum": ["standard", "containment"]
+        },
+        "requiredDbCompatibilityFingerprint": {
+          "$ref": "#/$defs/sha256"
+        },
+        "buildPurpose": {
+          "enum": ["qa-xlsx-main", "qa-list-force-full"]
+        },
+        "nonPromotable": {
+          "const": true
+        }
+      },
+      "dependentRequired": {
+        "buildPurpose": ["nonPromotable"],
+        "nonPromotable": ["buildPurpose"]
+      },
+      "required": [
+        "schemaVersion",
+        "sourceSha",
+        "buildId",
+        "variantId",
+        "releaseRole",
+        "requiredDbCompatibilityFingerprint"
+      ]
+    },
+    "legacyAutoUpdate": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseProperties"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pwaLifecycle": {
+              "const": "legacy-auto-update-v1"
+            },
+            "appEntryUrl": {
+              "$ref": "#/$defs/sameOriginPath"
+            },
+            "appEntrySha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "serviceWorkerUrl": {
+              "$ref": "#/$defs/sameOriginPath"
+            },
+            "serviceWorkerSha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "pwaLifecycle",
+            "appEntryUrl",
+            "appEntrySha256",
+            "serviceWorkerUrl",
+            "serviceWorkerSha256"
+          ],
+          "unevaluatedProperties": false
+        }
+      ]
+    },
+    "promptCloseAll": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/baseProperties"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pwaLifecycle": {
+              "const": "prompt-close-all-v1"
+            },
+            "roleEntryUrl": {
+              "$ref": "#/$defs/sameOriginPath"
+            },
+            "roleEntrySha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "serviceWorkerUrl": {
+              "$ref": "#/$defs/sameOriginPath"
+            },
+            "serviceWorkerSha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "outerAgentUrl": {
+              "$ref": "#/$defs/sameOriginPath"
+            },
+            "outerAgentSha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": [
+            "pwaLifecycle",
+            "roleEntryUrl",
+            "roleEntrySha256",
+            "serviceWorkerUrl",
+            "serviceWorkerSha256",
+            "outerAgentUrl",
+            "outerAgentSha256"
+          ],
+          "unevaluatedProperties": false
+        }
+      ]
+    }
+  }
+}

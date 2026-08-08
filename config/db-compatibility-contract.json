@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "contractStatus": "local-specification",
+  "contractUri": "urn:event-shopping-planner:db-compatibility:v1",
+  "indexedDb": {
+    "name": "EventShoppingPlannerDB",
+    "version": 5,
+    "forwardCompatibilityCeiling": 7,
+    "stores": {
+      "eventLists": {
+        "keyPath": null,
+        "indexes": []
+      },
+      "eventMetadata": {
+        "keyPath": null,
+        "indexes": []
+      },
+      "executeModeItems": {
+        "keyPath": null,
+        "indexes": []
+      },
+      "dayModes": {
+        "keyPath": null,
+        "indexes": []
+      },
+      "mapData": {
+        "keyPath": null,
+        "indexes": []
+      },
+      "mapRotationSettings": {
+        "keyPath": null,
+        "indexes": []
+      },
+      "routeSettings": {
+        "keyPath": null,
+        "indexes": []
+      },
+      "hallDefinitions": {
+        "keyPath": null,
+        "indexes": []
+      },
+      "hallRouteSettings": {
+        "keyPath": null,
+        "indexes": []
+      },
+      "mapViewportSettings": {
+        "keyPath": null,
+        "indexes": []
+      },
+      "syncQueue": {
+        "keyPath": null,
+        "indexes": []
+      }
+    },
+    "knownInternalKeys": {
+      "syncQueuePayload": "data"
+    },
+    "compatibilityVersions": {
+      "migrationJournal": 2,
+      "migrationArchive": 1,
+      "repairCheckpoint": 1,
+      "mapData": 1,
+      "syncQueueWire": 2
+    }
+  },
+  "remote": {
+    "observationStatus": "unobserved",
+    "requiredTables": [
+      "public.persistence_release_a_metric_events",
+      "public.csp_violation_reports"
+    ],
+    "requiredFunctions": [
+      "public.read_persistence_release_a_metrics",
+      "public.retain_persistence_release_a_metrics",
+      "public.read_csp_violation_aggregates",
+      "public.retain_csp_violation_reports"
+    ],
+    "requiredPrivilegeFloor": {
+      "serviceRoleRawInsert": true,
+      "serviceRoleRawSelect": false,
+      "cspServiceRoleRawInsert": true,
+      "cspServiceRoleRawSelect": false,
+      "operatorBoundedFunctionOnly": true,
+      "cspApplicationCredentialDormantUntilPhase2B": true
+    },
+    "migrationSha256": "04a28f077af00d724dcd521c1d94fc85ae777f077cfc639adf1be200d213683b"
+  },
+  "releaseA": {
+    "releaseChannel": "release-a",
+    "legacyLocalStorageCleanup": "forced-off",
+    "legacyPhysicalDeletion": "forbidden"
+  },
+  "blockerCodes": [
+    "remote-schema-unobserved",
+    "remote-privileges-unobserved",
+    "hardening-migration-unapplied"
+  ]
+}

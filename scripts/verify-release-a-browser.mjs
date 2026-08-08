@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   access,
@@ -8,11 +7,10 @@ import {
   rm,
   writeFile,
 } from "node:fs/promises";
-import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import WebSocket from "ws";
+import { chromium as playwrightChromium } from "playwright";
 
 const PREVIEW_URL = process.env.ESP_PREVIEW_URL ?? "http://127.0.0.1:4173/";
 const ROLLBACK_MODE = process.env.ESP_ROLLBACK_MODE === "true";
@@ -38,6 +36,7 @@ const EXPECTED_SERVICE_WORKER_SHA256 =
 const EXPECTED_MAIN_ASSET = process.env.ESP_EXPECTED_MAIN_ASSET?.trim() || null;
 const CHROME_CANDIDATES = [
   process.env.CHROME_PATH,
+  playwrightChromium.executablePath(),
   "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
   "C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe",
@@ -118,174 +117,58 @@ const findChrome = async () => {
     }
   }
   throw new Error(
-    "Chrome or Edge was not found. Set CHROME_PATH to a Chromium executable.",
+    "A Playwright Chromium, Chrome, or Edge executable was not found. Set CHROME_PATH to a Chromium executable.",
   );
 };
 
-const reservePort = async () =>
-  await new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      if (!address || typeof address === "string") {
-        server.close();
-        reject(new Error("Failed to reserve a Chromium debugging port."));
-        return;
-      }
-      const { port } = address;
-      server.close((error) => (error ? reject(error) : resolve(port)));
-    });
-  });
-
-class CdpClient {
-  constructor(socket) {
-    this.socket = socket;
-    this.nextId = 1;
-    this.pending = new Map();
-    this.listeners = new Map();
-
-    socket.on("message", (rawMessage) => {
-      const message = JSON.parse(rawMessage.toString());
-      if (typeof message.id === "number") {
-        const pending = this.pending.get(message.id);
-        if (!pending) return;
-        this.pending.delete(message.id);
-        if (message.error) {
-          pending.reject(
-            new Error(
-              `${message.error.message ?? "CDP command failed"} (${message.error.code ?? "unknown"})`,
-            ),
-          );
-        } else {
-          pending.resolve(message.result ?? {});
-        }
-        return;
-      }
-
-      const listeners = this.listeners.get(message.method);
-      if (!listeners) return;
-      listeners.forEach((listener) => listener(message.params ?? {}));
-    });
-  }
-
-  static async connect(webSocketDebuggerUrl) {
-    const socket = new WebSocket(webSocketDebuggerUrl);
-    await withTimeout(
-      new Promise((resolve, reject) => {
-        socket.once("open", resolve);
-        socket.once("error", reject);
-      }),
-      10_000,
-      "Chromium DevTools connection",
-    );
-    return new CdpClient(socket);
+class PlaywrightPageClient {
+  constructor(session) {
+    this.session = session;
   }
 
   send(method, params = {}) {
-    const id = this.nextId;
-    this.nextId += 1;
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        this.pending.delete(id);
-        reject(new Error(`CDP ${method} timed out after 30000ms.`));
-      }, 30_000);
-      const settle = (callback) => (value) => {
-        clearTimeout(timeout);
-        callback(value);
-      };
-      this.pending.set(id, {
-        resolve: settle(resolve),
-        reject: settle(reject),
-      });
-      this.socket.send(JSON.stringify({ id, method, params }), (error) => {
-        if (!error) return;
-        const pending = this.pending.get(id);
-        this.pending.delete(id);
-        pending?.reject(error);
-      });
-    });
-  }
-
-  once(method, timeoutMs = 15_000) {
     return withTimeout(
-      new Promise((resolve) => {
-        const listeners = this.listeners.get(method) ?? new Set();
-        const listener = (params) => {
-          listeners.delete(listener);
-          resolve(params);
-        };
-        listeners.add(listener);
-        this.listeners.set(method, listeners);
-      }),
-      timeoutMs,
-      method,
+      this.session.send(method, params),
+      30_000,
+      `CDP ${method}`,
     );
   }
 
-  on(method, listener) {
-    const listeners = this.listeners.get(method) ?? new Set();
-    listeners.add(listener);
-    this.listeners.set(method, listeners);
-    return () => {
-      listeners.delete(listener);
-      if (listeners.size === 0) this.listeners.delete(method);
-    };
+  once(method, timeoutMs = 15_000) {
+    let listener;
+    const event = new Promise((resolve) => {
+      listener = (params) => resolve(params);
+      this.session.once(method, listener);
+    });
+    return withTimeout(event, timeoutMs, method).finally(() => {
+      if (listener) this.session.off(method, listener);
+    });
   }
 
-  close() {
-    const closeError = new Error("Chromium DevTools connection closed.");
-    this.pending.forEach(({ reject }) => reject(closeError));
-    this.pending.clear();
-    this.socket.terminate();
+  on(method, listener) {
+    this.session.on(method, listener);
+    return () => this.session.off(method, listener);
+  }
+
+  async close() {
+    await this.session.detach().catch(() => undefined);
   }
 }
 
-const fetchJson = async (url, options) => {
-  const response = await fetch(url, options);
-  if (!response.ok) {
-    throw new Error(`${url} returned HTTP ${response.status}.`);
-  }
-  return await response.json();
-};
-
-const waitForDevTools = async (port) => {
-  const endpoint = `http://127.0.0.1:${port}/json/version`;
-  let lastError;
-  for (let attempt = 0; attempt < 100; attempt += 1) {
-    try {
-      return await fetchJson(endpoint);
-    } catch (error) {
-      lastError = error;
-      await delay(100);
-    }
-  }
-  throw lastError ?? new Error("Chromium DevTools endpoint did not start.");
-};
-
-const createTarget = async (port) => {
-  const target = await fetchJson(
-    `http://127.0.0.1:${port}/json/new?${encodeURIComponent("about:blank")}`,
-    { method: "PUT" },
-  );
-  const client = await CdpClient.connect(target.webSocketDebuggerUrl);
+const createTarget = async (context, existingPage = null) => {
+  const page = existingPage ?? (await context.newPage());
+  const client = new PlaywrightPageClient(await context.newCDPSession(page));
   await Promise.all([
     client.send("Page.enable"),
     client.send("Runtime.enable"),
     client.send("Network.enable"),
   ]);
-  return { id: target.id, client };
+  return { page, client };
 };
 
-const closeTarget = async (port, target) => {
-  target.client.close();
-  try {
-    await fetch(`http://127.0.0.1:${port}/json/close/${target.id}`, {
-      method: "PUT",
-    });
-  } catch {
-    // The Chromium process shutdown path will close remaining targets.
-  }
+const closeTarget = async (target) => {
+  await target.client.close();
+  await target.page.close({ runBeforeUnload: false }).catch(() => undefined);
 };
 
 const installBrowserInstrumentation = async (client) => {
@@ -416,25 +299,115 @@ const waitForExpression = async (
   );
 };
 
+class AttachedServiceWorkerClient {
+  constructor(browserSession, sessionId) {
+    this.browserSession = browserSession;
+    this.sessionId = sessionId;
+    this.nextId = 1;
+    this.pending = new Map();
+    this.listeners = new Map();
+    this.handleMessage = (event) => {
+      if (event.sessionId !== this.sessionId) return;
+      const message = JSON.parse(event.message);
+      if (typeof message.id === "number") {
+        const pending = this.pending.get(message.id);
+        if (!pending) return;
+        this.pending.delete(message.id);
+        if (message.error) {
+          pending.reject(
+            new Error(
+              `${message.error.message ?? "Service Worker CDP command failed"} (${message.error.code ?? "unknown"})`,
+            ),
+          );
+        } else {
+          pending.resolve(message.result ?? {});
+        }
+        return;
+      }
+
+      const listeners = this.listeners.get(message.method);
+      listeners?.forEach((listener) => listener(message.params ?? {}));
+    };
+    browserSession.on("Target.receivedMessageFromTarget", this.handleMessage);
+  }
+
+  send(method, params = {}) {
+    const id = this.nextId;
+    this.nextId += 1;
+    return withTimeout(
+      new Promise((resolve, reject) => {
+        this.pending.set(id, { resolve, reject });
+        this.browserSession
+          .send("Target.sendMessageToTarget", {
+            sessionId: this.sessionId,
+            message: JSON.stringify({ id, method, params }),
+          })
+          .catch((error) => {
+            this.pending.delete(id);
+            reject(error);
+          });
+      }),
+      30_000,
+      `Service Worker CDP ${method}`,
+    ).finally(() => {
+      this.pending.delete(id);
+    });
+  }
+
+  on(method, listener) {
+    const listeners = this.listeners.get(method) ?? new Set();
+    listeners.add(listener);
+    this.listeners.set(method, listeners);
+    return () => {
+      listeners.delete(listener);
+      if (listeners.size === 0) this.listeners.delete(method);
+    };
+  }
+
+  async close() {
+    this.browserSession.off(
+      "Target.receivedMessageFromTarget",
+      this.handleMessage,
+    );
+    const closeError = new Error("Service Worker CDP session closed.");
+    this.pending.forEach(({ reject }) => reject(closeError));
+    this.pending.clear();
+    await this.browserSession
+      .send("Target.detachFromTarget", { sessionId: this.sessionId })
+      .catch(() => undefined);
+  }
+}
+
+const attachServiceWorkerTarget = async (browserSession, targetId) => {
+  // Playwright has no public API for reading the exact running worker source.
+  // Keep this protocol adapter scoped to that evidence only; all browser/page
+  // lifecycle and ordinary CDP commands remain owned by Playwright.
+  const { sessionId } = await browserSession.send("Target.attachToTarget", {
+    targetId,
+    flatten: false,
+  });
+  return new AttachedServiceWorkerClient(browserSession, sessionId);
+};
+
 const collectActiveServiceWorkerSourceEvidence = async (
-  port,
+  browserSession,
   serviceWorkerUrl,
 ) => {
   let lastError;
+  await browserSession.send("Target.setDiscoverTargets", { discover: true });
   for (let attempt = 0; attempt < 50; attempt += 1) {
     try {
-      const targetList = await fetchJson(`http://127.0.0.1:${port}/json/list`);
-      const workerTargets = targetList
+      const { targetInfos } = await browserSession.send("Target.getTargets");
+      const workerTargets = targetInfos
         .filter(
-          ({ type, url, webSocketDebuggerUrl }) =>
-            type === "service_worker" &&
-            url === serviceWorkerUrl &&
-            typeof webSocketDebuggerUrl === "string",
+          ({ type, url }) =>
+            type === "service_worker" && url === serviceWorkerUrl,
         )
         .reverse();
       for (const workerTarget of workerTargets) {
-        const workerClient = await CdpClient.connect(
-          workerTarget.webSocketDebuggerUrl,
+        const workerClient = await attachServiceWorkerTarget(
+          browserSession,
+          workerTarget.targetId,
         );
         try {
           const parsedScripts = [];
@@ -465,7 +438,7 @@ const collectActiveServiceWorkerSourceEvidence = async (
             sha256: sha256Text(scriptSource),
           };
         } finally {
-          workerClient.close();
+          await workerClient.close();
         }
       }
     } catch (error) {
@@ -529,7 +502,9 @@ const collectOnlineProbe = async (client) =>
       }).then((response) => response.text());
       const mainScript = [...document.scripts]
         .map((script) => script.src)
-        .find((source) => /\\/assets\\/index-[^/]+\\.js$/.test(source));
+        .find((source) =>
+          /\\/assets\\/(?:index-[^/]+|release-role)\\.js$/.test(source),
+        );
       const metrics = JSON.parse(
         sessionStorage.getItem(${JSON.stringify(METRICS_STORAGE_KEY)}) ?? "null",
       );
@@ -1020,35 +995,15 @@ const profileDirectory = REQUESTED_PROFILE_DIRECTORY
 if (REQUESTED_PROFILE_DIRECTORY) {
   await mkdir(profileDirectory, { recursive: true });
 }
-const debugPort = await reservePort();
-const chromePath = await findChrome();
+const browserExecutablePath = await findChrome();
 const standaloneBootstrapUrl = new URL("/manifest.webmanifest", PREVIEW_URL);
 standaloneBootstrapUrl.hostname =
   standaloneBootstrapUrl.hostname === "127.0.0.1" ? "localhost" : "127.0.0.1";
-const chromium = spawn(
-  chromePath,
-  [
-    "--headless=new",
-    "--disable-background-mode",
-    "--disable-component-update",
-    "--disable-default-apps",
-    "--disable-gpu",
-    "--no-default-browser-check",
-    "--no-first-run",
-    `--remote-debugging-port=${debugPort}`,
-    "--remote-allow-origins=*",
-    `--user-data-dir=${profileDirectory}`,
-    `--app=${standaloneBootstrapUrl.href}`,
-  ],
-  {
-    stdio: "ignore",
-    windowsHide: true,
-  },
-);
 const targets = [];
-let standaloneDebugPort = null;
 let standaloneTarget = null;
 let browserClient = null;
+let browserContext = null;
+let browserVersion = null;
 
 try {
   const previewResponse = await fetch(PREVIEW_URL);
@@ -1087,30 +1042,35 @@ try {
       "Served transition Service Worker does not match the expected artifact.",
     );
   }
-  const devToolsVersion = await waitForDevTools(debugPort);
-  assert(
-    typeof devToolsVersion.webSocketDebuggerUrl === "string",
-    "Chromium browser DevTools target is missing.",
+  browserContext = await playwrightChromium.launchPersistentContext(
+    profileDirectory,
+    {
+      executablePath: browserExecutablePath,
+      headless: true,
+      serviceWorkers: "allow",
+      viewport: null,
+      args: [
+        "--disable-background-mode",
+        "--disable-component-update",
+        "--disable-default-apps",
+        "--disable-gpu",
+        "--no-default-browser-check",
+        "--no-first-run",
+        `--app=${standaloneBootstrapUrl.href}`,
+      ],
+    },
   );
-  browserClient = await CdpClient.connect(devToolsVersion.webSocketDebuggerUrl);
-  const startupTargets = await fetchJson(
-    `http://127.0.0.1:${debugPort}/json/list`,
-  );
-  const startupAppTarget = startupTargets.find(({ type }) => type === "page");
-  assert(startupAppTarget, "Initial standalone app-window target is missing.");
-  standaloneDebugPort = debugPort;
-  standaloneTarget = {
-    id: startupAppTarget.id,
-    client: await CdpClient.connect(startupAppTarget.webSocketDebuggerUrl),
-  };
-  await Promise.all([
-    standaloneTarget.client.send("Page.enable"),
-    standaloneTarget.client.send("Runtime.enable"),
-    standaloneTarget.client.send("Network.enable"),
-  ]);
+  const browser = browserContext.browser();
+  assert(browser, "Playwright persistent Chromium browser is missing.");
+  browserClient = await browser.newBrowserCDPSession();
+  const devToolsVersion = await browserClient.send("Browser.getVersion");
+  browserVersion = devToolsVersion.product ?? browser.version();
+  const startupAppPage = browserContext.pages()[0];
+  assert(startupAppPage, "Initial standalone app-window page is missing.");
+  standaloneTarget = await createTarget(browserContext, startupAppPage);
   await installBrowserInstrumentation(standaloneTarget.client);
 
-  const primary = await createTarget(debugPort);
+  const primary = await createTarget(browserContext);
   targets.push(primary);
   await installBrowserInstrumentation(primary.client);
   await navigate(primary.client, PREVIEW_URL);
@@ -1166,7 +1126,7 @@ try {
       "rollback Service Worker controller change",
     );
     const activeRollbackWorker = await collectActiveServiceWorkerSourceEvidence(
-      debugPort,
+      browserClient,
       new URL("/sw.js", PREVIEW_URL).href,
     );
     assert(
@@ -1301,7 +1261,7 @@ try {
         {
           result: "PASS",
           mode: "rollback",
-          browser: path.basename(chromePath),
+          browser: path.basename(browserExecutablePath),
           previewOrigin: new URL(PREVIEW_URL).origin,
           fromArtifactId: EXPECTED_FROM_ARTIFACT_ID,
           targetArtifactId: TARGET_ARTIFACT_ID,
@@ -1384,7 +1344,7 @@ try {
       "Forward app identity does not match the target artifact.",
     );
     const activeForwardWorker = await collectActiveServiceWorkerSourceEvidence(
-      debugPort,
+      browserClient,
       new URL("/sw.js", PREVIEW_URL).href,
     );
     assert(
@@ -1468,7 +1428,7 @@ try {
         {
           result: "PASS",
           mode: "forward",
-          browser: path.basename(chromePath),
+          browser: path.basename(browserExecutablePath),
           previewOrigin: new URL(PREVIEW_URL).origin,
           fromArtifactId: EXPECTED_FROM_ARTIFACT_ID,
           targetArtifactId: TARGET_ARTIFACT_ID,
@@ -1537,7 +1497,7 @@ try {
     const primaryFixture = await collectFixtureEvidence(primary.client);
     assertFixtureUnchanged(fixture, primaryFixture, "primary tab");
 
-    const secondary = await createTarget(debugPort);
+    const secondary = await createTarget(browserContext);
     targets.push(secondary);
     await installBrowserInstrumentation(secondary.client);
     await navigate(secondary.client, PREVIEW_URL);
@@ -1627,7 +1587,7 @@ try {
       "Release A attempted to delete a protected legacy source.",
     );
     const activeServiceWorker = await collectActiveServiceWorkerSourceEvidence(
-      debugPort,
+      browserClient,
       finalProbe.serviceWorkerScriptUrl,
     );
     assert(
@@ -1652,8 +1612,8 @@ try {
         {
           result: "PREFLIGHT_PASS",
           observedAt: new Date().toISOString(),
-          browser: path.basename(chromePath),
-          browserVersion: devToolsVersion.Browser ?? null,
+          browser: path.basename(browserExecutablePath),
+          browserVersion,
           previewOrigin: new URL(PREVIEW_URL).origin,
           buildId: finalProbe.buildId,
           sourceState: finalProbe.sourceState,
@@ -1701,40 +1661,26 @@ try {
     );
   }
 } finally {
-  if (standaloneTarget && standaloneDebugPort !== null) {
-    await closeTarget(standaloneDebugPort, standaloneTarget).catch(
-      () => undefined,
-    );
+  if (standaloneTarget) {
+    await closeTarget(standaloneTarget).catch(() => undefined);
   }
-  await Promise.all(
-    targets.map((target) => closeTarget(debugPort, target)),
-  ).catch(() => undefined);
+  await Promise.all(targets.map((target) => closeTarget(target))).catch(
+    () => undefined,
+  );
   if (browserClient) {
-    await withTimeout(
-      browserClient.send("Browser.close"),
-      2_000,
-      "Graceful Chromium shutdown request",
-    ).catch(() => undefined);
-    browserClient.close();
+    await browserClient.detach().catch(() => undefined);
   }
-  const waitForChromiumExit = async (timeoutMs) =>
+  if (browserContext) {
     await withTimeout(
-      new Promise((resolve) => {
-        if (chromium.exitCode !== null || chromium.signalCode !== null) {
-          resolve();
-          return;
-        }
-        chromium.once("exit", resolve);
-      }),
-      timeoutMs,
-      "Chromium shutdown",
-    ).then(
-      () => true,
-      () => false,
-    );
-  if (!(await waitForChromiumExit(5_000))) {
-    chromium.kill();
-    await waitForChromiumExit(5_000);
+      browserContext.close(),
+      10_000,
+      "Playwright persistent context shutdown",
+    ).catch(async () => {
+      await browserContext
+        .browser()
+        ?.close()
+        .catch(() => undefined);
+    });
   }
 
   const expectedPrefix = path.join(tmpdir(), "esp-release-a-browser-");

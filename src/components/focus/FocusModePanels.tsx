@@ -8,6 +8,7 @@ import type { FocusMapCenteringMode, FocusPhase } from "../../types/focus";
 import { hasMissingLimitedQuantity } from "../../features/space-navigation/domain/statusSegments";
 import ShoppingItemCard from "../ShoppingItemCard";
 import MapRotationControls from "../map/MapRotationControls";
+import "./FocusModePanels.css";
 
 interface FocusModeItemListProps {
   itemListRef: React.RefObject<HTMLDivElement>;
@@ -116,29 +117,11 @@ const getHeaderStatusKind = (item: ShoppingItem): HeaderStatusKind => {
   }
 };
 
-const headerDarkOverlay =
-  "linear-gradient(rgba(15, 23, 42, 0.28), rgba(15, 23, 42, 0.28))";
-const fallbackHeaderGradient =
-  "linear-gradient(to right, #6366f1 0%, #6366f1 50%, #9333ea 50%, #9333ea 100%)";
-
-const buildHeaderBackgroundImage = (items: readonly ShoppingItem[]): string => {
+const getHeaderStatusKinds = (
+  items: readonly ShoppingItem[],
+): HeaderStatusKind[] => {
   const presentKinds = new Set(items.map(getHeaderStatusKind));
-  const orderedKinds = HEADER_STATUS_ORDER.filter((kind) =>
-    presentKinds.has(kind),
-  );
-  if (orderedKinds.length === 0) {
-    return `${headerDarkOverlay}, ${fallbackHeaderGradient}`;
-  }
-
-  const widthRatio = 1 / orderedKinds.length;
-  const stops = orderedKinds.flatMap((kind, index) => {
-    const color = HEADER_STATUS_COLORS[kind];
-    const startRatio = index * widthRatio;
-    const endRatio =
-      index === orderedKinds.length - 1 ? 1 : (index + 1) * widthRatio;
-    return [`${color} ${startRatio * 100}%`, `${color} ${endRatio * 100}%`];
-  });
-  return `${headerDarkOverlay}, linear-gradient(to right, ${stops.join(", ")})`;
+  return HEADER_STATUS_ORDER.filter((kind) => presentKinds.has(kind));
 };
 
 const bulkStatusOptions: {
@@ -297,7 +280,7 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
       : `text-white rounded-lg shadow-lg ${
           isSmartphone ? `px-2 py-1 ${isMapVisible ? "mx-2" : ""}` : "px-3 py-1"
         }`;
-    const headerBackgroundImage = buildHeaderBackgroundImage(currentVisitItems);
+    const headerStatusKinds = getHeaderStatusKinds(currentVisitItems);
     const labelClassName =
       size === "expanded" ? "text-sm opacity-80" : "text-xs opacity-80";
     const titleClassName =
@@ -333,16 +316,8 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
         value={currentPhase}
         disabled={readOnly}
         onChange={(e) => onPhaseChangeRequest(e.target.value as FocusPhase)}
-        className={className}
+        className={`focus-mode-phase-select ${className}`}
         aria-label="phase"
-        style={{
-          backgroundImage:
-            "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='white'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E\")",
-          backgroundRepeat: "no-repeat",
-          backgroundPosition: "right 4px center",
-          backgroundSize: "16px",
-          paddingRight: "24px",
-        }}
       >
         <option value="normal" className="text-slate-900">
           通常
@@ -540,11 +515,52 @@ export const FocusModeHeader: React.FC<FocusModeHeaderProps> = React.memo(
 
     return (
       <div
-        className={rootClassName}
-        style={{ backgroundImage: headerBackgroundImage }}
+        className={`relative overflow-hidden ${rootClassName}`}
         data-testid="focus-mode-header"
       >
-        {headerContent}
+        <svg
+          aria-hidden="true"
+          className="absolute inset-0 h-full w-full pointer-events-none"
+          preserveAspectRatio="none"
+          shapeRendering="crispEdges"
+          viewBox="0 0 100 100"
+        >
+          {headerStatusKinds.length > 0 ? (
+            headerStatusKinds.map((kind, index) => (
+              <rect
+                key={kind}
+                data-header-status={kind}
+                fill={HEADER_STATUS_COLORS[kind]}
+                height="100"
+                width={100 / headerStatusKinds.length}
+                x={(index * 100) / headerStatusKinds.length}
+              />
+            ))
+          ) : (
+            <>
+              <rect
+                data-header-status="fallback-start"
+                fill="#6366f1"
+                height="100"
+                width="50"
+              />
+              <rect
+                data-header-status="fallback-end"
+                fill="#9333ea"
+                height="100"
+                width="50"
+                x="50"
+              />
+            </>
+          )}
+          <rect
+            data-header-overlay
+            fill="rgba(15, 23, 42, 0.28)"
+            height="100"
+            width="100"
+          />
+        </svg>
+        <div className="relative">{headerContent}</div>
       </div>
     );
   },

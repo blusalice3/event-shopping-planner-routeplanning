@@ -23,6 +23,7 @@ const item: ShoppingItem = {
 describe("VisitListPanel touch drag cancellation", () => {
   afterEach(() => {
     vi.useRealTimers();
+    document.body.className = "";
     document.body.style.overflow = "";
     document.body.style.overscrollBehavior = "";
     document.body.style.touchAction = "";
@@ -61,8 +62,10 @@ describe("VisitListPanel touch drag cancellation", () => {
       vi.advanceTimersByTime(300);
     });
 
-    expect(document.body.style.overflow).toBe("hidden");
-    expect(document.body.style.touchAction).toBe("none");
+    expect(document.body).toHaveClass(
+      "esp-body-scroll-lock",
+      "esp-body-touch-lock",
+    );
     expect(
       view.container.querySelector(".pointer-events-none.border-blue-500"),
     ).not.toBeNull();
@@ -72,6 +75,10 @@ describe("VisitListPanel touch drag cancellation", () => {
       changedTouches: [{ clientX: 120, clientY: 240 }],
     });
 
+    expect(document.body).not.toHaveClass(
+      "esp-body-scroll-lock",
+      "esp-body-touch-lock",
+    );
     expect(document.body.style.overflow).toBe("auto");
     expect(document.body.style.touchAction).toBe("pan-y");
     expect(

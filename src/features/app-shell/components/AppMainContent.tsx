@@ -34,6 +34,16 @@ import type {
   VertexSelectionMode,
 } from "../types";
 
+const APP_ZOOM_CLASS_BY_LEVEL: Readonly<Record<number, string>> = {
+  15: "origin-top-left scale-[0.15] w-[666.666667%]",
+  30: "origin-top-left scale-[0.3] w-[333.333333%]",
+  50: "origin-top-left scale-50 w-[200%]",
+  75: "origin-top-left scale-75 w-[133.333333%]",
+  100: "origin-top-left scale-100 w-full",
+  125: "origin-top-left scale-125 w-4/5",
+  150: "origin-top-left scale-150 w-2/3",
+};
+
 const ImportScreen = React.lazy(
   () => import("../../../components/ImportScreen"),
 );
@@ -457,11 +467,9 @@ const AppMainContent: React.FC<AppMainContentProps> = (props) => {
       )}
       {activeEventName && mainContentVisible && !isMapTab && (
         <div
-          style={{
-            transform: `scale(${zoomLevel / 100})`,
-            transformOrigin: "top left",
-            width: `${100 * (100 / zoomLevel)}%`,
-          }}
+          className={
+            APP_ZOOM_CLASS_BY_LEVEL[zoomLevel] ?? APP_ZOOM_CLASS_BY_LEVEL[100]
+          }
         >
           {currentMode === "edit" ? (
             <div className="grid grid-cols-2 gap-4">

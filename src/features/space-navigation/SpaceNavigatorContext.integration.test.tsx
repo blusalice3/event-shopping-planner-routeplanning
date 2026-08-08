@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   act,
   fireEvent,
@@ -80,10 +80,13 @@ function RegistrationHarness({
     [action, currentIndex, formalIndex, layoutMode],
   );
 
-  useEffect(() => navigator.register(registration), [navigator.register]);
+  const initialRegistration = useRef(registration);
+  const register = navigator.register;
+  const updateRegistration = navigator.updateRegistration;
+  useEffect(() => register(initialRegistration.current), [register]);
   useEffect(
-    () => navigator.updateRegistration(registration),
-    [navigator, registration],
+    () => updateRegistration(registration),
+    [registration, updateRegistration],
   );
   return null;
 }

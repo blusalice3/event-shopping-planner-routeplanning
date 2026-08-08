@@ -759,7 +759,6 @@ describe("FocusMode limited purchase defer - integration", () => {
 
   it("clears deferred state when a deferred item is saved from the limited dialog and later becomes missing again", async () => {
     let items: ShoppingItem[] = limitedItemsFixture.items;
-    let view: ReturnType<typeof render>;
     const onUpdateItem = vi.fn((updatedItem: ShoppingItem) => {
       items = items.map((item) =>
         item.id === updatedItem.id ? updatedItem : item,
@@ -776,7 +775,7 @@ describe("FocusMode limited purchase defer - integration", () => {
       );
     });
 
-    view = render(
+    const view = render(
       <FocusMode
         {...minimalProps({
           items,
@@ -814,7 +813,6 @@ describe("FocusMode limited purchase defer - integration", () => {
 
   it("clears deferred state when a deferred item is committed as purchased and later becomes missing again", async () => {
     let items: ShoppingItem[] = limitedItemsFixture.items;
-    let view: ReturnType<typeof render>;
     const onUpdateItem = vi.fn((updatedItem: ShoppingItem) => {
       items = items.map((item) =>
         item.id === updatedItem.id ? updatedItem : item,
@@ -831,7 +829,7 @@ describe("FocusMode limited purchase defer - integration", () => {
       );
     });
 
-    view = render(
+    const view = render(
       <FocusMode
         {...minimalProps({
           items,

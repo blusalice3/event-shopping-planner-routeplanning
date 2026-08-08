@@ -1,0 +1,546 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:event-shopping-planner:release-state:v1",
+  "title": "Release State v1",
+  "$ref": "#/$defs/releaseEventEnvelope",
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "sourceSha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "immutableObjectRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "pattern": "^release-state://[a-z0-9][a-z0-9-]{2,62}/(?:events/[1-9][0-9]*/|evidence/)[0-9a-f]{64}$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["uri", "sha256"]
+    },
+    "dbCompatibilityBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "contractUri": {
+          "type": "string",
+          "minLength": 1
+        },
+        "fingerprint": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": ["contractUri", "fingerprint"]
+    },
+    "approvalReference": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "uri": {
+          "type": "string",
+          "pattern": "^release-state://[a-z0-9][a-z0-9-]{2,62}/evidence/[0-9a-f]{64}$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "approvalId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "subjectSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "trustedIssuer": {
+          "const": "https://token.actions.githubusercontent.com"
+        },
+        "issuerReceiptUri": {
+          "type": "string",
+          "pattern": "^release-state://[a-z0-9][a-z0-9-]{2,62}/evidence/[0-9a-f]{64}$"
+        },
+        "issuerReceiptSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "workflowRunId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protectedEnvironment": {
+          "type": "string",
+          "minLength": 1
+        },
+        "providerReviewerId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "role": {
+          "enum": ["releaseOwner", "dataSafetyReviewer", "operationsReviewer"]
+        },
+        "decision": {
+          "const": "APPROVED"
+        },
+        "approvedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uri",
+        "sha256",
+        "approvalId",
+        "operationId",
+        "subjectSha256",
+        "trustedIssuer",
+        "issuerReceiptUri",
+        "issuerReceiptSha256",
+        "workflowRunId",
+        "protectedEnvironment",
+        "providerReviewerId",
+        "role",
+        "decision",
+        "approvedAt"
+      ]
+    },
+    "deploymentBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "bindingId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sourceSha": {
+          "$ref": "#/$defs/sourceSha"
+        },
+        "buildId": {
+          "$ref": "#/$defs/sourceSha"
+        },
+        "variantId": {
+          "$ref": "#/$defs/sha256"
+        },
+        "releaseRole": {
+          "enum": ["standard", "containment"]
+        },
+        "publicIdentityKind": {
+          "enum": ["release-identity-v1", "legacy-bootstrap-v1"]
+        },
+        "providerProjectId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "providerDeploymentId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deploymentUrl": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        },
+        "packageIndex": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "artifactManifest": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "providerEvidence": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "releasePolicy": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "providerPolicy": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "providerConfigurationHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "requiredDbCompatibility": {
+          "$ref": "#/$defs/dbCompatibilityBinding"
+        }
+      },
+      "required": [
+        "bindingId",
+        "sourceSha",
+        "buildId",
+        "variantId",
+        "releaseRole",
+        "publicIdentityKind",
+        "providerProjectId",
+        "providerDeploymentId",
+        "deploymentUrl",
+        "packageIndex",
+        "artifactManifest",
+        "providerEvidence",
+        "releasePolicy",
+        "providerPolicy",
+        "providerConfigurationHash",
+        "requiredDbCompatibility"
+      ]
+    },
+    "pendingOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "promote-standard",
+            "rollback-standard",
+            "activate-containment",
+            "redeploy-standard",
+            "redeploy-containment"
+          ]
+        },
+        "expectedState": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "eventHash": {
+              "$ref": "#/$defs/sha256"
+            }
+          },
+          "required": ["sequence", "eventHash"]
+        },
+        "targetBinding": {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        "originBinding": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/deploymentBinding"
+            }
+          ]
+        },
+        "originCompanionBinding": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/deploymentBinding"
+            }
+          ]
+        },
+        "companionBinding": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/deploymentBinding"
+            }
+          ]
+        },
+        "previousBinding": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/deploymentBinding"
+            }
+          ]
+        },
+        "emergencyRecoveryBinding": {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        "approvalRefs": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/approvalReference"
+          }
+        },
+        "preparedAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "operationId",
+        "kind",
+        "expectedState",
+        "targetBinding",
+        "originBinding",
+        "originCompanionBinding",
+        "companionBinding",
+        "previousBinding",
+        "emergencyRecoveryBinding",
+        "approvalRefs",
+        "preparedAt"
+      ]
+    },
+    "pendingAcceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "standardBinding": {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        "companionBinding": {
+          "$ref": "#/$defs/deploymentBinding"
+        },
+        "assignmentValidationEvidence": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "observationStartedEvent": {
+          "$ref": "#/$defs/immutableObjectRef"
+        },
+        "observationNotBefore": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "minimumObservationEndsAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "operationId",
+        "standardBinding",
+        "companionBinding",
+        "assignmentValidationEvidence",
+        "observationStartedEvent",
+        "observationNotBefore",
+        "minimumObservationEndsAt"
+      ]
+    },
+    "releaseEventEnvelope": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "namespace": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]{2,62}$"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "eventType": {
+          "enum": [
+            "state-initialized",
+            "policy-activated",
+            "db-contract-activated",
+            "promotion-prepared",
+            "deployment-assigned",
+            "assignment-validated",
+            "observation-started",
+            "release-accepted",
+            "operation-aborted",
+            "temporary-containment-activated",
+            "containment-activated",
+            "rollback-activated",
+            "package-redeploy-activated",
+            "state-reconciled"
+          ]
+        },
+        "operationId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "appendId": {
+          "type": "string",
+          "format": "uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$"
+        },
+        "previousEventHash": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/sha256"
+            }
+          ]
+        },
+        "payload": {
+          "type": "object"
+        },
+        "payloadSha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "evidenceRefs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/immutableObjectRef"
+          }
+        },
+        "approvalRefs": {
+          "type": "array",
+          "maxItems": 3,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/approvalReference"
+          }
+        }
+      },
+      "required": [
+        "schemaVersion",
+        "namespace",
+        "sequence",
+        "eventType",
+        "operationId",
+        "appendId",
+        "previousEventHash",
+        "payload",
+        "payloadSha256",
+        "evidenceRefs",
+        "approvalRefs"
+      ]
+    },
+    "releaseStateSnapshot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "eventHash": {
+          "$ref": "#/$defs/sha256"
+        },
+        "legacyObservedProduction": {
+          "type": ["object", "null"]
+        },
+        "activeProduction": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/deploymentBinding"
+            }
+          ]
+        },
+        "acceptedStandard": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/deploymentBinding"
+            }
+          ]
+        },
+        "bootstrapRecovery": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/deploymentBinding"
+            }
+          ]
+        },
+        "containmentCompanion": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/deploymentBinding"
+            }
+          ]
+        },
+        "pendingOperation": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/pendingOperation"
+            }
+          ]
+        },
+        "pendingAcceptance": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/pendingAcceptance"
+            }
+          ]
+        },
+        "containmentIncident": {
+          "type": ["object", "null"]
+        },
+        "standardRecovery": {
+          "type": ["object", "null"]
+        },
+        "rollbackInventory": {
+          "type": "array"
+        },
+        "minimumSafetyFloors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "acceptedStandardFloors": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "currentDbCompatibility": {
+          "$ref": "#/$defs/dbCompatibilityBinding"
+        },
+        "activeReleasePolicy": {
+          "$ref": "#/$defs/immutableObjectRef"
+        }
+      },
+      "required": [
+        "sequence",
+        "eventHash",
+        "legacyObservedProduction",
+        "activeProduction",
+        "acceptedStandard",
+        "bootstrapRecovery",
+        "containmentCompanion",
+        "pendingOperation",
+        "pendingAcceptance",
+        "containmentIncident",
+        "standardRecovery",
+        "rollbackInventory",
+        "minimumSafetyFloors",
+        "acceptedStandardFloors",
+        "currentDbCompatibility",
+        "activeReleasePolicy"
+      ]
+    }
+  }
+}

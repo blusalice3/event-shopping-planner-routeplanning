@@ -12,11 +12,13 @@ import {
   PurchaseStatusControlMode,
 } from "../types/item";
 import { HallDefinition, DayMapData } from "../types/map";
+import { getSpaceKey } from "../utils/spaceGrouping";
 import {
-  getSpaceKey,
-  getBaseNumber,
-  getStatusSummaryText,
-} from "../utils/spaceGrouping";
+  clearDynamicCssClassRule,
+  getDynamicCssClassName,
+  setDynamicCssClassRule,
+  updateDynamicCssClassRule,
+} from "../styles/useDynamicCssClass";
 import {
   parseGroupId,
   buildGroupId,
@@ -25,6 +27,7 @@ import {
   sortItemsByHallOrder,
 } from "../utils/hallGrouping";
 import ShoppingItemCard from "./ShoppingItemCard";
+import "./ShoppingList.css";
 import LimitedPurchaseDialog from "./LimitedPurchaseDialog";
 import type {
   BulkLimitedMessageState,
@@ -71,6 +74,19 @@ import {
   type RangeEndpoint,
   type RangePresentation,
 } from "../features/lists/domain/rangeSelection";
+import {
+  buildListRows,
+  createLocalStorageListRendererPreferenceAdapter,
+  evaluateVirtualListEligibility,
+  getFullListRendererAttributes,
+  getShoppingListRowAccessibilityAttributes,
+  resolveListRendererPreference,
+  selectListRenderer,
+  VirtualListRenderer,
+  type ListRendererPreferencePort,
+  type ShoppingListItemRow,
+  type ShoppingListRowGroupInput,
+} from "../features/shopping-list";
 
 type PriorityLevel = "none" | "priority" | "highest";
 
@@ -176,6 +192,9 @@ interface ShoppingListProps {
   disableLimitedPurchaseQuantityCheck?: boolean;
   postEventDistributionCheckEnabled?: boolean;
   skipLimitedPurchaseForSingleQuantity: boolean;
+  listRendererPreferencePort?: ListRendererPreferencePort;
+  forceFullListRenderer?: boolean;
+  recoveryActive?: boolean | null;
 }
 
 type PostEventDistributionCheckContext = {
@@ -227,6 +246,32 @@ const TOP_SCROLL_TRIGGER_PX = 150;
 const BOTTOM_SCROLL_TRIGGER_PX = 100;
 const EMPTY_HALL_DEFINITIONS: HallDefinition[] = [];
 const EMPTY_HALL_ORDER: string[] = [];
+const DEFAULT_LIST_RENDERER_PREFERENCE_PORT =
+  createLocalStorageListRendererPreferenceAdapter();
+const VIRTUAL_LIST_MINIMUM_ROW_COUNT = 80;
+const VIRTUAL_LIST_ESTIMATED_ROW_HEIGHT_PX = 136;
+const VIRTUAL_LIST_SUPPORTED_ZOOM_PERCENTS = [100] as const;
+
+const readViewportZoomPercent = (): number | null => {
+  if (typeof window === "undefined" || !window.visualViewport) return null;
+  const scale = window.visualViewport.scale;
+  if (!Number.isFinite(scale) || scale <= 0) return null;
+  return Math.round(scale * 100);
+};
+
+const useViewportZoomPercent = (): number | null => {
+  const [zoomPercent, setZoomPercent] = useState(readViewportZoomPercent);
+
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!viewport) return;
+    const updateZoom = () => setZoomPercent(readViewportZoomPercent());
+    viewport.addEventListener("resize", updateZoom);
+    return () => viewport.removeEventListener("resize", updateZoom);
+  }, []);
+
+  return zoomPercent;
+};
 
 const colorPalette: Array<{ light: string; dark: string }> = [
   {
@@ -480,6 +525,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   postEventDistributionCheckEnabled = true,
   skipLimitedPurchaseForSingleQuantity,
   purchaseStatusControlMode = "cycle",
+  listRendererPreferencePort = DEFAULT_LIST_RENDERER_PREFERENCE_PORT,
+  forceFullListRenderer = false,
+  recoveryActive = false,
 }) => {
   const dragItem = useRef<string | null>(null);
   const dragSourceColumn = useRef<"execute" | "candidate" | null>(null);
@@ -505,6 +553,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
   // タッチドラッグ用state/ref
   const touchDragActive = useRef(false);
+  const touchDragRuleKey = React.useId();
+  const touchDragPositionClassName = getDynamicCssClassName(touchDragRuleKey);
   const touchLongPressTimer = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -521,6 +571,8 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     id: string;
     position: "top" | "bottom";
   } | null>(null);
+  const [dragRuntimeActive, setDragRuntimeActive] = useState(false);
+  const viewportZoomPercent = useViewportZoomPercent();
 
   const [expandedRemarks, setExpandedRemarks] = useState<Set<string>>(
     new Set(),
@@ -1098,6 +1150,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       isInspecting,
       onBulkStatusChange,
       openPostEventDistributionCheck,
+      showLimitedMessage,
       startLimitedBulkFlow,
     ],
   );
@@ -1331,6 +1384,102 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     mapData,
     showSpaceGroups,
   ]);
+
+  const shouldShowHallGroups =
+    showHallGroups &&
+    (hallDefinitions.length > 0 ||
+      hallGroups.length > 1 ||
+      (hallGroups.length === 1 && hallGroups[0].groupId !== null));
+
+  const listRowGroups = useMemo<
+    readonly ShoppingListRowGroupInput[] | undefined
+  >(() => {
+    if (showSpaceGroups) {
+      return spaceGroups.map((group) => ({
+        key: group.groupKey,
+        label: group.displayName,
+        items: group.items,
+        collapsed: group.isCollapsed,
+      }));
+    }
+    if (shouldShowHallGroups) {
+      return hallGroups.map((group, groupIndex) => ({
+        key: group.groupId ?? `ungrouped:${groupIndex}`,
+        label: getGroupDisplayName(group.groupId, hallDefinitions),
+        items: group.items,
+      }));
+    }
+    return undefined;
+  }, [
+    hallDefinitions,
+    hallGroups,
+    shouldShowHallGroups,
+    showSpaceGroups,
+    spaceGroups,
+  ]);
+
+  const listReadModel = useMemo(
+    () =>
+      buildListRows({
+        items,
+        groups: listRowGroups,
+        column: columnType,
+        selectedItemIds,
+        duplicateCircleItemIds,
+        highlightedItemId,
+      }),
+    [
+      columnType,
+      duplicateCircleItemIds,
+      highlightedItemId,
+      items,
+      listRowGroups,
+      selectedItemIds,
+    ],
+  );
+
+  const listRendererPreference = useMemo(() => {
+    try {
+      return resolveListRendererPreference(listRendererPreferencePort.read());
+    } catch {
+      return "full";
+    }
+  }, [listRendererPreferencePort]);
+  const virtualRuntimeAvailable =
+    typeof window !== "undefined" &&
+    typeof document !== "undefined" &&
+    typeof ResizeObserver === "function" &&
+    typeof HTMLElement.prototype.focus === "function";
+  const isSingleColumnVirtualShape =
+    layoutMode === "smartphone" && !showSpaceGroups && !shouldShowHallGroups;
+  const virtualListEligibility = evaluateVirtualListEligibility({
+    runtimeAvailable: virtualRuntimeAvailable,
+    columnCount: isSingleColumnVirtualShape ? 1 : 2,
+    zoomPercent: viewportZoomPercent,
+    supportedZoomPercents: VIRTUAL_LIST_SUPPORTED_ZOOM_PERCENTS,
+    dragActive:
+      dragRuntimeActive || activeDropTarget !== null || touchDragActive.current,
+    modalActive:
+      addDialogOpen ||
+      limitedBulkDialogContext !== null ||
+      postEventDistributionCheckContext !== null,
+    recoveryActive,
+    rowCount: listReadModel.rows.length,
+    minimumRowCount: VIRTUAL_LIST_MINIMUM_ROW_COUNT,
+    rowHeightPx: VIRTUAL_LIST_ESTIMATED_ROW_HEIGHT_PX,
+    stableRowHeight: isSingleColumnVirtualShape,
+    focusRestorationReady: virtualRuntimeAvailable,
+    stableRowKeys: listReadModel.hasStableRowKeys,
+  });
+  const listRendererSelection = selectListRenderer(
+    listRendererPreference,
+    virtualListEligibility,
+    { forceFull: forceFullListRenderer },
+  );
+  const fullListRendererAttributes = getFullListRendererAttributes(
+    listReadModel,
+    listRendererSelection.reason,
+  );
 
   const rangePresentation = useMemo((): RangePresentation => {
     if (showSpaceGroups) {
@@ -1623,6 +1772,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     e: React.DragEvent<HTMLDivElement>,
     item: ShoppingItem,
   ) => {
+    setDragRuntimeActive(true);
     dragItem.current = item.id;
     dragSourceColumn.current = columnType || null;
     if (columnType) {
@@ -1766,6 +1916,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     dragItem.current = null;
     dragSourceColumn.current = null;
     setActiveDropTarget(null);
+    setDragRuntimeActive(false);
   }, []);
 
   // === タッチドラッグ&ドロップ ===
@@ -1784,6 +1935,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       touchDragClone.current.remove();
       touchDragClone.current = null;
     }
+    clearDynamicCssClassRule(touchDragRuleKey);
     if (touchDragSourceEl.current) {
       touchDragSourceEl.current.setAttribute("draggable", "true");
       touchDragSourceEl.current.classList.remove("opacity-40");
@@ -1797,7 +1949,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     releaseTouchBodyScrollLock.current?.();
     releaseTouchBodyScrollLock.current = null;
     cleanUp();
-  }, [cleanUp, onSetSpaceGroupDragItemIds]);
+  }, [cleanUp, onSetSpaceGroupDragItemIds, touchDragRuleKey]);
 
   // クリーンアップ: コンポーネントアンマウント時
   useEffect(() => () => touchCleanUp(), [touchCleanUp]);
@@ -1806,21 +1958,19 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     (sourceEl: HTMLElement, touchX: number, touchY: number) => {
       const rect = sourceEl.getBoundingClientRect();
       const clone = sourceEl.cloneNode(true) as HTMLElement;
-      clone.style.position = "fixed";
-      clone.style.left = `${rect.left}px`;
-      clone.style.top = `${touchY - 20}px`;
-      clone.style.width = `${rect.width}px`;
-      clone.style.opacity = "0.8";
-      clone.style.zIndex = "9999";
-      clone.style.pointerEvents = "none";
-      clone.style.transform = "scale(0.95)";
-      clone.style.boxShadow = "0 8px 25px rgba(0,0,0,0.3)";
-      clone.style.borderRadius = "8px";
-      clone.style.transition = "none";
+      setDynamicCssClassRule(touchDragRuleKey, {
+        left: `${rect.left}px`,
+        top: `${touchY - 20}px`,
+        width: `${rect.width}px`,
+      });
+      clone.classList.add(
+        "esp-shopping-touch-clone",
+        touchDragPositionClassName,
+      );
       document.body.appendChild(clone);
       return clone;
     },
-    [],
+    [touchDragPositionClassName, touchDragRuleKey],
   );
 
   const handleTouchDragStart = useCallback(
@@ -1831,6 +1981,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       touchY: number,
       spaceGroupItemIds?: string[],
     ) => {
+      setDragRuntimeActive(true);
       touchDragActive.current = true;
       dragItem.current = itemId;
       dragSourceColumn.current = columnType || null;
@@ -1901,7 +2052,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
       e.preventDefault(); // ドラッグ中はスクロール防止
 
       if (touchDragClone.current) {
-        touchDragClone.current.style.top = `${touch.clientY - 20}px`;
+        updateDynamicCssClassRule(touchDragRuleKey, {
+          top: `${touch.clientY - 20}px`,
+        });
       }
 
       // 自動スクロール
@@ -1923,12 +2076,14 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         );
       }
 
-      if (touchDragClone.current) touchDragClone.current.style.display = "none";
+      touchDragClone.current?.classList.add("esp-shopping-touch-clone-hidden");
       const elementUnder = document.elementFromPoint(
         touch.clientX,
         touch.clientY,
       );
-      if (touchDragClone.current) touchDragClone.current.style.display = "";
+      touchDragClone.current?.classList.remove(
+        "esp-shopping-touch-clone-hidden",
+      );
 
       if (elementUnder) {
         const itemEl = elementUnder.closest(
@@ -1948,7 +2103,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
         }
       }
     },
-    [],
+    [touchDragRuleKey],
   );
 
   const handleItemTouchEnd = useCallback(() => {
@@ -2067,6 +2222,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   if (items.length === 0) {
     return (
       <div
+        {...fullListRendererAttributes}
         className="text-center text-slate-500 dark:text-slate-400 py-12 min-h-[200px] border-2 border-dashed border-slate-300 dark:border-slate-600 rounded-lg relative"
         onDragOver={!isInspecting ? handleContainerDragOver : undefined}
         onDrop={!isInspecting ? handleDrop : undefined}
@@ -2122,9 +2278,9 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
 
     return (
       <div
+        {...fullListRendererAttributes}
         ref={containerRef}
-        className="space-y-1 relative"
-        style={{ paddingBottom: "var(--footer-height, 96px)" }}
+        className="relative space-y-1 pb-[var(--footer-height,96px)]"
         onDragOver={!isInspecting ? handleContainerDragOver : undefined}
         onDrop={!isInspecting ? handleDrop : undefined}
         onDragLeave={() => setActiveDropTarget(null)}
@@ -2177,11 +2333,20 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   }
                   return (
                     <div
-                      className={`sticky top-0 z-30 flex items-center justify-between px-4 py-2 rounded-t-lg ${headerStyle.bgClass} ${groupIndex > 0 ? "mt-3" : ""}`}
-                      style={{
-                        borderLeft: `4px solid ${headerStyle.borderColor}`,
-                      }}
+                      className={`sticky top-0 z-30 flex items-center justify-between overflow-hidden rounded-t-lg px-4 py-2 ${headerStyle.bgClass} ${groupIndex > 0 ? "mt-3" : ""}`}
                     >
+                      <svg
+                        aria-hidden="true"
+                        className="absolute inset-y-0 left-0 h-full w-1"
+                        preserveAspectRatio="none"
+                        viewBox="0 0 4 100"
+                      >
+                        <rect
+                          fill={headerStyle.borderColor}
+                          height="100"
+                          width="4"
+                        />
+                      </svg>
                       <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
                         {displayName}
                       </span>
@@ -2310,7 +2475,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                   )}
                   {/* スペースグループヘッダー */}
                   <div
-                    className={`sticky top-0 z-20 rounded-lg select-none cursor-pointer ${
+                    className={`sticky top-0 z-20 rounded-lg border-l-4 border-l-[#9CA3AF] select-none cursor-pointer ${
                       blockColor?.light || "bg-slate-100 dark:bg-slate-800"
                     } hover:brightness-95 dark:hover:brightness-110 transition-all ${
                       layoutMode === "smartphone" &&
@@ -2319,7 +2484,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         ? "flex flex-col"
                         : "flex items-center"
                     }`}
-                    style={{ borderLeft: "4px solid #9CA3AF" }}
                     onClick={() => onToggleSpaceCollapse?.(group.groupKey)}
                     data-item-id={
                       group.isCollapsed ? group.items[0]?.id : undefined
@@ -2925,14 +3089,13 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                     crossRangeInGroup &&
                     onToggleRangeSelection && (
                       <div
-                        className={`absolute top-0 bottom-0 z-40 ${
+                        className={`absolute top-0 bottom-0 z-40 w-10 ${
                           columnType === "candidate" ? "left-0" : "right-0"
                         } cursor-pointer ${
                           crossSpaceGroupRangeInfo!.onlyStartEndSelected
                             ? "opacity-50 hover:opacity-100"
                             : "opacity-100"
                         }`}
-                        style={{ width: "40px" }}
                         title={
                           crossSpaceGroupRangeInfo!.allSelected
                             ? "範囲内のチェックを外す"
@@ -2947,11 +3110,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                         }
                       >
                         <svg
-                          className="absolute w-full h-full"
-                          style={{
-                            [columnType === "candidate" ? "left" : "right"]:
-                              "-42px",
-                          }}
+                          className={`absolute h-full w-full ${
+                            columnType === "candidate"
+                              ? "-left-[42px]"
+                              : "-right-[42px]"
+                          }`}
                           preserveAspectRatio="none"
                         >
                           <defs>
@@ -3207,7 +3370,7 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                               isInRange &&
                               onToggleRangeSelection && (
                                 <div
-                                  className={`absolute top-0 bottom-0 z-40 ${
+                                  className={`absolute top-0 bottom-0 z-40 w-10 ${
                                     columnType === "candidate"
                                       ? "left-0"
                                       : "right-0"
@@ -3216,7 +3379,6 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                       ? "opacity-50 hover:opacity-100"
                                       : "opacity-100"
                                   }`}
-                                  style={{ width: "40px" }}
                                   title={
                                     spaceGroupRangeInfo!.allSelected
                                       ? "範囲内のチェックを外す"
@@ -3231,12 +3393,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                                   }
                                 >
                                   <svg
-                                    className="absolute w-full h-full"
-                                    style={{
-                                      [columnType === "candidate"
-                                        ? "left"
-                                        : "right"]: "-42px",
-                                    }}
+                                    className={`absolute h-full w-full ${
+                                      columnType === "candidate"
+                                        ? "-left-[42px]"
+                                        : "-right-[42px]"
+                                    }`}
                                     preserveAspectRatio="none"
                                   >
                                     <defs>
@@ -3702,17 +3863,12 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
   // ホールグループ化表示
   // ホール定義 0 件でも、優先度別の未定義セクション (highest/priority/none) が
   // 1 つでもあれば groupItemsByHallOrder が複数バケットを返す
-  const shouldShowHallGroups =
-    showHallGroups &&
-    (hallDefinitions.length > 0 ||
-      hallGroups.length > 1 ||
-      (hallGroups.length === 1 && hallGroups[0].groupId !== null));
   if (shouldShowHallGroups) {
     return (
       <div
+        {...fullListRendererAttributes}
         ref={containerRef}
-        className="space-y-2 relative"
-        style={{ paddingBottom: "var(--footer-height, 96px)" }}
+        className="relative space-y-2 pb-[var(--footer-height,96px)]"
         onDragLeave={() => setActiveDropTarget(null)}
       >
         {hallGroups.map((group, groupIndex) => {
@@ -3736,9 +3892,16 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
             >
               {/* グループヘッダー */}
               <div
-                className={`sticky top-0 z-20 flex items-center justify-between px-4 py-2 rounded-t-lg ${headerStyle.bgClass}`}
-                style={{ borderLeft: `4px solid ${headerStyle.borderColor}` }}
+                className={`sticky top-0 z-20 flex items-center justify-between overflow-hidden rounded-t-lg px-4 py-2 ${headerStyle.bgClass}`}
               >
+                <svg
+                  aria-hidden="true"
+                  className="absolute inset-y-0 left-0 h-full w-1"
+                  preserveAspectRatio="none"
+                  viewBox="0 0 4 100"
+                >
+                  <rect fill={headerStyle.borderColor} height="100" width="4" />
+                </svg>
                 <span className="font-bold text-sm text-slate-700 dark:text-slate-300">
                   {displayName}
                 </span>
@@ -3886,14 +4049,13 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                       {/* 範囲選択表示とチェーン選択UI（グループ内のみ） */}
                       {!isInspecting && isInRange && onToggleRangeSelection && (
                         <div
-                          className={`absolute top-0 bottom-0 z-40 ${
+                          className={`absolute top-0 bottom-0 z-40 w-10 ${
                             columnType === "candidate" ? "left-0" : "right-0"
                           } cursor-pointer ${
                             groupRangeInfo!.onlyStartEndSelected
                               ? "opacity-50 hover:opacity-100"
                               : "opacity-100"
                           }`}
-                          style={{ width: "40px" }}
                           title={
                             groupRangeInfo!.allSelected
                               ? "範囲内のチェックを外す"
@@ -3908,11 +4070,11 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
                           }
                         >
                           <svg
-                            className="absolute w-full h-full"
-                            style={{
-                              [columnType === "candidate" ? "left" : "right"]:
-                                "-42px",
-                            }}
+                            className={`absolute h-full w-full ${
+                              columnType === "candidate"
+                                ? "-left-[42px]"
+                                : "-right-[42px]"
+                            }`}
                             preserveAspectRatio="none"
                           >
                             <defs>
@@ -4045,368 +4207,388 @@ const ShoppingList: React.FC<ShoppingListProps> = ({
     );
   }
 
-  // 通常表示（既存のコード）
-  return (
-    <div
-      ref={containerRef}
-      className={`relative ${
-        layoutMode === "smartphone" ? "space-y-2" : "space-y-4"
-      }`}
-      style={{ paddingBottom: "var(--footer-height, 96px)" }}
-      onDragLeave={() => setActiveDropTarget(null)}
-    >
-      {limitedPurchaseOverlays}
-      {items.map((item, index) => {
-        const isInRange =
-          rangeInfo &&
-          index >= rangeInfo.startIndex &&
-          index <= rangeInfo.endIndex;
-        const isStart = rangeInfo && index === rangeInfo.startIndex;
-        const isEnd = rangeInfo && index === rangeInfo.endIndex;
-        const isMiddle =
-          rangeInfo &&
-          index > rangeInfo.startIndex &&
-          index < rangeInfo.endIndex;
+  const renderUngroupedItemRow = (
+    row: ShoppingListItemRow,
+    index: number,
+    nestedInVirtualList: boolean,
+  ): React.ReactElement => {
+    const item = row.item;
+    const isInRange =
+      rangeInfo && index >= rangeInfo.startIndex && index <= rangeInfo.endIndex;
+    const isStart = rangeInfo && index === rangeInfo.startIndex;
+    const isEnd = rangeInfo && index === rangeInfo.endIndex;
+    const isMiddle =
+      rangeInfo && index > rangeInfo.startIndex && index < rangeInfo.endIndex;
 
-        return (
+    return (
+      <div
+        key={row.rowKey}
+        {...(nestedInVirtualList
+          ? {}
+          : getShoppingListRowAccessibilityAttributes(row))}
+        data-item-id={item.id}
+        data-space-navigation-visit-id={getExecutionVisitIdForItem(item)}
+        data-space-navigation-anchor="item"
+        draggable={!isInspecting}
+        onDragStart={
+          !isInspecting ? (e) => handleDragStart(e, item) : undefined
+        }
+        onDragOver={!isInspecting ? (e) => handleDragOver(e, item) : undefined}
+        onDrop={!isInspecting ? handleDrop : undefined}
+        onDragEnd={!isInspecting ? cleanUp : undefined}
+        onTouchStart={
+          !isInspecting ? (e) => handleItemTouchStart(e, item) : undefined
+        }
+        onTouchMove={!isInspecting ? handleItemTouchMove : undefined}
+        onTouchEnd={!isInspecting ? handleItemTouchEnd : undefined}
+        onTouchCancel={!isInspecting ? handleItemTouchCancel : undefined}
+        className="transition-opacity duration-200 relative"
+        data-is-selected={selectedItemIds.has(item.id)}
+      >
+        {activeDropTarget?.id === item.id &&
+          activeDropTarget.position === "top" && (
+            <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+              <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+              <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+              <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+            </div>
+          )}
+
+        <ShoppingItemCard
+          item={item}
+          onUpdate={onUpdateItem}
+          isStriped={index % 2 !== 0}
+          onEditRequest={onEditRequest}
+          onDeleteRequest={onDeleteRequest}
+          isSelected={selectedItemIds.has(item.id)}
+          onSelectItem={(itemId) =>
+            onSelectItem(itemId, columnType, rangePresentation)
+          }
+          blockBackgroundColor={blockColorMap.get(item.id)}
+          onMoveUp={
+            onMoveItemUp ? () => onMoveItemUp(item.id, columnType) : undefined
+          }
+          onMoveDown={
+            onMoveItemDown
+              ? () => onMoveItemDown(item.id, columnType)
+              : undefined
+          }
+          canMoveUp={index > 0}
+          canMoveDown={index < items.length - 1}
+          isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
+          isSearchMatch={highlightedItemId === item.id}
+          layoutMode={layoutMode}
+          viewMode={viewMode}
+          highlightPrice={priceHighlightItemIds.has(item.id)}
+          highlightLimitedMissing={limitedMissingHighlightItemIds.has(item.id)}
+          getLatestItemById={getLatestItemById}
+          onNotify={showLimitedMessage}
+          onPostEventDistributionCheckRequest={
+            viewMode === "execute" && columnType === "execute"
+              ? (soldOutItem) =>
+                  openPostEventDistributionCheck("single", [soldOutItem])
+              : undefined
+          }
+          purchaseStatusControlMode={purchaseStatusControlMode}
+          skipLimitedPurchaseForSingleQuantity={
+            skipLimitedPurchaseForSingleQuantity
+          }
+          readOnly={isInspecting}
+        />
+
+        {activeDropTarget?.id === item.id &&
+          activeDropTarget.position === "bottom" && (
+            <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
+              <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
+              <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
+              <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
+            </div>
+          )}
+
+        {/* チェーンをアイテムの右側（左列: execute）または左側（右列: candidate）に表示 */}
+        {!isInspecting && isInRange && onToggleRangeSelection && (
           <div
-            key={item.id}
-            data-item-id={item.id}
-            data-space-navigation-visit-id={getExecutionVisitIdForItem(item)}
-            data-space-navigation-anchor="item"
-            draggable={!isInspecting}
-            onDragStart={
-              !isInspecting ? (e) => handleDragStart(e, item) : undefined
-            }
-            onDragOver={
-              !isInspecting ? (e) => handleDragOver(e, item) : undefined
-            }
-            onDrop={!isInspecting ? handleDrop : undefined}
-            onDragEnd={!isInspecting ? cleanUp : undefined}
-            onTouchStart={
-              !isInspecting ? (e) => handleItemTouchStart(e, item) : undefined
-            }
-            onTouchMove={!isInspecting ? handleItemTouchMove : undefined}
-            onTouchEnd={!isInspecting ? handleItemTouchEnd : undefined}
-            onTouchCancel={!isInspecting ? handleItemTouchCancel : undefined}
-            className="transition-opacity duration-200 relative"
-            data-is-selected={selectedItemIds.has(item.id)}
+            className={`absolute top-0 bottom-0 z-40 w-10 pointer-events-none ${
+              columnType === "candidate" ? "left-0" : "right-0"
+            }`}
           >
-            {activeDropTarget?.id === item.id &&
-              activeDropTarget.position === "top" && (
-                <div className="absolute -top-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                  <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                  <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                  <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                </div>
-              )}
-
-            <ShoppingItemCard
-              item={item}
-              onUpdate={onUpdateItem}
-              isStriped={index % 2 !== 0}
-              onEditRequest={onEditRequest}
-              onDeleteRequest={onDeleteRequest}
-              isSelected={selectedItemIds.has(item.id)}
-              onSelectItem={(itemId) =>
-                onSelectItem(itemId, columnType, rangePresentation)
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleRangeSelection(
+                  rangeInfo.rangeItems.map((rangeItem) => rangeItem.id),
+                );
+              }}
+              className={`pointer-events-auto absolute h-full w-full transition-opacity ${
+                rangeInfo.onlyStartEndSelected
+                  ? "opacity-50 hover:opacity-100"
+                  : "opacity-100"
+              } ${
+                columnType === "candidate" ? "-left-[42px]" : "-right-[42px]"
+              }`}
+              title={
+                rangeInfo.allSelected
+                  ? "範囲内のチェックを外す"
+                  : "範囲内のチェックを入れる"
               }
-              blockBackgroundColor={blockColorMap.get(item.id)}
-              onMoveUp={
-                onMoveItemUp
-                  ? () => onMoveItemUp(item.id, columnType)
-                  : undefined
-              }
-              onMoveDown={
-                onMoveItemDown
-                  ? () => onMoveItemDown(item.id, columnType)
-                  : undefined
-              }
-              canMoveUp={index > 0}
-              canMoveDown={index < items.length - 1}
-              isDuplicateCircle={duplicateCircleItemIds.has(item.id)}
-              isSearchMatch={highlightedItemId === item.id}
-              layoutMode={layoutMode}
-              viewMode={viewMode}
-              highlightPrice={priceHighlightItemIds.has(item.id)}
-              highlightLimitedMissing={limitedMissingHighlightItemIds.has(
-                item.id,
-              )}
-              getLatestItemById={getLatestItemById}
-              onNotify={showLimitedMessage}
-              onPostEventDistributionCheckRequest={
-                viewMode === "execute" && columnType === "execute"
-                  ? (soldOutItem) =>
-                      openPostEventDistributionCheck("single", [soldOutItem])
-                  : undefined
-              }
-              purchaseStatusControlMode={purchaseStatusControlMode}
-              skipLimitedPurchaseForSingleQuantity={
-                skipLimitedPurchaseForSingleQuantity
-              }
-              readOnly={isInspecting}
-            />
-
-            {activeDropTarget?.id === item.id &&
-              activeDropTarget.position === "bottom" && (
-                <div className="absolute -bottom-3 left-0 right-0 h-2 flex items-center justify-center z-30 pointer-events-none">
-                  <div className="w-full h-1.5 bg-blue-500 rounded-full shadow-sm ring-2 ring-white dark:ring-slate-800 transform scale-x-95 transition-transform duration-75" />
-                  <div className="absolute w-4 h-4 bg-blue-500 rounded-full -left-1 ring-2 ring-white dark:ring-slate-800" />
-                  <div className="absolute w-4 h-4 bg-blue-500 rounded-full -right-1 ring-2 ring-white dark:ring-slate-800" />
-                </div>
-              )}
-
-            {/* チェーンをアイテムの右側（左列: execute）または左側（右列: candidate）に表示 */}
-            {!isInspecting && isInRange && onToggleRangeSelection && (
-              <div
-                className={`absolute top-0 bottom-0 z-40 pointer-events-none ${
-                  columnType === "candidate" ? "left-0" : "right-0"
-                }`}
-                style={{ width: "40px" }}
+              data-no-long-press
+            >
+              <svg
+                width="40"
+                height="100%"
+                preserveAspectRatio="none"
+                xmlns="http://www.w3.org/2000/svg"
+                className="w-full h-full"
               >
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleRangeSelection(
-                      rangeInfo.rangeItems.map((rangeItem) => rangeItem.id),
-                    );
-                  }}
-                  className={`pointer-events-auto absolute w-full h-full transition-opacity ${
-                    rangeInfo.onlyStartEndSelected
-                      ? "opacity-50 hover:opacity-100"
-                      : "opacity-100"
-                  }`}
-                  style={{
-                    [columnType === "candidate" ? "left" : "right"]: "-42px",
-                  }}
-                  title={
-                    rangeInfo.allSelected
-                      ? "範囲内のチェックを外す"
-                      : "範囲内のチェックを入れる"
-                  }
-                  data-no-long-press
-                >
-                  <svg
+                <defs>
+                  <linearGradient
+                    id={`chainMetal-${item.id}`}
+                    x1="0%"
+                    y1="0%"
+                    x2="100%"
+                    y2="0%"
+                  >
+                    <stop offset="0%" stopColor="#9CA3AF" />
+                    <stop offset="30%" stopColor="#F3F4F6" />
+                    <stop offset="50%" stopColor="#D1D5DB" />
+                    <stop offset="70%" stopColor="#9CA3AF" />
+                    <stop offset="100%" stopColor="#6B7280" />
+                  </linearGradient>
+                  <pattern
+                    id={`chainPattern-${item.id}`}
+                    x="0"
+                    y="0"
+                    width="40"
+                    height="20"
+                    patternUnits="userSpaceOnUse"
+                  >
+                    <rect
+                      x="14"
+                      y="-2"
+                      width="12"
+                      height="18"
+                      rx="6"
+                      fill="none"
+                      stroke={`url(#chainMetal-${item.id})`}
+                      strokeWidth="3"
+                    />
+                    <rect
+                      x="17"
+                      y="13"
+                      width="6"
+                      height="8"
+                      rx="2"
+                      fill={`url(#chainMetal-${item.id})`}
+                      stroke="#4B5563"
+                      strokeWidth="0.5"
+                    />
+                  </pattern>
+                </defs>
+
+                {/* チェーンの描画範囲を制御 */}
+                {isStart && (
+                  // 起点: 中央から下まで
+                  <rect
+                    x="0"
+                    y="50%"
+                    width="40"
+                    height="50%"
+                    fill={`url(#chainPattern-${item.id})`}
+                  />
+                )}
+                {isEnd && (
+                  // 終点: 上から中央まで
+                  <rect
+                    x="0"
+                    y="0"
+                    width="40"
+                    height="50%"
+                    fill={`url(#chainPattern-${item.id})`}
+                  />
+                )}
+                {isMiddle && (
+                  <rect
+                    x="0"
+                    y="0"
                     width="40"
                     height="100%"
-                    preserveAspectRatio="none"
-                    xmlns="http://www.w3.org/2000/svg"
-                    className="w-full h-full"
-                  >
-                    <defs>
-                      <linearGradient
-                        id={`chainMetal-${item.id}`}
-                        x1="0%"
-                        y1="0%"
-                        x2="100%"
-                        y2="0%"
-                      >
-                        <stop offset="0%" stopColor="#9CA3AF" />
-                        <stop offset="30%" stopColor="#F3F4F6" />
-                        <stop offset="50%" stopColor="#D1D5DB" />
-                        <stop offset="70%" stopColor="#9CA3AF" />
-                        <stop offset="100%" stopColor="#6B7280" />
-                      </linearGradient>
-                      <pattern
-                        id={`chainPattern-${item.id}`}
-                        x="0"
-                        y="0"
-                        width="40"
-                        height="20"
-                        patternUnits="userSpaceOnUse"
-                      >
-                        <rect
-                          x="14"
-                          y="-2"
-                          width="12"
-                          height="18"
-                          rx="6"
-                          fill="none"
-                          stroke={`url(#chainMetal-${item.id})`}
-                          strokeWidth="3"
-                        />
-                        <rect
-                          x="17"
-                          y="13"
-                          width="6"
-                          height="8"
-                          rx="2"
-                          fill={`url(#chainMetal-${item.id})`}
-                          stroke="#4B5563"
-                          strokeWidth="0.5"
-                        />
-                      </pattern>
-                    </defs>
+                    fill={`url(#chainPattern-${item.id})`}
+                  />
+                )}
 
-                    {/* チェーンの描画範囲を制御 */}
-                    {isStart && (
-                      // 起点: 中央から下まで
-                      <rect
-                        x="0"
-                        y="50%"
-                        width="40"
-                        height="50%"
-                        fill={`url(#chainPattern-${item.id})`}
-                      />
-                    )}
-                    {isEnd && (
-                      // 終点: 上から中央まで
-                      <rect
-                        x="0"
-                        y="0"
-                        width="40"
-                        height="50%"
-                        fill={`url(#chainPattern-${item.id})`}
-                      />
-                    )}
-                    {isMiddle && (
-                      <rect
-                        x="0"
-                        y="0"
-                        width="40"
-                        height="100%"
-                        fill={`url(#chainPattern-${item.id})`}
-                      />
-                    )}
+                {/* フック（アイテムと鎖を繋ぐ金具） - 全ての範囲内アイテムに表示 */}
+                <g transform="translate(0, 50)">
+                  {columnType === "candidate" ? (
+                    <path
+                      d="M 40 0 L 20 0"
+                      stroke={`url(#chainMetal-${item.id})`}
+                      strokeWidth="4"
+                      strokeLinecap="round"
+                      fill="none"
+                    />
+                  ) : (
+                    <path
+                      d="M 0 0 L 20 0"
+                      stroke={`url(#chainMetal-${item.id})`}
+                      strokeWidth="4"
+                      strokeLinecap="round"
+                      fill="none"
+                    />
+                  )}
+                  <circle
+                    cx="20"
+                    cy="0"
+                    r="4"
+                    fill={`url(#chainMetal-${item.id})`}
+                    stroke="#4B5563"
+                    strokeWidth="0.5"
+                  />
+                  <circle
+                    cx={columnType === "candidate" ? 38 : 2}
+                    cy="0"
+                    r="3"
+                    fill="#9CA3AF"
+                  />
+                </g>
+              </svg>
+            </button>
+          </div>
+        )}
 
-                    {/* フック（アイテムと鎖を繋ぐ金具） - 全ての範囲内アイテムに表示 */}
-                    <g transform="translate(0, 50)">
-                      {columnType === "candidate" ? (
-                        <path
-                          d="M 40 0 L 20 0"
-                          stroke={`url(#chainMetal-${item.id})`}
-                          strokeWidth="4"
-                          strokeLinecap="round"
-                          fill="none"
-                        />
-                      ) : (
-                        <path
-                          d="M 0 0 L 20 0"
-                          stroke={`url(#chainMetal-${item.id})`}
-                          strokeWidth="4"
-                          strokeLinecap="round"
-                          fill="none"
-                        />
-                      )}
-                      <circle
-                        cx="20"
-                        cy="0"
-                        r="4"
-                        fill={`url(#chainMetal-${item.id})`}
+        {/* アイテム間の隙間を埋めるチェーン */}
+        {!isInspecting &&
+          rangeInfo &&
+          (isStart || isMiddle) &&
+          onToggleRangeSelection && (
+            <div
+              className={`absolute bottom-0 z-50 h-4 w-10 pointer-events-none ${
+                columnType === "candidate" ? "left-0" : "right-0"
+              } ${
+                columnType === "candidate" ? "-left-[42px]" : "-right-[42px]"
+              }`}
+            >
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onToggleRangeSelection(
+                    rangeInfo.rangeItems.map((rangeItem) => rangeItem.id),
+                  );
+                }}
+                className={`pointer-events-auto absolute w-full h-full transition-opacity ${
+                  rangeInfo.onlyStartEndSelected
+                    ? "opacity-50 hover:opacity-100"
+                    : "opacity-100"
+                }`}
+                title={
+                  rangeInfo.allSelected
+                    ? "範囲内のチェックを外す"
+                    : "範囲内のチェックを入れる"
+                }
+                data-no-long-press
+              >
+                <svg
+                  width="40"
+                  height="16"
+                  xmlns="http://www.w3.org/2000/svg"
+                  className="w-full h-full"
+                >
+                  {/* パターン定義を再利用するためにdefsを定義（本当はuseタグを使いたいが、IDスコープが面倒なので再定義） */}
+                  <defs>
+                    <linearGradient
+                      id={`chainMetal-gap-${item.id}`}
+                      x1="0%"
+                      y1="0%"
+                      x2="100%"
+                      y2="0%"
+                    >
+                      <stop offset="0%" stopColor="#9CA3AF" />
+                      <stop offset="30%" stopColor="#F3F4F6" />
+                      <stop offset="50%" stopColor="#D1D5DB" />
+                      <stop offset="70%" stopColor="#9CA3AF" />
+                      <stop offset="100%" stopColor="#6B7280" />
+                    </linearGradient>
+                    <pattern
+                      id={`chainPattern-gap-${item.id}`}
+                      x="0"
+                      y="0"
+                      width="40"
+                      height="20"
+                      patternUnits="userSpaceOnUse"
+                    >
+                      <rect
+                        x="14"
+                        y="-2"
+                        width="12"
+                        height="18"
+                        rx="6"
+                        fill="none"
+                        stroke={`url(#chainMetal-gap-${item.id})`}
+                        strokeWidth="3"
+                      />
+                      <rect
+                        x="17"
+                        y="13"
+                        width="6"
+                        height="8"
+                        rx="2"
+                        fill={`url(#chainMetal-gap-${item.id})`}
                         stroke="#4B5563"
                         strokeWidth="0.5"
                       />
-                      <circle
-                        cx={columnType === "candidate" ? 38 : 2}
-                        cy="0"
-                        r="3"
-                        fill="#9CA3AF"
-                      />
-                    </g>
-                  </svg>
-                </button>
-              </div>
-            )}
+                    </pattern>
+                  </defs>
+                  <rect
+                    x="0"
+                    y="0"
+                    width="40"
+                    height="100%"
+                    fill={`url(#chainPattern-gap-${item.id})`}
+                  />
+                </svg>
+              </button>
+            </div>
+          )}
+      </div>
+    );
+  };
 
-            {/* アイテム間の隙間を埋めるチェーン */}
-            {!isInspecting &&
-              rangeInfo &&
-              (isStart || isMiddle) &&
-              onToggleRangeSelection && (
-                <div
-                  className={`absolute bottom-0 z-50 pointer-events-none ${
-                    columnType === "candidate" ? "left-0" : "right-0"
-                  }`}
-                  style={{
-                    width: "40px",
-                    height: "16px",
-                    [columnType === "candidate" ? "left" : "right"]: "-42px",
-                  }}
-                >
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      onToggleRangeSelection(
-                        rangeInfo.rangeItems.map((rangeItem) => rangeItem.id),
-                      );
-                    }}
-                    className={`pointer-events-auto absolute w-full h-full transition-opacity ${
-                      rangeInfo.onlyStartEndSelected
-                        ? "opacity-50 hover:opacity-100"
-                        : "opacity-100"
-                    }`}
-                    title={
-                      rangeInfo.allSelected
-                        ? "範囲内のチェックを外す"
-                        : "範囲内のチェックを入れる"
-                    }
-                    data-no-long-press
-                  >
-                    <svg
-                      width="40"
-                      height="16"
-                      xmlns="http://www.w3.org/2000/svg"
-                      className="w-full h-full"
-                    >
-                      {/* パターン定義を再利用するためにdefsを定義（本当はuseタグを使いたいが、IDスコープが面倒なので再定義） */}
-                      <defs>
-                        <linearGradient
-                          id={`chainMetal-gap-${item.id}`}
-                          x1="0%"
-                          y1="0%"
-                          x2="100%"
-                          y2="0%"
-                        >
-                          <stop offset="0%" stopColor="#9CA3AF" />
-                          <stop offset="30%" stopColor="#F3F4F6" />
-                          <stop offset="50%" stopColor="#D1D5DB" />
-                          <stop offset="70%" stopColor="#9CA3AF" />
-                          <stop offset="100%" stopColor="#6B7280" />
-                        </linearGradient>
-                        <pattern
-                          id={`chainPattern-gap-${item.id}`}
-                          x="0"
-                          y="0"
-                          width="40"
-                          height="20"
-                          patternUnits="userSpaceOnUse"
-                        >
-                          <rect
-                            x="14"
-                            y="-2"
-                            width="12"
-                            height="18"
-                            rx="6"
-                            fill="none"
-                            stroke={`url(#chainMetal-gap-${item.id})`}
-                            strokeWidth="3"
-                          />
-                          <rect
-                            x="17"
-                            y="13"
-                            width="6"
-                            height="8"
-                            rx="2"
-                            fill={`url(#chainMetal-gap-${item.id})`}
-                            stroke="#4B5563"
-                            strokeWidth="0.5"
-                          />
-                        </pattern>
-                      </defs>
-                      <rect
-                        x="0"
-                        y="0"
-                        width="40"
-                        height="100%"
-                        fill={`url(#chainPattern-gap-${item.id})`}
-                      />
-                    </svg>
-                  </button>
-                </div>
-              )}
-          </div>
-        );
-      })}
+  if (listRendererSelection.engine === "virtual") {
+    return (
+      <VirtualListRenderer
+        model={listReadModel}
+        accessibleLabel="買い物リスト"
+        estimateSizePx={
+          virtualListEligibility.rowHeightPx ??
+          VIRTUAL_LIST_ESTIMATED_ROW_HEIGHT_PX
+        }
+        overscan={8}
+        gapPx={layoutMode === "smartphone" ? 8 : 16}
+        className="pb-[var(--footer-height,96px)]"
+        beforeContent={limitedPurchaseOverlays}
+        rootRef={containerRef}
+        onDragLeave={() => setActiveDropTarget(null)}
+        renderRow={(row, index) =>
+          row.kind === "item" ? renderUngroupedItemRow(row, index, true) : null
+        }
+      />
+    );
+  }
+
+  return (
+    <div
+      {...fullListRendererAttributes}
+      ref={containerRef}
+      role="list"
+      aria-label="買い物リスト"
+      className={`relative ${
+        layoutMode === "smartphone" ? "space-y-2" : "space-y-4"
+      } pb-[var(--footer-height,96px)]`}
+      onDragLeave={() => setActiveDropTarget(null)}
+    >
+      {limitedPurchaseOverlays}
+      {listReadModel.itemRows.map((row, index) =>
+        renderUngroupedItemRow(row, index, false),
+      )}
     </div>
   );
 };

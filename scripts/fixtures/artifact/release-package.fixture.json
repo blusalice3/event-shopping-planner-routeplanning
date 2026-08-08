@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "sourceSha": "1234567890abcdef1234567890abcdef12345678",
+  "providerPolicy": {
+    "bindingStatus": "fixture-only",
+    "expectedTeamId": "team_local_fixture_01",
+    "expectedProjectId": "project_local_fixture_01",
+    "ownedProductionDomains": ["fixture.invalid"]
+  },
+  "providerObservation": {
+    "schemaVersion": 1,
+    "observationStatus": "fixture-only",
+    "providerProjectId": "project_local_fixture_01",
+    "providerTeamId": "team_local_fixture_01",
+    "productionEnvironmentName": "production",
+    "providerNodeFamily": "24.x",
+    "ownedProductionDomains": ["fixture.invalid"],
+    "presentEnvironmentNames": [],
+    "autoAssignCustomProductionDomains": false,
+    "gitProductionAutoDeploy": false,
+    "hstsOwner": "provider",
+    "wafRules": {},
+    "logPolicy": {}
+  }
+}

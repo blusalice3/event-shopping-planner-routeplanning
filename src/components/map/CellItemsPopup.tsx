@@ -109,7 +109,6 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
   const isLongPress = useRef(false);
   const suppressNextClick = useRef(false);
   const suppressPopupClickUntilRef = useRef(0);
-  const [popupSize, setPopupSize] = useState({ width: 320, height: 300 });
 
   // === アイテム追加ダイアログ ===
   const [addDialogOpen, setAddDialogOpen] = useState(false);
@@ -277,14 +276,6 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     onClose,
   ]);
 
-  // ポップアップサイズを測定
-  useEffect(() => {
-    if (popupRef.current && isOpen) {
-      const rect = popupRef.current.getBoundingClientRect();
-      setPopupSize({ width: rect.width, height: rect.height });
-    }
-  }, [isOpen, items.length]);
-
   // 表示元のpointerup後に発生する互換clickだけを、DOM反映時点から抑止する。
   useLayoutEffect(() => {
     if (!isOpen) {
@@ -306,45 +297,8 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     }
   }, [isOpen]);
 
-  // 最適なポップアップ位置を計算
-  const computedPosition = useMemo(() => {
-    const screenWidth = window.innerWidth;
-    const screenHeight = window.innerHeight;
-    const padding = 16;
-    const offsetFromClick = 40;
-    const isMobileOrTablet = screenWidth <= 768;
-    let x: number;
-    let y: number;
-    if (isMobileOrTablet) {
-      x = Math.max(
-        padding,
-        Math.min(
-          position.x - popupSize.width / 2,
-          screenWidth - popupSize.width - padding,
-        ),
-      );
-      const isLeftSide = position.x < screenWidth / 2;
-      x = isLeftSide
-        ? Math.max(padding, padding)
-        : Math.max(padding, screenWidth - popupSize.width - padding);
-      y = screenHeight - popupSize.height - padding - 60;
-    } else {
-      if (position.x < screenWidth / 2) {
-        x = Math.min(
-          position.x + offsetFromClick,
-          screenWidth - popupSize.width - padding,
-        );
-      } else {
-        x = Math.max(padding, position.x - popupSize.width - offsetFromClick);
-      }
-      y = position.y - popupSize.height / 2;
-      y = Math.max(
-        padding + 104,
-        Math.min(y, screenHeight - popupSize.height - padding),
-      );
-    }
-    return { x, y };
-  }, [position, popupSize]);
+  const popupHorizontalClass =
+    position.x < window.innerWidth / 2 ? "left-4" : "right-4";
 
   useEffect(() => {
     const handleClickOutside = (e: PointerEvent) => {
@@ -486,8 +440,7 @@ const CellItemsPopup: React.FC<CellItemsPopupProps> = ({
     <>
       <div
         ref={popupRef}
-        className="fixed z-50 bg-white dark:bg-slate-800 rounded-lg shadow-xl border border-slate-200 dark:border-slate-700 max-w-sm w-80 transition-all duration-150"
-        style={{ left: computedPosition.x, top: computedPosition.y }}
+        className={`fixed top-[calc(50%+52px)] z-50 max-h-[calc(100vh-120px)] w-80 max-w-sm -translate-y-1/2 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-xl transition-all duration-150 dark:border-slate-700 dark:bg-slate-800 ${popupHorizontalClass}`}
         onClickCapture={handlePopupClickCapture}
         onPointerDownCapture={handlePopupInteractionStart}
         onTouchStartCapture={handlePopupInteractionStart}
