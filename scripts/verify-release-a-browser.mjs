@@ -12,8 +12,11 @@ import path from "node:path";
 import process from "node:process";
 import { chromium as playwrightChromium } from "playwright";
 import {
+  assertLegacyRollbackCapabilityAbsence,
   assertPromptCloseAllBrowserDrill,
   resolvePromptCloseAllDrillMode,
+  resolveRollbackActivationMode,
+  resolveRollbackTargetCapabilityMode,
 } from "./browser/prompt-close-all-drill-authority.mjs";
 import { ServiceWorkerActivationTracker } from "./lib/service-worker-activation-tracker.mjs";
 
@@ -29,6 +32,14 @@ const TRANSITION_MODE = ROLLBACK_MODE
 const PROMPT_CLOSE_DRILL_MODE = resolvePromptCloseAllDrillMode({
   transitionMode: TRANSITION_MODE,
   configuredMode: process.env.ESP_PROMPT_CLOSE_DRILL,
+});
+const ROLLBACK_TARGET_CAPABILITY_MODE = resolveRollbackTargetCapabilityMode({
+  transitionMode: TRANSITION_MODE,
+  configuredMode: process.env.ESP_ROLLBACK_TARGET_CAPABILITY,
+});
+const ROLLBACK_ACTIVATION_MODE = resolveRollbackActivationMode({
+  transitionMode: TRANSITION_MODE,
+  configuredMode: process.env.ESP_ROLLBACK_ACTIVATION,
 });
 const ALLOW_DIRTY_BUILD = process.env.ESP_ALLOW_DIRTY_BUILD === "true";
 const REQUESTED_PROFILE_DIRECTORY =
@@ -62,6 +73,9 @@ const PWA_UPDATE_PROBE_STATE_KEY =
 const PWA_UPDATE_PROBE_TRACE_KEY =
   "__esp_internal__:browser-test:pwa-update-probe-trace:v1";
 const ROLLBACK_SAVE_EVENT_NAME = "RELEASE_A_ROLLBACK_SAVE";
+const PROMPT_CLOSE_ITEM_TITLE = "Prompt Close Saved Item";
+const PROMPT_CLOSE_AUTOSAVE_ARM_REMARK = "PWA autosave blocker armed";
+const PROMPT_CLOSE_AUTOSAVE_REMARK = "PWA save-flush evidence";
 const SYNTHETIC_METADATA =
   '{"A10_FIXTURE":{"title":"synthetic-event","phase":"release-a-browser"}}';
 const SYNTHETIC_SYNC_QUEUE =
@@ -182,6 +196,53 @@ const createTarget = async (context, existingPage = null) => {
 const closeTarget = async (target) => {
   await target.client.close();
   await target.page.close({ runBeforeUnload: false }).catch(() => undefined);
+};
+
+const selectUniqueStandaloneStartupPage = async (
+  context,
+  timeoutMs = 15_000,
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let observations = [];
+  while (Date.now() < deadline) {
+    const pages = context.pages();
+    observations = await Promise.all(
+      pages.map(async (page) => {
+        try {
+          return {
+            page,
+            url: page.url(),
+            standalone: await page.evaluate(
+              () => matchMedia("(display-mode: standalone)").matches,
+            ),
+          };
+        } catch {
+          return { page, url: page.url(), standalone: false };
+        }
+      }),
+    );
+    const candidates = observations.filter(({ standalone }) => standalone);
+    if (candidates.length > 1) {
+      throw new Error("Chromium exposed multiple standalone startup pages.");
+    }
+    if (candidates.length === 1) {
+      const selected = candidates[0].page;
+      for (const observation of observations) {
+        if (observation.page !== selected) {
+          await observation.page
+            .close({ runBeforeUnload: false })
+            .catch(() => undefined);
+        }
+      }
+      return selected;
+    }
+    await delay(100);
+  }
+  throw new Error(
+    `A unique standalone startup page was not observed: ${JSON.stringify(
+      observations.map(({ url, standalone }) => ({ url, standalone })),
+    )}`,
+  );
 };
 
 const installBrowserInstrumentation = async (
@@ -556,18 +617,35 @@ const collectPromptCloseAllUiEvidence = async (client) =>
     })())()`,
   );
 
-const waitForPromptCloseAllPhase = async (client, phase, label) => {
-  await waitForExpression(
-    client,
-    `document.querySelector(
-      "[data-pwa-update-notice]",
-    )?.dataset.pwaUpdatePhase === ${JSON.stringify(phase)}`,
-    label,
+const waitForPromptCloseAllPhase = async (
+  client,
+  phase,
+  label,
+  timeoutMs = 20_000,
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let lastEvidence = null;
+  let lastError = null;
+  while (Date.now() < deadline) {
+    try {
+      lastEvidence = await collectPromptCloseAllUiEvidence(client);
+      lastError = null;
+      if (lastEvidence.phase === phase) return lastEvidence;
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
+    }
+    await delay(100);
+  }
+  throw new Error(
+    `${label} was not observed: ${JSON.stringify({
+      expectedPhase: phase,
+      lastEvidence,
+      lastError,
+    })}`,
   );
-  return collectPromptCloseAllUiEvidence(client);
 };
 
-const inspectProductionEventAutosaveBlocker = async (client) =>
+const requestProductionEventAutosaveSnapshot = async (client, flush) =>
   await evaluate(
     client,
     `(() => new Promise((resolve, reject) => {
@@ -615,12 +693,43 @@ const inspectProductionEventAutosaveBlocker = async (client) =>
           protocolVersion: 1,
           requestId,
           clientId,
-          flush: false,
+          flush: ${JSON.stringify(flush)},
         },
         globalThis.location.origin,
       );
     }))()`,
   );
+
+const inspectProductionEventAutosaveBlocker = async (client) =>
+  requestProductionEventAutosaveSnapshot(client, false);
+
+const flushProductionEventAutosave = async (client) =>
+  requestProductionEventAutosaveSnapshot(client, true);
+
+const waitForProductionEventAutosaveBlocker = async (
+  client,
+  timeoutMs = 5_000,
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let evidence = null;
+  while (Date.now() < deadline) {
+    evidence = await inspectProductionEventAutosaveBlocker(client);
+    if (
+      evidence.responsive === true &&
+      evidence.flushError === false &&
+      evidence.blockerCount >= 1 &&
+      evidence.eventAutosaveObserved === true
+    ) {
+      return evidence;
+    }
+    await delay(100);
+  }
+  throw new Error(
+    `Production event-autosave blocker was not observed: ${JSON.stringify(
+      evidence,
+    )}`,
+  );
+};
 
 class AttachedServiceWorkerClient {
   constructor(browserSession, sessionId) {
@@ -1285,9 +1394,25 @@ const collectPersistedEventEvidence = async (client, eventName) =>
           request.onsuccess = () => resolve(request.result);
         });
         const items = eventLists?.[${JSON.stringify(eventName)}];
+        const matchingAtomicCreationCount = Array.isArray(items)
+          ? items.filter(
+              (item) =>
+                item?.title === ${JSON.stringify(PROMPT_CLOSE_ITEM_TITLE)} &&
+                item?.remarks === "",
+            ).length
+          : 0;
+        const matchingAutosaveMutationCount = Array.isArray(items)
+          ? items.filter(
+              (item) =>
+                item?.title === ${JSON.stringify(PROMPT_CLOSE_ITEM_TITLE)} &&
+                item?.remarks === ${JSON.stringify(PROMPT_CLOSE_AUTOSAVE_REMARK)},
+            ).length
+          : 0;
         return {
           present: Array.isArray(items),
           itemCount: Array.isArray(items) ? items.length : 0,
+          atomicCreationClean: matchingAtomicCreationCount === 1,
+          autosaveMutationCommitted: matchingAutosaveMutationCount === 1,
         };
       } finally {
         database.close();
@@ -1295,12 +1420,45 @@ const collectPersistedEventEvidence = async (client, eventName) =>
     })()`,
   );
 
-const waitForPersistedEvent = async (client, eventName, timeoutMs = 20_000) => {
+const waitForPersistedEventCreation = async (
+  client,
+  eventName,
+  timeoutMs = 20_000,
+) => {
   const deadline = Date.now() + timeoutMs;
   let lastEvidence = null;
   while (Date.now() < deadline) {
     lastEvidence = await collectPersistedEventEvidence(client, eventName);
-    if (lastEvidence.present && lastEvidence.itemCount >= 1) {
+    if (
+      lastEvidence.present &&
+      lastEvidence.itemCount >= 1 &&
+      lastEvidence.atomicCreationClean
+    ) {
+      return lastEvidence;
+    }
+    await delay(100);
+  }
+  throw new Error(
+    `Prompt-close event creation was not committed atomically. Last evidence: ${JSON.stringify(
+      lastEvidence,
+    )}`,
+  );
+};
+
+const waitForAutosaveMutationCommit = async (
+  client,
+  eventName,
+  timeoutMs = 20_000,
+) => {
+  const deadline = Date.now() + timeoutMs;
+  let lastEvidence = null;
+  while (Date.now() < deadline) {
+    lastEvidence = await collectPersistedEventEvidence(client, eventName);
+    if (
+      lastEvidence.present &&
+      lastEvidence.itemCount >= 1 &&
+      lastEvidence.autosaveMutationCommitted
+    ) {
       return lastEvidence;
     }
     await delay(100);
@@ -1317,18 +1475,35 @@ const createPromptClosePendingEventThroughUi = async (page, eventName) => {
     .getByRole("button", { name: "新規リスト作成", exact: true })
     .click();
   await page.locator("#eventName").waitFor({ state: "visible" });
-  await Promise.all([
-    page.locator("#eventName").fill(eventName),
-    page.locator("#circles").fill("Prompt Close Circle"),
-    page.locator("#event-dates").fill("1日目"),
-    page.locator("#blocks").fill("A"),
-    page.locator("#numbers").fill("01a"),
-    page.locator("#titles").fill("Prompt Close Saved Item"),
-    page.locator("#prices").fill("100"),
-  ]);
-  const alertMessages = [];
+  const formValues = [
+    ["#eventName", eventName],
+    ["#circles", "Prompt Close Circle"],
+    ["#event-dates", "1日目"],
+    ["#blocks", "A"],
+    ["#numbers", "01a"],
+    ["#titles", PROMPT_CLOSE_ITEM_TITLE],
+    ["#prices", "100"],
+  ];
+  // These are controlled React inputs. Serialize interactions and verify the
+  // reflected values so concurrent fills cannot submit a partial fixture.
+  for (const [selector, value] of formValues) {
+    await page.locator(selector).fill(value);
+  }
+  for (const [selector, value] of formValues) {
+    assert(
+      (await page.locator(selector).inputValue()) === value,
+      `Prompt-close fixture form value differs for ${selector}.`,
+    );
+  }
+  assert(
+    await page
+      .locator("form:has(#eventName)")
+      .evaluate(
+        (form) => form instanceof HTMLFormElement && form.checkValidity(),
+      ),
+    "Prompt-close fixture form is invalid before submission.",
+  );
   const acceptDialog = async (dialog) => {
-    alertMessages.push(dialog.message());
     await dialog.accept();
   };
   page.on("dialog", acceptDialog);
@@ -1343,13 +1518,58 @@ const createPromptClosePendingEventThroughUi = async (page, eventName) => {
       true,
     eventName,
   );
+};
+
+const applyPromptCloseAutosaveMutationThroughUi = async (
+  page,
+  eventName,
+  expectedPreviousRemarks,
+  remarks,
+) => {
+  const itemRow = page.getByRole("listitem", {
+    name: `A01a Prompt Close Circle ${PROMPT_CLOSE_ITEM_TITLE}`,
+    exact: true,
+  });
+  await itemRow.waitFor({ state: "visible" });
   assert(
-    alertMessages.some((message) =>
-      message.includes("items imported into a new event"),
-    ),
-    `Prompt-close UI did not reach its successful import path. Alerts: ${JSON.stringify(
-      alertMessages,
-    )}`,
+    (await itemRow.count()) === 1,
+    "Prompt-close fixture item row is not unique.",
+  );
+  const remarksInput = itemRow.getByRole("textbox", {
+    name: "利用者メモ",
+    exact: true,
+  });
+  await remarksInput.waitFor({ state: "visible" });
+  assert(
+    (await remarksInput.count()) === 1,
+    "Prompt-close fixture autosave input is not unique.",
+  );
+  const previousRemarks = await remarksInput.inputValue();
+  assert(
+    previousRemarks === expectedPreviousRemarks,
+    `Prompt-close fixture autosave input differs before mutation for ${eventName}.`,
+  );
+  await remarksInput.fill(remarks);
+  assert(
+    (await remarksInput.inputValue()) === remarks,
+    `Prompt-close fixture autosave mutation was not applied for ${eventName}.`,
+  );
+};
+
+const createPromptClosePendingEventAndArmAutosave = async (
+  page,
+  client,
+  eventName,
+) => {
+  await createPromptClosePendingEventThroughUi(page, eventName);
+  await waitForPersistedEventCreation(client, eventName);
+  // Event creation is atomically persisted and clean. This public UI mutation
+  // exercises the separate debounced autosave path used by the update blocker.
+  await applyPromptCloseAutosaveMutationThroughUi(
+    page,
+    eventName,
+    "",
+    PROMPT_CLOSE_AUTOSAVE_ARM_REMARK,
   );
 };
 
@@ -1582,6 +1802,49 @@ const collectOfflineControllerBuildIdentity = async (client, buildId) => {
   }
 };
 
+const collectLegacyCapabilityAbsence = async (client, requestedPath) => {
+  const observation = await evaluate(
+    client,
+    `fetch(${JSON.stringify(requestedPath)}, { cache: "no-store" })
+      .then(async (response) => {
+        const contentType = response.headers.get("content-type") ?? "";
+        const body = await response.text();
+        const normalizedBody = body.trimStart().toLowerCase();
+        let parsed = null;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          // A legacy Vite preview can return its HTML fallback for an absent file.
+        }
+        const releaseCapability =
+          parsed !== null &&
+          typeof parsed === "object" &&
+          !Array.isArray(parsed) &&
+          parsed.kind === "event-shopping-planner-release-capabilities";
+        const htmlFallback =
+          contentType.toLowerCase().includes("text/html") &&
+          (normalizedBody.startsWith("<!doctype html") ||
+            normalizedBody.startsWith("<html"));
+        return {
+          status: response.status,
+          contentType,
+          observation: releaseCapability
+            ? "release-capability"
+            : htmlFallback
+              ? "html-fallback"
+              : "other",
+        };
+      })`,
+  );
+  assertLegacyRollbackCapabilityAbsence(observation);
+  return {
+    requestedPath,
+    status: observation.status,
+    observation:
+      observation.status === 404 ? "not-found" : observation.observation,
+  };
+};
+
 if (TRANSITION_MODE) {
   assert(
     REQUESTED_PROFILE_DIRECTORY !== null,
@@ -1604,6 +1867,14 @@ if (TRANSITION_MODE) {
     assert(
       EXPECTED_TARGET_BUILD_ID !== null,
       "Forward verification requires ESP_EXPECTED_TARGET_BUILD_ID.",
+    );
+  }
+  if (TRANSITION_MODE === "rollback") {
+    assert(
+      ROLLBACK_TARGET_CAPABILITY_MODE === "required"
+        ? EXPECTED_TARGET_BUILD_ID === TARGET_ARTIFACT_ID
+        : EXPECTED_TARGET_BUILD_ID === null,
+      "Rollback target build ID must match its capability mode.",
     );
   }
 }
@@ -1698,8 +1969,8 @@ try {
     "Chromium browser process identity is ambiguous.",
   );
   const browserProcessId = browserProcessIds[0];
-  const startupAppPage = browserContext.pages()[0];
-  assert(startupAppPage, "Initial standalone app-window page is missing.");
+  const startupAppPage =
+    await selectUniqueStandaloneStartupPage(browserContext);
   standaloneTarget = await createTarget(browserContext, startupAppPage);
   await installBrowserInstrumentation(
     standaloneTarget.client,
@@ -1719,12 +1990,59 @@ try {
       (await readArtifactMarker()) === EXPECTED_FROM_ARTIFACT_ID,
       "Rollback profile does not contain the expected source artifact marker.",
     );
-    await evaluate(
-      primary.client,
-      "navigator.serviceWorker.getRegistration().then((registration) => registration.update()).then(() => true)",
-    );
-    await delay(1_500);
-    await reload(primary.client);
+    let rollbackNaturalActivation = null;
+    if (ROLLBACK_ACTIVATION_MODE === "natural-after-client-release") {
+      const previewOrigin = new URL(PREVIEW_URL).origin;
+      const hasPreviewOrigin = (page) => {
+        try {
+          return new URL(page.url()).origin === previewOrigin;
+        } catch {
+          return false;
+        }
+      };
+      rollbackNaturalActivation = await waitForNaturalServiceWorkerActivation(
+        primary.client,
+        new URL("/sw.js", PREVIEW_URL).href,
+        () => requestTargetServiceWorkerUpdate(primary.client),
+        null,
+        async () => {
+          const originPages = browserContext.pages().filter(hasPreviewOrigin);
+          assert(
+            originPages.length > 0,
+            "Rollback transition has no controlled origin client to release.",
+          );
+          await Promise.all(
+            originPages.map((page) =>
+              page.goto("about:blank", { waitUntil: "load" }),
+            ),
+          );
+          const remainingOriginClientCount = browserContext
+            .pages()
+            .filter(hasPreviewOrigin).length;
+          assert(
+            remainingOriginClientCount === 0,
+            "Rollback transition did not release every controlled origin client.",
+          );
+          return {
+            releasedClientCount: originPages.length,
+            releasedTargetCount: originPages.length,
+            remainingOriginClientCount,
+          };
+        },
+        async () => {
+          await navigate(primary.client, PREVIEW_URL);
+          await waitForControlledApplication(primary.client);
+          return { primary: true };
+        },
+      );
+    } else {
+      await evaluate(
+        primary.client,
+        "navigator.serviceWorker.getRegistration().then((registration) => registration.update()).then(() => true)",
+      );
+      await delay(1_500);
+      await reload(primary.client);
+    }
     await ensureControlledApplication(primary.client);
     await waitForExpression(
       primary.client,
@@ -1754,16 +2072,18 @@ try {
       ))`,
       "rollback legacy source protection status",
     );
-    await waitForExpression(
-      primary.client,
-      `Number.parseInt(
-        sessionStorage.getItem(${JSON.stringify(
-          CONTROLLER_CHANGE_COUNT_KEY,
-        )}) ?? "0",
-        10,
-      ) >= 1`,
-      "rollback Service Worker controller change",
-    );
+    if (!rollbackNaturalActivation) {
+      await waitForExpression(
+        primary.client,
+        `Number.parseInt(
+          sessionStorage.getItem(${JSON.stringify(
+            CONTROLLER_CHANGE_COUNT_KEY,
+          )}) ?? "0",
+          10,
+        ) >= 1`,
+        "rollback Service Worker controller change",
+      );
+    }
     const activeRollbackWorker = await collectActiveServiceWorkerSourceEvidence(
       browserClient,
       new URL("/sw.js", PREVIEW_URL).href,
@@ -1773,10 +2093,41 @@ try {
       "Active rollback Service Worker does not match the expected artifact.",
     );
     const rollbackOfflineControllerIdentity =
-      await collectOfflineControllerBuildIdentity(
-        primary.client,
-        TARGET_ARTIFACT_ID,
+      ROLLBACK_TARGET_CAPABILITY_MODE === "required"
+        ? await collectOfflineControllerBuildIdentity(
+            primary.client,
+            TARGET_ARTIFACT_ID,
+          )
+        : null;
+    if (rollbackOfflineControllerIdentity) {
+      assert(
+        rollbackOfflineControllerIdentity.buildId === TARGET_ARTIFACT_ID &&
+          rollbackOfflineControllerIdentity.sourceSha === TARGET_ARTIFACT_ID &&
+          rollbackOfflineControllerIdentity.sourceState === "clean" &&
+          rollbackOfflineControllerIdentity.releaseChannel === "release-a" &&
+          rollbackOfflineControllerIdentity.cleanupCapability === "forced-off",
+        "Rollback target versioned capability identity differs.",
       );
+    }
+    const rollbackVersionedCapabilityEvidence =
+      rollbackOfflineControllerIdentity
+        ? {
+            expectation: "required",
+            requestedPath: `/release-capabilities.${TARGET_ARTIFACT_ID}.json`,
+            status: 200,
+            observation: "offline-cached",
+          }
+        : {
+            expectation: "legacy-absent",
+            stable: await collectLegacyCapabilityAbsence(
+              primary.client,
+              "/release-capabilities.json",
+            ),
+            versioned: await collectLegacyCapabilityAbsence(
+              primary.client,
+              `/release-capabilities.${TARGET_ARTIFACT_ID}.json`,
+            ),
+          };
     const expectedFixture = createExpectedLegacyFixtureEvidence();
     const rollbackFixture = await collectFixtureEvidence(primary.client);
     assertFixtureUnchanged(
@@ -1816,7 +2167,35 @@ try {
       "Rollback reader could not read the Release A checkpoint.",
     );
 
-    await createRollbackSavedEventThroughUi(primary.client);
+    if (ROLLBACK_ACTIVATION_MODE === "natural-after-client-release") {
+      await createPromptClosePendingEventAndArmAutosave(
+        primary.page,
+        primary.client,
+        ROLLBACK_SAVE_EVENT_NAME,
+      );
+      await waitForProductionEventAutosaveBlocker(primary.client);
+      await applyPromptCloseAutosaveMutationThroughUi(
+        primary.page,
+        ROLLBACK_SAVE_EVENT_NAME,
+        PROMPT_CLOSE_AUTOSAVE_ARM_REMARK,
+        PROMPT_CLOSE_AUTOSAVE_REMARK,
+      );
+      const rollbackFlush = await flushProductionEventAutosave(primary.client);
+      assert(
+        rollbackFlush.responsive === true &&
+          rollbackFlush.flushError === false &&
+          rollbackFlush.blockerCount === 0,
+        `Rollback production autosave flush did not finish cleanly: ${JSON.stringify(
+          rollbackFlush,
+        )}`,
+      );
+      await waitForAutosaveMutationCommit(
+        primary.client,
+        ROLLBACK_SAVE_EVENT_NAME,
+      );
+    } else {
+      await createRollbackSavedEventThroughUi(primary.client);
+    }
     let rollbackDatabase = await collectRollbackDatabaseEvidence(
       primary.client,
     );
@@ -1891,10 +2270,19 @@ try {
       rollbackInstrumentation.legacyDeleteCount === 0,
       "Rollback attempted to delete a protected legacy source.",
     );
-    assert(
-      rollbackInstrumentation.controllerChangeCount >= 1,
-      "Rollback did not observe a Service Worker controller change.",
-    );
+    if (rollbackNaturalActivation) {
+      assert(
+        typeof rollbackNaturalActivation.versionId === "string" &&
+          rollbackNaturalActivation.versionId.length > 0 &&
+          rollbackNaturalActivation.remainingOriginClientCount === 0,
+        "Rollback did not complete natural Service Worker activation.",
+      );
+    } else {
+      assert(
+        rollbackInstrumentation.controllerChangeCount >= 1,
+        "Rollback did not observe a Service Worker controller change.",
+      );
+    }
     assert(
       await writeArtifactMarker(TARGET_ARTIFACT_ID),
       "Rollback artifact marker could not be persisted.",
@@ -1913,7 +2301,10 @@ try {
           rollbackArtifactLoaded: true,
           indexSha256: previewIndexSha256,
           activeServiceWorker: activeRollbackWorker,
+          versionedCapability: rollbackVersionedCapabilityEvidence,
           offlineControllerIdentity: rollbackOfflineControllerIdentity,
+          naturalActivation: rollbackNaturalActivation,
+          activationMode: ROLLBACK_ACTIVATION_MODE,
           serviceWorkerResponseCacheControl: serviceWorkerCacheControl,
           legacySources: {
             metadataPresent: finalRollbackFixture.metadataPresent,
@@ -1964,7 +2355,6 @@ try {
     if (PROMPT_CLOSE_DRILL_MODE === "required") {
       await navigate(standaloneTarget.client, PREVIEW_URL);
       await ensureControlledApplication(standaloneTarget.client);
-      await waitForReleaseAStartupMetric(standaloneTarget.client);
 
       promptCloseSecondary = await createTarget(browserContext);
       targets.push(promptCloseSecondary);
@@ -1974,7 +2364,6 @@ try {
       );
       await navigate(promptCloseSecondary.client, PREVIEW_URL);
       await ensureControlledApplication(promptCloseSecondary.client);
-      await waitForReleaseAStartupMetric(promptCloseSecondary.client);
 
       promptCloseClients = [
         { role: "primary", target: primary },
@@ -2041,12 +2430,13 @@ try {
               "Prompt-close preflush did not preserve the active/waiting roles.",
             );
 
-            await createPromptClosePendingEventThroughUi(
+            await createPromptClosePendingEventAndArmAutosave(
               primary.page,
+              primary.client,
               promptCloseEventName,
             );
             const eventAutosaveInspection =
-              await inspectProductionEventAutosaveBlocker(primary.client);
+              await waitForProductionEventAutosaveBlocker(primary.client);
             assert(
               eventAutosaveInspection.responsive === true &&
                 eventAutosaveInspection.flushError === false &&
@@ -2065,6 +2455,14 @@ try {
             );
             let failedClosed;
             try {
+              // Re-arm the debounce immediately before the trusted action. The
+              // final marker is what the production flush must persist.
+              await applyPromptCloseAutosaveMutationThroughUi(
+                primary.page,
+                promptCloseEventName,
+                PROMPT_CLOSE_AUTOSAVE_ARM_REMARK,
+                PROMPT_CLOSE_AUTOSAVE_REMARK,
+              );
               await primary.page
                 .locator(
                   '[data-pwa-save-and-flush][data-pwa-save-action="save-and-flush"]',
@@ -2095,7 +2493,7 @@ try {
                 .catch(() => undefined);
             }
 
-            const eventAfterInitialAction = await waitForPersistedEvent(
+            const eventAfterInitialAction = await waitForAutosaveMutationCommit(
               primary.client,
               promptCloseEventName,
             );
@@ -2180,8 +2578,8 @@ try {
                 operationCount: postflush.saveOperationCount,
                 eventAutosaveBlockerObserved:
                   eventAutosaveInspection.eventAutosaveObserved,
-                eventPersistedAfterInitialAction:
-                  eventAfterInitialAction.present,
+                eventAutosaveMutationPersistedAfterInitialAction:
+                  eventAfterInitialAction.autosaveMutationCommitted,
                 persistedItemCount: eventAfterInitialAction.itemCount,
               },
               preflush: projectPhase(preflush),

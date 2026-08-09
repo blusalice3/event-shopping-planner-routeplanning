@@ -5,6 +5,14 @@ const CLIENT_ROLES = Object.freeze([
 ]);
 
 const PROMPT_CLOSE_DRILL_MODES = Object.freeze(["required", "disabled"]);
+const ROLLBACK_TARGET_CAPABILITY_MODES = Object.freeze([
+  "required",
+  "legacy-absent",
+]);
+const ROLLBACK_ACTIVATION_MODES = Object.freeze([
+  "auto-takeover",
+  "natural-after-client-release",
+]);
 
 export const resolvePromptCloseAllDrillMode = ({
   transitionMode,
@@ -30,6 +38,59 @@ export const resolvePromptCloseAllDrillMode = ({
   return "disabled";
 };
 
+export const resolveRollbackTargetCapabilityMode = ({
+  transitionMode,
+  configuredMode,
+}) => {
+  if (![null, "rollback", "forward"].includes(transitionMode)) {
+    throw new Error("Rollback target capability transition mode is invalid");
+  }
+  if (
+    configuredMode !== undefined &&
+    !ROLLBACK_TARGET_CAPABILITY_MODES.includes(configuredMode)
+  ) {
+    throw new Error(
+      "ESP_ROLLBACK_TARGET_CAPABILITY must be exactly required or legacy-absent",
+    );
+  }
+  if (transitionMode === "rollback") {
+    return configuredMode ?? "required";
+  }
+  if (configuredMode !== undefined) {
+    throw new Error(
+      "Rollback target capability mode requires a rollback transition",
+    );
+  }
+  return "required";
+};
+
+export const resolveRollbackActivationMode = ({
+  transitionMode,
+  configuredMode,
+}) => {
+  if (![null, "rollback", "forward"].includes(transitionMode)) {
+    throw new Error("Rollback activation transition mode is invalid");
+  }
+  if (
+    configuredMode !== undefined &&
+    !ROLLBACK_ACTIVATION_MODES.includes(configuredMode)
+  ) {
+    throw new Error(
+      "ESP_ROLLBACK_ACTIVATION must be exactly auto-takeover or natural-after-client-release",
+    );
+  }
+  if (transitionMode === "rollback") {
+    if (configuredMode === undefined) {
+      throw new Error("Rollback activation mode must be configured explicitly");
+    }
+    return configuredMode;
+  }
+  if (configuredMode !== undefined) {
+    throw new Error("Rollback activation mode requires a rollback transition");
+  }
+  return null;
+};
+
 const isRecord = (value) =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -40,6 +101,31 @@ const exactKeys = (value, expected, label) => {
   ) {
     throw new Error(`${label} contains unknown or missing fields`);
   }
+};
+
+export const assertLegacyRollbackCapabilityAbsence = (value) => {
+  exactKeys(
+    value,
+    ["contentType", "observation", "status"],
+    "Legacy rollback capability observation",
+  );
+  if (
+    !Number.isSafeInteger(value.status) ||
+    typeof value.contentType !== "string" ||
+    !["release-capability", "html-fallback", "other"].includes(
+      value.observation,
+    ) ||
+    value.observation === "release-capability" ||
+    !(
+      value.status === 404 ||
+      (value.status === 200 && value.observation === "html-fallback")
+    )
+  ) {
+    throw new Error(
+      "Legacy rollback target unexpectedly exposes a versioned capability",
+    );
+  }
+  return value;
 };
 
 const nonnegativeInteger = (value, label) => {
@@ -123,7 +209,7 @@ export const assertPromptCloseAllBrowserDrill = (
     value.interaction,
     [
       "eventAutosaveBlockerObserved",
-      "eventPersistedAfterInitialAction",
+      "eventAutosaveMutationPersistedAfterInitialAction",
       "initialAction",
       "operationCount",
       "persistedItemCount",
@@ -144,7 +230,8 @@ export const assertPromptCloseAllBrowserDrill = (
     value.interaction.retryAction !== "playwright-click" ||
     value.interaction.operationCount !== 2 ||
     value.interaction.eventAutosaveBlockerObserved !== true ||
-    value.interaction.eventPersistedAfterInitialAction !== true ||
+    value.interaction.eventAutosaveMutationPersistedAfterInitialAction !==
+      true ||
     value.interaction.persistedItemCount < 1
   ) {
     throw new Error("Prompt-close browser interaction differs");

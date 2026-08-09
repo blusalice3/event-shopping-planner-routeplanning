@@ -59,7 +59,7 @@ $TempBase = [IO.Path]::GetFullPath([IO.Path]::GetTempPath())
 $TempRoot = Join-Path $TempBase (
   "esp-release-a-rollback-" + [Guid]::NewGuid().ToString("N")
 )
-$BaselineArchive = Join-Path $TempRoot "baseline.zip"
+$BaselineBundle = Join-Path $TempRoot "baseline.bundle"
 $BaselineRoot = Join-Path $TempRoot "baseline"
 $ProfileDirectory = Join-Path $TempRoot "browser-profile"
 $PreviewProcess = $null
@@ -222,7 +222,10 @@ function Get-Sha256File {
 function Get-ArtifactEvidence {
   param(
     [Parameter(Mandatory = $true)]
-    [string]$DistDirectory
+    [string]$DistDirectory,
+    [Parameter(Mandatory = $true)]
+    [ValidatePattern('^[0-9a-f]{40}$')]
+    [string]$ArtifactId
   )
 
   $indexPath = Join-Path $DistDirectory "index.html"
@@ -268,10 +271,104 @@ function Get-ArtifactEvidence {
   if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
     throw "Module application asset is missing: $mainAsset."
   }
+  $capabilityPath = Join-Path $DistDirectory "release-capabilities.json"
+  $versionedCapabilityPath = Join-Path $DistDirectory (
+    "release-capabilities.$ArtifactId.json"
+  )
+  $hasCapability = Test-Path -LiteralPath $capabilityPath -PathType Leaf
+  $hasVersionedCapability = Test-Path `
+    -LiteralPath $versionedCapabilityPath `
+    -PathType Leaf
+  $capabilityFiles = @(
+    Get-ChildItem `
+      -LiteralPath $DistDirectory `
+      -Filter "release-capabilities*.json" `
+      -File
+  )
+  if ($hasCapability -ne $hasVersionedCapability) {
+    throw (
+      "Artifact {0} has an incomplete versioned capability pair." -f `
+      $ArtifactId
+    )
+  }
+  if (
+    ($hasCapability -and $capabilityFiles.Count -ne 2) -or
+    (-not $hasCapability -and $capabilityFiles.Count -ne 0)
+  ) {
+    throw (
+      "Artifact {0} has an unexpected capability file set: {1}." -f `
+        $ArtifactId,
+        (($capabilityFiles | ForEach-Object { $_.Name }) -join ", ")
+    )
+  }
+  $targetBuildId = $null
+  $versionedCapabilityMode = "legacy-absent"
+  $pwaLifecycle = "legacy-auto-update-v1"
+  if ($hasCapability) {
+    if (
+      (Get-Sha256File -Path $capabilityPath) -ne
+      (Get-Sha256File -Path $versionedCapabilityPath)
+    ) {
+      throw "Artifact $ArtifactId capability files are not byte-identical."
+    }
+    $capability = Get-Content `
+      -LiteralPath $capabilityPath `
+      -Raw `
+      -Encoding utf8 | ConvertFrom-Json
+    if (
+      $capability.kind -ne "event-shopping-planner-release-capabilities" -or
+      $capability.version -ne 1 -or
+      $capability.buildMode -ne "release-a" -or
+      $capability.buildId -ne $ArtifactId -or
+      $capability.sourceSha -ne $ArtifactId -or
+      $capability.sourceState -ne "clean" -or
+      $capability.releaseChannel -ne "release-a" -or
+      $capability.legacyLocalStorageCleanup -ne "forced-off"
+    ) {
+      throw "Artifact $ArtifactId capability identity differs."
+    }
+    $targetBuildId = $ArtifactId
+    $versionedCapabilityMode = "required"
+    $releaseIdentityPath = Join-Path $DistDirectory "release-identity.json"
+    if (-not (Test-Path -LiteralPath $releaseIdentityPath -PathType Leaf)) {
+      throw "Artifact $ArtifactId release identity is missing."
+    }
+    $releaseIdentity = Get-Content `
+      -LiteralPath $releaseIdentityPath `
+      -Raw `
+      -Encoding utf8 | ConvertFrom-Json
+    if (
+      $releaseIdentity.schemaVersion -ne 1 -or
+      $releaseIdentity.buildId -ne $ArtifactId -or
+      $releaseIdentity.sourceSha -ne $ArtifactId -or
+      $releaseIdentity.pwaLifecycle -notin @(
+        "legacy-auto-update-v1",
+        "prompt-close-all-v1"
+      )
+    ) {
+      throw "Artifact $ArtifactId PWA lifecycle identity differs."
+    }
+    $pwaLifecycle = [string]$releaseIdentity.pwaLifecycle
+  } elseif (
+    Test-Path `
+      -LiteralPath (Join-Path $DistDirectory "release-identity.json") `
+      -PathType Leaf
+  ) {
+    throw "Legacy artifact $ArtifactId unexpectedly has a release identity."
+  }
+  $rollbackActivationMode = if ($pwaLifecycle -eq "prompt-close-all-v1") {
+    "natural-after-client-release"
+  } else {
+    "auto-takeover"
+  }
   return @{
     IndexSha256 = Get-Sha256File -Path $indexPath
     ServiceWorkerSha256 = Get-Sha256File -Path $serviceWorkerPath
     MainAsset = $mainAsset
+    TargetBuildId = $targetBuildId
+    VersionedCapabilityMode = $versionedCapabilityMode
+    PwaLifecycle = $pwaLifecycle
+    RollbackActivationMode = $rollbackActivationMode
   }
 }
 
@@ -285,6 +382,8 @@ function Clear-TransitionEnvironment {
   Remove-Item Env:ESP_EXPECTED_SW_SHA256 -ErrorAction SilentlyContinue
   Remove-Item Env:ESP_EXPECTED_MAIN_ASSET -ErrorAction SilentlyContinue
   Remove-Item Env:ESP_PROMPT_CLOSE_DRILL -ErrorAction SilentlyContinue
+  Remove-Item Env:ESP_ROLLBACK_TARGET_CAPABILITY -ErrorAction SilentlyContinue
+  Remove-Item Env:ESP_ROLLBACK_ACTIVATION -ErrorAction SilentlyContinue
   Remove-Item Env:ESP_ALLOW_DIRTY_BUILD -ErrorAction SilentlyContinue
 }
 
@@ -311,7 +410,37 @@ function Invoke-BrowserVerifier {
     if ($TargetBuildId) {
       $env:ESP_EXPECTED_TARGET_BUILD_ID = $TargetBuildId
     }
+    if ($Mode -eq "rollback") {
+      if (
+        $Evidence.VersionedCapabilityMode -notin @(
+          "required",
+          "legacy-absent"
+        )
+      ) {
+        throw "Rollback artifact capability mode is invalid."
+      }
+      if (
+        ($Evidence.VersionedCapabilityMode -eq "required") -ne
+        [bool]$TargetBuildId
+      ) {
+        throw "Rollback artifact build ID and capability mode differ."
+      }
+      $env:ESP_ROLLBACK_TARGET_CAPABILITY = `
+        $Evidence.VersionedCapabilityMode
+      if (
+        $Evidence.RollbackActivationMode -notin @(
+          "auto-takeover",
+          "natural-after-client-release"
+        )
+      ) {
+        throw "Rollback artifact activation mode is invalid."
+      }
+      $env:ESP_ROLLBACK_ACTIVATION = $Evidence.RollbackActivationMode
+    }
     if ($Mode -eq "forward") {
+      if ($Evidence.VersionedCapabilityMode -ne "required") {
+        throw "Forward artifact must provide a versioned capability."
+      }
       if ($RequirePromptCloseDrill) {
         $env:ESP_PROMPT_CLOSE_DRILL = "required"
       } else {
@@ -346,6 +475,17 @@ if ($LASTEXITCODE -ne 0 -or $workingTreeState) {
 if (-not (Test-Path -LiteralPath $ViteCli -PathType Leaf)) {
   throw "Vite CLI is missing. Run npm install before the rehearsal."
 }
+$baselineCommitOutput = @(
+  git -C $ProjectRoot rev-parse --verify "$BaselineCommit^{commit}"
+)
+if (
+  $LASTEXITCODE -ne 0 -or
+  $baselineCommitOutput.Count -ne 1 -or
+  ([string]$baselineCommitOutput[0]).Trim() -notmatch '^[0-9a-f]{40}$'
+) {
+  throw "Rollback baseline did not resolve to one full commit SHA."
+}
+$BaselineCommit = ([string]$baselineCommitOutput[0]).Trim()
 
 try {
   New-Item -ItemType Directory -Path $TempRoot | Out-Null
@@ -369,22 +509,25 @@ try {
   if ($FinalBuildId -notmatch '^[0-9a-f]{40}$') {
     throw "Final Release A build ID is not a full source SHA."
   }
-  $FinalEvidence = Get-ArtifactEvidence -DistDirectory (
-    Join-Path $ProjectRoot "dist"
-  )
+  $FinalEvidence = Get-ArtifactEvidence `
+    -DistDirectory (Join-Path $ProjectRoot "dist") `
+    -ArtifactId $FinalBuildId
 
   Invoke-CheckedCommand `
     -Command {
-      git -C $ProjectRoot archive `
-        --format=zip `
-        "--output=$BaselineArchive" `
-        $BaselineCommit
+      git -C $ProjectRoot bundle create $BaselineBundle --all
     } `
-    -FailureMessage "Could not archive rollback baseline $BaselineCommit"
-  New-Item -ItemType Directory -Path $BaselineRoot | Out-Null
-  Expand-Archive `
-    -LiteralPath $BaselineArchive `
-    -DestinationPath $BaselineRoot
+    -FailureMessage "Could not bundle rollback baseline repository"
+  Invoke-CheckedCommand `
+    -Command {
+      git clone --no-checkout --quiet $BaselineBundle $BaselineRoot
+    } `
+    -FailureMessage "Could not clone rollback baseline bundle"
+  Invoke-CheckedCommand `
+    -Command {
+      git -C $BaselineRoot switch --detach $BaselineCommit
+    } `
+    -FailureMessage "Could not select rollback baseline $BaselineCommit"
 
   Push-Location $BaselineRoot
   try {
@@ -399,9 +542,15 @@ try {
     Remove-Item Env:VITE_PERSISTENCE_LEGACY_CLEANUP -ErrorAction SilentlyContinue
     Pop-Location
   }
-  $BaselineEvidence = Get-ArtifactEvidence -DistDirectory (
-    Join-Path $BaselineRoot "dist"
-  )
+  $BaselineEvidence = Get-ArtifactEvidence `
+    -DistDirectory (Join-Path $BaselineRoot "dist") `
+    -ArtifactId $BaselineCommit
+  if (
+    $RequirePromptCloseDrill -and
+    $BaselineEvidence.PwaLifecycle -ne "prompt-close-all-v1"
+  ) {
+    throw "Prompt-close drill requires a prompt-close-all-v1 predecessor."
+  }
 
   $PreviewProcess = Start-ArtifactPreview -WorkingDirectory $ProjectRoot
   Invoke-BrowserVerifier -Mode "seed"
@@ -413,6 +562,7 @@ try {
     -Mode "rollback" `
     -FromArtifactId $FinalBuildId `
     -TargetArtifactId $BaselineCommit `
+    -TargetBuildId $BaselineEvidence.TargetBuildId `
     -Evidence $BaselineEvidence
   Stop-ArtifactPreview -Process $PreviewProcess
   $PreviewProcess = $null

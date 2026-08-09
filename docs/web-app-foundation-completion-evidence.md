@@ -92,9 +92,11 @@ artifact digest、ZIP bytes、ZIP 内 exact single file、source/run/attempt、a
   `ready-to-close`、production bridge上の実`event-autosave` blocker/flush、IndexedDB commit、全clientの
   clean response、close前controller不変、全client解放後だけのnatural activationを確認する。合成responseは
   初回`flush=false`表示だけに限定し、`flush=true`はproduction responderへ通す。
-- prompt UI非搭載のhistorical baselineは`disabled`で従来のnatural activationを回帰し、prompt対応
-  predecessorは`-RequirePromptCloseDrill`で上記操作を必須化する。対応能力のないbaselineをrequired modeへ
-  渡した場合はfail-closedにする。
+- prompt UI非搭載のhistorical baselineは`disabled`で従来のnatural activationを回帰し、version付き
+  capabilityの両ファイルが成果物にない場合だけ`legacy-absent`を許可する。prompt対応predecessorはrepository
+  bundleのdetached cloneからclean SHAで再buildし、`-RequirePromptCloseDrill`で上記操作とoffline capabilityを
+  必須化する。rollback activationはcapability有無と分離し、exact `pwaLifecycle`から導出する。
+  対応能力のないbaselineをrequired modeへ渡した場合はfail-closedにする。
 - drillの`promptCloseAll` objectは共通closed verifierで各階層のunknown/missing field、request欠落、
   premature controller change、failure中のclose guidance、client残存、activation順序改ざんを拒否する。
   このloopback drillはrepository regressionであり、実managed Windows/PWAの外部authorityを代替しない。

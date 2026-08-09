@@ -468,7 +468,7 @@ cleanなworktreeで、既存previewを停止してから実行します。演習
 npm run test:release-a-rollback
 ```
 
-既定baselineは明示的な保存UIを持たないhistorical packageであるため、この演習では旧natural activation経路を検証し、prompt-close操作は要求しません。`prompt-close-all-v1`を備えたdormant preparation / compatible predecessorとの遷移を検証するときは、そのcommitを明示してprompt-close drillを必須化します。
+既定baselineは明示的な保存UIとversion付きcapabilityを持たないhistorical packageであるため、rollbackでは`auto-takeover`、final forwardではprompt操作を伴わない全client解放後のnatural activationを検証します。成果物上でunversioned/versioned capabilityがともに欠落していることを`legacy-absent`として閉じて検証し、active Workerの実ソースhash、index、main assetとの照合は省略しません。`prompt-close-all-v1`を備えたdormant preparation / compatible predecessorとの遷移を検証するときは、そのcommitを明示してprompt-close drillを必須化します。
 
 ```powershell
 pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/rehearse-release-a-rollback.ps1 `
@@ -488,6 +488,8 @@ pwsh -NoProfile -ExecutionPolicy Bypass -File scripts/rehearse-release-a-rollbac
 6. 同じprofileのstandalone app-window相当でもrollback後データを読めることを確認する
 7. 最終Release Aへforward updateし、version付きcapabilityをactive controllerからoffline取得する
 8. 全段階で旧原本hash不変と対象`localStorage.removeItem`呼出し0件を確認する
+
+baseline sourceは一時directoryへ作成したrepository bundleからdetached cloneしてbuildします。これによりprompt対応predecessorでも`.git`由来のfull source SHAとclean stateを保持し、capability搭載artifactではrollback時にも同じversion付きcapabilityをoffline取得します。rollback activation modeはcapability有無ではなく、成果物内のexact `pwaLifecycle`から`auto-takeover`または`natural-after-client-release`へ導出します。
 
 演習用profile、baseline source、junction、preview processは`finally`で検証済み一時pathから削除します。途中失敗はPASS扱いにせずnon-zeroで終了します。app-window相当は実installed PWAの代替ではないため、Windows/Android実機試験は別途必要です。
 

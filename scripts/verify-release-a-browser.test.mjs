@@ -13,6 +13,12 @@ const rollbackRehearsalSource = await readFile(
   fileURLToPath(new URL("./rehearse-release-a-rollback.ps1", import.meta.url)),
   "utf8",
 );
+const managedTransitionSource = await readFile(
+  fileURLToPath(
+    new URL("./browser/run-managed-device-transition.mjs", import.meta.url),
+  ),
+  "utf8",
+);
 
 test("Release A browser verifier is syntax-valid and Playwright-owned", () => {
   const syntaxCheck = spawnSync(process.execPath, ["--check", verifierPath], {
@@ -28,6 +34,12 @@ test("Release A browser verifier is syntax-valid and Playwright-owned", () => {
   assert.match(verifierSource, /context\.newPage\(\)/);
   assert.match(verifierSource, /context\.newCDPSession\(page\)/);
   assert.match(verifierSource, /browser\.newBrowserCDPSession\(\)/);
+  assert.match(verifierSource, /selectUniqueStandaloneStartupPage/);
+  assert.match(
+    verifierSource,
+    /matchMedia\("\(display-mode: standalone\)"\)\.matches/,
+  );
+  assert.doesNotMatch(verifierSource, /browserContext\.pages\(\)\[0\]/);
 
   for (const forbidden of [
     /from "ws"/,
@@ -150,14 +162,15 @@ test("forward transition waits for one target worker to activate naturally", () 
   for (const fragment of [
     '"save-required"',
     'state: "frozen"',
-    "inspectProductionEventAutosaveBlocker",
+    "waitForProductionEventAutosaveBlocker",
     'data-pwa-save-action="save-and-flush"',
     '"save-incomplete"',
     'state: "active"',
-    "createPromptClosePendingEventThroughUi",
+    "createPromptClosePendingEventAndArmAutosave",
+    "eventAutosaveMutationPersistedAfterInitialAction",
     'data-pwa-save-action="retry"',
     '"ready-to-close"',
-    "waitForPersistedEvent",
+    "waitForAutosaveMutationCommit",
   ]) {
     assert.ok(
       promptCloseSource.includes(fragment),
@@ -165,14 +178,32 @@ test("forward transition waits for one target worker to activate naturally", () 
     );
   }
   assert.ok(
-    promptCloseSource.indexOf("createPromptClosePendingEventThroughUi") <
+    promptCloseSource.indexOf("createPromptClosePendingEventAndArmAutosave") <
       promptCloseSource.indexOf('state: "frozen"'),
     "The real event-autosave blocker must be created before the initial save action.",
+  );
+  const freezeIndex = promptCloseSource.indexOf('state: "frozen"');
+  const finalAutosaveMutationIndex = promptCloseSource.indexOf(
+    "applyPromptCloseAutosaveMutationThroughUi",
+    freezeIndex,
+  );
+  const initialSaveActionIndex = promptCloseSource.indexOf(
+    'data-pwa-save-action="save-and-flush"',
+    freezeIndex,
+  );
+  assert.ok(
+    freezeIndex >= 0 &&
+      finalAutosaveMutationIndex > freezeIndex &&
+      initialSaveActionIndex > finalAutosaveMutationIndex,
+    "The final autosave marker must be applied after freeze and before the trusted save action.",
   );
   assert.match(
     verifierSource,
     /if \(request\.flush\) return;\s*event\.stopImmediatePropagation\(\);/,
   );
+  assert.match(verifierSource, /getByRole\("listitem", \{/);
+  assert.match(verifierSource, /name: "利用者メモ"/);
+  assert.match(verifierSource, /PROMPT_CLOSE_AUTOSAVE_REMARK/);
   assert.match(
     helperSource,
     /prepareClientsForRelease\s*\?\s*await prepareClientsForRelease/,
@@ -186,6 +217,7 @@ test("historical rollback disables prompt UI while capable predecessors can requ
     rollbackRehearsalSource,
     /\$env:ESP_PROMPT_CLOSE_DRILL = "disabled"/,
   );
+  assert.match(rollbackRehearsalSource, /ESP_ROLLBACK_ACTIVATION/);
   assert.match(
     rollbackRehearsalSource,
     /\$env:ESP_PROMPT_CLOSE_DRILL = "required"/,
@@ -195,6 +227,48 @@ test("historical rollback disables prompt UI while capable predecessors can requ
     /Remove-Item Env:ESP_PROMPT_CLOSE_DRILL/,
   );
   assert.match(
+    rollbackRehearsalSource,
+    /\$env:ESP_ROLLBACK_TARGET_CAPABILITY =/,
+  );
+  assert.match(
+    rollbackRehearsalSource,
+    /Remove-Item Env:ESP_ROLLBACK_TARGET_CAPABILITY/,
+  );
+  assert.match(
+    rollbackRehearsalSource,
+    /release-capabilities\.\$ArtifactId\.json/,
+  );
+  assert.match(
+    rollbackRehearsalSource,
+    /git -C \$ProjectRoot bundle create \$BaselineBundle --all/,
+  );
+  assert.match(
+    rollbackRehearsalSource,
+    /git clone --no-checkout --quiet \$BaselineBundle/,
+  );
+  assert.match(rollbackRehearsalSource, /switch --detach \$BaselineCommit/);
+  assert.doesNotMatch(rollbackRehearsalSource, /git -C \$ProjectRoot archive/);
+  const rollbackStart = verifierSource.indexOf(
+    'if (TRANSITION_MODE === "rollback")',
+  );
+  const rollbackEnd = verifierSource.indexOf(
+    '} else if (TRANSITION_MODE === "forward")',
+    rollbackStart,
+  );
+  const rollbackSource = verifierSource.slice(rollbackStart, rollbackEnd);
+  assert.match(
+    rollbackSource,
+    /ROLLBACK_ACTIVATION_MODE === "natural-after-client-release"/,
+  );
+  assert.match(rollbackSource, /waitForNaturalServiceWorkerActivation/);
+  assert.match(rollbackSource, /requestTargetServiceWorkerUpdate/);
+  assert.match(rollbackSource, /remainingOriginClientCount === 0/);
+  assert.match(rollbackSource, /createPromptClosePendingEventAndArmAutosave/);
+  assert.match(rollbackSource, /createRollbackSavedEventThroughUi/);
+  assert.match(rollbackSource, /waitForAutosaveMutationCommit/);
+  assert.match(rollbackSource, /waitForProductionEventAutosaveBlocker/);
+  assert.match(rollbackSource, /flushProductionEventAutosave/);
+  assert.match(
     verifierSource,
     /PROMPT_CLOSE_DRILL_MODE === "required"\s*\? async \(\{ waitingVersionId \}\) =>/,
   );
@@ -202,6 +276,25 @@ test("historical rollback disables prompt UI while capable predecessors can requ
     verifierSource,
     /PROMPT_CLOSE_DRILL_MODE === "required"\) \{\s*assertPromptCloseAllBrowserDrill/,
   );
+});
+
+test("managed transition binds rollback and prompt modes to artifact lifecycles", () => {
+  for (const fragment of [
+    '"ESP_PROMPT_CLOSE_DRILL"',
+    '"ESP_ROLLBACK_TARGET_CAPABILITY"',
+    '"ESP_ROLLBACK_ACTIVATION"',
+    "environment.ESP_EXPECTED_TARGET_BUILD_ID = targetSource",
+    'environment.ESP_ROLLBACK_TARGET_CAPABILITY = "required"',
+    'sourcePwaLifecycle === "prompt-close-all-v1"',
+    'sourcePwaLifecycle === "legacy-auto-update-v1"',
+    "rollbackActivationModeForLifecycle",
+    "evidence.pwaLifecycle",
+  ]) {
+    assert.ok(
+      managedTransitionSource.includes(fragment),
+      `Missing managed transition environment fragment: ${fragment}`,
+    );
+  }
 });
 
 const workerVersion = (versionId, status) => ({
@@ -315,9 +408,11 @@ test("preflight and transition JSON contracts remain present", () => {
     "promptCloseAll",
     'kind: "prompt-close-all-browser-drill/v1"',
     "frozen-unresponsive-client",
-    "eventPersisted",
+    "eventAutosaveMutationPersistedAfterInitialAction",
     "activeSource",
     "offlineControllerIdentity",
+    "versionedCapability",
+    "legacy-absent",
   ]) {
     assert.ok(
       verifierSource.includes(contractFragment),

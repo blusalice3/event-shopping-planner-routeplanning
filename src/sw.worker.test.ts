@@ -282,6 +282,103 @@ describe("Service Worker blocker snapshot aggregation", () => {
 });
 
 describe("Service Worker offline precache fetch", () => {
+  const navigationRequest = () =>
+    ({
+      method: "GET",
+      mode: "navigate",
+      url: "https://planner.test/",
+    }) as Request;
+
+  const dispatchFetch = (
+    listener: EventListener,
+    request: Request,
+  ): Promise<Response> => {
+    let responseTask: Promise<Response> | undefined;
+    const event = {
+      request,
+      respondWith(response: Promise<Response> | Response) {
+        responseTask = Promise.resolve(response);
+      },
+    } as unknown as WorkerFetchEvent;
+
+    listener(event);
+    if (!responseTask) {
+      throw new Error("Service Worker did not handle the fetch event.");
+    }
+    return responseTask;
+  };
+
+  it("serves the controller-owned shell for online navigation", async () => {
+    const cachedShell = new Response("controller-owned shell");
+    const match = vi.fn(async () => cachedShell);
+    vi.stubGlobal("caches", {
+      open: vi.fn(async () => ({ match })),
+    });
+    const networkFetch = vi.fn(async () => new Response("new network shell"));
+    vi.stubGlobal("fetch", networkFetch);
+    const listeners = await bootWorkerListeners([]);
+    const fetchListener = listeners.get("fetch");
+    if (!fetchListener) {
+      throw new Error("Service Worker fetch listener is missing.");
+    }
+
+    await expect(
+      dispatchFetch(fetchListener, navigationRequest()),
+    ).resolves.toBe(cachedShell);
+    expect(match).toHaveBeenCalledOnce();
+    expect(match).toHaveBeenCalledWith("https://planner.test/index.html", {
+      ignoreSearch: false,
+      ignoreVary: true,
+    });
+    expect(networkFetch).not.toHaveBeenCalled();
+  });
+
+  it("uses the network only when the controller-owned shell is absent", async () => {
+    const networkShell = new Response("network shell");
+    const match = vi.fn(async () => undefined);
+    vi.stubGlobal("caches", {
+      open: vi.fn(async () => ({ match })),
+    });
+    const networkFetch = vi.fn(async () => networkShell);
+    vi.stubGlobal("fetch", networkFetch);
+    const listeners = await bootWorkerListeners([]);
+    const fetchListener = listeners.get("fetch");
+    if (!fetchListener) {
+      throw new Error("Service Worker fetch listener is missing.");
+    }
+    const request = navigationRequest();
+
+    await expect(dispatchFetch(fetchListener, request)).resolves.toBe(
+      networkShell,
+    );
+    expect(match).toHaveBeenCalledOnce();
+    expect(networkFetch).toHaveBeenCalledOnce();
+    expect(networkFetch).toHaveBeenCalledWith(request);
+  });
+
+  it("fails navigation when both the controller-owned shell and network are unavailable", async () => {
+    const match = vi.fn(async () => undefined);
+    vi.stubGlobal("caches", {
+      open: vi.fn(async () => ({ match })),
+    });
+    const networkError = new Error("network unavailable");
+    const networkFetch = vi.fn(async () => {
+      throw networkError;
+    });
+    vi.stubGlobal("fetch", networkFetch);
+    const listeners = await bootWorkerListeners([]);
+    const fetchListener = listeners.get("fetch");
+    if (!fetchListener) {
+      throw new Error("Service Worker fetch listener is missing.");
+    }
+
+    await expect(
+      dispatchFetch(fetchListener, navigationRequest()),
+    ).rejects.toBe(networkError);
+    expect(match).toHaveBeenCalledOnce();
+    expect(networkFetch).toHaveBeenCalledOnce();
+  });
+
   it("serves same-origin module requests despite an Origin Vary mismatch", async () => {
     const cachedResponse = new Response("export const cached = true;", {
       headers: {

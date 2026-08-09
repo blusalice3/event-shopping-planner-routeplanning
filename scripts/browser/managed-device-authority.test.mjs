@@ -15,7 +15,12 @@ import {
   derivePwaMulticlientEvidence,
   managedDevicePublicKeyFingerprint,
 } from "./managed-device-authority.mjs";
-import { resolvePromptCloseAllDrillMode } from "./prompt-close-all-drill-authority.mjs";
+import {
+  assertLegacyRollbackCapabilityAbsence,
+  resolvePromptCloseAllDrillMode,
+  resolveRollbackActivationMode,
+  resolveRollbackTargetCapabilityMode,
+} from "./prompt-close-all-drill-authority.mjs";
 
 test("resolves prompt-close drill mode as a closed forward-only contract", () => {
   assert.equal(
@@ -55,6 +60,127 @@ test("resolves prompt-close drill mode as a closed forward-only contract", () =>
       }),
     /requires a forward transition/,
   );
+});
+
+test("resolves rollback capability mode as a closed rollback-only contract", () => {
+  assert.equal(
+    resolveRollbackTargetCapabilityMode({
+      transitionMode: "rollback",
+      configuredMode: undefined,
+    }),
+    "required",
+  );
+  assert.equal(
+    resolveRollbackTargetCapabilityMode({
+      transitionMode: "rollback",
+      configuredMode: "legacy-absent",
+    }),
+    "legacy-absent",
+  );
+  assert.throws(
+    () =>
+      resolveRollbackTargetCapabilityMode({
+        transitionMode: "rollback",
+        configuredMode: "optional",
+      }),
+    /exactly required or legacy-absent/,
+  );
+  assert.throws(
+    () =>
+      resolveRollbackTargetCapabilityMode({
+        transitionMode: "forward",
+        configuredMode: "legacy-absent",
+      }),
+    /requires a rollback transition/,
+  );
+});
+
+test("requires an explicit closed rollback activation mode", () => {
+  assert.equal(
+    resolveRollbackActivationMode({
+      transitionMode: "rollback",
+      configuredMode: "auto-takeover",
+    }),
+    "auto-takeover",
+  );
+  assert.equal(
+    resolveRollbackActivationMode({
+      transitionMode: "rollback",
+      configuredMode: "natural-after-client-release",
+    }),
+    "natural-after-client-release",
+  );
+  assert.throws(
+    () =>
+      resolveRollbackActivationMode({
+        transitionMode: "rollback",
+        configuredMode: undefined,
+      }),
+    /must be configured explicitly/,
+  );
+  assert.throws(
+    () =>
+      resolveRollbackActivationMode({
+        transitionMode: "rollback",
+        configuredMode: "optional",
+      }),
+    /exactly auto-takeover or natural-after-client-release/,
+  );
+  assert.throws(
+    () =>
+      resolveRollbackActivationMode({
+        transitionMode: "forward",
+        configuredMode: "auto-takeover",
+      }),
+    /requires a rollback transition/,
+  );
+});
+
+test("accepts only closed evidence that a legacy capability is absent", () => {
+  assert.deepEqual(
+    assertLegacyRollbackCapabilityAbsence({
+      status: 404,
+      contentType: "text/plain",
+      observation: "other",
+    }),
+    {
+      status: 404,
+      contentType: "text/plain",
+      observation: "other",
+    },
+  );
+  assert.deepEqual(
+    assertLegacyRollbackCapabilityAbsence({
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      observation: "html-fallback",
+    }),
+    {
+      status: 200,
+      contentType: "text/html; charset=utf-8",
+      observation: "html-fallback",
+    },
+  );
+  for (const invalid of [
+    {
+      status: 200,
+      contentType: "application/json",
+      observation: "release-capability",
+    },
+    { status: 200, contentType: "text/plain", observation: "other" },
+    { status: 500, contentType: "text/html", observation: "html-fallback" },
+    {
+      status: 404,
+      contentType: "text/plain",
+      observation: "other",
+      callerClaim: true,
+    },
+  ]) {
+    assert.throws(
+      () => assertLegacyRollbackCapabilityAbsence(invalid),
+      /versioned capability|unknown or missing fields/,
+    );
+  }
 });
 
 const root = path.resolve(
@@ -281,7 +407,7 @@ const promptCloseAllDrill = (profileIndex) => {
       retryAction: "playwright-click",
       operationCount: 2,
       eventAutosaveBlockerObserved: true,
-      eventPersistedAfterInitialAction: true,
+      eventAutosaveMutationPersistedAfterInitialAction: true,
       persistedItemCount: 1,
     },
     preflush: phase({
@@ -642,6 +768,9 @@ test("rejects incomplete or tampered prompt-close browser evidence", () => {
     },
     (value) => {
       value.interaction.eventAutosaveBlockerObserved = false;
+    },
+    (value) => {
+      value.interaction.eventAutosaveMutationPersistedAfterInitialAction = false;
     },
     (value) => {
       value.controllerBeforeClose.clients[0].controllerChangeCountDelta = 1;

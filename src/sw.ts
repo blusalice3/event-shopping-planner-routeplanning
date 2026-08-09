@@ -128,6 +128,17 @@ const handleFetch = async (request: Request): Promise<Response> => {
     return fetch(request);
   }
   const cache = await caches.open(CACHE_NAME);
+  if (request.mode === "navigate") {
+    // Keep HTML, the outer agent, and the active controller on one immutable
+    // release identity while a newer worker is waiting for natural activation.
+    const shell = await cache.match(absoluteUrl("/index.html"), {
+      ignoreSearch: false,
+      ignoreVary: true,
+    });
+    if (shell) return shell;
+    return fetch(request);
+  }
+
   // Static preview/CDN responses can vary on Origin while module and
   // crossorigin stylesheet requests add that header only at runtime. The
   // cache itself is same-origin and source/variant-addressed, so the response
@@ -137,16 +148,6 @@ const handleFetch = async (request: Request): Promise<Response> => {
     ignoreVary: true,
   });
   if (cached) return cached;
-
-  if (request.mode === "navigate") {
-    try {
-      return await fetch(request);
-    } catch {
-      const fallback = await cache.match(absoluteUrl("/index.html"));
-      if (fallback) return fallback;
-      throw new Error("Offline navigation fallback is unavailable.");
-    }
-  }
   return fetch(request);
 };
 

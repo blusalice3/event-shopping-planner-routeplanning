@@ -117,18 +117,22 @@ const parseArguments = (arguments_) => {
 const sha256 = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 const readArtifactEvidence = async ({ distRoot, expectedSource, label }) => {
-  const indexBytes = await readFile(path.join(distRoot, "index.html"));
-  const serviceWorkerBytes = await readFile(path.join(distRoot, "sw.js"));
-  const capabilityBytes = await readFile(
-    path.join(distRoot, "release-capabilities.json"),
-  );
+  const [indexBytes, serviceWorkerBytes, capabilityBytes, identityBytes] =
+    await Promise.all([
+      readFile(path.join(distRoot, "index.html")),
+      readFile(path.join(distRoot, "sw.js")),
+      readFile(path.join(distRoot, "release-capabilities.json")),
+      readFile(path.join(distRoot, "release-identity.json")),
+    ]);
   if (
     indexBytes.length === 0 ||
     serviceWorkerBytes.length === 0 ||
     capabilityBytes.length === 0 ||
+    identityBytes.length === 0 ||
     indexBytes.length > MAXIMUM_JSON_BYTES ||
     serviceWorkerBytes.length > MAXIMUM_JSON_BYTES ||
-    capabilityBytes.length > MAXIMUM_JSON_BYTES
+    capabilityBytes.length > MAXIMUM_JSON_BYTES ||
+    identityBytes.length > MAXIMUM_JSON_BYTES
   ) {
     throw new Error(`${label} artifact is empty or oversized`);
   }
@@ -141,6 +145,20 @@ const readArtifactEvidence = async ({ distRoot, expectedSource, label }) => {
     capability.sourceSha !== expectedSource
   ) {
     throw new Error(`${label} capability source differs`);
+  }
+  const identity = parseJsonStrict(
+    identityBytes.toString("utf8"),
+    `${label} release identity`,
+  );
+  if (
+    identity.schemaVersion !== 1 ||
+    identity.buildId !== expectedSource ||
+    identity.sourceSha !== expectedSource ||
+    !["legacy-auto-update-v1", "prompt-close-all-v1"].includes(
+      identity.pwaLifecycle,
+    )
+  ) {
+    throw new Error(`${label} PWA lifecycle identity differs`);
   }
   const indexSource = indexBytes.toString("utf8");
   const matches = [
@@ -162,6 +180,7 @@ const readArtifactEvidence = async ({ distRoot, expectedSource, label }) => {
   return Object.freeze({
     indexSha256: sha256(indexBytes),
     mainAsset: assets[0],
+    pwaLifecycle: identity.pwaLifecycle,
     serviceWorkerSha256: sha256(serviceWorkerBytes),
   });
 };
@@ -255,27 +274,42 @@ const stopPreview = async (preview) => {
   if (preview.child.exitCode === null) preview.child.kill("SIGKILL");
 };
 
-const runVerifier = async ({
+const transitionEnvironmentKeys = Object.freeze([
+  "ESP_TRANSITION_MODE",
+  "ESP_ROLLBACK_MODE",
+  "ESP_EXPECTED_FROM_ARTIFACT_ID",
+  "ESP_TARGET_ARTIFACT_ID",
+  "ESP_EXPECTED_TARGET_BUILD_ID",
+  "ESP_EXPECTED_INDEX_SHA256",
+  "ESP_EXPECTED_SW_SHA256",
+  "ESP_EXPECTED_MAIN_ASSET",
+  "ESP_PROMPT_CLOSE_DRILL",
+  "ESP_ROLLBACK_TARGET_CAPABILITY",
+  "ESP_ROLLBACK_ACTIVATION",
+  "ESP_ALLOW_DIRTY_BUILD",
+]);
+
+const rollbackActivationModeForLifecycle = (pwaLifecycle) => {
+  if (pwaLifecycle === "legacy-auto-update-v1") return "auto-takeover";
+  if (pwaLifecycle === "prompt-close-all-v1") {
+    return "natural-after-client-release";
+  }
+  throw new Error("Managed device target PWA lifecycle is invalid");
+};
+
+export const createManagedDeviceVerifierEnvironment = ({
+  baseEnvironment,
   browserPath,
-  currentSource,
   evidence,
   fromSource = null,
   mode = null,
   origin,
   profileDir,
+  sourcePwaLifecycle = null,
   targetSource = null,
 }) => {
-  const environment = { ...process.env };
-  for (const key of [
-    "ESP_TRANSITION_MODE",
-    "ESP_ROLLBACK_MODE",
-    "ESP_EXPECTED_FROM_ARTIFACT_ID",
-    "ESP_TARGET_ARTIFACT_ID",
-    "ESP_EXPECTED_TARGET_BUILD_ID",
-    "ESP_EXPECTED_INDEX_SHA256",
-    "ESP_EXPECTED_SW_SHA256",
-    "ESP_EXPECTED_MAIN_ASSET",
-  ]) {
+  const environment = { ...baseEnvironment };
+  for (const key of transitionEnvironmentKeys) {
     delete environment[key];
   }
   environment.CHROME_PATH = browserPath;
@@ -288,10 +322,33 @@ const runVerifier = async ({
     environment.ESP_EXPECTED_INDEX_SHA256 = evidence.indexSha256;
     environment.ESP_EXPECTED_SW_SHA256 = evidence.serviceWorkerSha256;
     environment.ESP_EXPECTED_MAIN_ASSET = evidence.mainAsset;
-    if (mode === "forward") {
-      environment.ESP_EXPECTED_TARGET_BUILD_ID = currentSource;
+    environment.ESP_EXPECTED_TARGET_BUILD_ID = targetSource;
+    if (mode === "rollback") {
+      environment.ESP_ROLLBACK_TARGET_CAPABILITY = "required";
+      environment.ESP_ROLLBACK_ACTIVATION = rollbackActivationModeForLifecycle(
+        evidence.pwaLifecycle,
+      );
+    } else if (mode === "forward") {
+      environment.ESP_PROMPT_CLOSE_DRILL =
+        sourcePwaLifecycle === "prompt-close-all-v1"
+          ? "required"
+          : sourcePwaLifecycle === "legacy-auto-update-v1"
+            ? "disabled"
+            : (() => {
+                throw new Error(
+                  "Managed device source PWA lifecycle is invalid",
+                );
+              })();
     }
   }
+  return environment;
+};
+
+const runVerifier = async (options) => {
+  const environment = createManagedDeviceVerifierEnvironment({
+    ...options,
+    baseEnvironment: process.env,
+  });
   const verifier = path.join(root, "scripts", "verify-release-a-browser.mjs");
   const result = await execFileAsync(process.execPath, [verifier], {
     cwd: root,
@@ -371,7 +428,6 @@ export const runManagedDeviceTransition = async (arguments_) => {
     preview = await startPreview({ distRoot: currentDist, port });
     const initialForward = await runVerifier({
       browserPath,
-      currentSource: parsed.currentSource,
       evidence: currentEvidence,
       origin: preview.origin,
       profileDir,
@@ -380,7 +436,6 @@ export const runManagedDeviceTransition = async (arguments_) => {
     preview = await startPreview({ distRoot: rollbackDist, port });
     const rollback = await runVerifier({
       browserPath,
-      currentSource: parsed.currentSource,
       evidence: rollbackEvidence,
       fromSource: parsed.currentSource,
       mode: "rollback",
@@ -392,12 +447,12 @@ export const runManagedDeviceTransition = async (arguments_) => {
     preview = await startPreview({ distRoot: currentDist, port });
     const finalForward = await runVerifier({
       browserPath,
-      currentSource: parsed.currentSource,
       evidence: currentEvidence,
       fromSource: parsed.rollbackSource,
       mode: "forward",
       origin: preview.origin,
       profileDir,
+      sourcePwaLifecycle: rollbackEvidence.pwaLifecycle,
       targetSource: parsed.currentSource,
     });
     const document = Object.freeze({
