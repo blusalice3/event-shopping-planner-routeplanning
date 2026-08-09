@@ -21,7 +21,13 @@ const readJson = async (filePath) =>
   JSON.parse(await readFile(filePath, { encoding: "utf8" }));
 
 const capabilityPath = path.join(distDirectory, "release-capabilities.json");
-const capability = await readJson(capabilityPath);
+const capabilitySource = await readFile(capabilityPath, "utf8");
+const capability = JSON.parse(capabilitySource);
+if (canonicalizeJson(capability) !== capabilitySource) {
+  throw new Error(
+    "Release A capability verification failed: stable capability is not canonical.",
+  );
+}
 const isNonPromotableQa =
   capability?.nonPromotable === true &&
   ["qa-xlsx-main", "qa-list-force-full"].includes(capability?.buildPurpose);
@@ -74,8 +80,11 @@ if (!versionedCapability.isFile() || versionedCapability.size === 0) {
     "Release A capability verification failed: versioned capability evidence is missing.",
   );
 }
-const versionedCapabilityPayload = await readJson(versionedCapabilityPath);
-if (JSON.stringify(versionedCapabilityPayload) !== JSON.stringify(capability)) {
+const versionedCapabilitySource = await readFile(
+  versionedCapabilityPath,
+  "utf8",
+);
+if (versionedCapabilitySource !== capabilitySource) {
   throw new Error(
     "Release A capability verification failed: stable and versioned evidence differ.",
   );

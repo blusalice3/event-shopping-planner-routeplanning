@@ -591,28 +591,22 @@ export default defineConfig(({ command, mode }) => {
     !isReleaseABuild &&
     releaseChannel === "release-b" &&
     process.env.VITE_PERSISTENCE_LEGACY_CLEANUP === "true";
-  const capabilitySource = JSON.stringify(
-    {
-      kind: "event-shopping-planner-release-capabilities",
-      version: 1,
-      buildMode: mode,
-      buildId: identity.sourceSha,
-      sourceSha: identity.sourceSha,
-      sourceState: identity.sourceState,
-      releaseChannel,
-      legacyLocalStorageCleanup: legacyCleanupEnabled
-        ? "enabled"
-        : "forced-off",
-      ...(identity.nonPromotable
-        ? {
-            buildPurpose: identity.buildPurpose,
-            nonPromotable: true,
-          }
-        : {}),
-    },
-    null,
-    2,
-  );
+  const capabilitySource = canonicalize({
+    kind: "event-shopping-planner-release-capabilities",
+    version: 1,
+    buildMode: mode,
+    buildId: identity.sourceSha,
+    sourceSha: identity.sourceSha,
+    sourceState: identity.sourceState,
+    releaseChannel,
+    legacyLocalStorageCleanup: legacyCleanupEnabled ? "enabled" : "forced-off",
+    ...(identity.nonPromotable
+      ? {
+          buildPurpose: identity.buildPurpose,
+          nonPromotable: true,
+        }
+      : {}),
+  });
   const roleEntry =
     identity.releaseRole === "standard"
       ? path.resolve(projectRoot, "src", "index.tsx")
